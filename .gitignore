@@ -5,3 +5,18 @@ nul
 node_modules/
 native/target/
 .tmp-wal-test*/
+
+# Build artifacts
+*.node
+dist/
+
+# Data & runtime
+data/
+.env
+
+# IDE
+*.swp
+.idea/
+
+# Test artifacts
+.sisyphus/test-report.xml
