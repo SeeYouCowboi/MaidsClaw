@@ -1,12 +1,8 @@
-reference/
-.vs/
-nul
-
+# Dependencies
 node_modules/
-native/target/
-.tmp-wal-test*/
 
 # Build artifacts
+native/target/
 *.node
 dist/
 
@@ -14,9 +10,25 @@ dist/
 data/
 .env
 
-# IDE
-*.swp
+# IDE & editor
+.vs/
 .idea/
+*.swp
+
+# OS artifacts
+nul
+Thumbs.db
+.DS_Store
 
 # Test artifacts
-.sisyphus/test-report.xml
+.tmp-wal-test*/
+
+# Tool state
+.omc/
+.sisyphus/
+
+# Lock files (Bun project — use bun.lockb)
+package-lock.json
+
+# Reference docs (local only)
+reference/

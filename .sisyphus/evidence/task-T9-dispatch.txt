@@ -1,1 +1,0 @@
-ToolExecutor dual-layer dispatch verified via tests: local tools execute directly, remote MCP tools execute through McpToolAdapter with lazy schema hydration on first dispatch.

@@ -1,4 +1,0 @@
-T8 Capability Split Evidence
-- Scenario: resolve embedding for claude-* model
-- Result: registry throws CapabilityNotSupportedError with code CAPABILITY_NOT_SUPPORTED
-- Verified: OpenAI embedding resolution still succeeds for text-embedding-* models.

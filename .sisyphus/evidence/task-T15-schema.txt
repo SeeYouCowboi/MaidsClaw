@@ -1,9 +1,0 @@
-Task T15 Schema Foundation Evidence
-
-Schema Counts
-- non_fts_table_count=19
-- fts5_table_count=3
-
-Verification
-- bun test test/memory/schema.test.ts -> pass (4 pass, 0 fail)
-- bun run build -> pass (tsc --noEmit)

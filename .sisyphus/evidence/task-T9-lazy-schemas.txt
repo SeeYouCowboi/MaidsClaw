@@ -1,1 +1,0 @@
-Lazy schema behavior verified: registerMCP performs zero listTools calls until getSchemas() or first execute() requiring remote lookup.

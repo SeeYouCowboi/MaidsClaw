@@ -1,4 +1,0 @@
-T8 Missing Model Evidence
-- Scenario: resolve unknown chat model
-- Result: DefaultModelServiceRegistry throws MaidsClawError code MODEL_NOT_CONFIGURED
-- Coverage: test/core/models/model-services.test.ts (unknown model mapping test).
