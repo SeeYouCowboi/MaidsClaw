@@ -46,7 +46,13 @@ describe("createMemorySchema", () => {
   it("is idempotent — running twice does not error", () => {
     const db = new Database(":memory:");
     createMemorySchema(db);
-    expect(() => createMemorySchema(db)).not.toThrow();
+    let threw = false;
+    try {
+      createMemorySchema(db);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 });
@@ -223,12 +229,16 @@ describe("entity_nodes CHECK constraints", () => {
     const db = freshDb();
     const now = Date.now();
 
-    expect(() => {
+    let threw = false;
+    try {
       db.prepare(
         `INSERT INTO entity_nodes (pointer_key, display_name, entity_type, memory_scope, owner_agent_id, created_at, updated_at)
          VALUES (?, ?, ?, 'shared_public', NULL, ?, ?)`
       ).run("valid_ptr", "Valid", "person", now, now);
-    }).not.toThrow();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 
@@ -236,12 +246,16 @@ describe("entity_nodes CHECK constraints", () => {
     const db = freshDb();
     const now = Date.now();
 
-    expect(() => {
+    let threw = false;
+    try {
       db.prepare(
         `INSERT INTO entity_nodes (pointer_key, display_name, entity_type, memory_scope, owner_agent_id, created_at, updated_at)
          VALUES (?, ?, ?, 'private_overlay', 'agent_1', ?, ?)`
       ).run("valid_ptr", "Valid", "person", now, now);
-    }).not.toThrow();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 });
@@ -277,12 +291,16 @@ describe("entity_nodes partial unique indexes", () => {
     ).run("shared_ptr", "Agent1 view", "person", now, now);
 
     // Different agent, same pointer_key — should succeed
-    expect(() => {
+    let threw = false;
+    try {
       db.prepare(
         `INSERT INTO entity_nodes (pointer_key, display_name, entity_type, memory_scope, owner_agent_id, created_at, updated_at)
          VALUES (?, ?, ?, 'private_overlay', 'agent_2', ?, ?)`
       ).run("shared_ptr", "Agent2 view", "person", now, now);
-    }).not.toThrow();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 
@@ -325,12 +343,16 @@ describe("event_nodes CHECK constraints", () => {
     const db = freshDb();
     const now = Date.now();
 
-    expect(() => {
+    let threw = false;
+    try {
       db.prepare(
         `INSERT INTO event_nodes (session_id, timestamp, created_at, visibility_scope, location_entity_id, event_category, event_origin)
          VALUES (?, ?, ?, 'area_visible', ?, ?, ?)`
       ).run("sess1", now, now, 1, "speech", "runtime_projection");
-    }).not.toThrow();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 
@@ -338,12 +360,16 @@ describe("event_nodes CHECK constraints", () => {
     const db = freshDb();
     const now = Date.now();
 
-    expect(() => {
+    let threw = false;
+    try {
       db.prepare(
         `INSERT INTO event_nodes (session_id, timestamp, created_at, visibility_scope, location_entity_id, event_category, event_origin)
          VALUES (?, ?, ?, 'world_public', ?, ?, ?)`
       ).run("sess1", now, now, 1, "action", "promotion");
-    }).not.toThrow();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
     db.close();
   });
 
@@ -372,8 +398,14 @@ describe("makeNodeRef", () => {
     expect(makeNodeRef("entity", 1)).toBe("entity:1");
   });
 
-  it("handles any string kind", () => {
-    expect(makeNodeRef("custom", 99)).toBe("custom:99");
+  it("rejects unsupported kinds", () => {
+    let threw = false;
+    try {
+      makeNodeRef("custom" as never, 99);
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
   });
 });
 
