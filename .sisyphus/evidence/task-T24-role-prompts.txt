@@ -1,0 +1,29 @@
+Task T24 Evidence - Role-specific prompt injection
+
+Command:
+bun test test/core/prompt-builder.test.ts --test-name-pattern "maiden prompt with world"
+Result snippet:
+  1 pass
+  7 filtered out
+  0 fail
+
+Command:
+bun test test/core/prompt-builder.test.ts --test-name-pattern "rp-agent prompt with core-memory"
+Result snippet:
+  1 pass
+  7 filtered out
+  0 fail
+
+Command:
+bun test test/core/prompt-builder.test.ts --test-name-pattern "task-agent prompt with lorebook disabled"
+Result snippet:
+  1 pass
+  7 filtered out
+  0 fail
+
+Command:
+bun test test/core/prompt-builder.test.ts --test-name-pattern "task-agent prompt with lorebook\+narrative context enabled"
+Result snippet:
+  1 pass
+  7 filtered out
+  0 fail

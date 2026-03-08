@@ -610,3 +610,11 @@ Created the append-only SQLite-backed interaction log module with commit service
 - Full suite: 536 pass (492 existing + 44 new), 0 fail
 - `bun run build` (tsc --noEmit): zero errors
 - LSP diagnostics: clean on all files (only informational biome import sorting on barrel)
+
+## [2026-03-09T00:00:00Z] Task: T24 — Prompt Builder Injection Coordinator
+
+- Prompt assembly should stay slot-driven: collect role-dependent content first, then emit sections in `SECTION_SLOT_ORDER` for deterministic rendering.
+- Keep T24 as the sole injector by reading lore/persona/memory/blackboard through explicit data-source interfaces instead of direct storage imports.
+- Consolidating provider failures under `PROMPT_BUILDER_DATA_SOURCE_ERROR` gives one stable error path for missing persona, missing provider wiring, and thrown subsystem exceptions.
+- RP core memory retrieval should key off `viewerContext.viewer_agent_id` from `src/memory/types.ts`.
+- Task agent defaults remain intentionally minimal (preamble + conversation), with lore/world slots only when `lorebookEnabled` and `narrativeContextEnabled` opt-ins are enabled.
