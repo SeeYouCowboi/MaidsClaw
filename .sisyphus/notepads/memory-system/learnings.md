@@ -224,3 +224,19 @@
 ### Verification Results
 - `bun test src/memory/navigator.test.ts`: 13 pass
 - `bun test`: 455 pass / 0 fail
+
+## Promotion Pipeline Service (T12) - 2026-03-08
+
+### Implementation
+- Added `src/memory/promotion.ts` with `PromotionService` implementing a 2-type promotion pipeline: event promotion (`area_visible` -> `world_public`) and fact crystallization (`fact_edges` in `world_public` scope)
+- `identifyEventCandidates()` applies promotion gate defaults (`event_category='speech'`, `promotion_class='world_candidate'`) and supports criteria overrides
+- `resolveReferences()` supports all required actions: `reuse`, `promote_full`, `promote_placeholder`, and `block`; placeholder pointer format is `unknown_person@area:t{timestamp}`
+- `executeProjectedWrite()` creates new promoted records only (never mutates source), routes events through `GraphStorageService.createPromotedEvent()`, routes facts through `createFact()`, and syncs world search docs + FTS for crystallized facts
+- Private boundary invariants enforced: promotions are blocked when `private_belief` is the source or when an entity is flagged as existence-private; promoted refs resolve to shared-public or placeholder entity IDs only
+
+### Testing
+- Added `src/memory/promotion.test.ts` with coverage for reference resolution actions, block behavior, event promotion immutability, world search projection sync, and fact crystallization sync
+
+### Verification Results
+- `bun test src/memory/promotion.test.ts`: 6 pass
+- `bun test`: 461 pass / 0 fail
