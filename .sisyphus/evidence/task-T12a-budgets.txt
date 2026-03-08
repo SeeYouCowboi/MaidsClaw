@@ -1,0 +1,23 @@
+Task T12a — Token/Context Budget Manager
+Evidence: Budget allocation correctness
+
+Test Results: 19 pass, 0 fail, 44 expect() calls
+
+calculateTokenBudget:
+- non-Maiden (rp_agent, maxContext=100000):
+  coordinationReserve = 0
+  maxOutputTokens = 4096 (default)
+  inputBudget = 100000 - 4096 = 95904
+
+- Maiden (maxContext=100000):
+  coordinationReserve = ceil(100000 * 0.20) = 20000 (≥20%)
+  maxOutputTokens = 4096 (default)
+  inputBudget = 100000 - 4096 - 20000 = 75904
+
+- Custom maxOutputTokens (8192, maxContext=200000):
+  inputBudget = 200000 - 8192 = 191808
+
+- Math.ceil for non-integer: ceil(99999 * 0.20) = ceil(19999.8) = 20000
+
+Invariant: Maiden role ALWAYS reserves ≥20% for coordination overhead.
+Non-Maiden roles get coordinationReserve = 0.

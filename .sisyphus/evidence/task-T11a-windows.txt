@@ -1,0 +1,5 @@
+$ tsc --noEmit
+src/core/models/anthropic-provider.ts(249,3): error TS2322: Type '(AnthropicTextBlock | AnthropicToolUseBlock)[]' is not assignable to type 'AnthropicTextBlock[] | AnthropicToolUseBlock[]'.
+  Type '(AnthropicTextBlock | AnthropicToolUseBlock)[]' is not assignable to type 'AnthropicTextBlock[]'.
+    Type 'AnthropicTextBlock | AnthropicToolUseBlock' is not assignable to type 'AnthropicTextBlock'.
+      Property 'text' is missing in type 'AnthropicToolUseBlock' but required in type 'AnthropicTextBlock'.

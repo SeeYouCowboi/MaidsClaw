@@ -1,0 +1,26 @@
+Task: T10 - Core agent loop (TAOR) + context compactor/runtime projection scaffolding
+Date: 2026-03-08
+
+Implemented:
+- src/core/agent-loop.ts
+- src/core/run-context.ts
+- src/core/runtime-projection.ts
+- src/core/interfaces/context-compactor.ts
+- src/core/truncate-compactor.ts
+- test/core/agent-loop.test.ts
+
+Verification:
+- bun test test/core/agent-loop.test.ts
+  - 5 pass
+  - 0 fail
+  - 23 expect() calls
+- bun run build
+  - tsc --noEmit completed with zero TypeScript errors
+
+Acceptance coverage:
+- TAOR loop streams chunks without buffering final text
+- Tool-use chunks are accumulated and executed via ToolExecutor
+- Tool results are appended as role=tool messages for next loop iteration
+- Delegation depth guard throws DELEGATION_DEPTH_EXCEEDED at configured max depth
+- RuntimeProjectionSink receives projection appendix for assistant turns
+- TruncateCompactor respects flush boundary and avoids evicting unflushed messages

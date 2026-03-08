@@ -330,3 +330,151 @@ Created the shared typed error system and retry policies for MaidsClaw. These ce
 - Migration runner uses `_migrations` table with idempotent INSERT (check before apply)
 - Transaction wrapper: `db.transaction(fn)()` — note the double invocation (bun:sqlite returns a wrapped function)
 - FileStore uses sync fs operations (readFileSync/writeFileSync) — appropriate for config/persona/lore files
+## [2026-03-08T23:55:00Z] Task: T11a - Native interfaces baseline
+
+- { is a shell keyword should gate native loading behind  and silently fall back when  is missing.
+- Keep Rust and TS fallback APIs aligned by exporting camelCase JS names from NAPI () while preserving snake_case Rust function names.
+- Bun ESM tests can force re-evaluation of env-gated modules with dynamic import cache-busting query params.
+- Windows cargo check can emit hard-link incremental cache warnings; this is non-fatal and expected in this repo.
+
+### T11a note correction
+- src/core/native.ts should gate native loading behind MAIDSCLAW_NATIVE_MODULES=="false" and silently fall back when native/index.node is missing.
+## [2026-03-08T23:55:00Z] Task: T9 — ToolExecutor + MCP Client + Interface Stubs
+
+- ToolExecutor now supports dual-layer dispatch: local tool direct invoke and MCP-backed invoke through McpToolAdapter.
+- MCP schema loading is lazy: registerMCP does not call listTools until getSchemas() or first execute() on unresolved tool name.
+- McpClient caches listed schemas and clears cache on disconnect for hot-swap reconnect behavior.
+- Stub interfaces added for reserved contracts: StaticRouter(route->modelId), NoopRateLimiter(acquire immediate), ConsoleUsageTracker(log usage).
+- Verification: bun test test/core/tools/tool-executor.test.ts passed (5/5); bun run build currently fails on pre-existing files outside T9 scope (core/models and test/core/models).
+- Follow-up verification (latest): bun run build currently fails with pre-existing parse error in test/core/models/model-services.test.ts:138 (outside T9 file scope constraints).
+
+## [2026-03-08T23:59:00Z] Task: T8 - Model Services
+
+### Implementation Patterns
+- Keep chat and embedding capabilities split via separate interfaces (, ) and resolve independently through .
+- Normalize vendor SSE streams directly into  union (, , ) so agent loop consumes one contract.
+- OpenAI embeddings should always return ; tests should assert numeric closeness () because Float32 precision differs from JS literals.
+- For unsupported capability paths (Anthropic embeddings), raise a dedicated capability error instead of treating it as missing model configuration.
+
+### Testing Approach
+- Use fetch fixtures that return in-memory SSE  streams for deterministic chunk ordering and zero real API calls.
+- Cover happy-path normalization, unknown-model typed errors, and capability-split edge behavior in one focused .
+
+### T8 note correction
+- Keep chat and embedding capabilities split via separate interfaces (`ChatModelProvider`, `EmbeddingProvider`) and resolve independently through `ModelServiceRegistry`.
+- Normalize vendor SSE streams into `Chunk` union (`text_delta`, `tool_use_start`/`tool_use_delta`/`tool_use_end`, `message_end`).
+- OpenAI embeddings return `Float32Array[]`; tests should use `toBeCloseTo` for float precision.
+- Fixture tests should return in-memory SSE `Response` streams and avoid real API calls.
+- Main test file: `test/core/models/model-services.test.ts`.
+
+## [2026-03-08T00:00:00Z] Task: T12a — Token/Context Budget Manager
+
+### Implementation Summary
+Created deterministic token budget allocation and G4 eviction guard for context management.
+
+### Files Created
+- `src/core/token-budget.ts` — TokenBudget type + calculateTokenBudget() (53 lines)
+- `src/core/context-budget.ts` — ContextBudgetManager class with G4 guard (109 lines)
+- `test/core/context-budget.test.ts` — 19 tests, 44 expect() calls
+
+### Files Modified (minimal additions)
+- `src/core/errors.ts` — Added `CONTEXT_BUDGET_INVALID` to ErrorCode union
+- `src/agents/profile.ts` — Added `maxOutputTokens?: number` to AgentProfile
+
+### Key Implementation Decisions
+1. **Maiden coordination reserve**: Math.ceil(maxContextTokens * 0.20) — always rounds up to ensure ≥20%
+2. **G4 eviction guard**: flushBoundary starts at -1 (nothing evictable). canEvict is O(1) comparison.
+3. **Token estimation for ContentBlock[]**: Extracts text from each block variant (text, tool_use, tool_result)
+4. **MESSAGE_OVERHEAD_TOKENS = 4**: Per-message overhead for role/formatting in token estimation
+5. **No `as any` or `@ts-ignore`**: All types flow cleanly through the implementation
+
+### Test Patterns
+- Use try/catch for error path testing (bun-types `.not.toThrow()` limitation)
+- `expect(err instanceof MaidsClawError).toBe(true)` instead of `toBeInstanceOf`
+- Helper functions (makeProfile, makeMessage) to reduce test boilerplate
+
+### Verification
+- 19 pass, 0 fail, 44 expect() calls
+- `bun run build` (tsc --noEmit): zero errors
+- LSP diagnostics: clean on all 3 new files
+
+## [2026-03-08T00:00:00Z] Task: T10 — Core Agent Loop (TAOR)
+
+### Implementation Patterns
+- Keep `AgentLoop.run()` streaming-first: yield `text_delta`/tool chunks as received; never collapse assistant output into a final plain string buffer for emission.
+- Normalize tool arguments at `tool_use_end` by concatenating `tool_use_delta.partialJson` and validating strict JSON-object shape before dispatch.
+- Route every tool invocation through `ToolExecutor.execute(name, params, context)` with session/agent context injected from loop scope.
+- Emit projection metadata at assistant turn boundaries via a pluggable `RuntimeProjectionSink`; use `NoopRuntimeProjectionSink` as default.
+
+### Guardrails
+- Delegation guard belongs at loop entry and should throw `DELEGATION_DEPTH_EXCEEDED` when `delegationDepth >= maxDelegationDepth`.
+- For malformed tool arguments, emit a typed `error` chunk (`TOOL_ARGUMENT_INVALID`) and stop the run cleanly.
+- `TruncateCompactor` must enforce G4 by only evicting non-system messages whose indices are `<= flushBoundary`.
+
+### Verification
+- `bun test test/core/agent-loop.test.ts`: 5 pass, 0 fail.
+- `bun run build`: `tsc --noEmit` passes with zero TypeScript errors.
+
+## [2026-03-08T00:00:00Z] Task: T13a — Prompt Assembler (Core Template Engine)
+
+### Implementation Summary
+Created the prompt template engine: canonical section slots, section data types, and budget-aware renderer.
+
+### Files Created
+- `src/core/prompt-template.ts` — PromptSectionSlot enum (7 slots), SECTION_SLOT_ORDER, PromptSection type
+- `src/core/prompt-sections.ts` — Typed data shapes for each slot (SystemPreambleData, WorldRulesData, etc.)
+- `src/core/prompt-renderer.ts` — PromptRenderer class with render() method (127 lines)
+- `test/core/prompt-template.test.ts` — 13 tests, 32 expect() calls
+
+### Files Modified
+- `src/core/errors.ts` — Added `PROMPT_TEMPLATE_ERROR` to ErrorCode union
+
+### Key Implementation Decisions
+1. **Enum for slots**: TypeScript enum gives both type safety and string values for serialization
+2. **Canonical ordering via const array**: SECTION_SLOT_ORDER drives render order; sections provided out-of-order are still rendered correctly
+3. **CONVERSATION as JSON string**: Content is JSON-serialized ChatMessage[]; parsed in render()
+4. **Budget warning, not error**: When tokens exceed budget, log warning only — T24 owns truncation
+5. **Empty/whitespace skip**: Sections with empty or whitespace-only content are silently omitted
+
+### TypeScript Gotchas
+- `toEqual` with enum values: Cannot compare enum values to raw strings in strict TypeScript — must use enum members
+- `expect().not.toContain()`: Not typed in bun-types — use `expect(str.includes(x)).toBe(false)` workaround
+- Both patterns are consistent with T12a learnings about bun-types limitations
+
+### Verification
+- `bun test test/core/prompt-template.test.ts`: 13 pass, 0 fail, 32 expect() calls
+- `bun run build` (tsc --noEmit): zero errors
+- LSP diagnostics: clean on all 5 files (errors.ts, prompt-template.ts, prompt-sections.ts, prompt-renderer.ts, test)
+
+## [2026-03-08T00:00:00Z] Task: T14a — Agent Registry + Lifecycle + Permissions
+
+### Implementation Summary
+Created agent registry, lifecycle manager, and minimal permission layer (absorbs T23).
+
+### Files Created
+- `src/agents/registry.ts` (50 lines) — In-memory AgentProfile registry
+- `src/agents/lifecycle.ts` (103 lines) — Run tracking + ephemeral cleanup
+- `src/agents/permissions.ts` (73 lines) — Delegation, tool, and data access checks
+- `src/agents/presets.ts` (69 lines) — MAIDEN, RP_AGENT, TASK_AGENT profiles
+- `test/agents/registry.test.ts` (381 lines) — 41 tests, 77 expect() calls
+
+### Key Adaptations from Task Spec
+- AgentProfile uses `id` (not `agentId` as in spec)
+- AgentProfile uses `toolPermissions: ToolPermission[]` (not `allowedTools?: string[]`)
+- OutputMode is `"freeform" | "structured"` (not `"streaming"`)
+- Required fields: `maxDelegationDepth`, `lorebookEnabled`, `narrativeContextEnabled`
+- AGENT_NOT_FOUND already existed in ErrorCode; only added AGENT_ALREADY_REGISTERED
+
+### TypeScript Gotchas
+- `toContain()` with `readonly` arrays causes TS2345 — use `.includes()` instead
+- Consistent with prior learnings: bun-types has incomplete matcher typing
+
+### Permission Rules (V1)
+- Delegation: maiden→any, rp_agent→task_agent only, task_agent→none
+- Tool access: empty toolPermissions = all allowed, non-empty = explicit allowlist
+- Private data: only maiden can cross-read, all agents can self-read
+
+### Verification
+- `bun test test/agents/registry.test.ts`: 41 pass, 0 fail, 77 expect() calls
+- `bun run build` (tsc --noEmit): zero TypeScript errors
+- LSP diagnostics: clean on all 4 source files

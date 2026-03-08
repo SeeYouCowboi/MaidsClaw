@@ -1,0 +1,13 @@
+Task: T10 invalid tool arguments evidence
+
+Scenario:
+- Model emits tool_use_start/tool_use_delta/tool_use_end where the concatenated JSON is malformed.
+
+Observed behavior (test/core/agent-loop.test.ts):
+- AgentLoop emits an error chunk.
+- Error code: TOOL_ARGUMENT_INVALID
+- retriable: false
+- ToolExecutor local tool execute() is not invoked for malformed payload.
+
+Result:
+- Typed error handling for malformed tool arguments is verified.

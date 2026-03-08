@@ -1,3 +1,7 @@
 reference/
 .vs/
 nul
+
+node_modules/
+native/target/
+.tmp-wal-test*/

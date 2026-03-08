@@ -28,6 +28,7 @@ export type AgentProfile = {
   userFacing: boolean;
   outputMode: OutputMode;
   modelId: string;         // e.g. "claude-opus-4-5", "gpt-4o"
+  maxOutputTokens?: number;  // max tokens reserved for model output
   personaId?: string;      // For rp_agent: which character card
   toolPermissions: ToolPermission[];
   authorizationPolicy?: AuthorizationPolicy; // Maiden-only

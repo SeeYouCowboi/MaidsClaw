@@ -6,6 +6,7 @@ export type ErrorCode =
   | "MODEL_NOT_CONFIGURED"
   | "MODEL_API_ERROR"
   | "INPUT_TOO_LARGE"
+  | "CONTEXT_BUDGET_INVALID"
   // MCP errors
   | "MCP_DISCONNECTED"
   | "MCP_TOOL_ERROR"
@@ -15,6 +16,7 @@ export type ErrorCode =
   | "MIGRATION_FAILED"
   // Agent/runtime errors
   | "AGENT_NOT_FOUND"
+  | "AGENT_ALREADY_REGISTERED"
   | "DELEGATION_DEPTH_EXCEEDED"
   | "CIRCULAR_DELEGATION"
   | "TOOL_PERMISSION_DENIED"
@@ -26,6 +28,7 @@ export type ErrorCode =
   | "JOB_TIMEOUT"
   // Generic
   | "INTERNAL_ERROR"
+  | "PROMPT_TEMPLATE_ERROR"
   | "UNKNOWN_ERROR";
 
 // The canonical runtime error type used throughout MaidsClaw

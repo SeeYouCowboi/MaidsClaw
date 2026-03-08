@@ -1,0 +1,4 @@
+T8 Streaming Evidence
+- Command: bun test test/core/models/model-services.test.ts
+- Result: 7 pass, 0 fail
+- Verified: Anthropic and OpenAI fixtures normalize to Chunk stream with text/tool/message_end events in deterministic order.

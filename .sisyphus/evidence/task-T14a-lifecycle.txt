@@ -1,0 +1,30 @@
+T14a Evidence: AgentLifecycleManager
+=====================================
+Date: 2026-03-08
+
+Files created:
+- src/agents/lifecycle.ts (103 lines)
+- AgentLifecycleManager with run tracking
+- States: idle | running | completed | failed
+
+Core behavior:
+- startRun(agentId, sessionId) → unique runId (run_{timestamp}_{counter})
+- completeRun(runId) → sets state to "completed"
+- failRun(runId, error) → sets state to "failed"
+- getRunState(runId) → AgentLifecycleState | undefined
+
+Ephemeral cleanup:
+- Ephemeral agents (lifecycle: "ephemeral") auto-unregister after completeRun or failRun
+- Persistent agents stay registered
+
+Tests:
+- startRun returns run ID and sets state to running ✓
+- completeRun sets state to completed ✓
+- failRun sets state to failed ✓
+- startRun throws AGENT_NOT_FOUND for unregistered agent ✓
+- completeRun throws for unknown runId ✓
+- getRunState returns undefined for unknown runId ✓
+- isEphemeral returns true/false correctly ✓
+- ephemeral agent auto-unregisters after completeRun ✓
+- ephemeral agent auto-unregisters after failRun ✓
+- persistent agent stays registered after completeRun ✓

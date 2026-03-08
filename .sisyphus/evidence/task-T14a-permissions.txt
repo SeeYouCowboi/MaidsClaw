@@ -1,0 +1,48 @@
+T14a Evidence: AgentPermissions (absorbs T23)
+==============================================
+Date: 2026-03-08
+
+Files created:
+- src/agents/permissions.ts (73 lines)
+- Minimal V1 permission layer
+
+Delegation rules:
+- maiden → can delegate to ANY registered agent
+- rp_agent → can delegate to task_agent ONLY
+- task_agent → CANNOT delegate
+
+Tool permission rules:
+- Empty toolPermissions[] → all tools allowed
+- Non-empty → tool must be explicitly listed with allowed: true
+- Missing tool in list → denied
+
+Private data access rules:
+- Any agent can access its own data
+- Only maiden can access other agents' private data
+- rp_agent/task_agent cannot read other agents' data
+
+Tests:
+- maiden can delegate to rp_agent ✓
+- maiden can delegate to task_agent ✓
+- rp_agent can delegate to task_agent ✓
+- rp_agent cannot delegate to maiden ✓
+- rp_agent cannot delegate to another rp_agent ✓
+- task_agent cannot delegate to anyone ✓
+- returns false for unregistered agents ✓
+- allows all tools when toolPermissions is empty ✓
+- allows explicitly permitted tools ✓
+- denies explicitly denied tools ✓
+- denies tools not in permission list ✓
+- maiden can access other agents' private data ✓
+- rp_agent/task_agent cannot access other agents' private data ✓
+- any agent can access its own private data ✓
+
+Preset profiles:
+- src/agents/presets.ts (69 lines)
+- MAIDEN_PROFILE: maid:main, persistent, freeform, 8192 tokens
+- RP_AGENT_PROFILE: rp:default, persistent, freeform, 4096 tokens
+- TASK_AGENT_PROFILE: task:default, ephemeral, structured, 2048 tokens
+- PRESET_PROFILES: readonly array of all 3
+
+Build: tsc --noEmit — zero TypeScript errors
+Tests: 41 pass, 0 fail, 77 expect() calls (108ms)

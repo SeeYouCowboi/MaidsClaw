@@ -1,0 +1,29 @@
+Task: T13a — Prompt Assembler (Core Template Engine)
+Evidence: Edge path — optional sections omitted
+
+Test 1: "renders correctly with only required sections (no empty placeholders)"
+Result: PASS
+- Input: SYSTEM_PREAMBLE + CONVERSATION only
+- Output: systemPrompt = "You are a helpful assistant." (no \n\n, no empty placeholders)
+- Verified: systemPrompt.includes("\n\n") === false
+
+Test 2: "skips sections with empty content"
+Result: PASS
+- Input: SYSTEM_PREAMBLE="Agent." + WORLD_RULES="" + CORE_MEMORY="   " + CONVERSATION
+- Output: systemPrompt = "Agent." (empty and whitespace-only sections skipped)
+- No empty separator artifacts in output
+
+Test 3: "handles sections without tokenEstimate"
+Result: PASS
+- Input: SYSTEM_PREAMBLE + CONVERSATION (no tokenEstimate on either)
+- Output: estimatedTokens = 0 (undefined estimates treated as 0)
+
+Budget awareness tests:
+Test 4: "logs warning when estimated tokens exceed budget"
+Result: PASS
+- 70 estimated tokens vs 50 inputBudget → warning logged (not thrown)
+- Warning message contains "70" and "50"
+
+Test 5: "does not warn when under budget"
+Result: PASS
+- 30 estimated tokens vs 150 inputBudget → no warning logged

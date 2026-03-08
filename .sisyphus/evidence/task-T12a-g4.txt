@@ -1,0 +1,23 @@
+Task T12a — G4 Eviction Guard
+Evidence: Flush boundary invariant enforcement
+
+Initial state:
+  flushBoundary = -1
+  canEvict(0) = false
+  canEvict(5) = false
+  canEvict(-1) = false
+
+After setFlushBoundary(5):
+  flushBoundary = 5
+  canEvict(0) = true   (0 <= 5)
+  canEvict(3) = true   (3 <= 5)
+  canEvict(5) = true   (5 <= 5, boundary inclusive)
+  canEvict(6) = false  (6 > 5)
+  canEvict(100) = false (100 > 5)
+
+Boundary update:
+  setFlushBoundary(3) → canEvict(3)=true, canEvict(4)=false
+  setFlushBoundary(10) → canEvict(4)=true, canEvict(10)=true, canEvict(11)=false
+
+G4 Invariant: Records are only evictable after T28a accepts batch ownership
+and setFlushBoundary is called with the accepted record index.

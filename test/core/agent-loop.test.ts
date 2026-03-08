@@ -1,0 +1,236 @@
+import { describe, expect, it } from "bun:test";
+
+import type { AgentProfile } from "../../src/agents/profile.js";
+import { AgentLoop } from "../../src/core/agent-loop.js";
+import type { Chunk } from "../../src/core/chunk.js";
+import { MaidsClawError } from "../../src/core/errors.js";
+import type { ChatCompletionRequest, ChatModelProvider, ChatMessage } from "../../src/core/models/chat-provider.js";
+import { createRunContext } from "../../src/core/run-context.js";
+import type { ProjectionAppendix } from "../../src/core/types.js";
+import type { RuntimeProjectionSink } from "../../src/core/runtime-projection.js";
+import { TruncateCompactor } from "../../src/core/truncate-compactor.js";
+import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
+import type { ToolDefinition } from "../../src/core/tools/tool-definition.js";
+
+const TEST_PROFILE: AgentProfile = {
+  id: "agent-maiden-1",
+  role: "maiden",
+  lifecycle: "persistent",
+  userFacing: true,
+  outputMode: "freeform",
+  modelId: "mock-model",
+  toolPermissions: [{ toolName: "lookup", allowed: true }],
+  maxDelegationDepth: 3,
+  lorebookEnabled: true,
+  narrativeContextEnabled: false,
+};
+
+class MockProjectionSink implements RuntimeProjectionSink {
+  readonly calls: Array<{ appendix: ProjectionAppendix; sessionId: string }> = [];
+
+  onProjectionEligible(appendix: ProjectionAppendix, sessionId: string): void {
+    this.calls.push({ appendix, sessionId });
+  }
+}
+
+class MockModelProvider implements ChatModelProvider {
+  constructor(private readonly responses: Chunk[][]) {}
+
+  readonly requests: ChatCompletionRequest[] = [];
+
+  async *chatCompletion(request: ChatCompletionRequest): AsyncIterable<Chunk> {
+    this.requests.push(request);
+    const turn = this.responses[this.requests.length - 1] ?? [];
+    for (const chunk of turn) {
+      yield chunk;
+    }
+  }
+}
+
+describe("AgentLoop", () => {
+  it("happy path: streams chunks, executes tool call, and continues TAOR loop", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "text_delta", text: "Let me check." },
+        { type: "tool_use_start", id: "call_1", name: "lookup" },
+        { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"cats"}' },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "Found two matches." },
+        { type: "message_end", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    const seenCalls: Array<{ params: unknown; contextSessionId?: string; contextAgentId?: string }> = [];
+    const lookupTool: ToolDefinition = {
+      name: "lookup",
+      description: "Lookup a value",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      async execute(params, context) {
+        seenCalls.push({
+          params,
+          contextSessionId: typeof context?.sessionId === "string" ? context.sessionId : undefined,
+          contextAgentId: typeof context?.agentId === "string" ? context.agentId : undefined,
+        });
+        return { result: "ok" };
+      },
+    };
+    executor.registerLocal(lookupTool);
+
+    const projectionSink = new MockProjectionSink();
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+      projectionSink,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-1",
+        requestId: "request-1",
+        messages: [{ role: "user", content: "Find cats" }],
+      })
+    );
+
+    expect(chunks).toEqual([
+      { type: "text_delta", text: "Let me check." },
+      { type: "tool_use_start", id: "call_1", name: "lookup" },
+      { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"cats"}' },
+      { type: "tool_use_end", id: "call_1" },
+      { type: "message_end", stopReason: "tool_use" },
+      { type: "text_delta", text: "Found two matches." },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
+
+    expect(seenCalls).toHaveLength(1);
+    expect(seenCalls[0]?.params).toEqual({ q: "cats" });
+    expect(seenCalls[0]?.contextSessionId).toBe("session-1");
+    expect(seenCalls[0]?.contextAgentId).toBe(TEST_PROFILE.id);
+
+    expect(model.requests).toHaveLength(2);
+    const secondTurnMessages = model.requests[1]?.messages;
+    const toolMessage = secondTurnMessages?.find((message) => message.role === "tool");
+    expect(toolMessage).toBeDefined();
+    expect(toolMessage?.toolCallId).toBe("call_1");
+    expect(toolMessage?.content).toBe('{"result":"ok"}');
+
+    expect(projectionSink.calls).toHaveLength(2);
+    expect(projectionSink.calls[0]?.appendix.eventCategory).toBe("speech");
+  });
+
+  it("error path: malformed tool arguments emits typed error chunk", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_bad", name: "lookup" },
+        { type: "tool_use_delta", id: "call_bad", partialJson: '{"q":' },
+        { type: "tool_use_end", id: "call_bad" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    executor.registerLocal({
+      name: "lookup",
+      description: "Lookup a value",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      async execute(): Promise<unknown> {
+        throw new Error("should not execute for malformed args");
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-err",
+        requestId: "request-err",
+        messages: [{ role: "user", content: "Find cats" }],
+      })
+    );
+
+    const lastChunk = chunks[chunks.length - 1];
+    expect(lastChunk?.type).toBe("error");
+    if (!lastChunk || lastChunk.type !== "error") {
+      throw new Error("Expected error chunk at end");
+    }
+    expect(lastChunk.code).toBe("TOOL_ARGUMENT_INVALID");
+    expect(lastChunk.retriable).toBe(false);
+  });
+
+  it("edge path: throws when delegation depth reaches max", async () => {
+    const model = new MockModelProvider([]);
+    const executor = new ToolExecutor();
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+      maxDelegationDepth: 3,
+    });
+
+    let thrown: unknown;
+    try {
+      await collectChunks(
+        loop.run({
+          sessionId: "session-depth",
+          requestId: "request-depth",
+          messages: [{ role: "user", content: "hello" }],
+          delegationDepth: 3,
+        })
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown instanceof MaidsClawError).toBe(true);
+    const err = thrown as MaidsClawError;
+    expect(err.code).toBe("DELEGATION_DEPTH_EXCEEDED");
+  });
+});
+
+describe("RunContext", () => {
+  it("creates default run context shape", () => {
+    const now = Date.now();
+    const context = createRunContext("session-1", "request-1", "agent-1");
+
+    expect(context.sessionId).toBe("session-1");
+    expect(context.requestId).toBe("request-1");
+    expect(context.agentId).toBe("agent-1");
+    expect(context.delegationDepth).toBe(0);
+    expect(context.startedAt >= now).toBe(true);
+  });
+});
+
+describe("TruncateCompactor", () => {
+  it("respects G4 invariant and avoids evicting unflushed messages", () => {
+    const compactor = new TruncateCompactor();
+    const messages: ChatMessage[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "old-user-message" },
+      { role: "assistant", content: "new-assistant-message" },
+      { role: "user", content: "newest-user-message" },
+    ];
+
+    compactor.setFlushBoundary(1);
+    const compacted = compactor.compact(messages, 5);
+
+    expect(compacted.some((message) => message.content === "new-assistant-message")).toBe(true);
+    expect(compacted.some((message) => message.content === "newest-user-message")).toBe(true);
+  });
+});
+
+async function collectChunks(stream: AsyncIterable<Chunk>): Promise<Chunk[]> {
+  const chunks: Chunk[] = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+
+  return chunks;
+}

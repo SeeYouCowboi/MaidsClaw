@@ -1,0 +1,19 @@
+Task T12a — INPUT_TOO_LARGE Error Path
+Evidence: Single message exceeding inputBudget throws correctly
+
+Test: checkInputSize with inputBudget=1 token
+Input: "This is a message that definitely exceeds one token in length"
+Result: MaidsClawError thrown
+  code: "INPUT_TOO_LARGE"
+  retriable: false
+  message contains token count and budget limit
+
+Test: CONTEXT_BUDGET_INVALID when inputBudget <= 0
+  maxContextTokens=5000, maxOutputTokens=10000 → inputBudget=-5000
+  Result: MaidsClawError thrown
+  code: "CONTEXT_BUDGET_INVALID"
+  retriable: false
+
+Test: Maiden with small window
+  maxContextTokens=5000, maxOutputTokens=4096, reserve=ceil(5000*0.20)=1000
+  inputBudget = 5000 - 4096 - 1000 = -96 → CONTEXT_BUDGET_INVALID

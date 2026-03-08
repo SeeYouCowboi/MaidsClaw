@@ -1,0 +1,25 @@
+T14a Evidence: AgentRegistry
+=============================
+Date: 2026-03-08
+
+Files created:
+- src/agents/registry.ts (50 lines)
+- AgentRegistry class with Map<string, AgentProfile>
+- register(), unregister(), get(), getAll(), has()
+
+Error handling:
+- register() throws AGENT_ALREADY_REGISTERED on duplicate id
+- unregister() throws AGENT_NOT_FOUND for unknown id
+- get() returns undefined for unknown id (no throw)
+
+Tests (in test/agents/registry.test.ts):
+- register + get returns the profile ✓
+- has() returns true for registered, false for unregistered ✓
+- getAll() returns all registered profiles ✓
+- unregister removes an agent ✓
+- register throws AGENT_ALREADY_REGISTERED on duplicate id ✓
+- unregister throws AGENT_NOT_FOUND for unknown id ✓
+- get() returns undefined for unregistered agent ✓
+
+Build: tsc --noEmit — zero errors
+Tests: 41 pass, 0 fail, 77 expect() calls

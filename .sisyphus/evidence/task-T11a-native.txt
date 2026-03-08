@@ -1,0 +1,5 @@
+    Checking maidsclaw-native v0.1.0 (H:\MaidsClaw\native)
+warning: hard linking files in the incremental compilation cache failed. copying files instead. consider moving the cache directory to a file system which supports hard linking in session dir `\\?\H:\MaidsClaw\native\target\debug\incremental\maidsclaw_native-267abrrai9cz9\s-hggtp79gzw-16lrqj9-working`
+
+warning: `maidsclaw-native` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
