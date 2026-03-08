@@ -132,3 +132,79 @@
 - Added `src/memory/storage.test.ts` with 17 scenarios covering all required QA paths (entity scope behavior, fact invalidation, private event/belief rules, FTS sync/search, projected/promoted invariants, embeddings, same_episode adjacency, and transactional rollback)
 - Targeted: `bun test src/memory/storage.test.ts` -> 17 pass
 - Full suite: `bun test` -> 381 pass, 0 fail
+
+## Memory Tool Definitions (T7) - 2026-03-08
+
+### Implementation
+- Added `src/memory/tools.ts` with 5 tool definitions: core_memory_append, core_memory_replace, memory_read, memory_search, memory_explore
+- `MemoryToolDefinition` type: { name, description, parameters (JSON Schema), handler(args, viewerContext) }
+- `buildMemoryTools(services)` returns all 5 tools; `registerMemoryTools(executor, services)` registers them
+- Tool handlers are thin wrappers — dispatch to CoreMemoryService / RetrievalService / GraphNavigator
+- ViewerContext auto-injected by ToolExecutor into handler — agents never see or pass it
+- Label restriction enforced at handler level: 'index' label returns error for core_memory_append/replace
+- Pointer syntax guide shared across all tool descriptions: @pointer_key, #topic_name, e:id, f:id
+- GraphNavigator uses stub interface (T10 not yet created); memory_explore returns error when navigator is undefined
+- memory_search handler is async (RetrievalService.searchVisibleNarrative returns Promise)
+- memory_read dispatches based on which arg is provided: entity → readByEntity, topic → readByTopic, event_ids → readByEventIds, fact_ids → readByFactIds
+
+### Testing
+- Added `src/memory/tools.test.ts` with 22 tests covering:
+  - All 5 tools have valid JSON Schema parameter definitions
+  - Tool descriptions include pointer syntax guide
+  - core_memory_append dispatches correctly and persists
+  - core_memory_append rejects label 'index'
+  - core_memory_replace dispatches correctly
+  - core_memory_replace rejects label 'index'
+  - memory_read dispatches entity/topic/event_ids/fact_ids reads
+  - memory_read returns error when no argument provided
+  - memory_search dispatches to searchVisibleNarrative
+  - memory_explore dispatches to navigator stub
+  - memory_explore returns error when navigator absent
+  - registerMemoryTools registers all 5 tools
+  - ViewerContext isolation (different agent_ids write to correct blocks)
+
+### Verification Results
+- `bun test src/memory/tools.test.ts`: 22 pass
+- `bun test`: 415 pass / 0 fail
+
+## Prompt Data Integration (T9) - 2026-03-08
+
+### Implementation
+- Added `src/memory/prompt-data.ts` with 3 data source functions for prompt injection
+- `getCoreMemoryBlocks(agentId, db)` → synchronous, returns XML-wrapped blocks with `chars_current` and `chars_limit` attributes
+- `getMemoryHints(userMessage, viewerContext, db, limit?)` → async (wraps RetrievalService.generateMemoryHints which is async), returns bullet list `• [nodeKind] content`
+- `formatNavigatorEvidence(navigatorResult, viewerContext)` → synchronous, formats NavigatorResult paths/edges/facts as structured text
+- These are DATA SOURCE functions only — no prompt assembly, placement, or template logic (T24 owns that)
+- NavigatorResult param typed as `unknown` since T10 (GraphNavigator) not yet created; cast internally with null/empty guard
+
+### Key Patterns
+- CoreMemoryService.getAllBlocks returns `chars_current` but NOT `chars_limit` — use `block.char_limit` from CoreMemoryBlock base type
+- RetrievalService.generateMemoryHints is async (Promise<MemoryHint[]>) — so getMemoryHints must also be async
+- MemoryHint.source_ref is NodeRef format (e.g. `entity:5`); extract node kind via `.split(':')[0]`
+- Viewer role scoping is handled by RetrievalService internally — prompt-data just passes viewerContext through
+- formatNavigatorEvidence underscore-prefixes `_viewerContext` since filtering happens at navigator level
+
+### Testing
+- Added `src/memory/prompt-data.test.ts` with 20 tests covering:
+  - getCoreMemoryBlocks: XML format, all 3 blocks, chars metadata, block content
+  - getMemoryHints: bullet list format, short query guard, limit param, rp_agent scope (private+area+world), maiden scope (area+world only)
+  - formatNavigatorEvidence: null/undefined/non-object guards, empty paths, structured output, edge formatting with/without timestamp/summary, multi-path, no prompt assembly markers
+- FTS test helpers: insertSearchDocPrivate/Area/World that handle both base table and FTS shadow table inserts
+
+### Verification Results
+- `bun test src/memory/prompt-data.test.ts`: 20 pass
+- `bun test`: 435 pass / 0 fail
+
+## Delayed Materialization Service (T11) - 2026-03-08
+
+### Implementation
+- Added `src/memory/materialization.ts` with `MaterializationService` and exported `MaterializationResult` (`materialized`, `reconciled`, `skipped`)
+- `materializeDelayed(privateEvents, agentId)` enforces scope/category gate: only `projection_class='area_candidate'` and non-`thought` private events are materialized
+- Reconciliation rule is link-only: if `source_record_id` matches an existing `area_visible` event, only `agent_event_overlay.event_id` is updated (no duplicate insert, no event_origin mutation)
+- New delayed public events are written only through `GraphStorageService.createProjectedEvent()` with `origin='delayed_materialization'`, `summary=projectable_summary`, and implicit `raw_text=NULL`
+- Entity references are resolved to non-private IDs only: reuse shared entity, promote identifiable private entity to shared via `upsertEntity`, or create placeholder `unknown_person@area:t{timestamp}` for hidden identities
+- Participants are emitted strictly as JSON NodeRef array (`entity:{id}` refs), never free-text names, and search projection is synced via storage layer to `search_docs_area` + FTS using only public-safe summary text
+
+### Testing
+- Added `src/memory/materialization.test.ts` with 7 scenarios covering delayed creation, runtime reconciliation, thought/none skipping, text safety, participant ref safety, owner-private exclusion, placeholder creation, and search sync
+- Verification: `bun test src/memory/materialization.test.ts` pass; full `bun test` pass (442/0)
