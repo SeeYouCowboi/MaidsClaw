@@ -1,0 +1,7 @@
+T32 E2E demo scenario intentionally uses in-process wiring only.
+
+No real LLM or external model API calls are executed.
+All behavior is deterministic and local:
+- DecisionPolicy is pure logic
+- DelegationCoordinator uses in-memory Blackboard + local CommitService
+- Gateway demo script calls only local /healthz endpoint on localhost

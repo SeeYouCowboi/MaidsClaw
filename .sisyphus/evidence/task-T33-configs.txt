@@ -1,0 +1,48 @@
+Task T33 — Configuration Examples Evidence
+==========================================
+
+Files Created
+-------------
+
+1. .env.example
+   - Environment variables template
+   - Contains placeholder API keys (sk-ant-PLACEHOLDER, sk-PLACEHOLDER)
+   - Includes all documented env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY,
+     MAIDSCLAW_PORT, MAIDSCLAW_HOST, MAIDSCLAW_DB_PATH, MAIDSCLAW_DATA_DIR,
+     MAIDSCLAW_NATIVE_MODULES
+
+2. config/models.example.json
+   - Model configuration for chat and embedding providers
+   - Shows provider structure for anthropic and openai
+   - Lists available models per provider
+
+3. config/agents.example.json
+   - Array of 3 agent profiles:
+     * maid:main — Maiden coordinator (persistent, user-facing)
+     * rp:alice — RP agent with personaId "alice"
+     * task:runner — Task agent (ephemeral, structured output)
+   - Each includes all required AgentProfile fields
+
+4. config/lore.example.json
+   - Array of 2 LoreEntry objects
+   - world-rules-001: World setting entry
+   - etiquette-001: Service etiquette rules
+   - Both use valid scope values ("world")
+   - Include keywords, priority, enabled, and tags
+
+5. config/personas.example.json
+   - Array with 1 CharacterCard (Alice)
+   - Includes all required fields: id, name, description, persona
+   - Includes optional fields: world, firstMessage, messageExamples, systemPrompt, tags
+
+6. scripts/start-dev.ts
+   - Development server startup script
+   - Creates GatewayServer with SessionService
+   - Graceful shutdown on SIGINT/SIGTERM
+   - Warns but doesn't crash on missing API keys
+
+7. scripts/check-system.ts
+   - System readiness check script
+   - Fetches /healthz and /readyz endpoints
+   - Exits with code 0 if healthy, 1 if not
+   - Shows detailed response status and body

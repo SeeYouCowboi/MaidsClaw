@@ -1,0 +1,15 @@
+{
+  "agent_id": "maid:main",
+  "request_id": "demo-req-001",
+  "user_message": {
+    "id": "demo-msg-001",
+    "text": "Hello, can you help me with something?"
+  },
+  "client_context": {
+    "timezone": "Asia/Hong_Kong",
+    "locale": "zh-HK"
+  },
+  "metadata": {
+    "source": "demo"
+  }
+}

@@ -696,3 +696,61 @@ Created the Gateway HTTP server with 5 V1 endpoints, SSE streaming, and session 
 - Retry behavior is easiest to reason about when `attempts` increments on dispatch and requeue occurs only if `retriable && attempts < maxAttempts`.
 - V1 scheduler loop should guard against overlapping interval ticks (`tickInFlight`) even in a single-threaded runtime.
 - Bun strict test ergonomics remain consistent: avoid non-null assertions in tests; use explicit guards and throw for impossible states.
+
+## [2026-03-09T00:00:00Z] Task: T32 — E2E Demo Scenario
+
+- In-process E2E wiring works cleanly with `openDatabase({ path: ":memory:" })` + `runInteractionMigrations(db)` + `InteractionStore` for deterministic integration tests.
+- `DecisionPolicy.decide(...)` (not `shouldDelegate`) delegates to the first available `rp:` agent when message length is > 10 and delegation depth allows it.
+- `DelegationCoordinator.coordinate(...)` requires registered source/target agents and permission checks; using `Blackboard` caller `"maiden"` satisfies `delegation.*` namespace ownership.
+- `FlushSelector.shouldFlush(sessionId, agentId)` triggers at 10 unprocessed RP dialogue turns and returns `flushMode: "dialogue_slice"`; `buildSessionCloseFlush(...)` returns `flushMode: "session_close"` for remaining unprocessed records.
+- `JobScheduler.submit(...)` delegates dedup behavior to dispatcher/dedup engine: a duplicate pending `jobKey` coalesces and returns `null` (single queued job remains).
+
+
+## [2026-03-09T00:00:00Z] Task: T33 — Configuration Examples + Startup Scripts
+
+### Files Created
+- `.env.example` — Environment variables template with placeholder API keys
+- `config/models.example.json` — Model provider configuration example
+- `config/agents.example.json` — 3 agent profiles (maid:main, rp:alice, task:runner)
+- `config/lore.example.json` — 2 LoreEntry examples with world rules
+- `config/personas.example.json` — Character card example (Alice)
+- `scripts/start-dev.ts` — Development server startup with graceful shutdown
+- `scripts/check-system.ts` — Health/readiness endpoint checker
+
+### Key Implementation Decisions
+
+1. **Placeholder secrets**: `.env.example` uses `sk-ant-PLACEHOLDER` and `sk-PLACEHOLDER` — clearly marked as placeholders, won't work with real APIs
+
+2. **Dev startup script resilience**: `start-dev.ts` warns but doesn't crash on missing API keys. Uses try/catch pattern for graceful degradation in development.
+
+3. **GatewayServer requires SessionService**: The server constructor needs `{ port, host, sessionService }` — created fresh SessionService instance in startup script.
+
+4. **Health check endpoints**: `/healthz` returns `{ status: "ok" }`, `/readyz` returns `{ status: "ok", storage: "ok", models: "ok" }`
+
+5. **Import convention**: Scripts use `.js` extension for ESM compatibility (`../src/gateway/server.js`)
+
+### Script Behaviors
+
+**start-dev.ts**:
+- Reads MAIDSCLAW_PORT (default 3000) and MAIDSCLAW_HOST (default localhost) from env
+- Creates GatewayServer with SessionService
+- Logs startup message with actual port
+- Handles SIGINT/SIGTERM for graceful shutdown
+- Warns about missing API keys without crashing
+
+**check-system.ts**:
+- Makes fetch() calls to /healthz and /readyz
+- Prints status and response body for each endpoint
+- Exits with code 0 if both succeed, code 1 if either fails
+- Handles fetch errors gracefully (server not running)
+
+### Verification
+- `bun test test/core/config.test.ts`: 11 pass, 0 fail
+- `bun run build` (tsc --noEmit): zero errors
+- No existing source files modified
+
+### Configuration Patterns
+- Environment variables: `MAIDSCLAW_*` prefix for app settings, `*_API_KEY` for credentials
+- JSON configs: Use arrays for collections (agents, lore, personas), objects for maps (models)
+- LoreEntry: Must include `enabled: boolean` field (not optional in schema)
+- CharacterCard: Uses `persona` field (not `personality` as in some other systems)

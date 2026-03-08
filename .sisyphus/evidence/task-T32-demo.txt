@@ -1,0 +1,16 @@
+Task T32 implementation complete.
+
+Created:
+- test/e2e/demo-scenario.test.ts
+- test/fixtures/demo/canonical-turn.json
+- scripts/demo.ts
+
+Implemented E2E scenario coverage for:
+1) canonical delegation turn (DecisionPolicy + DelegationCoordinator + delegation commit)
+2) 10-turn flush trigger (FlushSelector.shouldFlush -> dialogue_slice)
+3) session-close flush request (FlushSelector.buildSessionCloseFlush -> session_close)
+4) scheduler submit + dedup coalescing behavior for duplicate job_key
+
+Verification:
+- bun test test/e2e/demo-scenario.test.ts -> 4 pass, 0 fail
+- bun run build -> success (tsc --noEmit)

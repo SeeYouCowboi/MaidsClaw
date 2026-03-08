@@ -1,0 +1,53 @@
+[
+  {
+    "id": "maid:main",
+    "role": "maiden",
+    "lifecycle": "persistent",
+    "userFacing": true,
+    "outputMode": "freeform",
+    "modelId": "claude-3-5-sonnet-20241022",
+    "maxOutputTokens": 8192,
+    "toolPermissions": [],
+    "maxDelegationDepth": 3,
+    "lorebookEnabled": true,
+    "narrativeContextEnabled": true,
+    "contextBudget": {
+      "maxTokens": 200000,
+      "reservedForCoordination": 40000
+    }
+  },
+  {
+    "id": "rp:alice",
+    "role": "rp_agent",
+    "lifecycle": "persistent",
+    "userFacing": true,
+    "outputMode": "freeform",
+    "modelId": "claude-3-5-sonnet-20241022",
+    "personaId": "alice",
+    "maxOutputTokens": 4096,
+    "toolPermissions": [],
+    "maxDelegationDepth": 1,
+    "lorebookEnabled": true,
+    "narrativeContextEnabled": true,
+    "contextBudget": {
+      "maxTokens": 200000
+    }
+  },
+  {
+    "id": "task:runner",
+    "role": "task_agent",
+    "lifecycle": "ephemeral",
+    "userFacing": false,
+    "outputMode": "structured",
+    "modelId": "claude-3-haiku-20240307",
+    "maxOutputTokens": 2048,
+    "toolPermissions": [],
+    "maxDelegationDepth": 0,
+    "detachable": true,
+    "lorebookEnabled": false,
+    "narrativeContextEnabled": false,
+    "contextBudget": {
+      "maxTokens": 100000
+    }
+  }
+]
