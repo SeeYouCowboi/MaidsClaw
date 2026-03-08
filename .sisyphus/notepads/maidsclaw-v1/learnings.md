@@ -618,3 +618,35 @@ Created the append-only SQLite-backed interaction log module with commit service
 - Consolidating provider failures under `PROMPT_BUILDER_DATA_SOURCE_ERROR` gives one stable error path for missing persona, missing provider wiring, and thrown subsystem exceptions.
 - RP core memory retrieval should key off `viewerContext.viewer_agent_id` from `src/memory/types.ts`.
 - Task agent defaults remain intentionally minimal (preamble + conversation), with lore/world slots only when `lorebookEnabled` and `narrativeContextEnabled` opt-ins are enabled.
+
+## [2026-03-09T00:00:00Z] Task: T20a — Maiden Coordination Module
+
+- Keep Maiden coordination split into three small units: profile factory (`createMaidenProfile`), deterministic routing policy (`DecisionPolicy`), and side-effectful delegation orchestrator (`DelegationCoordinator`).
+- `DecisionPolicy` V1 can stay deterministic by relying only on run depth + `availableAgentIds`; routing to rp agent via ID convention (`rp:` prefix) avoids reaching into registry internals.
+- Delegation writes should use blackboard key `delegation.{delegationId}` with caller exactly `"maiden"` so namespace single-writer enforcement passes.
+- Permission-denied and depth/cycle guard paths can share `DELEGATION_DEPTH_EXCEEDED`; missing target should still surface as `AGENT_NOT_FOUND`.
+- Optional commit emission works cleanly by committing a `recordType: "delegation"` record with `DelegationPayload` status `"started"` and session ID inherited from `RunContext`.
+
+## [2026-03-09T00:00:00Z] Task: T21 — RP Agent Profile Module
+
+- Keep RP profile composition declarative by re-exporting `RP_AGENT_PROFILE` from `src/agents/rp/profile.ts` and layering `id/personaId` defaults via `createRpProfile(personaId, overrides)`.
+- Represent RP tool permissions as a dedicated policy object (`RpToolPolicy`) that owns the static authorized set and converts it into `ToolPermission[]` for `AgentProfile.toolPermissions`.
+- `AgentPermissions.canUseTool` behavior is dual-mode: empty `toolPermissions` means allow-all, non-empty list behaves like an explicit allowlist.
+- Private-memory boundary remains centralized in `AgentPermissions.canAccessPrivateData`: RP agents can self-read but cannot read another RP agent's private memory.
+
+## [2026-03-09T00:00:00Z] Task: T20a — Maiden Coordination Follow-up
+
+- `createMaidenProfile(overrides?)` should spread `MAIDEN_PROFILE` then overrides and re-export the preset from the maiden module to keep imports centralized.
+- `DelegationCoordinator` works best when it persists the raw `DelegationContext` at `delegation.{delegationId}` with caller `"maiden"`; no wrapper fields are needed.
+- Delegation interaction logging should emit `recordType: "delegation"` with `input: taskInput ?? null` and `correlatedTurnId` set from `RunContext.requestId` for turn-level traceability.
+- Decision routing can stay deterministic in V1: depth limit guard first, then delegate to first `rp:` target only for longer user input.
+
+## [2026-03-09] T22a — Task Agent Worker Module
+
+- `createTaskProfile(taskId, overrides?)` spreads `TASK_AGENT_PROFILE` then overrides with `id: task:{taskId}`. Simple and mirrors the Maiden pattern.
+- `spawnFromConfig()` resolves base profile from registry with fallback to `TASK_AGENT_PROFILE`, then forces `lifecycle: "ephemeral"` and `userFacing: false` before applying overrides. The `baseRegistry` param accepts any object with `get()` — AgentRegistry satisfies it directly.
+- `TaskOutputValidator` uses a ValidationResult discriminated union (`{ok:true, value}` | `{ok:false, reason}`) instead of throwing. Caller code should use `TASK_OUTPUT_INVALID` error code when validation fails.
+- V1 schema validation is simplified: type-checks for primitives/array, required keys + property types for objects. Absent optional keys are skipped.
+- `resolveDetachPolicy()` is a pure function — `detachable === true` → "detach", everything else → "wait".
+- Added `TASK_OUTPUT_INVALID` to ErrorCode union in `src/core/errors.ts` (non-retriable).
+- Test count: 544 → 579 (22 new task agent tests). Full suite green.

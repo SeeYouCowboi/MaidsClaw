@@ -1,0 +1,13 @@
+bun run build && bun test test/agents/maiden/maiden.test.ts
+
+$ tsc --noEmit
+bun test v1.3.10 (30e609e0)
+
+ 6 pass
+ 0 fail
+ 26 expect() calls
+Ran 6 tests across 1 file. [101.00ms]
+
+Covered delegate happy path in `test/agents/maiden/maiden.test.ts`:
+- blackboard key `delegation.{id}` set
+- delegation record emitted via commit service

@@ -1,0 +1,29 @@
+EVIDENCE: Task Agent Structured Worker — Happy Path
+====================================================
+Date: 2026-03-09
+Task: T22a — Task Agent worker module
+
+Test: createTaskProfile("my-task")
+  - id = "task:my-task" ✓
+  - lifecycle = "ephemeral" ✓
+  - userFacing = false ✓
+  - outputMode = "structured" ✓
+  - lorebookEnabled = false ✓
+  - narrativeContextEnabled = false ✓
+
+Test: spawnFromConfig("t2", { baseProfileId: "task:custom-base", overrides: { narrativeContextEnabled: true } }, registry)
+  - id = "task:t2" ✓
+  - narrativeContextEnabled = true (override applied) ✓
+  - lifecycle = "ephemeral" (forced) ✓
+  - userFacing = false (forced) ✓
+  - modelId = "custom-base-model" (from base profile) ✓
+
+Test: TaskOutputValidator.validate({name:"Alice",age:30}, objectSchema)
+  - result.ok = true ✓
+
+Test: Ephemeral lifecycle completeRun → auto-unregister
+  - registry.has("task:eph-complete") after completeRun = false ✓
+
+Build: bun run build → 0 errors
+Tests: 22 pass, 0 fail
+Full suite: 579 pass, 0 fail

@@ -1,0 +1,16 @@
+Task T21 private-memory boundary evidence
+Date: 2026-03-09
+
+Boundary rule source:
+- AgentPermissions.canAccessPrivateData() in src/agents/permissions.ts
+- Rule: self-read allowed; cross-read restricted to maiden role
+
+Verified in test/agents/rp/rp-agent.test.ts:
+- canAccessPrivateData("rp:alice", "rp:bob") -> false
+- canAccessPrivateData("rp:alice", "rp:alice") -> true
+
+Test setup:
+- Registered both rp:alice and rp:bob profiles in AgentRegistry for boundary check
+
+Verification:
+- bun test test/agents/rp/rp-agent.test.ts -> pass

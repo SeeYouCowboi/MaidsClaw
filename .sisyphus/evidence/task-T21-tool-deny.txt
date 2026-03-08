@@ -1,0 +1,20 @@
+Task T21 tool policy deny-path evidence
+Date: 2026-03-09
+
+Authorized RP tools (7 total):
+- core_memory_append
+- core_memory_replace
+- memory_read
+- memory_search
+- memory_explore
+- persona_check_drift
+- delegate_task
+
+Verified behaviors in test/agents/rp/rp-agent.test.ts:
+- RpToolPolicy.isAllowed("memory_read") -> true
+- RpToolPolicy.isAllowed("admin_tool") -> false
+- AgentPermissions.canUseTool with empty toolPermissions allows all tools
+- AgentPermissions.canUseTool with explicit allowlist denies non-listed tool "admin_tool"
+
+Verification:
+- bun test test/agents/rp/rp-agent.test.ts -> pass

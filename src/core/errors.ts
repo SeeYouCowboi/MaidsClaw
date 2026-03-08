@@ -21,6 +21,7 @@ export type ErrorCode =
   | "CIRCULAR_DELEGATION"
   | "TOOL_PERMISSION_DENIED"
   | "TOOL_ARGUMENT_INVALID"
+  | "TASK_OUTPUT_INVALID"
   // Config errors (note: CONFIG_ERROR defined in config-schema.ts is separate)
   | "CONFIG_MISSING_CREDENTIAL"
   | "PERSONA_CARD_INVALID"
