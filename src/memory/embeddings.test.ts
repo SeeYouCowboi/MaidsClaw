@@ -107,7 +107,7 @@ describe("EmbeddingService", () => {
       },
     ]);
 
-    const neighbors = service.queryNearestNeighbors(new Float32Array([1, 0, 0]), { limit: 2 });
+    const neighbors = service.queryNearestNeighbors(new Float32Array([1, 0, 0]), { agentId: null, limit: 2 });
     expect(neighbors).toHaveLength(2);
     expect(neighbors[0].nodeRef).toBe("event:1");
     expect(neighbors[0].similarity).toBe(1);

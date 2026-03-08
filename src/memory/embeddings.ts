@@ -12,7 +12,7 @@ type EmbeddingEntry = {
 
 type NeighborQueryOptions = {
   nodeKind?: string;
-  agentId?: string;
+  agentId: string | null;
   limit?: number;
 };
 
@@ -67,7 +67,7 @@ export class EmbeddingService {
 
   queryNearestNeighbors(
     queryEmbedding: Float32Array,
-    options: NeighborQueryOptions = {},
+    options: NeighborQueryOptions,
   ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
     const limit = options.limit ?? 20;
     const rows = options.nodeKind
@@ -111,12 +111,17 @@ export class EmbeddingService {
   private isNodeVisibleForAgent(
     nodeRef: NodeRef,
     nodeKind: string,
-    agentId: string | undefined,
+    agentId: string | null,
     privateEventOwnerStmt: ReturnType<Database["prepare"]>,
     privateBeliefOwnerStmt: ReturnType<Database["prepare"]>,
   ): boolean {
-    if (!agentId) {
+    if (nodeKind !== "private_event" && nodeKind !== "private_belief") {
       return true;
+    }
+
+    // G-NEW-7: null agentId means "shared public only" — exclude all private nodes
+    if (agentId === null) {
+      return false;
     }
 
     if (nodeKind !== "private_event" && nodeKind !== "private_belief") {
