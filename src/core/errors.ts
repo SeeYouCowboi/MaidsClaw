@@ -40,6 +40,9 @@ export type ErrorCode =
   // Interaction log errors
   | "INTERACTION_DUPLICATE_RECORD"
   | "INTERACTION_INVALID_FIELD"
+  // Session errors
+  | "SESSION_NOT_FOUND"
+  | "SESSION_CLOSED"
   | "UNKNOWN_ERROR";
 
 // The canonical runtime error type used throughout MaidsClaw

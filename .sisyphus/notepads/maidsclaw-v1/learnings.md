@@ -650,3 +650,49 @@ Created the append-only SQLite-backed interaction log module with commit service
 - `resolveDetachPolicy()` is a pure function — `detachable === true` → "detach", everything else → "wait".
 - Added `TASK_OUTPUT_INVALID` to ErrorCode union in `src/core/errors.ts` (non-retriable).
 - Test count: 544 → 579 (22 new task agent tests). Full suite green.
+
+## [2026-03-09T00:00:00Z] Task: T26 — Gateway API Server
+
+### Implementation Summary
+Created the Gateway HTTP server with 5 V1 endpoints, SSE streaming, and session lifecycle management.
+
+### Files Created
+- `src/session/service.ts` (52 lines) — SessionService with in-memory Map<string, SessionRecord>
+- `src/gateway/sse.ts` (52 lines) — formatSseEvent() + createSseStream() with ReadableStream
+- `src/gateway/controllers.ts` (197 lines) — 5 endpoint handlers (healthz, readyz, createSession, turnStream, closeSession)
+- `src/gateway/routes.ts` (62 lines) — Route table with path pattern matching
+- `src/gateway/server.ts` (86 lines) — GatewayServer wrapping Bun.serve()
+- `test/gateway/gateway.test.ts` (374 lines) — 15 contract tests, 74 expect() calls
+
+### Files Modified
+- `src/core/errors.ts` — Added SESSION_NOT_FOUND, SESSION_CLOSED error codes
+
+### Key Implementation Decisions
+1. **SSE format**: `data: {JSON}\n\n` — no `event:` type field in SSE (type is in JSON payload). This matches the plan specification exactly.
+2. **Bun.serve() Server<unknown>**: The `Server` type from bun requires a generic type parameter. Use `Server<unknown>` since we don't use WebSocket data.
+3. **Server.port may be undefined**: `server.port` on Bun's Server type is `number | undefined`. Use `?? options.port` fallback.
+4. **SSE error events for session errors**: Invalid/closed sessions return 200 SSE stream with a single error event (not a JSON error response). This keeps the client protocol consistent — always parse SSE for turns:stream.
+5. **V1 stub for turns:stream**: Emits status → delta → done with deterministic data. Full AgentLoop integration deferred to T32.
+6. **Port 0 for tests**: `Bun.serve({ port: 0 })` auto-assigns a random available port. `server.port` returns the actual port.
+7. **ReadableStream pull model**: SSE uses pull-based ReadableStream (not push) — each pull() calls generator.next() for backpressure-friendly streaming.
+8. **Client disconnect**: ReadableStream cancel() calls generator.return() for cleanup.
+
+### TypeScript Gotchas
+- `Server` from `bun` requires generic: `Server<unknown>` not bare `Server`
+- `server.port` is `number | undefined` — needs null coalescing
+- Non-null assertions (`sessionId!`) needed in generator closures where outer scope validated the value
+
+### Verification
+- 15 pass, 0 fail, 74 expect() calls
+- Full suite: 599 pass, 0 fail (579 existing + 20 new)
+- `bun run build` (tsc --noEmit): zero errors
+- LSP diagnostics: zero errors on all files (only biome style warnings)
+
+## [2026-03-09T00:00:00Z] Task: T28a — Minimal Job Runtime
+
+- Keep dedup policy fully key-driven (`job_key`): pending -> coalesce, running -> drop, terminal -> noop, missing -> accept.
+- Centralize execution-class priority as a constant map and sort pending jobs by class priority first, then FIFO (`createdAt`).
+- Set `ownershipAccepted=true` before entering worker execution to satisfy G4 ownership-transfer semantics.
+- Retry behavior is easiest to reason about when `attempts` increments on dispatch and requeue occurs only if `retriable && attempts < maxAttempts`.
+- V1 scheduler loop should guard against overlapping interval ticks (`tickInFlight`) even in a single-threaded runtime.
+- Bun strict test ergonomics remain consistent: avoid non-null assertions in tests; use explicit guards and throw for impossible states.

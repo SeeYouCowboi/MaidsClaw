@@ -1,0 +1,20 @@
+Task T28a — Job Key Dedup Evidence
+
+Scenario: Duplicate submissions for key memory.migrate:session-dup:0-9.
+
+Observed behavior:
+- First submit returns a Job (accepted, pending in queue).
+- Second submit returns null (deduplicated).
+- Queue pending size remains 1.
+
+Dedup engine status rules validated in tests:
+- existing pending => coalesce
+- existing running => drop
+- existing completed => noop
+- missing key => accept
+
+Verification command:
+- bun test test/jobs/job-runtime.test.ts
+
+Result:
+- 5 pass, 0 fail

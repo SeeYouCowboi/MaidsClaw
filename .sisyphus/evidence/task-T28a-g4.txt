@@ -1,0 +1,20 @@
+Task T28a — G4 Ownership Transfer Evidence
+
+Scenario: processNext starts a memory.migrate job with a worker blocked on a promise gate.
+
+Observed behavior before worker completion:
+- Job status is running.
+- Job ownershipAccepted is true.
+- Worker observes ownershipAccepted=true at entry.
+
+Observed behavior after gate release:
+- Job status transitions to completed.
+
+G4 invariant proven:
+- Ownership token is set before worker execution, so ContextCompactor can treat batch as queue-owned only after acceptance.
+
+Verification command:
+- bun test test/jobs/job-runtime.test.ts
+
+Result:
+- 5 pass, 0 fail

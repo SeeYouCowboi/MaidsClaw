@@ -1,0 +1,21 @@
+T26 Gateway — Evidence: Provider Timeout Handling
+==================================================
+
+## V1 Behavior
+V1 uses a deterministic stub for turns:stream — no real provider calls.
+The stub emits status → delta → done without network I/O, so provider
+timeouts are not applicable in V1.
+
+## Future Integration (T32)
+When T32 integrates the real AgentLoop:
+- Provider timeout errors (MODEL_TIMEOUT) will be caught by the agent loop
+- The loop emits an ErrorChunk which the gateway translates to an SSE error event
+- The SSE stream will emit: error event with code "MODEL_TIMEOUT", retriable: true
+- The client can retry the turn based on the retriable flag
+
+## Error Code Available
+- MODEL_TIMEOUT is in RETRIABLE_CODES set (from T7)
+- MaidsClawError wrapping ensures consistent error envelope
+
+## SSE Error Event Format (verified in tests)
+data: {"session_id":"...","request_id":"...","event_id":"...","ts":...,"type":"error","data":{"code":"SESSION_NOT_FOUND","message":"...","retriable":false}}
