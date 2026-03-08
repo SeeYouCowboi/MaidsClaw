@@ -31,5 +31,5 @@
     }
   },
   "include": ["src/**/*", "test/**/*", "types/**/*"],
-  "exclude": ["node_modules", "dist", "native"]
+  "exclude": ["node_modules", "dist", "native", "src/**/*.test.ts"]
 }

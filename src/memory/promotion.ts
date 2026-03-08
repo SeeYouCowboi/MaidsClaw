@@ -4,6 +4,7 @@ import type { GraphStorageService } from "./storage.js";
 import type {
   EventNode,
   IPromotionService,
+  NodeRef,
   ProjectedWrite,
   PromotionCandidate,
   PublicEventCategory,
@@ -350,7 +351,7 @@ export class PromotionService implements IPromotionService {
       .get(pointerKey) as { id: number } | null;
   }
 
-  private parseParticipantRefs(participants: string | null): Array<`entity:${number}`> {
+  private parseParticipantRefs(participants: string | null): NodeRef[] {
     if (!participants) {
       return [];
     }
@@ -359,7 +360,7 @@ export class PromotionService implements IPromotionService {
       const parsed = JSON.parse(participants) as string[];
       return parsed
         .filter((value): value is `entity:${number}` => /^entity:\d+$/.test(value))
-        .map((value) => value as `entity:${number}`);
+        .map((value) => value as NodeRef);
     } catch {
       return [];
     }

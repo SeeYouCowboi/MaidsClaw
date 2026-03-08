@@ -12,6 +12,11 @@ export interface Db {
   get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined;
   close(): void;
   transaction<T>(fn: () => T): T;
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
 }
 
 export function openDatabase(options: DbOptions): Db {
@@ -49,6 +54,23 @@ export function openDatabase(options: DbOptions): Db {
 
     transaction<T>(fn: () => T): T {
       return db.transaction(fn)();
+    },
+
+    prepare(sql: string) {
+      const stmt = db.prepare(sql);
+      return {
+        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+          const result = params.length > 0 ? stmt.run(...params as []) : stmt.run();
+          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+        },
+        all(...params: unknown[]): unknown[] {
+          return (params.length > 0 ? stmt.all(...params as []) : stmt.all()) as unknown[];
+        },
+        get(...params: unknown[]): unknown {
+          const result = params.length > 0 ? stmt.get(...params as []) : stmt.get();
+          return result === null ? undefined : result;
+        },
+      };
     },
   };
 }

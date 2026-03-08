@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "../storage/database.js";
 import type { CoreMemoryBlock, CoreMemoryLabel, AppendResult, ReplaceResult } from "./types.js";
 
 const BLOCK_DEFAULTS: ReadonlyArray<{
@@ -13,7 +13,7 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
 ];
 
 export class CoreMemoryService {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Db) {}
 
   /** Create 3 default blocks: character (4000), user (3000), index (1500) */
   initializeBlocks(agentId: string): void {

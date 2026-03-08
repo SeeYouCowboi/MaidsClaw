@@ -1,0 +1,30 @@
+Task T27a: Interaction Log Module — COMPLETED
+
+## Files Created
+- src/interaction/schema.ts — SQLite DDL + migration runner (runInteractionMigrations)
+- src/interaction/store.ts — InteractionStore class (commit, getBySession, getByRange, markProcessed, countUnprocessedRpTurns, getMinMaxUnprocessedIndex, getMaxIndex)
+- src/interaction/commit-service.ts — CommitService class (ID assignment via crypto.randomUUID, auto-increment recordIndex, actorType/recordType validation)
+- src/interaction/flush-selector.ts — FlushSelector class (shouldFlush at 10+ RP dialogue turns, buildSessionCloseFlush for any unprocessed)
+- src/interaction/index.ts — Barrel export
+
+## Files Modified
+- src/core/errors.ts — Added INTERACTION_DUPLICATE_RECORD, INTERACTION_INVALID_FIELD error codes
+
+## Test File
+- test/interaction/interaction-log.test.ts — 44 tests across 6 describe blocks
+
+## Test Results
+- 44 pass, 0 fail, 112 expect() calls
+- Full suite: 536 pass (492 existing + 44 new), 0 fail
+
+## Build
+- bun run build (tsc --noEmit): zero errors
+
+## Key Design Decisions
+- InteractionStore exposes getMinMaxUnprocessedIndex() and getMaxIndex() as helper methods used by CommitService and FlushSelector
+- CommitService.getNextIndex queries max(record_index) for session, returns 0 if none
+- FlushSelector threshold: 10 unprocessed RP dialogue turns (user/rp_agent + message)
+- idempotencyKey format: memory.migrate:{sessionId}:{rangeStart}-{rangeEnd}
+- Payload stored as JSON text in SQLite, deserialized on read
+- Duplicate recordId throws INTERACTION_DUPLICATE_RECORD (caught from UNIQUE constraint)
+- Added 2 new ErrorCode values to the union type

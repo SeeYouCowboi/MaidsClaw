@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "../storage/database.js";
 import { EmbeddingService } from "./embeddings.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
@@ -45,7 +45,7 @@ type TopicReadResult = {
 export class RetrievalService {
   private readonly embeddingService: EmbeddingService;
 
-  constructor(private readonly db: Database) {
+  constructor(private readonly db: Db) {
     const batcher = new TransactionBatcher(db);
     this.embeddingService = new EmbeddingService(db, batcher);
   }

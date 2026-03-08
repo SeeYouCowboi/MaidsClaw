@@ -8,6 +8,8 @@ import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type {
   AgentEventOverlay,
+  BeliefType,
+  EpistemicStatus,
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
@@ -199,7 +201,7 @@ export class MemoryIngestionPolicy {
     const dialogueFromLog = records
       .filter((record) => record.recordType === "message")
       .filter((record) => record.recordIndex >= flushRequest.rangeStart && record.recordIndex <= flushRequest.rangeEnd)
-      .map((record) => {
+      .map((record): DialogueRecord | undefined => {
         const payload = record.payload as { role?: string; content?: string };
         if (payload.role !== "user" && payload.role !== "assistant") {
           return undefined;
@@ -619,9 +621,9 @@ export class MemoryTaskAgent {
           sourceEntityId: source,
           targetEntityId: target,
           predicate: this.asString(call.arguments.predicate),
-          beliefType: this.asOptionalString(call.arguments.belief_type) ?? undefined,
+          beliefType: this.asOptionalString(call.arguments.belief_type) as BeliefType | undefined,
           confidence: this.asOptionalNumber(call.arguments.confidence) ?? undefined,
-          epistemicStatus: this.asOptionalString(call.arguments.epistemic_status) ?? undefined,
+          epistemicStatus: this.asOptionalString(call.arguments.epistemic_status) as EpistemicStatus | undefined,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
           sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
         });

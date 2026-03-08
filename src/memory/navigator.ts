@@ -1024,7 +1024,7 @@ export class GraphNavigator {
 
   private edgePriorityScore(kind: NavigatorEdgeKind, queryType: QueryType): number {
     const ordered = QUERY_TYPE_PRIORITY[queryType];
-    const index = ordered.indexOf(kind);
+    const index = (ordered as readonly NavigatorEdgeKind[]).indexOf(kind);
     if (index === -1) {
       return 0.1;
     }
@@ -1181,7 +1181,7 @@ export class GraphNavigator {
     if (edges.length === 0) {
       return 0.4;
     }
-    const topKinds = new Set(QUERY_TYPE_PRIORITY[queryType].slice(0, 2));
+    const topKinds = new Set<NavigatorEdgeKind>(QUERY_TYPE_PRIORITY[queryType].slice(0, 2));
     const matched = edges.filter((edge) => topKinds.has(edge.kind)).length;
     return matched / edges.length;
   }

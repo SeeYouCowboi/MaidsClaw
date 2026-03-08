@@ -217,6 +217,14 @@ export type CoreMemoryBlock = {
   updated_at: number;
 };
 
+export type AppendResult =
+  | { success: true; chars_current: number; chars_limit: number }
+  | { success: false; remaining: number; limit: number; current: number };
+
+export type ReplaceResult =
+  | { success: true; chars_current: number }
+  | { success: false; reason: string };
+
 export type NodeEmbedding = {
   id: number;
   node_ref: NodeRef;

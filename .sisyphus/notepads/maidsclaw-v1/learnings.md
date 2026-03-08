@@ -478,3 +478,135 @@ Created agent registry, lifecycle manager, and minimal permission layer (absorbs
 - `bun test test/agents/registry.test.ts`: 41 pass, 0 fail, 77 expect() calls
 - `bun run build` (tsc --noEmit): zero TypeScript errors
 - LSP diagnostics: clean on all 4 source files
+
+
+## [2026-03-08T22:04:00Z] Task: T18a — Blackboard Module (Shared Operational State)
+
+### Implementation Summary
+Created the Blackboard module — V1 shared operational state with namespace enforcement.
+
+### Files Created
+- `src/state/namespaces.ts` (117 lines) — 6 namespace definitions (5 active + 1 reserved), MergeRule type, resolveNamespace()
+- `src/state/blackboard.ts` (169 lines) — Blackboard class: Map<string, unknown> with namespace + ownership validation
+- `src/state/location-helpers.ts` (94 lines) — Agent/object location helpers under agent_runtime.* namespace
+- `src/state/index.ts` (25 lines) — Barrel export
+- `test/state/blackboard.test.ts` (457 lines) — 50 tests, 86 expect() calls
+
+### Files Modified
+- `src/core/errors.ts` — Added 3 error codes: BLACKBOARD_INVALID_NAMESPACE, BLACKBOARD_NAMESPACE_RESERVED, BLACKBOARD_OWNERSHIP_VIOLATION
+
+### Key Implementation Decisions
+1. **Namespace singleWriter enforcement**: session.* requires caller='system', delegation.* requires caller='maiden', transport.* requires caller='gateway'. task.* and agent_runtime.* are open (singleWriter=null — per-key ownership deferred to future versions).
+
+## [2026-03-08T23:59:00Z] Task: T15 — Memory Foundation Schema/Types/Batcher
+
+- For this memory foundation, `runMemoryMigrations(db: Db)` should use the storage `Db` wrapper and run static DDL in a single transaction.
+- FTS5 table verification in this repo should use explicit sqlite_master queries (`name NOT LIKE '%fts%'` and `sql LIKE '%fts5%'`) because FTS shadow tables are auto-created.
+- Keeping a compatibility alias (`createMemorySchema`) and const exports in `src/memory/schema.ts` avoids breaking legacy in-repo schema tests while adding the new API.
+- `TransactionBatcher` can support both queued callback writes and legacy SQL-operation arrays by handling `Db` and `bun:sqlite Database`-style executors structurally.
+- Bun test matcher typing still requires try/catch booleans instead of `.not.toThrow()` in strict TypeScript contexts.
+2. **autonomy.* fully rejected**: Any set/delete on autonomy.* throws BLACKBOARD_NAMESPACE_RESERVED (V1 reserved).
+3. **V1 simplicity**: Pure in-memory Map, no persistence (G1 guardrail). Interface designed for future SQLite upgrade.
+4. **Location key pattern**: `agent_runtime.location.{agentId}` for agents, `agent_runtime.location.obj:{objectId}` for objects. The `obj:` prefix prevents key collisions between agent and object IDs.
+5. **No reads validate namespace**: get() returns undefined for missing keys without throwing — only writes enforce namespace rules.
+
+### TypeScript Gotcha
+- Template literals with double-quoted string expressions inside `${}` can confuse tsc on Windows: `${caller ?? "(none)"}` compiles, but `${caller ?? "(none)"}` may trigger unterminated template literal. Fix: use single quotes inside expression: `${caller ?? '(none)'}`.
+
+### Verification
+- `bun test test/state/blackboard.test.ts`: 50 pass, 0 fail, 86 expect() calls
+- `bun run build` (tsc --noEmit): zero errors in state module (pre-existing error in test/memory/schema.test.ts unrelated)
+- LSP diagnostics: clean on all 6 files
+## [2026-03-08T00:00:00Z] Task: T17 — Shared Lore Canon Module
+
+### Implementation Summary
+Created the Shared Lore Canon module — keyword-triggered world rule entries for authored canon, world rules, and static definitions.
+
+### Files Created
+- `src/lore/entry-schema.ts` (90 lines) — LoreEntry type + LoreScope type + validateLoreEntry() validator
+- `src/lore/loader.ts` (69 lines) — loadLoreEntries() loads from data/lore/*.json, handles single entries and arrays
+- `src/lore/matcher.ts` (62 lines) — findMatchingEntries() using matchKeywords from core/native.ts (Aho-Corasick/TS fallback)
+- `src/lore/service.ts` (76 lines) — createLoreService() factory with loadAll, getMatchingEntries, getAllEntries, registerEntry
+- `src/lore/index.ts` (12 lines) — Barrel export
+- `test/lore/lore.test.ts` (425 lines) — 38 tests, 80 expect() calls
+
+### Key Implementation Decisions
+1. **Case-insensitive matching**: Both text and keywords are lowercased before passing to matchKeywords. The TS fallback (String.includes) is case-sensitive, so lowering both sides ensures consistent behavior.
+2. **validateLoreEntry returns discriminated union**: `{ ok: true, entry } | { ok: false, reason }` — same pattern as ConfigResult. No throwing on invalid schema.
+3. **loadLoreEntries collects errors alongside valid entries**: Partial success — one malformed entry doesn't prevent loading valid sibling entries in the same file.
+4. **LoreService.loadAll() is synchronous**: Uses readFileSync since lore files are small static JSON. Returns LoreLoadResult with entries + errors.
+5. **registerEntry deduplicates by id**: Replaces existing entry with same id, appends otherwise. Supports runtime registration without disk persistence.
+6. **getAllEntries returns copy**: Spread into new array to prevent external mutation of internal state.
+7. **Priority sorting**: Default priority is 0 (via `?? 0`). Higher priority = first in results.
+8. **Scope filtering**: "all" | "world" | "area" — defaults to "all" when not specified.
+
+### Testing Patterns
+- **Windows temp dir for fixtures**: `os.tmpdir()` with unique random suffix avoids Windows EPERM race condition on rmSync+mkdirSync in same directory path across beforeEach/afterEach cycles.
+- Used `force: true` on cleanup rmSync with try/catch for best-effort cleanup.
+- 38 tests across 4 describe blocks: entry-schema (8), loader (8), matcher (10), service (12).
+
+### Architecture Notes
+- Lore is read-only at runtime — no writes to lore canon from agents
+- LoreService provides data only; T24 (Prompt Builder) owns assembly/injection
+- matchKeywords from native.ts handles Aho-Corasick multi-pattern search with TS fallback
+- Lore Canon and Public Narrative Store are non-overlapping authority domains
+- Maiden and RP Agents always get lore; Task Agents opt-in via profile
+
+### Verification
+- `bun test test/lore/lore.test.ts`: 38 pass, 0 fail, 80 expect() calls
+- LSP diagnostics: 0 errors on all 5 source files
+- `bun run build`: lore files produce 0 TS errors (pre-existing blackboard.ts unterminated template literal from parallel T18a task — not our code)
+
+## [2026-03-08T00:00:00Z] Task: T16 — Persona Module
+
+### Implementation Patterns
+- Keep authored character cards as immutable JSON sources in `data/personas/*.json`, loaded synchronously via `readFileSync` for deterministic startup/config behavior.
+- Validate card shape at load time with a strict type guard; throw typed `MaidsClawError` (`PERSONA_CARD_INVALID` / `PERSONA_LOAD_FAILED`) for malformed files.
+- Keep persona ownership boundary clear: Persona module serves authored card truth and drift checks only, while runtime memory ownership remains outside T16.
+
+### Drift Detection Notes
+- Character-overlap similarity works for a scalar drift score (`driftScore = 1 - similarity`) and the V1 threshold `> 0.3` is stable for obvious rewrites.
+- Section-level drift (`changedSections`) is more reliable with normalized section containment + word-overlap checks than raw char overlap against the full current persona text.
+
+### Verification
+- `bun run build` passed after resolving one pre-existing strict typing mismatch in `test/memory/schema.test.ts` (NodeRef string expectation).
+- `bun test test/persona/persona.test.ts` passed: 7 pass, 0 fail.
+- `lsp_diagnostics` clean on all changed T16 files.
+
+
+## [2026-03-09T00:00:00Z] Task: T27a — Interaction Log Module
+
+### Implementation Summary
+Created the append-only SQLite-backed interaction log module with commit service and flush selector.
+
+### Files Created
+- `src/interaction/schema.ts` (37 lines) — DDL migration via runMigrations pattern
+- `src/interaction/store.ts` (152 lines) — InteractionStore with commit, getBySession, getByRange, markProcessed, countUnprocessedRpTurns
+- `src/interaction/commit-service.ts` (78 lines) — CommitService with ID assignment, validation, auto-increment index
+- `src/interaction/flush-selector.ts` (50 lines) — FlushSelector with shouldFlush (10+ threshold) and buildSessionCloseFlush
+- `src/interaction/index.ts` (18 lines) — Barrel export
+- `test/interaction/interaction-log.test.ts` (873 lines) — 44 tests, 112 expect() calls
+
+### Files Modified
+- `src/core/errors.ts` — Added INTERACTION_DUPLICATE_RECORD, INTERACTION_INVALID_FIELD error codes
+
+### Key Implementation Decisions
+1. **Store helper methods**: Added getMinMaxUnprocessedIndex() and getMaxIndex() to InteractionStore as private-use helpers for CommitService and FlushSelector. This keeps the SQL centralized in the store layer.
+2. **Payload serialization**: JSON.stringify on commit, JSON.parse on read. Complex payloads round-trip correctly.
+3. **Duplicate detection**: Catches SQLite UNIQUE constraint violation and re-throws as INTERACTION_DUPLICATE_RECORD.
+4. **Migration pattern**: Follows exact same runMigrations() from src/storage/migrations.ts — single MigrationStep with idempotent DDL.
+5. **Flush threshold**: 10 unprocessed RP dialogue turns (user/rp_agent + message type only). System/maiden/task_agent records and non-message types don't count.
+6. **idempotencyKey**: `memory.migrate:{sessionId}:{rangeStart}-{rangeEnd}` — matches job key format.
+7. **In-memory DB for tests**: All tests use `:memory:` since no WAL mode needed for interaction log.
+
+### Testing Patterns
+- beforeEach creates fresh :memory: db + runs migrations + instantiates store/service/selector
+- try/catch for error path testing (bun-types limitation)
+- `instanceof MaidsClawError` for type checking (not toBeInstanceOf)
+- closeDatabaseGracefully at end of each test for cleanup
+
+### Verification
+- 44 pass, 0 fail, 112 expect() calls
+- Full suite: 536 pass (492 existing + 44 new), 0 fail
+- `bun run build` (tsc --noEmit): zero errors
+- LSP diagnostics: clean on all files (only informational biome import sorting on barrel)

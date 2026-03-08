@@ -23,12 +23,21 @@ export type ErrorCode =
   | "TOOL_ARGUMENT_INVALID"
   // Config errors (note: CONFIG_ERROR defined in config-schema.ts is separate)
   | "CONFIG_MISSING_CREDENTIAL"
+  | "PERSONA_CARD_INVALID"
+  | "PERSONA_LOAD_FAILED"
   // Job errors
   | "JOB_FAILED"
   | "JOB_TIMEOUT"
   // Generic
+  // Blackboard errors
+  | "BLACKBOARD_INVALID_NAMESPACE"
+  | "BLACKBOARD_NAMESPACE_RESERVED"
+  | "BLACKBOARD_OWNERSHIP_VIOLATION"
   | "INTERNAL_ERROR"
   | "PROMPT_TEMPLATE_ERROR"
+  // Interaction log errors
+  | "INTERACTION_DUPLICATE_RECORD"
+  | "INTERACTION_INVALID_FIELD"
   | "UNKNOWN_ERROR";
 
 // The canonical runtime error type used throughout MaidsClaw

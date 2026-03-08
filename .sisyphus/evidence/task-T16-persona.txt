@@ -1,0 +1,49 @@
+Task: T16 Persona module
+Date: 2026-03-08
+Workspace: H:\MaidsClaw
+
+Implemented files:
+- src/persona/card-schema.ts
+- src/persona/loader.ts
+- src/persona/service.ts
+- src/persona/anti-drift.ts
+- src/persona/index.ts
+- test/persona/persona.test.ts
+
+Additional compatibility fix for build gate:
+- test/memory/schema.test.ts (line 213 assertion now compares NodeRef to NodeRef)
+
+Verification evidence:
+1) LSP diagnostics on changed files
+   Result: clean (no diagnostics) for
+   - src/core/errors.ts
+   - src/persona/card-schema.ts
+   - src/persona/loader.ts
+   - src/persona/service.ts
+   - src/persona/anti-drift.ts
+   - src/persona/index.ts
+   - test/persona/persona.test.ts
+   - test/memory/schema.test.ts
+
+2) Build
+   Command: bun run build
+   Output:
+   $ tsc --noEmit
+   Result: PASS (zero TypeScript errors)
+
+3) Persona tests
+   Command: bun test test/persona/persona.test.ts
+   Output summary:
+   bun test v1.3.10 (30e609e0)
+   7 pass
+   0 fail
+   18 expect() calls
+   Result: PASS
+
+Behavior coverage implemented:
+- Card loading from fixture personas directory
+- Missing personas directory returns []
+- Invalid card schema throws typed persona error
+- Drift detection no-drift case
+- Drift detection high-drift case
+- PersonaService missing-card handling

@@ -259,3 +259,42 @@
 - Added `src/memory/task-agent.test.ts` with coverage for queue-owned migrate execution, two-call hot path, atomic rollback, same-episode sparsity policy, async non-blocking organize scheduling, organizer derived writes, and trigger-hook absence
 - `bun test src/memory/task-agent.test.ts`: 6 pass
 - `bun test`: 467 pass / 0 fail
+
+
+## Unified VisibilityPolicy Module (TF3) - 2026-03-08
+
+### Implementation
+- Added `src/memory/visibility-policy.ts` with `VisibilityPolicy` class — centralises all visibility decisions
+- 5 per-node-type methods: `isEventVisible`, `isEntityVisible`, `isFactVisible`, `isPrivateNodeVisible`, `isNodeVisible` (dispatch)
+- 3 SQL predicate builders: `eventVisibilityPredicate`, `entityVisibilityPredicate`, `privateNodePredicate` — return WHERE clause fragments with optional table alias
+- Method signatures use `(viewerContext, data)` param order (task spec), which differs from `IVisibilityPolicy` interface in types.ts (`(node, viewerContext)`) — reconciliation deferred
+- `isFactVisible` always returns true: fact_edges are world_public stable facts only
+- `isNodeVisible` dispatches on nodeRef prefix string (event:, entity:, fact:, private_event:, private_belief:)
+
+### Embeddings Scope Filter (G-NEW-7)
+- Changed `NeighborQueryOptions.agentId` from `string | undefined` (optional) to `string | null` (required)
+- `null` means "shared public only" — all private nodes excluded (not "no filter")
+- `isNodeVisibleForAgent` now rejects private nodes when agentId is null instead of accepting everything
+- All existing callers (retrieval.ts, task-agent.ts x2) already pass string agentId — no caller changes needed
+- Updated embeddings.test.ts: the unscoped test now passes `agentId: null` explicitly
+
+### Testing
+- Added `src/memory/visibility-policy.test.ts` with 24 tests covering all methods + SQL builders
+- Full suite: `bun test` → 491 pass / 0 fail
+
+## TF1 Integration Scenario - 2026-03-09
+
+### What was validated
+- Added `src/memory/integration.test.ts` with a 10-turn RP simulation for a single owning RP agent (`agent-1`) in one area (`area:tea-room`).
+- Verified Memory Task Agent hot path creates owner-private overlays (`agent_event_overlay`, `agent_fact_overlay`) with expected projection/event fields and provenance metadata.
+- Verified delayed materialization behavior for `projection_class='area_candidate'` includes both reconcile-by-`source_record_id` (`r4`) and new area event creation (`r9`).
+- Confirmed text-safety boundaries on materialized events: `summary` from `projectable_summary`, `raw_text=NULL`, participants as resolved `entity:{id}` JSON refs.
+- Confirmed alias resolution through pointer reads (`Lady Alice` -> canonical private entity), and viewer filtering (other agent sees shared entity only, no private overlays).
+- Confirmed scope-partitioned FTS behavior: RP agent sees private+area+world matches, maiden view excludes private hits.
+- Exercised bi-temporal invalidation via repeated `createFact` on same triple (`t_invalid` closes previous edge, latest remains `MAX_INTEGER`).
+- Confirmed organizer pass writes embeddings, semantic edges, and score/search sync updates.
+- Confirmed private semantic graph safety check: no cross-agent private-private semantic edges were present.
+- Verified `memory_explore` output paths for `why`, `relationship`, and `timeline` queries via registered tool handler.
+
+### Execution result
+- `bun test src/memory/integration.test.ts` passes with required status line: `Main [14/14 pass] | VERDICT: APPROVE`.

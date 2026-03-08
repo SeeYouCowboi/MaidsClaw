@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
 import type { NavigatorResult, ViewerContext } from "./types";
@@ -8,7 +8,7 @@ import type { NavigatorResult, ViewerContext } from "./types";
  * Always returns all 3 blocks (character, user, index).
  * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
  */
-export function getCoreMemoryBlocks(agentId: string, db: Database): string {
+export function getCoreMemoryBlocks(agentId: string, db: Db): string {
   const service = new CoreMemoryService(db);
   const blocks = service.getAllBlocks(agentId);
 
@@ -29,7 +29,7 @@ export function getCoreMemoryBlocks(agentId: string, db: Database): string {
 export async function getMemoryHints(
   userMessage: string,
   viewerContext: ViewerContext,
-  db: Database,
+  db: Db,
   limit?: number,
 ): Promise<string> {
   const service = new RetrievalService(db);

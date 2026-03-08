@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "../storage/database.js";
 import type { TransactionBatcher } from "./transaction-batcher.js";
 import type { EmbeddingViewType, NodeRef } from "./types.js";
 
@@ -18,7 +18,7 @@ type NeighborQueryOptions = {
 
 export class EmbeddingService {
   constructor(
-    private readonly db: Database,
+    private readonly db: Db,
     private readonly batcher: TransactionBatcher,
   ) {}
 
@@ -112,8 +112,8 @@ export class EmbeddingService {
     nodeRef: NodeRef,
     nodeKind: string,
     agentId: string | null,
-    privateEventOwnerStmt: ReturnType<Database["prepare"]>,
-    privateBeliefOwnerStmt: ReturnType<Database["prepare"]>,
+    privateEventOwnerStmt: ReturnType<Db["prepare"]>,
+    privateBeliefOwnerStmt: ReturnType<Db["prepare"]>,
   ): boolean {
     if (nodeKind !== "private_event" && nodeKind !== "private_belief") {
       return true;

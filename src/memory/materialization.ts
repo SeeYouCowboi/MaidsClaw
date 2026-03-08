@@ -43,7 +43,6 @@ export class MaterializationService {
       if (
         privateEvent.agent_id !== agentId ||
         privateEvent.projection_class !== "area_candidate" ||
-        privateEvent.projection_class === "none" ||
         privateEvent.event_category === "thought"
       ) {
         result.skipped += 1;

@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Db } from "../storage/database.js";
 import { MAX_INTEGER, makeNodeRef } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
@@ -111,12 +111,12 @@ type SameEpisodeEvent = { id: number; session_id: string; topic_id: number | nul
 export class GraphStorageService {
   private readonly batcher: TransactionBatcher;
 
-  constructor(private readonly db: Database) {
+  constructor(private readonly db: Db) {
     this.batcher = new TransactionBatcher(db);
   }
 
   createProjectedEvent(params: CreateProjectedEventInput): number {
-    if (!PUBLIC_EVENT_CATEGORY_SET.has(params.eventCategory) || params.eventCategory === "thought") {
+    if (!PUBLIC_EVENT_CATEGORY_SET.has(params.eventCategory)) {
       throw new Error(`Invalid projected event category: ${params.eventCategory}`);
     }
     if (!PROJECTED_EVENT_ORIGIN_SET.has(params.origin)) {
@@ -171,7 +171,7 @@ export class GraphStorageService {
   }
 
   createPromotedEvent(params: CreatePromotedEventInput): number {
-    if (!PUBLIC_EVENT_CATEGORY_SET.has(params.eventCategory) || params.eventCategory === "thought") {
+    if (!PUBLIC_EVENT_CATEGORY_SET.has(params.eventCategory)) {
       throw new Error(`Invalid promoted event category: ${params.eventCategory}`);
     }
 
