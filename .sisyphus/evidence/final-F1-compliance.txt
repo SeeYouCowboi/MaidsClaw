@@ -1,0 +1,65 @@
+F1 PLAN COMPLIANCE AUDIT - MaidsClaw V1
+Date: 2026-03-09
+
+=== MUST HAVE ===
+TAOR agent loop: PASS - evidence: `src/core/agent-loop.ts:52` exposes `run()` as `AsyncIterable<Chunk>` and `src/core/agent-loop.ts:75` uses a simple while-loop for model/tool turns.
+Streaming Pipeline: FAIL - evidence: `src/core/models/chat-provider.ts:45`, `src/core/models/openai-provider.ts:55`, `src/core/models/anthropic-provider.ts:85`, and `src/core/agent-loop.ts:52` stream correctly, but `src/gateway/controllers.ts:152` still emits a stub SSE stream instead of relaying agent chunks end-to-end.
+ToolExecutor (MCP Dual-Layer Dispatch): PASS - evidence: `src/core/tools/tool-executor.ts:17` has `registerLocal()`, `src/core/tools/tool-executor.ts:21` has `registerMCP()`, `src/core/tools/tool-executor.ts:40` has `execute()`, and `src/core/tools/tool-executor.ts:69` has `getSchemas()`.
+Model Services Layer: PASS - evidence: `src/core/models/chat-provider.ts:44` defines `ChatModelProvider`, `src/core/models/embedding-provider.ts:3` defines `EmbeddingProvider`, and `src/core/models/registry.ts:5` defines `ModelServiceRegistry`.
+Unified agent runtime: FAIL - evidence: `src/agents/presets.ts:6`, `src/agents/presets.ts:28`, and `src/agents/presets.ts:46` define role configs as `AgentProfile`s, but `src/memory/task-agent.ts:249` still introduces a specialized `MemoryTaskAgent` class and no production `new AgentLoop(` usage was found.
+Memory System: PASS - evidence: `src/memory/schema.ts:28` through `src/memory/schema.ts:67` contain 22 `CREATE TABLE` / `CREATE VIRTUAL TABLE` entries, `src/memory/schema.ts:53` defines the 3 core-memory labels (`character`, `user`, `index`), and `src/memory/tools.ts:281` registers memory tools locally.
+Shared Lore Canon: PASS - evidence: `src/lore/service.ts:23` defines the lore service, `src/lore/service.ts:27` exposes keyword matching, and `src/core/prompt-builder.ts:201` injects matched lore entries into prompts.
+Shared Operational State / Blackboard: FAIL - evidence: `src/state/namespaces.ts:50` defines 5 active namespaces plus 1 reserved namespace, but `src/state/blackboard.ts:4` and `src/state/blackboard.ts:155` show namespace-level enforcement only; per-key ownership / typed merge behavior is not implemented.
+Knowledge Ownership Matrix: PASS - evidence: interaction durability lives in `src/interaction/schema.ts:5` and `src/interaction/store.ts:40`; lore in `src/lore/service.ts:40`; blackboard in `src/state/blackboard.ts:22`; jobs in `src/jobs/dispatcher.ts:17`.
+Interaction Log: PASS - evidence: `src/interaction/contracts.ts:8` defines 6 actorTypes, `src/interaction/contracts.ts:18` defines 7 recordTypes, `src/interaction/store.ts:47` appends records, and `src/interaction/schema.ts:11` owns log durability.
+Minimal Job Runtime: PASS - evidence: `src/jobs/types.ts:1` defines `memory.migrate | memory.organize | task.run`, `src/jobs/types.ts:3` defines 5 execution classes, and `src/jobs/dedup.ts:5` implements dedup behavior.
+Eviction Invariant (G4): FAIL - evidence: `src/core/context-budget.ts:77` and `src/core/truncate-compactor.ts:12` expose flush-boundary hooks, and `src/jobs/dispatcher.ts:86` records `ownershipAccepted`, but no production call path wires ownership transfer to `setFlushBoundary()`.
+Flush Trigger Policy: FAIL - evidence: `src/interaction/flush-selector.ts:4` sets the 10-turn threshold, `src/interaction/flush-selector.ts:13` handles capacity flush, and `src/interaction/flush-selector.ts:34` handles session close, but idle-timeout and manual triggers are not implemented.
+Job Mapping: PASS - evidence: `src/memory/task-agent.ts:295` runs migrate, `src/memory/task-agent.ts:309` performs call 1, `src/memory/task-agent.ts:333` performs call 2, and `src/memory/task-agent.ts:395` runs organize as the derived follow-up phase.
+Maiden: FAIL - evidence: `src/agents/maiden/decision-policy.ts:17` and `src/agents/maiden/delegation.ts:20` define coordination helpers, but no production runtime uses them and `src/gateway/controllers.ts:152` still returns a stub stream.
+RP Agents: FAIL - evidence: `src/core/prompt-builder.ts:162` injects persona prompts and `src/agents/rp/tool-policy.ts:3` lists persona-fitting tools, but `delegate_task` / `persona_check_drift` only appear in policy at `src/agents/rp/tool-policy.ts:9`.
+Task Agents: PASS - evidence: `src/agents/presets.ts:46` configures task agents as `lifecycle: "ephemeral"`, `userFacing: false`, `outputMode: "structured"`, and `src/agents/task/profile.ts:28` plus `src/agents/task/output-schema.ts:26` support configurable structured task agents.
+Dynamic MCP hot-swap: PASS - evidence: `src/core/tools/tool-executor.ts:21` registers external MCP servers, `src/core/tools/tool-executor.ts:30` unregisters/disconnects them, and internal memory tools still register via `src/memory/tools.ts:287`.
+Multi-model LLM support: PASS - evidence: `src/core/models/anthropic-provider.ts:74` provides one chat provider, `src/core/models/openai-provider.ts:42` provides a second chat provider plus embeddings, and `src/core/models/registry.ts:48` / `src/core/models/registry.ts:62` resolve chat and embedding separately.
+Persona anti-drift mechanism: PASS - evidence: `src/persona/anti-drift.ts:77` defines `DriftDetector` and `src/persona/service.ts:34` exposes drift detection.
+Keyword-triggered lorebook injection: PASS - evidence: `src/lore/matcher.ts:26` performs keyword matching and `src/core/prompt-builder.ts:201` injects matched lore entries at prompt-build time.
+Event bus for inter-agent communication: PASS - evidence: `src/core/event-bus.ts:13` defines the `EventBus` interface and `src/jobs/dispatcher.ts:233` / `src/jobs/dispatcher.ts:245` / `src/jobs/dispatcher.ts:264` emit inter-module events.
+SQLite + file hybrid storage: PASS - evidence: `src/storage/database.ts:22` opens SQLite and `src/storage/file-store.ts:11` exposes file-backed JSON storage.
+Extensible autonomy framework: PASS - evidence: `src/jobs/types.ts:8` reserves `background.autonomy` and `src/state/namespaces.ts:86` reserves the `autonomy.` namespace as substrate for later autonomy work.
+Graceful error handling: PASS - evidence: `src/core/agent-loop.ts:138` yields model error chunks, `src/core/tools/mcp-client.ts:73` handles MCP disconnects, and `src/core/agent-loop.ts:54` guards excessive delegation.
+Rust NAPI-RS layer: PASS - evidence: `src/core/native.ts:3` imports context-window, lore-matcher, and token-counter fallbacks; `src/core/native.ts:49` through `src/core/native.ts:53` export wrapped functions with TS fallback behavior.
+Reserved Interfaces: PASS - evidence: `src/core/interfaces/blackboard.ts`, `src/core/interfaces/context-compactor.ts`, `src/core/interfaces/usage-tracker.ts`, `src/core/interfaces/rate-limiter.ts`, `src/core/interfaces/model-router.ts`, and `src/core/interfaces/cache-hint-provider.ts` all exist.
+Gateway contract shape: PASS - evidence: `src/gateway/routes.ts:39` defines 5 endpoints and `src/core/types.ts:7` defines 7 `GatewayEventType` values.
+
+=== MUST NOT HAVE ===
+No RAG / vector database: PASS (not found) - evidence: no vector DB dependency or adapter was found in `src/`; embeddings stay in SQLite at `src/memory/schema.ts:55` (`node_embeddings`).
+No MCP IPC for internal modules: PASS (not found) - evidence: internal memory tools register locally at `src/memory/tools.ts:287`, while external MCP dispatch stays behind `src/core/tools/tool-executor.ts:21`.
+No Web UI: PASS (not found) - evidence: glob for `src/**/*.tsx` returned no files and the exposed surface is the headless route table at `src/gateway/routes.ts:39`.
+No OpenClaw dependencies: PASS (not found) - evidence: grep across the repo found no `OpenClaw` references.
+No OpenAI-compatible API shoehorning: PASS (not found) - evidence: `src/gateway/routes.ts:39` defines a custom session/stream/close contract, not an OpenAI-compatible gateway surface.
+No world_id in V1: PASS (not found) - evidence: grep for `world_id` in `src/**/*.ts` returned no matches.
+No entity merge execution in V1 Core: PASS (not found) - evidence: `src/memory/schema.ts:47` and `src/memory/retrieval.ts:316` use `pointer_redirects` as lookup infrastructure only, and no entity-merge executor was found.
+No shared dynamic world-canon store: PASS (not found) - evidence: no shared world-canon store implementation was found; canon stays split between `src/lore/`, `src/memory/`, and `src/state/`.
+No unjustified Rust expansion beyond V1 baseline: PASS (not found) - evidence: `src/core/native.ts:3` exposes only the baseline wrappers and `src/native-fallbacks/` contains exactly 3 fallback modules.
+No shared LLM sessions between agents: PASS (not found) - evidence: `src/core/agent-loop.ts:62` creates per-run context and `src/core/agent-loop.ts:72` copies messages into a run-local working array.
+No upfront MCP tool schema loading: PASS (not found) - evidence: `src/core/tools/tool-executor.ts:79` to `src/core/tools/tool-executor.ts:81` start lazy background loading only when schemas are requested, and `src/core/tools/tool-executor.ts:141` loads remote schemas on demand.
+No over-abstracted factory patterns: PASS (not found) - evidence: no abstract factory layer was found in production code; the only factory-like helper is the local `TOOL_FACTORIES` array at `src/memory/tools.ts:269`.
+No "god object" agent: PASS (not found) - evidence: responsibilities are split across `src/core/agent-loop.ts`, `src/agents/maiden/decision-policy.ts`, `src/agents/maiden/delegation.ts`, and `src/core/prompt-builder.ts`.
+No hardcoded LLM provider: PASS (not found) - evidence: `src/core/agent-loop.ts:231` reads `this.profile.modelId` and provider resolution is model-based in `src/core/models/registry.ts:48` / `src/core/models/registry.ts:62`.
+No blocking synchronous LLM calls in the event loop: PASS (not found) - evidence: `src/core/models/openai-provider.ts:55` and `src/core/models/anthropic-provider.ts:85` are async streaming provider implementations.
+No narrative state in operational namespace: FAIL (violation found) - evidence: `src/state/location-helpers.ts:4` through `src/state/location-helpers.ts:6` store agent/object locations under `agent_runtime.location.*`.
+No Blackboard shared writes without namespace ownership: FAIL (violation found) - evidence: `src/state/namespaces.ts:70` and `src/state/namespaces.ts:77` leave `task.` and `agent_runtime.` open at the namespace level, and `src/state/blackboard.ts:155` enforces only `singleWriter`, not per-key ownership / typed merge.
+No `as any` in `src/`: PASS (not found) - evidence: grep across `src/**/*.ts` returned no matches.
+No `@ts-ignore` in `src/`: PASS (not found) - evidence: grep across `src/**/*.ts` returned no matches.
+
+=== OWNERSHIP MATRIX ===
+Interaction log: src/interaction/ - CORRECT
+Job runtime: src/jobs/ - CORRECT
+Lore canon: src/lore/ - CORRECT
+Blackboard: src/state/ - CORRECT
+
+=== SUMMARY ===
+Must Have: 21/28 pass
+Must NOT Have: 17/19 pass
+Ownership: 4/4 correct
+Overall: FAIL

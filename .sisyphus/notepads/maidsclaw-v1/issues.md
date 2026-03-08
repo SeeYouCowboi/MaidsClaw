@@ -58,3 +58,19 @@ Fixed TypeScript compilation errors after adding Bun-specific code.
 - bun-types package provides both Bun-specific APIs and Node.js compatibility types
 - When using `types` in tsconfig, TypeScript only loads those specific type packages (excluding others like @types/node)
 - bun-types has incomplete type support for `expect().not.toThrow()` pattern - use try-catch as workaround
+
+## [2026-03-09] Task: F1 - compliance gaps found
+
+- `src/gateway/controllers.ts` still emits a stub SSE stream instead of relaying AgentLoop chunk streams.
+- `src/state/location-helpers.ts` stores location data under `agent_runtime.*`, conflicting with the guardrail against narrative state in operational namespace.
+- `src/core/interfaces/` is missing the required `blackboard.ts` stub interface file.
+- Several production memory modules import `Database` directly from `bun:sqlite` instead of the storage abstraction (`src/memory/alias.ts`, `src/memory/materialization.ts`, `src/memory/navigator.ts`, `src/memory/promotion.ts`, `src/memory/task-agent.ts`).
+- `src/core/native.ts` still uses `require()` for native loading.
+
+## [2026-03-09] Task: F1 - compliance gaps found
+
+- `src/gateway/controllers.ts` still emits a stub SSE stream instead of relaying `AgentLoop` chunks.
+- `src/memory/task-agent.ts` still represents a specialized agent runtime outside the single `AgentLoop` pattern.
+- `src/state/location-helpers.ts` writes location state into `agent_runtime.*`, conflicting with the operational-namespace guardrail.
+- Idle-timeout and manual flush triggers are declared but not implemented beyond the type surface.
+- RP-agent tool affordances are declared in policy but missing as production tool implementations.

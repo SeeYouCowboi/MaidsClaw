@@ -1,0 +1,95 @@
+F3 QA SCENARIO EXECUTION — MaidsClaw V1
+Date: 2026-03-09
+
+=== GATEWAY CONTRACT ===
+Routes (5 verified in src/gateway/routes.ts):
+  1. GET  /healthz
+  2. GET  /readyz
+  3. POST /v1/sessions
+  4. POST /v1/sessions/{session_id}/turns:stream
+  5. POST /v1/sessions/{session_id}/close
+
+SSE event types (7 verified in src/core/types.ts):
+  status, delta, tool_call, tool_result, delegate, done, error
+
+Tests verified:
+  - GET /healthz — returns 200
+  - GET /readyz — returns 200 with subsystem checks
+  - POST /v1/sessions — creates session (201), rejects missing agent_id (400), rejects invalid JSON (400)
+  - POST /v1/sessions/{id}/turns:stream — SSE stream with status/delta/done, preserves request_id, unique event_ids, error for unknown session, error for closed session
+  - POST /v1/sessions/{id}/close — closes session, 404 for unknown
+  - Unknown routes — 404
+  - SSE format — valid data:{JSON} lines
+  - All 7 GatewayEventType values validated
+
+Test result: 15 pass, 0 fail (74 expect() calls)
+
+=== MEMORY PIPELINE ===
+Test result: 4 pass, 0 fail (17 expect() calls)
+Flush trigger at 10 turns: VERIFIED (tested via FlushSelector.shouldFlush in interaction/memory tests)
+
+=== INTERACTION LOG ===
+actorTypes (6 confirmed in src/interaction/contracts.ts):
+  user, rp_agent, maiden, task_agent, system, autonomy
+
+recordTypes (7 confirmed in src/interaction/contracts.ts):
+  message, tool_call, tool_result, delegation, task_result, schedule_trigger, status
+
+Test result: 44 pass, 0 fail (112 expect() calls)
+
+=== JOB RUNTIME ===
+Job kinds (3 confirmed in src/jobs/types.ts):
+  memory.migrate, memory.organize, task.run
+
+Dedup states verified: coalesce (pending+same key), drop (running+same key), noop (completed+same key)
+Test result: 5 pass, 0 fail (23 expect() calls)
+
+=== AGENT PROFILES ===
+Profiles confirmed (src/agents/presets.ts):
+  Maiden (MAIDEN_PROFILE):
+    role: "maiden", lifecycle: "persistent", userFacing: true
+    maxDelegationDepth: 3, lorebookEnabled: true, narrativeContextEnabled: true
+    outputMode: "freeform", modelId: "claude-3-5-sonnet-20241022"
+
+  RP Agent (RP_AGENT_PROFILE):
+    role: "rp_agent", lifecycle: "persistent", userFacing: true
+    maxDelegationDepth: 1, lorebookEnabled: true, narrativeContextEnabled: true
+    outputMode: "freeform", modelId: "claude-3-5-sonnet-20241022"
+
+  Task Agent (TASK_AGENT_PROFILE):
+    role: "task_agent", lifecycle: "ephemeral", userFacing: false
+    outputMode: "structured", maxDelegationDepth: 0, lorebookEnabled: false
+    modelId: "claude-3-5-haiku-20241022"
+
+Test result: 76 pass, 0 fail (170 expect() calls)
+(includes registry.test.ts + profile tests across 4 files)
+
+=== E2E DEMO ===
+4 scenarios tested:
+  1. Canonical turn — delegation + memory flush trigger
+  2. 10-turn fixture — memory flush trigger
+  3. Session close flush
+  4. Job scheduler — submit and dedup
+
+Test result: 4 pass, 0 fail (20 expect() calls)
+
+=== LORE + PERSONA + BLACKBOARD ===
+  Lore:       38 pass (test/lore/lore.test.ts)
+  Persona:     7 pass (test/persona/persona.test.ts)
+  Blackboard: 50 pass (test/state/blackboard.test.ts)
+
+Test result: 95 pass, 0 fail (184 expect() calls)
+
+=== FULL SUITE ===
+Total: 603 pass, 0 fail (1539 expect() calls)
+Ran across 40 files in 2.87s
+
+=== VERDICT ===
+Gateway:     PASS
+Memory:      PASS
+Interaction: PASS
+Jobs:        PASS
+Agents:      PASS
+E2E:         PASS
+Lore/Persona/Blackboard: PASS
+Overall:     PASS

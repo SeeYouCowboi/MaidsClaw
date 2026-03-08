@@ -754,3 +754,24 @@ Created the Gateway HTTP server with 5 V1 endpoints, SSE streaming, and session 
 - JSON configs: Use arrays for collections (agents, lore, personas), objects for maps (models)
 - LoreEntry: Must include `enabled: boolean` field (not optional in schema)
 - CharacterCard: Uses `persona` field (not `personality` as in some other systems)
+
+## [2026-03-09] Task: F1 - plan compliance audit
+
+### Audit learnings
+- The codebase matches several structural V1 contracts (ToolExecutor dual-layer, model-service split, 22-table memory schema, event bus, Rust fallback wrapper), but end-to-end runtime wiring is still incomplete.
+- The biggest plan drift is integration: Gateway streaming is still a stub, Maiden coordination helpers are not wired into a real runtime path, and G4 flush-boundary handoff is defined but not connected.
+- Blackboard namespace metadata exists, but the runtime implementation only enforces namespace-level single-writer checks; per-key ownership and typed merge behavior are not implemented.
+
+## [2026-03-09] Task: F1 - plan compliance audit
+
+### Audit learnings
+- The codebase matches several structural V1 contracts (ToolExecutor dual-layer, model-service split, 22-table memory schema, event bus, Rust fallback wrapper), but end-to-end runtime wiring is still incomplete.
+- The biggest plan drift is integration: Gateway streaming is still a stub, Maiden coordination helpers are not wired into a real runtime path, and G4 flush-boundary handoff is defined but not connected.
+- Blackboard namespace metadata exists, but the runtime implementation only enforces namespace-level single-writer checks; per-key ownership and typed merge behavior are not implemented.
+
+## [2026-03-09] Task: F1 - plan compliance audit
+
+### Audit learnings
+- Structural contracts are mostly present, but several V1 requirements are still only partially wired: Gateway streaming remains stubbed, Maiden coordination is not exercised by production runtime code, and G4 ownership-to-eviction handoff is not connected.
+- The new `src/core/interfaces/blackboard.ts` stub closes the reserved-interface gap, so interface coverage is now complete.
+- Blackboard namespace metadata exists, but runtime enforcement still stops at namespace-level validation rather than per-key ownership / typed merge semantics.

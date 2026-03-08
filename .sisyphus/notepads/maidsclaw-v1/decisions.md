@@ -43,3 +43,15 @@
 - G2: No world_id in V1 (single canon)
 - G3: No entity merge execution in V1 Core
 - G4: ContextCompactor must not evict before T28a ownership transfer
+
+## [2026-03-09] F1 audit decision basis
+
+- Treated `.sisyphus/plans/maidsclaw-v1.md` lines 636-699 as the compliance source of truth.
+- Marked items PASS only when the repo contained direct file evidence; missing wiring or partial implementation was marked FAIL.
+- Kept ownership checks module-based: interaction log -> `src/interaction/`, jobs -> `src/jobs/`, lore -> `src/lore/`, blackboard -> `src/state/`.
+
+## [2026-03-09] F1 audit decision basis
+
+- Used `.sisyphus/plans/maidsclaw-v1.md:636` through `.sisyphus/plans/maidsclaw-v1.md:699` as the compliance source of truth.
+- Marked PASS only when the repository contained concrete code evidence; partial scaffolding or unwired hooks were marked FAIL.
+- Counted summary totals against the audited report items written to `.sisyphus/evidence/final-F1-compliance.txt`.
