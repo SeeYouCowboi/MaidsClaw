@@ -208,3 +208,19 @@
 ### Testing
 - Added `src/memory/materialization.test.ts` with 7 scenarios covering delayed creation, runtime reconciliation, thought/none skipping, text safety, participant ref safety, owner-private exclusion, placeholder creation, and search sync
 - Verification: `bun test src/memory/materialization.test.ts` pass; full `bun test` pass (442/0)
+
+## Graph Navigator (T10) - 2026-03-08
+
+### Implementation
+- Added `src/memory/navigator.ts` with `GraphNavigator.explore(query, viewerContext, options?)` returning structured `NavigatorResult` data only (no prompt formatting)
+- Implemented deterministic 4-step pipeline with no LLM calls in common path: query analysis heuristics, hybrid seed localization via `RetrievalService.localizeSeedsHybrid`, typed beam expansion (max depth hard-capped at 2), path reranking, and evidence assembly
+- Traversal is TypeScript frontier-based (batched per node kind) and avoids recursive CTEs; expansion covers event/entity/fact/private_event/private_belief frontiers with required edge kinds
+- Visibility enforcement runs at each traversal step plus a final post-filter safety net; private overlays remain agent-scoped and semantic traversal requires both endpoints visible
+- Path scoring uses required weighted formulas for `seed_score`, `path_score`, and canonical-only `support_score`; semantic edges never increase support
+
+### Testing
+- Added `src/memory/navigator.test.ts` with 13 tests covering query-type priorities, beam/depth limits, fact virtual-node traversal, lexical-only degradation with empty embeddings, SQL shape guard (no recursive CTE), private scope isolation, cross-agent private semantic-edge blocking, and post-filter safety net
+
+### Verification Results
+- `bun test src/memory/navigator.test.ts`: 13 pass
+- `bun test`: 455 pass / 0 fail
