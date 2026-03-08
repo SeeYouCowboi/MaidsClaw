@@ -1,0 +1,31 @@
+Task T7: Unknown Throwable Verification
+=========================================
+
+Evidence: Unknown throwable wrapping tests passing
+
+Test Results:
+- wrapError() correctly handles unknown thrown values
+- Raw strings → UNKNOWN_ERROR with retriable: false
+- Plain Error objects → INTERNAL_ERROR
+- MaidsClawError objects → returned unchanged (same reference)
+
+Wrapping Behavior:
+| Input Type | Output Code | Retriable | Notes |
+|------------|-------------|-----------|-------|
+| MaidsClawError | (unchanged) | (unchanged) | Same reference returned |
+| Error | INTERNAL_ERROR | false | Original preserved in details |
+| string | UNKNOWN_ERROR | false | Message = string value |
+| object | UNKNOWN_ERROR | false | Stringified as message |
+| null/undefined | UNKNOWN_ERROR | false | Stringified as message |
+
+Test Case:
+  throw "a raw string error"
+  → caught.code === "UNKNOWN_ERROR"
+  → caught.retriable === false
+
+Implementation:
+- File: src/core/errors.ts
+- Function: wrapError(thrown: unknown, context?): MaidsClawError
+- Type Guard: isMaidsClawError(err): err is MaidsClawError
+
+Status: VERIFIED ✓

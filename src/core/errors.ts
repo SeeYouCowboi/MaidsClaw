@@ -1,0 +1,107 @@
+// All V1 error codes — exhaustive list
+export type ErrorCode =
+  // Model/LLM errors
+  | "MODEL_TIMEOUT"
+  | "MODEL_RATE_LIMIT"
+  | "MODEL_NOT_CONFIGURED"
+  | "MODEL_API_ERROR"
+  | "INPUT_TOO_LARGE"
+  // MCP errors
+  | "MCP_DISCONNECTED"
+  | "MCP_TOOL_ERROR"
+  | "MCP_SCHEMA_LOAD_FAILED"
+  // Storage errors
+  | "STORAGE_ERROR"
+  | "MIGRATION_FAILED"
+  // Agent/runtime errors
+  | "AGENT_NOT_FOUND"
+  | "DELEGATION_DEPTH_EXCEEDED"
+  | "CIRCULAR_DELEGATION"
+  | "TOOL_PERMISSION_DENIED"
+  | "TOOL_ARGUMENT_INVALID"
+  // Config errors (note: CONFIG_ERROR defined in config-schema.ts is separate)
+  | "CONFIG_MISSING_CREDENTIAL"
+  // Job errors
+  | "JOB_FAILED"
+  | "JOB_TIMEOUT"
+  // Generic
+  | "INTERNAL_ERROR"
+  | "UNKNOWN_ERROR";
+
+// The canonical runtime error type used throughout MaidsClaw
+export class MaidsClawError extends Error {
+  readonly code: ErrorCode;
+  readonly retriable: boolean;
+  readonly details?: unknown;
+
+  constructor(options: {
+    code: ErrorCode;
+    message: string;
+    retriable: boolean;
+    details?: unknown;
+  }) {
+    super(options.message);
+    this.name = "MaidsClawError";
+    this.code = options.code;
+    this.retriable = options.retriable;
+    this.details = options.details;
+  }
+
+  // Serialize to the Gateway error envelope shape
+  toGatewayShape(): {
+    error: { code: string; message: string; retriable: boolean; details?: unknown };
+  } {
+    return {
+      error: {
+        code: this.code,
+        message: this.message,
+        retriable: this.retriable,
+        details: this.details,
+      },
+    };
+  }
+}
+
+// Wrap any unknown thrown value into a stable MaidsClawError
+export function wrapError(
+  thrown: unknown,
+  context?: { code?: ErrorCode; retriable?: boolean }
+): MaidsClawError {
+  // If already a MaidsClawError, return as-is
+  if (thrown instanceof MaidsClawError) {
+    return thrown;
+  }
+
+  // If it's a plain Error, wrap as INTERNAL_ERROR
+  if (thrown instanceof Error) {
+    return new MaidsClawError({
+      code: context?.code ?? "INTERNAL_ERROR",
+      message: thrown.message,
+      retriable: context?.retriable ?? false,
+      details: { originalError: thrown },
+    });
+  }
+
+  // For anything else (string, object, null, etc.), wrap as UNKNOWN_ERROR
+  return new MaidsClawError({
+    code: "UNKNOWN_ERROR",
+    message: typeof thrown === "string" ? thrown : String(thrown),
+    retriable: false,
+    details: { originalValue: thrown },
+  });
+}
+
+// Type guard
+export function isMaidsClawError(err: unknown): err is MaidsClawError {
+  return err instanceof MaidsClawError;
+}
+
+// Retriable error codes (for retry policy decisions)
+export const RETRIABLE_CODES = new Set<ErrorCode>([
+  "MODEL_TIMEOUT",
+  "MODEL_RATE_LIMIT",
+  "MODEL_API_ERROR",
+  "MCP_DISCONNECTED",
+  "STORAGE_ERROR",
+  "JOB_TIMEOUT",
+]);

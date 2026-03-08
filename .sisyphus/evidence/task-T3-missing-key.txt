@@ -1,0 +1,17 @@
+=== Task T3 Evidence: Missing ANTHROPIC_API_KEY ===
+{
+  "ok": false,
+  "errors": [
+    {
+      "type": "CONFIG_ERROR",
+      "field": "ANTHROPIC_API_KEY",
+      "message": "Missing required environment variable: ANTHROPIC_API_KEY"
+    }
+  ]
+}
+
+✓ Config validation correctly failed
+  Error 1:
+    - Field: ANTHROPIC_API_KEY
+    - Type: CONFIG_ERROR
+    - Message: Missing required environment variable: ANTHROPIC_API_KEY

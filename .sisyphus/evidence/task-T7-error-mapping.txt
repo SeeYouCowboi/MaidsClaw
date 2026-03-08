@@ -1,0 +1,28 @@
+Task T7: Error Mapping Verification
+=====================================
+
+Evidence: Error mapping tests passing
+
+Test Results:
+- MaidsClawError.toGatewayShape() correctly serializes to Gateway envelope
+  code: MODEL_TIMEOUT
+  message: "Upstream chat provider timed out"
+  retriable: true
+  details: { providerId: "anthropic" }
+
+- Shape matches expected Gateway format:
+  {
+    error: {
+      code: string,
+      message: string,
+      retriable: boolean,
+      details?: unknown
+    }
+  }
+
+Implementation:
+- File: src/core/errors.ts
+- Class: MaidsClawError extends Error
+- Method: toGatewayShape() returns { error: { code, message, retriable, details } }
+
+Status: VERIFIED ✓

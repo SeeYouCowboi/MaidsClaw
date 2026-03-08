@@ -1,0 +1,17 @@
+[install]
+# Use exact versions for reproducibility
+exact = true
+
+[install.cache]
+# Disable global cache for CI environments
+disable = false
+
+#[test]
+# Test configuration
+#preload = []
+# Test configuration
+preload = []
+
+[build]
+# Build configuration
+minify = false

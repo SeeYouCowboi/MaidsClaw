@@ -11,7 +11,7 @@
 > - Pointer-based retrieval + scope-partitioned FTS5 Memory Hints + hybrid semantic localization + Viewer Context filtering
 > - Node embedding storage/generation helpers for graph seed discovery
 > - RP Agent memory tool definitions (`core_memory_*`, `memory_read`, `memory_search`, `memory_explore`) — all view-aware via ToolExecutor-injected Viewer Context
-> - Memory Task Agent workflow (event segmentation → entity extraction → fact distillation → index update → dual-write to shared + private overlays)
+> - Memory Task Agent workflow (event segmentation → entity extraction → fact distillation → index update → owner-private writes + shared entity/structure writes + public-candidate emission)
 > - Prompt Builder integration (Core Memory injection + Memory Hints)
 > - Delayed Public Materialization + Reconciliation service (rules-based private_event → area_visible event materialization with RuntimeProjection reconciliation, driven by projection_class + source_record_id)
 > - Promotion Pipeline service (2-type: area_visible event → world_public event, public evidence → world_public fact)
@@ -60,7 +60,7 @@ Design and implement the memory system for MaidsClaw V1 - an RP agent engine bui
 
 ## Contract Supersession (V1 Plan Reconciliation)
 
-> This plan **replaces** V1 plan T15 (`maidsclaw-v1.md:248-254`). The following V1 contracts are superseded by evolved designs agreed upon during the interview phase.
+> This plan **replaces** V1 plan T15 (the memory summary contract in `maidsclaw-v1.md`). The following V1 contracts are superseded by evolved designs agreed upon during the interview phase.
 
 ### Schema Evolution
 
@@ -116,7 +116,7 @@ This plan defines the Memory System subsystem inside MaidsClaw's Narrative Plane
 11. **Visibility Scope** — 4-level persisted enum: `system_only` | `owner_private` | `area_visible` | `world_public`. Every event/entity/fact/overlay has a scope. Retrieval default-denies anything outside the viewer's visible scopes. `maiden_authorized` is NOT a persisted scope — see AuthorizationPolicy.
 12. **VisibilityPolicy** — unified module (`visibility-policy.ts`) providing `isEventVisible()`, `isEntityVisible()`, `isFactVisible()`, `isPrivateNodeVisible()`, `isNodeVisible()` + SQL predicate builder. `isEventVisible()` MUST enforce: `area_visible` events are visible only when `event.location_entity_id == viewerContext.current_area_id`; `world_public` events are visible to all viewers. ALL retrieval (Search, Retrieval, Navigator) MUST go through VisibilityPolicy. No direct bare table access.
 13. **AuthorizationPolicy** — Maiden's elevated read access to specific agents' `owner_private` data. Not a persisted scope. Permission source: Agent Registry / permissions. Applied at retrieval layer via `AuthorizationResolver`. Maiden's “accessible” ≠ “default prompt injection” — authorized private content is on-demand retrieval only.
-14. **Task Agent** — job-scoped worker with no long-term private graph. Writes to Public Narrative Store (public events/facts) AND to the owning RP Agent's Per-Agent Cognitive Graph (private events/beliefs) on behalf of the owning RP Agent. One session = one owning cognitive agent (V1 hard constraint).
+14. **Task Agent** — job-scoped worker with no long-term private graph. Writes to the owning RP Agent's Per-Agent Cognitive Graph, may directly create shared entities/topics/logic data, and emits candidates for Delayed Public Materialization and Promotion. It does NOT directly create public `event_nodes` or `fact_edges`; those arise only through RuntimeProjection, Delayed Public Materialization, or Promotion. One session = one owning cognitive agent (V1 hard constraint).
 
 **General vocabulary:**
 
@@ -240,7 +240,7 @@ Build MaidsClaw's memory system: a per-agent cognitive memory + shared fact plan
 - [ ] `memory_read(entity/topic/event/fact)` returns correct data via direct SQLite lookup, filtered by Viewer Context
 - [ ] `memory_search(query)` returns relevant results via scope-partitioned FTS5 trigram tokenizer (searches private+area+world per Viewer Context)
 - [ ] Memory Hints generated from user message via scope-partitioned trigram scan (visible scopes only)
-- [ ] Memory Task Agent successfully segments events, extracts entities, distills facts, writes to both shared and private overlays
+- [ ] Memory Task Agent successfully segments events, extracts entities, distills facts, writes owner-private overlays plus shared entities/logic data, and emits public materialization/promotion candidates
 - [ ] Index block updated with pointer addresses after Task Agent batch run
 - [ ] Bi-temporal queries return only currently-valid facts
 - [ ] Entity alias resolution correctly maps aliases to canonical entities
@@ -248,7 +248,7 @@ Build MaidsClaw's memory system: a per-agent cognitive memory + shared fact plan
 - [ ] Transaction batcher correctly batches Task Agent writes without blocking event loop
 - [ ] Core Memory blocks injected into prompt by Prompt Builder
 - [ ] RP Agent can edit character/user blocks via `core_memory_replace/append`
-- [ ] End-to-end: 10-turn conversation → Task Agent processes → shared events created + private overlays written → embeddings refresh → index updated → RP Agent reads via pointer (view-filtered)
+- [ ] End-to-end: 10-turn conversation → Task Agent processes → private overlays written + shared entities/logic data updated + delayed/public events created via materialization/promotion → embeddings refresh → index updated → RP Agent reads via pointer (view-filtered)
 - [ ] `memory_explore(query)` localizes via lexical + semantic search and expands graph via typed beam search within 2 hops
 - [ ] Graph navigation returns scored evidence paths with edge types, temporal ordering, and supporting nodes
 - [ ] Graph navigator performs 0 LLM calls by default; optional cheap-model query rewrite/tie-break is capped at 1 call
@@ -269,7 +269,7 @@ Build MaidsClaw's memory system: a per-agent cognitive memory + shared fact plan
 - Core Memory 3 blocks with pointer-based index
 - Event graph with temporal + causal edges
 - Entity KG with bi-temporal 4-timestamp fact edges (shared facts only)
-- Hybrid-triggered Memory Task Agent (capacity 10 turns + session end flush) with dual-write (shared + private overlays)
+- Hybrid-triggered Memory Task Agent (capacity 10 turns + session end flush) with owner-private writes, shared entity/structure writes, and public materialization/promotion candidate emission
 - Delayed Public Materialization + Reconciliation service (rules-based private_event → area_visible event, with RuntimeProjection reconciliation via source_record_id, text safety enforced)
 - Promotion Pipeline (2-type: event promotion + fact crystallization, with Reference Resolution)
 - Viewer Context (`viewer_agent_id`, `viewer_role`, `current_area_id`, `session_id`) auto-injected by ToolExecutor
@@ -353,7 +353,7 @@ Wave 2 (Storage + Retrieval - depends on Wave 1):
 
 Wave 3 (Agent Integration + Projection - depends on Wave 2):
 - T7: RP Agent memory tool definitions (Viewer Context aware) [unspecified-high]
-- T8: Memory Task Agent + migration pipeline (dual-write)  [deep]
+- T8: Memory Task Agent + migration pipeline (owner-private writes + shared-structure writes + public-candidate emission)  [deep]
 - T9: Prompt Builder integration (scope-aware)             [unspecified-high]
 - T10: Graph Navigator (scope-filtered beam search)        [deep]
 - T11: Delayed Public Materialization + Reconciliation  [deep]
@@ -413,11 +413,11 @@ Max Concurrent: 6 (Wave 3)
 - Optional attachments: related delegation/tool/task records from the same accepted range when they materially explain durable outcomes
 - Non-goals: deciding flush timing, dedup, retry, concurrency, or session lifecycle
 
-**Task Agent Pipeline** (LangMem-inspired extraction prompt, dual-write to shared + private):
+**Task Agent Pipeline** (LangMem-inspired extraction prompt; owner-private writes + shared-structure writes + public-candidate emission):
 - Not LangMem's exact 3-phase pattern (which is a single prompt with 3 reasoning sections)
 - Our implementation: 2 hot-path LLM calls plus 1 async derived-data phase
 - Extraction call uses LangMem-style 3-phase reasoning instructions as system prompt
-- **Dual-write**: Task Agent writes to BOTH the target RP Agent's Per-Agent Cognitive Graph (private events + private beliefs) AND identifies candidates for Delayed Public Materialization and Promotion, but does NOT directly create public `event_nodes` or `fact_edges`
+- **Write contract**: Task Agent writes to the target RP Agent's Per-Agent Cognitive Graph (private events + private beliefs), may directly create shared entities/topics/logic data, and identifies candidates for Delayed Public Materialization and Promotion. It does NOT directly create public `event_nodes` or `fact_edges`
 
 ```text
 Call 1 - Extract & Contextualize (LangMem-inspired system prompt):
@@ -977,13 +977,13 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
 
   **Pattern References**:
   - This plan Schema section — Complete schema definition with all 22 tables (16 core + 3 search projection + 3 FTS5), column types, enum value comments
-  - This plan L371-378 — `node_ref` canonical format (`event:{id}`, `entity:{id}`, `fact:{id}`) used by derived tables
-  - This plan L382-395 — Enum values for `logic_edges.relation_type` (4 values) and `semantic_edges.relation_type` (3 values)
-  - This plan L517-522 — `node_embeddings.view_type` enum (3 values) and uniqueness constraint
+  - This plan's Node Identity Normalization section — `node_ref` canonical format (`event:{id}`, `entity:{id}`, `fact:{id}`) used by derived tables
+  - This plan's Navigator Edge Taxonomy section — enum values for `logic_edges.relation_type` (4 values) and `semantic_edges.relation_type` (3 values)
+  - This plan's `node_embeddings.view_type` Definition section — enum values and uniqueness constraint
 
   **API/Type References**:
-  - This plan L468-473 — Transaction atomicity requirements: single transaction for batch writes, rollback on failure
-  - This plan L475-478 — FTS5 trigram tokenizer strategy: trigram for all text (Latin+CJK), skip queries < 3 chars
+  - This plan's Transaction Atomicity section — single transaction for batch writes, rollback on failure
+  - This plan's FTS5 Tokenizer Strategy section — trigram for all text (Latin+CJK), skip queries < 3 chars
 
   **External References**:
   - Bun SQLite docs: `https://bun.sh/docs/api/sqlite` — `Database`, `Statement`, transaction API
@@ -991,9 +991,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - (ICU removed — V1 uses trigram only for CJK; queries ≥3 characters)
 
   **WHY Each Reference Matters**:
-  - Schema definition (L541-563): Executor must implement EXACTLY these columns — this is the single source of truth for all downstream tasks
-  - node_ref format (L371-378): Derived tables use string refs not integers — schema must use TEXT type for node_ref columns
-  - Transaction batcher (L468-473): Must understand bun:sqlite is synchronous to design correctly (no async mutex, just batch into BEGIN/COMMIT)
+  - Schema definition (Schema (Final) section): Executor must implement EXACTLY these columns — this is the single source of truth for all downstream tasks
+  - node_ref format (Node Identity Normalization section): Derived tables use string refs not integers — schema must use TEXT type for node_ref columns
+  - Transaction batcher (Transaction Atomicity section): Must understand bun:sqlite is synchronous to design correctly (no async mutex, just batch into BEGIN/COMMIT)
 
   **Acceptance Criteria**:
   - [ ] `SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'` returns 19 (16 tables + 3 search projection tables)
@@ -1113,22 +1113,22 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L541-563 — Schema columns → TypeScript interface fields (1:1 mapping)
-  - This plan L371-378 — NodeRef format and virtual fact node concept
-  - This plan L380-395 — Edge taxonomy enums (logic_edges 4 types, semantic_edges 3 types)
-  - This plan L412-431 — seed_score and path_score field structures
-  - This plan L433-442 — support_score definition (for PathScore type)
-  - This plan L517-522 — view_type enum (3 values)
+  - This plan's Schema (Final) section — schema columns → TypeScript interface fields (1:1 mapping)
+  - This plan's Node Identity Normalization section — NodeRef format and virtual fact node concept
+  - This plan's Navigator Edge Taxonomy section — edge taxonomy enums (logic_edges 4 types, semantic_edges 3 types)
+  - This plan's Path Scoring Model section — `seed_score` and `path_score` field structures
+  - This plan's `support_score` Definition section — support score shape for `PathScore`
+  - This plan's `node_embeddings.view_type` Definition section — `view_type` enum (3 values)
 
   **API/Type References**:
-  - This plan L76-82 — Tool signatures → input type definitions
-  - This plan L326-330 — 3-tier retrieval → service interface method signatures
-  - This plan L336 — QueryType enum values
+  - This plan's Tool Surface (Final) section — tool signatures → input type definitions
+  - This plan's 3-Tier Retrieval System section — service interface method signatures
+  - This plan's Graph Navigator Workflow section — `QueryType` enum values
 
   **WHY Each Reference Matters**:
-  - Schema (L541-563): Every column becomes a TypeScript field — executor must not invent or omit fields
-  - Edge taxonomy (L380-395): NavigatorEdgeKind must be a SUPERSET of all raw relation_type enums plus virtual edges (participant, fact_relation, fact_support)
-  - Tool signatures (L76-82): Input types must match exactly — these are the RP Agent's API contract
+  - Schema (Schema (Final) section): Every column becomes a TypeScript field — executor must not invent or omit fields
+  - Edge taxonomy (Navigator Edge Taxonomy section): `NavigatorEdgeKind` must be a SUPERSET of all raw relation_type enums plus virtual edges (`participant`, `fact_relation`, `fact_support`)
+  - Tool signatures (Tool Surface (Final) section): Input types must match exactly — these are the RP Agent's API contract
 
   **Acceptance Criteria**:
   - [ ] `bun --check src/memory/types.ts` → no type errors
@@ -1200,13 +1200,13 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L320-324 — Core Memory management rules: Letta pattern, overflow behavior, chars metadata
-  - This plan L543 — `core_memory_blocks` schema: `(id, agent_id, label, description, value, char_limit, read_only, updated_at)`
-  - Draft L373-394 — Letta Core Memory research: block structure, self-editing tools, prompt injection position
+  - This plan's Core Memory Management section — Letta pattern, overflow behavior, chars metadata
+  - This plan's Schema (Final) section — `core_memory_blocks` schema: `(id, agent_id, label, description, value, char_limit, read_only, updated_at)`
+  - This plan's Interview Summary + Tool Surface (Final) sections — block structure, self-editing tools, prompt injection position
 
   **API/Type References**:
-  - This plan L78-79 — `core_memory_append` and `core_memory_replace` signatures
-  - This plan L88 — Core Memory injection: XML-wrapped, always present in system prompt
+  - This plan's Tool Surface (Final) section — `core_memory_append` and `core_memory_replace` signatures
+  - This plan's Passive injection section — Core Memory injection: XML-wrapped, always present in system prompt
   - T2 types: `CoreMemoryBlock`, `CoreMemoryLabel`
 
   **External References**:
@@ -1335,15 +1335,15 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L313-318 — Entity handling: UNIQUE constraint, upsert semantics, NFC normalization, alias creation
-  - This plan L307-311 — Conflict detection: predicate-level, old fact invalidated, new fact created
-  - This plan L397-411 — same_episode creation policy: session+topic+time window, adjacent-only sparsity, paired directed rows
-  - This plan L444-451 — fact_relation vs fact_support: storage creates fact_edges; navigator interprets them as two edge kinds
-  - This plan L468-473 — Transaction atomicity: single transaction for batch, rollback on failure
-  - This plan L487-508 — Semantic edge creation policy: thresholds, caps, node-kind compatibility (storage WRITES these; T8 Call 3 DECIDES which to create)
+  - This plan's Entity Handling section — UNIQUE constraint, upsert semantics, NFC normalization, alias creation
+  - This plan's Conflict Detection section — predicate-level, old fact invalidated, new fact created
+  - This plan's `same_episode` Creation Policy section — session+topic+time window, adjacent-only sparsity, paired directed rows
+  - This plan's `fact_relation` vs `fact_support` section — storage creates `fact_edges`; navigator interprets them as two edge kinds
+  - This plan's Transaction Atomicity section — single transaction for batch, rollback on failure
+  - This plan's Semantic Edge Creation Policy section — thresholds, caps, node-kind compatibility (storage writes these; T8 Call 3 decides which to create)
 
   **API/Type References**:
-  - This plan L541-563 — Schema column definitions for all tables
+  - This plan's Schema (Final) section — column definitions for all tables
   - T2 types: `EventNode`, `EntityNode`, `FactEdge`, `LogicEdge`, `LogicEdgeType`, `SemanticEdgeType`, `NodeRef`, `VisibilityScope`, `MemoryScope`, `AgentEventOverlay`, `AgentFactOverlay`, `ViewerContext`
   - T1: `TransactionBatcher`, `MAX_INTEGER`, `makeNodeRef()`
 
@@ -1352,9 +1352,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - Unicode NFC: `String.prototype.normalize('NFC')` — built-in JavaScript
 
   **WHY Each Reference Matters**:
-  - Entity handling (L313-318): Executor must implement UPSERT, not INSERT-or-error. Return existing ID on collision.
-  - same_episode policy (L397-411): This is the most complex logic in storage — must implement sparsity rule (adjacent only) and time window check
-  - Conflict detection (L307-311): Must check BEFORE creating new fact, not after. Order matters for atomicity.
+  - Entity handling (Entity Handling section): Executor must implement UPSERT, not INSERT-or-error. Return existing ID on collision.
+  - `same_episode` policy (`same_episode` Creation Policy section): This is the most complex logic in storage — must implement the sparsity rule (adjacent only) and time window check
+  - Conflict detection (Conflict Detection section): Must check BEFORE creating a new fact, not after. Order matters for atomicity.
 
   **Acceptance Criteria**:
   - [ ] `upsertEntity('alice', 'Alice', 'person', 'A maid', 'shared_public')` creates shared entity; second call updates summary, returns same ID
@@ -1488,16 +1488,16 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L326-330 — 3-Tier retrieval system overview: which tier does what
-  - This plan L339-342 — Hybrid Localization (Navigator Step 1): FTS5 + dense + RRF + MMR → seed set
-  - This plan L475-478 — FTS5 trigram tokenizer: trigram for all text, skip < 3 chars, top-5 default
-  - This plan L481-485 — Semantic localization: embeddings for seed discovery only, edges for explanation
-  - This plan L536-539 — Pointer redirects: check before lookup, transparent to caller, soft failure
-  - This plan L510-515 — Embedding model dependency: provider-agnostic `embed(texts, purpose, model_id)` interface
-  - This plan L517-522 — view_type: online localization queries `primary` first, unions `keywords` when confidence low
+  - This plan's 3-Tier Retrieval System section — which tier does what
+  - This plan's Graph Navigator Workflow / Hybrid Localization step — FTS5 + dense + RRF + MMR → seed set
+  - This plan's FTS5 Tokenizer Strategy section — trigram for all text, skip < 3 chars, top-5 default
+  - This plan's Semantic Localization Strategy section — embeddings for seed discovery only, edges for explanation
+  - This plan's Pointer Redirects section — check before lookup, transparent to caller, soft failure
+  - This plan's Embedding Model Dependency section — provider-agnostic `embed(texts, purpose, model_id)` interface
+  - This plan's `node_embeddings.view_type` Definition section — online localization queries `primary` first, unions `keywords` when confidence is low
 
   **API/Type References**:
-  - This plan L80-81 — `memory_read` and `memory_search` signatures
+  - This plan's Tool Surface (Final) section — `memory_read` and `memory_search` signatures
   - T2 types: `SeedCandidate`, `MemoryHint`, `NodeRef`, `NodeEmbedding`, `EmbeddingViewType`
   - T1: `MAX_INTEGER` for bi-temporal filter
 
@@ -1506,9 +1506,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - MMR (Maximal Marginal Relevance): `lambda * sim(q, d) - (1-lambda) * max(sim(d, d_selected))`
 
   **WHY Each Reference Matters**:
-  - 3-Tier system (L326-330): T5 implements Tier 1 (Memory Hints) and Tier 2 (pointer read). T10 uses T5's localization for Tier 3 seeds.
-  - Hybrid localization (L339-342): This is the CORE of T5's novel contribution — must implement RRF fusion + MMR diversification correctly
-  - Pointer redirects (L536-539): EVERY read function must check redirects first — this is non-optional
+  - 3-Tier system (3-Tier Retrieval System section): T5 implements Tier 1 (Memory Hints) and Tier 2 (pointer read). T10 uses T5's localization for Tier 3 seeds.
+  - Hybrid localization (Graph Navigator Workflow / Hybrid Localization step): This is the CORE of T5's novel contribution — must implement RRF fusion + MMR diversification correctly
+  - Pointer redirects (Pointer Redirects section): EVERY read function must check redirects first — this is non-optional
 
   **Acceptance Criteria**:
   - [ ] `readByEntity('alice', rpAgentContext)` returns entity + current facts + source events + agent's event overlays
@@ -1609,9 +1609,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L317 — Aliases created explicitly by Task Agent tool calls, resolved by exact match
-  - This plan L390-391 — `participant` virtual edge: resolved by joining event_nodes.participants with entity_nodes and entity_aliases
-  - This plan L553 — `entity_aliases` schema: `(canonical_id, alias, alias_type)`
+  - This plan's Entity Handling section — aliases created explicitly by Task Agent tool calls, resolved by exact match
+  - This plan's Navigator Edge Taxonomy section — `participant` virtual edge resolved by joining `event_nodes.participants` with `entity_nodes` and `entity_aliases`
+  - This plan's Schema (Final) section — `entity_aliases` schema: `(canonical_id, alias, alias_type, owner_agent_id)`
 
   **API/Type References**:
   - T2 types: `EntityAlias`
@@ -1711,10 +1711,10 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L74-82 — Tool surface table: all 5 tools with signatures and purposes
-  - This plan L91-96 — V1 contract mapping: how these tools relate to original V1 plan tools
-  - This plan L320-324 — Core Memory management: overflow error shape, chars metadata
-  - Draft L433-437 — Pointer address syntax: `@entity_name`, `#topic_name`, `e:id`, `f:id`
+  - This plan's Tool Surface (Final) section — all 5 tools with signatures and purposes
+  - This plan's V1 contract mapping section — how these tools relate to original V1 plan tools
+  - This plan's Core Memory Management section — overflow error shape, chars metadata
+  - This task's Call 2 output contract — pointer address syntax: `@pointer_key`, `#topic`, `e:id`, `f:id`
 
   **API/Type References**:
   - T2 types: `CoreMemoryAppendInput`, `CoreMemoryReplaceInput`, `MemoryReadInput`, `MemorySearchInput`, `MemoryExploreInput`
@@ -1727,9 +1727,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - OpenAI function calling format (reference for tool schema design)
 
   **WHY Each Reference Matters**:
-  - Tool surface (L74-82): These are the EXACT signatures the RP Agent will see — tool names, parameter names, and types must match precisely
-  - Pointer syntax (draft L433-437): Must be included in tool descriptions so the LLM knows how to construct memory_read calls
-  - Overflow behavior (L320-324): core_memory_append/replace handlers must return this exact error shape on failure
+  - Tool surface (Tool Surface (Final) section): These are the EXACT signatures the RP Agent will see — tool names, parameter names, and types must match precisely
+  - Pointer syntax (this task's Call 2 output contract): Must be included in tool descriptions so the LLM knows how to construct `memory_read` calls
+  - Overflow behavior (Core Memory Management section): `core_memory_append` / `core_memory_replace` handlers must return this exact error shape on failure
 
   **Acceptance Criteria**:
   - [ ] All 5 tools have valid JSON Schema parameter definitions
@@ -1791,7 +1791,7 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
     - Required payload: committed RP dialogue records in the accepted range
     - Optional attachments: related delegation/tool/task records from the same accepted range when they materially explain durable outcomes
     - Non-goals: deciding flush timing, dedup, retry, concurrency, or session lifecycle
-  - **Call 1 – Extract & Contextualize** (hot-path LLM call 1, **dual-write**):
+  - **Call 1 – Extract & Contextualize** (hot-path LLM call 1; private cognitive writes + shared-structure writes + public-candidate emission):
     - System prompt: LangMem-inspired 3-phase instructions (Extract, Compare, Synthesize) + scope classification instructions
     - Input: migrate input built by `MemoryIngestionPolicy` from accepted Interaction Log range + existing entities/facts loaded from DB as context
     - Method: LLM tool-calling with functions:
@@ -1845,7 +1845,7 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
-    - Reason: Most complex task — LLM tool-calling orchestration, dual-write pipeline (shared + private), scope classification, 3-phase pipeline, Delayed Public Materialization trigger, transaction management, async Call 3, semantic edge policy implementation
+    - Reason: Most complex task — LLM tool-calling orchestration, private cognitive writes + shared-structure writes + public-candidate emission, scope classification, 3-phase pipeline, Delayed Public Materialization trigger, transaction management, async Call 3, semantic edge policy implementation
   - **Skills**: `[]`
   - **Skills Evaluated but Omitted**:
     - `playwright`: No browser interaction
@@ -1859,14 +1859,14 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L278-305 — Task Agent pipeline: 3 calls, inputs/outputs/methods for each
-  - This plan L284-291 — Call 1 LangMem-inspired system prompt: Extract-Compare-Synthesize instructions
-  - This plan L307-311 — Conflict detection: predicate-level, invalidate old fact
-  - This plan L397-411 — same_episode creation policy: session+topic+time window, adjacent-only sparsity
-  - This plan L468-473 — Transaction atomicity: single transaction for canonical writes, rollback on failure
-  - This plan L487-508 — Semantic edge creation policy: thresholds, caps, node-kind compatibility for Call 3
-  - This plan L452-466 — node_scores derivation: salience formula, centrality = weighted degree, bridge = cross-cluster heuristic
-  - This plan L510-515 — Embedding model dependency: provider-agnostic `embed()` interface
+  - This plan's Task Agent Pipeline section — 3 calls, inputs/outputs/methods for each
+  - This plan's Task Agent Pipeline / Call 1 subsection — LangMem-inspired Extract-Compare-Synthesize instructions
+  - This plan's Conflict Detection section — predicate-level invalidation of old facts
+  - This plan's `same_episode` Creation Policy section — session+topic+time window, adjacent-only sparsity
+  - This plan's Transaction Atomicity section — single transaction for canonical writes, rollback on failure
+  - This plan's Semantic Edge Creation Policy section — thresholds, caps, node-kind compatibility for Call 3
+  - This plan's `node_scores` Derivation section — salience formula, centrality = weighted degree, bridge = cross-cluster heuristic
+  - This plan's Embedding Model Dependency section — provider-agnostic `embed()` interface
 
   **API/Type References**:
   - T2 types: `ExtractionBatch`, `MigrationResult`, `GraphOrganizerResult`
@@ -1880,10 +1880,10 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - MemoryOS updater: `H:\MaidsClaw\reference\MemoryOS\memoryos-pypi\memoryos\updater.py` — capacity-triggered promotion flow
 
   **WHY Each Reference Matters**:
-  - Pipeline spec (L278-305): Defines the EXACT 3-call structure — executor must not merge calls or add extra calls
+  - Pipeline spec (Task Agent Pipeline section): Defines the EXACT 3-call structure — executor must not merge calls or add extra calls
   - LangMem reference: Provides the proven prompt pattern for extraction — adapt to our schema, don't copy verbatim
-  - Semantic edge policy (L487-508): Call 3 must implement EXACTLY these thresholds and caps — they were designed to control edge density
-  - same_episode policy (L397-411): Critical for event graph connectivity — adjacent-only prevents O(N²) edge explosion
+  - Semantic edge policy (Semantic Edge Creation Policy section): Call 3 must implement EXACTLY these thresholds and caps — they were designed to control edge density
+  - `same_episode` policy (`same_episode` Creation Policy section): Critical for event graph connectivity — adjacent-only prevents O(N²) edge explosion
 
   **Acceptance Criteria**:
   - [ ] `runMigrate(flushRequest)` accepts a queue-owned `MemoryFlushRequest`, uses `MemoryIngestionPolicy` to build migrate input, and executes Calls 1+2
@@ -1996,20 +1996,20 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L84-89 — Passive injection table: Core Memory blocks in system prompt (XML-wrapped), Memory Hints after Core Memory
-  - This plan L320-324 — Core Memory: chars_current/chars_limit metadata in output
-  - This plan L475-479 — Memory Hints format: top-N bullet list with summaries
-  - This plan L364-367 — Evidence Assembly output: paths with seeds, edges, nodes, timestamps
+  - This plan's Passive injection section — Core Memory blocks in system prompt (XML-wrapped), Memory Hints after Core Memory
+  - This plan's Core Memory Management section — `chars_current` / `chars_limit` metadata in output
+  - This plan's FTS5 Tokenizer Strategy section — Memory Hints format: top-N bullet list with summaries
+  - This plan's Graph Navigator Workflow / Evidence Assembly step — paths with seeds, edges, nodes, timestamps
 
   **API/Type References**:
   - T3: `CoreMemoryService.getAllBlocks()` — returns raw block data
   - T5: `RetrievalService.generateMemoryHints()` — returns `MemoryHint[]`
   - T10: `GraphNavigator.explore()` — returns `NavigatorResult`
-  - This plan L114 — Cross-plan coordination: T24 is sole injection coordinator, T9 provides data sources
+  - This plan's Cross-Plan Coordination section — T24 is the sole injection coordinator; T9 provides data sources
 
   **WHY Each Reference Matters**:
-  - Passive injection (L84-89): Defines the EXACT injection points — Core Memory in system prompt, Hints after it. T9 must format data compatible with T24's expectations.
-  - Evidence Assembly (L364-367): Navigator returns structured paths — T9 must format these into readable text for the RP Agent
+  - Passive injection (Passive injection section): Defines the EXACT injection points — Core Memory in system prompt, Hints after it. T9 must format data compatible with T24's expectations.
+  - Evidence Assembly (Graph Navigator Workflow / Evidence Assembly step): Navigator returns structured paths — T9 must format these into readable text for the RP Agent
 
   **Acceptance Criteria**:
   - [ ] `getCoreMemoryBlocks('agent-1')` returns XML-wrapped blocks with chars metadata
@@ -2038,14 +2038,14 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
 
   Scenario: Memory Hints scope-aware formatting
     Tool: Bash (bun run)
-    Preconditions: Schema migrated, agent-a owns private events about 'coffee meeting' in search_docs_private, area-visible event about 'coffee shop' in search_docs_area, world fact in search_docs_world
+    Preconditions: Schema migrated, agent-a owns private events about 'coffee meeting' in search_docs_private, an area-visible event about 'coffee shop' exists in `search_docs_area` with `location_entity_id=10` (`kitchen`), and a world fact exists in search_docs_world
     Steps:
-      1. Build viewerContext: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 'kitchen', session_id: 's1' }
+      1. Build viewerContext: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 10, session_id: 's1' }
       2. Call getMemoryHints('Do you remember the coffee shop?', viewerContext)
       3. Assert result is bullet-formatted string with • prefix
       4. Assert hints include both private and area results (viewer is owner)
       5. Assert <= 5 hints returned
-      6. Build viewerContext_b: { viewer_agent_id: 'agent-b', viewer_role: 'rp_agent', current_area_id: 'kitchen', session_id: 's1' }
+      6. Build viewerContext_b: { viewer_agent_id: 'agent-b', viewer_role: 'rp_agent', current_area_id: 10, session_id: 's1' }
       7. Call getMemoryHints('Do you remember the coffee shop?', viewerContext_b)
       8. Assert agent-b does NOT see agent-a's private memories
       9. Assert agent-b DOES see area-visible and world results
@@ -2133,16 +2133,16 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **References**:
 
   **Pattern References**:
-  - This plan L332-367 — Graph Navigator workflow: complete Step 0-4 specification
-  - This plan L369 — Budget: 0 LLM default, max 1 optional
-  - This plan L371-378 — Node Identity Normalization: `event:{id}`, `entity:{id}`, `fact:{id}`, virtual fact nodes
-  - This plan L380-395 — Navigator Edge Taxonomy: 4 edge sources, virtual participant, enum values
-  - This plan L397-411 — same_episode creation policy: context for understanding edge semantics during traversal
-  - This plan L412-431 — Path Scoring Model: seed_score and path_score formulas with exact weights
-  - This plan L433-442 — support_score: canonical evidence counting, normalization formula
-  - This plan L444-451 — fact_relation vs fact_support: when to use each during traversal
-  - This plan L452-466 — node_scores: salience/centrality/bridge_score used in seed scoring
-  - This plan L524-534 — Cross-Table Beam Traversal: TypeScript frontier, batched queries per node_kind
+  - This plan's Graph Navigator Workflow section — complete Step 0-4 specification
+  - This plan's Graph Navigator Workflow budget note — 0 LLM default, max 1 optional
+  - This plan's Node Identity Normalization section — `event:{id}`, `entity:{id}`, `fact:{id}`, virtual fact nodes
+  - This plan's Navigator Edge Taxonomy section — 4 edge sources, virtual participant, enum values
+  - This plan's `same_episode` Creation Policy section — context for understanding edge semantics during traversal
+  - This plan's Path Scoring Model section — `seed_score` and `path_score` formulas with exact weights
+  - This plan's `support_score` Definition section — canonical evidence counting and normalization formula
+  - This plan's `fact_relation` vs `fact_support` section — when to use each during traversal
+  - This plan's `node_scores` Derivation section — salience/centrality/bridge_score used in seed scoring
+  - This plan's Cross-Table Beam Traversal Execution section — TypeScript frontier, batched queries per node_kind
 
   **API/Type References**:
   - T2 types: `NodeRef`, `NavigatorEdgeKind`, `QueryType`, `SeedCandidate`, `BeamPath`, `PathScore`, `EvidencePath`, `NavigatorResult`
@@ -2155,10 +2155,10 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   - Beam search algorithm: standard AI search with fixed-width frontier
 
   **WHY Each Reference Matters**:
-  - Navigator workflow (L332-367): This IS the implementation spec — each step maps directly to a method
-  - Edge taxonomy (L380-395): Beam expansion queries must cover ALL 4 edge sources and correctly categorize each edge as one of 10 NavigatorEdgeKind values
-  - Path scoring (L412-431): EXACT weights specified — do not invent new weights or modify formulas
-  - Cross-table traversal (L524-534): Implementation strategy is prescribed — TypeScript frontier, batched queries, NOT monolithic CTE
+  - Navigator workflow (Graph Navigator Workflow section): This IS the implementation spec — each step maps directly to a method
+  - Edge taxonomy (Navigator Edge Taxonomy section): Beam expansion queries must cover ALL 4 edge sources and correctly categorize each edge as one of 10 `NavigatorEdgeKind` values
+  - Path scoring (Path Scoring Model section): EXACT weights specified — do not invent new weights or modify formulas
+  - Cross-table traversal (Cross-Table Beam Traversal Execution section): Implementation strategy is prescribed — TypeScript frontier, batched queries, NOT a monolithic CTE
 
   **Acceptance Criteria**:
   - [ ] `explore('why did Alice leave the coffee shop', viewerContext)` returns scored evidence paths
@@ -2182,9 +2182,9 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   ```
   Scenario: Graph navigation for 'why' query type
     Tool: Bash (bun run)
-    Preconditions: Schema migrated, populated graph with events (Alice arrives at coffee shop, Alice argues with Bob, Alice leaves), logic_edges (causal: argue -> leave, temporal: arrive -> argue -> leave), entities (Alice, Bob, coffee_shop memory_scope=shared_public), facts (Alice-dislikes-conflict), agent-a has agent_event_overlay entries for these events
+    Preconditions: Schema migrated, populated graph with events (Alice arrives at coffee shop, Alice argues with Bob, Alice leaves), logic_edges (causal: argue -> leave, temporal: arrive -> argue -> leave), entities (Alice, Bob, `coffee_shop` with shared_public entity id=30), facts (Alice-dislikes-conflict), and agent-a has agent_event_overlay entries for these events
     Steps:
-      1. Build viewerContext: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 'coffee_shop', session_id: 's1' }
+      1. Build viewerContext: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 30, session_id: 's1' }
       2. Call explore('Why did Alice leave the coffee shop?', viewerContext)
       3. Assert query_type classified as 'why'
       4. Assert result contains evidence paths (not empty)
@@ -2224,14 +2224,14 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
 
   Scenario: Scope isolation during beam expansion
     Tool: Bash (bun run)
-    Preconditions: agent-a has private entity 'AliceSecret' (memory_scope=private_overlay, owner_agent_id=agent-a), agent-b has private entity 'BobSecret' (memory_scope=private_overlay, owner_agent_id=agent-b), shared entity 'Alice' (memory_scope=shared_public), fact_edge connecting Alice to AliceSecret exists
+    Preconditions: agent-a has private entity 'AliceSecret' (memory_scope=private_overlay, owner_agent_id=agent-a), agent-b has private entity 'BobSecret' (memory_scope=private_overlay, owner_agent_id=agent-b), shared entity 'Alice' (memory_scope=shared_public), fact_edge connecting Alice to AliceSecret exists, and both viewers are in `kitchen` with place entity id=10
     Steps:
-      1. Build viewerContext_b: { viewer_agent_id: 'agent-b', viewer_role: 'rp_agent', current_area_id: 'kitchen', session_id: 's1' }
+      1. Build viewerContext_b: { viewer_agent_id: 'agent-b', viewer_role: 'rp_agent', current_area_id: 10, session_id: 's1' }
       2. Call explore('Tell me about Alice', viewerContext_b)
       3. Assert result contains paths through shared entity 'Alice'
       4. Assert result does NOT contain any reference to 'AliceSecret' (agent-a's private node)
       5. Assert no traversal step visited owner_agent_id='agent-a' private nodes
-      6. Build viewerContext_a: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 'kitchen', session_id: 's1' }
+      6. Build viewerContext_a: { viewer_agent_id: 'agent-a', viewer_role: 'rp_agent', current_area_id: 10, session_id: 's1' }
       7. Call explore('Tell me about Alice', viewerContext_a)
       8. Assert result DOES contain paths through 'AliceSecret' (agent-a is owner)
     Expected Result: agent-b cannot traverse into agent-a's private nodes; agent-a can see own private nodes
@@ -2421,7 +2421,7 @@ search_docs_world_fts USING fts5(content, tokenize='trigram')
   **Pattern References**:
   - This plan's Promotion Pipeline section — 3-step flow, reference resolution actions, critical invariants
   - This plan's Schema — entity_nodes.canonical_entity_id for linking promoted entities
-  - This plan's D8 decisions in draft — full specification of cascade behavior
+  - This plan's Promotion Pipeline + Reference Resolution sections — full specification of cascade behavior
 
   **Acceptance Criteria**:
   - [ ] `resolveReferences(candidate)` returns correct action for each referenced entity
@@ -2544,7 +2544,7 @@ type ProjectionAppendix = {
 - **T2+T3**: `feat(memory): add type definitions and Core Memory Block service` - `types.ts`, `core-memory.ts`
 - **T4+T5+T6**: `feat(memory): add scope-aware graph storage, view-aware retrieval, alias resolution, and embedding-backed seed localization` - `storage.ts`, `retrieval.ts`, `alias.ts`, `embeddings.ts`
 - **T7**: `feat(memory): add RP Agent memory tool definitions with Viewer Context` - `tools.ts`
-- **T8**: `feat(memory): add Memory Task Agent with dual-write pipeline` - `task-agent.ts`
+- **T8**: `feat(memory): add Memory Task Agent migration pipeline with public-candidate emission` - `task-agent.ts`
 - **T9**: `feat(memory): integrate scope-aware Core Memory with Prompt Builder` - prompt-builder integration
 - **T10**: `feat(memory): add scope-filtered hybrid graph navigator` - `navigator.ts`
 - **T11**: `feat(memory): add Delayed Public Materialization + Reconciliation service` - `materialization.ts`

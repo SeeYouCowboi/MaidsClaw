@@ -311,7 +311,7 @@ If a vendor supports both capabilities, one adapter may implement both interface
 | `core_memory.character` | Memory runtime | RP Agent | — | Always (system prompt) |
 | `core_memory.user` | Memory runtime | RP Agent | — | Always (system prompt) |
 | `core_memory.index` | Memory runtime | Memory Task Agent (Call 2) | — | Always (system prompt) |
-| Public Narrative Store (`event_nodes[area_visible/world_public]`, `entity_nodes[shared_public]`, `fact_edges[world_public]`, `topics`, `logic_edges`) | Memory system | Memory Task Agent + RuntimeProjection + Delayed Public Materialization + Promotion Pipeline | Authoritative for runtime-emergent shared narrative records and promoted public facts | Via tools only (`memory_read`/`search`/`explore`), all view-aware |
+| Public Narrative Store (`event_nodes[area_visible/world_public]`, `entity_nodes[shared_public]`, `fact_edges[world_public]`, `topics`, `logic_edges`) | Memory system | Memory Task Agent (shared entities/topics/logic only) + RuntimeProjection + Delayed Public Materialization + Promotion Pipeline | Authoritative for runtime-emergent shared narrative records and promoted public facts | Via tools only (`memory_read`/`search`/`explore`), all view-aware |
 | Per-Agent Cognitive Graph (`agent_event_overlay`=private_event, `agent_fact_overlay`=private_belief, `entity_nodes[private_overlay]`) | Memory system (per-agent) | Memory Task Agent (on behalf of owning RP Agent) | per-agent scope-local | Via tools (view-filtered to owning agent only) |
 || RuntimeProjection + Delayed Public Materialization (area_visible write paths) | Core runtime (RuntimeProjection) + Memory system (Delayed Materialization) | RuntimeProjection: synchronous from projection-eligible runtime records; MaterializationService: rules-based from private_event | — | Via tools (visible to agents in same area). AreaStateResolver reads persisted `event_origin` to classify events as live perception (`runtime_projection`) vs historical recall (`delayed_materialization`). Both are authoritative once written. V1: AreaStateResolver does NOT infer durable current state from `event_nodes` alone — no `state_effect` model, no state snapshots. |
 | Shared operational blackboard | T18a (Coordination) | Per-namespace owner (see namespace table) | per-key owner / typed merge / no shared writes by default | Role-based (see injection rules) |
@@ -340,7 +340,7 @@ Interpretation notes for V1:
 - **Maiden**: always-on world rules + routing-safe lore excerpts + operational state excerpts. No RP-only Memory Hints by default. Viewer Context: `viewer_role='maiden'`, sees area_visible + world_public by default. Authorized private access via AuthorizationPolicy (on-demand retrieval only, NOT default injection).
 - **RP Agent**: owning agent Core Memory + scope-partitioned Memory Hints (private+area+world) + always-on world rules + triggered lore entries. Viewer Context: `viewer_role='rp_agent'`, sees own private + current area + world.
 - **Task Agent**: No narrative plane by default; opt-in via task profile context contract. Viewer Context: `viewer_role='task_agent'`, minimal access.
-- **memory.migrate context**: stable log-derived dialogue slice + memory-owned contextual attachments + existing entities/facts + current index (Call 1 + Call 2). Dual-write output: shared events/facts + agent private overlays.
+- **memory.migrate context**: stable log-derived dialogue slice + memory-owned contextual attachments + existing entities/facts + current index (Call 1 + Call 2). Output: agent private overlays + shared entities/structure + materialization/promotion candidates. Public `event_nodes` / `fact_edges` still arise only via Delayed Public Materialization or Promotion.
 - **memory.organize context**: IDs of entities/events/facts produced by the triggering migrate run (Call 3). Includes search projection sync.
 
 Lore note: Lore Canon answers what the world is authored to be (world rules, settings, character definitions, static facts). Public Narrative Store answers what publicly happened or became true at runtime (area events, promoted public facts). Lore remains authoritative for authored canon even when Prompt Builder injects only a selective subset for a given agent turn. Runtime must not silently rewrite Lore Canon — world-state changes are expressed as public events/facts, not by mutating authored canon.
@@ -421,7 +421,7 @@ type InteractionRecord = {
 };
 ```
 
-**ProjectionAppendix Contract**: When an InteractionRecord is treated as a projection-eligible structured runtime record, the `payload` MUST include a `projectionAppendix` field conforming to the `ProjectionAppendix` type (see memory-system.md Appendix: RuntimeProjection Input Contract). This appendix carries `public_summary_seed`, `primary_actor_entity_id`, `location_entity_id`, `event_category`, and `source_record_id`, enabling RuntimeProjection to produce area_visible events synchronously without LLM calls. Records lacking a valid `projectionAppendix` are still flushed to memory but are NOT projection-eligible — they follow the Delayed Public Materialization path instead. The appendix schema is normative for the runtime path, not informational. RuntimeProjection MUST NOT parse or reprocess assistant message text to infer observability — it consumes ONLY the pre-generated `ProjectionAppendix`. V1 direct runtime projection allows assistant `message` only for `speech` event_category; `action` / `observation` / `state_change` event categories must originate from structured `tool_result` or `task_result` records with a valid `ProjectionAppendix`.
+**ProjectionAppendix Contract**: When an InteractionRecord is treated as a projection-eligible structured runtime record, the `payload` MUST include a `projectionAppendix` field conforming to the `ProjectionAppendix` type (see memory-system.md Appendix: RuntimeProjection Input Contract). This appendix carries `public_summary_seed`, `primary_actor_entity_id`, `location_entity_id`, `event_category`, `projection_class='area_candidate'`, and `source_record_id`, enabling RuntimeProjection to produce area_visible events synchronously without LLM calls. Records lacking a valid `projectionAppendix` are still flushed to memory but are NOT projection-eligible — they follow the Delayed Public Materialization path instead. The appendix schema is normative for the runtime path, not informational. RuntimeProjection MUST NOT parse or reprocess assistant message text to infer observability — it consumes ONLY the pre-generated `ProjectionAppendix`. V1 direct runtime projection allows assistant `message` only for `speech` event_category; `action` / `observation` / `state_change` event categories must originate from structured `tool_result` or `task_result` records with a valid `ProjectionAppendix`.
 
 ### Memory Flush Request
 
@@ -622,7 +622,7 @@ The engine runs headless as a backend service, exposing a custom Gateway API for
 - [ ] Memory operations (store/retrieve/search) work via ToolExecutor (local dispatch, not MCP IPC)
 - [ ] External MCP servers can be connected/disconnected at runtime without restart
 - [ ] All tool calls go through ToolExecutor — no direct MCP client calls from agents
-- [ ] Memory system functional: 22 tables created (16 core + 3 search projection + 3 FTS5), Core Memory 3 blocks per agent, scope-partitioned retrieval operational (private/area/world FTS5) via VisibilityPolicy, Task Agent pipeline processing batches with dual-write (Public Narrative Store + Per-Agent Cognitive Graph), graph navigator returning scope-filtered evidence paths (including private_event/private_belief traversal for owner with 5-kind frontier adjacency), Delayed Public Materialization (private_event → area_visible event with RuntimeProjection reconciliation and text safety) + Promotion Pipeline (2-type: event promotion + fact crystallization) functional (→ see `memory-system.md` Definition of Done)
+- [ ] Memory system functional: 22 tables created (16 core + 3 search projection + 3 FTS5), Core Memory 3 blocks per agent, scope-partitioned retrieval operational (private/area/world FTS5) via VisibilityPolicy, Task Agent pipeline processing batches with owner-private writes + shared entity/structure writes + materialization/promotion candidate emission (not direct public event/fact writes), graph navigator returning scope-filtered evidence paths (including private_event/private_belief traversal for owner with 5-kind frontier adjacency), Delayed Public Materialization (private_event → area_visible event with RuntimeProjection reconciliation and text safety) + Promotion Pipeline (2-type: event promotion + fact crystallization) functional (→ see `memory-system.md` Definition of Done)
 - [ ] Memory system: `event_origin` persisted on every `event_nodes` row (`runtime_projection` | `delayed_materialization` | `promotion`); cross-field invariant enforced (runtime_projection/delayed_materialization → area_visible; promotion → world_public); AreaStateResolver is retrieval-only — reads persisted `event_origin` to classify events as `live perception` vs `historical recall`, not a durable current-state derivation engine, no `state_effect` model in V1
 - [ ] Shared lore canon: entries loadable, keyword-triggered injection working for Maiden + RP
 - [ ] Blackboard: 5 V1 namespaces functional with per-key ownership enforcement
@@ -649,7 +649,7 @@ The engine runs headless as a backend service, exposing a custom Gateway API for
 - **Knowledge Ownership Matrix**: Every canonical domain has exactly one owner. No overlap between memory, lore, blackboard, and projections.
 
 **Operational**:
-- **Interaction Log** (T27a): Append-only, 6 actorTypes (`user | rp_agent | maiden | task_agent | system | autonomy`), 7+ recordTypes. Owns system log durability. Memory module must NOT own interaction-log durability. Note: Projection reads structured private_event fields, NOT raw InteractionRecord.payload. A recordType → payload schema mapping appendix should be defined in memory-system.md.
+- **Interaction Log** (T27a): Append-only, 6 actorTypes (`user | rp_agent | maiden | task_agent | system | autonomy`), 7+ recordTypes. Owns system log durability. Memory module must NOT own interaction-log durability. Note: RuntimeProjection reads producer-generated `ProjectionAppendix`; Delayed Public Materialization reads structured `private_event` fields; neither path reparses raw `InteractionRecord.payload`. A recordType → payload schema mapping appendix should be defined in memory-system.md.
 - **Minimal Job Runtime** (T28a): Execution classes (5 priority levels), job_key dedup (`{job_type}:{scope}:{batch_identity}`), concurrency defaults. Ships before autonomy features.
 - **Eviction Invariant** (G4): Three-part chain across T12a (ContextCompactor), T28a (Job Runtime), T27a (Interaction Log). ContextCompactor must not evict before batch ownership transferred.
 - **Flush Trigger Policy**: capacity (10 turns) + session end + idle timeout + manual.
@@ -908,6 +908,1522 @@ Max Concurrent: 7 (Waves 1 & 2)
 
 ## TODOs
 
+> All implementation tasks below use the same executable spec pattern as `memory-system.md`.
+> Resolved defaults for this plan:
+- T6 owns database/file primitives plus the generic migration runner; subsystem tasks own their own DDL and migration steps.
+- T13a owns prompt templating, section slots, and budget-aware rendering primitives; T24 is the sole injection/data-selection coordinator.
+- T10 owns `ProjectionAppendix` emission and the `RuntimeProjectionSink` interface; T24 owns `AreaStateResolver` prompt-time classification.
+- T15 is a strict wrapper: `memory-system.md` is authoritative for memory internals, while this file remains authoritative for wave placement, cross-task orchestration, commit grouping, and V1 Core vs Extended scope.
+
+- [ ] T1. Project scaffolding + configs (TS + Rust crate)
+
+  **What to do**:
+  - Own bootstrap-only files: `package.json`, `tsconfig.json`, `bunfig.toml`, `src/index.ts`, `native/Cargo.toml`, `native/build.rs`, `native/src/lib.rs`, and the directory tree declared in `### Concrete Deliverables`.
+  - Create empty module roots only: `src/core/`, `src/core/interfaces/`, `src/core/tools/`, `src/agents/`, `src/memory/`, `src/persona/`, `src/lore/`, `src/state/`, `src/interaction/`, `src/jobs/`, `src/gateway/`, `src/session/`, `src/storage/`, `src/native-fallbacks/`, `test/`, `config/`, `data/`.
+  - Define Bun scripts for `build`, `test`, `start`, and `check:native`; enable TypeScript strict mode and Windows-safe path handling.
+  - Prepare the native crate for NAPI-RS without adding any business logic beyond a loadable stub.
+
+  **Must NOT do**:
+  - No subsystem logic, schemas, HTTP routes, agent profiles, or provider adapters.
+  - No placeholder implementations that claim runtime features already work.
+  - No secrets, machine-specific absolute paths, or shell-specific startup scripts.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - bootstrap files and directory structure only.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser surface exists.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T2, T3, T4, T5, T6, T7, T11a | Blocked By: None
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Concrete Deliverables`, `### V1 Core vs Extended Split`
+  - External: `https://bun.sh/docs/quickstart` - Bun project bootstrap
+  - External: `https://napi.rs/docs/introduction/getting-started` - Rust addon bootstrap
+
+  **WHY Each Reference Matters**:
+  - The deliverables section locks the exact top-level tree; Bun and NAPI-RS docs lock the supported scaffold/build commands for a TS+Bun+Rust workspace.
+
+  **Acceptance Criteria**:
+  - [ ] `bun run build` succeeds against the empty scaffold with zero TypeScript errors.
+  - [ ] `bun test` runs a bootstrap smoke test successfully.
+  - [ ] `cargo check --manifest-path native/Cargo.toml` passes on the Windows host.
+  - [ ] The directory tree in `### Concrete Deliverables` exists exactly once with no extra product surfaces.
+  - [ ] `package.json` contains only the bootstrap scripts needed by later tasks.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path bootstrap
+    Tool: Bash
+    Steps: run `bun install`, `bun run build`, and `cargo check --manifest-path native/Cargo.toml`
+    Expected: Bun and Rust scaffolds compile without feature code
+    Evidence: .sisyphus/evidence/task-T1-bootstrap.txt
+
+  Scenario: Error path no-env build
+    Tool: Bash
+    Steps: run `bun run build` in a clean checkout with no `.env`
+    Expected: bootstrap build succeeds because no secrets are required yet
+    Evidence: .sisyphus/evidence/task-T1-no-env.txt
+
+  Scenario: Edge path Windows execution
+    Tool: Bash
+    Steps: run the same commands from `H:\MaidsClaw`
+    Expected: scripts work without POSIX-only assumptions
+    Evidence: .sisyphus/evidence/task-T1-windows.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `package.json`, `tsconfig.json`, `bunfig.toml`, `native/**`, `src/index.ts` | Pre-commit: `bun run build && cargo check --manifest-path native/Cargo.toml`
+
+- [ ] T2. Core type definitions
+
+  **What to do**:
+  - Own shared cross-cutting contracts only: `src/core/chunk.ts`, `src/core/types.ts`, `src/agents/profile.ts`, and `src/interaction/contracts.ts`.
+  - Define the normalized `Chunk` union used by T8/T10 for streaming text and tool-use blocks, plus shared types for `AgentProfile`, `InteractionRecord`, `MemoryFlushRequest`, `ProjectionAppendix`, `GatewayEvent`, and delegation/run context metadata.
+  - Keep memory-specific schema/types in `src/memory/**`; T2 only defines types consumed across modules.
+
+  **Must NOT do**:
+  - No provider-specific SDK payloads leaked past the normalization boundary.
+  - No memory table row types, prompt-builder data-source types, or storage implementations.
+  - No runtime validation logic beyond TypeScript type guards needed by tests.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - this is a pure contract task with no I/O.
+  - Skills: `[]`
+  - Omitted: `frontend-ui-ux` - no UI work.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T5, T6, T7, T8, T9, T10, T12a, T14a, T18a, T27a | Blocked By: T1
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Model Services Contract`, `## Gateway V1 Contract`, `## Interaction Log and Memory Flush Contract`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## Memory Contract Lock` (for `ProjectionAppendix` compatibility)
+
+  **WHY Each Reference Matters**:
+  - These sections already lock the canonical shared contracts; T2 must mirror them exactly so later tasks do not invent competing shapes.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/types.test.ts` passes.
+  - [ ] `Chunk` supports text streaming plus incremental tool-call assembly without provider-specific types in downstream modules.
+  - [ ] `AgentProfile` includes role, lifecycle, `userFacing`, `outputMode`, model selection, and tool permissions.
+  - [ ] `InteractionRecord` and `MemoryFlushRequest` exactly match the locked contract sections.
+  - [ ] `ProjectionAppendix` is exported for use by T10 and T27a.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path shared contract compile
+    Tool: Bash
+    Steps: run `bun test src/core/types.test.ts`
+    Expected: shared contracts compile and import cleanly across modules
+    Evidence: .sisyphus/evidence/task-T2-types.txt
+
+  Scenario: Error path invalid chunk shape
+    Tool: Bash
+    Steps: compile a fixture that omits required tool-call fields from `Chunk`
+    Expected: TypeScript rejects the invalid fixture
+    Evidence: .sisyphus/evidence/task-T2-invalid-chunk.txt
+
+  Scenario: Edge path provider normalization
+    Tool: Bash
+    Steps: compile Anthropic-style and OpenAI-style fixtures through the same `Chunk` helpers
+    Expected: both normalize into the shared union without downstream type branching
+    Evidence: .sisyphus/evidence/task-T2-normalization.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/core/chunk.ts`, `src/core/types.ts`, `src/agents/profile.ts`, `src/interaction/contracts.ts` | Pre-commit: `bun test src/core/types.test.ts`
+
+- [ ] T3. Configuration system
+
+  **What to do**:
+  - Own `src/core/config.ts` and `src/core/config-schema.ts`.
+  - Load runtime configuration from environment variables plus JSON config files for models, agents, and content directories; expose a single typed config object.
+  - Validate storage path, server port, provider credentials presence, model IDs, and content directories at startup.
+  - Keep T33 responsible for example config files; T3 owns the loader/validator only.
+
+  **Must NOT do**:
+  - No secret fetching from remote services.
+  - No defaulting that hides missing required provider config.
+  - No example files or startup scripts in this task.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - typed config loading and validation only.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser work.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T8, T9, T33 | Blocked By: T1
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Concrete Deliverables`, `## Success Criteria`
+  - External: `https://bun.sh/docs/quickstart` - Bun runtime/env conventions
+
+  **WHY Each Reference Matters**:
+  - T3 must validate exactly the runtime knobs later tasks rely on, while leaving example files and operator guidance to T33.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/config.test.ts` passes.
+  - [ ] Missing required provider credentials fail fast with typed config errors.
+  - [ ] Valid config resolves relative paths under the project root and storage root.
+  - [ ] Default values exist only for safe runtime fields such as port and data directories.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path valid config
+    Tool: Bash
+    Steps: run `bun test src/core/config.test.ts` with a complete fixture config
+    Expected: config loads into a typed object with resolved paths
+    Evidence: .sisyphus/evidence/task-T3-valid-config.txt
+
+  Scenario: Error path missing provider key
+    Tool: Bash
+    Steps: run the same test with Anthropic credentials omitted
+    Expected: loader returns a typed config error and startup is blocked
+    Evidence: .sisyphus/evidence/task-T3-missing-key.txt
+
+  Scenario: Edge path default port/path handling
+    Tool: Bash
+    Steps: load config with only required provider settings and no optional path overrides
+    Expected: defaults resolve deterministically under the workspace root
+    Evidence: .sisyphus/evidence/task-T3-defaults.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/core/config.ts`, `src/core/config-schema.ts` | Pre-commit: `bun test src/core/config.test.ts`
+
+- [ ] T4. Logger + observability
+
+  **What to do**:
+  - Own `src/core/logger.ts` and `src/core/observability.ts`.
+  - Implement structured logs with contextual fields (`request_id`, `session_id`, `agent_id`, `job_key`, `provider`, `tool_name`) and lightweight counters/timers for runtime diagnostics.
+  - Provide helper APIs for child loggers and event timing used by T5, T8, T10, T26, and T28a.
+
+  **Must NOT do**:
+  - No remote telemetry vendor integration.
+  - No console spam without severity/structured fields.
+  - No business logic side effects hidden inside logging helpers.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - narrow runtime utility with clear consumers.
+  - Skills: `[]`
+  - Omitted: `git-master` - no git work is required.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: all runtime tasks | Blocked By: T1
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Verification Strategy`, `### Error Model`
+
+  **WHY Each Reference Matters**:
+  - Observability must expose the exact error and runtime evidence later verification tasks inspect; this task must stay generic and reusable.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/logger.test.ts` passes.
+  - [ ] Log entries serialize structured context without losing the root message.
+  - [ ] Observability timers/counters can be incremented from tests without global state leaks.
+  - [ ] Error logs preserve `code`, `message`, and retriable status.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path structured log
+    Tool: Bash
+    Steps: run `bun test src/core/logger.test.ts` with request/session context fixtures
+    Expected: emitted logs include message, severity, and all context keys
+    Evidence: .sisyphus/evidence/task-T4-logger.txt
+
+  Scenario: Error path error serialization
+    Tool: Bash
+    Steps: log a typed runtime error through the logger helper
+    Expected: the serialized payload preserves code and retriable status
+    Evidence: .sisyphus/evidence/task-T4-errors.txt
+
+  Scenario: Edge path child logger isolation
+    Tool: Bash
+    Steps: create two child loggers with different session IDs and emit events from both
+    Expected: context does not leak between child instances
+    Evidence: .sisyphus/evidence/task-T4-child-loggers.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/core/logger.ts`, `src/core/observability.ts` | Pre-commit: `bun test src/core/logger.test.ts`
+
+- [ ] T5. Event bus / inter-agent communication
+
+  **What to do**:
+  - Own `src/core/events.ts` and `src/core/event-bus.ts`.
+  - Implement a minimal typed in-process event bus (`emit`, `on`, `off`, `once`) for coordination and observability hooks.
+  - Freeze the V1 event map to the small internal set required by later tasks: `interaction.committed`, `job.enqueued`, `job.started`, `job.completed`, `tool.called`, `tool.completed`, `delegate.started`, `delegate.completed`, `session.closed`, `mcp.connected`, `mcp.disconnected`, `memory.flush_requested`.
+
+  **Must NOT do**:
+  - No persistence, replay, fan-out to external brokers, or cross-process messaging.
+  - No open-ended stringly-typed event names.
+  - No business logic that requires the bus to succeed in order for the core turn path to function.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - minimal typed utility, not a subsystem.
+  - Skills: `[]`
+  - Omitted: `deep` - avoid over-engineering.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T14a, T28a | Blocked By: T1, T2
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Background Job and Backpressure Policy`, `### Agent Dispatch Summary`
+
+  **WHY Each Reference Matters**:
+  - The plan needs simple coordination signals, not a workflow engine; the event map must stay bounded to the runtime events already implied by later tasks.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/event-bus.test.ts` passes.
+  - [ ] Event names are type-checked against the frozen V1 event map.
+  - [ ] A throwing listener does not crash the emitter; the error is routed to T4 logging.
+  - [ ] `once` listeners self-remove after the first event.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path typed emission
+    Tool: Bash
+    Steps: run `bun test src/core/event-bus.test.ts` with typed event fixtures
+    Expected: subscribers receive correctly typed payloads in-process
+    Evidence: .sisyphus/evidence/task-T5-event-bus.txt
+
+  Scenario: Error path listener failure
+    Tool: Bash
+    Steps: register a listener that throws during `job.started`
+    Expected: emitter logs the error and continues serving other listeners
+    Evidence: .sisyphus/evidence/task-T5-listener-error.txt
+
+  Scenario: Edge path unsubscribe
+    Tool: Bash
+    Steps: subscribe, unsubscribe, then emit the same event
+    Expected: removed listeners are not called
+    Evidence: .sisyphus/evidence/task-T5-unsubscribe.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/core/events.ts`, `src/core/event-bus.ts` | Pre-commit: `bun test src/core/event-bus.test.ts`
+
+- [ ] T6. SQLite + file storage abstraction
+
+  **What to do**:
+  - Own `src/storage/database.ts`, `src/storage/file-store.ts`, `src/storage/migrations.ts`, `src/storage/paths.ts`, and `src/storage/index.ts`.
+  - Implement database connection lifecycle, WAL mode, busy timeout, foreign keys, storage-root resolution, and a generic migration runner that accepts subsystem-owned `MigrationStep[]`.
+  - Verify `bun:sqlite` FTS5 availability and trigram tokenizer support up front so T15/T17 can rely on it later.
+  - Expose parameterized-query helpers and file-root helpers only; downstream tasks own their own schemas and domain DDL.
+
+  **Must NOT do**:
+  - No memory, lore, interaction-log, or blackboard table definitions in T6.
+  - No ORM/query-builder layer.
+  - No business-specific repositories or ad hoc SQL helpers beyond storage primitives.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - low-level runtime primitive with downstream dependencies.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser work.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T15, T16, T17, T18a, T27a | Blocked By: T1, T2
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Concrete Deliverables`, `## Success Criteria`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## Schema (Final)`
+  - External: `https://bun.com/docs/runtime/sqlite` - `bun:sqlite` API
+  - External: `https://www.sqlite.org/fts5.html` - FTS5 and trigram tokenizer
+
+  **WHY Each Reference Matters**:
+  - T6 must provide the shared storage primitives and FTS capabilities that memory, lore, and interaction-log tasks consume without owning their schemas.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/storage/database.test.ts` passes.
+  - [ ] The database opens in WAL mode and enforces foreign keys.
+  - [ ] The generic migration runner applies subsystem-owned migration steps in order and skips already-applied steps idempotently.
+  - [ ] `SELECT sqlite_compileoption_used('ENABLE_FTS5')` returns `1` in the test harness.
+  - [ ] Creating a temporary `fts5(..., tokenize='trigram')` table succeeds in tests.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path database bootstrap
+    Tool: Bash
+    Steps: run `bun test src/storage/database.test.ts`
+    Expected: SQLite opens, WAL is enabled, and migration steps apply cleanly
+    Evidence: .sisyphus/evidence/task-T6-storage.txt
+
+  Scenario: Error path duplicate migration step
+    Tool: Bash
+    Steps: register the same migration twice and rerun the migration harness
+    Expected: the second application is skipped or rejected without corrupting state
+    Evidence: .sisyphus/evidence/task-T6-duplicate-migration.txt
+
+  Scenario: Edge path FTS5 verification
+    Tool: Bash
+    Steps: create a temporary trigram-backed FTS5 table in the test database
+    Expected: table creation succeeds and proves downstream search prerequisites are available
+    Evidence: .sisyphus/evidence/task-T6-fts5.txt
+  ```
+
+  **Commit**: NO | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/storage/**` | Pre-commit: `bun test src/storage/database.test.ts`
+
+- [ ] T7. Error handling + retry framework
+
+  **What to do**:
+  - Own `src/core/errors.ts`, `src/core/retry.ts`, and the shared error-code registry used by T8, T9, T10, T26, and T28a.
+  - Implement typed errors that map to the Gateway error model and explicit retry policies for model calls, MCP tools, storage operations, and background jobs.
+  - Provide helpers for converting unknown thrown values into stable runtime errors with `code`, `message`, `retriable`, and `details`.
+
+  **Must NOT do**:
+  - No swallowed exceptions or empty catches.
+  - No framework-coupled HTTP middleware.
+  - No retry loops without explicit max attempts/backoff rules.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - shared runtime policy layer with narrow scope.
+  - Skills: `[]`
+  - Omitted: `deep` - keep the policy small and mechanical.
+
+  **Parallelization**: Can Parallel: YES | Wave 1 | Blocks: T8, T9, T10 | Blocked By: T1, T2
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Error Model`, `### Retry and Rollback`
+
+  **WHY Each Reference Matters**:
+  - The Gateway and job-runtime contracts already fix the error envelope and retry semantics; T7 must centralize them before providers and agents are implemented.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/errors.test.ts` passes.
+  - [ ] Typed runtime errors serialize into the Gateway contract shape without ad hoc branching.
+  - [ ] Retry helpers distinguish retriable/non-retriable failures and stop at configured limits.
+  - [ ] Unknown thrown values are wrapped into stable internal errors.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path typed error mapping
+    Tool: Bash
+    Steps: run `bun test src/core/errors.test.ts` with model, MCP, and storage error fixtures
+    Expected: each fixture maps to a stable code/message/retriable tuple
+    Evidence: .sisyphus/evidence/task-T7-error-mapping.txt
+
+  Scenario: Error path retry exhaustion
+    Tool: Bash
+    Steps: execute a retry policy against a permanently failing fixture
+    Expected: retries stop at the configured limit and surface the final typed error
+    Evidence: .sisyphus/evidence/task-T7-retry-exhaustion.txt
+
+  Scenario: Edge path unknown throwable
+    Tool: Bash
+    Steps: throw a raw string/object through the wrapper helper
+    Expected: the helper emits a stable internal error envelope
+    Evidence: .sisyphus/evidence/task-T7-unknown-throwable.txt
+  ```
+
+  **Commit**: YES | Message: `feat(foundation): scaffold project with types, config, storage, event bus, Rust crate` | Files: `src/core/config.ts`, `src/core/config-schema.ts`, `src/core/logger.ts`, `src/core/observability.ts`, `src/core/events.ts`, `src/core/event-bus.ts`, `src/storage/**`, `src/core/errors.ts`, `src/core/retry.ts`, `src/core/chunk.ts`, `src/core/types.ts`, `src/agents/profile.ts`, `src/interaction/contracts.ts` | Pre-commit: `bun run build && bun test && cargo check --manifest-path native/Cargo.toml`
+
+- [ ] T8. Model Services (ChatModelProvider + EmbeddingProvider + ModelServiceRegistry + CacheHintProvider stub)
+
+  **What to do**:
+  - Own `src/core/models/chat-provider.ts`, `src/core/models/embedding-provider.ts`, `src/core/models/registry.ts`, `src/core/models/anthropic-provider.ts`, `src/core/models/openai-provider.ts`, and `src/core/interfaces/cache-hint-provider.ts`.
+  - Implement exactly two concrete chat providers (Anthropic and OpenAI) plus one embedding provider (OpenAI `text-embedding-3-small`) behind the locked capability split.
+  - Normalize vendor streaming into the shared `AsyncIterable<Chunk>` contract, including incremental tool-use blocks and stop reasons.
+  - Ship `NoopCacheHintProvider` as the V1 stub only.
+
+  **Must NOT do**:
+  - No single merged provider interface that conflates chat and embeddings.
+  - No plugin system, dynamic provider discovery, or provider-specific types leaked into T10.
+  - No more than the required providers in V1 Core.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - provider normalization and streaming contracts are core architecture.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser surface.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T10, T12a, T15 | Blocked By: T2, T3, T7
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Model Services Contract`, `### Success Criteria`
+  - External: `https://docs.anthropic.com/en/api/messages-streaming` - Anthropic streaming events
+  - External: `https://developers.openai.com/api/docs/guides/embeddings/` - OpenAI embeddings
+
+  **WHY Each Reference Matters**:
+  - T8 must honor the capability split already locked in the plan while normalizing vendor-specific streaming into the common `Chunk` contract consumed by T10.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/models/model-services.test.ts` passes.
+  - [ ] `ModelServiceRegistry.resolveChat()` and `resolveEmbedding()` work independently.
+  - [ ] Anthropic and OpenAI chat streams both normalize into `AsyncIterable<Chunk>`.
+  - [ ] OpenAI embeddings return `Float32Array[]` for batched input.
+  - [ ] `NoopCacheHintProvider` compiles and returns messages unchanged.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path provider normalization
+    Tool: Bash
+    Steps: run `bun test src/core/models/model-services.test.ts` with Anthropic and OpenAI stream fixtures
+    Expected: both providers emit the shared `Chunk` union in deterministic order
+    Evidence: .sisyphus/evidence/task-T8-streaming.txt
+
+  Scenario: Error path missing model mapping
+    Tool: Bash
+    Steps: resolve an unknown model ID through the registry
+    Expected: a typed `MODEL_NOT_CONFIGURED` error is returned
+    Evidence: .sisyphus/evidence/task-T8-missing-model.txt
+
+  Scenario: Edge path chat-only capability
+    Tool: Bash
+    Steps: request embeddings from the Anthropic chat provider fixture
+    Expected: the registry rejects the call with a capability error while OpenAI embedding still works
+    Evidence: .sisyphus/evidence/task-T8-capability-split.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/models/**`, `src/core/interfaces/cache-hint-provider.ts` | Pre-commit: `bun test src/core/models/model-services.test.ts`
+
+- [ ] T9. MCP client + ToolExecutor (dual-layer dispatch) + ModelRouter/RateLimiter/UsageTracker stubs
+
+  **What to do**:
+  - Own `src/core/tools/tool-definition.ts`, `src/core/tools/tool-executor.ts`, `src/core/tools/mcp-client.ts`, `src/core/tools/mcp-adapter.ts`, `src/core/interfaces/model-router.ts`, `src/core/interfaces/rate-limiter.ts`, and `src/core/interfaces/usage-tracker.ts`.
+  - Implement local tool registration/direct dispatch and MCP-backed tool registration through a shared `ToolDefinition` contract.
+  - Use MCP over stdio in V1; lazy-load remote tool schemas on demand rather than at startup.
+  - Implement `StaticRouter`, `NoopRateLimiter`, and `ConsoleUsageTracker` stubs and expose a dispatch-context hook that later lets T15 inject `ViewerContext` without agent-side spoofing.
+
+  **Must NOT do**:
+  - No direct MCP calls from agent code.
+  - No eager schema loading from every MCP server at boot.
+  - No interactive transports or protocol variants beyond stdio in V1.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - this is the core local-vs-remote execution boundary.
+  - Skills: `[]`
+  - Omitted: `git-master` - no git work is needed.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T15, T16, T17, T18a, T27a | Blocked By: T2, T3, T7
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Architecture Optimization (Post-Review)`, `### Must Have`
+  - External: `https://modelcontextprotocol.info/docs/` - MCP protocol and client behavior
+  - External: `https://bun.com/docs/runtime/node-api` - runtime native-module compatibility expectations
+
+  **WHY Each Reference Matters**:
+  - T9 is the only place where local tools and external MCP tools are unified; it must preserve the dual-layer dispatch rule and the lazy-schema guardrail.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/tools/tool-executor.test.ts` passes.
+  - [ ] Local and MCP-backed tools both execute through `toolExecutor.execute()`.
+  - [ ] `getSchemas()` returns local schemas immediately and remote schemas lazily.
+  - [ ] `StaticRouter`, `NoopRateLimiter`, and `ConsoleUsageTracker` compile behind interface types only.
+  - [ ] Dispatch context can carry system-injected metadata without agents passing forged values.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path local and MCP dispatch
+    Tool: Bash
+    Steps: run `bun test src/core/tools/tool-executor.test.ts` with one local tool and one mock MCP tool
+    Expected: both tools execute through the same executor surface
+    Evidence: .sisyphus/evidence/task-T9-dispatch.txt
+
+  Scenario: Error path MCP disconnect
+    Tool: Bash
+    Steps: disconnect the mock MCP server during a tool call
+    Expected: executor returns a typed MCP error without crashing the caller
+    Evidence: .sisyphus/evidence/task-T9-mcp-disconnect.txt
+
+  Scenario: Edge path lazy schema loading
+    Tool: Bash
+    Steps: register a mock MCP server and inspect startup behavior before any schema request
+    Expected: no remote schema fetch occurs until `getSchemas()` or first dispatch requires it
+    Evidence: .sisyphus/evidence/task-T9-lazy-schemas.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/tools/**`, `src/core/interfaces/model-router.ts`, `src/core/interfaces/rate-limiter.ts`, `src/core/interfaces/usage-tracker.ts` | Pre-commit: `bun test src/core/tools/tool-executor.test.ts`
+
+- [ ] T10. Core agent loop (TAOR, unified runtime) + ContextCompactor stub + RuntimeProjection sink interface
+
+  **What to do**:
+  - Own `src/core/agent-loop.ts`, `src/core/run-context.ts`, `src/core/runtime-projection.ts`, `src/core/interfaces/context-compactor.ts`, and `src/core/truncate-compactor.ts`.
+  - Implement a role-agnostic TAOR loop that consumes `AgentProfile`, model services, prompt-builder interfaces, and ToolExecutor while yielding `AsyncIterable<Chunk>` end-to-end.
+  - Accumulate streamed tool-use blocks until arguments are complete, execute the tool, append the tool result, and resume the model stream.
+  - Own `ProjectionAppendix` emission and the injectable `RuntimeProjectionSink` interface; ship a no-op sink for Wave 2 tests and keep the real sink wiring for later waves.
+  - Enforce delegation-depth / circular-run guards at the core loop level so role profiles cannot recurse infinitely.
+
+  **Must NOT do**:
+  - No role-specific policy hardcoded in the loop.
+  - No direct MCP client calls or direct prompt assembly in this task.
+  - No eviction of unflushed turns before T28a ownership transfer.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - the TAOR loop is the runtime heart of V1.
+  - Skills: `[]`
+  - Omitted: `frontend-ui-ux` - backend runtime only.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T14a, T20a, T21, T22a | Blocked By: T2, T7, T8
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Architecture Optimization (Post-Review)`, `### Must Have`, `## Interaction Log and Memory Flush Contract`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## RuntimeProjection`
+
+  **WHY Each Reference Matters**:
+  - The plan already fixes the streaming shape, tool-use contract, and RuntimeProjection timing rules; T10 must implement those boundaries without taking over memory or prompt ownership.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/agent-loop.test.ts` passes.
+  - [ ] One mock turn completes through think -> act -> observe -> respond without buffering the final text into a plain string.
+  - [ ] Tool-use chunks are accumulated and executed exactly once per completed tool call.
+  - [ ] Circular delegation is blocked by a deterministic guard.
+  - [ ] The loop emits `ProjectionAppendix` metadata and can call a no-op `RuntimeProjectionSink` without breaking the turn.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path TAOR turn
+    Tool: Bash
+    Steps: run `bun test src/core/agent-loop.test.ts` with a fixture model stream and one local tool
+    Expected: the loop yields streamed chunks, executes the tool once, and completes the turn
+    Evidence: .sisyphus/evidence/task-T10-taor.txt
+
+  Scenario: Error path malformed tool arguments
+    Tool: Bash
+    Steps: feed the loop a tool-call fixture with invalid JSON arguments
+    Expected: the loop emits a typed tool-argument error and terminates cleanly
+    Evidence: .sisyphus/evidence/task-T10-invalid-tool-args.txt
+
+  Scenario: Edge path delegation guard
+    Tool: Bash
+    Steps: create a run fixture that attempts A -> B -> A delegation
+    Expected: the loop rejects the recursion deterministically before infinite replay
+    Evidence: .sisyphus/evidence/task-T10-delegation-guard.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/agent-loop.ts`, `src/core/run-context.ts`, `src/core/runtime-projection.ts`, `src/core/interfaces/context-compactor.ts`, `src/core/truncate-compactor.ts` | Pre-commit: `bun test src/core/agent-loop.test.ts`
+
+- [ ] T11a. Rust NAPI-RS interfaces + TS baseline (3 modules)
+
+  **What to do**:
+  - Own the native/TS bridge for exactly three modules: token counting, lore matching, and context-window utilities.
+  - Implement the NAPI-RS crate under `native/` and matching TS fallback modules under `src/native-fallbacks/` with a single import surface (for example `src/core/native.ts`).
+  - Keep every call site provider-agnostic: consumers import the wrapper, not the `.node` file directly.
+  - Verify the TS fallback path works even when native loading is disabled or build output is absent.
+
+  **Must NOT do**:
+  - No additional Rust modules in V1 Core.
+  - No direct `.node` imports outside the wrapper surface.
+  - No feature logic that exists only in Rust with no TS fallback.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - native/TS parity and Windows builds need care.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser task.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T12a, T17 | Blocked By: T1
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Must Have`, `### Reserved Interfaces`
+  - External: `https://napi.rs/docs/introduction/getting-started` - NAPI-RS build model
+  - External: `https://bun.com/docs/runtime/node-api` - Bun Node-API compatibility
+
+  **WHY Each Reference Matters**:
+  - T11a is an optimization layer, not a source-of-truth layer; the wrapper and fallback rules must be explicit so V1 still works on hosts where native builds fail.
+
+  **Acceptance Criteria**:
+  - [ ] `cargo check --manifest-path native/Cargo.toml` passes.
+  - [ ] `bun test src/core/native.test.ts` passes for both native-present and fallback-only modes.
+  - [ ] Token counting, lore matching, and context-window APIs share the same TS and native signatures.
+  - [ ] Setting a native-disable flag forces the TS fallback path without breaking tests.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path native wrapper
+    Tool: Bash
+    Steps: run `cargo check --manifest-path native/Cargo.toml` and `bun test src/core/native.test.ts`
+    Expected: native bindings compile and the wrapper loads them through the shared API
+    Evidence: .sisyphus/evidence/task-T11a-native.txt
+
+  Scenario: Error path native unavailable
+    Tool: Bash
+    Steps: run the tests with native loading disabled
+    Expected: TS fallbacks execute and all public APIs still pass
+    Evidence: .sisyphus/evidence/task-T11a-fallback.txt
+
+  Scenario: Edge path Windows build
+    Tool: Bash
+    Steps: execute the same checks on the Windows host path
+    Expected: native bootstrap commands remain Windows-compatible
+    Evidence: .sisyphus/evidence/task-T11a-windows.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `native/**`, `src/native-fallbacks/**`, `src/core/native.ts` | Pre-commit: `cargo check --manifest-path native/Cargo.toml && bun test src/core/native.test.ts`
+
+- [ ] T12a. Token/context budget manager (core, uses T11a TS/native token counting)
+
+  **What to do**:
+  - Own `src/core/token-budget.ts` and `src/core/context-budget.ts`.
+  - Implement deterministic budget allocation per run, including the Maiden-specific coordination reserve and hard input-size checks before prompt assembly.
+  - Wire the V1 `TruncateCompactor` only through the `ContextCompactor` interface and enforce the G4 rule: no eviction until T28a has accepted ownership of the flush batch.
+  - Define the policy for overlarge single messages explicitly (`INPUT_TOO_LARGE`), rather than silently truncating user input.
+
+  **Must NOT do**:
+  - No LLM summarization or semantic compression in V1.
+  - No deletion of committed interaction-log data.
+  - No private knowledge ownership logic; this task only manages token budgets and compaction rules.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - budget policy is compact but cross-cutting.
+  - Skills: `[]`
+  - Omitted: `deep` - avoid speculative compaction features.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T13a, T24 | Blocked By: T2, T8, T11a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Metis Review`, `### Concurrency Defaults`, `### Eviction Invariant (Three-Part Chain)`
+
+  **WHY Each Reference Matters**:
+  - T12a must honor the already-locked concurrency and eviction rules; it cannot invent a new compaction model that conflicts with T27a or T28a.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/context-budget.test.ts` passes.
+  - [ ] Budget allocation reserves coordination headroom for Maiden runs.
+  - [ ] Oversized single input is rejected with a typed `INPUT_TOO_LARGE` error.
+  - [ ] The compactor refuses to evict unowned/unflushed ranges.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path budget allocation
+    Tool: Bash
+    Steps: run `bun test src/core/context-budget.test.ts` with Maiden and non-Maiden fixtures
+    Expected: token budgets are deterministic and role-aware
+    Evidence: .sisyphus/evidence/task-T12a-budgets.txt
+
+  Scenario: Error path oversized input
+    Tool: Bash
+    Steps: submit a single fixture message that exceeds the configured context limit
+    Expected: the manager returns `INPUT_TOO_LARGE` without truncating the message silently
+    Evidence: .sisyphus/evidence/task-T12a-too-large.txt
+
+  Scenario: Edge path G4 guard
+    Tool: Bash
+    Steps: attempt compaction before a flush-ownership token is present
+    Expected: eviction is blocked until T28a ownership is confirmed
+    Evidence: .sisyphus/evidence/task-T12a-g4.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/token-budget.ts`, `src/core/context-budget.ts` | Pre-commit: `bun test src/core/context-budget.test.ts`
+
+- [ ] T13a. Prompt assembler (core template + injection system primitives)
+
+  **What to do**:
+  - Own `src/core/prompt-template.ts`, `src/core/prompt-sections.ts`, and `src/core/prompt-renderer.ts`.
+  - Implement the prompt template engine, canonical section ordering, section-slot definitions, and budget-aware rendering primitives used by T24.
+  - Export a render API that accepts already-prepared section data; T13a does not select sources or decide role-specific injection.
+
+  **Must NOT do**:
+  - No direct reads from memory, lore, persona, or blackboard services.
+  - No role-policy branching beyond slot definitions and section ordering.
+  - No Gateway- or provider-specific formatting rules.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - small module, but it defines the prompt assembly boundary for all later tasks.
+  - Skills: `[]`
+  - Omitted: `deep` - keep templating deterministic and minimal.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T24 | Blocked By: T2, T12a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Architecture Optimization (Post-Review)`, `### Must Have`
+
+  **WHY Each Reference Matters**:
+  - The plan already says T24 is the sole coordinator; T13a must stop at rendering primitives so prompt ownership does not bleed across tasks.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/prompt-template.test.ts` passes.
+  - [ ] The renderer produces deterministic section order for the same input.
+  - [ ] Empty/omitted sections are skipped without corrupting prompt boundaries.
+  - [ ] Token-budget metadata from T12a can be threaded into the renderer without direct service calls.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path deterministic render
+    Tool: Bash
+    Steps: run `bun test src/core/prompt-template.test.ts`
+    Expected: the same input sections always render in the same order
+    Evidence: .sisyphus/evidence/task-T13a-render.txt
+
+  Scenario: Error path missing required section
+    Tool: Bash
+    Steps: render a prompt missing the system preamble slot
+    Expected: the renderer returns a typed prompt-template error
+    Evidence: .sisyphus/evidence/task-T13a-missing-section.txt
+
+  Scenario: Edge path optional section omission
+    Tool: Bash
+    Steps: render a prompt with optional lore and operational sections omitted
+    Expected: no empty placeholders are emitted into the final prompt
+    Evidence: .sisyphus/evidence/task-T13a-optional-sections.txt
+  ```
+
+  **Commit**: NO | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/prompt-template.ts`, `src/core/prompt-sections.ts`, `src/core/prompt-renderer.ts` | Pre-commit: `bun test src/core/prompt-template.test.ts`
+
+- [ ] T14a. Agent registry + lifecycle + permissions
+
+  **What to do**:
+  - Own `src/agents/registry.ts`, `src/agents/lifecycle.ts`, `src/agents/permissions.ts`, and `src/agents/presets.ts`.
+  - Implement the in-memory registry of `AgentProfile`s, minimal lifecycle helpers for persistent vs ephemeral agents, and the permission source used by Maiden authorization checks.
+  - Support profile lookup by ID, ephemeral task-agent spawn from a base profile, and role-based permission checks for tools and private-read access.
+  - Keep the registry as runtime configuration, not persisted state.
+
+  **Must NOT do**:
+  - No dynamic agent creation from user input or remote APIs.
+  - No persistence of registry state in SQLite.
+  - No role logic that duplicates T20a/T21/T22a profile behavior.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - compact module with important security boundaries.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser work.
+
+  **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T20a, T21, T22a | Blocked By: T2, T5, T10
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Reserved Interfaces`, `### Injection Rules by Agent Role`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## AuthorizationPolicy`
+
+  **WHY Each Reference Matters**:
+  - T14a is the source of permission truth for later agent/profile tasks and for Maiden's elevated access rules; it must remain a registry, not a workflow engine.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/agents/registry.test.ts` passes.
+  - [ ] Persistent and ephemeral profiles resolve through the same registry surface.
+  - [ ] Tool permissions and private-read permissions can be allowed/denied deterministically.
+  - [ ] All calling code depends on interface types, not concrete registry internals.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path profile lookup
+    Tool: Bash
+    Steps: run `bun test src/agents/registry.test.ts` with persistent and ephemeral profile fixtures
+    Expected: profiles resolve correctly and ephemeral task workers inherit the intended defaults
+    Evidence: .sisyphus/evidence/task-T14a-registry.txt
+
+  Scenario: Error path forbidden tool
+    Tool: Bash
+    Steps: ask the registry if a disallowed tool may be used by a fixture profile
+    Expected: permission is denied with a typed authorization result
+    Evidence: .sisyphus/evidence/task-T14a-permissions.txt
+
+  Scenario: Edge path Maiden private-read authorization
+    Tool: Bash
+    Steps: evaluate a Maiden authorization fixture against both allowed and denied target agents
+    Expected: the resolver returns different results without changing persisted visibility scopes
+    Evidence: .sisyphus/evidence/task-T14a-maiden-auth.txt
+  ```
+
+  **Commit**: YES | Message: `feat(core): add Model Services (chat + embedding registries), ToolExecutor dual-layer, agent loop, Rust TS baseline, reserved interfaces` | Files: `src/core/models/**`, `src/core/tools/**`, `src/core/interfaces/**`, `src/core/agent-loop.ts`, `src/core/run-context.ts`, `src/core/runtime-projection.ts`, `src/core/token-budget.ts`, `src/core/context-budget.ts`, `src/core/prompt-template.ts`, `src/core/prompt-sections.ts`, `src/core/prompt-renderer.ts`, `src/agents/registry.ts`, `src/agents/lifecycle.ts`, `src/agents/permissions.ts`, `src/agents/presets.ts`, `native/**`, `src/native-fallbacks/**`, `src/core/native.ts` | Pre-commit: `bun run build && bun test && cargo check --manifest-path native/Cargo.toml`
+
+- [ ] T15. Memory system wrapper task (normative spec: `memory-system.md`)
+
+  **What to do**:
+  - Treat `H:\MaidsClaw\.sisyphus\plans\memory-system.md` as the implementation authority for every `src/memory/**` file, task breakdown, acceptance criterion, and QA scenario.
+  - Satisfy the main-plan integration contracts only: receive storage primitives from T6, model services from T8, ToolExecutor integration from T9, and expose prompt-time data sources to T24 plus flush-job entry points to T27a/T28a.
+  - Keep `maidsclaw-v1.md` authoritative for wave placement, commit grouping, Core-vs-Extended scope, and cross-task orchestration.
+  - Resolve conflicts with this rule: memory internals follow `memory-system.md`; orchestration and cross-task ownership follow `maidsclaw-v1.md`.
+
+  **Must NOT do**:
+  - No duplicate memory spec written into this file.
+  - No memory code outside `src/memory/**` except the already-planned integration seams in T9, T10, T24, T27a, and T28a.
+  - No direct MCP IPC for memory tools.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - delegated to the dedicated memory plan.
+  - Skills: `[]`
+  - Omitted: `writing` - execution belongs to the normative sub-plan.
+
+  **Parallelization**: Can Parallel: YES | Wave 3 | Blocks: T24, T31 | Blocked By: T6, T9, T8
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Dependency Matrix`, `### Must Have`, `## Success Criteria`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - whole document, especially `## TODOs` and `## Success Criteria`
+
+  **WHY Each Reference Matters**:
+  - T15 is only executable if the memory sub-plan stays the single source of truth for memory internals while this plan continues to own all non-memory orchestration.
+
+  **Acceptance Criteria**:
+  - [ ] All implementation tasks and verification tasks in `memory-system.md` are completed.
+  - [ ] Memory local tools are registered through T9 ToolExecutor, not called directly by agents.
+  - [ ] T24 consumes memory prompt data through explicit interfaces rather than direct table access.
+  - [ ] T27a/T28a interact with memory via `MemoryFlushRequest` / job contracts only.
+  - [ ] No non-memory task creates or owns `src/memory/**` internals.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path wrapper contract
+    Tool: Bash
+    Steps: run the memory test suite and the prompt-builder integration tests
+    Expected: memory internals pass via `memory-system.md` and integrate through planned seams only
+    Evidence: .sisyphus/evidence/task-T15-wrapper.txt
+
+  Scenario: Error path direct-memory bypass
+    Tool: Bash
+    Steps: grep the codebase for agent/runtime modules calling memory internals directly instead of ToolExecutor/data-source interfaces
+    Expected: no bypasses are found outside approved seams
+    Evidence: .sisyphus/evidence/task-T15-bypass-audit.txt
+
+  Scenario: Edge path conflict resolution
+    Tool: Bash
+    Steps: compare memory-related requirements in both plans and audit one implementation decision against them
+    Expected: memory internals follow `memory-system.md`, orchestration follows `maidsclaw-v1.md`
+    Evidence: .sisyphus/evidence/task-T15-conflict-rule.txt
+  ```
+
+  **Commit**: NO | Message: `feat(knowledge): add memory system (-> memory-system.md), persona, lore canon, Blackboard, interaction log` | Files: `src/memory/**`, memory integration seams only | Pre-commit: `bun test src/memory/**/*.test.ts`
+
+- [ ] T16. Persona module (character cards + anti-drift)
+
+  **What to do**:
+  - Own `src/persona/card-schema.ts`, `src/persona/loader.ts`, `src/persona/service.ts`, and `src/persona/anti-drift.ts`.
+  - Standardize character cards as JSON files under the T6 storage root (`data/personas/*.json`) with fields for `id`, `display_name`, authored persona text, tool-permission hints, and lore tags.
+  - Initialize `core_memory.character` from the authored card via a deterministic render, then compare the current block against the authored baseline for drift detection.
+  - Expose read-only persona prompt data to T24; keep card originals immutable at runtime.
+
+  **Must NOT do**:
+  - No user-memory writes or runtime world-state ownership.
+  - No LLM-based persona rewriting in V1.
+  - No mutation of authored card files during a session.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - persona consistency is a first-class product contract.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser surface.
+
+  **Parallelization**: Can Parallel: YES | Wave 3 | Blocks: T24, T20a, T21 | Blocked By: T6, T9
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Knowledge Ownership Matrix`, `### Must Have`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `### Cross-Plan Coordination`
+
+  **WHY Each Reference Matters**:
+  - T16 owns authored persona truth while T15 owns runtime cognitive evolution; the boundary must stay crisp so cards remain the canonical authored source.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/persona/persona.test.ts` passes.
+  - [ ] Persona cards load from the configured storage root and validate against the card schema.
+  - [ ] Initializing a session copies authored persona text into `core_memory.character` deterministically.
+  - [ ] Drift detection reports divergence against the authored baseline without mutating runtime memory or card files.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path card load and init
+    Tool: Bash
+    Steps: run `bun test src/persona/persona.test.ts` with a valid card fixture
+    Expected: the card loads and initializes `core_memory.character` deterministically
+    Evidence: .sisyphus/evidence/task-T16-persona-init.txt
+
+  Scenario: Error path invalid card schema
+    Tool: Bash
+    Steps: load a malformed persona card fixture
+    Expected: validation fails with a typed persona-config error
+    Evidence: .sisyphus/evidence/task-T16-invalid-card.txt
+
+  Scenario: Edge path drift detection
+    Tool: Bash
+    Steps: modify `core_memory.character` in a test fixture and run anti-drift comparison
+    Expected: drift is reported without changing the authored card file
+    Evidence: .sisyphus/evidence/task-T16-drift.txt
+  ```
+
+  **Commit**: NO | Message: `feat(knowledge): add memory system (-> memory-system.md), persona, lore canon, Blackboard, interaction log` | Files: `src/persona/**`, `data/personas/**` | Pre-commit: `bun test src/persona/persona.test.ts`
+
+- [ ] T17. Shared lore canon and retrieval (first-class)
+
+  **What to do**:
+  - Own `src/lore/entry-schema.ts`, `src/lore/loader.ts`, `src/lore/matcher.ts`, and `src/lore/service.ts`.
+  - Standardize lore entries as JSON files under `data/lore/*.json` with `id`, `title`, `keywords[]`, `content`, `priority`, `applies_to_roles[]`, `enabled`, and `max_tokens` fields.
+  - Build a deterministic matcher that uses the T11a Aho-Corasick native helper when available and the TS fallback otherwise.
+  - Return prompt-safe lore excerpts sorted by priority, exact-keyword hits, and token budget; expose read-only lookup functions for T24.
+
+  **Must NOT do**:
+  - No writes to Public Narrative Store or runtime memory tables.
+  - No generated lore entries from live conversations.
+  - No prompt assembly inside the lore service.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - bounded subsystem with search/matching concerns.
+  - Skills: `[]`
+  - Omitted: `deep` - keep lore retrieval narrow and deterministic.
+
+  **Parallelization**: Can Parallel: YES | Wave 3 | Blocks: T24 | Blocked By: T6, T11a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Knowledge Ownership Matrix`, `### Injection Rules by Agent Role`
+  - External: `https://bun.com/docs/runtime/node-api` - native-fallback wrapper expectations
+
+  **WHY Each Reference Matters**:
+  - T17 owns authored canon retrieval only; the knowledge matrix and injection rules define exactly how far lore may reach and where it must stop.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/lore/lore.test.ts` passes.
+  - [ ] Lore entries load from disk and validate against the schema.
+  - [ ] Keyword matching returns the same results through native and TS fallback paths.
+  - [ ] Role filters and token budgets are enforced before T24 sees the results.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path lore match
+    Tool: Bash
+    Steps: run `bun test src/lore/lore.test.ts` with keyword fixtures
+    Expected: matching lore entries are returned in deterministic order
+    Evidence: .sisyphus/evidence/task-T17-lore-match.txt
+
+  Scenario: Error path malformed entry
+    Tool: Bash
+    Steps: load a malformed lore entry fixture
+    Expected: the loader rejects it with a typed schema error
+    Evidence: .sisyphus/evidence/task-T17-invalid-entry.txt
+
+  Scenario: Edge path fallback parity
+    Tool: Bash
+    Steps: run the same lookup once with native matching enabled and once with fallback only
+    Expected: both paths return equivalent entry IDs in the same order
+    Evidence: .sisyphus/evidence/task-T17-fallback-parity.txt
+  ```
+
+  **Commit**: NO | Message: `feat(knowledge): add memory system (-> memory-system.md), persona, lore canon, Blackboard, interaction log` | Files: `src/lore/**`, `data/lore/**` | Pre-commit: `bun test src/lore/lore.test.ts`
+
+- [ ] T18a. Shared operational state / Blackboard (5 namespaces)
+
+  **What to do**:
+  - Own `src/state/blackboard.ts`, `src/state/namespaces.ts`, and `src/state/location-helpers.ts`.
+  - Implement the V1 `SimpleBlackboard` contract as an in-memory namespaced store with explicit owner validation and helper accessors for agent/object location tracking.
+  - Support exactly the five V1 namespaces: `session.*`, `delegation.*`, `task.*`, `agent_runtime.*`, `transport.*`; keep `autonomy.*` reserved and rejected.
+  - Enforce the `agent_runtime.*` restriction to runtime state only.
+
+  **Must NOT do**:
+  - No narrative state, lore, or memory data in the blackboard.
+  - No implicit shared writes outside namespace ownership rules.
+  - No persistence requirements beyond the V1 in-memory stub.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - simple data structure with important ownership rules.
+  - Skills: `[]`
+  - Omitted: `deep` - do not turn this into a workflow engine.
+
+  **Parallelization**: Can Parallel: YES | Wave 3 | Blocks: T24, T20a | Blocked By: T6, T2
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Blackboard Namespace Contract`, `### Must NOT Have`
+
+  **WHY Each Reference Matters**:
+  - T18a is the operational-plane coordination surface; the namespace table already fixes what data may live there and who may write it.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/state/blackboard.test.ts` passes.
+  - [ ] Writes to reserved `autonomy.*` keys are rejected in V1 Core.
+  - [ ] Owner validation rejects writes to namespaces controlled by another actor.
+  - [ ] Narrative-looking payloads are rejected from `agent_runtime.*`.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path namespace writes
+    Tool: Bash
+    Steps: run `bun test src/state/blackboard.test.ts` with valid owner/key fixtures
+    Expected: valid writes and reads succeed for all five V1 namespaces
+    Evidence: .sisyphus/evidence/task-T18a-blackboard.txt
+
+  Scenario: Error path owner violation
+    Tool: Bash
+    Steps: attempt a write from the wrong owner to `delegation.*`
+    Expected: the write is rejected with a typed ownership error
+    Evidence: .sisyphus/evidence/task-T18a-owner-violation.txt
+
+  Scenario: Edge path runtime-state guard
+    Tool: Bash
+    Steps: write narrative content into `agent_runtime.*`
+    Expected: validation rejects the payload because that namespace is runtime-only
+    Evidence: .sisyphus/evidence/task-T18a-runtime-guard.txt
+  ```
+
+  **Commit**: NO | Message: `feat(knowledge): add memory system (-> memory-system.md), persona, lore canon, Blackboard, interaction log` | Files: `src/state/**` | Pre-commit: `bun test src/state/blackboard.test.ts`
+
+- [ ] T27a. Interaction log + commit service
+
+  **What to do**:
+  - Own `src/interaction/schema.ts`, `src/interaction/store.ts`, `src/interaction/commit-service.ts`, and `src/interaction/flush-selector.ts`.
+  - Persist every committed `InteractionRecord` append-only in SQLite, assign monotonic `recordIndex`, and keep payload JSON opaque except for contract-level validation.
+  - Select stable log ranges for memory flushes and emit `MemoryFlushRequest` enqueue decisions for T28a on: 10 RP turns, session close, idle timeout, manual maintenance, and accepted durable delegated/autonomous runs.
+  - Keep session-close and idle-time bookkeeping minimal in V1 Core; this task owns the commit/flush policy, not advanced orchestration.
+
+  **Must NOT do**:
+  - No memory ingestion semantics or graph writes.
+  - No log deletion or mutation of committed records.
+  - No RuntimeProjection execution; T10 owns the projection caller logic.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - durability and flush policy, but not memory internals.
+  - Skills: `[]`
+  - Omitted: `deep` - keep this task focused on log durability and range selection.
+
+  **Parallelization**: Can Parallel: YES | Wave 3 | Blocks: T28a, T32 | Blocked By: T6, T2
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Interaction Log and Memory Flush Contract`, `### Flush Trigger Policy`, `### Memory Worker Split`
+
+  **WHY Each Reference Matters**:
+  - The plan already locks what T27a owns and what it must not own; the task spec must stay inside those durability and enqueue boundaries.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/interaction/interaction-log.test.ts` passes.
+  - [ ] All six actor types and seven record types are persisted append-only with monotonic `recordIndex`.
+  - [ ] Flush selection produces idempotent `MemoryFlushRequest`s from stable ranges only.
+  - [ ] Stream cancellation after commit does not delete or mutate records.
+  - [ ] T27a does not perform memory writes or call memory ingestion directly.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path append-only commit
+    Tool: Bash
+    Steps: run `bun test src/interaction/interaction-log.test.ts` with mixed actor/record fixtures
+    Expected: records commit in order and remain immutable
+    Evidence: .sisyphus/evidence/task-T27a-commit.txt
+
+  Scenario: Error path duplicate flush enqueue
+    Tool: Bash
+    Steps: run the flush selector twice against the same stable range
+    Expected: the same idempotency key is reused and duplicate enqueue is prevented
+    Evidence: .sisyphus/evidence/task-T27a-idempotency.txt
+
+  Scenario: Edge path stream cancel after commit
+    Tool: Bash
+    Steps: commit a turn, cancel the stream, then inspect the interaction log
+    Expected: committed rows remain present and unchanged
+    Evidence: .sisyphus/evidence/task-T27a-cancel.txt
+  ```
+
+  **Commit**: YES | Message: `feat(knowledge): add memory system (-> memory-system.md), persona, lore canon, Blackboard, interaction log` | Files: `src/persona/**`, `src/lore/**`, `src/state/**`, `src/interaction/**`, `src/memory/**` | Pre-commit: `bun run build && bun test`
+
+- [ ] T24. Prompt builder - SOLE injection coordinator
+
+  **What to do**:
+  - Own `src/core/prompt-builder.ts`, `src/core/prompt-data-sources.ts`, and `src/core/area-state-resolver.ts`.
+  - Consume T13a's template engine and T12a's budgets to assemble per-role prompts from T15 memory data sources, T16 persona data, T17 lore lookups, and T18a operational excerpts.
+  - Implement the Knowledge Ownership Matrix injection rules exactly and make `AreaStateResolver` a prompt-time classifier that reads persisted `event_origin` and labels events as live perception vs historical recall only.
+  - Emit prompt sections in the order fixed by T13a; this task chooses sources and quantities, not render semantics.
+
+  **Must NOT do**:
+  - No direct SQL queries or raw FTS access.
+  - No prompt assembly outside this module.
+  - No durable current-state inference from `event_nodes`; `AreaStateResolver` is classification-only.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - this is the injection boundary for the whole system.
+  - Skills: `[]`
+  - Omitted: `frontend-ui-ux` - non-UI prompt assembly.
+
+  **Parallelization**: Can Parallel: NO | Wave 4 | Blocks: T20a, T21, T22a | Blocked By: T12a, T13a, T15, T16, T17, T18a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Knowledge Ownership Matrix`, `### Injection Rules by Agent Role`, `## Memory Contract Lock`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## AreaStateResolver`, `## Tool Surface (Final)`
+
+  **WHY Each Reference Matters**:
+  - T24 is the only task allowed to turn subsystem outputs into prompt input; the ownership matrix and AreaStateResolver rules define that boundary precisely.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/prompt-builder.test.ts` passes.
+  - [ ] Maiden, RP Agent, and Task Agent prompts differ according to the locked injection rules.
+  - [ ] `AreaStateResolver` classifies `runtime_projection` as live perception and `delayed_materialization` as historical recall without inferring durable state.
+  - [ ] T24 consumes data only through subsystem interfaces, not direct storage access.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path role-specific prompts
+    Tool: Bash
+    Steps: run `bun test src/core/prompt-builder.test.ts` with Maiden, RP, and Task fixtures
+    Expected: each role receives the correct prompt sections and ordering
+    Evidence: .sisyphus/evidence/task-T24-role-prompts.txt
+
+  Scenario: Error path data-source failure
+    Tool: Bash
+    Steps: make one subsystem data source throw during prompt assembly
+    Expected: prompt building fails with a typed error instead of silently omitting required sections
+    Evidence: .sisyphus/evidence/task-T24-data-source-error.txt
+
+  Scenario: Edge path area-state classification
+    Tool: Bash
+    Steps: feed area events with both `runtime_projection` and `delayed_materialization` origins into the resolver
+    Expected: they are classified differently for prompt use without producing durable-state claims
+    Evidence: .sisyphus/evidence/task-T24-area-state.txt
+  ```
+
+  **Commit**: YES | Message: `feat(prompt): implement sole-coordinator prompt builder with ownership-matrix-driven injection` | Files: `src/core/prompt-builder.ts`, `src/core/prompt-data-sources.ts`, `src/core/area-state-resolver.ts` | Pre-commit: `bun test src/core/prompt-builder.test.ts`
+
+- [ ] T20a. Maiden (minimal coordination + delegation inline)
+
+  **What to do**:
+  - Own `src/agents/maiden/profile.ts`, `src/agents/maiden/decision-policy.ts`, and `src/agents/maiden/delegation.ts`.
+  - Implement the minimal coordination flow: receive user turn, decide direct reply vs delegation, call into T14a/T10 to run the target agent, write delegation state to `delegation.*`, and forward subordinate output back to the caller.
+  - Emit `delegation` interaction records and preserve the delegated stream rather than rewriting it after the fact.
+  - Keep delegation mechanics inline here; T25 remains Extended-only hardening.
+
+  **Must NOT do**:
+  - No RP-specific persona generation or task-agent business logic.
+  - No direct MCP calls or direct prompt assembly.
+  - No custom recursion logic separate from the core loop guard.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - Maiden is the main orchestration profile on the critical path.
+  - Skills: `[]`
+  - Omitted: `playwright` - backend runtime only.
+
+  **Parallelization**: Can Parallel: YES | Wave 5 | Blocks: T26, T32 | Blocked By: T10, T14a, T15, T16, T24
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Interview Summary`, `### Injection Rules by Agent Role`, `### Must Have`
+
+  **WHY Each Reference Matters**:
+  - The plan already fixes Maiden as a real coordinator, not a thin router; T20a must implement only that minimal orchestration role and nothing else.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/agents/maiden/maiden.test.ts` passes.
+  - [ ] Maiden can choose between direct reply and delegated execution using only profile/runtime inputs.
+  - [ ] Delegation writes `delegation.*` blackboard state and emits interaction-log records.
+  - [ ] Missing/unavailable target agents fail gracefully with a typed runtime error.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path delegated turn
+    Tool: Bash
+    Steps: run `bun test src/agents/maiden/maiden.test.ts` with a fixture that delegates to an RP agent
+    Expected: Maiden delegates, forwards the subordinate output, and records the delegation
+    Evidence: .sisyphus/evidence/task-T20a-delegate.txt
+
+  Scenario: Error path missing target agent
+    Tool: Bash
+    Steps: run the same test with an unknown target agent ID
+    Expected: Maiden returns a typed unavailable-agent error without hanging the request
+    Evidence: .sisyphus/evidence/task-T20a-missing-target.txt
+
+  Scenario: Edge path delegation cycle
+    Tool: Bash
+    Steps: create a fixture where Maiden would re-enter a previously visited agent chain
+    Expected: the run is blocked by the core recursion guard
+    Evidence: .sisyphus/evidence/task-T20a-cycle.txt
+  ```
+
+  **Commit**: NO | Message: `feat(agents): define Maiden/RP/Task AgentProfiles + delegation + ephemeral workers` | Files: `src/agents/maiden/**` | Pre-commit: `bun test src/agents/maiden/maiden.test.ts`
+
+- [ ] T21. RP Agent profile (persona role)
+
+  **What to do**:
+  - Own `src/agents/rp/profile.ts` and `src/agents/rp/tool-policy.ts`.
+  - Define the RP Agent profile defaults: persona-aware prompt role, allowed tool set, memory-tool access, lore-enabled injection, and default chat model selection.
+  - Keep the profile declarative so the T10 loop stays role-agnostic.
+  - Ensure the RP agent can call persona-fitting local tools and delegated task helpers through T9, not bespoke runtime code.
+
+  **Must NOT do**:
+  - No loop logic, prompt-builder logic, or character-card loading.
+  - No access to another agent's private memory outside authorized routes.
+  - No profile-local transport code.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - this is the product-facing conversation profile.
+  - Skills: `[]`
+  - Omitted: `frontend-ui-ux` - no UI scope.
+
+  **Parallelization**: Can Parallel: YES | Wave 5 | Blocks: T26 | Blocked By: T10, T14a, T16, T24
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Injection Rules by Agent Role`, `### Must Have`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `## Tool Surface (Final)`
+
+  **WHY Each Reference Matters**:
+  - T21 must expose the RP agent as a declarative profile that consumes persona, lore, and memory contracts without taking ownership of those subsystems.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/agents/rp/rp-agent.test.ts` passes.
+  - [ ] The RP profile uses persona + lore + memory prompt data via T24 only.
+  - [ ] Allowed tools include the memory surface and persona-fitting tools only.
+  - [ ] Forbidden tools are rejected by profile policy.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path RP profile assembly
+    Tool: Bash
+    Steps: run `bun test src/agents/rp/rp-agent.test.ts` with a complete profile fixture
+    Expected: the RP agent receives the correct prompt role and tool permissions
+    Evidence: .sisyphus/evidence/task-T21-profile.txt
+
+  Scenario: Error path forbidden tool
+    Tool: Bash
+    Steps: ask the RP profile to authorize a non-permitted tool
+    Expected: authorization is denied deterministically
+    Evidence: .sisyphus/evidence/task-T21-tool-deny.txt
+
+  Scenario: Edge path private-memory boundary
+    Tool: Bash
+    Steps: attempt to read another agent's private memory through the RP profile fixture
+    Expected: the profile does not expose unauthorized access paths
+    Evidence: .sisyphus/evidence/task-T21-private-boundary.txt
+  ```
+
+  **Commit**: NO | Message: `feat(agents): define Maiden/RP/Task AgentProfiles + delegation + ephemeral workers` | Files: `src/agents/rp/**` | Pre-commit: `bun test src/agents/rp/rp-agent.test.ts`
+
+- [ ] T22a. Task Agent (minimal worker profile)
+
+  **What to do**:
+  - Own `src/agents/task/profile.ts` and `src/agents/task/output-schema.ts`.
+  - Define the default task-agent profile as ephemeral, non-user-facing, and structured-output-first.
+  - Make narrative-plane context opt-in by explicit task contract; the default worker profile gets no lore/memory prompt data.
+  - Support detachable runs when the caller marks the task safe to continue after the originating stream ends.
+
+  **Must NOT do**:
+  - No persistent private memory for task agents.
+  - No default freeform conversational output.
+  - No direct gateway/session logic.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - focused profile work with explicit contract boundaries.
+  - Skills: `[]`
+  - Omitted: `deep` - keep the worker profile minimal in V1 Core.
+
+  **Parallelization**: Can Parallel: YES | Wave 5 | Blocks: T26 | Blocked By: T10, T14a, T24
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Interview Summary`, `### Must Have`
+
+  **WHY Each Reference Matters**:
+  - T22a is intentionally constrained: it exists to make delegated work executable without turning task agents into full narrative actors by default.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/agents/task/task-agent.test.ts` passes.
+  - [ ] Task agents spawn as ephemeral profiles through T14a.
+  - [ ] Structured output is validated before the result is returned to the caller.
+  - [ ] Narrative prompt data is absent unless explicitly requested by the task contract.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path structured worker
+    Tool: Bash
+    Steps: run `bun test src/agents/task/task-agent.test.ts` with a JSON-output fixture
+    Expected: the task agent returns validated structured output and exits cleanly
+    Evidence: .sisyphus/evidence/task-T22a-structured.txt
+
+  Scenario: Error path invalid output shape
+    Tool: Bash
+    Steps: return malformed structured output from a task-agent fixture
+    Expected: schema validation fails and the result is rejected
+    Evidence: .sisyphus/evidence/task-T22a-invalid-output.txt
+
+  Scenario: Edge path detached run policy
+    Tool: Bash
+    Steps: mark a task as detachable and end the caller stream mid-run
+    Expected: the worker lifecycle follows the detach policy rather than crashing
+    Evidence: .sisyphus/evidence/task-T22a-detached.txt
+  ```
+
+  **Commit**: YES | Message: `feat(agents): define Maiden/RP/Task AgentProfiles + delegation + ephemeral workers` | Files: `src/agents/maiden/**`, `src/agents/rp/**`, `src/agents/task/**` | Pre-commit: `bun run build && bun test`
+
+- [ ] T28a. Minimal job runtime / scheduler substrate
+
+  **What to do**:
+  - Own `src/jobs/types.ts`, `src/jobs/queue.ts`, `src/jobs/dedup.ts`, `src/jobs/dispatcher.ts`, and `src/jobs/scheduler.ts`.
+  - Implement the three V1 Core job kinds (`memory.migrate`, `memory.organize`, `task.run`), the five execution classes, concurrency caps, retry hooks, and the exact `job_key` format `{job_type}:{scope}:{batch_identity}`.
+  - Enforce coalesce/drop/noop rules and the G4 ownership transfer signal used by T12a before compaction can evict a batch.
+  - Keep job execution generic: the runtime schedules and dispatches, but job-specific work lives in the owning subsystem.
+
+  **Must NOT do**:
+  - No interaction-log durability or flush-range selection.
+  - No job-specific business logic inside the scheduler.
+  - No higher-level autonomy features from Extended scope.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - concurrency, dedup, and retry semantics are central runtime guarantees.
+  - Skills: `[]`
+  - Omitted: `playwright` - backend only.
+
+  **Parallelization**: Can Parallel: YES | Wave 6 | Blocks: T32 | Blocked By: T5, T14a, T27a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Background Job and Backpressure Policy`, `### Eviction Invariant (Three-Part Chain)`
+
+  **WHY Each Reference Matters**:
+  - T28a exists to make the plan's fixed job semantics executable without swallowing job-specific ownership from memory or delegated work.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/jobs/job-runtime.test.ts` passes.
+  - [ ] Dedup behavior matches the pending/running/completed coalesce-drop-noop table exactly.
+  - [ ] Concurrency limits and execution-class ordering follow the plan defaults.
+  - [ ] T28a emits/records an ownership token before T12a may evict a batch.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path dedup and scheduling
+    Tool: Bash
+    Steps: run `bun test src/jobs/job-runtime.test.ts` with multiple job-key fixtures
+    Expected: pending jobs coalesce, running duplicates drop, completed duplicates noop
+    Evidence: .sisyphus/evidence/task-T28a-dedup.txt
+
+  Scenario: Error path retry exhaustion
+    Tool: Bash
+    Steps: dispatch a retriable job fixture that fails beyond its retry budget
+    Expected: the runtime marks the job failed without losing the queue state
+    Evidence: .sisyphus/evidence/task-T28a-retry.txt
+
+  Scenario: Edge path G4 ownership transfer
+    Tool: Bash
+    Steps: inspect the compaction handoff for a memory batch fixture
+    Expected: eviction remains blocked until T28a has accepted ownership
+    Evidence: .sisyphus/evidence/task-T28a-g4.txt
+  ```
+
+  **Commit**: NO | Message: `feat(runtime): add minimal job runtime (job_key dedup, execution classes) + Gateway API server` | Files: `src/jobs/**` | Pre-commit: `bun test src/jobs/job-runtime.test.ts`
+
+- [ ] T26. Gateway API server (5 endpoints + 7 SSE event types)
+
+  **What to do**:
+  - Own `src/gateway/server.ts`, `src/gateway/routes.ts`, `src/gateway/sse.ts`, `src/gateway/controllers.ts`, and `src/session/service.ts`.
+  - Implement exactly the five Gateway V1 endpoints and the seven SSE event types from the locked contract.
+  - Use `Bun.serve()` with an SSE helper that preserves streaming order, disables idle timeout for active event streams, and handles client disconnects cleanly.
+  - Route turn execution into the runtime/session service; keep HTTP transport and session lifecycle thin and deterministic.
+
+  **Must NOT do**:
+  - No OpenAI-compatible API compatibility layer.
+  - No UI serving or dashboard rendering.
+  - No business logic that bypasses T20a/T21/T22a/T10.
+
+  **Recommended Agent Profile**:
+  - Category: `unspecified-high` - transport layer with strict contract matching.
+  - Skills: `[]`
+  - Omitted: `playwright` - browser automation is not part of V1 verification.
+
+  **Parallelization**: Can Parallel: YES | Wave 6 | Blocks: T32, T33 | Blocked By: T20a, T21, T22a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Gateway V1 Contract`, `### Error Model`
+  - External: `https://bun.com/docs/guides/http/sse` - Bun SSE response pattern
+
+  **WHY Each Reference Matters**:
+  - The transport contract is already fully specified; T26 must implement it exactly and stop there.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/gateway/gateway.test.ts` passes.
+  - [ ] `GET /healthz` and `GET /readyz` return the locked readiness shapes.
+  - [ ] `POST /v1/sessions`, `POST /v1/sessions/{id}/turns:stream`, and `POST /v1/sessions/{id}/close` follow the fixed request/response contract.
+  - [ ] SSE output uses only the seven approved event types and preserves `session_id`, `request_id`, `event_id`, `ts`, `type`, and `data`.
+  - [ ] Client disconnects do not corrupt committed interaction-log state.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path session + SSE stream
+    Tool: Bash
+    Steps: run `bun test src/gateway/gateway.test.ts` and the fixture HTTP stream harness
+    Expected: the server creates a session and streams contract-valid SSE events in order
+    Evidence: .sisyphus/evidence/task-T26-gateway.txt
+
+  Scenario: Error path provider failure
+    Tool: Bash
+    Steps: force the upstream model fixture to time out during `turns:stream`
+    Expected: the Gateway emits the typed error envelope with a retriable flag
+    Evidence: .sisyphus/evidence/task-T26-provider-timeout.txt
+
+  Scenario: Edge path client disconnect
+    Tool: Bash
+    Steps: disconnect the SSE client mid-stream and inspect server state
+    Expected: transport closes cleanly and previously committed records remain durable
+    Evidence: .sisyphus/evidence/task-T26-client-disconnect.txt
+  ```
+
+  **Commit**: YES | Message: `feat(runtime): add minimal job runtime (job_key dedup, execution classes) + Gateway API server` | Files: `src/jobs/**`, `src/gateway/**`, `src/session/**` | Pre-commit: `bun run build && bun test`
+
+- [ ] T32. End-to-end integration + demo scenario
+
+  **What to do**:
+  - Own `test/e2e/demo-scenario.test.ts`, `test/fixtures/demo/**`, and `scripts/demo.ts`.
+  - Define one canonical demo flow and keep it stable: start the server with `maid:main`, `rp:alice`, and `task:runner`; create a session; send the turn `Please ask Alice to bring coffee and remember I prefer oat milk.`; verify Maiden delegates, the RP agent updates user memory, the task agent returns structured work output, and the Gateway streams the expected events.
+  - Extend the fixture run to a deterministic 10-turn conversation so the memory-flush trigger, job runtime, and interaction log all activate in one automated scenario.
+
+  **Must NOT do**:
+  - No new product behavior invented only for the demo.
+  - No manual-only QA steps.
+  - No skipping subsystem contracts just to make the demo pass.
+
+  **Recommended Agent Profile**:
+  - Category: `deep` - full-system integration across all critical seams.
+  - Skills: `[]`
+  - Omitted: `playwright` - no browser layer exists.
+
+  **Parallelization**: Can Parallel: YES | Wave 7 | Blocks: F1-F4 | Blocked By: T26, T27a, T28a
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `### Definition of Done`, `### Layer B: Live Exploratory Validation`
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\memory-system.md` - `### Definition of Done`
+
+  **WHY Each Reference Matters**:
+  - T32 is where the main-plan and memory-plan contracts meet; the demo must prove the exact end-to-end promises already listed in both plans.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test test/e2e/demo-scenario.test.ts` passes.
+  - [ ] The demo exercises delegation, memory writes, interaction-log durability, and job scheduling in one run.
+  - [ ] The scripted 10-turn fixture produces a memory flush and completes without manual intervention.
+  - [ ] SSE event ordering matches the Gateway contract during the demo.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path canonical demo
+    Tool: Bash
+    Steps: run `bun test test/e2e/demo-scenario.test.ts`
+    Expected: the full scripted scenario passes with delegation, memory, jobs, and SSE all active
+    Evidence: .sisyphus/evidence/task-T32-demo.txt
+
+  Scenario: Error path upstream model failure
+    Tool: Bash
+    Steps: rerun the demo with a fixture model timeout injected on one turn
+    Expected: the scenario fails with the correct typed runtime/Gateway error rather than hanging
+    Evidence: .sisyphus/evidence/task-T32-model-failure.txt
+
+  Scenario: Edge path ten-turn flush trigger
+    Tool: Bash
+    Steps: inspect the scripted 10-turn portion of the demo run
+    Expected: a `memory.migrate` job is enqueued from a stable range at the threshold
+    Evidence: .sisyphus/evidence/task-T32-flush-trigger.txt
+  ```
+
+  **Commit**: NO | Message: `feat(integration): E2E demo scenario, startup configs` | Files: `test/e2e/**`, `test/fixtures/demo/**`, `scripts/demo.ts` | Pre-commit: `bun test test/e2e/demo-scenario.test.ts`
+
+- [ ] T33. Configuration examples + startup scripts
+
+  **What to do**:
+  - Own `.env.example`, `config/models.example.json`, `config/agents.example.json`, `config/lore.example.json`, `config/personas.example.json`, `scripts/start-dev.ts`, and `scripts/check-system.ts`.
+  - Provide example-only config files that validate through T3 and support the canonical local startup path.
+  - Add operator scripts for local boot and basic readiness checks without bypassing the real runtime entrypoints.
+
+  **Must NOT do**:
+  - No real credentials or secrets.
+  - No alternate code path that differs from the production runtime.
+  - No deployment-specific infrastructure automation in V1 Core.
+
+  **Recommended Agent Profile**:
+  - Category: `quick` - examples and operator scripts only.
+  - Skills: `[]`
+  - Omitted: `deep` - keep examples thin and mechanical.
+
+  **Parallelization**: Can Parallel: YES | Wave 7 | Blocks: F1-F4 | Blocked By: T26
+
+  **References**:
+  - Pattern: `H:\MaidsClaw\.sisyphus\plans\maidsclaw-v1.md` - `## Success Criteria`, `## Commit Strategy`
+
+  **WHY Each Reference Matters**:
+  - T33 exists to make the already-defined runtime operable from a clean checkout without smuggling in undocumented runtime behavior.
+
+  **Acceptance Criteria**:
+  - [ ] `bun test src/core/config.test.ts` passes against the example config files.
+  - [ ] `bun run start` can boot using only example/local config plus operator-provided real secrets.
+  - [ ] `scripts/check-system.ts` verifies healthz and readyz without custom runtime shortcuts.
+
+  **QA Scenarios**:
+  ```text
+  Scenario: Happy path example config validation
+    Tool: Bash
+    Steps: validate the example config files through the T3 loader and run the local startup script
+    Expected: config examples load cleanly and boot the real runtime entrypoint
+    Evidence: .sisyphus/evidence/task-T33-configs.txt
+
+  Scenario: Error path placeholder secret
+    Tool: Bash
+    Steps: run startup with only placeholder secret values from `.env.example`
+    Expected: startup fails with a clear typed config/provider error
+    Evidence: .sisyphus/evidence/task-T33-placeholder-secrets.txt
+
+  Scenario: Edge path readiness check script
+    Tool: Bash
+    Steps: start the server locally and execute `scripts/check-system.ts`
+    Expected: the script hits `/healthz` and `/readyz` and reports contract-valid responses
+    Evidence: .sisyphus/evidence/task-T33-readiness.txt
+  ```
+
+  **Commit**: YES | Message: `feat(integration): E2E demo scenario, startup configs` | Files: `.env.example`, `config/*.example.json`, `scripts/start-dev.ts`, `scripts/check-system.ts`, `test/e2e/**`, `test/fixtures/demo/**` | Pre-commit: `bun run build && bun test test/e2e/demo-scenario.test.ts`
+
 ---
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
@@ -970,7 +2486,7 @@ curl http://localhost:PORT/readyz  # Expected: {"status":"ready","storage":"ok",
 - [ ] No agent code directly calls MCP client — all through ToolExecutor
 - [ ] Model Services: ≥2 chat providers + ≥1 embedding provider, resolved independently via ModelServiceRegistry
 - [ ] Memory system: all 16 tables + 3 search projection + 3 FTS5 created, scope-aware graph storage functional (event_nodes=area_visible/world_public only with promotion_class + source_record_id + event_origin, fact_edges=world_public only), bi-temporal fact edges working, Per-Agent Cognitive Graph operational (private_event + private_belief as first-class nodes with event_category/projection_class/projectable_summary/source_record_id/epistemic_status/source_event_ref) (→ see memory-system.md)
-- [ ] Memory system: Core Memory 3 blocks + view-aware pointer retrieval + scope-partitioned FTS5 Memory Hints via VisibilityPolicy + dual-write Task Agent pipeline + Delayed Public Materialization (private_event → area_visible event with RuntimeProjection reconciliation + text safety) + Promotion Pipeline (2-type) + scope-filtered graph navigator (with 5-kind frontier adjacency including private_event/private_belief traversal for owner) all operational (→ see memory-system.md)
+- [ ] Memory system: Core Memory 3 blocks + view-aware pointer retrieval + scope-partitioned FTS5 Memory Hints via VisibilityPolicy + Task Agent pipeline with owner-private writes + shared entity/structure writes + materialization/promotion candidate emission + Delayed Public Materialization (private_event → area_visible event with RuntimeProjection reconciliation + text safety) + Promotion Pipeline (2-type) + scope-filtered graph navigator (with 5-kind frontier adjacency including private_event/private_belief traversal for owner) all operational (→ see memory-system.md)
 - [ ] Memory system: all retrieval view-aware via Viewer Context + VisibilityPolicy, no private data leakage between agents, no owner_private entities in area/world records, no maiden_authorized in persisted scope, AuthorizationPolicy for Maiden elevated read (→ see memory-system.md)
 - [ ] Memory system: authority split enforced — Shared Lore Canon is authoritative for authored canon and world rules; Public Narrative Store is authoritative for runtime-emergent shared narrative records and promoted public facts; domains non-overlapping; AreaStateResolver is retrieval-only (no durable state derivation, no state snapshots, no `state_effect` in V1); direct runtime projection restricted to `speech` event_category only for assistant `message` records (no hot-path text reparsing; only producer-generated `ProjectionAppendix` makes a record projectable)
 - [ ] Shared lore canon: entries loadable, keyword-triggered injection working for Maiden + RP

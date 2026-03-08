@@ -1,0 +1,11 @@
+T6 Storage — FTS5 Evidence
+==========================
+Date: 2026-03-08
+
+Test 1: "FTS5 verification: ENABLE_FTS5 is available"
+  Query: SELECT sqlite_compileoption_used('ENABLE_FTS5')
+  Result: 1 (true)
+
+Test 2: "FTS5 trigram tokenizer: creates successfully"
+  Query: CREATE VIRTUAL TABLE test_fts USING fts5(content, tokenize='trigram')
+  Result: No error thrown — FTS5 with trigram tokenizer is available in bun:sqlite

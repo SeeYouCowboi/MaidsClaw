@@ -1,0 +1,28 @@
+=== Task T5: Event Bus / Inter-Agent Communication ===
+Timestamp: 2025-03-08
+
+EventBus implementation complete with typed event map.
+
+Files created:
+- src/core/events.ts (100 lines) — V1 frozen event map with 12 events
+- src/core/event-bus.ts (127 lines) — emit, on, off, once implementation
+- test/core/event-bus.test.ts (99 lines) — 6 tests covering all behaviors
+
+Test results: 6 pass, 0 fail, 9 expect() calls
+
+Key behaviors verified:
+1. Typed payloads enforced at compile time via EventMap
+2. Throwing listeners log error and continue (other listeners still run)
+3. once() listeners self-remove after first emit
+4. Unsubscribe function returned by on() removes the listener
+5. off() removes specific handler by reference equality
+6. Multiple event types are isolated (no cross-contamination)
+
+EventMap contains 12 frozen events:
+- interaction.committed
+- job.enqueued, job.started, job.completed
+- tool.called, tool.completed
+- delegate.started, delegate.completed
+- session.closed
+- mcp.connected, mcp.disconnected
+- memory.flush_requested

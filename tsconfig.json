@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "types": ["bun-types"],
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "dist",
+    "rootDir": ".",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/core/*"],
+      "@agents/*": ["src/agents/*"],
+      "@memory/*": ["src/memory/*"],
+      "@persona/*": ["src/persona/*"],
+      "@lore/*": ["src/lore/*"],
+      "@state/*": ["src/state/*"],
+      "@interaction/*": ["src/interaction/*"],
+      "@jobs/*": ["src/jobs/*"],
+      "@gateway/*": ["src/gateway/*"],
+      "@session/*": ["src/session/*"],
+      "@storage/*": ["src/storage/*"],
+      "@native/*": ["src/native-fallbacks/*"]
+    }
+  },
+  "include": ["src/**/*", "test/**/*", "types/**/*"],
+  "exclude": ["node_modules", "dist", "native"]
+}

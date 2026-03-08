@@ -1,0 +1,63 @@
+Task T4: Child Logger Behavior - Evidence File
+Generated: 2026-03-08
+
+=== Child Logger Inheritance ===
+
+Parent logger creation:
+const parent = createLogger();
+
+Child 1 creation:
+const child1 = parent.child({ session_id: "s1" });
+
+Child 2 creation:
+const child2 = parent.child({ session_id: "s2" });
+
+Child 1 log output:
+{"level":"info","message":"from child 1","context":{"session_id":"s1"},"timestamp":...}
+
+Child 2 log output:
+{"level":"info","message":"from child 2","context":{"session_id":"s2"},"timestamp":...}
+
+Test case: Logger > edge path: child loggers don't cross-contaminate
+Result: ✓ PASS
+
+=== Context Merging ===
+
+Parent context + child context + per-call context:
+const child = parent.child({ session_id: "s1", agent_id: "a1" });
+child.info("test", { agent_id: "a2", tool_name: "my_tool" });
+
+Resulting context:
+{
+  "session_id": "s1",      // from child context
+  "agent_id": "a2",        // from per-call context (overrides child)
+  "tool_name": "my_tool"   // from per-call context
+}
+
+Test case: Logger > child logger inherits parent context and merges with per-call context
+Result: ✓ PASS
+
+=== Multi-Level Inheritance ===
+
+Grandparent → Parent → Child:
+const grandparent = createLogger();
+const parent = grandparent.child({ session_id: "s1" });
+const child = parent.child({ agent_id: "a1" });
+child.info("test");
+
+Resulting context:
+{
+  "session_id": "s1",
+  "agent_id": "a1"
+}
+
+Test case: Logger > grandchild logger inherits both parent and grandparent context
+Result: ✓ PASS
+
+=== Implementation Detail ===
+
+child(ctx: LogContext): Logger {
+  return new StructuredLogger({ ...this.baseContext, ...ctx }, this.level, this.name);
+}
+
+Key behavior: New logger instance with merged context - no cross-contamination possible.

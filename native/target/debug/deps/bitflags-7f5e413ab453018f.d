@@ -1,0 +1,11 @@
+H:\MaidsClaw\native\target\debug\deps\libbitflags-7f5e413ab453018f.rmeta: C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src/lib.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\iter.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\parser.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\traits.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\public.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\internal.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\external.rs
+
+H:\MaidsClaw\native\target\debug\deps\bitflags-7f5e413ab453018f.d: C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src/lib.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\iter.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\parser.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\traits.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\public.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\internal.rs C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\external.rs
+
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src/lib.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\iter.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\parser.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\traits.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\public.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\internal.rs:
+C:\Users\TeaCat\.cargo\registry\src\index.crates.io-6f17d22bba15001f\bitflags-2.11.0\src\external.rs:

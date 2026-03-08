@@ -1,0 +1,47 @@
+Task T2: Type Normalization Evidence
+====================================
+Date: 2026-03-08
+Status: COMPLETED
+
+Type Import/Export Normalization:
+---------------------------------
+All types use consistent ESM import conventions with .js extensions:
+
+1. src/core/types.ts:
+   import type { AgentProfile } from ../agents/profile.js;
+
+2. src/interaction/contracts.ts:
+   import type { ProjectionAppendix } from ../core/types.js;
+
+3. test/core/types.test.ts:
+   import { ... } from ../../src/core/chunk.js;
+   import type { ... } from ../../src/agents/profile.js;
+   import type { ... } from ../../src/interaction/contracts.js;
+   import type { ... } from ../../src/core/types.js;
+
+Union Type Discrimination:
+--------------------------
+All Chunk variants use 'type' field for discrimination:
+- TextDeltaChunk: type: text_delta
+- ToolUseStartChunk: type: tool_use_start
+- ToolUseDeltaChunk: type: tool_use_delta
+- ToolUseEndChunk: type: tool_use_end
+- MessageEndChunk: type: message_end
+- ErrorChunk: type: error
+
+String Literal Normalization:
+-----------------------------
+All string literals use lowercase snake_case consistently:
+- ActorType: user | rp_agent | maiden | task_agent | system | autonomy
+- RecordType: message | tool_call | tool_result | delegation | task_result | schedule_trigger | status
+- AgentRole: maiden | rp_agent | task_agent
+- AgentLifecycle: persistent | ephemeral
+- OutputMode: freeform | structured
+
+Optionality Patterns:
+---------------------
+- Required fields: no ? marker
+- Optional fields: ? marker with undefined in type
+- Optional complex types: Partial<T> for overrides
+- Unknown payloads: payload: unknown (runtime validated)
+

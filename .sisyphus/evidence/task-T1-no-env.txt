@@ -1,0 +1,21 @@
+=== Task T1 Evidence: Build without .env ===
+Date: Sun Mar 08 2026
+Platform: Windows (win32)
+Note: No .env file exists (as required - T33 owns .env creation)
+
+=== bun run build (without .env) ===
+$ tsc --noEmit
+(Success - no TypeScript errors)
+
+=== bun test (without .env) ===
+bun test v1.3.10 (30e609e0)
+
+ 3 pass
+ 0 fail
+ 5 expect() calls
+Ran 3 tests across 1 file. [54.00ms]
+
+=== Verification ===
+✓ Project builds without environment variables
+✓ Bootstrap tests pass without .env file
+✓ Scaffold is self-contained
