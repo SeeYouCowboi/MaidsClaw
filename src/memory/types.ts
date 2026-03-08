@@ -1,0 +1,455 @@
+export const MAX_INTEGER = Number.MAX_SAFE_INTEGER;
+
+export const VISIBILITY_SCOPES = ["system_only", "owner_private", "area_visible", "world_public"] as const;
+export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
+
+export const MEMORY_SCOPES = ["shared_public", "private_overlay"] as const;
+export type MemoryScope = (typeof MEMORY_SCOPES)[number];
+
+export const EVENT_ORIGINS = ["runtime_projection", "delayed_materialization", "promotion"] as const;
+export type EventOrigin = (typeof EVENT_ORIGINS)[number];
+
+export const PUBLIC_EVENT_CATEGORIES = ["speech", "action", "observation", "state_change"] as const;
+export type PublicEventCategory = (typeof PUBLIC_EVENT_CATEGORIES)[number];
+
+export const PRIVATE_EVENT_CATEGORIES = ["speech", "action", "thought", "observation", "state_change"] as const;
+export type PrivateEventCategory = (typeof PRIVATE_EVENT_CATEGORIES)[number];
+
+export const LOGIC_EDGE_TYPES = ["causal", "temporal_prev", "temporal_next", "same_episode"] as const;
+export type LogicEdgeType = (typeof LOGIC_EDGE_TYPES)[number];
+
+export const SEMANTIC_EDGE_TYPES = ["semantic_similar", "conflict_or_update", "entity_bridge"] as const;
+export type SemanticEdgeType = (typeof SEMANTIC_EDGE_TYPES)[number];
+
+export const EMBEDDING_VIEW_TYPES = ["primary", "keywords", "context"] as const;
+export type EmbeddingViewType = (typeof EMBEDDING_VIEW_TYPES)[number];
+
+export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state"] as const;
+export type QueryType = (typeof QUERY_TYPES)[number];
+
+export const NAVIGATOR_EDGE_KINDS = [
+  "causal",
+  "temporal_prev",
+  "temporal_next",
+  "same_episode",
+  "fact_relation",
+  "fact_support",
+  "participant",
+  "semantic_similar",
+  "conflict_or_update",
+  "entity_bridge",
+] as const;
+export type NavigatorEdgeKind = (typeof NAVIGATOR_EDGE_KINDS)[number];
+
+export const PROMOTION_ACTIONS = ["reuse", "promote_full", "promote_placeholder", "block"] as const;
+export type PromotionAction = (typeof PROMOTION_ACTIONS)[number];
+
+export const BELIEF_TYPES = ["observation", "inference", "suspicion", "intention"] as const;
+export type BeliefType = (typeof BELIEF_TYPES)[number];
+
+export const PROJECTION_CLASSES = ["none", "area_candidate"] as const;
+export type ProjectionClass = (typeof PROJECTION_CLASSES)[number];
+
+export const PROMOTION_CLASSES = ["none", "world_candidate"] as const;
+export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
+
+export const EPISTEMIC_STATUSES = ["confirmed", "suspected", "hypothetical", "retracted"] as const;
+export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
+
+export const VIEWER_ROLES = ["maiden", "rp_agent", "task_agent"] as const;
+export type ViewerRole = (typeof VIEWER_ROLES)[number];
+
+export const CORE_MEMORY_LABELS = ["character", "user", "index"] as const;
+export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
+
+export const NODE_REF_KINDS = ["event", "entity", "fact", "private_event", "private_belief"] as const;
+export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
+
+type Brand<T, Name extends string> = T & { readonly __brand: Name };
+type NodeRefLiteral = `${NodeRefKind}:${number}`;
+export type NodeRef = Brand<NodeRefLiteral, "NodeRef">;
+
+export type ViewerContext = {
+  viewer_agent_id: string;
+  viewer_role: ViewerRole;
+  current_area_id: number;
+  session_id: string;
+};
+
+export type MemoryMigration = {
+  migration_id: string;
+  description: string;
+  applied_at: number;
+};
+
+export type MemoryRuntimeState = {
+  key: string;
+  value: string;
+  updated_at: number;
+};
+
+export type MemoryMaintenanceJob = {
+  id: number;
+  job_type: string;
+  status: string;
+  payload: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type EventNode = {
+  id: number;
+  session_id: string;
+  raw_text: string | null;
+  summary: string | null;
+  timestamp: number;
+  created_at: number;
+  // participants must be JSON array of resolved entity refs, never free-text names.
+  participants: string | null;
+  emotion: string | null;
+  topic_id: number | null;
+  visibility_scope: "area_visible" | "world_public";
+  location_entity_id: number;
+  event_category: PublicEventCategory;
+  primary_actor_entity_id: number | null;
+  promotion_class: PromotionClass;
+  source_record_id: string | null;
+  event_origin: EventOrigin;
+};
+
+export type LogicEdge = {
+  id: number;
+  source_event_id: number;
+  target_event_id: number;
+  relation_type: LogicEdgeType;
+  created_at: number;
+};
+
+export type Topic = {
+  id: number;
+  name: string;
+  description: string | null;
+  created_at: number;
+};
+
+export type FactEdge = {
+  id: number;
+  source_entity_id: number;
+  target_entity_id: number;
+  predicate: string;
+  t_valid: number;
+  t_invalid: number;
+  t_created: number;
+  t_expired: number;
+  source_event_id: number | null;
+};
+
+export type EntityNode = {
+  id: number;
+  pointer_key: string;
+  display_name: string;
+  entity_type: string;
+  memory_scope: MemoryScope;
+  owner_agent_id: string | null;
+  canonical_entity_id: number | null;
+  summary: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type EntityAlias = {
+  id: number;
+  canonical_id: number;
+  alias: string;
+  alias_type: string | null;
+  owner_agent_id: string | null;
+};
+
+export type PointerRedirect = {
+  id: number;
+  old_name: string;
+  new_name: string;
+  redirect_type: string | null;
+  owner_agent_id: string | null;
+  created_at: number;
+};
+
+export type AgentEventOverlay = {
+  id: number;
+  event_id: number | null;
+  agent_id: string;
+  role: string | null;
+  private_notes: string | null;
+  salience: number | null;
+  emotion: string | null;
+  event_category: PrivateEventCategory;
+  primary_actor_entity_id: number | null;
+  projection_class: ProjectionClass;
+  location_entity_id: number | null;
+  projectable_summary: string | null;
+  source_record_id: string | null;
+  created_at: number;
+};
+
+export type AgentFactOverlay = {
+  id: number;
+  agent_id: string;
+  source_entity_id: number;
+  target_entity_id: number;
+  predicate: string;
+  belief_type: BeliefType | null;
+  confidence: number | null;
+  epistemic_status: EpistemicStatus | null;
+  provenance: string | null;
+  source_event_ref: NodeRef | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type CoreMemoryBlock = {
+  id: number;
+  agent_id: string;
+  label: CoreMemoryLabel;
+  description: string | null;
+  value: string;
+  char_limit: number;
+  read_only: number;
+  updated_at: number;
+};
+
+export type NodeEmbedding = {
+  id: number;
+  node_ref: NodeRef;
+  node_kind: NodeRefKind;
+  view_type: EmbeddingViewType;
+  model_id: string;
+  embedding: Uint8Array;
+  updated_at: number;
+};
+
+export type SemanticEdge = {
+  id: number;
+  source_node_ref: NodeRef;
+  target_node_ref: NodeRef;
+  relation_type: SemanticEdgeType;
+  weight: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type NodeScores = {
+  node_ref: NodeRef;
+  salience: number;
+  centrality: number;
+  bridge_score: number;
+  updated_at: number;
+};
+
+export type SearchDocPrivate = {
+  id: number;
+  doc_type: string;
+  source_ref: NodeRef;
+  agent_id: string;
+  content: string;
+  created_at: number;
+};
+
+export type SearchDocArea = {
+  id: number;
+  doc_type: string;
+  source_ref: NodeRef;
+  location_entity_id: number;
+  content: string;
+  created_at: number;
+};
+
+export type SearchDocWorld = {
+  id: number;
+  doc_type: string;
+  source_ref: NodeRef;
+  content: string;
+  created_at: number;
+};
+
+export type SeedCandidate = {
+  node_ref: NodeRef;
+  node_kind: NodeRefKind;
+  lexical_score: number;
+  semantic_score: number;
+  fused_score: number;
+  source_scope: "private" | "area" | "world";
+};
+
+export type BeamEdge = {
+  from: NodeRef;
+  to: NodeRef;
+  kind: NavigatorEdgeKind;
+  weight: number;
+  timestamp: number | null;
+  summary: string | null;
+};
+
+export type BeamPath = {
+  seed: NodeRef;
+  nodes: NodeRef[];
+  edges: BeamEdge[];
+  depth: number;
+};
+
+export type PathScore = {
+  seed_score: number;
+  edge_type_score: number;
+  temporal_consistency: number;
+  query_intent_match: number;
+  support_score: number;
+  recency_score: number;
+  hop_penalty: number;
+  redundancy_penalty: number;
+  path_score: number;
+};
+
+export type EvidencePath = {
+  path: BeamPath;
+  score: PathScore;
+  supporting_nodes: NodeRef[];
+  supporting_facts: number[];
+};
+
+export type NavigatorResult = {
+  query: string;
+  query_type: QueryType;
+  evidence_paths: EvidencePath[];
+};
+
+export type MemoryHint = {
+  scope: "private" | "area" | "world";
+  source_ref: NodeRef;
+  doc_type: string;
+  content: string;
+  score: number;
+};
+
+export type CoreMemoryAppendInput = {
+  label: "character" | "user";
+  content: string;
+};
+
+export type CoreMemoryReplaceInput = {
+  label: "character" | "user";
+  old_content: string;
+  new_content: string;
+};
+
+export type MemoryReadInput = {
+  entity?: string;
+  topic?: string;
+  event_ids?: number[];
+  fact_ids?: number[];
+};
+
+export type MemorySearchInput = {
+  query: string;
+};
+
+export type MemoryExploreInput = {
+  query: string;
+};
+
+export type ExtractionBatch = {
+  batch_id: string;
+  owner_agent_id: string;
+  session_id: string;
+  range_start: number;
+  range_end: number;
+};
+
+export type MigrationResult = {
+  batch_id: string;
+  private_event_ids: number[];
+  private_belief_ids: number[];
+  entity_ids: number[];
+  fact_ids: number[];
+};
+
+export type GraphOrganizerResult = {
+  updated_embedding_refs: NodeRef[];
+  updated_semantic_edge_count: number;
+  updated_score_refs: NodeRef[];
+};
+
+export type PromotionCandidate = {
+  source_ref: NodeRef;
+  target_scope: "area_visible" | "world_public";
+  summary: string;
+  entity_refs: NodeRef[];
+};
+
+export type ReferenceResolution = {
+  source_ref: NodeRef;
+  action: PromotionAction;
+  resolved_entity_id?: number;
+  placeholder_pointer_key?: string;
+  reason?: string;
+};
+
+export type ProjectedWrite = {
+  target_scope: "area_visible" | "world_public";
+  source_ref: NodeRef;
+  created_ref: NodeRef;
+};
+
+export interface IMemoryStorage {
+  createProjectedEvent(input: {
+    session_id: string;
+    summary: string;
+    timestamp: number;
+    participants: string;
+    location_entity_id: number;
+    event_category: PublicEventCategory;
+    primary_actor_entity_id?: number;
+    source_record_id?: string;
+    event_origin: "runtime_projection" | "delayed_materialization";
+  }): number;
+  createPromotedEvent(input: {
+    session_id: string;
+    summary: string;
+    timestamp: number;
+    participants: string;
+    event_category: PublicEventCategory;
+    source_record_id?: string;
+  }): number;
+}
+
+export interface IMemoryRetrieval {
+  searchVisibleNarrative(query: string, viewerContext: ViewerContext): MemoryHint[];
+  generateMemoryHints(userMessage: string, viewerContext: ViewerContext, limit?: number): MemoryHint[];
+}
+
+export interface ICoreMemory {
+  getBlock(agentId: string, label: CoreMemoryLabel): CoreMemoryBlock | undefined;
+  getAllBlocks(agentId: string): CoreMemoryBlock[];
+}
+
+export interface IGraphNavigator {
+  explore(query: string, viewerContext: ViewerContext): NavigatorResult;
+}
+
+export interface IMaterializationService {
+  materializeDelayed(privateEvents: AgentEventOverlay[], agentId: string): number[];
+}
+
+export interface IPromotionService {
+  resolveReferences(candidate: PromotionCandidate): ReferenceResolution[];
+  executeProjectedWrite(candidate: PromotionCandidate, resolutions: ReferenceResolution[]): ProjectedWrite | undefined;
+}
+
+export interface IVisibilityPolicy {
+  isEventVisible(event: EventNode, viewerContext: ViewerContext): boolean;
+  isEntityVisible(entity: EntityNode, viewerContext: ViewerContext): boolean;
+  isFactVisible(fact: FactEdge, viewerContext: ViewerContext): boolean;
+  isNodeVisible(nodeRef: NodeRef, viewerContext: ViewerContext): boolean;
+}
+
+export interface IAuthorizationResolver {
+  canAccess(viewerAgentId: string, targetAgentId: string, scope: "owner_private"): boolean;
+}
