@@ -240,3 +240,22 @@
 ### Verification Results
 - `bun test src/memory/promotion.test.ts`: 6 pass
 - `bun test`: 461 pass / 0 fail
+
+## Memory Task Agent Migration Pipeline (T8) - 2026-03-08
+
+### Implementation
+- Added `src/memory/task-agent.ts` with `MemoryTaskAgent` (`runMigrate`, `runOrganize`) and `MemoryIngestionPolicy`
+- `runMigrate` hot path uses exactly 2 chat-tool calls: Call 1 extraction/writes, Call 2 index synthesis/update
+- Call 1 writes are mapped to `GraphStorageService` APIs (`createPrivateEvent`, `upsertEntity`, `createPrivateBelief`, aliases, logic edges) and materialization is triggered for `area_candidate` private events
+- Calls 1+2 run inside a single `BEGIN IMMEDIATE` transaction (`db.prepare().run()`), and rollback on LLM/index failure
+- Same-episode adjacency edges are generated for linked events with same `(session_id, topic_id)` and <=24h gap
+- `runOrganize` is queued async, uses embedding model only, stores vectors via `EmbeddingService.batchStoreEmbeddings`, then updates semantic edges, node scores, and search projections incrementally
+
+### Gotchas
+- `EmbeddingService.batchStoreEmbeddings()` opens its own transaction via `TransactionBatcher`; avoid wrapping it in another explicit transaction to prevent nested-transaction SQLite errors
+- `GraphStorageService.createSameEpisodeEdges()` also uses `TransactionBatcher`; call-site code running in an existing transaction should insert same-episode edges directly
+
+### Verification
+- Added `src/memory/task-agent.test.ts` with coverage for queue-owned migrate execution, two-call hot path, atomic rollback, same-episode sparsity policy, async non-blocking organize scheduling, organizer derived writes, and trigger-hook absence
+- `bun test src/memory/task-agent.test.ts`: 6 pass
+- `bun test`: 467 pass / 0 fail

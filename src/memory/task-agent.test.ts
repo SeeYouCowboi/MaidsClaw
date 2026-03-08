@@ -1,0 +1,406 @@
+import { Database } from "bun:sqlite";
+import { beforeEach, describe, expect, it } from "bun:test";
+import { CoreMemoryService } from "./core-memory.js";
+import { EmbeddingService } from "./embeddings.js";
+import { MaterializationService } from "./materialization.js";
+import { createMemorySchema, makeNodeRef } from "./schema.js";
+import { GraphStorageService } from "./storage.js";
+import { MemoryTaskAgent, type GraphOrganizerJob, type MemoryFlushRequest } from "./task-agent.js";
+import { TransactionBatcher } from "./transaction-batcher.js";
+
+type ToolCallResult = {
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+class MockModelProvider {
+  public chatCalls = 0;
+  public embedCalls = 0;
+
+  constructor(
+    private readonly chatResponses: Array<ToolCallResult[] | Error>,
+    private readonly embedResponseFactory: (texts: string[]) => Float32Array[] = (texts) =>
+      texts.map((_, index) => new Float32Array([index + 1, 0.1])),
+  ) {}
+
+  async chat(): Promise<ToolCallResult[]> {
+    this.chatCalls += 1;
+    const next = this.chatResponses.shift();
+    if (!next) {
+      return [];
+    }
+    if (next instanceof Error) {
+      throw next;
+    }
+    return next;
+  }
+
+  async embed(texts: string[]): Promise<Float32Array[]> {
+    this.embedCalls += 1;
+    return this.embedResponseFactory(texts);
+  }
+}
+
+function freshDb(): Database {
+  const db = new Database(":memory:");
+  createMemorySchema(db);
+  return db;
+}
+
+function makeFlushRequest(overrides?: Partial<MemoryFlushRequest>): MemoryFlushRequest {
+  return {
+    sessionId: "session-1",
+    agentId: "agent-1",
+    rangeStart: 1,
+    rangeEnd: 10,
+    flushMode: "dialogue_slice",
+    idempotencyKey: "queue:batch-1",
+    queueOwnerAgentId: "agent-1",
+    dialogueRecords: [
+      { role: "user", content: "I met Alice in the kitchen", timestamp: 1000, recordId: "r1", recordIndex: 1 },
+      {
+        role: "assistant",
+        content: "You noted Alice looked worried.",
+        timestamp: 1200,
+        recordId: "r2",
+        recordIndex: 2,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe("MemoryTaskAgent", () => {
+  let db: Database;
+  let storage: GraphStorageService;
+  let coreMemory: CoreMemoryService;
+  let embeddings: EmbeddingService;
+  let materialization: MaterializationService;
+
+  beforeEach(() => {
+    db = freshDb();
+    storage = new GraphStorageService(db);
+    coreMemory = new CoreMemoryService(db);
+    embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+    materialization = new MaterializationService(db, storage);
+    coreMemory.initializeBlocks("agent-1");
+  });
+
+  it("accepts queue-owned MemoryFlushRequest and executes hot-path Calls 1+2", async () => {
+    const kitchenId = storage.upsertEntity({
+      pointerKey: "area:kitchen",
+      displayName: "Kitchen",
+      entityType: "area",
+      memoryScope: "shared_public",
+    });
+
+    const provider = new MockModelProvider([
+      [
+        {
+          name: "create_entity",
+          arguments: {
+            pointer_key: "person:alice",
+            display_name: "Alice",
+            entity_type: "person",
+            memory_scope: "private_overlay",
+          },
+        },
+        {
+          name: "create_private_event",
+          arguments: {
+            role: "assistant",
+            private_notes: "Alice looks worried",
+            salience: 0.9,
+            emotion: "concern",
+            event_category: "observation",
+            primary_actor_entity_id: "person:alice",
+            projection_class: "area_candidate",
+            location_entity_id: kitchenId,
+            projectable_summary: "Alice looked worried in the kitchen",
+            source_record_id: "r2",
+          },
+        },
+        {
+          name: "create_private_belief",
+          arguments: {
+            source: "person:alice",
+            target: "person:alice",
+            predicate: "seems_worried",
+            belief_type: "observation",
+            confidence: 0.82,
+          },
+        },
+      ],
+      [
+        {
+          name: "update_index_block",
+          arguments: { new_text: "@person:alice e:1 f:1 #worry" },
+        },
+      ],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    const result = await agent.runMigrate(makeFlushRequest());
+
+    expect(result.private_event_ids.length).toBe(1);
+    expect(result.private_belief_ids.length).toBe(1);
+    expect(result.entity_ids.length).toBe(1);
+    expect(provider.chatCalls).toBe(2);
+
+    const index = coreMemory.getBlock("agent-1", "index");
+    expect(index.value).toContain("@person:alice");
+    expect(index.value).toContain("#worry");
+
+    const privateEvent = db
+      .prepare(`SELECT projection_class FROM agent_event_overlay WHERE id = ?`)
+      .get(result.private_event_ids[0]) as { projection_class: string };
+    expect(privateEvent.projection_class).toBe("area_candidate");
+  });
+
+  it("Call 1 + 2 are atomic and roll back fully if hot-path LLM fails", async () => {
+    const provider = new MockModelProvider([
+      [
+        {
+          name: "create_entity",
+          arguments: {
+            pointer_key: "person:bob",
+            display_name: "Bob",
+            entity_type: "person",
+            memory_scope: "private_overlay",
+          },
+        },
+      ],
+      [new Error("call2 failed") as unknown as ToolCallResult],
+    ]);
+    provider.chat = async () => {
+      provider.chatCalls += 1;
+      if (provider.chatCalls === 1) {
+        return [
+          {
+            name: "create_entity",
+            arguments: {
+              pointer_key: "person:bob",
+              display_name: "Bob",
+              entity_type: "person",
+              memory_scope: "private_overlay",
+            },
+          },
+        ];
+      }
+      throw new Error("call2 failed");
+    };
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await expect(agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-rollback" }))).rejects.toThrow(
+      "call2 failed",
+    );
+
+    const entityCount = db
+      .prepare(`SELECT count(*) as cnt FROM entity_nodes WHERE pointer_key = 'person:bob'`)
+      .get() as { cnt: number };
+    const eventCount = db.prepare(`SELECT count(*) as cnt FROM agent_event_overlay`).get() as { cnt: number };
+    const indexBlock = coreMemory.getBlock("agent-1", "index");
+
+    expect(entityCount.cnt).toBe(0);
+    expect(eventCount.cnt).toBe(0);
+    expect(indexBlock.value).toBe("");
+    expect(provider.chatCalls).toBe(2);
+  });
+
+  it("creates same_episode edges with adjacent sparsity policy", async () => {
+    const locationId = storage.upsertEntity({
+      pointerKey: "area:hall",
+      displayName: "Hall",
+      entityType: "area",
+      memoryScope: "shared_public",
+    });
+
+    const event1 = storage.createProjectedEvent({
+      sessionId: "session-1",
+      summary: "step one",
+      timestamp: 1000,
+      participants: JSON.stringify([makeNodeRef("entity", locationId)]),
+      locationEntityId: locationId,
+      eventCategory: "action",
+      origin: "runtime_projection",
+    });
+    const event2 = storage.createProjectedEvent({
+      sessionId: "session-1",
+      summary: "step two",
+      timestamp: 2000,
+      participants: JSON.stringify([makeNodeRef("entity", locationId)]),
+      locationEntityId: locationId,
+      eventCategory: "action",
+      origin: "runtime_projection",
+    });
+    const event3 = storage.createProjectedEvent({
+      sessionId: "session-1",
+      summary: "step three",
+      timestamp: 3000,
+      participants: JSON.stringify([makeNodeRef("entity", locationId)]),
+      locationEntityId: locationId,
+      eventCategory: "action",
+      origin: "runtime_projection",
+    });
+
+    const provider = new MockModelProvider([
+      [
+        {
+          name: "create_private_event",
+          arguments: {
+            role: "assistant",
+            private_notes: "linked one",
+            salience: 0.5,
+            emotion: "neutral",
+            event_category: "action",
+            primary_actor_entity_id: null,
+            projection_class: "none",
+            event_id: event1,
+          },
+        },
+        {
+          name: "create_private_event",
+          arguments: {
+            role: "assistant",
+            private_notes: "linked two",
+            salience: 0.5,
+            emotion: "neutral",
+            event_category: "action",
+            primary_actor_entity_id: null,
+            projection_class: "none",
+            event_id: event2,
+          },
+        },
+        {
+          name: "create_private_event",
+          arguments: {
+            role: "assistant",
+            private_notes: "linked three",
+            salience: 0.5,
+            emotion: "neutral",
+            event_category: "action",
+            primary_actor_entity_id: null,
+            projection_class: "none",
+            event_id: event3,
+          },
+        },
+      ],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-same-episode" }));
+
+    const edges = db
+      .prepare(
+        `SELECT source_event_id, target_event_id
+         FROM logic_edges
+         WHERE relation_type = 'same_episode'`,
+      )
+      .all() as Array<{ source_event_id: number; target_event_id: number }>;
+    const keySet = new Set(edges.map((edge) => `${edge.source_event_id}->${edge.target_event_id}`));
+    expect(keySet.has(`${event1}->${event2}`)).toBe(true);
+    expect(keySet.has(`${event2}->${event1}`)).toBe(true);
+    expect(keySet.has(`${event2}->${event3}`)).toBe(true);
+    expect(keySet.has(`${event3}->${event2}`)).toBe(true);
+    expect(keySet.has(`${event1}->${event3}`)).toBe(false);
+    expect(keySet.has(`${event3}->${event1}`)).toBe(false);
+  });
+
+  it("schedules Call 3 asynchronously and does not block runMigrate", async () => {
+    const provider = new MockModelProvider([
+      [
+        {
+          name: "create_entity",
+          arguments: {
+            pointer_key: "person:carol",
+            display_name: "Carol",
+            entity_type: "person",
+            memory_scope: "private_overlay",
+          },
+        },
+      ],
+      [{ name: "update_index_block", arguments: { new_text: "@person:carol" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let release: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    (agent as unknown as { runOrganize: (job: GraphOrganizerJob) => Promise<unknown> }).runOrganize = async () => {
+      await blocked;
+      return { updated_embedding_refs: [], updated_semantic_edge_count: 0, updated_score_refs: [] };
+    };
+
+    const result = await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-async" }));
+    expect(result.entity_ids.length).toBe(1);
+    expect(provider.chatCalls).toBe(2);
+
+    release?.();
+    await Promise.resolve();
+  });
+
+  it("runOrganize processes embeddings, semantic edges, node scores, and search sync", async () => {
+    const alpha = storage.upsertEntity({
+      pointerKey: "person:alpha",
+      displayName: "Alpha",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+      summary: "planner strategist",
+    });
+    const beta = storage.upsertEntity({
+      pointerKey: "person:beta",
+      displayName: "Beta",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+      summary: "planner strategist",
+    });
+
+    const provider = new MockModelProvider([], () => [
+      new Float32Array([1, 0]),
+      new Float32Array([0.99, 0.01]),
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    const job: GraphOrganizerJob = {
+      agentId: "agent-1",
+      sessionId: "session-1",
+      batchId: "b-1",
+      changedNodeRefs: [makeNodeRef("entity", alpha), makeNodeRef("entity", beta)],
+      embeddingModelId: "test-model",
+    };
+
+    const organizeResult = await agent.runOrganize(job);
+    expect(provider.embedCalls).toBe(1);
+    expect(organizeResult.updated_embedding_refs.length).toBe(2);
+
+    const embeddingCount = db
+      .prepare(`SELECT count(*) as cnt FROM node_embeddings WHERE model_id = 'test-model'`)
+      .get() as { cnt: number };
+    expect(embeddingCount.cnt).toBe(2);
+
+    const semanticCount = db.prepare(`SELECT count(*) as cnt FROM semantic_edges`).get() as { cnt: number };
+    expect(semanticCount.cnt).toBeGreaterThanOrEqual(1);
+
+    const scoreCount = db.prepare(`SELECT count(*) as cnt FROM node_scores`).get() as { cnt: number };
+    expect(scoreCount.cnt).toBeGreaterThanOrEqual(1);
+
+    const privateDocCount = db
+      .prepare(`SELECT count(*) as cnt FROM search_docs_private WHERE agent_id = 'agent-1'`)
+      .get() as { cnt: number };
+    expect(privateDocCount.cnt).toBeGreaterThanOrEqual(1);
+  });
+
+  it("exposes no onTurn or onSessionEnd trigger hooks", () => {
+    const provider = new MockModelProvider([]);
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    expect("onTurn" in (agent as unknown as Record<string, unknown>)).toBe(false);
+    expect("onSessionEnd" in (agent as unknown as Record<string, unknown>)).toBe(false);
+  });
+});
