@@ -158,7 +158,7 @@ MaidsClaw/
 │  ├─ session/           Session services
 │  └─ native-fallbacks/  TypeScript fallbacks for native modules
 ├─ native/               Rust NAPI-RS crate
-├─ config/               Example model, agent, persona, and lore configs
+├─ config/               Example provider, agent, persona, and lore configs
 ├─ scripts/              Demo and system-check scripts
 ├─ test/                 Tests
 ├─ docs/                 Localized and supplemental documentation
@@ -180,7 +180,7 @@ Copy the example configuration files:
 
 ```bash
 cp .env.example .env
-cp config/models.example.json config/models.json
+cp config/providers.example.json config/providers.json
 cp config/agents.example.json config/agents.json
 cp config/personas.example.json config/personas.json
 cp config/lore.example.json config/lore.json
@@ -222,9 +222,38 @@ cd ..
 | `MAIDSCLAW_DATA_DIR` | Data directory |
 | `MAIDSCLAW_NATIVE_MODULES` | Whether to attempt loading Rust native modules |
 
-### `config/models.json`
+### Provider Tiers
 
-Defines model aliases, providers, model IDs, and default parameters.
+MaidsClaw groups model providers into three tiers:
+
+**Tier A (Stable)**: `anthropic`, `openai`
+Official API keys via `.env`. These are the default providers and fully supported.
+
+**Tier B (Compatible)**: `moonshot`, `minimax`
+OpenAI-compatible providers. Set credentials in `config/auth.json` (preferred) or via env vars (`MOONSHOT_API_KEY`, `MINIMAX_API_KEY`). Not auto-selected by default; configure them explicitly via `config/providers.json`.
+
+**Tier C (Experimental)**: `OpenAI ChatGPT Codex OAuth`, `Anthropic Claude Pro/Max OAuth`
+Manual token import via `config/auth.json`. Enabled when credentials are present, but never auto-selected and never used as silent failover. Using these may violate provider terms of service.
+
+### Provider Configuration
+
+Optional provider overrides live in `config/providers.json`. Copy the example to get started:
+
+```bash
+cp config/providers.example.json config/providers.json
+```
+
+The example includes Moonshot/Kimi and MiniMax entries. You can also define custom OpenAI-compatible endpoints here.
+
+### Auth Configuration
+
+Non-env credentials go in `config/auth.json` (gitignored). Copy the example:
+
+```bash
+cp config/auth.example.json config/auth.json
+```
+
+Fill in your API keys or OAuth tokens for Tier B and Tier C providers.
 
 ### `config/agents.json`
 
@@ -241,6 +270,16 @@ Defines who a maid is, how she speaks, how she serves, and what kind of opening 
 ### `config/lore.json`
 
 Defines world rules, etiquette constraints, and background knowledge. A maid should know how the household works, not just how to reply.
+
+## Adding a New Provider
+
+Any OpenAI-compatible API can be added without writing a new transport class.
+
+1. **Catalog entry** in `config/providers.json`: set `transportFamily` to `openai-compatible`, provide a `baseUrl`, and define your models.
+2. **Auth config** in `config/auth.json`: add a credential entry with `"type": "api-key"` and your provider ID.
+3. **Tests**: add a test that verifies the provider entry loads correctly and that auth resolves.
+
+That's it. No new TypeScript source files needed for a standard API-key provider.
 
 ---
 

@@ -160,7 +160,7 @@ MaidsClaw/
 │  ├─ session/         会话服务
 │  └─ native-fallbacks/ Rust 原生模块的 TS 兜底实现
 ├─ native/             Rust NAPI-RS crate
-├─ config/             模型、agents、persona、lore 配置样例
+├─ config/             provider、agents、persona、lore 配置样例
 ├─ scripts/            demo、system check 等脚本
 ├─ test/               测试
 ├─ .env.example
@@ -181,7 +181,7 @@ bun install
 
 ```bash
 cp .env.example .env
-cp config/models.example.json config/models.json
+cp config/providers.example.json config/providers.json
 cp config/agents.example.json config/agents.json
 cp config/personas.example.json config/personas.json
 cp config/lore.example.json config/lore.json
@@ -223,9 +223,38 @@ cd ..
 | `MAIDSCLAW_DATA_DIR` | 数据目录 |
 | `MAIDSCLAW_NATIVE_MODULES` | 是否尝试加载 Rust 原生模块 |
 
-### `config/models.json`
+### Provider Tiers (提供方分层)
 
-模型别名、provider、模型 ID 与默认参数配置。
+MaidsClaw 将模型提供方分为三个层级:
+
+**Tier A (稳定)**：`anthropic`、`openai`
+通过 `.env` 配置官方 API Key。是默认提供方，完整支持。
+
+**Tier B (兼容)**：`moonshot`、`minimax`
+OpenAI 共容接口。凭据建议写入 `config/auth.json`，也可以用环境变量（`MOONSHOT_API_KEY`、`MINIMAX_API_KEY`）。默认不会被自动选择，需要在 `config/providers.json` 中显式配置。
+
+**Tier C (实验性)**：`OpenAI ChatGPT Codex OAuth`、`Anthropic Claude Pro/Max OAuth`
+通过 `config/auth.json` 手动导入 Token。配置凭据后会启用，但永远不会被自动选择、不参与静默备用。使用这类提供方可能违反服务条款。
+
+### 提供方配置
+
+可选配置放在 `config/providers.json`。复制样例即可开始:
+
+```bash
+cp config/providers.example.json config/providers.json
+```
+
+样例包含 Moonshot/Kimi 和 MiniMax 条目，也可以在这里添加自定义 OpenAI 共容接口。
+
+### Auth 配置
+
+非环境变量凭据写入 `config/auth.json`（已 gitignore）。复制样例:
+
+```bash
+cp config/auth.example.json config/auth.json
+```
+
+填入 Tier B 和 Tier C 提供方的 API Key 或 OAuth Token。
 
 ### `config/agents.json`
 
