@@ -1,4 +1,5 @@
 export * from "./anthropic-provider.js";
+export * from "./bootstrap.js";
 export * from "./chat-provider.js";
 export * from "./embedding-provider.js";
 export * from "./openai-provider.js";

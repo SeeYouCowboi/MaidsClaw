@@ -9,6 +9,7 @@ dist/
 # Data & runtime
 data/
 .env
+config/auth.json
 
 # IDE & editor
 .vs/

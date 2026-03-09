@@ -48,3 +48,34 @@ export type ConfigError = {
 export type ConfigResult = 
   | { ok: true; config: MaidsClawConfig }
   | { ok: false; errors: ConfigError[] };
+
+// Auth credential types (discriminated union)
+export type ApiKeyCredential = {
+  type: "api-key";
+  provider: string;
+  apiKey: string;
+};
+
+export type OAuthTokenCredential = {
+  type: "oauth-token";
+  provider: string;
+  accessToken: string;
+  expiresAt?: number; // Unix ms
+};
+
+export type SetupTokenCredential = {
+  type: "setup-token";
+  provider: string;
+  token: string;
+  expiresAt?: number;
+};
+
+export type AuthCredential = ApiKeyCredential | OAuthTokenCredential | SetupTokenCredential;
+
+export type AuthConfig = {
+  credentials: AuthCredential[];
+};
+
+export type AuthConfigResult =
+  | { ok: true; auth: AuthConfig }
+  | { ok: false; errors: ConfigError[] };

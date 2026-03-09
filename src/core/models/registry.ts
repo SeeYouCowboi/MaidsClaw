@@ -20,6 +20,26 @@ export type DefaultModelServiceRegistryOptions = {
   unsupportedEmbeddingPrefixes?: string[];
 };
 
+export function normalizeModelRef(ref: string): string {
+  if (ref.includes("/")) {
+    return ref;
+  }
+
+  if (ref.startsWith("claude-")) {
+    return `anthropic/${ref}`;
+  }
+
+  if (ref.startsWith("gpt-") || ref.startsWith("text-embedding-")) {
+    return `openai/${ref}`;
+  }
+
+  if (/^(o1|o3|o4)/.test(ref)) {
+    return `openai/${ref}`;
+  }
+
+  return ref;
+}
+
 export class CapabilityNotSupportedError extends Error {
   readonly code = "CAPABILITY_NOT_SUPPORTED";
   readonly retriable = false;
@@ -46,12 +66,14 @@ export class DefaultModelServiceRegistry implements ModelServiceRegistry {
   }
 
   resolveChat(modelId: string): ChatModelProvider {
-    const exact = this.chatExact.get(modelId);
+    const normalizedModelId = normalizeModelRef(modelId);
+    const exact = this.chatExact.get(normalizedModelId) ?? this.chatExact.get(modelId);
     if (exact) {
       return exact;
     }
 
-    const prefixed = this.resolveByPrefix(modelId, this.chatPrefixes);
+    const prefixed = this.resolveByPrefix(normalizedModelId, this.chatPrefixes)
+      ?? this.resolveByPrefix(modelId, this.chatPrefixes);
     if (prefixed) {
       return prefixed;
     }
@@ -60,17 +82,19 @@ export class DefaultModelServiceRegistry implements ModelServiceRegistry {
   }
 
   resolveEmbedding(modelId: string): EmbeddingProvider {
-    const exact = this.embeddingExact.get(modelId);
+    const normalizedModelId = normalizeModelRef(modelId);
+    const exact = this.embeddingExact.get(normalizedModelId) ?? this.embeddingExact.get(modelId);
     if (exact) {
       return exact;
     }
 
-    const prefixed = this.resolveByPrefix(modelId, this.embeddingPrefixes);
+    const prefixed = this.resolveByPrefix(normalizedModelId, this.embeddingPrefixes)
+      ?? this.resolveByPrefix(modelId, this.embeddingPrefixes);
     if (prefixed) {
       return prefixed;
     }
 
-    if (this.hasUnsupportedEmbeddingPrefix(modelId)) {
+    if (this.hasUnsupportedEmbeddingPrefix(normalizedModelId) || this.hasUnsupportedEmbeddingPrefix(modelId)) {
       throw new CapabilityNotSupportedError(
         `Embedding capability is not supported for model '${modelId}'`,
         { modelId }
@@ -84,8 +108,20 @@ export class DefaultModelServiceRegistry implements ModelServiceRegistry {
     modelId: string,
     registrations: PrefixRegistration<TProvider>[]
   ): TProvider | undefined {
-    const match = registrations.find((entry) => modelId.startsWith(entry.prefix));
+    const bareModelId = this.extractBareModelId(modelId);
+    const match = registrations.find((entry) =>
+      modelId.startsWith(entry.prefix) || bareModelId.startsWith(entry.prefix)
+    );
     return match?.provider;
+  }
+
+  private extractBareModelId(modelId: string): string {
+    const slashIndex = modelId.indexOf("/");
+    if (slashIndex < 0) {
+      return modelId;
+    }
+
+    return modelId.slice(slashIndex + 1);
   }
 
   private hasUnsupportedEmbeddingPrefix(modelId: string): boolean {

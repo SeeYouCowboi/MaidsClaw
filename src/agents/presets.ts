@@ -9,7 +9,7 @@ export const MAIDEN_PROFILE: AgentProfile = {
   lifecycle: "persistent",
   userFacing: true,
   outputMode: "freeform",
-  modelId: "claude-3-5-sonnet-20241022",
+  modelId: "anthropic/claude-3-5-sonnet-20241022",
   maxOutputTokens: 8192,
   toolPermissions: [], // empty = all tools allowed
   authorizationPolicy: {
@@ -31,7 +31,7 @@ export const RP_AGENT_PROFILE: AgentProfile = {
   lifecycle: "persistent",
   userFacing: true,
   outputMode: "freeform",
-  modelId: "claude-3-5-sonnet-20241022",
+  modelId: "anthropic/claude-3-5-sonnet-20241022",
   maxOutputTokens: 4096,
   toolPermissions: [], // empty = all tools allowed
   maxDelegationDepth: 1, // can only delegate to task_agent
@@ -49,7 +49,7 @@ export const TASK_AGENT_PROFILE: AgentProfile = {
   lifecycle: "ephemeral",
   userFacing: false,
   outputMode: "structured",
-  modelId: "claude-3-5-haiku-20241022",
+  modelId: "anthropic/claude-3-5-haiku-20241022",
   maxOutputTokens: 2048,
   toolPermissions: [], // empty = all tools allowed (constrained per-spawn)
   maxDelegationDepth: 0, // cannot delegate

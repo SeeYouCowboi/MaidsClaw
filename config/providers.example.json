@@ -1,0 +1,32 @@
+{
+  "_comment": "Optional provider overrides. Copy relevant sections to config/providers.json to override built-in providers or add custom ones.",
+  "providers": [
+    {
+      "_comment": "Example: add a custom OpenAI-compatible provider",
+      "id": "my-local-llm",
+      "displayName": "My Local LLM",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "defaultChatModelId": "llama3",
+      "models": [
+        {
+          "id": "llama3",
+          "displayName": "Llama 3",
+          "contextWindow": 8192,
+          "maxOutputTokens": 4096,
+          "supportsTools": false,
+          "supportsVision": false,
+          "supportsEmbedding": false
+        }
+      ]
+    }
+  ]
+}

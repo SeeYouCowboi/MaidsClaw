@@ -1,4 +1,4 @@
-import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig } from "./config-schema.js";
+import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig, AuthConfig, AuthConfigResult, AuthCredential } from "./config-schema.js";
 import { readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 
@@ -143,4 +143,149 @@ function resolvePath(p: string): string {
     return p;
   }
   return resolve(process.cwd(), p);
+}
+
+// Env var override map: providerId → env var name
+const PROVIDER_ENV_MAP: Record<string, { envVar: string; credType: "api-key" | "oauth-token" | "setup-token" }> = {
+  "anthropic": { envVar: "ANTHROPIC_API_KEY", credType: "api-key" },
+  "openai": { envVar: "OPENAI_API_KEY", credType: "api-key" },
+  "moonshot": { envVar: "MOONSHOT_API_KEY", credType: "api-key" },
+  "minimax": { envVar: "MINIMAX_API_KEY", credType: "api-key" },
+  "openai-chatgpt-codex-oauth": { envVar: "OPENAI_CODEX_OAUTH_TOKEN", credType: "oauth-token" },
+  "anthropic-claude-pro-max-oauth": { envVar: "ANTHROPIC_SETUP_TOKEN", credType: "setup-token" },
+};
+
+// Load auth credentials from project-local config/auth.json
+export function loadAuthConfig(options?: { authFilePath?: string }): AuthConfigResult {
+  const filePath = options?.authFilePath ?? join(process.cwd(), "config", "auth.json");
+
+  if (!existsSync(filePath)) {
+    return { ok: true, auth: { credentials: [] } };
+  }
+
+  let raw: unknown;
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    raw = JSON.parse(content);
+  } catch {
+    return {
+      ok: false,
+      errors: [{
+        type: "CONFIG_ERROR",
+        field: "config/auth.json",
+        message: "auth.json contains invalid JSON",
+      }],
+    };
+  }
+
+  // Validate root shape
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return {
+      ok: false,
+      errors: [{
+        type: "CONFIG_ERROR",
+        field: "config/auth.json",
+        message: "auth.json root must be an object with a 'credentials' array",
+      }],
+    };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.credentials)) {
+    return {
+      ok: false,
+      errors: [{
+        type: "CONFIG_ERROR",
+        field: "credentials",
+        message: "'credentials' must be an array",
+      }],
+    };
+  }
+
+  // Validate each credential entry
+  const errors: ConfigError[] = [];
+  const credentials: AuthCredential[] = [];
+
+  for (let i = 0; i < obj.credentials.length; i++) {
+    const entry = obj.credentials[i] as Record<string, unknown>;
+    const idx = `credentials[${i}]`;
+
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      errors.push({ type: "CONFIG_ERROR", field: idx, message: `${idx} must be an object` });
+      continue;
+    }
+
+    const entryType = entry.type;
+    if (entryType !== "api-key" && entryType !== "oauth-token" && entryType !== "setup-token") {
+      errors.push({ type: "CONFIG_ERROR", field: `${idx}.type`, message: `${idx} has invalid type '${String(entryType)}'; must be 'api-key', 'oauth-token', or 'setup-token'` });
+      continue;
+    }
+
+    if (typeof entry.provider !== "string" || entry.provider.trim() === "") {
+      errors.push({ type: "CONFIG_ERROR", field: `${idx}.provider`, message: `${idx} must have a non-empty 'provider' string` });
+      continue;
+    }
+
+    if (entryType === "api-key") {
+      if (typeof entry.apiKey !== "string" || entry.apiKey.trim() === "") {
+        errors.push({ type: "CONFIG_ERROR", field: `${idx}.apiKey`, message: `${idx} (api-key) must have a non-empty 'apiKey' string` });
+        continue;
+      }
+      credentials.push({ type: "api-key", provider: entry.provider, apiKey: entry.apiKey });
+    } else if (entryType === "oauth-token") {
+      if (typeof entry.accessToken !== "string" || entry.accessToken.trim() === "") {
+        errors.push({ type: "CONFIG_ERROR", field: `${idx}.accessToken`, message: `${idx} (oauth-token) must have a non-empty 'accessToken' string` });
+        continue;
+      }
+      const expiresAt = entry.expiresAt !== undefined ? (typeof entry.expiresAt === "number" ? entry.expiresAt : undefined) : undefined;
+      if (entry.expiresAt !== undefined && typeof entry.expiresAt !== "number") {
+        errors.push({ type: "CONFIG_ERROR", field: `${idx}.expiresAt`, message: `${idx} (oauth-token) 'expiresAt' must be a number if provided` });
+        continue;
+      }
+      credentials.push({ type: "oauth-token", provider: entry.provider, accessToken: entry.accessToken, ...(expiresAt !== undefined ? { expiresAt } : {}) });
+    } else {
+      // setup-token
+      if (typeof entry.token !== "string" || entry.token.trim() === "") {
+        errors.push({ type: "CONFIG_ERROR", field: `${idx}.token`, message: `${idx} (setup-token) must have a non-empty 'token' string` });
+        continue;
+      }
+      const expiresAt = entry.expiresAt !== undefined ? (typeof entry.expiresAt === "number" ? entry.expiresAt : undefined) : undefined;
+      if (entry.expiresAt !== undefined && typeof entry.expiresAt !== "number") {
+        errors.push({ type: "CONFIG_ERROR", field: `${idx}.expiresAt`, message: `${idx} (setup-token) 'expiresAt' must be a number if provided` });
+        continue;
+      }
+      credentials.push({ type: "setup-token", provider: entry.provider, token: entry.token, ...(expiresAt !== undefined ? { expiresAt } : {}) });
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  return { ok: true, auth: { credentials } };
+}
+
+// Resolve credential for a provider, with env var taking precedence over file-based auth
+export function resolveProviderCredential(
+  providerId: string,
+  auth: AuthConfig,
+): AuthCredential | null {
+  // Check env var override first
+  const mapping = PROVIDER_ENV_MAP[providerId];
+  if (mapping) {
+    const envValue = getRequiredEnv(mapping.envVar);
+    if (envValue !== null) {
+      if (mapping.credType === "api-key") {
+        return { type: "api-key", provider: providerId, apiKey: envValue };
+      } else if (mapping.credType === "oauth-token") {
+        return { type: "oauth-token", provider: providerId, accessToken: envValue };
+      } else {
+        return { type: "setup-token", provider: providerId, token: envValue };
+      }
+    }
+  }
+
+  // Fall back to file-based credential
+  const fileCred = auth.credentials.find(c => c.provider === providerId);
+  return fileCred ?? null;
 }
