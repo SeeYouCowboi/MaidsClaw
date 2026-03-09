@@ -31,7 +31,7 @@ describe("CodexOAuthAdapter", () => {
     const mockFetch = (async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return sseResponse([
         `data: ${JSON.stringify({ choices: [{ delta: { content: "hello" } }] })}\n\n`,
-        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" } ] })}\n\n`,
         "data: [DONE]\n\n",
       ]);
     }) as unknown as typeof fetch;
@@ -53,6 +53,42 @@ describe("CodexOAuthAdapter", () => {
     );
 
     expect(chunks.some((chunk) => chunk.type === "text_delta")).toBe(true);
+  });
+
+  it("injects Authorization: Bearer header from OAuth access token", async () => {
+    const capturedHeaders: Record<string, string> = {};
+    const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = init?.headers ?? {};
+      if (headers instanceof Headers) {
+        headers.forEach((value, key) => { capturedHeaders[key.toLowerCase()] = value; });
+      } else if (Array.isArray(headers)) {
+        for (const [key, value] of headers) { capturedHeaders[key.toLowerCase()] = value; }
+      } else {
+        for (const [key, value] of Object.entries(headers as Record<string, string>)) {
+          capturedHeaders[key.toLowerCase()] = value;
+        }
+      }
+      return sseResponse([
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+    }) as unknown as typeof fetch;
+
+    const accessToken = "codex-oauth-access-token-xyz";
+    const provider = createCodexOAuthAdapter(
+      { type: "oauth-token", provider: "openai-chatgpt-codex-oauth", accessToken },
+      { fetchImpl: mockFetch }
+    );
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "openai-chatgpt-codex-oauth/codex-mini-latest",
+        messages: [{ role: "user", content: "test" }],
+      })
+    );
+
+    expect(capturedHeaders["authorization"]).toBe(`Bearer ${accessToken}`);
   });
 
   it("throws an explicit error when access token is missing", () => {
