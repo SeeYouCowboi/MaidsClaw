@@ -451,23 +451,38 @@ export class GraphNavigator {
       });
     }
 
-    const eventRows = this.db
-      .prepare(
-        `SELECT id, participants, primary_actor_entity_id, timestamp, summary
-         FROM event_nodes
-         WHERE id IN (${placeholders})
-           AND (
-             visibility_scope='world_public'
-             OR (visibility_scope='area_visible' AND location_entity_id=?)
-           )`,
-      )
-      .all(...ids, viewerContext.current_area_id) as Array<{
-      id: number;
-      participants: string | null;
-      primary_actor_entity_id: number | null;
-      timestamp: number;
-      summary: string | null;
-    }>;
+    const eventRows = viewerContext.current_area_id != null
+      ? this.db
+          .prepare(
+            `SELECT id, participants, primary_actor_entity_id, timestamp, summary
+             FROM event_nodes
+             WHERE id IN (${placeholders})
+               AND (
+                 visibility_scope='world_public'
+                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+               )`,
+          )
+          .all(...ids, viewerContext.current_area_id) as Array<{
+          id: number;
+          participants: string | null;
+          primary_actor_entity_id: number | null;
+          timestamp: number;
+          summary: string | null;
+        }>
+      : this.db
+          .prepare(
+            `SELECT id, participants, primary_actor_entity_id, timestamp, summary
+             FROM event_nodes
+             WHERE id IN (${placeholders})
+               AND visibility_scope='world_public'`,
+          )
+          .all(...ids) as Array<{
+          id: number;
+          participants: string | null;
+          primary_actor_entity_id: number | null;
+          timestamp: number;
+          summary: string | null;
+        }>;
 
     for (const row of eventRows) {
       const srcRef = `event:${row.id}` as NodeRef;
@@ -560,6 +575,12 @@ export class GraphNavigator {
     }
 
     const participantConditions = ids.map(() => "participants LIKE ?").join(" OR ");
+    const areaClause = viewerContext.current_area_id != null
+      ? `AND (
+         visibility_scope='world_public'
+         OR (visibility_scope='area_visible' AND location_entity_id=?)
+       )`
+      : `AND visibility_scope='world_public'`;
     const participantSql =
       `SELECT id, participants, primary_actor_entity_id, timestamp, summary
        FROM event_nodes
@@ -567,15 +588,15 @@ export class GraphNavigator {
          primary_actor_entity_id IN (${placeholders})` +
       (participantConditions.length > 0 ? ` OR ${participantConditions}` : "") +
       `)
-       AND (
-         visibility_scope='world_public'
-         OR (visibility_scope='area_visible' AND location_entity_id=?)
-       )`;
+       ${areaClause}`;
 
-    const participantRows = this.db.prepare(participantSql).all(
+    const participantBindings = [
       ...ids,
       ...ids.map((id) => `%entity:${id}%`),
-      viewerContext.current_area_id,
+      ...(viewerContext.current_area_id != null ? [viewerContext.current_area_id] : []),
+    ];
+    const participantRows = this.db.prepare(participantSql).all(
+      ...participantBindings,
     ) as Array<{
       id: number;
       participants: string | null;
@@ -1356,7 +1377,7 @@ export class GraphNavigator {
       }
       return (
         row.visibility_scope === "world_public" ||
-        (row.visibility_scope === "area_visible" && row.location_entity_id === viewerContext.current_area_id)
+        (row.visibility_scope === "area_visible" && viewerContext.current_area_id != null && row.location_entity_id === viewerContext.current_area_id)
       );
     }
 

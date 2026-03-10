@@ -17,6 +17,10 @@ export class VisibilityPolicy {
       return true;
     }
     if (event.visibility_scope === "area_visible") {
+      // When current_area_id is absent (degraded context), skip area-visible entirely
+      if (viewerContext.current_area_id == null) {
+        return false;
+      }
       return event.location_entity_id === viewerContext.current_area_id;
     }
     // system_only, owner_private — never visible via this method
@@ -80,6 +84,9 @@ export class VisibilityPolicy {
 
   eventVisibilityPredicate(viewerContext: ViewerContext, tableAlias?: string): string {
     const prefix = tableAlias ? `${tableAlias}.` : "";
+    if (viewerContext.current_area_id == null) {
+      return `(${prefix}visibility_scope = 'world_public')`;
+    }
     return `(${prefix}visibility_scope = 'world_public' OR (${prefix}visibility_scope = 'area_visible' AND ${prefix}location_entity_id = ${viewerContext.current_area_id}))`;
   }
 

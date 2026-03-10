@@ -63,16 +63,24 @@ export class RetrievalService {
       )
       .all(entity.id, entity.id, MAX_INTEGER) as FactEdge[];
 
-    const events = this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-           AND (
-             visibility_scope='world_public'
-             OR (visibility_scope='area_visible' AND location_entity_id=?)
-           )`,
-      )
-      .all(`%entity:${entity.id}%`, entity.id, viewerContext.current_area_id) as EventNode[];
+    const events = viewerContext.current_area_id != null
+      ? this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
+               AND (
+                 visibility_scope='world_public'
+                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+               )`,
+          )
+          .all(`%entity:${entity.id}%`, entity.id, viewerContext.current_area_id) as EventNode[]
+      : this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
+               AND visibility_scope='world_public'`,
+          )
+          .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
 
     const eventIds = events.map((event) => event.id);
     const overlays = eventIds.length > 0
@@ -98,16 +106,24 @@ export class RetrievalService {
       return { topic: null, events: [], overlays: [] };
     }
 
-    const events = this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE topic_id=?
-           AND (
-             visibility_scope='world_public'
-             OR (visibility_scope='area_visible' AND location_entity_id=?)
-           )`,
-      )
-      .all(topic.id, viewerContext.current_area_id) as EventNode[];
+    const events = viewerContext.current_area_id != null
+      ? this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE topic_id=?
+               AND (
+                 visibility_scope='world_public'
+                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+               )`,
+          )
+          .all(topic.id, viewerContext.current_area_id) as EventNode[]
+      : this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE topic_id=?
+               AND visibility_scope='world_public'`,
+          )
+          .all(topic.id) as EventNode[];
 
     const eventIds = events.map((event) => event.id);
     const overlays = eventIds.length === 0
@@ -128,16 +144,24 @@ export class RetrievalService {
     }
 
     const placeholders = ids.map(() => "?").join(",");
-    return this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE id IN (${placeholders})
-           AND (
-             visibility_scope='world_public'
-             OR (visibility_scope='area_visible' AND location_entity_id=?)
-           )`,
-      )
-      .all(...ids, viewerContext.current_area_id) as EventNode[];
+    return viewerContext.current_area_id != null
+      ? this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE id IN (${placeholders})
+               AND (
+                 visibility_scope='world_public'
+                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+               )`,
+          )
+          .all(...ids, viewerContext.current_area_id) as EventNode[]
+      : this.db
+          .prepare(
+            `SELECT * FROM event_nodes
+             WHERE id IN (${placeholders})
+               AND visibility_scope='world_public'`,
+          )
+          .all(...ids) as EventNode[];
   }
 
   readByFactIds(ids: number[], _viewerContext: ViewerContext): FactEdge[] {
@@ -173,14 +197,17 @@ export class RetrievalService {
     }
 
     if (viewerContext.viewer_role !== "task_agent") {
-      const areaRows = this.db
-        .prepare(
-          `SELECT d.source_ref, d.doc_type, d.content
-           FROM search_docs_area d
-           JOIN search_docs_area_fts f ON f.rowid = d.id
-           WHERE f.content MATCH ? AND d.location_entity_id=?`,
-        )
-        .all(safeQuery, viewerContext.current_area_id) as SearchRow[];
+      if (viewerContext.current_area_id != null) {
+        const areaRows = this.db
+          .prepare(
+            `SELECT d.source_ref, d.doc_type, d.content
+             FROM search_docs_area d
+             JOIN search_docs_area_fts f ON f.rowid = d.id
+             WHERE f.content MATCH ? AND d.location_entity_id=?`,
+          )
+          .all(safeQuery, viewerContext.current_area_id) as SearchRow[];
+        rawResults.push(...areaRows.map((row) => this.mapSearchRow(row, "area", 0.9)));
+      }
       const worldRows = this.db
         .prepare(
           `SELECT d.source_ref, d.doc_type, d.content
@@ -189,8 +216,6 @@ export class RetrievalService {
            WHERE f.content MATCH ?`,
         )
         .all(safeQuery) as SearchRow[];
-
-      rawResults.push(...areaRows.map((row) => this.mapSearchRow(row, "area", 0.9)));
       rawResults.push(...worldRows.map((row) => this.mapSearchRow(row, "world", 0.8)));
     }
 

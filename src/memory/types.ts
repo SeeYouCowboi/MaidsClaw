@@ -72,7 +72,7 @@ export type NodeRef = Brand<NodeRefLiteral, "NodeRef">;
 export type ViewerContext = {
   viewer_agent_id: string;
   viewer_role: ViewerRole;
-  current_area_id: number;
+  current_area_id?: number | undefined;
   session_id: string;
 };
 
