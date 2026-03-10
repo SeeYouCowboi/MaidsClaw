@@ -20,6 +20,7 @@ export type ErrorCode =
   | "DELEGATION_DEPTH_EXCEEDED"
   | "CIRCULAR_DELEGATION"
   | "TOOL_PERMISSION_DENIED"
+  | "AGENT_OWNERSHIP_MISMATCH"
   | "TOOL_ARGUMENT_INVALID"
   | "TASK_OUTPUT_INVALID"
   // Config errors (note: CONFIG_ERROR defined in config-schema.ts is separate)

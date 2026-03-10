@@ -1,5 +1,7 @@
 import { AgentLoop } from "../core/agent-loop.js";
 import type { AgentProfile } from "../agents/profile.js";
+import { AgentRegistry } from "../agents/registry.js";
+import { MAIDEN_PROFILE, PRESET_PROFILES } from "../agents/presets.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
@@ -15,19 +17,6 @@ import type {
   RuntimeMigrationStatus,
 } from "./types.js";
 
-const DEFAULT_AGENT_PROFILE: AgentProfile = {
-  id: "maid:main",
-  role: "maiden",
-  lifecycle: "persistent",
-  userFacing: true,
-  outputMode: "freeform",
-  modelId: "anthropic/claude-sonnet-4-20250514",
-  toolPermissions: [],
-  maxDelegationDepth: 3,
-  lorebookEnabled: false,
-  narrativeContextEnabled: false,
-};
-
 function resolveDatabasePath(options: RuntimeBootstrapOptions): string {
   if (options.databasePath) {
     return options.databasePath;
@@ -42,7 +31,7 @@ function buildHealthChecks(
   options: {
     modelRegistry: RuntimeBootstrapResult["modelRegistry"];
     toolExecutor: RuntimeBootstrapResult["toolExecutor"];
-    defaultAgentProfile: AgentProfile;
+    healthCheckAgentProfile: AgentProfile;
   }
 ): Record<string, RuntimeHealthStatus> {
   const healthChecks: Record<string, RuntimeHealthStatus> = {
@@ -52,7 +41,7 @@ function buildHealthChecks(
   };
 
   try {
-    options.modelRegistry.resolveChat(options.defaultAgentProfile.modelId);
+    options.modelRegistry.resolveChat(options.healthCheckAgentProfile.modelId);
     healthChecks.models = "ok";
   } catch {
     healthChecks.models = "degraded";
@@ -68,8 +57,30 @@ function buildHealthChecks(
   return healthChecks;
 }
 
+function buildAgentRegistry(options: RuntimeBootstrapOptions): AgentRegistry {
+  const registry = new AgentRegistry();
+  const mergedProfiles = new Map<string, AgentProfile>();
+
+  for (const profile of PRESET_PROFILES) {
+    mergedProfiles.set(profile.id, profile);
+  }
+
+  if (options.defaultAgentProfile) {
+    mergedProfiles.set(options.defaultAgentProfile.id, options.defaultAgentProfile);
+  }
+
+  for (const profile of options.agentProfiles ?? []) {
+    mergedProfiles.set(profile.id, profile);
+  }
+
+  for (const profile of mergedProfiles.values()) {
+    registry.register(profile);
+  }
+
+  return registry;
+}
+
 export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): RuntimeBootstrapResult {
-  const defaultAgentProfile = options.defaultAgentProfile ?? DEFAULT_AGENT_PROFILE;
   const db = openDatabase({
     path: resolveDatabasePath(options),
     busyTimeoutMs: options.busyTimeoutMs,
@@ -100,18 +111,22 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
 
   const sessionService = options.sessionService ?? new SessionService();
   const blackboard = options.blackboard ?? new Blackboard();
+  const agentRegistry = buildAgentRegistry(options);
   const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
   const toolExecutor = options.toolExecutor ?? new ToolExecutor();
+  const healthCheckAgentProfile =
+    agentRegistry.get(MAIDEN_PROFILE.id) ?? agentRegistry.getAll()[0] ?? MAIDEN_PROFILE;
   const healthChecks = buildHealthChecks(migrationStatus, {
     modelRegistry,
     toolExecutor,
-    defaultAgentProfile,
+    healthCheckAgentProfile,
   });
 
   const createAgentLoop = (agentId: string): AgentLoop | null => {
-    const profile = agentId === defaultAgentProfile.id
-      ? defaultAgentProfile
-      : { ...defaultAgentProfile, id: agentId };
+    const profile = agentRegistry.get(agentId);
+    if (!profile) {
+      return null;
+    }
 
     try {
       const modelProvider = modelRegistry.resolveChat(profile.modelId);
@@ -134,6 +149,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     rawDb: db.raw,
     sessionService,
     blackboard,
+    agentRegistry,
     modelRegistry,
     toolExecutor,
     migrationStatus,
@@ -144,6 +160,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     rawDb: db.raw,
     sessionService,
     blackboard,
+    agentRegistry,
     modelRegistry,
     toolExecutor,
     runtimeServices,

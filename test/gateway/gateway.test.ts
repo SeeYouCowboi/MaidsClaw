@@ -272,6 +272,79 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     const errData = events[0].data as { code: string };
     expect(errData.code).toBe("SESSION_CLOSED");
   });
+
+  it("rejects request agent_id that mismatches session owner", async () => {
+    const createRes = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: "maid:main" }),
+    });
+    const { session_id } = (await createRes.json()) as { session_id: string };
+
+    const res = await fetch(`${baseUrl}/v1/sessions/${session_id}/turns:stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: "rp:default",
+        request_id: "req-owner-mismatch",
+        user_message: { id: "msg-owner-mismatch", text: "Should fail" },
+      }),
+    });
+
+    const events = parseSseEvents(await res.text());
+    expect(events.length).toBe(1);
+    expect(events[0].type).toBe("error");
+
+    const errData = events[0].data as { code: string; retriable: boolean; message: string };
+    expect(errData.code).toBe("AGENT_OWNERSHIP_MISMATCH");
+    expect(errData.retriable).toBe(false);
+    expect(errData.message.includes("owned by agent")).toBe(true);
+  });
+
+  it("uses session owner when request body omits agent_id", async () => {
+    let selectedAgentId = "";
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: (agentId) => {
+        selectedAgentId = agentId;
+        return null;
+      },
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "rp:default" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-owner-default",
+          user_message: { id: "msg-owner-default", text: "Use owner" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      expect(events.length).toBe(1);
+      expect(events[0].type).toBe("error");
+      expect(selectedAgentId).toBe("rp:default");
+
+      const errData = events[0].data as { code: string; message: string };
+      expect(errData.code).toBe("AGENT_NOT_CONFIGURED");
+      expect(errData.message.includes("rp:default")).toBe(true);
+    } finally {
+      localServer.stop();
+    }
+  });
 });
 
 // ── 5. Close Session ─────────────────────────────────────────────────────────

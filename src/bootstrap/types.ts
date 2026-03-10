@@ -1,5 +1,6 @@
 import type { AgentLoop } from "../core/agent-loop.js";
 import type { AgentProfile } from "../agents/profile.js";
+import type { AgentRegistry } from "../agents/registry.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { SessionService } from "../session/service.js";
@@ -25,6 +26,7 @@ export type RuntimeServices = {
   rawDb: Database;
   sessionService: SessionService;
   blackboard: Blackboard;
+  agentRegistry: AgentRegistry;
   modelRegistry: DefaultModelServiceRegistry;
   toolExecutor: ToolExecutor;
   migrationStatus: RuntimeMigrationStatus;
@@ -34,6 +36,7 @@ export type RuntimeBootstrapOptions = {
   databasePath?: string;
   busyTimeoutMs?: number;
   defaultAgentProfile?: AgentProfile;
+  agentProfiles?: AgentProfile[];
   sessionService?: SessionService;
   blackboard?: Blackboard;
   modelRegistry?: DefaultModelServiceRegistry;
@@ -45,6 +48,7 @@ export type RuntimeBootstrapResult = {
   rawDb: Database;
   sessionService: SessionService;
   blackboard: Blackboard;
+  agentRegistry: AgentRegistry;
   modelRegistry: DefaultModelServiceRegistry;
   toolExecutor: ToolExecutor;
   runtimeServices: RuntimeServices;

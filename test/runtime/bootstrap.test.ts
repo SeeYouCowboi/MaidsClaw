@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
+import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
 
 describe("bootstrapRuntime", () => {
   it("returns runtime service bundle with health and migration status", () => {
@@ -10,6 +12,7 @@ describe("bootstrapRuntime", () => {
       expect(runtime.rawDb).toBe(runtime.db.raw);
       expect(runtime.sessionService).toBeDefined();
       expect(runtime.blackboard).toBeDefined();
+      expect(runtime.agentRegistry).toBeDefined();
       expect(runtime.modelRegistry).toBeDefined();
       expect(runtime.toolExecutor).toBeDefined();
       expect(runtime.runtimeServices).toBeDefined();
@@ -50,5 +53,38 @@ describe("bootstrapRuntime", () => {
 
     expect(firstThrow).toBe(false);
     expect(secondThrow).toBe(false);
+  });
+
+  it("creates agent loops from registry profiles and returns null for unknown agent ids", () => {
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [
+        {
+          prefix: "anthropic/",
+          provider: {
+            async *chatCompletion() {
+              yield { type: "message_end", stopReason: "end_turn" };
+            },
+          },
+        },
+      ],
+    });
+
+    const runtime = bootstrapRuntime({
+      databasePath: ":memory:",
+      modelRegistry,
+    });
+
+    try {
+      expect(runtime.agentRegistry.has(MAIDEN_PROFILE.id)).toBe(true);
+      expect(runtime.agentRegistry.has(RP_AGENT_PROFILE.id)).toBe(true);
+      expect(runtime.agentRegistry.has(TASK_AGENT_PROFILE.id)).toBe(true);
+
+      expect(runtime.createAgentLoop(MAIDEN_PROFILE.id) !== null).toBe(true);
+      expect(runtime.createAgentLoop(RP_AGENT_PROFILE.id) !== null).toBe(true);
+      expect(runtime.createAgentLoop(TASK_AGENT_PROFILE.id) !== null).toBe(true);
+      expect(runtime.createAgentLoop("rp:unregistered")).toBeNull();
+    } finally {
+      runtime.shutdown();
+    }
   });
 });

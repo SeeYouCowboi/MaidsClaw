@@ -210,6 +210,42 @@ export async function handleTurnStream(
     return createSseStream(sessionId, requestId, errorStream());
   }
 
+  const session = ctx.sessionService.getSession(sessionId);
+  if (!session) {
+    async function* errorStream(): AsyncGenerator<GatewayEvent> {
+      yield makeEvent(sessionId!, requestId, "error", {
+        code: "SESSION_NOT_FOUND",
+        message: `Session not found: ${sessionId}`,
+        retriable: false,
+      });
+    }
+    return createSseStream(sessionId, requestId, errorStream());
+  }
+
+  if (body.agent_id && body.agent_id !== session.agentId) {
+    const ownershipError = new MaidsClawError({
+      code: "AGENT_OWNERSHIP_MISMATCH",
+      message: `Session '${sessionId}' is owned by agent '${session.agentId}', not '${body.agent_id}'`,
+      retriable: false,
+      details: {
+        sessionId,
+        ownerAgentId: session.agentId,
+        requestedAgentId: body.agent_id,
+      },
+    });
+
+    async function* errorStream(): AsyncGenerator<GatewayEvent> {
+      yield makeEvent(sessionId!, requestId, "error", {
+        code: ownershipError.code,
+        message: ownershipError.message,
+        retriable: ownershipError.retriable,
+      });
+    }
+    return createSseStream(sessionId, requestId, errorStream());
+  }
+
+  const canonicalAgentId = session.agentId;
+
   if (!ctx.createAgentLoop) {
     async function* stubStream(): AsyncGenerator<GatewayEvent> {
       yield makeEvent(sessionId!, requestId, "status", { message: "processing" });
@@ -219,12 +255,12 @@ export async function handleTurnStream(
     return createSseStream(sessionId, requestId, stubStream());
   }
 
-  const agentLoop = ctx.createAgentLoop(body.agent_id ?? "maid:main");
+  const agentLoop = ctx.createAgentLoop(canonicalAgentId);
   if (!agentLoop) {
     async function* errorStream(): AsyncGenerator<GatewayEvent> {
       yield makeEvent(sessionId!, requestId, "error", {
         code: "AGENT_NOT_CONFIGURED",
-        message: `No agent loop available for agent '${body.agent_id}'`,
+        message: `No agent loop available for agent '${canonicalAgentId}'`,
         retriable: false,
       });
     }

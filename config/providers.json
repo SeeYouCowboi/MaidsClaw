@@ -1,0 +1,30 @@
+{
+  "providers": [
+    {
+      "id": "moonshot",
+      "displayName": "Moonshot (Kimi)",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "defaultChatModelId": "kimi-k2.5",
+      "models": [
+        {
+          "id": "kimi-k2.5",
+          "displayName": "Kimi K2.5",
+          "contextWindow": 256000,
+          "maxOutputTokens": 8192,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsEmbedding": false
+        }
+      ]
+    }
+  ]
+}
