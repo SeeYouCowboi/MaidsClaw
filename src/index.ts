@@ -1,9 +1,5 @@
-import { AgentLoop } from "./core/agent-loop.js";
-import { ToolExecutor } from "./core/tools/tool-executor.js";
-import { bootstrapRegistry } from "./core/models/bootstrap.js";
+import { bootstrapRuntime } from "./bootstrap/runtime.js";
 import { GatewayServer } from "./gateway/server.js";
-import { SessionService } from "./session/service.js";
-import type { AgentProfile } from "./agents/profile.js";
 
 export const VERSION = "0.1.0";
 
@@ -14,19 +10,6 @@ export function version(): string {
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
 
-const DEFAULT_AGENT_PROFILE: AgentProfile = {
-  id: "maid:main",
-  role: "maiden",
-  lifecycle: "persistent",
-  userFacing: true,
-  outputMode: "freeform",
-  modelId: "anthropic/claude-sonnet-4-20250514",
-  toolPermissions: [],
-  maxDelegationDepth: 3,
-  lorebookEnabled: false,
-  narrativeContextEnabled: false,
-};
-
 async function main(): Promise<void> {
   const port = parseInt(process.env.MAIDSCLAW_PORT ?? String(DEFAULT_PORT), 10);
   const host = process.env.MAIDSCLAW_HOST ?? DEFAULT_HOST;
@@ -36,36 +19,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
-    console.warn("No API keys set. Agent runtime will not be available.");
-  }
-
-  const sessionService = new SessionService();
-  const modelRegistry = bootstrapRegistry();
-  const toolExecutor = new ToolExecutor();
-
-  const createAgentLoop = (agentId: string) => {
-    const profile = agentId === DEFAULT_AGENT_PROFILE.id
-      ? DEFAULT_AGENT_PROFILE
-      : { ...DEFAULT_AGENT_PROFILE, id: agentId };
-
-    try {
-      const modelProvider = modelRegistry.resolveChat(profile.modelId);
-      return new AgentLoop({
-        profile,
-        modelProvider,
-        toolExecutor,
-      });
-    } catch {
-      return null;
-    }
-  };
+  const runtime = bootstrapRuntime();
+  const healthChecks = Object.fromEntries(
+    Object.entries(runtime.healthChecks).map(([name, status]) => [
+      name,
+      () => (status === "error" ? "unavailable" : status),
+    ])
+  );
 
   const server = new GatewayServer({
     port,
     host,
-    sessionService,
-    createAgentLoop,
+    sessionService: runtime.sessionService,
+    createAgentLoop: runtime.createAgentLoop,
+    turnService: runtime.turnService,
+    healthChecks,
   });
 
   server.start();
@@ -75,6 +43,7 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log("Shutting down...");
     server.stop();
+    runtime.shutdown();
     process.exit(0);
   };
 

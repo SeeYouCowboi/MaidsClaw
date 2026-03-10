@@ -2,6 +2,7 @@ import type { GatewayEvent, GatewayEventType } from "../core/types.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
 import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
+import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import { createSseStream } from "./sse.js";
 
@@ -16,6 +17,7 @@ export type ControllerContext = {
   sessionService: SessionService;
   healthChecks?: Record<string, HealthCheckFn>;
   createAgentLoop?: AgentLoopFactory;
+  turnService?: TurnService;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -246,46 +248,59 @@ export async function handleTurnStream(
 
   const canonicalAgentId = session.agentId;
 
-  if (!ctx.createAgentLoop) {
+  const userText = body.user_message?.text ?? "";
+  const runRequest: AgentRunRequest & {
+    agentId: string;
+    userMessageId?: string;
+    clientContext?: unknown;
+    metadata?: unknown;
+  } = {
+    sessionId,
+    requestId,
+    messages: [{ role: "user", content: userText }],
+    agentId: canonicalAgentId,
+    userMessageId: body.user_message?.id,
+    clientContext: body.client_context,
+    metadata: body.metadata,
+  };
+
+  let runLoop: AsyncIterable<Chunk>;
+
+  if (ctx.turnService) {
+    runLoop = ctx.turnService.run(runRequest);
+  } else if (!ctx.createAgentLoop) {
     async function* stubStream(): AsyncGenerator<GatewayEvent> {
       yield makeEvent(sessionId!, requestId, "status", { message: "processing" });
       yield makeEvent(sessionId!, requestId, "delta", { text: "Hello from MaidsClaw." });
       yield makeEvent(sessionId!, requestId, "done", { total_tokens: 10 });
     }
     return createSseStream(sessionId, requestId, stubStream());
-  }
-
-  const agentLoop = ctx.createAgentLoop(canonicalAgentId);
-  if (!agentLoop) {
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "error", {
-        code: "AGENT_NOT_CONFIGURED",
-        message: `No agent loop available for agent '${canonicalAgentId}'`,
-        retriable: false,
-      });
+  } else {
+    const agentLoop = ctx.createAgentLoop(canonicalAgentId);
+    if (!agentLoop) {
+      async function* errorStream(): AsyncGenerator<GatewayEvent> {
+        yield makeEvent(sessionId!, requestId, "error", {
+          code: "AGENT_NOT_CONFIGURED",
+          message: `No agent loop available for agent '${canonicalAgentId}'`,
+          retriable: false,
+        });
+      }
+      return createSseStream(sessionId, requestId, errorStream());
     }
-    return createSseStream(sessionId, requestId, errorStream());
-  }
 
-  const userText = body.user_message?.text ?? "";
-  const runRequest: AgentRunRequest = {
-    sessionId,
-    requestId,
-    messages: [{ role: "user", content: userText }],
-  };
+    runLoop = agentLoop.run(runRequest);
+  }
 
   async function* agentStream(): AsyncGenerator<GatewayEvent> {
     yield makeEvent(sessionId!, requestId, "status", { message: "processing" });
 
-    let totalText = "";
     let inputTokens = 0;
     let outputTokens = 0;
 
     try {
-      for await (const chunk of agentLoop!.run(runRequest)) {
+      for await (const chunk of runLoop) {
         const event = chunkToGatewayEvent(sessionId!, requestId, chunk);
         if (event) {
-          if (chunk.type === "text_delta") totalText += chunk.text;
           if (chunk.type === "message_end") {
             inputTokens = chunk.inputTokens ?? 0;
             outputTokens = chunk.outputTokens ?? 0;
@@ -326,6 +341,11 @@ export async function handleCloseSession(
       retriable: false,
     });
     return errorResponse(err, 400);
+  }
+
+  const session = ctx.sessionService.getSession(sessionId);
+  if (ctx.turnService && session) {
+    await ctx.turnService.flushOnSessionClose(sessionId, session.agentId);
   }
 
   try {

@@ -1,5 +1,6 @@
 import type { Server } from "bun";
 import type { SessionService } from "../session/service.js";
+import type { TurnService } from "../runtime/turn-service.js";
 import type { AgentLoopFactory, ControllerContext, HealthCheckFn } from "./controllers.js";
 import { resolveRoute } from "./routes.js";
 
@@ -8,6 +9,7 @@ export type GatewayServerOptions = {
   host: string;
   sessionService: SessionService;
   createAgentLoop?: AgentLoopFactory;
+  turnService?: TurnService;
   healthChecks?: Record<string, HealthCheckFn>;
 };
 
@@ -27,6 +29,7 @@ export class GatewayServer {
     const ctx: ControllerContext = {
       sessionService: this.options.sessionService,
       createAgentLoop: this.options.createAgentLoop,
+      turnService: this.options.turnService,
       healthChecks: this.options.healthChecks,
     };
 
