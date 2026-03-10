@@ -3,9 +3,20 @@ import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { MAIDEN_PROFILE, PRESET_PROFILES } from "../agents/presets.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
+import { PromptBuilder } from "../core/prompt-builder.js";
+import {
+  PersonaAdapter,
+  LoreAdapter,
+  MemoryAdapter,
+  BlackboardOperationalDataSource,
+} from "../core/prompt-data-adapters/index.js";
+import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
+import { createLoreService } from "../lore/service.js";
 import { runMemoryMigrations } from "../memory/schema.js";
+import { PersonaLoader } from "../persona/loader.js";
+import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
@@ -24,6 +35,15 @@ function resolveDatabasePath(options: RuntimeBootstrapOptions): string {
 
   const envDbPath = process.env.MAIDSCLAW_DB_PATH;
   return resolveStoragePaths({ databasePath: envDbPath }).databasePath;
+}
+
+function resolveDataDir(options: RuntimeBootstrapOptions): string {
+  if (options.dataDir) {
+    return options.dataDir;
+  }
+
+  const envDataDir = process.env.MAIDSCLAW_DATA_DIR;
+  return resolveStoragePaths({ dataDir: envDataDir }).dataDir;
 }
 
 function buildHealthChecks(
@@ -122,6 +142,31 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     healthCheckAgentProfile,
   });
 
+  const dataDir = resolveDataDir(options);
+  const storagePaths = resolveStoragePaths({ dataDir });
+
+  const personaService = new PersonaService({
+    loader: new PersonaLoader(storagePaths.personasDir),
+  });
+  personaService.loadAll();
+
+  const loreService = createLoreService({ dataDir });
+  loreService.loadAll();
+
+  const personaAdapter = new PersonaAdapter(personaService);
+  const loreAdapter = new LoreAdapter(loreService);
+  const memoryAdapter = new MemoryAdapter(db);
+  const operationalAdapter = new BlackboardOperationalDataSource(blackboard);
+
+  const promptBuilder = new PromptBuilder({
+    persona: personaAdapter,
+    lore: loreAdapter,
+    memory: memoryAdapter,
+    operational: operationalAdapter,
+  });
+
+  const promptRenderer = new PromptRenderer();
+
   const createAgentLoop = (agentId: string): AgentLoop | null => {
     const profile = agentRegistry.get(agentId);
     if (!profile) {
@@ -163,6 +208,8 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     agentRegistry,
     modelRegistry,
     toolExecutor,
+    promptBuilder,
+    promptRenderer,
     runtimeServices,
     createAgentLoop,
     healthChecks,

@@ -2,6 +2,8 @@ import type { AgentLoop } from "../core/agent-loop.js";
 import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
+import type { PromptBuilder } from "../core/prompt-builder.js";
+import type { PromptRenderer } from "../core/prompt-renderer.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
@@ -34,6 +36,7 @@ export type RuntimeServices = {
 
 export type RuntimeBootstrapOptions = {
   databasePath?: string;
+  dataDir?: string;
   busyTimeoutMs?: number;
   defaultAgentProfile?: AgentProfile;
   agentProfiles?: AgentProfile[];
@@ -51,6 +54,8 @@ export type RuntimeBootstrapResult = {
   agentRegistry: AgentRegistry;
   modelRegistry: DefaultModelServiceRegistry;
   toolExecutor: ToolExecutor;
+  promptBuilder: PromptBuilder;
+  promptRenderer: PromptRenderer;
   runtimeServices: RuntimeServices;
   createAgentLoop: (agentId: string) => AgentLoop | null;
   healthChecks: Record<string, RuntimeHealthStatus>;
