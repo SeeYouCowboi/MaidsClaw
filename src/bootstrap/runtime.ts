@@ -1,7 +1,7 @@
 import { AgentLoop } from "../core/agent-loop.js";
 import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
-import { MAIDEN_PROFILE, PRESET_PROFILES } from "../agents/presets.js";
+import { MAIDEN_PROFILE, PRESET_PROFILES, TASK_AGENT_PROFILE } from "../agents/presets.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import {
@@ -14,7 +14,14 @@ import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import { createLoreService } from "../lore/service.js";
+import { CoreMemoryService } from "../memory/core-memory.js";
+import { EmbeddingService } from "../memory/embeddings.js";
+import { MaterializationService } from "../memory/materialization.js";
+import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { runMemoryMigrations } from "../memory/schema.js";
+import { GraphStorageService } from "../memory/storage.js";
+import { MemoryTaskAgent } from "../memory/task-agent.js";
+import { TransactionBatcher } from "../memory/transaction-batcher.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
@@ -25,6 +32,7 @@ import type {
   RuntimeBootstrapOptions,
   RuntimeBootstrapResult,
   RuntimeHealthStatus,
+  MemoryPipelineStatus,
   RuntimeMigrationStatus,
 } from "./types.js";
 import { registerRuntimeTools } from "./tools.js";
@@ -53,12 +61,14 @@ function buildHealthChecks(
     modelRegistry: RuntimeBootstrapResult["modelRegistry"];
     toolExecutor: RuntimeBootstrapResult["toolExecutor"];
     healthCheckAgentProfile: AgentProfile;
+    memoryPipelineReady: boolean;
   }
 ): Record<string, RuntimeHealthStatus> {
   const healthChecks: Record<string, RuntimeHealthStatus> = {
     storage: migrationStatus.succeeded ? "ok" : "error",
     models: "degraded",
     tools: "ok",
+    memory_pipeline: options.memoryPipelineReady ? "ok" : "degraded",
   };
 
   try {
@@ -148,12 +158,46 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
 
   registerRuntimeTools(toolExecutor, runtimeServices);
 
+  const memoryMigrationModelId = options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
+  const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
+  let memoryTaskAgent: MemoryTaskAgent | null = null;
+  let memoryPipelineReady = false;
+  let memoryPipelineStatus: MemoryPipelineStatus = "missing_embedding_model";
+
+  try {
+    modelRegistry.resolveChat(memoryMigrationModelId);
+  } catch {
+    memoryPipelineStatus = "chat_model_unavailable";
+  }
+
+  if (memoryPipelineStatus !== "chat_model_unavailable") {
+    if (!memoryEmbeddingModelId) {
+      memoryPipelineStatus = "missing_embedding_model";
+    } else {
+      try {
+        modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
+
+        const storage = new GraphStorageService(db);
+        const coreMemory = new CoreMemoryService(db);
+        const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+        const materialization = new MaterializationService(db.raw, storage);
+        const provider = new MemoryTaskModelProviderAdapter(modelRegistry, memoryMigrationModelId, memoryEmbeddingModelId);
+        memoryTaskAgent = new MemoryTaskAgent(db.raw, storage, coreMemory, embeddings, materialization, provider);
+        memoryPipelineReady = true;
+        memoryPipelineStatus = "ready";
+      } catch {
+        memoryPipelineStatus = "embedding_model_unavailable";
+      }
+    }
+  }
+
   const healthCheckAgentProfile =
     agentRegistry.get(MAIDEN_PROFILE.id) ?? agentRegistry.getAll()[0] ?? MAIDEN_PROFILE;
   const healthChecks = buildHealthChecks(migrationStatus, {
     modelRegistry,
     toolExecutor,
     healthCheckAgentProfile,
+    memoryPipelineReady,
   });
 
   const dataDir = resolveDataDir(options);
@@ -215,6 +259,9 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     promptRenderer,
     runtimeServices,
     createAgentLoop,
+    memoryTaskAgent,
+    memoryPipelineReady,
+    memoryPipelineStatus,
     healthChecks,
     migrationStatus,
     shutdown,

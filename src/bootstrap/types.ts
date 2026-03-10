@@ -9,6 +9,7 @@ import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
 import type { Db } from "../storage/database.js";
 import type { Database } from "bun:sqlite";
+import type { MemoryTaskAgent } from "../memory/task-agent.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
@@ -38,6 +39,8 @@ export type RuntimeBootstrapOptions = {
   databasePath?: string;
   dataDir?: string;
   busyTimeoutMs?: number;
+  memoryMigrationModelId?: string;
+  memoryEmbeddingModelId?: string;
   defaultAgentProfile?: AgentProfile;
   agentProfiles?: AgentProfile[];
   sessionService?: SessionService;
@@ -45,6 +48,12 @@ export type RuntimeBootstrapOptions = {
   modelRegistry?: DefaultModelServiceRegistry;
   toolExecutor?: ToolExecutor;
 };
+
+export type MemoryPipelineStatus =
+  | "ready"
+  | "missing_embedding_model"
+  | "chat_model_unavailable"
+  | "embedding_model_unavailable";
 
 export type RuntimeBootstrapResult = {
   db: Db;
@@ -58,6 +67,9 @@ export type RuntimeBootstrapResult = {
   promptRenderer: PromptRenderer;
   runtimeServices: RuntimeServices;
   createAgentLoop: (agentId: string) => AgentLoop | null;
+  memoryTaskAgent: MemoryTaskAgent | null;
+  memoryPipelineReady: boolean;
+  memoryPipelineStatus: MemoryPipelineStatus;
   healthChecks: Record<string, RuntimeHealthStatus>;
   migrationStatus: RuntimeMigrationStatus;
   shutdown: () => void;

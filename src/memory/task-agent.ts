@@ -54,23 +54,23 @@ type IngestionInput = {
   attachments: IngestionAttachment[];
 };
 
-type ToolCallResult = {
+export type ToolCallResult = {
   name: string;
   arguments: Record<string, unknown>;
 };
 
-type ChatToolDefinition = {
+export type ChatToolDefinition = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
 };
 
-type ChatMessage = {
+export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
 
-type ModelProvider = {
+export type MemoryTaskModelProvider = {
   chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
   embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
@@ -247,7 +247,7 @@ export class MemoryIngestionPolicy {
 }
 
 export class MemoryTaskAgent {
-  private readonly modelProvider: ModelProvider;
+  private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private migrateTail: Promise<unknown> = Promise.resolve();
   private organizeTail: Promise<unknown> = Promise.resolve();
@@ -276,7 +276,7 @@ export class MemoryTaskAgent {
         embed: async () => {
           throw new Error("MemoryTaskAgent requires modelProvider.embed");
         },
-      } satisfies ModelProvider);
+      } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
   }
 
