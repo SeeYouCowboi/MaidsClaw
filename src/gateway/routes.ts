@@ -38,7 +38,7 @@ function matchPath(pathname: string, pattern: string): boolean {
 /** V1 route table — all 5 endpoints */
 export const ROUTES: RouteEntry[] = [
   { method: "GET", pattern: "/healthz", handler: (_req) => handleHealthz() },
-  { method: "GET", pattern: "/readyz", handler: (_req) => handleReadyz() },
+  { method: "GET", pattern: "/readyz", handler: (req, ctx) => handleReadyz(req, ctx) },
   { method: "POST", pattern: "/v1/sessions", handler: handleCreateSession },
   { method: "POST", pattern: "/v1/sessions/{session_id}/turns:stream", handler: handleTurnStream },
   { method: "POST", pattern: "/v1/sessions/{session_id}/close", handler: handleCloseSession },

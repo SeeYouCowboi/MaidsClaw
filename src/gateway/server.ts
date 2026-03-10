@@ -1,12 +1,14 @@
 import type { Server } from "bun";
 import type { SessionService } from "../session/service.js";
-import type { ControllerContext } from "./controllers.js";
+import type { AgentLoopFactory, ControllerContext, HealthCheckFn } from "./controllers.js";
 import { resolveRoute } from "./routes.js";
 
 export type GatewayServerOptions = {
   port: number;
   host: string;
   sessionService: SessionService;
+  createAgentLoop?: AgentLoopFactory;
+  healthChecks?: Record<string, HealthCheckFn>;
 };
 
 /**
@@ -24,11 +26,16 @@ export class GatewayServer {
   start(): void {
     const ctx: ControllerContext = {
       sessionService: this.options.sessionService,
+      createAgentLoop: this.options.createAgentLoop,
+      healthChecks: this.options.healthChecks,
     };
+
+    // "localhost" on Windows binds to IPv6 ::1 only, causing IPv4 fetch() to get ConnectionRefused.
+    const bindHost = this.options.host === "localhost" ? "0.0.0.0" : this.options.host;
 
     this.server = Bun.serve({
       port: this.options.port,
-      hostname: this.options.host,
+      hostname: bindHost,
       fetch: async (req: Request): Promise<Response> => {
         const url = new URL(req.url);
         const route = resolveRoute(req.method, url.pathname);

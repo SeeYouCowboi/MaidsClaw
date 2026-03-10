@@ -6,6 +6,7 @@ export type DbOptions = {
 };
 
 export interface Db {
+  readonly raw: Database;
   exec(sql: string): void;
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[];
   run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint };
@@ -27,6 +28,7 @@ export function openDatabase(options: DbOptions): Db {
   db.exec(`PRAGMA busy_timeout=${options.busyTimeoutMs ?? 5000}`);
 
   return {
+    raw: db,
     exec(sql: string): void {
       db.exec(sql);
     },

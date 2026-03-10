@@ -1,0 +1,55 @@
+import type { AgentLoop } from "../core/agent-loop.js";
+import type { AgentProfile } from "../agents/profile.js";
+import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
+import type { ToolExecutor } from "../core/tools/tool-executor.js";
+import type { SessionService } from "../session/service.js";
+import type { Blackboard } from "../state/blackboard.js";
+import type { Db } from "../storage/database.js";
+import type { Database } from "bun:sqlite";
+
+export type RuntimeHealthStatus = "ok" | "degraded" | "error";
+
+export type RuntimeMigrationStatus = {
+  interaction: {
+    succeeded: boolean;
+    appliedMigrations: string[];
+  };
+  memory: {
+    succeeded: boolean;
+  };
+  succeeded: boolean;
+};
+
+export type RuntimeServices = {
+  db: Db;
+  rawDb: Database;
+  sessionService: SessionService;
+  blackboard: Blackboard;
+  modelRegistry: DefaultModelServiceRegistry;
+  toolExecutor: ToolExecutor;
+  migrationStatus: RuntimeMigrationStatus;
+};
+
+export type RuntimeBootstrapOptions = {
+  databasePath?: string;
+  busyTimeoutMs?: number;
+  defaultAgentProfile?: AgentProfile;
+  sessionService?: SessionService;
+  blackboard?: Blackboard;
+  modelRegistry?: DefaultModelServiceRegistry;
+  toolExecutor?: ToolExecutor;
+};
+
+export type RuntimeBootstrapResult = {
+  db: Db;
+  rawDb: Database;
+  sessionService: SessionService;
+  blackboard: Blackboard;
+  modelRegistry: DefaultModelServiceRegistry;
+  toolExecutor: ToolExecutor;
+  runtimeServices: RuntimeServices;
+  createAgentLoop: (agentId: string) => AgentLoop | null;
+  healthChecks: Record<string, RuntimeHealthStatus>;
+  migrationStatus: RuntimeMigrationStatus;
+  shutdown: () => void;
+};
