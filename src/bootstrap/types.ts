@@ -10,6 +10,7 @@ import type { Blackboard } from "../state/blackboard.js";
 import type { Db } from "../storage/database.js";
 import type { Database } from "bun:sqlite";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
+import type { TurnService } from "../runtime/turn-service.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
@@ -67,6 +68,7 @@ export type RuntimeBootstrapResult = {
   promptRenderer: PromptRenderer;
   runtimeServices: RuntimeServices;
   createAgentLoop: (agentId: string) => AgentLoop | null;
+  turnService: TurnService;
   memoryTaskAgent: MemoryTaskAgent | null;
   memoryPipelineReady: boolean;
   memoryPipelineStatus: MemoryPipelineStatus;

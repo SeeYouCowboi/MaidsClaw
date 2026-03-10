@@ -1,4 +1,5 @@
-import { AgentLoop } from "../core/agent-loop.js";
+import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
+import type { Chunk } from "../core/chunk.js";
 import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { MAIDEN_PROFILE, PRESET_PROFILES, TASK_AGENT_PROFILE } from "../agents/presets.js";
@@ -13,6 +14,9 @@ import {
 import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
+import { CommitService } from "../interaction/commit-service.js";
+import { FlushSelector } from "../interaction/flush-selector.js";
+import { InteractionStore } from "../interaction/store.js";
 import { createLoreService } from "../lore/service.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
 import { EmbeddingService } from "../memory/embeddings.js";
@@ -26,6 +30,7 @@ import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
 import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
+import { TurnService } from "../runtime/turn-service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
 import { resolveStoragePaths } from "../storage/paths.js";
@@ -157,6 +162,10 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     migrationStatus,
   };
 
+  const interactionStore = new InteractionStore(db);
+  const commitService = new CommitService(interactionStore);
+  const flushSelector = new FlushSelector(interactionStore);
+
   registerRuntimeTools(toolExecutor, runtimeServices);
 
   const memoryMigrationModelId = options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
@@ -248,6 +257,29 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     }
   };
 
+  const turnServiceAgentLoop = {
+    async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
+      const canonicalAgentId = sessionService.getSession(request.sessionId)?.agentId ?? MAIDEN_PROFILE.id;
+      const loop = createAgentLoop(canonicalAgentId);
+      if (!loop) {
+        throw new Error(`No agent loop available for agent '${canonicalAgentId}'`);
+      }
+
+      for await (const chunk of loop.run(request)) {
+        yield chunk;
+      }
+    },
+  } as unknown as AgentLoop;
+
+  const turnService = new TurnService(
+    turnServiceAgentLoop,
+    commitService,
+    interactionStore,
+    flushSelector,
+    memoryTaskAgent,
+    sessionService,
+  );
+
   const shutdown = (): void => {
     closeDatabaseGracefully(db);
   };
@@ -264,6 +296,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     promptRenderer,
     runtimeServices,
     createAgentLoop,
+    turnService,
     memoryTaskAgent,
     memoryPipelineReady,
     memoryPipelineStatus,
