@@ -27,6 +27,7 @@ import type {
   RuntimeHealthStatus,
   RuntimeMigrationStatus,
 } from "./types.js";
+import { registerRuntimeTools } from "./tools.js";
 
 function resolveDatabasePath(options: RuntimeBootstrapOptions): string {
   if (options.databasePath) {
@@ -134,6 +135,19 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   const agentRegistry = buildAgentRegistry(options);
   const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
   const toolExecutor = options.toolExecutor ?? new ToolExecutor();
+  const runtimeServices = {
+    db,
+    rawDb: db.raw,
+    sessionService,
+    blackboard,
+    agentRegistry,
+    modelRegistry,
+    toolExecutor,
+    migrationStatus,
+  };
+
+  registerRuntimeTools(toolExecutor, runtimeServices);
+
   const healthCheckAgentProfile =
     agentRegistry.get(MAIDEN_PROFILE.id) ?? agentRegistry.getAll()[0] ?? MAIDEN_PROFILE;
   const healthChecks = buildHealthChecks(migrationStatus, {
@@ -187,17 +201,6 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
 
   const shutdown = (): void => {
     closeDatabaseGracefully(db);
-  };
-
-  const runtimeServices = {
-    db,
-    rawDb: db.raw,
-    sessionService,
-    blackboard,
-    agentRegistry,
-    modelRegistry,
-    toolExecutor,
-    migrationStatus,
   };
 
   return {
