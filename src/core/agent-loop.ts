@@ -3,9 +3,13 @@ import type { Chunk, TextDeltaChunk } from "./chunk.js";
 import { MaidsClawError, wrapError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type { ChatCompletionRequest, ChatMessage, ChatModelProvider, ContentBlock } from "./models/chat-provider.js";
+import type { ViewerContext } from "../memory/types.js";
+import type { PromptBuilder } from "./prompt-builder.js";
+import type { PromptRenderer } from "./prompt-renderer.js";
 import { createRunContext } from "./run-context.js";
 import { NoopRuntimeProjectionSink } from "./runtime-projection.js";
 import type { RuntimeProjectionSink } from "./runtime-projection.js";
+import { calculateTokenBudget } from "./token-budget.js";
 import type { ProjectionAppendix } from "./types.js";
 import type { ToolExecutor } from "./tools/tool-executor.js";
 import { getFilteredSchemas, canExecuteTool } from "./tools/tool-access-policy.js";
@@ -20,6 +24,13 @@ export interface AgentLoopOptions {
   profile: AgentProfile;
   modelProvider: ChatModelProvider;
   toolExecutor: ToolExecutor;
+  promptBuilder?: PromptBuilder;
+  promptRenderer?: PromptRenderer;
+  viewerContextResolver?: (params: {
+    sessionId: string;
+    agentId: string;
+    role: AgentProfile["role"];
+  }) => ViewerContext | Promise<ViewerContext>;
   projectionSink?: RuntimeProjectionSink;
   logger?: Logger;
   maxDelegationDepth?: number;
@@ -37,6 +48,9 @@ export class AgentLoop {
   private readonly profile: AgentProfile;
   private readonly modelProvider: ChatModelProvider;
   private readonly toolExecutor: ToolExecutor;
+  private readonly promptBuilder?: PromptBuilder;
+  private readonly promptRenderer?: PromptRenderer;
+  private readonly viewerContextResolver?: AgentLoopOptions["viewerContextResolver"];
   private readonly projectionSink: RuntimeProjectionSink;
   private readonly logger?: Logger;
   private readonly maxDelegationDepth: number;
@@ -45,6 +59,9 @@ export class AgentLoop {
     this.profile = options.profile;
     this.modelProvider = options.modelProvider;
     this.toolExecutor = options.toolExecutor;
+    this.promptBuilder = options.promptBuilder;
+    this.promptRenderer = options.promptRenderer;
+    this.viewerContextResolver = options.viewerContextResolver;
     this.projectionSink = options.projectionSink ?? new NoopRuntimeProjectionSink();
     this.logger = options.logger;
     this.maxDelegationDepth = options.maxDelegationDepth ?? 3;
@@ -70,7 +87,9 @@ export class AgentLoop {
       agent_id: this.profile.id,
     });
 
-    const workingMessages = [...request.messages];
+    const initialPromptState = await this.buildInitialPromptState(request);
+    const workingMessages = [...initialPromptState.messages];
+    const systemPrompt = initialPromptState.systemPrompt;
     let turnIndex = 0;
 
     while (true) {
@@ -83,7 +102,7 @@ export class AgentLoop {
       let sawMessageEnd = false;
 
       try {
-        const completionRequest = this.buildCompletionRequest(workingMessages);
+        const completionRequest = this.buildCompletionRequest(workingMessages, systemPrompt);
         for await (const chunk of this.modelProvider.chatCompletion(completionRequest)) {
           if (chunk.type === "text_delta") {
             assistantText += chunk.text;
@@ -237,10 +256,48 @@ export class AgentLoop {
     }
   }
 
-  private buildCompletionRequest(messages: ChatMessage[]): ChatCompletionRequest {
+  private async buildInitialPromptState(
+    request: AgentRunRequest
+  ): Promise<{ systemPrompt: string; messages: ChatMessage[] }> {
+    if (!this.promptBuilder || !this.promptRenderer) {
+      return {
+        systemPrompt: buildSystemPrompt(this.profile),
+        messages: [...request.messages],
+      };
+    }
+
+    const viewerContext = this.viewerContextResolver
+      ? await this.viewerContextResolver({
+          sessionId: request.sessionId,
+          agentId: this.profile.id,
+          role: this.profile.role,
+        })
+      : {
+          viewer_agent_id: this.profile.id,
+          viewer_role: this.profile.role,
+          session_id: request.sessionId,
+        };
+
+    const promptSections = await this.promptBuilder.build({
+      profile: this.profile,
+      viewerContext,
+      userMessage: getLatestUserMessage(request.messages),
+      conversationMessages: request.messages,
+      budget: calculateTokenBudget(this.profile, DEFAULT_PROMPT_MAX_CONTEXT_TOKENS),
+    });
+
+    const rendered = this.promptRenderer.render({ sections: promptSections.sections });
+
+    return {
+      systemPrompt: rendered.systemPrompt,
+      messages: rendered.conversationMessages,
+    };
+  }
+
+  private buildCompletionRequest(messages: ChatMessage[], systemPrompt: string): ChatCompletionRequest {
     return {
       modelId: this.profile.modelId,
-      systemPrompt: buildSystemPrompt(this.profile),
+      systemPrompt,
       messages,
       tools: getFilteredSchemas(this.profile, this.toolExecutor).map((tool) => ({
         name: tool.name,
@@ -249,6 +306,27 @@ export class AgentLoop {
       })),
     };
   }
+}
+
+const DEFAULT_PROMPT_MAX_CONTEXT_TOKENS = 128000;
+
+function getLatestUserMessage(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== "user") {
+      continue;
+    }
+
+    if (typeof message.content === "string") {
+      return message.content;
+    }
+
+    return message.content
+      .map((block) => (block.type === "text" ? block.text : JSON.stringify(block)))
+      .join("\n");
+  }
+
+  return "";
 }
 
 function appendTextBlock(blocks: ContentBlock[], chunk: TextDeltaChunk): void {

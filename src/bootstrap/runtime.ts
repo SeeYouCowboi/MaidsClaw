@@ -25,6 +25,7 @@ import { TransactionBatcher } from "../memory/transaction-batcher.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
+import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
 import { resolveStoragePaths } from "../storage/paths.js";
@@ -237,6 +238,10 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
         profile,
         modelProvider,
         toolExecutor,
+        promptBuilder,
+        promptRenderer,
+        viewerContextResolver: ({ sessionId, agentId, role }) =>
+          resolveViewerContext(agentId, blackboard, { sessionId, role }),
       });
     } catch {
       return null;
