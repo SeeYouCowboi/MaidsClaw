@@ -35,7 +35,7 @@ describe("RpToolPolicy", () => {
 describe("RP Agent permission boundaries", () => {
   it("canUseTool allows all tools when toolPermissions is empty", () => {
     const registry = new AgentRegistry();
-    registry.register(createRpProfile("open"));
+    registry.register(createRpProfile("open", { toolPermissions: [] }));
     const permissions = new AgentPermissions(registry);
 
     expect(permissions.canUseTool("rp:open", "memory_read")).toBe(true);

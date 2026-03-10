@@ -1,6 +1,7 @@
 // Preset agent profile definitions for MaidsClaw V1
 
 import type { AgentProfile } from "./profile.js";
+import { RpToolPolicy } from "./rp/tool-policy.js";
 
 /** Maiden — the primary coordinator agent. Persistent, user-facing, freeform output. */
 export const MAIDEN_PROFILE: AgentProfile = {
@@ -33,7 +34,7 @@ export const RP_AGENT_PROFILE: AgentProfile = {
   outputMode: "freeform",
   modelId: "anthropic/claude-3-5-sonnet-20241022",
   maxOutputTokens: 4096,
-  toolPermissions: [], // empty = all tools allowed
+  toolPermissions: new RpToolPolicy().toToolPermissions(),
   maxDelegationDepth: 1, // can only delegate to task_agent
   lorebookEnabled: true,
   narrativeContextEnabled: true,

@@ -8,6 +8,7 @@ import { NoopRuntimeProjectionSink } from "./runtime-projection.js";
 import type { RuntimeProjectionSink } from "./runtime-projection.js";
 import type { ProjectionAppendix } from "./types.js";
 import type { ToolExecutor } from "./tools/tool-executor.js";
+import { getFilteredSchemas, canExecuteTool } from "./tools/tool-access-policy.js";
 
 type PendingToolCall = {
   id: string;
@@ -201,6 +202,16 @@ export class AgentLoop {
 
       try {
         for (const toolCall of normalizedToolCalls) {
+          if (!canExecuteTool(this.profile, toolCall.name)) {
+            yield {
+              type: "error",
+              code: "TOOL_PERMISSION_DENIED",
+              message: `Tool '${toolCall.name}' is not permitted for agent '${this.profile.id}'`,
+              retriable: false,
+            };
+            return;
+          }
+
           const result = await this.toolExecutor.execute(toolCall.name, toolCall.params, {
             sessionId: request.sessionId,
             agentId: this.profile.id,
@@ -231,7 +242,7 @@ export class AgentLoop {
       modelId: this.profile.modelId,
       systemPrompt: buildSystemPrompt(this.profile),
       messages,
-      tools: this.toolExecutor.getSchemas().map((tool) => ({
+      tools: getFilteredSchemas(this.profile, this.toolExecutor).map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: tool.parameters,
