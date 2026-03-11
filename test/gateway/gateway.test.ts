@@ -1,3 +1,7 @@
+import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
+import type { Chunk } from "../../src/core/chunk.js";
+import type { ChatModelProvider } from "../../src/core/models/chat-provider.js";
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import { SessionService } from "../../src/session/service.js";
 import { GatewayServer } from "../../src/gateway/server.js";
@@ -882,6 +886,270 @@ describe("Stream semantics", () => {
       expect((errorEvent!.data as any).code).toBe("AGENT_RUNTIME_ERROR");
     } finally {
       localServer.stop();
+    }
+  });
+});
+
+// ── 11. Real TurnService-backed gateway path ─────────────────────────────
+
+describe("Real TurnService-backed gateway path", () => {
+  /** Build a ChatModelProvider that yields a fixed chunk sequence per call. */
+  function makeMockProvider(chunkRef: { value: Chunk[] }): ChatModelProvider {
+    return {
+      async *chatCompletion() {
+        for (const chunk of chunkRef.value) {
+          yield chunk;
+        }
+      },
+    };
+  }
+
+  it("real-path turn completes with done event", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "text_delta", text: "Hello!" },
+        { type: "message_end", stopReason: "end_turn", inputTokens: 5, outputTokens: 3 },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      // Create session with known agent
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      expect(createRes.status).toBe(201);
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      // Submit turn
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-1",
+          user_message: { id: "msg-r1", text: "Hello" },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+
+      expect(types).toContain("status");
+      expect(types).toContain("delta");
+      expect(types).toContain("done");
+      expect(types).not.toContain("error");
+
+      const doneEvent = events.find((e) => e.type === "done");
+      expect(doneEvent).toBeDefined();
+      const doneData = doneEvent!.data as { total_tokens: number };
+      expect(doneData.total_tokens).toBe(8); // 5 + 3
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
+  it("real-path failed turn sets recovery_required and blocks next turn", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "text_delta", text: "partial..." },
+        { type: "error", code: "MODEL_ERROR", message: "model failed", retriable: false },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      // First turn: model emits partial text then error
+      const res1 = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-fail",
+          user_message: { id: "msg-rf", text: "Hello" },
+        }),
+      });
+      const events1 = parseSseEvents(await res1.text());
+      const types1 = events1.map((e) => e.type);
+      expect(types1).toContain("error");
+      expect(types1).not.toContain("done");
+
+      // Second turn: should be blocked with SESSION_RECOVERY_REQUIRED
+      const res2 = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-blocked",
+          user_message: { id: "msg-rb", text: "Hello again" },
+        }),
+      });
+      const events2 = parseSseEvents(await res2.text());
+      expect(events2.length).toBe(1);
+      expect(events2[0].type).toBe("error");
+      const errData = events2[0].data as { code: string; retriable: boolean };
+      expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
+      expect(errData.retriable).toBe(false);
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
+  it("real-path recovery clears blocked state", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "text_delta", text: "partial..." },
+        { type: "error", code: "MODEL_ERROR", message: "model failed", retriable: false },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      // Trigger error to put session in recovery_required state
+      await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-err",
+          user_message: { id: "msg-re", text: "Hello" },
+        }),
+      }).then((r) => r.text()); // consume body
+
+      // Verify session is now recovery_required
+      expect(runtime.sessionService.isRecoveryRequired(session_id)).toBe(true);
+
+      // Call recover endpoint
+      const recoverRes = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "discard_partial_turn" }),
+      });
+      expect(recoverRes.status).toBe(200);
+      const recoverBody = (await recoverRes.json()) as { session_id: string; recovered: boolean };
+      expect(recoverBody.session_id).toBe(session_id);
+      expect(recoverBody.recovered).toBe(true);
+
+      // Switch mock to success chunks
+      chunkRef.value = [
+        { type: "text_delta", text: "OK!" },
+        { type: "message_end", stopReason: "end_turn", inputTokens: 2, outputTokens: 1 },
+      ];
+
+      // Submit next turn — should succeed now
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-after-recovery",
+          user_message: { id: "msg-rar", text: "Hello again" },
+        }),
+      });
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+      expect(types).toContain("done");
+      expect(types).not.toContain("error");
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
+  it("real-path unknown agent_id is rejected at session creation", async () => {
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [
+        {
+          prefix: "anthropic",
+          provider: makeMockProvider({ value: [] }),
+        },
+      ],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      // Try to create session with unknown agent
+      const res = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "unknown:agent" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("AGENT_NOT_FOUND");
+      expect(body.error.message.includes("unknown:agent")).toBe(true);
+    } finally {
+      srv.stop();
+      runtime.shutdown();
     }
   });
 });
