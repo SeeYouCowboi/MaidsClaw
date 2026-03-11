@@ -21,6 +21,7 @@ type ToolCallResult = {
 };
 
 class MockModelProvider {
+	readonly defaultEmbeddingModelId: string = "test-embedding-model";
 	private readonly chatResponses: ToolCallResult[][];
 	private readonly vectors: Float32Array[];
 

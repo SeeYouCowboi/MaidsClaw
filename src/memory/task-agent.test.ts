@@ -14,6 +14,7 @@ type ToolCallResult = {
 };
 
 class MockModelProvider {
+  readonly defaultEmbeddingModelId: string = "test-embedding-model";
   public chatCalls = 0;
   public embedCalls = 0;
 
