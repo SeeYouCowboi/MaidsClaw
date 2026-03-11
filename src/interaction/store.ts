@@ -118,6 +118,13 @@ export class InteractionStore {
     );
   }
 
+  markRangeProcessed(sessionId: string, rangeStart: number, rangeEnd: number): void {
+    this.db.run(
+      `UPDATE interaction_records SET is_processed = 1 WHERE session_id = ? AND record_index >= ? AND record_index <= ?`,
+      [sessionId, rangeStart, rangeEnd],
+    );
+  }
+
   countUnprocessedRpTurns(sessionId: string): number {
     const row = this.db.get<{ count: number }>(
       `SELECT COUNT(*) AS count FROM interaction_records

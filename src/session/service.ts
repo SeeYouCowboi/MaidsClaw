@@ -13,6 +13,7 @@ export type SessionRecord = {
  */
 export class SessionService {
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly recoveryRequired = new Set<string>();
 
   createSession(agentId: string): SessionRecord {
     const sessionId = crypto.randomUUID();
@@ -40,6 +41,7 @@ export class SessionService {
       });
     }
     record.closedAt = Date.now();
+    this.recoveryRequired.delete(sessionId);
     return record;
   }
 
@@ -47,5 +49,25 @@ export class SessionService {
     const record = this.sessions.get(sessionId);
     if (!record) return false;
     return record.closedAt === undefined;
+  }
+
+  setRecoveryRequired(sessionId: string): void {
+    if (!this.sessions.has(sessionId)) {
+      throw new MaidsClawError({
+        code: "SESSION_NOT_FOUND",
+        message: `Session not found: ${sessionId}`,
+        retriable: false,
+        details: { sessionId },
+      });
+    }
+    this.recoveryRequired.add(sessionId);
+  }
+
+  clearRecoveryRequired(sessionId: string): void {
+    this.recoveryRequired.delete(sessionId);
+  }
+
+  isRecoveryRequired(sessionId: string): boolean {
+    return this.recoveryRequired.has(sessionId);
   }
 }
