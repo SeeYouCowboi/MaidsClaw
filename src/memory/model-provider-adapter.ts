@@ -19,6 +19,8 @@ export class MemoryTaskModelProviderAdapter implements MemoryTaskModelProvider {
     this.chatProvider = this.modelRegistry.resolveChat(this.chatModelId);
   }
 
+  get defaultEmbeddingModelId(): string { return this.embeddingModelId; }
+
   async chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]> {
     const calls = new Map<string, { name: string; partialJson: string }>();
 

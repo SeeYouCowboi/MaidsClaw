@@ -37,7 +37,7 @@ export type GraphOrganizerJob = {
   sessionId: string;
   batchId: string;
   changedNodeRefs: NodeRef[];
-  embeddingModelId?: string;
+  embeddingModelId: string;
 };
 
 type IngestionAttachment = {
@@ -71,6 +71,7 @@ export type ChatMessage = {
 };
 
 export type MemoryTaskModelProvider = {
+  readonly defaultEmbeddingModelId: string;
   chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
   embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
@@ -258,18 +259,12 @@ export class MemoryTaskAgent {
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
     private readonly materialization: MaterializationService,
-    modelProvider?: {
-      chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
-      embed(
-        texts: string[],
-        purpose: "memory_index" | "memory_search" | "query_expansion",
-        modelId: string,
-      ): Promise<Float32Array[]>;
-    },
+    modelProvider?: MemoryTaskModelProvider,
   ) {
     this.modelProvider =
       modelProvider ??
       ({
+        defaultEmbeddingModelId: "",
         chat: async () => {
           throw new Error("MemoryTaskAgent requires modelProvider.chat");
         },
@@ -378,10 +373,18 @@ export class MemoryTaskAgent {
       sessionId: flushRequest.sessionId,
       batchId: flushRequest.idempotencyKey,
       changedNodeRefs: created.changedNodeRefs,
-      embeddingModelId: "memory-task-organizer-v1",
+      embeddingModelId: this.modelProvider.defaultEmbeddingModelId,
     };
 
-    void Promise.resolve().then(() => this.runOrganize(organizeJob));
+    void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
+      console.error("[MemoryTaskAgent] background organize failed", {
+        batchId: organizeJob.batchId,
+        sessionId: organizeJob.sessionId,
+        agentId: organizeJob.agentId,
+        embeddingModelId: organizeJob.embeddingModelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return {
       batch_id: flushRequest.idempotencyKey,
@@ -419,14 +422,14 @@ export class MemoryTaskAgent {
     const embeddings = await this.modelProvider.embed(
       nodes.map((node) => node.content),
       "memory_index",
-      job.embeddingModelId ?? "memory-task-organizer-v1",
+      job.embeddingModelId,
     );
 
     const entries = nodes.map((node, index) => ({
       nodeRef: node.nodeRef,
       nodeKind: node.nodeKind,
       viewType: "primary" as const,
-      modelId: job.embeddingModelId ?? "memory-task-organizer-v1",
+      modelId: job.embeddingModelId,
       embedding: embeddings[index] ?? new Float32Array([0]),
     }));
 
