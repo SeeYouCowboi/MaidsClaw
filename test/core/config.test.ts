@@ -1,5 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { loadConfig } from "../../src/core/config.js";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 describe("Config loading", () => {
   const originalEnv = { ...process.env };
@@ -13,6 +16,9 @@ describe("Config loading", () => {
     delete process.env.MAIDSCLAW_DB_PATH;
     delete process.env.MAIDSCLAW_DATA_DIR;
     delete process.env.MAIDSCLAW_NATIVE_MODULES;
+    delete process.env.MAIDSCLAW_MEMORY_MIGRATION_MODEL;
+    delete process.env.MAIDSCLAW_MEMORY_EMBEDDING_MODEL;
+    delete process.env.MAIDSCLAW_MEMORY_ORGANIZER_EMBEDDING_MODEL;
   });
   
   afterEach(() => {
@@ -168,6 +174,88 @@ describe("Config loading", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.some(e => e.field === "MAIDSCLAW_PORT")).toBe(true);
+    }
+  });
+
+  it("loads memory config from runtime.json file when env vars are absent", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-config-"));
+    const runtimePath = join(tempDir, "runtime.json");
+    try {
+      writeFileSync(runtimePath, JSON.stringify({
+        memory: {
+          migrationChatModelId: "anthropic/claude-3-5-haiku-20241022",
+          embeddingModelId: "openai/text-embedding-3-small",
+          organizerEmbeddingModelId: "openai/text-embedding-3-large",
+        }
+      }));
+
+      const result = loadConfig({ runtimeFilePath: runtimePath, requireAllProviders: false });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config.memory?.migrationChatModelId).toBe("anthropic/claude-3-5-haiku-20241022");
+        expect(result.config.memory?.embeddingModelId).toBe("openai/text-embedding-3-small");
+        expect(result.config.memory?.organizerEmbeddingModelId).toBe("openai/text-embedding-3-large");
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true });
+    }
+  });
+
+  it("env vars override file-backed memory config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-config-"));
+    const runtimePath = join(tempDir, "runtime.json");
+    try {
+      writeFileSync(runtimePath, JSON.stringify({
+        memory: {
+          embeddingModelId: "openai/text-embedding-3-small",
+        }
+      }));
+
+      process.env.MAIDSCLAW_MEMORY_EMBEDDING_MODEL = "openai/text-embedding-3-large";
+
+      const result = loadConfig({ runtimeFilePath: runtimePath, requireAllProviders: false });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config.memory?.embeddingModelId).toBe("openai/text-embedding-3-large");
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true });
+    }
+  });
+
+  it("organizerEmbeddingModelId defaults to embeddingModelId when not set", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-config-"));
+    const runtimePath = join(tempDir, "runtime.json");
+    try {
+      writeFileSync(runtimePath, JSON.stringify({
+        memory: {
+          embeddingModelId: "openai/text-embedding-3-small",
+        }
+      }));
+
+      const result = loadConfig({ runtimeFilePath: runtimePath, requireAllProviders: false });
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.config.memory?.organizerEmbeddingModelId).toBe("openai/text-embedding-3-small");
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true });
+    }
+  });
+
+  it("requireAllProviders false with only anthropic key succeeds", () => {
+    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    delete process.env.OPENAI_API_KEY;
+
+    const result = loadConfig({ requireAllProviders: false });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.providers.anthropic.apiKey).toBe("test-anthropic-key");
+      expect(result.config.providers.openai.apiKey).toBe("");
     }
   });
 });

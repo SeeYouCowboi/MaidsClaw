@@ -444,3 +444,70 @@ describe("SSE format", () => {
     expect(validTypes.length).toBe(7);
   });
 });
+
+
+// ── 8. Agent Validation at Session Creation ───────────────────────────────────
+
+describe("POST /v1/sessions - agent validation", () => {
+  it("returns 400 when agent_id is unknown (hasAgent hook provided)", async () => {
+    const knownAgents = new Set(["maid:main", "rp:default"]);
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      hasAgent: (agentId: string) => knownAgents.has(agentId),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+
+      // Try to create session with unknown agent
+      const res = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "unknown:agent" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("AGENT_NOT_FOUND");
+      expect(body.error.message.includes("unknown:agent")).toBe(true);
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("creates session successfully when agent_id is known (hasAgent hook provided)", async () => {
+    const knownAgents = new Set(["maid:main", "rp:default"]);
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      hasAgent: (agentId: string) => knownAgents.has(agentId),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+
+      // Create session with known agent
+      const res = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { session_id: string; created_at: number };
+      expect(typeof body.session_id).toBe("string");
+      expect(body.session_id.length > 0).toBe(true);
+      expect(typeof body.created_at).toBe("number");
+      expect(body.created_at > 0).toBe(true);
+    } finally {
+      localServer.stop();
+    }
+  });
+});

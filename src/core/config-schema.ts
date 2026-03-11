@@ -30,12 +30,21 @@ export type ServerConfig = {
   host: string;           // Default: "localhost"
 };
 
+
+// Memory config
+export type MemoryConfig = {
+  migrationChatModelId?: string;
+  embeddingModelId?: string;
+  organizerEmbeddingModelId?: string;
+};
+
 // Complete V1 runtime config
 export type MaidsClawConfig = {
   providers: ProviderConfigs;
   storage: StorageConfig;
   server: ServerConfig;
   nativeModulesEnabled: boolean; // Whether to try loading Rust native modules
+  memory?: MemoryConfig;
 };
 
 // Config validation error
@@ -78,4 +87,14 @@ export type AuthConfig = {
 
 export type AuthConfigResult =
   | { ok: true; auth: AuthConfig }
+  | { ok: false; errors: ConfigError[] };
+
+
+// Runtime config (file-backed via config/runtime.json)
+export type RuntimeConfig = {
+  memory?: MemoryConfig;
+};
+
+export type RuntimeConfigResult =
+  | { ok: true; runtime: RuntimeConfig }
   | { ok: false; errors: ConfigError[] };

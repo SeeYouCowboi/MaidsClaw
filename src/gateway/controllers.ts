@@ -18,6 +18,8 @@ export type ControllerContext = {
   healthChecks?: Record<string, HealthCheckFn>;
   createAgentLoop?: AgentLoopFactory;
   turnService?: TurnService;
+  /** Narrow hook to check if an agent is registered. Returns true if agent exists. */
+  hasAgent?: (agentId: string) => boolean;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -144,6 +146,16 @@ export async function handleCreateSession(
     const err = new MaidsClawError({
       code: "INTERNAL_ERROR",
       message: "Missing required field: agent_id",
+      retriable: false,
+    });
+    return errorResponse(err, 400);
+  }
+
+  // Validate agent is registered (if hasAgent hook is provided)
+  if (ctx.hasAgent && !ctx.hasAgent(body.agent_id)) {
+    const err = new MaidsClawError({
+      code: "AGENT_NOT_FOUND",
+      message: `Unknown agent: ${body.agent_id}`,
       retriable: false,
     });
     return errorResponse(err, 400);

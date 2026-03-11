@@ -170,6 +170,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
 
   const memoryMigrationModelId = options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
   const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
+  const effectiveOrganizerEmbeddingModelId = options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
   let memoryTaskAgent: MemoryTaskAgent | null = null;
   let memoryPipelineReady = false;
   let memoryPipelineStatus: MemoryPipelineStatus = "missing_embedding_model";
@@ -187,14 +188,25 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
       try {
         modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
 
-        const storage = new GraphStorageService(db);
-        const coreMemory = new CoreMemoryService(db);
-        const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
-        const materialization = new MaterializationService(db.raw, storage);
-        const provider = new MemoryTaskModelProviderAdapter(modelRegistry, memoryMigrationModelId, memoryEmbeddingModelId);
-        memoryTaskAgent = new MemoryTaskAgent(db.raw, storage, coreMemory, embeddings, materialization, provider);
-        memoryPipelineReady = true;
-        memoryPipelineStatus = "ready";
+        // Validate organizer embedding model if different from base embedding
+        if (effectiveOrganizerEmbeddingModelId && effectiveOrganizerEmbeddingModelId !== memoryEmbeddingModelId) {
+          try {
+            modelRegistry.resolveEmbedding(effectiveOrganizerEmbeddingModelId);
+          } catch {
+            memoryPipelineStatus = "organizer_embedding_model_unavailable";
+          }
+        }
+
+        if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
+          const storage = new GraphStorageService(db);
+          const coreMemory = new CoreMemoryService(db);
+          const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+          const materialization = new MaterializationService(db.raw, storage);
+          const provider = new MemoryTaskModelProviderAdapter(modelRegistry, memoryMigrationModelId, effectiveOrganizerEmbeddingModelId!);
+          memoryTaskAgent = new MemoryTaskAgent(db.raw, storage, coreMemory, embeddings, materialization, provider);
+          memoryPipelineReady = true;
+          memoryPipelineStatus = "ready";
+        }
       } catch {
         memoryPipelineStatus = "embedding_model_unavailable";
       }
@@ -300,6 +312,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     memoryTaskAgent,
     memoryPipelineReady,
     memoryPipelineStatus,
+    effectiveOrganizerEmbeddingModelId,
     healthChecks,
     migrationStatus,
     shutdown,

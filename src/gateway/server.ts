@@ -11,6 +11,8 @@ export type GatewayServerOptions = {
   createAgentLoop?: AgentLoopFactory;
   turnService?: TurnService;
   healthChecks?: Record<string, HealthCheckFn>;
+  /** Narrow hook to check if an agent is registered. Returns true if agent exists. */
+  hasAgent?: (agentId: string) => boolean;
 };
 
 /**
@@ -31,6 +33,7 @@ export class GatewayServer {
       createAgentLoop: this.options.createAgentLoop,
       turnService: this.options.turnService,
       healthChecks: this.options.healthChecks,
+      hasAgent: this.options.hasAgent,
     };
 
     // "localhost" on Windows binds to IPv6 ::1 only, causing IPv4 fetch() to get ConnectionRefused.

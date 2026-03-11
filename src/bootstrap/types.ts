@@ -42,6 +42,7 @@ export type RuntimeBootstrapOptions = {
   busyTimeoutMs?: number;
   memoryMigrationModelId?: string;
   memoryEmbeddingModelId?: string;
+  memoryOrganizerEmbeddingModelId?: string;
   defaultAgentProfile?: AgentProfile;
   agentProfiles?: AgentProfile[];
   sessionService?: SessionService;
@@ -54,7 +55,8 @@ export type MemoryPipelineStatus =
   | "ready"
   | "missing_embedding_model"
   | "chat_model_unavailable"
-  | "embedding_model_unavailable";
+  | "embedding_model_unavailable"
+  | "organizer_embedding_model_unavailable";
 
 export type RuntimeBootstrapResult = {
   db: Db;
@@ -72,6 +74,7 @@ export type RuntimeBootstrapResult = {
   memoryTaskAgent: MemoryTaskAgent | null;
   memoryPipelineReady: boolean;
   memoryPipelineStatus: MemoryPipelineStatus;
+  effectiveOrganizerEmbeddingModelId: string | undefined;
   healthChecks: Record<string, RuntimeHealthStatus>;
   migrationStatus: RuntimeMigrationStatus;
   shutdown: () => void;

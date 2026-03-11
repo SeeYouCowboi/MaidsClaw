@@ -87,4 +87,18 @@ describe("bootstrapRuntime", () => {
       runtime.shutdown();
     }
   });
+
+  it("passes memoryOrganizerEmbeddingModelId through to bootstrap options", () => {
+    const runtime = bootstrapRuntime({
+      databasePath: ":memory:",
+      memoryOrganizerEmbeddingModelId: "openai/custom-embed",
+    });
+
+    try {
+      // The model won't resolve but the option is accepted and stored
+      expect(runtime.effectiveOrganizerEmbeddingModelId).toBe("openai/custom-embed");
+    } finally {
+      runtime.shutdown();
+    }
+  });
 });

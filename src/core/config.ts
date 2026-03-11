@@ -1,4 +1,4 @@
-import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig, AuthConfig, AuthConfigResult, AuthCredential } from "./config-schema.js";
+import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig, AuthConfig, AuthConfigResult, AuthCredential, MemoryConfig, RuntimeConfig, RuntimeConfigResult } from "./config-schema.js";
 import { readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 
@@ -15,6 +15,7 @@ const DEFAULT_EMBEDDING_DIMENSION = 1536;
 // Load config from environment variables and optional JSON config files
 export function loadConfig(options?: {
   configDir?: string;       // Optional override for config directory location
+  runtimeFilePath?: string; // Optional direct path to runtime.json for testing
   requireAllProviders?: boolean; // Default: true — fail if any provider key missing
 }): ConfigResult {
   const errors: ConfigError[] = [];
@@ -66,6 +67,23 @@ export function loadConfig(options?: {
   // Get native modules setting
   const nativeModulesStr = getOptionalEnv("MAIDSCLAW_NATIVE_MODULES", String(DEFAULT_NATIVE_MODULES));
   const nativeModulesEnabled = nativeModulesStr.toLowerCase() === "true";
+
+  // Load runtime config from file (memory settings, etc.)
+  const runtimeFilePath = options?.runtimeFilePath ?? join(options?.configDir ?? join(process.cwd(), "config"), "runtime.json");
+  const runtimeResult = loadRuntimeConfig({ runtimeFilePath });
+  const fileMemory = runtimeResult.ok ? runtimeResult.runtime.memory : undefined;
+
+  // Resolve memory config: env overrides file, organizerEmbeddingModelId defaults to embeddingModelId
+  const memoryMigrationChatModelId = getRequiredEnv("MAIDSCLAW_MEMORY_MIGRATION_MODEL") ?? fileMemory?.migrationChatModelId;
+  const memoryEmbeddingModelId = getRequiredEnv("MAIDSCLAW_MEMORY_EMBEDDING_MODEL") ?? fileMemory?.embeddingModelId;
+  const rawOrganizerEmbeddingModelId = getRequiredEnv("MAIDSCLAW_MEMORY_ORGANIZER_EMBEDDING_MODEL") ?? fileMemory?.organizerEmbeddingModelId;
+  const memoryOrganizerEmbeddingModelId = rawOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
+
+  const memory: MemoryConfig = {
+    ...(memoryMigrationChatModelId ? { migrationChatModelId: memoryMigrationChatModelId } : {}),
+    ...(memoryEmbeddingModelId ? { embeddingModelId: memoryEmbeddingModelId } : {}),
+    ...(memoryOrganizerEmbeddingModelId ? { organizerEmbeddingModelId: memoryOrganizerEmbeddingModelId } : {}),
+  };
   
   // Build provider configs
   const anthropicConfig: AnthropicProviderConfig = {
@@ -98,10 +116,71 @@ export function loadConfig(options?: {
       port,
       host
     },
-    nativeModulesEnabled
+    nativeModulesEnabled,
+    memory,
   };
   
   return { ok: true, config };
+}
+
+// Load runtime config from project-local config/runtime.json
+export function loadRuntimeConfig(options?: { runtimeFilePath?: string }): RuntimeConfigResult {
+  const filePath = options?.runtimeFilePath ?? join(process.cwd(), "config", "runtime.json");
+
+  if (!existsSync(filePath)) {
+    return { ok: true, runtime: {} };
+  }
+
+  let raw: unknown;
+  try {
+    const content = readFileSync(filePath, "utf-8");
+    raw = JSON.parse(content);
+  } catch {
+    return {
+      ok: false,
+      errors: [{
+        type: "CONFIG_ERROR",
+        field: "config/runtime.json",
+        message: "runtime.json contains invalid JSON",
+      }],
+    };
+  }
+
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return {
+      ok: false,
+      errors: [{
+        type: "CONFIG_ERROR",
+        field: "config/runtime.json",
+        message: "runtime.json root must be an object",
+      }],
+    };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const runtime: RuntimeConfig = {};
+
+  if (obj.memory !== undefined) {
+    if (typeof obj.memory !== "object" || obj.memory === null || Array.isArray(obj.memory)) {
+      return {
+        ok: false,
+        errors: [{
+          type: "CONFIG_ERROR",
+          field: "memory",
+          message: "'memory' must be an object",
+        }],
+      };
+    }
+
+    const mem = obj.memory as Record<string, unknown>;
+    runtime.memory = {
+      ...(typeof mem.migrationChatModelId === "string" ? { migrationChatModelId: mem.migrationChatModelId } : {}),
+      ...(typeof mem.embeddingModelId === "string" ? { embeddingModelId: mem.embeddingModelId } : {}),
+      ...(typeof mem.organizerEmbeddingModelId === "string" ? { organizerEmbeddingModelId: mem.organizerEmbeddingModelId } : {}),
+    };
+  }
+
+  return { ok: true, runtime };
 }
 
 // Parse a config JSON file safely

@@ -98,4 +98,25 @@ describe("bootstrapRuntime memory pipeline readiness", () => {
       runtime.shutdown();
     }
   });
+
+  it("reports embedding_model_unavailable when organizer embedding model is not in registry", () => {
+    const chatProvider = new MockChatProvider();
+    const registry = new DefaultModelServiceRegistry({
+      chatExact: new Map([["anthropic/claude-3-5-haiku-20241022", chatProvider]]),
+    });
+
+    const runtime = bootstrapRuntime({
+      databasePath: ":memory:",
+      modelRegistry: registry,
+      memoryMigrationModelId: "anthropic/claude-3-5-haiku-20241022",
+      memoryEmbeddingModelId: "openai/text-embedding-3-small",
+    });
+
+    try {
+      expect(runtime.memoryPipelineReady).toBe(false);
+      expect(runtime.memoryPipelineStatus).toBe("embedding_model_unavailable");
+    } finally {
+      runtime.shutdown();
+    }
+  });
 });
