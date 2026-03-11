@@ -67,9 +67,9 @@ function chunkToGatewayEvent(
         status: "started",
       });
     case "tool_use_end":
-      return makeEvent(sessionId, requestId, "tool_result", {
+      return makeEvent(sessionId, requestId, "tool_call", {
         id: chunk.id,
-        status: "completed",
+        status: "arguments_complete",
       });
     case "error":
       return makeEvent(sessionId, requestId, "error", {
@@ -80,6 +80,13 @@ function chunkToGatewayEvent(
     case "tool_use_delta":
     case "message_end":
       return null;
+    case "tool_execution_result":
+      return makeEvent(sessionId, requestId, "tool_result", {
+        id: chunk.id,
+        name: chunk.name,
+        status: chunk.isError ? "failed" : "completed",
+        result: chunk.result,
+      });
     default:
       return null;
   }
@@ -258,6 +265,18 @@ export async function handleTurnStream(
     return createSseStream(sessionId, requestId, errorStream());
   }
 
+  // Block recovery_required sessions
+  if (ctx.sessionService.isRecoveryRequired(sessionId)) {
+    async function* errorStream(): AsyncGenerator<GatewayEvent> {
+      yield makeEvent(sessionId!, requestId, "error", {
+        code: "SESSION_RECOVERY_REQUIRED",
+        message: `Session '${sessionId}' requires recovery before accepting new turns`,
+        retriable: false,
+      });
+    }
+    return createSseStream(sessionId, requestId, errorStream());
+  }
+
   const canonicalAgentId = session.agentId;
 
   const userText = body.user_message?.text ?? "";
@@ -308,15 +327,21 @@ export async function handleTurnStream(
 
     let inputTokens = 0;
     let outputTokens = 0;
+    let hadError = false;
 
     try {
       for await (const chunk of runLoop) {
+        // Accumulate tokens from message_end chunks before gateway mapping
+        if (chunk.type === "message_end") {
+          inputTokens += chunk.inputTokens ?? 0;
+          outputTokens += chunk.outputTokens ?? 0;
+        }
+        if (chunk.type === "error") {
+          hadError = true;
+        }
+
         const event = chunkToGatewayEvent(sessionId!, requestId, chunk);
         if (event) {
-          if (chunk.type === "message_end") {
-            inputTokens = chunk.inputTokens ?? 0;
-            outputTokens = chunk.outputTokens ?? 0;
-          }
           yield event;
         }
       }
@@ -330,9 +355,12 @@ export async function handleTurnStream(
       return;
     }
 
-    yield makeEvent(sessionId!, requestId, "done", {
-      total_tokens: inputTokens + outputTokens,
-    });
+    // Only emit done if no error occurred
+    if (!hadError) {
+      yield makeEvent(sessionId!, requestId, "done", {
+        total_tokens: inputTokens + outputTokens,
+      });
+    }
   }
 
   return createSseStream(sessionId, requestId, agentStream());
@@ -377,4 +405,55 @@ export async function handleCloseSession(
     });
     return errorResponse(err, 500);
   }
+}
+
+/** POST /v1/sessions/{session_id}/recover — recover a session from recovery_required state */
+export async function handleRecoverSession(
+  req: Request,
+  ctx: ControllerContext
+): Promise<Response> {
+  const url = new URL(req.url);
+  const sessionId = extractSessionId(url);
+
+  if (!sessionId) {
+    return errorResponse(
+      new MaidsClawError({ code: "INTERNAL_ERROR", message: "Missing session_id", retriable: false }),
+      400
+    );
+  }
+
+  let body: { action?: string };
+  try {
+    body = (await req.json()) as { action?: string };
+  } catch {
+    return errorResponse(
+      new MaidsClawError({ code: "INTERNAL_ERROR", message: "Invalid JSON body", retriable: false }),
+      400
+    );
+  }
+
+  if (body.action !== "discard_partial_turn") {
+    return errorResponse(
+      new MaidsClawError({ code: "INVALID_ACTION", message: "Only 'discard_partial_turn' is supported", retriable: false }),
+      400
+    );
+  }
+
+  const session = ctx.sessionService.getSession(sessionId);
+  if (!session) {
+    return errorResponse(
+      new MaidsClawError({ code: "SESSION_NOT_FOUND", message: `Session not found: ${sessionId}`, retriable: false }),
+      404
+    );
+  }
+
+  if (!ctx.sessionService.isRecoveryRequired(sessionId)) {
+    return errorResponse(
+      new MaidsClawError({ code: "SESSION_NOT_IN_RECOVERY", message: `Session '${sessionId}' is not in recovery_required state`, retriable: false }),
+      400
+    );
+  }
+
+  ctx.sessionService.clearRecoveryRequired(sessionId);
+  return jsonResponse({ session_id: sessionId, recovered: true });
 }

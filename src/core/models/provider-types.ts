@@ -65,4 +65,5 @@ export type ProviderCatalogEntry = {
   defaultEmbeddingModelId?: string; // default model ref for embedding
   models: ModelCatalogEntry[];
   warningMessage?: string; // shown on instantiation for experimental providers
+  supportsStreamingUsage?: boolean; // true if provider supports stream_options.include_usage
 };

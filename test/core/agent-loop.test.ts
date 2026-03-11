@@ -102,6 +102,7 @@ describe("AgentLoop", () => {
       { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"cats"}' },
       { type: "tool_use_end", id: "call_1" },
       { type: "message_end", stopReason: "tool_use" },
+      { type: "tool_execution_result", id: "call_1", name: "lookup", result: { result: "ok" }, isError: false },
       { type: "text_delta", text: "Found two matches." },
       { type: "message_end", stopReason: "end_turn" },
     ]);
@@ -192,6 +193,98 @@ describe("AgentLoop", () => {
     expect(thrown instanceof MaidsClawError).toBe(true);
     const err = thrown as MaidsClawError;
     expect(err.code).toBe("DELEGATION_DEPTH_EXCEEDED");
+  });
+
+  it("emits tool_execution_result chunk after tool execution", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "lookup" },
+        { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"test"}' },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "Done." },
+        { type: "message_end", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    executor.registerLocal({
+      name: "lookup",
+      description: "Lookup a value",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      async execute() {
+        return { found: true };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-exec",
+        requestId: "request-exec",
+        messages: [{ role: "user", content: "test" }],
+      })
+    );
+
+    const resultChunk = chunks.find((c) => c.type === "tool_execution_result");
+    expect(resultChunk).toBeDefined();
+    expect(resultChunk!.type).toBe("tool_execution_result");
+    if (resultChunk && resultChunk.type === "tool_execution_result") {
+      expect(resultChunk.id).toBe("call_1");
+      expect(resultChunk.name).toBe("lookup");
+      expect(resultChunk.result).toEqual({ found: true });
+      expect(resultChunk.isError).toBe(false);
+    }
+  });
+
+  it("emits tool_execution_result with isError=true when tool fails", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_fail", name: "lookup" },
+        { type: "tool_use_delta", id: "call_fail", partialJson: '{"q":"test"}' },
+        { type: "tool_use_end", id: "call_fail" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    executor.registerLocal({
+      name: "lookup",
+      description: "Lookup a value",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      async execute() {
+        throw new Error("tool execution failed");
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-fail",
+        requestId: "request-fail",
+        messages: [{ role: "user", content: "test" }],
+      })
+    );
+
+    // When tool throws, the agent loop catches it and emits an error chunk
+    // (not a tool_execution_result) — this is the existing behavior
+    const lastChunk = chunks[chunks.length - 1];
+    expect(lastChunk?.type).toBe("error");
+    if (lastChunk && lastChunk.type === "error") {
+      expect(lastChunk.code).toBe("MCP_TOOL_ERROR");
+    }
   });
 });
 

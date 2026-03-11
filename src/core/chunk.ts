@@ -27,6 +27,15 @@ export type ToolUseEndChunk = {
   id: string;
 };
 
+/** Tool execution result chunk (emitted after tool executor completes) */
+export type ToolExecutionResultChunk = {
+  type: "tool_execution_result";
+  id: string;       // tool call ID
+  name: string;     // tool name
+  result: unknown;  // execution result
+  isError: boolean; // true if tool execution failed
+};
+
 /** Message end chunk (final stop reason) */
 export type MessageEndChunk = {
   type: "message_end";
@@ -49,6 +58,7 @@ export type Chunk =
   | ToolUseStartChunk
   | ToolUseDeltaChunk
   | ToolUseEndChunk
+  | ToolExecutionResultChunk
   | MessageEndChunk
   | ErrorChunk;
 
@@ -75,6 +85,10 @@ export function isMessageEndChunk(c: Chunk): c is MessageEndChunk {
 
 export function isErrorChunk(c: Chunk): c is ErrorChunk {
   return c.type === "error";
+}
+
+export function isToolExecutionResultChunk(c: Chunk): c is ToolExecutionResultChunk {
+  return c.type === "tool_execution_result";
 }
 
 /** Helper type to accumulate tool-use argument chunks into a complete call */

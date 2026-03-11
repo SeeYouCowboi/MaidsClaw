@@ -12,6 +12,7 @@ type OpenAIChatProviderOptions = {
   baseUrl?: string;
   fetchImpl?: FetchFn;
   logger?: Logger;
+  supportsStreamingUsage?: boolean;
 };
 
 type OpenAIChatDeltaToolCall = {
@@ -31,6 +32,11 @@ type OpenAIChatChunkPayload = {
     };
     finish_reason?: string | null;
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 };
 
 type OpenAIEmbeddingResponse = {
@@ -85,7 +91,8 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
     const startedToolIds = new Set<string>();
     const closedToolIds = new Set<string>();
     let emittedMessageEnd = false;
-
+    let usageInputTokens: number | undefined;
+    let usageOutputTokens: number | undefined;
     for await (const event of parseSseEvents(response.body)) {
       if (!event.data) {
         continue;
@@ -100,7 +107,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
             }
           }
 
-          yield { type: "message_end", stopReason };
+          yield { type: "message_end", stopReason, inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
           emittedMessageEnd = true;
         }
         return;
@@ -115,6 +122,14 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       }
 
       const choice = payload.choices?.[0];
+
+      // Handle usage-only final chunk (no choices, just usage)
+      if (!choice && payload.usage) {
+        usageInputTokens = payload.usage.prompt_tokens;
+        usageOutputTokens = payload.usage.completion_tokens;
+        continue;
+      }
+
       if (!choice) {
         continue;
       }
@@ -161,8 +176,8 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
           }
         }
 
-        if (!emittedMessageEnd) {
-          yield { type: "message_end", stopReason };
+        if (!emittedMessageEnd && !this.options.supportsStreamingUsage) {
+          yield { type: "message_end", stopReason, inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
           emittedMessageEnd = true;
         }
       }
@@ -174,7 +189,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
           yield { type: "tool_use_end", id };
         }
       }
-      yield { type: "message_end", stopReason };
+      yield { type: "message_end", stopReason, inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
     }
   }
 
@@ -212,7 +227,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       messages.unshift({ role: "system", content: systemPrompt });
     }
 
-    return {
+    const result: Record<string, unknown> = {
       model: request.modelId,
       stream: true,
       temperature: request.temperature,
@@ -227,6 +242,12 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
         },
       })),
     };
+
+    if (this.options.supportsStreamingUsage) {
+      result.stream_options = { include_usage: true };
+    }
+
+    return result;
   }
 }
 

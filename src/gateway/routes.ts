@@ -5,6 +5,7 @@ import {
   handleCreateSession,
   handleTurnStream,
   handleCloseSession,
+  handleRecoverSession,
 } from "./controllers.js";
 
 export type RouteHandler = (req: Request, ctx: ControllerContext) => Response | Promise<Response>;
@@ -42,6 +43,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "POST", pattern: "/v1/sessions", handler: handleCreateSession },
   { method: "POST", pattern: "/v1/sessions/{session_id}/turns:stream", handler: handleTurnStream },
   { method: "POST", pattern: "/v1/sessions/{session_id}/close", handler: handleCloseSession },
+  { method: "POST", pattern: "/v1/sessions/{session_id}/recover", handler: handleRecoverSession },
 ];
 
 /**

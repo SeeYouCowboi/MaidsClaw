@@ -218,6 +218,84 @@ describe("Model services", () => {
   });
 });
 
+describe("OpenAI streaming usage capability", () => {
+  it("includes stream_options.include_usage when supportsStreamingUsage is true", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const openai = new OpenAIProvider({
+      apiKey: "test-key",
+      supportsStreamingUsage: true,
+      fetchImpl: async (_url: RequestInfo | URL, init?: RequestInit) => {
+        capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+        return sseResponse([
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    await collectChunks(openai.chatCompletion({
+      modelId: "gpt-4o",
+      messages: [{ role: "user", content: "hello" }],
+    }));
+
+    expect(capturedBody.stream_options).toEqual({ include_usage: true });
+  });
+
+  it("does NOT include stream_options when supportsStreamingUsage is false/absent", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    const openai = new OpenAIProvider({
+      apiKey: "test-key",
+      fetchImpl: async (_url: RequestInfo | URL, init?: RequestInit) => {
+        capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+        return sseResponse([
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ]);
+      },
+    });
+
+    await collectChunks(openai.chatCompletion({
+      modelId: "gpt-4o",
+      messages: [{ role: "user", content: "hello" }],
+    }));
+
+    expect(capturedBody.stream_options).toBeUndefined();
+  });
+
+  it("normalizes usage-only final chunk into message_end token fields", async () => {
+    const openai = new OpenAIProvider({
+      apiKey: "test-key",
+      supportsStreamingUsage: true,
+      fetchImpl: async () =>
+        sseResponse([
+          `data: ${JSON.stringify({
+            choices: [{ delta: { content: "Hello" } }],
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            choices: [{ delta: {}, finish_reason: "stop" }],
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            choices: [],
+            usage: { prompt_tokens: 42, completion_tokens: 17, total_tokens: 59 },
+          })}\n\n`,
+          "data: [DONE]\n\n",
+        ]),
+    });
+
+    const chunks = await collectChunks(openai.chatCompletion({
+      modelId: "gpt-4o",
+      messages: [{ role: "user", content: "hello" }],
+    }));
+
+    const messageEnd = chunks.find((c) => c.type === "message_end");
+    expect(messageEnd).toBeDefined();
+    if (messageEnd && messageEnd.type === "message_end") {
+      expect(messageEnd.inputTokens).toBe(42);
+      expect(messageEnd.outputTokens).toBe(17);
+    }
+  });
+});
+
 async function collectChunks(stream: AsyncIterable<Chunk>): Promise<Chunk[]> {
   const chunks: Chunk[] = [];
   for await (const chunk of stream) {

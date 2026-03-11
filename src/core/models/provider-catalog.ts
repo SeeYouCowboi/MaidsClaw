@@ -51,6 +51,7 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
       isAutoDefault: true,
     },
     defaultChatModelId: "gpt-4o",
+    supportsStreamingUsage: true,
     defaultEmbeddingModelId: "text-embedding-3-small",
     models: [
       {

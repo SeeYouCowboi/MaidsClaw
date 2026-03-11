@@ -511,3 +511,377 @@ describe("POST /v1/sessions - agent validation", () => {
     }
   });
 });
+
+// ── 9. Recovery endpoint ───────────────────────────────────────────────────
+
+describe("POST /v1/sessions/{id}/recover", () => {
+  it("returns SESSION_RECOVERY_REQUIRED error when session is in recovery state", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      // Set recovery required
+      localSessionService.setRecoveryRequired(session_id);
+
+      // Try to submit a turn
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-recovery",
+          user_message: { id: "msg-r", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      expect(events.length).toBe(1);
+      expect(events[0].type).toBe("error");
+      const errData = events[0].data as { code: string; retriable: boolean };
+      expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
+      expect(errData.retriable).toBe(false);
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("recover endpoint clears recovery state and allows next turn", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      // Set recovery required
+      localSessionService.setRecoveryRequired(session_id);
+
+      // Call recover endpoint
+      const recoverRes = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "discard_partial_turn" }),
+      });
+
+      expect(recoverRes.status).toBe(200);
+      const recoverBody = (await recoverRes.json()) as { session_id: string; recovered: boolean };
+      expect(recoverBody.session_id).toBe(session_id);
+      expect(recoverBody.recovered).toBe(true);
+
+      // Now turns should work again (stub stream)
+      const turnRes = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-after-recovery",
+          user_message: { id: "msg-ar", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await turnRes.text());
+      // Should get status, delta, done (stub stream)
+      expect(events.length).toBe(3);
+      expect(events[0].type).toBe("status");
+      expect(events[2].type).toBe("done");
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("recover endpoint returns 400 for unknown action", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+      localSessionService.setRecoveryRequired(session_id);
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unknown_action" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("INVALID_ACTION");
+    } finally {
+      localServer.stop();
+    }
+  });
+});
+
+// ── 10. Stream semantics ──────────────────────────────────────────────────
+
+describe("Stream semantics", () => {
+  it("done is not emitted after error chunk", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: () => ({
+        run: async function* () {
+          yield { type: "text_delta" as const, text: "partial" };
+          yield {
+            type: "error" as const,
+            code: "MODEL_ERROR",
+            message: "model failed",
+            retriable: true,
+          };
+        },
+      } as any),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-err-done",
+          user_message: { id: "msg-ed", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+      expect(types).toContain("error");
+      expect(types).not.toContain("done");
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("token accumulation sums across message_end chunks", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: () => ({
+        run: async function* () {
+          yield { type: "text_delta" as const, text: "Hello" };
+          yield { type: "message_end" as const, stopReason: "tool_use" as const, inputTokens: 10, outputTokens: 5 };
+          yield { type: "text_delta" as const, text: "World" };
+          yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 15, outputTokens: 8 };
+        },
+      } as any),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-tokens",
+          user_message: { id: "msg-t", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const doneEvent = events.find((e) => e.type === "done");
+      expect(doneEvent).toBeDefined();
+      const doneData = doneEvent!.data as { total_tokens: number };
+      // 10 + 15 input + 5 + 8 output = 38
+      expect(doneData.total_tokens).toBe(38);
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("tool_use_end maps to tool_call arguments_complete, not tool_result", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: () => ({
+        run: async function* () {
+          yield { type: "tool_use_start" as const, id: "t1", name: "search" };
+          yield { type: "tool_use_end" as const, id: "t1" };
+          yield { type: "message_end" as const, stopReason: "end_turn" as const };
+        },
+      } as any),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-tool-end",
+          user_message: { id: "msg-te", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const toolCallEvent = events.find((e) => e.type === "tool_call" && (e.data as any).status === "arguments_complete");
+      expect(toolCallEvent).toBeDefined();
+      // Should NOT have a tool_result event from tool_use_end
+      const toolResultEvent = events.find((e) => e.type === "tool_result");
+      expect(toolResultEvent).toBeUndefined();
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("tool_execution_result maps to tool_result completed/failed", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: () => ({
+        run: async function* () {
+          yield { type: "tool_execution_result" as const, id: "t1", name: "search", result: { data: "found" }, isError: false };
+          yield { type: "tool_execution_result" as const, id: "t2", name: "delete", result: "permission denied", isError: true };
+          yield { type: "message_end" as const, stopReason: "end_turn" as const };
+        },
+      } as any),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-exec-result",
+          user_message: { id: "msg-er", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const toolResults = events.filter((e) => e.type === "tool_result");
+      expect(toolResults.length).toBe(2);
+
+      const completed = toolResults[0].data as { id: string; name: string; status: string; result: unknown };
+      expect(completed.id).toBe("t1");
+      expect(completed.name).toBe("search");
+      expect(completed.status).toBe("completed");
+      expect(completed.result).toEqual({ data: "found" });
+
+      const failed = toolResults[1].data as { id: string; name: string; status: string; result: unknown };
+      expect(failed.id).toBe("t2");
+      expect(failed.name).toBe("delete");
+      expect(failed.status).toBe("failed");
+      expect(failed.result).toBe("permission denied");
+    } finally {
+      localServer.stop();
+    }
+  });
+
+  it("error during streaming terminates with error and no done", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: localSessionService,
+      createAgentLoop: () => ({
+        run: async function* () {
+          yield { type: "text_delta" as const, text: "partial" };
+          throw new Error("stream explosion");
+        },
+      } as any),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: "req-throw",
+          user_message: { id: "msg-throw", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+      expect(types).toContain("error");
+      expect(types).not.toContain("done");
+      const errorEvent = events.find((e) => e.type === "error");
+      expect((errorEvent!.data as any).code).toBe("AGENT_RUNTIME_ERROR");
+    } finally {
+      localServer.stop();
+    }
+  });
+});

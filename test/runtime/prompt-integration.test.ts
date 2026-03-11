@@ -131,6 +131,7 @@ describe("runtime prompt integration", () => {
       { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"tea"}' },
       { type: "tool_use_end", id: "call_1" },
       { type: "message_end", stopReason: "tool_use" },
+      { type: "tool_execution_result", id: "call_1", name: "lookup", result: { result: "ok" }, isError: false },
       { type: "text_delta", text: "Done." },
       { type: "message_end", stopReason: "end_turn" },
     ]);

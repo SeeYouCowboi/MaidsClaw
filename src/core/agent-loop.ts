@@ -236,6 +236,13 @@ export class AgentLoop {
             agentId: this.profile.id,
           });
 
+          yield {
+            type: "tool_execution_result" as const,
+            id: toolCall.id,
+            name: toolCall.name,
+            result,
+            isError: false,
+          };
           workingMessages.push({
             role: "tool",
             toolCallId: toolCall.id,
