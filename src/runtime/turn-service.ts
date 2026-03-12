@@ -56,19 +56,27 @@ export class TurnService {
         code: "AGENT_LOOP_EXCEPTION",
         message: error instanceof Error ? error.message : String(error),
       };
+      yield {
+        type: "error" as const,
+        code: errorChunk.code ?? "UNKNOWN",
+        message: errorChunk.message ?? "Unknown error",
+        retriable: false,
+      };
     }
 
     if (errorChunk === null) {
-      this.commitService.commit({
-        sessionId: request.sessionId,
-        actorType: this.resolveAssistantActorType(request.sessionId),
-        recordType: "message",
-        payload: {
-          role: "assistant",
-          content: assistantText,
-        },
-        correlatedTurnId: request.requestId,
-      });
+      if (assistantText.length > 0) {
+        this.commitService.commit({
+          sessionId: request.sessionId,
+          actorType: this.resolveAssistantActorType(request.sessionId),
+          recordType: "message",
+          payload: {
+            role: "assistant",
+            content: assistantText,
+          },
+          correlatedTurnId: request.requestId,
+        });
+      }
 
       await this.flushIfDue(request.sessionId);
       return;

@@ -63,6 +63,7 @@ async function main(): Promise<void> {
     createAgentLoop: runtime.createAgentLoop,
     turnService: runtime.turnService,
     healthChecks,
+    hasAgent: (id) => runtime.agentRegistry.has(id),
   });
 
   server.start();

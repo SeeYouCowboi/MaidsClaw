@@ -1114,6 +1114,127 @@ describe("Real TurnService-backed gateway path", () => {
     }
   });
 
+  it("real-path tool execution failure emits tool_result.failed then error", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "tool_use_start", id: "t1", name: "lookup" },
+        { type: "tool_use_delta", id: "t1", partialJson: '{"q":"test"}' },
+        { type: "tool_use_end", id: "t1" },
+        { type: "message_end", stopReason: "tool_use" as const },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+
+    const failingTool = {
+      name: "lookup",
+      description: "Lookup a value",
+      parameters: { type: "object" as const, properties: { q: { type: "string" as const } }, required: ["q"] },
+      async execute() {
+        throw new Error("tool kaboom");
+      },
+    };
+    runtime.toolExecutor.registerLocal(failingTool);
+
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-tool-fail",
+          user_message: { id: "msg-rtf", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+
+      const toolResult = events.find((e) => e.type === "tool_result");
+      expect(toolResult).toBeDefined();
+      const toolResultData = toolResult!.data as { id: string; name: string; status: string };
+      expect(toolResultData.status).toBe("failed");
+
+      expect(types).toContain("error");
+      expect(types).not.toContain("done");
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
+  it("real-path thrown exception through TurnService ends with error and no done", async () => {
+    const callCount = { value: 0 };
+    const throwingProvider: ChatModelProvider = {
+      async *chatCompletion() {
+        callCount.value++;
+        yield { type: "text_delta" as const, text: "partial" };
+        throw new Error("downstream explosion");
+      },
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: throwingProvider }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "maid:main",
+          request_id: "req-real-throw",
+          user_message: { id: "msg-rt", text: "Hello" },
+        }),
+      });
+
+      const events = parseSseEvents(await res.text());
+      const types = events.map((e) => e.type);
+      expect(types).toContain("error");
+      expect(types).not.toContain("done");
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
   it("real-path unknown agent_id is rejected at session creation", async () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [

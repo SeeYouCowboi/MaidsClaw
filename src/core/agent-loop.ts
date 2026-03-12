@@ -219,6 +219,7 @@ export class AgentLoop {
         return;
       }
 
+      let activeToolCall: { id: string; name: string } | undefined;
       try {
         for (const toolCall of normalizedToolCalls) {
           if (!canExecuteTool(this.profile, toolCall.name)) {
@@ -231,10 +232,12 @@ export class AgentLoop {
             return;
           }
 
+          activeToolCall = toolCall;
           const result = await this.toolExecutor.execute(toolCall.name, toolCall.params, {
             sessionId: request.sessionId,
             agentId: this.profile.id,
           });
+          activeToolCall = undefined;
 
           yield {
             type: "tool_execution_result" as const,
@@ -252,6 +255,15 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "MCP_TOOL_ERROR", retriable: false });
         loopLogger?.error("Agent loop tool execution failed", wrapped, { turn: turnIndex });
+        if (activeToolCall) {
+          yield {
+            type: "tool_execution_result" as const,
+            id: activeToolCall.id,
+            name: activeToolCall.name,
+            result: wrapped.message,
+            isError: true,
+          };
+        }
         yield {
           type: "error",
           code: wrapped.code,

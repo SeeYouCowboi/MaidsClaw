@@ -26,7 +26,8 @@ Thumbs.db
 
 # Tool state
 .omc/
-.sisyphus/
+.sisyphus/*
+!.sisyphus/plans/
 
 # Lock files (Bun project — use bun.lockb)
 package-lock.json

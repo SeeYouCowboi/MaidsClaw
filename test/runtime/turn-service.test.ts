@@ -123,6 +123,41 @@ describe("TurnService", () => {
 		}
 	});
 
+	it("success with no assistant text does not commit empty assistant message", async () => {
+		const session = sessionService.createSession("rp:alice");
+		const chunks: Chunk[] = [
+			{ type: "message_end", stopReason: "end_turn" },
+		];
+
+		const turnService = new TurnService(
+			makeAgentLoop(chunks) as unknown as AgentLoop,
+			commitService,
+			store,
+			flushSelector,
+			null,
+			sessionService,
+		);
+
+		try {
+			const runChunks = await collectChunks(
+				turnService.run({
+					sessionId: session.sessionId,
+					requestId: "req-empty",
+					messages: [{ role: "user", content: "hello" }],
+				}),
+			);
+
+			expect(runChunks).toEqual(chunks);
+			const records = store.getBySession(session.sessionId);
+			expect(records).toHaveLength(1);
+			expect(records[0]?.actorType).toBe("user");
+			expect(records[0]?.recordType).toBe("message");
+			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(false);
+		} finally {
+			closeDatabaseGracefully(db);
+		}
+	});
+
 	it("failed_no_output settlement commits status record, not assistant message", async () => {
 		const session = sessionService.createSession("rp:alice");
 		const chunks: Chunk[] = [
@@ -235,7 +270,7 @@ describe("TurnService", () => {
 		}
 	});
 
-	it("thrown exception from agent loop settles as failure", async () => {
+	it("thrown exception from agent loop settles as failure and yields error chunk", async () => {
 		const session = sessionService.createSession("rp:alice");
 
 		const turnService = new TurnService(
@@ -256,7 +291,15 @@ describe("TurnService", () => {
 				}),
 			);
 
-			expect(runChunks).toEqual([]);
+			// Must yield an error chunk so the gateway sees the failure
+			expect(runChunks).toHaveLength(1);
+			expect(runChunks[0]?.type).toBe("error");
+			if (runChunks[0]?.type === "error") {
+				expect(runChunks[0].code).toBe("AGENT_LOOP_EXCEPTION");
+				expect(runChunks[0].message).toBe("loop exploded");
+				expect(runChunks[0].retriable).toBe(false);
+			}
+
 			const records = store.getBySession(session.sessionId);
 			expect(records).toHaveLength(2);
 			expect(records[1]?.recordType).toBe("status");

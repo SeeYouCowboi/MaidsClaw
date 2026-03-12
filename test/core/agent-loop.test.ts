@@ -244,7 +244,7 @@ describe("AgentLoop", () => {
     }
   });
 
-  it("emits tool_execution_result with isError=true when tool fails", async () => {
+  it("emits tool_execution_result with isError=true then error chunk when tool fails", async () => {
     const model = new MockModelProvider([
       [
         { type: "tool_use_start", id: "call_fail", name: "lookup" },
@@ -278,8 +278,14 @@ describe("AgentLoop", () => {
       })
     );
 
-    // When tool throws, the agent loop catches it and emits an error chunk
-    // (not a tool_execution_result) — this is the existing behavior
+    const resultChunk = chunks.find((c) => c.type === "tool_execution_result");
+    expect(resultChunk).toBeDefined();
+    if (resultChunk && resultChunk.type === "tool_execution_result") {
+      expect(resultChunk.id).toBe("call_fail");
+      expect(resultChunk.name).toBe("lookup");
+      expect(resultChunk.isError).toBe(true);
+    }
+
     const lastChunk = chunks[chunks.length - 1];
     expect(lastChunk?.type).toBe("error");
     if (lastChunk && lastChunk.type === "error") {
