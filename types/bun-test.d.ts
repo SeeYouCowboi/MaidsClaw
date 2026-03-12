@@ -1,10 +1,15 @@
 // Type declarations for Bun test module
 declare module "bun:test" {
-  export function describe(name: string, fn: () => void): void;
-  export function it(name: string, fn: () => void | Promise<void>): void;
-  export function expect<T>(value: T): {
+  type AsyncMatchers = {
+    toBe(expected: unknown): Promise<void>;
+    toEqual(expected: unknown): Promise<void>;
+    toBeUndefined(): Promise<void>;
+    toThrow(expected?: string | RegExp): Promise<void>;
+  };
+
+  type Matchers<T> = {
     toBe(expected: T): void;
-    toEqual(expected: T): void;
+    toEqual(expected: unknown): void;
     toBeDefined(): void;
     toBeUndefined(): void;
     toBeNull(): void;
@@ -14,21 +19,24 @@ declare module "bun:test" {
     toBeGreaterThanOrEqual(expected: number): void;
     toBeLessThan(expected: number): void;
     toBeLessThanOrEqual(expected: number): void;
-    toBeLessThan(expected: number): void;
+    toBeCloseTo(expected: number, precision?: number): void;
     toMatch(expected: RegExp | string): void;
-    toContain(expected: T extends Array<infer U> ? U : T): void;
+    toContain(expected: unknown): void;
     toHaveLength(expected: number): void;
     toThrow(expected?: string | RegExp): void;
-    resolves: {
-      toBe(expected: T): Promise<void>;
-      toEqual(expected: T): Promise<void>;
-    };
-    rejects: {
-      toBe(expected: T): Promise<void>;
-      toEqual(expected: T): Promise<void>;
-      toThrow(expected?: string | RegExp): Promise<void>;
-    };
+    toHaveBeenCalledWith(...expected: unknown[]): void;
+    resolves: AsyncMatchers;
+    rejects: AsyncMatchers;
+    not: Omit<Matchers<T>, "not">;
   };
+
+  export function describe(name: string, fn: () => void): void;
+  export function it(name: string, fn: () => void | Promise<void>): void;
+  export function expect<T>(value: T): Matchers<T>;
+  export namespace expect {
+    function any<T = unknown>(constructor: new (...args: any[]) => T | Function): unknown;
+    function objectContaining<T extends object>(value: T): T;
+  }
   export function beforeAll(fn: () => void | Promise<void>): void;
   export function afterAll(fn: () => void | Promise<void>): void;
   export function beforeEach(fn: () => void | Promise<void>): void;

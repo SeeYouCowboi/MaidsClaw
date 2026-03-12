@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, mkdtempSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { openDatabase, closeDatabaseGracefully } from "../../src/storage/database.js";
 import { runMigrations, initMigrationsTable, isMigrationApplied } from "../../src/storage/migrations.js";
 import { createFileStore } from "../../src/storage/file-store.js";
@@ -12,7 +13,7 @@ const IN_MEMORY = ":memory:";
 describe("Database", () => {
   it("happy path: opens in WAL mode with foreign keys", () => {
     // WAL mode requires a file-based database, not :memory:
-    const tmpDir = join(import.meta.dir, `../../.tmp-wal-test-${Date.now()}`);
+    const tmpDir = mkdtempSync(join(tmpdir(), "maidsclaw-wal-test-"));
     mkdirSync(tmpDir, { recursive: true });
     const dbPath = join(tmpDir, "wal-test.db");
 
@@ -196,8 +197,7 @@ describe("Database", () => {
 
 describe("FileStore", () => {
   it("writeJson and readJson round-trip", () => {
-    // Use a temp dir via Bun
-    const tmpDir = `${import.meta.dir}/../../.tmp-test-filestore-${Date.now()}`;
+    const tmpDir = mkdtempSync(join(tmpdir(), "maidsclaw-filestore-"));
     const store = createFileStore(tmpDir);
 
     const testData = { hello: "world", count: 42 };
@@ -207,8 +207,7 @@ describe("FileStore", () => {
     expect(loaded).toEqual(testData);
 
     // Cleanup
-    const { rmSync } = require("fs");
-    rmSync(tmpDir, { recursive: true, force: true });
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   });
 
   it("readJson returns undefined for missing file", () => {
@@ -217,19 +216,18 @@ describe("FileStore", () => {
   });
 
   it("exists returns correct boolean", () => {
-    const tmpDir = `${import.meta.dir}/../../.tmp-test-filestore-exists-${Date.now()}`;
+    const tmpDir = mkdtempSync(join(tmpdir(), "maidsclaw-filestore-exists-"));
     const store = createFileStore(tmpDir);
 
     expect(store.exists("nope.json")).toBe(false);
     store.writeJson("yep.json", { ok: true });
     expect(store.exists("yep.json")).toBe(true);
 
-    const { rmSync } = require("fs");
-    rmSync(tmpDir, { recursive: true, force: true });
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   });
 
   it("listFiles with extension filter", () => {
-    const tmpDir = `${import.meta.dir}/../../.tmp-test-filestore-list-${Date.now()}`;
+    const tmpDir = mkdtempSync(join(tmpdir(), "maidsclaw-filestore-list-"));
     const store = createFileStore(tmpDir);
 
     store.writeJson("items/a.json", {});
@@ -243,8 +241,7 @@ describe("FileStore", () => {
     const allFiles = store.listFiles("items");
     expect(allFiles).toHaveLength(3);
 
-    const { rmSync } = require("fs");
-    rmSync(tmpDir, { recursive: true, force: true });
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   });
 
   it("listFiles returns empty for missing directory", () => {

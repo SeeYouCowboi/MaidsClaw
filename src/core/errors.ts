@@ -44,6 +44,8 @@ export type ErrorCode =
   // Session errors
   | "SESSION_NOT_FOUND"
   | "SESSION_CLOSED"
+  | "SESSION_NOT_IN_RECOVERY"
+  | "INVALID_ACTION"
   | "UNKNOWN_ERROR";
 
 // The canonical runtime error type used throughout MaidsClaw

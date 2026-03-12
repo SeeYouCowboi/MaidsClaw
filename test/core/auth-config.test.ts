@@ -1,14 +1,17 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { writeFileSync, mkdirSync, rmSync } from "fs";
+import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { loadAuthConfig, resolveProviderCredential } from "../../src/core/config.js";
 
 // Use a temp directory for auth.json fixtures to avoid polluting real config/
 describe("Auth config loading", () => {
-  const tmpDir = join(process.cwd(), ".tmp-auth-test-" + Date.now());
-  const tmpAuthFile = join(tmpDir, "auth.json");
+  let tmpDir = "";
+  let tmpAuthFile = "";
 
   beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "maidsclaw-auth-test-"));
+    tmpAuthFile = join(tmpDir, "auth.json");
     mkdirSync(tmpDir, { recursive: true });
     // Clear relevant env vars
     delete process.env.MOONSHOT_API_KEY;
@@ -18,7 +21,9 @@ describe("Auth config loading", () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
   });
 
   it("returns ok:true with empty credentials when auth.json does not exist", () => {
