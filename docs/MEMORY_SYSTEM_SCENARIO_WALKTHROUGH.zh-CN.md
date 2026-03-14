@@ -814,6 +814,141 @@ Core Memory character (可变):
 
 ---
 
+## 十、已知架构风险：Task Agent Thought 与 RP Agent 回复的一致性
+
+### 问题本质
+
+RP Agent 和 Memory Task Agent 是**两次独立的 LLM 调用**，没有共享内部状态。Task Agent 只看到对话原文（`{role, content}` 的 JSON），不知道 RP Agent 为什么这么说。
+
+**矛盾场景示例**：
+
+```
+对话原文:
+  用户: "Sakura，你信任Leo吗？"
+  Sakura (RP Agent): "当然，Leo先生是值得信赖的客人。"
+
+后续 Flush 时，Task Agent 事后提取:
+  create_private_event(eventCategory="thought",
+    privateNotes="我对Leo保持警惕，他的来历不明...")
+  → 直接写入 agent_event_overlay，无人质疑
+```
+
+RP Agent 表达了信任，但 Task Agent "脑补"出完全相反的内心想法。这个矛盾的 thought 会永久存储，未来被 Memory Hints 搜到后污染后续对话。
+
+### 为什么当前没有防护
+
+| 环节 | 代码位置 | 现状 |
+|------|---------|------|
+| Task Agent 系统提示 | `task-agent.ts:309` | 只提到去重和分类，**没有一致性指引** |
+| Tool call 写入 | `task-agent.ts:559-667` `applyCallOneToolCalls()` | 直接写库，**零验证** |
+| 写入后校验 | (不存在) | **无任何 post-processing** |
+
+### 改进方向（按侵入性从低到高）
+
+**方案 A: 增强 Task Agent 系统提示（零代码改动）**
+
+在 `task-agent.ts:309` 加入：
+```
+"For thought events, you MUST only infer mental states that are
+ CONSISTENT with the agent's actual dialogue responses. Never
+ fabricate thoughts that contradict what the agent explicitly said."
+```
+最简单，但依赖 LLM 遵循指令，非系统保证。
+
+**方案 B: 利用已有的 RuntimeProjectionSink 传递 RP 上下文（中等改动）**
+
+`MessagePayload` 类型已预留 `projectionAppendix` 字段（`src/interaction/contracts.ts:41-45`），但 `TurnService`（`turn-service.ts:68-79`）从未填充它。如果将 RP Agent 的 `ProjectionAppendix`（包含 `publicSummarySeed` = Agent 原话）写入 interaction_records，Task Agent 在 Flush 时就能看到"RP Agent 认为自己在做什么"，作为 thought 提取的约束锚点。
+
+```
+当前: RP回复 → TurnService.commit({role, content}) → interaction_records
+                                                      ↓
+      Flush → Task Agent 只看到 {role, content} → 自由发挥 thought
+
+改进: RP回复 → TurnService.commit({role, content, projectionAppendix}) → interaction_records
+                                                                          ↓
+      Flush → Task Agent 看到 {role, content, projectionAppendix} → 约束性推断
+```
+
+**方案 C: 后写入矛盾检测（较大改动）**
+
+在 `applyCallOneToolCalls()` 中，对 `eventCategory="thought"` 的事件做轻量校验：
+- 提取 thought 的情感极性和关键主张
+- 与同时段 assistant 消息做简单矛盾检测（如情感方向相反）
+- 矛盾时降低 `salience` 或标记 `epistemicStatus="uncertain"`
+
+---
+
+## 十一、搜索作用域隔离分析
+
+### Memory Hints 会搜到不该搜的地方吗？
+
+**结论：作用域隔离做得很扎实，不会越权。**
+
+三层防御机制：
+
+#### 第一层：物理表隔离（`src/memory/schema.ts:60-67`）
+
+Private / Area / World 存储在**三张完全独立的表**中：
+
+```sql
+search_docs_private  (含 agent_id 列)       ← Sakura 的私有记忆
+search_docs_area     (含 location_entity_id) ← 特定地点的共享记忆
+search_docs_world    (无额外过滤列)           ← 全局公开记忆
+```
+
+不是同一张表加 WHERE 条件，而是物理隔离。
+
+#### 第二层：SQL 参数化查询（`src/memory/retrieval.ts:188-219`）
+
+```sql
+-- Private: 只查自己的
+WHERE f.content MATCH ? AND d.agent_id = ?
+-- Area: 只查当前位置的
+WHERE f.content MATCH ? AND d.location_entity_id = ?
+-- World: 对所有人可见（设计如此）
+WHERE f.content MATCH ?
+```
+
+过滤在 SQL 层完成，不存在"先查出来再在应用层过滤"的泄露窗口。
+
+#### 第三层：写入时强制校验（`src/memory/storage.ts:556-580`）
+
+```typescript
+if (scope === "private" && !agentId)
+  throw new Error("agentId is required for private search docs");
+if (scope === "area" && locationEntityId === undefined)
+  throw new Error("locationEntityId is required for area search docs");
+```
+
+数据写入时缺少 metadata 直接 throw，不可能产生"没有 agent_id 的 private 文档"。
+
+#### Embedding 搜索也有隔离（`src/memory/embeddings.ts:111-143`）
+
+```typescript
+if (nodeKind === "private_event") {
+  const row = privateEventOwnerStmt.get(id);
+  return row?.agent_id === agentId;  // 逐条校验所有权
+}
+```
+
+#### 测试覆盖（`src/memory/retrieval.test.ts:232-248`）
+
+```typescript
+it("agent-b cannot read agent-a private search docs", async () => {
+  // 写入 agent-a 的 private doc
+  insertSearchDoc(db, "private", { agentId: "agent-a", content: "coffee secret" });
+  // agent-b 搜索
+  const results = await service.searchVisibleNarrative("coffee", otherRpCtx);
+  expect(results.some(r => r.scope === "private")).toBe(false); // ✅ 看不到
+});
+```
+
+#### 唯一的边缘情况
+
+当 `ViewerContext.current_area_id` 为 `undefined` 时，area 搜索整段跳过（`retrieval.ts:199`）。这意味着位置数据丢失时 Agent 会"失忆"（看不到任何 area 记忆），而非"越权"（看到别的地方的记忆）。这是**安全的降级**。
+
+---
+
 ## 关键阈值速查
 
 | 参数 | 值 | 用途 |
