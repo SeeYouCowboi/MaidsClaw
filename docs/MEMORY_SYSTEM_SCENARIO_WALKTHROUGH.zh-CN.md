@@ -203,6 +203,30 @@ LLM 分析 14 条对话后，调用以下工具：
 
 **私有事件提取:**
 
+> **⚠ 关键认知：谁在创建这些事件？**
+>
+> 下面的 `create_private_event` 调用**不是 Sakura (RP Agent) 在对话中执行的**。
+> RP Agent 的工具列表（`src/agents/rp/tool-policy.ts:3-11`）**不包含** `create_private_event`：
+> ```typescript
+> export const RP_AUTHORIZED_TOOLS: readonly string[] = [
+>   "core_memory_append", "core_memory_replace",
+>   "memory_read", "memory_search", "memory_explore",
+>   "persona_check_drift", "delegate_task",
+> ];
+> // ← 没有 create_private_event！
+> ```
+>
+> 这些事件是 **Memory Task Agent（一个独立的后台 LLM）** 在 Flush 阶段**回顾对话后替 Sakura 总结提取的**。
+> 包括 `thought` 类事件——"Sakura 担心伯爵生气"并不是 Sakura 实时产生的内心独白，
+> 而是 Memory Task Agent 事后推断"她可能会这么想"然后写入的。
+>
+> 这意味着：**角色的私有想法是回顾性重构，不是实时记录。**
+>
+> 另外，`src/core/agent-loop.ts:422-436` 中有一个 `RuntimeProjectionSink` 机制，
+> 设计上可以在 RP Agent 说完话后自动捕获回复文本作为 `ProjectionAppendix`，
+> 但当前实现是 `NoopRuntimeProjectionSink`——什么都不做。
+> 这意味着未来可能会启用实时捕获，但目前唯一的 thought 来源就是 Flush 回顾。
+
 ```
 ▸ create_private_event(agentId="sakura", eventCategory="observation",
     projectionClass="area_candidate",
@@ -229,6 +253,7 @@ LLM 分析 14 条对话后，调用以下工具：
     projectionClass="none",  ← 思想不会物化！
     privateNotes="我擅自带Leo进了书房，希望伯爵不会生气...",
     salience=0.8)
+  → 这不是 Sakura 实时的想法，是 Memory Task Agent 事后推断写入的
 ```
 
 **私有信念与逻辑边:**
@@ -417,6 +442,24 @@ Sakura: "真的吗！那或许就是您一直在找的'旅人之星'？
 ```
 
 → Sakura 不仅记得 Leo 在找旅人之星（Core Memory），还能回忆起昨天去书房的具体情节（Graph Memory 通过 Hints 注入）。
+
+#### ⚠ 设计审视: Memory Hints 的被动注入问题
+
+当前 Memory Hints 的实现相当粗放（`src/memory/retrieval.ts:234-251`）：
+
+| 问题 | 代码证据 |
+|------|---------|
+| **无相关性阈值** | FTS5 命中即入选，不看分数高低。查询"星星"可能拉回所有包含"星"字的记忆 |
+| **无 token 预算硬截断** | `prompt-builder.ts:133` 只 `warn` 不截断，hints 可能挤占对话空间 |
+| **固定 top-5，不分质量** | 即使第 4、5 条 hint 相关性极低，也照样注入 |
+
+**潜在后果**：每轮都被动喂入 5 条"沾边"的 hints，LLM 可能形成"记忆已经给我了"的惯性，不再主动调用 `memory_explore` 做深度图搜索。被动填鸭和主动检索之间存在张力——如果被动注入已经"够用"，Agent 就失去了主动探索的动机。
+
+**可能的改进方向**：
+1. **加最低分数门槛** — FTS rank 或 embedding similarity 低于阈值的候选直接丢弃
+2. **分层注入** — 高置信 hint 直接注入；低置信 hint 只注入一句提示"你可能有相关记忆，可用 `memory_explore` 深入查询"，引导 Agent 主动检索
+3. **Token 预算硬截断** — hints 总长度受 token budget 约束，超出则裁剪最低分条目
+4. **动态 top-K** — 根据对话复杂度动态调整：简单闲聊 top-2，复杂回溯 top-8
 
 ---
 
