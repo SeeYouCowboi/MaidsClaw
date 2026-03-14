@@ -58,7 +58,7 @@
 
 ## 三、逐轮模拟
 
-### Turn 1-3: 初次见面
+### ═══ Turn 1-3: 初次见面 ═══
 
 ```
 用户: "你好，我是从北方来的旅人Leo，第一次来到这个庄园。"
@@ -119,7 +119,7 @@ Core Memory 变为：
 
 ---
 
-### Turn 4-7: 深入交流
+### ═══ Turn 4-7: 深入交流 ═══
 
 ```
 用户: "Leo对星空很感兴趣，他问Sakura庄园附近能看到银河吗"
@@ -162,7 +162,7 @@ Sakura: "这是伯爵多年的观星记录。请小心翻阅。"
 
 ---
 
-### Memory Task Agent 工作过程
+### ═══ Memory Task Agent 工作过程 ═══
 
 这是一个专门的 Task Agent，用 LLM 分析对话并提取结构化记忆。
 
@@ -175,57 +175,57 @@ LLM 分析 14 条对话后，调用以下工具：
 **实体提取:**
 
 ```
-create_entity(pointer_key="person:leo", displayName="Leo",
-              entityType="person", summary="来自北方的旅人和天文学者",
-              memoryScope="shared_public")
-→ entity_nodes 表写入 id=201
+▸ create_entity(pointer_key="person:leo", displayName="Leo",
+                entityType="person", summary="来自北方的旅人和天文学者",
+                memoryScope="shared_public")
+  → entity_nodes 表写入 id=201
 
-create_entity(pointer_key="person:ashford", displayName="Ashford伯爵",
-              entityType="person", summary="庄园主人，目前外出旅行，对星星着迷",
-              memoryScope="shared_public")
-→ entity_nodes 表写入 id=202
+▸ create_entity(pointer_key="person:ashford", displayName="Ashford伯爵",
+                entityType="person", summary="庄园主人，目前外出旅行，对星星着迷",
+                memoryScope="shared_public")
+  → entity_nodes 表写入 id=202
 
-create_entity(pointer_key="item:star_painting", displayName="星夜归途",
-              entityType="item", summary="大厅墙上的画作，无名画家所赠",
-              memoryScope="shared_public")
-→ entity_nodes 表写入 id=203
+▸ create_entity(pointer_key="item:star_painting", displayName="星夜归途",
+                entityType="item", summary="大厅墙上的画作，无名画家所赠",
+                memoryScope="shared_public")
+  → entity_nodes 表写入 id=203
 
-create_entity(pointer_key="location:observatory", displayName="观星台",
-              entityType="location", summary="庄园后山，可以看到银河",
-              memoryScope="shared_public")
-→ entity_nodes 表写入 id=204
+▸ create_entity(pointer_key="location:observatory", displayName="观星台",
+                entityType="location", summary="庄园后山，可以看到银河",
+                memoryScope="shared_public")
+  → entity_nodes 表写入 id=204
 
-create_entity(pointer_key="concept:travelers_star", displayName="旅人之星",
-              entityType="concept", summary="Leo在寻找的一颗星星，伯爵也曾着迷",
-              memoryScope="shared_public")
-→ entity_nodes 表写入 id=205
+▸ create_entity(pointer_key="concept:travelers_star", displayName="旅人之星",
+                entityType="concept", summary="Leo在寻找的一颗星星，伯爵也曾着迷",
+                memoryScope="shared_public")
+  → entity_nodes 表写入 id=205
 ```
 
 **私有事件提取:**
 
 ```
-create_private_event(agentId="sakura", eventCategory="observation",
+▸ create_private_event(agentId="sakura", eventCategory="observation",
     projectionClass="area_candidate",
     projectableSummary="旅人Leo首次到访庄园，自我介绍为来自北方的天文学者",
     locationEntityId=101, primaryActorEntityId=201)
-→ agent_event_overlay 表写入 (projection_class="area_candidate")
+  → agent_event_overlay 表写入 (projection_class="area_candidate")
 
-create_private_event(agentId="sakura", eventCategory="speech",
+▸ create_private_event(agentId="sakura", eventCategory="speech",
     projectionClass="area_candidate",
     projectableSummary="Sakura告诉Leo庄园属于Ashford伯爵，伯爵目前外出",
     locationEntityId=101, primaryActorEntityId=201)
 
-create_private_event(agentId="sakura", eventCategory="action",
+▸ create_private_event(agentId="sakura", eventCategory="action",
     projectionClass="area_candidate",
     projectableSummary="Leo提到寻找'旅人之星'，Sakura在书房见过这个名字",
     locationEntityId=101, primaryActorEntityId=201)
 
-create_private_event(agentId="sakura", eventCategory="action",
+▸ create_private_event(agentId="sakura", eventCategory="action",
     projectionClass="area_candidate",
     projectableSummary="Sakura带Leo进入伯爵书房查看天文日志",
     locationEntityId=101, primaryActorEntityId=201)
 
-create_private_event(agentId="sakura", eventCategory="thought",
+▸ create_private_event(agentId="sakura", eventCategory="thought",
     projectionClass="none",  ← 思想不会物化！
     privateNotes="我擅自带Leo进了书房，希望伯爵不会生气...",
     salience=0.8)
@@ -234,21 +234,21 @@ create_private_event(agentId="sakura", eventCategory="thought",
 **私有信念与逻辑边:**
 
 ```
-create_private_belief(agentId="sakura",
+▸ create_private_belief(agentId="sakura",
     sourceEntityId=201, targetEntityId=205,
     predicate="seeks", beliefType="observation",
     confidence=0.95, epistemicStatus="confirmed")
-→ "Leo 正在寻找 旅人之星"
+  → "Leo 正在寻找 旅人之星"
 
-create_private_belief(agentId="sakura",
+▸ create_private_belief(agentId="sakura",
     sourceEntityId=202, targetEntityId=205,
     predicate="is_interested_in", beliefType="inference",
     confidence=0.7, epistemicStatus="suspected")
-→ "Ashford伯爵 可能对 旅人之星 感兴趣" (推测)
+  → "Ashford伯爵 可能对 旅人之星 感兴趣" (推测)
 
-create_logic_edge(sourceEventId=event3, targetEventId=event4,
+▸ create_logic_edge(sourceEventId=event3, targetEventId=event4,
     relationType="causal")
-→ "因为Leo提到旅人之星 → 所以Sakura带他去书房"
+  → "因为Leo提到旅人之星 → 所以Sakura带他去书房"
 ```
 
 #### 物化 (Materialization) — 立即触发
@@ -281,7 +281,7 @@ MaterializationService.materializeDelayed(areaCandidates, "sakura")
 LLM 审视提取出的所有实体/事件/信仰，决定哪些值得加入 Index：
 
 ```
-update_index_block(text=
+▸ update_index_block(text=
     "@person:leo - 北方旅人，天文学者，寻找旅人之星
      @person:ashford - 庄园主人，外出旅行
      @item:star_painting - 《星夜归途》大厅画作
@@ -307,7 +307,7 @@ Core Memory 变为：
 
 ---
 
-### Turn 8-10: 第二天的对话（新 session）
+### ═══ Turn 8-10: 第二天的对话（新 session）═══
 
 **场景切换**: 第二天，用户继续和 Sakura 对话。
 
@@ -334,7 +334,7 @@ PromptBuilder 从 `core_memory_blocks` 读取三个块，拼入 system prompt：
 </core_memory>
 ```
 
-Sakura **立即知道** Leo 是谁、在找什么。这就是 Core Memory 的价值——**零延迟的关键记忆**。
+→ Sakura **立即知道** Leo 是谁、在找什么。这就是 Core Memory 的价值——**零延迟的关键记忆**。
 
 #### Step 2: Memory Hints 生成 (异步，按需)
 
@@ -373,8 +373,8 @@ queryEmbedding = embed("昨晚我在观星台看到了一颗特别亮的星星")
 cosineSimilarity(queryEmbedding, each_node_embedding)
 
 // 结果示例:
-// "观星台" (location:204)    → similarity 0.91
 // "旅人之星" (concept:205)   → similarity 0.87
+// "观星台" (location:204)    → similarity 0.91
 // "星夜归途" (item:203)      → similarity 0.72
 ```
 
@@ -382,7 +382,7 @@ cosineSimilarity(queryEmbedding, each_node_embedding)
 
 ```
 对每个候选节点:
-  fused_score = 0.5 * lexicalRRF + 0.5 * semanticRRF
+  fused_score = 0.5 × lexicalRRF + 0.5 × semanticRRF
 
 其中 RRF(rank) = 1 / (60 + rank)
 
@@ -416,11 +416,11 @@ Sakura: "真的吗！那或许就是您一直在找的'旅人之星'？
         要不要我们再去书房确认一下？"
 ```
 
-Sakura 不仅记得 Leo 在找旅人之星（Core Memory），还能回忆起昨天去书房的具体情节（Graph Memory 通过 Hints 注入）。
+→ Sakura 不仅记得 Leo 在找旅人之星（Core Memory），还能回忆起昨天去书房的具体情节（Graph Memory 通过 Hints 注入）。
 
 ---
 
-### Turn 20+: 当 Agent 主动搜索记忆
+### ═══ Turn 20+: 当 Agent 主动搜索记忆 ═══
 
 假设对话继续深入，用户问了一个需要回溯的问题：
 
@@ -437,12 +437,13 @@ query: "伯爵和那幅画之间的联系"
 queryType: "relationship" (检测到"联系"关键词)
 ```
 
-**Seed 生成** (混合搜索取前 10 个候选):
+**Seed 生成** (混合搜索 → 前 10 个候选):
 ```
 Seeds:
   1. entity:202 (Ashford伯爵) → seedScore 0.82
   2. entity:203 (星夜归途)     → seedScore 0.78
   3. concept:205 (旅人之星)    → seedScore 0.45
+  ...
 ```
 
 **Beam 搜索展开** (beamWidth=8, maxDepth=2):
@@ -472,9 +473,9 @@ Depth 2 (继续展开):
 
 **Path 重排序**:
 ```
-pathScore = 0.30*seedScore + 0.25*edgeTypeScore + 0.15*temporalConsistency
-          + 0.10*queryIntentMatch + 0.10*supportScore + 0.10*recencyScore
-          - 0.10*hopPenalty - 0.10*redundancyPenalty
+pathScore = 0.30×seedScore + 0.25×edgeTypeScore + 0.15×temporalConsistency
+          + 0.10×queryIntentMatch + 0.10×supportScore + 0.10×recencyScore
+          - 0.10×hopPenalty - 0.10×redundancyPenalty
 
 最佳路径: [星夜归途] → [伯爵] → [旅人之星]
   = "星夜归途属于伯爵，伯爵对旅人之星感兴趣"
@@ -502,7 +503,7 @@ Sakura: "我想起来了...那幅《星夜归途》是伯爵最珍爱的画。
 
 ---
 
-### 晋升 (Promotion): Area → World
+### ═══ 晋升 (Promotion): Area → World ═══
 
 假设系统定期运行 Promotion 检查（或由 Scheduler Job 触发）：
 
@@ -607,7 +608,7 @@ Sakura的私人信念          ✅           ❌            ❌          ❌
   ▼
 ⑥ 定期 Promotion (Area → World)
   ├─ 事件候选: area_visible + world_candidate
-  └─ 事实候选: 谓词出现 >= 2 次
+  └─ 事实候选: 谓词出现 ≥ 2 次
   → event_nodes (world_public)
   → fact_edges
   → search_docs_world
@@ -617,7 +618,7 @@ Sakura的私人信念          ✅           ❌            ❌          ❌
 
 ## 六、Prompt 六槽位并行注入机制
 
-RP Agent 每轮构建 prompt 时，PromptBuilder 填充 **6 个独立槽位**，按固定顺序拼接（`src/core/prompt-template.ts`）：
+RP Agent 每轮构建 prompt 时，PromptBuilder 会填充 **6 个独立槽位**，按固定顺序拼接（见 `src/core/prompt-template.ts`）：
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -643,7 +644,7 @@ slotContent.set(LORE_ENTRIES,     this.getLoreEntries(loreQuery));           // 
 slotContent.set(MEMORY_HINTS,     await this.getMemoryHints(...));          // 图记忆提示
 ```
 
-就像同时问三个人同一个问题——Persona 告诉你"我是谁"，Lore 告诉你"世界是怎样的"，Memory 告诉你"之前发生过什么"。
+就像同时问三个人同一个问题——Persona 告诉你"我是谁"，Lore 告诉你"世界是怎样的"，Memory 告诉你"之前发生过什么"。三者使用同一条用户消息作为输入，分别查询各自的数据源，最后拼在一起。
 
 ---
 
@@ -719,8 +720,8 @@ Core Memory character (可变):
 
 | 问题 | 说明 |
 |------|------|
-| **权威性冲突** | Lore 是"创作者说的绝对真理"，Graph Memory 是"Agent 感知到的可能有误的记忆"。混在同一个图里难以区分权威性 |
-| **性能无瓶颈** | Aho-Corasick 多模式匹配 O(n)，n 是文本长度，和条目数量无关 |
+| **权威性冲突** | Lore 是"创作者说的绝对真理"，Graph Memory 是"Agent 感知到的可能有误的记忆"。混在同一个图里难以区分权威性。Graph Memory 的 `epistemic_status` 有 `confirmed/suspected/hypothetical/retracted`，但 Lore 条目是不可质疑的 |
+| **性能无瓶颈** | Aho-Corasick 多模式匹配 O(n)，n 是文本长度，和条目数量无关。除非 Lore 有上万条，否则性能不是问题 |
 | **数据量不匹配** | Lore 通常十几到几百条人工编写条目，图谱适合大规模动态数据 |
 
 ### 更好的方向：Graph Memory 侧建立 Lore 引用
@@ -770,7 +771,7 @@ Core Memory character (可变):
 
 ---
 
-## 附录：关键阈值速查
+## 关键阈值速查
 
 | 参数 | 值 | 用途 |
 |------|---|------|
@@ -778,10 +779,10 @@ Core Memory character (可变):
 | Character 块上限 | 4000 字符 | Agent 人格容量 |
 | User 块上限 | 3000 字符 | 用户信息容量 |
 | Index 块上限 | 1500 字符 | 指针地址容量 |
-| Fact 晋升证据门槛 | >= 2 次 | 最少出现次数才能晋升 |
+| Fact 晋升证据门槛 | ≥ 2 次 | 最少出现次数才能晋升 |
 | Same-episode 时间窗口 | 24 小时 | 事件时间分组 |
 | FTS scope 权重 | Private 1.0 / Area 0.9 / World 0.8 | 搜索结果优先级 |
-| RRF 融合公式 | 0.5 * lexical + 0.5 * semantic | 种子候选排序 |
+| RRF 融合公式 | 0.5×lexical + 0.5×semantic | 种子候选排序 |
 | Beam search 宽度 | 8 (max 32) | 图探索并行路径数 |
 | Beam search 深度 | 2 (max 2) | 图探索最大跳数 |
 | Seed 候选数 | 10 (max 32) | 初始种子数量 |
