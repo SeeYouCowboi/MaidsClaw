@@ -876,6 +876,17 @@ RP Agent 表达了信任，但 Task Agent "脑补"出完全相反的内心想法
 - 与同时段 assistant 消息做简单矛盾检测（如情感方向相反）
 - 矛盾时降低 `salience` 或标记 `epistemicStatus="uncertain"`
 
+### 根本局限：以上方案都不能让角色"心口不一"
+
+上述三个方案的前提都是"Task Agent 的 thought 应该与 RP Agent 的回复一致"。
+但这恰恰**堵死了角色表达复杂内心世界的可能**。
+
+一个善于外交辞令的角色、一个内心恐惧但故作镇定的角色、一个暗中算计的角色——
+这些都需要**思维端和口头端合法地分离**。当前架构的根本问题不是"Task Agent 脑补了矛盾的想法"，
+而是**RP Agent 只有一个输出通道（text），没有独立的思维通道**。
+
+详见下方「十二、思维-口头分离方案」。
+
 ---
 
 ## 十一、搜索作用域隔离分析
@@ -946,6 +957,193 @@ it("agent-b cannot read agent-a private search docs", async () => {
 #### 唯一的边缘情况
 
 当 `ViewerContext.current_area_id` 为 `undefined` 时，area 搜索整段跳过（`retrieval.ts:199`）。这意味着位置数据丢失时 Agent 会"失忆"（看不到任何 area 记忆），而非"越权"（看到别的地方的记忆）。这是**安全的降级**。
+
+---
+
+## 十二、思维-口头分离方案：让角色"心口不一"
+
+### 问题本质
+
+当前 RP Agent 只有一个输出通道：
+
+```
+RP Agent → 单一文本流 → 全部展示给用户 / 全部存入 interaction_records
+                        ↓
+         （10 轮后）Task Agent 事后猜"她可能在想什么"
+```
+
+这导致角色永远无法表达**有意的心口不一**。一个善于外交辞令的角色、内心恐惧但故作镇定的角色、暗中算计的角色——这些都需要思维端和口头端**合法地分离**。
+
+而如果强制 Task Agent 的 thought 与 RP 回复保持一致（十、方案 A-C），thought 就变成了回复的复述，失去存在意义。
+
+**真正需要的是：让 RP Agent 自己在对话中实时产生私有想法，与口头回复分离。**
+
+### 方案对比
+
+#### 方案 A: 给 RP Agent 加 `record_inner_thought` 工具
+
+```
+RP Agent 的一轮:
+  1. 调用 record_inner_thought("Leo来历不明，我要警惕...")
+  2. 工具执行，写入 agent_event_overlay
+  3. 继续生成: "当然，Leo先生是值得信赖的客人。"
+```
+
+**改动量**：小。在 `RP_AUTHORIZED_TOOLS` 加一项 + 实现 handler。
+
+**致命问题**：
+- 工具调用是完整的 model round-trip（LLM 输出 tool_use → 系统执行 → 结果返回 → LLM 再输出文本），**延迟翻倍**
+- LLM 不一定每次都"想到"要先调工具
+- 如果角色每轮都调工具记录想法，用户会感受到明显的停顿
+
+**适用场景**：不是每轮都用，而是**重要时刻**主动记录——类似"在日记里写一笔"。
+
+---
+
+#### 方案 B: Extended Thinking（推荐主方案）
+
+Anthropic API 已支持 `thinking` content block。模型在输出最终文本前先产生内部推理，可被捕获但不展示给用户：
+
+```
+模型输出流:
+  content_block_start: {type: "thinking"}     ← 内心想法（不展示）
+  content_block_delta: "Leo这人很可疑，但我不能表现出来..."
+  content_block_stop
+  content_block_start: {type: "text"}         ← 口头回复（展示给用户）
+  content_block_delta: "当然，Leo先生是值得信赖的客人。"
+  content_block_stop
+```
+
+**优点**：
+- **零额外延迟**：单次 LLM 调用，thinking 和 text 在同一次生成中
+- **天然分离**：模型自己决定"想什么"和"说什么"，不需要额外提示
+- **思维影响口头**：thinking 在 text 之前生成，内心想法自然会影响口头表达的措辞
+
+**需要的改动**：
+
+1. **`src/core/chunk.ts`** — 新增 thinking chunk 类型：
+```typescript
+export type ThinkingDeltaChunk = {
+  type: "thinking_delta";
+  text: string;
+};
+export type Chunk = ... | ThinkingDeltaChunk;
+```
+
+2. **`src/core/models/anthropic-provider.ts`** — 解析 thinking block：
+```typescript
+// 当前只处理 text_delta 和 tool_use，需要新增：
+if (parsed.content_block?.type === "thinking") {
+  // 捕获但不作为 text_delta 发出
+  yield { type: "thinking_delta", text: parsed.delta.thinking };
+}
+```
+
+3. **`src/core/agent-loop.ts`** — 分流捕获：
+```typescript
+let thinkingText = "";  // 新增
+for await (const chunk of this.modelProvider.chatCompletion(completionRequest)) {
+  if (chunk.type === "thinking_delta") {
+    thinkingText += chunk.text;
+    // 不 yield 给用户！
+    continue;
+  }
+  if (chunk.type === "text_delta") {
+    assistantText += chunk.text;
+    yield chunk;  // 只有口头回复传给用户
+    continue;
+  }
+}
+// message_end 后，把 thinkingText 传给 projectionSink
+```
+
+4. **`src/core/types.ts`** — 扩展 ProjectionAppendix：
+```typescript
+export type ProjectionAppendix = {
+  publicSummarySeed: string;
+  thinkingContent?: string;  // ← 新增：内心想法原文
+  // ...其他字段
+};
+```
+
+5. **`src/runtime/turn-service.ts`** — 存储时分离：
+```typescript
+// interaction_records 中 assistant 消息只存口头回复
+// thinkingContent 通过 projectionAppendix 附带
+// 或直接写入 agent_event_overlay
+```
+
+**数据流**：
+```
+模型生成
+  ├─ thinking block → thinkingText（不展示）
+  │   ├─ 立即写入 agent_event_overlay (eventCategory="thought")
+  │   └─ 附带到 projectionAppendix.thinkingContent
+  │       → Flush 时 Task Agent 看到"RP Agent 原始想法"
+  │       → 作为 thought 提取的真实锚点（不再是事后猜测）
+  │
+  └─ text block → assistantText（展示给用户）
+      → interaction_records.payload.content
+```
+
+**关键认知**: 启用 Extended Thinking 后，Task Agent 的角色从"猜测角色在想什么"变成"整理角色已经想过的东西"。Thought 不再是回顾性脑补，而是实时记录的整理。
+
+---
+
+#### 方案 C: XML 标签解析
+
+在 system prompt 中指示 RP Agent 用标签区分：
+
+```
+模型输出: "<inner>Leo很可疑</inner>当然，Leo先生是值得信赖的客人。"
+→ 解析后: thought="Leo很可疑", speech="当然，Leo先生..."
+```
+
+**优点**：不依赖特定模型提供商。
+**缺点**：
+- 流式 XML 解析复杂（标签跨 chunk 边界）
+- 依赖 LLM 严格遵循格式（可能漏标签或格式错误）
+- 需要专门的状态机解析器
+
+---
+
+#### 方案 D: 双阶段生成
+
+```
+Phase 1 (隐藏): 只输出内心想法 → agent_event_overlay
+Phase 2 (可见): 注入 Phase 1 结果，输出口头回复 → 用户
+```
+
+**优点**：分离最彻底。
+**致命问题**：两次 LLM 调用，延迟和成本翻倍。
+
+---
+
+### 推荐策略：B 为主 + A 为辅
+
+```
+日常对话:
+  Extended Thinking 自动运行 → thinking block 作为实时内心独白
+  → 零额外延迟，每轮都有思维记录
+
+重要时刻:
+  RP Agent 主动调用 record_inner_thought → 显式标记"这很重要"
+  → salience 更高，更容易被未来的 Memory Hints 召回
+
+Flush 时:
+  Task Agent 看到 {对话文本 + RP 原始 thinking} → 整理而非猜测
+  → thought 一致性由 RP Agent 自己保证，Task Agent 只做结构化
+```
+
+**为什么这比纯工具方案好**：
+- 工具方案要求 LLM 每次都"记得"先调工具，且增加延迟
+- Extended Thinking 是模型的自然行为，不需要额外提示
+- 两者互补：thinking 捕获瞬间念头，工具记录深思熟虑的判断
+
+**为什么这比纯 Task Agent 回顾好**：
+- 想法是 RP Agent **自己**产生的，不是别人替它猜的
+- 思维影响口头表达（thinking 在 text 之前生成）
+- 心口不一是**有意的**角色行为，不是系统 bug
 
 ---
 
