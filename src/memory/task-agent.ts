@@ -306,7 +306,7 @@ export class MemoryTaskAgent {
           {
             role: "system",
             content:
-              "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.",
+              "You are a memory migration engine. The RP Agent records its own inner thoughts as private events (event_category='thought'). Your role: Phase 1 Extract: identify durable PUBLIC facts, entities, and relationships from dialogue text. Phase 2 Consolidate: deduplicate and merge overlapping private events. Phase 3 Detect contradictions: flag facts/beliefs that conflict with existing graph data. Phase 4 Classify: mark outputs as shared_public or owner_private. Do NOT re-create thought events that the RP Agent already recorded.",
           },
           {
             role: "user",
@@ -532,7 +532,7 @@ export class MemoryTaskAgent {
     }
   }
 
-  private loadExistingContext(agentId: string): { entities: unknown[]; privateBeliefs: unknown[] } {
+  private loadExistingContext(agentId: string): { entities: unknown[]; privateBeliefs: unknown[]; recentThoughts: unknown[] } {
     const entities = this.db
       .prepare(
         `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
@@ -553,7 +553,19 @@ export class MemoryTaskAgent {
       )
       .all(agentId);
 
-    return { entities, privateBeliefs };
+    // Load recent thought events already recorded by the RP Agent's inner thought filter
+    // so the LLM avoids duplicating them
+    const recentThoughts = this.db
+      .prepare(
+        `SELECT id, private_notes, emotion, created_at
+         FROM agent_event_overlay
+         WHERE agent_id = ? AND event_category = 'thought'
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      )
+      .all(agentId);
+
+    return { entities, privateBeliefs, recentThoughts };
   }
 
   private applyCallOneToolCalls(
@@ -996,8 +1008,8 @@ export class MemoryTaskAgent {
 
     const row = this.db
       .prepare(
-        `SELECT (SELECT count(*) FROM logic_edges WHERE source_event_id = ?) +
-                (SELECT count(*) FROM logic_edges WHERE target_event_id = ?) as degree`,
+        `SELECT (SELECT count(*) FROM logic_edges WHERE source_event_id = ? AND invalidated_at IS NULL) +
+                (SELECT count(*) FROM logic_edges WHERE target_event_id = ? AND invalidated_at IS NULL) as degree`,
       )
       .get(parsed.id, parsed.id) as { degree: number };
     return row.degree;

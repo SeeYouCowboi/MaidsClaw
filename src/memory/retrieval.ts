@@ -353,7 +353,7 @@ export class RetrievalService {
     return globalRedirect?.new_name ?? name;
   }
 
-  private resolveEntityByPointer(pointerKey: string, viewerAgentId: string): EntityNode | null {
+  resolveEntityByPointer(pointerKey: string, viewerAgentId: string): EntityNode | null {
     const privateEntity = this.db
       .prepare(
         "SELECT * FROM entity_nodes WHERE pointer_key=? AND memory_scope='private_overlay' AND owner_agent_id=? LIMIT 1",

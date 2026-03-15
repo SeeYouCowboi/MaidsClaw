@@ -21,6 +21,19 @@ type GraphNavigatorLike = {
   explore(query: string, ctx: ViewerContext): unknown | Promise<unknown>;
 };
 
+type GraphStorageLike = {
+  createPrivateBelief(params: {
+    agentId: string;
+    sourceEntityId: number;
+    targetEntityId: number;
+    predicate: string;
+    beliefType?: string;
+    confidence?: number;
+    epistemicStatus?: string;
+    provenance?: string;
+  }): number;
+};
+
 // ---------------------------------------------------------------------------
 // Service bag passed to registerMemoryTools
 // ---------------------------------------------------------------------------
@@ -29,6 +42,7 @@ export type MemoryToolServices = {
   coreMemory: CoreMemoryService;
   retrieval: RetrievalService;
   navigator?: GraphNavigatorLike;
+  storage?: GraphStorageLike;
 };
 
 export type ToolExecutorLike = {
@@ -263,6 +277,85 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// Tool: record_private_belief
+// ---------------------------------------------------------------------------
+
+function makeRecordPrivateBelief(services: MemoryToolServices): MemoryToolDefinition {
+  return {
+    name: "record_private_belief",
+    description:
+      `Record a private belief about the relationship between two entities. ` +
+      `Use when you form a judgment, suspicion, or conclusion about someone or something. ` +
+      `This is stored privately and invisible to other agents. ` +
+      POINTER_GUIDE,
+    parameters: {
+      type: "object",
+      properties: {
+        source_entity: {
+          type: "string",
+          description: "Source entity pointer key (e.g. @Alice).",
+        },
+        target_entity: {
+          type: "string",
+          description: "Target entity pointer key (e.g. @Bob).",
+        },
+        predicate: {
+          type: "string",
+          description: "Relationship predicate (e.g. 'suspects_lying', 'likes', 'distrusts').",
+        },
+        belief_type: {
+          type: "string",
+          enum: ["observation", "inference", "suspicion", "intention"],
+          description: "How this belief was formed.",
+        },
+        confidence: {
+          type: "number",
+          description: "Confidence level from 0.0 (uncertain) to 1.0 (certain).",
+        },
+      },
+      required: ["source_entity", "target_entity", "predicate", "belief_type", "confidence"],
+      additionalProperties: false,
+    },
+    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+      if (!services.storage) {
+        return { success: false, error: "GraphStorage not available" };
+      }
+
+      const sourcePointer = args.source_entity as string;
+      const targetPointer = args.target_entity as string;
+
+      const sourceEntity = services.retrieval.resolveEntityByPointer(
+        sourcePointer.replace(/^@/, ""),
+        viewerContext.viewer_agent_id,
+      );
+      const targetEntity = services.retrieval.resolveEntityByPointer(
+        targetPointer.replace(/^@/, ""),
+        viewerContext.viewer_agent_id,
+      );
+
+      if (!sourceEntity) {
+        return { success: false, error: `Entity not found: ${sourcePointer}. Create it first.` };
+      }
+      if (!targetEntity) {
+        return { success: false, error: `Entity not found: ${targetPointer}. Create it first.` };
+      }
+
+      const beliefId = services.storage.createPrivateBelief({
+        agentId: viewerContext.viewer_agent_id,
+        sourceEntityId: sourceEntity.id,
+        targetEntityId: targetEntity.id,
+        predicate: args.predicate as string,
+        beliefType: args.belief_type as string,
+        confidence: args.confidence as number,
+        provenance: "rp_agent_tool",
+      });
+
+      return { success: true, belief_id: beliefId };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -272,6 +365,7 @@ const TOOL_FACTORIES = [
   makeMemoryRead,
   makeMemorySearch,
   makeMemoryExplore,
+  makeRecordPrivateBelief,
 ] as const;
 
 export function buildMemoryTools(services: MemoryToolServices): MemoryToolDefinition[] {

@@ -385,7 +385,8 @@ export class GraphNavigator {
       .prepare(
         `SELECT source_event_id, target_event_id, relation_type, created_at
          FROM logic_edges
-         WHERE source_event_id IN (${placeholders}) OR target_event_id IN (${placeholders})`,
+         WHERE (source_event_id IN (${placeholders}) OR target_event_id IN (${placeholders}))
+           AND invalidated_at IS NULL`,
       )
       .all(...ids, ...ids) as Array<{
       source_event_id: number;

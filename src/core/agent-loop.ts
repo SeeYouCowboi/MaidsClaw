@@ -13,6 +13,7 @@ import { calculateTokenBudget } from "./token-budget.js";
 import type { ProjectionAppendix } from "./types.js";
 import type { ToolExecutor } from "./tools/tool-executor.js";
 import { getFilteredSchemas, canExecuteTool } from "./tools/tool-access-policy.js";
+import { InnerThoughtFilter } from "./inner-thought-filter.js";
 
 type PendingToolCall = {
   id: string;
@@ -90,6 +91,7 @@ export class AgentLoop {
     const initialPromptState = await this.buildInitialPromptState(request);
     const workingMessages = [...initialPromptState.messages];
     const systemPrompt = initialPromptState.systemPrompt;
+    const thoughtFilter = this.profile.role === "rp_agent" ? new InnerThoughtFilter() : null;
     let turnIndex = 0;
 
     while (true) {
@@ -105,9 +107,19 @@ export class AgentLoop {
         const completionRequest = this.buildCompletionRequest(workingMessages, systemPrompt);
         for await (const chunk of this.modelProvider.chatCompletion(completionRequest)) {
           if (chunk.type === "text_delta") {
-            assistantText += chunk.text;
-            appendTextBlock(assistantBlocks, chunk);
-            yield chunk;
+            if (thoughtFilter) {
+              const filtered = thoughtFilter.feed(chunk.text);
+              if (filtered.publicText.length > 0) {
+                const publicChunk: TextDeltaChunk = { type: "text_delta", text: filtered.publicText };
+                assistantText += filtered.publicText;
+                appendTextBlock(assistantBlocks, publicChunk);
+                yield publicChunk;
+              }
+            } else {
+              assistantText += chunk.text;
+              appendTextBlock(assistantBlocks, chunk);
+              yield chunk;
+            }
             continue;
           }
 
@@ -167,6 +179,17 @@ export class AgentLoop {
         return;
       }
 
+      // Flush any remaining buffered text from the inner thought filter
+      if (thoughtFilter) {
+        const flushed = thoughtFilter.flush();
+        if (flushed.publicText.length > 0) {
+          const publicChunk: TextDeltaChunk = { type: "text_delta", text: flushed.publicText };
+          assistantText += flushed.publicText;
+          appendTextBlock(assistantBlocks, publicChunk);
+          yield publicChunk;
+        }
+      }
+
       const normalizedToolCalls: Array<{
         id: string;
         name: string;
@@ -213,6 +236,15 @@ export class AgentLoop {
             request.sessionId
           );
         }
+      }
+
+      // Store captured inner thoughts in the private memory layer
+      if (thoughtFilter && thoughtFilter.completedThoughts.length > 0) {
+        for (const thought of thoughtFilter.completedThoughts) {
+          this.projectionSink.onThoughtCaptured?.(thought, request.sessionId, runContext.agentId);
+        }
+        // Clear after storing so re-entering the loop doesn't re-store
+        thoughtFilter.completedThoughts.length = 0;
       }
 
       if (normalizedToolCalls.length === 0) {

@@ -1,5 +1,5 @@
 import type { Db } from "../storage/database.js";
-import { MAX_INTEGER, makeNodeRef } from "./schema.js";
+import { MAX_INTEGER, PREDICATE_MUTEX_GROUPS, makeNodeRef } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
   AgentFactOverlay,
@@ -411,6 +411,28 @@ export class GraphStorageService {
       this.invalidateFact(existing.id);
     }
 
+    // Mutex group invalidation: invalidate facts with same (source, target)
+    // but a different predicate in the same mutex group
+    const mutexGroup = findMutexGroup(predicate);
+    if (mutexGroup) {
+      const otherPredicates = mutexGroup.filter((p) => p !== predicate);
+      if (otherPredicates.length > 0) {
+        const placeholders = otherPredicates.map(() => "?").join(",");
+        const conflicting = this.db
+          .prepare(
+            `SELECT id FROM fact_edges
+             WHERE source_entity_id = ?
+               AND target_entity_id = ?
+               AND predicate IN (${placeholders})
+               AND t_invalid = ?`,
+          )
+          .all(sourceEntityId, targetEntityId, ...otherPredicates, MAX_INTEGER) as { id: number }[];
+        for (const row of conflicting) {
+          this.invalidateFact(row.id);
+        }
+      }
+    }
+
     const now = Date.now();
     const result = this.db
       .prepare(
@@ -441,6 +463,10 @@ export class GraphStorageService {
   invalidateFact(factId: number): void {
     const now = Date.now();
     this.db.prepare(`UPDATE fact_edges SET t_invalid = ?, t_expired = ? WHERE id = ?`).run(now, now, factId);
+  }
+
+  invalidateLogicEdge(logicEdgeId: number): void {
+    this.db.prepare(`UPDATE logic_edges SET invalidated_at = ? WHERE id = ?`).run(Date.now(), logicEdgeId);
   }
 
   createPrivateEvent(params: CreatePrivateEventInput): number {
@@ -505,6 +531,26 @@ export class GraphStorageService {
     if (existing) {
       this.db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(now, existing.id);
       return existing.id;
+    }
+
+    // Mutex group: retract conflicting beliefs with different predicate in same group
+    const mutexGroup = findMutexGroup(params.predicate);
+    if (mutexGroup) {
+      const otherPredicates = mutexGroup.filter((p) => p !== params.predicate);
+      if (otherPredicates.length > 0) {
+        const placeholders = otherPredicates.map(() => "?").join(",");
+        this.db
+          .prepare(
+            `UPDATE agent_fact_overlay
+             SET epistemic_status = 'retracted', updated_at = ?
+             WHERE agent_id = ?
+               AND source_entity_id = ?
+               AND target_entity_id = ?
+               AND predicate IN (${placeholders})
+               AND (epistemic_status IS NULL OR epistemic_status != 'retracted')`,
+          )
+          .run(now, params.agentId, params.sourceEntityId, params.targetEntityId, ...otherPredicates);
+      }
     }
 
     const result = this.db
@@ -805,4 +851,8 @@ export class GraphStorageService {
     }
     return rawId;
   }
+}
+
+function findMutexGroup(predicate: string): readonly string[] | undefined {
+  return PREDICATE_MUTEX_GROUPS.find((group) => group.includes(predicate));
 }

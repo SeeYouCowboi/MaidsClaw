@@ -8,6 +8,7 @@ export const RP_AUTHORIZED_TOOLS: readonly string[] = [
   "memory_explore",
   "persona_check_drift",
   "delegate_task",
+  "record_private_belief",
 ] as const;
 
 export class RpToolPolicy {

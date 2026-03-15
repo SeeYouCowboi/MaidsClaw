@@ -14,6 +14,19 @@ export const EventCategory = {
 export const ProjectionClass = { NONE: "none", AREA_CANDIDATE: "area_candidate" } as const;
 export const PromotionClass = { NONE: "none", WORLD_CANDIDATE: "world_candidate" } as const;
 
+/**
+ * Predicate mutex groups — predicates within the same group are mutually exclusive
+ * for a given (source_entity, target_entity) pair. When a new fact is created with
+ * a predicate in a group, existing valid facts with other predicates in the same
+ * group are automatically invalidated.
+ */
+export const PREDICATE_MUTEX_GROUPS: readonly (readonly string[])[] = [
+  ["likes", "hates", "dislikes", "fears", "trusts", "distrusts", "loves", "despises"],
+  ["is_alive", "is_dead"],
+  ["is_friend_of", "is_enemy_of", "is_rival_of", "is_ally_of"],
+  ["is_located_at", "has_left", "is_traveling_to"],
+] as const;
+
 export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   if (!NODE_REF_KINDS.includes(kind)) {
     throw new Error(`Invalid node ref kind: ${kind}`);
@@ -32,7 +45,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_area_source_record ON event_nodes(source_record_id) WHERE source_record_id IS NOT NULL AND visibility_scope = 'area_visible'`,
   `CREATE INDEX IF NOT EXISTS idx_event_nodes_session_timestamp ON event_nodes(session_id, timestamp)`,
   `CREATE INDEX IF NOT EXISTS idx_event_nodes_scope_location ON event_nodes(visibility_scope, location_entity_id)`,
-  `CREATE TABLE IF NOT EXISTS logic_edges (id INTEGER PRIMARY KEY, source_event_id INTEGER NOT NULL, target_event_id INTEGER NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('causal', 'temporal_prev', 'temporal_next', 'same_episode')), created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS logic_edges (id INTEGER PRIMARY KEY, source_event_id INTEGER NOT NULL, target_event_id INTEGER NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('causal', 'temporal_prev', 'temporal_next', 'same_episode')), created_at INTEGER NOT NULL, invalidated_at INTEGER DEFAULT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_logic_edges_source ON logic_edges(source_event_id)`,
   `CREATE INDEX IF NOT EXISTS idx_logic_edges_target ON logic_edges(target_event_id)`,
   `CREATE TABLE IF NOT EXISTS topics (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, created_at INTEGER NOT NULL)`,
@@ -76,7 +89,17 @@ function applyMemoryDdl(db: { exec: (sql: string) => void }): void {
 export function runMemoryMigrations(db: Db): void {
   db.transaction(() => {
     applyMemoryDdl(db);
+    applyIncrementalMigrations(db);
   });
+}
+
+function applyIncrementalMigrations(db: Db): void {
+  // Migration: add invalidated_at column to logic_edges for soft-delete support
+  const columns = db.prepare("PRAGMA table_info(logic_edges)").all() as Array<{ name: string }>;
+  const hasInvalidatedAt = columns.some((col) => col.name === "invalidated_at");
+  if (!hasInvalidatedAt) {
+    db.exec("ALTER TABLE logic_edges ADD COLUMN invalidated_at INTEGER DEFAULT NULL");
+  }
 }
 
 export function createMemorySchema(db: { exec: (sql: string) => void }): void {

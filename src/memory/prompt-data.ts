@@ -58,6 +58,7 @@ export async function getMemoryHints(
 export function formatNavigatorEvidence(
   navigatorResult: unknown,
   _viewerContext: ViewerContext,
+  now?: number,
 ): string {
   if (!navigatorResult || typeof navigatorResult !== "object") {
     return "";
@@ -69,22 +70,25 @@ export function formatNavigatorEvidence(
     return "";
   }
 
+  const currentTime = now ?? Date.now();
   const lines: string[] = [];
   lines.push(`Query: "${result.query}" (${result.query_type})`);
   lines.push("");
 
   for (let i = 0; i < result.evidence_paths.length; i++) {
     const ep = result.evidence_paths[i];
-    lines.push(`--- Evidence Path ${i + 1} (score: ${ep.score.path_score.toFixed(3)}) ---`);
+    const hasConflict = ep.path.edges.some((e) => e.kind === "conflict_or_update");
+    const conflictTag = hasConflict ? " [contains conflicts]" : "";
+    lines.push(`--- Evidence Path ${i + 1} (score: ${ep.score.path_score.toFixed(3)})${conflictTag} ---`);
     lines.push(`Seed: ${ep.path.seed}`);
     lines.push(`Depth: ${ep.path.depth}`);
 
     if (ep.path.edges.length > 0) {
       lines.push("Edges:");
       for (const edge of ep.path.edges) {
-        const ts = edge.timestamp ? ` @${edge.timestamp}` : "";
+        const ageLabel = edge.timestamp ? ` [${formatAgeLabel(currentTime, edge.timestamp)}]` : "";
         const summary = edge.summary ? ` — ${edge.summary}` : "";
-        lines.push(`  ${edge.from} -[${edge.kind}]-> ${edge.to}${ts}${summary}`);
+        lines.push(`  ${edge.from} -[${edge.kind}]-> ${edge.to}${ageLabel}${summary}`);
       }
     }
 
@@ -100,4 +104,18 @@ export function formatNavigatorEvidence(
   }
 
   return lines.join("\n").trimEnd();
+}
+
+function formatAgeLabel(now: number, timestamp: number): string {
+  const ageMs = now - timestamp;
+  const ONE_HOUR = 3_600_000;
+  const ONE_DAY = 86_400_000;
+  const ONE_WEEK = 604_800_000;
+  const ONE_MONTH = 2_592_000_000;
+
+  if (ageMs < ONE_HOUR) return "just now";
+  if (ageMs < ONE_DAY) return "recent";
+  if (ageMs < ONE_WEEK) return "days ago";
+  if (ageMs < ONE_MONTH) return "weeks ago";
+  return "old";
 }

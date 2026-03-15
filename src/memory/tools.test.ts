@@ -65,8 +65,8 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("tool definitions", () => {
-    it("defines exactly 5 tools", () => {
-      expect(tools).toHaveLength(5);
+    it("defines exactly 6 tools", () => {
+      expect(tools).toHaveLength(6);
     });
 
     it("all tools have valid JSON Schema parameter definitions", () => {
@@ -323,7 +323,7 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("registerMemoryTools", () => {
-    it("successfully registers all 5 tools", () => {
+    it("successfully registers all 6 tools", () => {
       const registered: MemoryToolDefinition[] = [];
       const executor: ToolExecutorLike = {
         registerLocal(tool: MemoryToolDefinition) {
@@ -333,13 +333,14 @@ describe("Memory Tools", () => {
 
       registerMemoryTools(executor, services);
 
-      expect(registered).toHaveLength(5);
+      expect(registered).toHaveLength(6);
       const names = registered.map((t) => t.name);
       expect(names).toContain("core_memory_append");
       expect(names).toContain("core_memory_replace");
       expect(names).toContain("memory_read");
       expect(names).toContain("memory_search");
       expect(names).toContain("memory_explore");
+      expect(names).toContain("record_private_belief");
     });
   });
 

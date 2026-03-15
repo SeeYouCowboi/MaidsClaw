@@ -308,7 +308,7 @@ describe("formatNavigatorEvidence", () => {
     expect(output).toContain("Seed: entity:1");
     expect(output).toContain("Depth: 1");
     expect(output).toContain("entity:1 -[participant]-> event:5");
-    expect(output).toContain("@1700000000");
+    expect(output).toMatch(/\[(just now|recent|days ago|weeks ago|old)\]/);
     expect(output).toContain("Alice attended the gathering");
     expect(output).toContain("f:10, f:11");
     expect(output).toContain("entity:2");
