@@ -234,6 +234,9 @@ export class TurnService {
           publicReply: outcome.publicReply,
           hasPublicReply,
           viewerSnapshot: resolvedViewerSnapshot,
+          privateCommit: hasPrivateOps
+            ? { ops: summarizeCognitionOps(outcome.privateCommit!.ops) }
+            : undefined,
         };
 
         this.commitService.commitWithId({
@@ -445,6 +448,7 @@ export class TurnService {
     await this.memoryTaskAgent.runMigrate({
       ...flushRequest,
       dialogueRecords: toDialogueRecords(records),
+      interactionRecords: records,
       queueOwnerAgentId,
     });
 
@@ -576,6 +580,18 @@ function buildCognitionSlotPayload(ops: CognitionOp[]): CognitionSlotItem[] {
 
   // Cap at last 8 items
   return items.slice(-8);
+}
+
+function summarizeCognitionOps(ops: CognitionOp[]): Array<{ key: string; kind: string }> {
+  const result: Array<{ key: string; kind: string }> = [];
+  for (const op of ops) {
+    if (op.op === "upsert") {
+      result.push({ key: op.record.key, kind: op.record.kind });
+    } else if (op.op === "retract") {
+      result.push({ key: op.target.key, kind: op.target.kind });
+    }
+  }
+  return result;
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {

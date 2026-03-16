@@ -91,6 +91,9 @@ export type TurnSettlementPayload = {
     userPointerKey: string;
     currentLocationEntityId?: number;
   };
+  privateCommit?: {
+    ops: Array<{ key: string; kind: string }>;
+  };
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

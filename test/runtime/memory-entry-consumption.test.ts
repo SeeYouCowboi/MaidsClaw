@@ -7,8 +7,10 @@ import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import type { MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import { MemoryIngestionPolicy } from "../../src/memory/task-agent.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
+import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 
 function makeMockAgentLoop(chunks: Chunk[]): AgentLoop {
   return {
@@ -359,6 +361,276 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(runtime.migrationStatus.interaction.succeeded).toBe(true);
       expect(runtime.migrationStatus.memory.succeeded).toBe(true);
       expect(runtime.migrationStatus.interaction.appliedMigrations.length).toBeGreaterThan(0);
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("silent-private RP turn (no assistant message, only turn_settlement) survives flush and is marked processed", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "..." },
+        correlatedTurnId: "req-silent-1",
+      });
+
+      const settlementId = crypto.randomUUID();
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: settlementId,
+        recordType: "turn_settlement",
+        payload: {
+          settlementId,
+          requestId: "req-silent-1",
+          sessionId: session.sessionId,
+          publicReply: "",
+          hasPublicReply: false,
+          viewerSnapshot: {
+            selfPointerKey: "__self__",
+            userPointerKey: "__user__",
+          },
+          privateCommit: {
+            ops: [{ key: "belief:alice_is_kind", kind: "assertion" }],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-silent-1",
+      });
+
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const mockMemoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        mockMemoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
+
+      expect(migrateCalls).toHaveLength(1);
+      expect(migrateCalls[0]?.flushMode).toBe("session_close");
+      expect(migrateCalls[0]?.rangeStart).toBe(0);
+      expect(migrateCalls[0]?.rangeEnd).toBe(1);
+      expect(migrateCalls[0]?.interactionRecords).toBeDefined();
+      const settlementRecords = migrateCalls[0]!.interactionRecords!.filter(
+        (r) => r.recordType === "turn_settlement",
+      );
+      expect(settlementRecords).toHaveLength(1);
+
+      const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
+      expect(unprocessedRange).toBeUndefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("buildMigrateInput with settled explicit cognition excludes private belief/event tools from call one", () => {
+    const policy = new MemoryIngestionPolicy();
+
+    const settlementPayload: TurnSettlementPayload = {
+      settlementId: "settle-1",
+      requestId: "req-1",
+      sessionId: "sess-1",
+      publicReply: "Hello",
+      hasPublicReply: true,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+      privateCommit: {
+        ops: [
+          { key: "belief:trust_user", kind: "assertion" },
+          { key: "eval:mood_cheerful", kind: "evaluation" },
+        ],
+      },
+    };
+
+    const flushRequest: MemoryFlushRequest = {
+      sessionId: "sess-1",
+      agentId: "rp:alice",
+      rangeStart: 0,
+      rangeEnd: 2,
+      flushMode: "session_close",
+      idempotencyKey: "test-key",
+      dialogueRecords: [
+        { role: "user", content: "Hi", timestamp: 1000, recordId: "r0", recordIndex: 0 },
+        { role: "assistant", content: "Hello", timestamp: 2000, recordId: "r1", recordIndex: 1 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "sess-1",
+          recordId: "r0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Hi" },
+          committedAt: 1000,
+        },
+        {
+          sessionId: "sess-1",
+          recordId: "r1",
+          recordIndex: 1,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Hello" },
+          committedAt: 2000,
+        },
+        {
+          sessionId: "sess-1",
+          recordId: "settle-1",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: settlementPayload,
+          committedAt: 3000,
+        },
+      ],
+    };
+
+    const input = policy.buildMigrateInput(flushRequest);
+
+    const settlementAttachments = input.attachments.filter(
+      (a) => a.recordType === "turn_settlement",
+    );
+    expect(settlementAttachments).toHaveLength(1);
+
+    const attachedPayload = settlementAttachments[0]!.payload as TurnSettlementPayload;
+    expect(attachedPayload.privateCommit?.ops.length).toBe(2);
+    expect(attachedPayload.privateCommit?.ops[0]?.key).toBe("belief:trust_user");
+
+    expect(input.dialogue).toHaveLength(2);
+  });
+
+  it("buildMigrateInput preserves dialogue with empty content when turn_settlement exists in range", () => {
+    const policy = new MemoryIngestionPolicy();
+
+    const flushRequest: MemoryFlushRequest = {
+      sessionId: "sess-1",
+      agentId: "rp:alice",
+      rangeStart: 0,
+      rangeEnd: 1,
+      flushMode: "session_close",
+      idempotencyKey: "test-key-2",
+      dialogueRecords: [
+        { role: "user", content: "", timestamp: 1000, recordId: "r0", recordIndex: 0 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "sess-1",
+          recordId: "r0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "" },
+          committedAt: 1000,
+        },
+        {
+          sessionId: "sess-1",
+          recordId: "settle-2",
+          recordIndex: 1,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "settle-2",
+            requestId: "req-2",
+            sessionId: "sess-1",
+            publicReply: "",
+            hasPublicReply: false,
+            viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+            privateCommit: { ops: [{ key: "belief:x", kind: "assertion" }] },
+          } satisfies TurnSettlementPayload,
+          committedAt: 2000,
+        },
+      ],
+    };
+
+    const input = policy.buildMigrateInput(flushRequest);
+
+    expect(input.dialogue).toHaveLength(1);
+    expect(input.dialogue[0]!.content).toBe("");
+
+    expect(input.attachments.filter((a) => a.recordType === "turn_settlement")).toHaveLength(1);
+  });
+
+  it("maiden/task session-close flush behavior is unchanged by turn_settlement changes", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("task:cleanup");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "clean up the kitchen" },
+      });
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "task_agent",
+        recordType: "message",
+        payload: { role: "assistant", content: "Kitchen has been cleaned." },
+      });
+
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const mockMemoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        mockMemoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "task:cleanup");
+
+      expect(migrateCalls).toHaveLength(1);
+      expect(migrateCalls[0]?.flushMode).toBe("session_close");
+      expect(migrateCalls[0]?.queueOwnerAgentId).toBe("task:cleanup");
+      expect(migrateCalls[0]?.dialogueRecords).toHaveLength(2);
+
+      const settlementRecords = (migrateCalls[0]?.interactionRecords ?? []).filter(
+        (r) => r.recordType === "turn_settlement",
+      );
+      expect(settlementRecords).toHaveLength(0);
+
+      const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
+      expect(unprocessedRange).toBeUndefined();
     } finally {
       runtime.shutdown();
     }

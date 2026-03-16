@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
-import type { InteractionRecord } from "../interaction/contracts.js";
+import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
 import { makeNodeRef } from "./schema.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
@@ -30,6 +30,7 @@ export type DialogueRecord = {
 export type MemoryFlushRequest = CoreMemoryFlushRequest & {
   dialogueRecords?: DialogueRecord[];
   queueOwnerAgentId?: string;
+  interactionRecords?: InteractionRecord[];
 };
 
 export type GraphOrganizerJob = {
@@ -41,7 +42,7 @@ export type GraphOrganizerJob = {
 };
 
 type IngestionAttachment = {
-  recordType: "tool_call" | "tool_result" | "delegation" | "task_result";
+  recordType: "tool_call" | "tool_result" | "delegation" | "task_result" | "turn_settlement";
   payload: unknown;
   committedAt: number;
 };
@@ -192,6 +193,7 @@ export class MemoryIngestionPolicy {
 
   buildMigrateInput(flushRequest: MemoryFlushRequest): IngestionInput {
     const records = this.interactionLogReader?.(flushRequest) ?? [];
+    const allRecords = [...records, ...(flushRequest.interactionRecords ?? [])];
     const dialogueFromFlush = (flushRequest.dialogueRecords ?? []).filter((record) => {
       if (record.recordIndex === undefined) {
         return true;
@@ -199,7 +201,7 @@ export class MemoryIngestionPolicy {
       return record.recordIndex >= flushRequest.rangeStart && record.recordIndex <= flushRequest.rangeEnd;
     });
 
-    const dialogueFromLog = records
+    const dialogueFromLog = allRecords
       .filter((record) => record.recordType === "message")
       .filter((record) => record.recordIndex >= flushRequest.rangeStart && record.recordIndex <= flushRequest.rangeEnd)
       .map((record): DialogueRecord | undefined => {
@@ -217,17 +219,33 @@ export class MemoryIngestionPolicy {
       })
       .filter((record): record is DialogueRecord => record !== undefined);
 
+    const hasSettlementInRange = allRecords.some(
+      (record) =>
+        record.recordType === "turn_settlement" &&
+        record.recordIndex >= flushRequest.rangeStart &&
+        record.recordIndex <= flushRequest.rangeEnd,
+    );
+
+    const seenRecordIds = new Set<string>();
     const mergedDialogue = [...dialogueFromLog, ...dialogueFromFlush]
       .sort((a, b) => a.timestamp - b.timestamp)
-      .filter((record) => record.content.trim().length > 0);
+      .filter((record) => {
+        if (record.recordId) {
+          if (seenRecordIds.has(record.recordId)) return false;
+          seenRecordIds.add(record.recordId);
+        }
+        return true;
+      })
+      .filter((record) => hasSettlementInRange || record.content.trim().length > 0);
 
-    const attachments = records
+    const attachments = allRecords
       .filter(
         (record) =>
           (record.recordType === "tool_call" ||
             record.recordType === "tool_result" ||
             record.recordType === "delegation" ||
-            record.recordType === "task_result") &&
+            record.recordType === "task_result" ||
+            record.recordType === "turn_settlement") &&
           record.recordIndex >= flushRequest.rangeStart &&
           record.recordIndex <= flushRequest.rangeEnd,
       )
@@ -299,21 +317,34 @@ export class MemoryTaskAgent {
       changedNodeRefs: [],
     };
 
+    const hasExplicitCognition = ingest.attachments.some((attachment) => {
+      if (attachment.recordType !== "turn_settlement") return false;
+      const payload = attachment.payload as TurnSettlementPayload | undefined;
+      return (payload?.privateCommit?.ops?.length ?? 0) > 0;
+    });
+
+    const callOneTools = hasExplicitCognition
+      ? CALL_ONE_TOOLS.filter((tool) => tool.name !== "create_private_belief" && tool.name !== "create_private_event")
+      : CALL_ONE_TOOLS;
+
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
+      const systemPrompt = hasExplicitCognition
+        ? "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private. NOTE: Explicit private cognition has already been committed for settled turns in this batch. Do NOT re-create private beliefs or events for those turns — focus on entities, aliases, and logic edges only."
+        : "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.";
+
       const callOne = await this.modelProvider.chat(
         [
           {
             role: "system",
-            content:
-              "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.",
+            content: systemPrompt,
           },
           {
             role: "user",
             content: JSON.stringify({ ingest, existingContext }),
           },
         ],
-        CALL_ONE_TOOLS,
+        callOneTools,
       );
 
       const createdPrivateEvents = this.applyCallOneToolCalls(flushRequest, callOne, created);
