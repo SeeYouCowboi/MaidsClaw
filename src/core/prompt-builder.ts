@@ -90,6 +90,10 @@ export class PromptBuilder {
 				this.getCoreMemoryBlocks(input.viewerContext.viewer_agent_id),
 			);
 			slotContent.set(
+				PromptSectionSlot.RECENT_COGNITION,
+				this.getRecentCognition(input.viewerContext),
+			);
+			slotContent.set(
 				PromptSectionSlot.LORE_ENTRIES,
 				this.getLoreEntries(loreQuery),
 			);
@@ -218,6 +222,14 @@ export class PromptBuilder {
 		return (
 			this.readDataSource("memory.getCoreMemoryBlocks", () =>
 				this.getMemoryDataSource().getCoreMemoryBlocks(agentId),
+			) ?? ""
+		);
+	}
+
+	private getRecentCognition(viewerContext: ViewerContext): string {
+		return (
+			this.readDataSource("memory.getRecentCognition", () =>
+				this.getMemoryDataSource().getRecentCognition(viewerContext),
 			) ?? ""
 		);
 	}

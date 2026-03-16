@@ -1,13 +1,11 @@
 import type { ToolPermission } from "../profile.js";
 
 export const RP_AUTHORIZED_TOOLS: readonly string[] = [
-  "core_memory_append",
-  "core_memory_replace",
   "memory_read",
   "memory_search",
   "memory_explore",
   "persona_check_drift",
-  "delegate_task",
+  "submit_rp_turn",
 ] as const;
 
 export class RpToolPolicy {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { AgentProfile } from "../../src/agents/profile.js";
+import { RpToolPolicy } from "../../src/agents/rp/tool-policy.js";
 import { AgentLoop } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import { MaidsClawError } from "../../src/core/errors.js";
@@ -9,6 +10,7 @@ import { createRunContext } from "../../src/core/run-context.js";
 import type { ProjectionAppendix } from "../../src/core/types.js";
 import type { RuntimeProjectionSink } from "../../src/core/runtime-projection.js";
 import { TruncateCompactor } from "../../src/core/truncate-compactor.js";
+import { getFilteredSchemas } from "../../src/core/tools/tool-access-policy.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { ToolDefinition } from "../../src/core/tools/tool-definition.js";
 
@@ -322,6 +324,74 @@ describe("TruncateCompactor", () => {
 
     expect(compacted.some((message) => message.content === "new-assistant-message")).toBe(true);
     expect(compacted.some((message) => message.content === "newest-user-message")).toBe(true);
+  });
+});
+
+describe("RP tool policy filtering", () => {
+  it("core_memory_append is NOT in the RP agent's filtered schema list", () => {
+    const rpPolicy = new RpToolPolicy();
+    const rpProfile: AgentProfile = {
+      id: "agent-rp-1",
+      role: "rp_agent",
+      lifecycle: "persistent",
+      userFacing: true,
+      outputMode: "freeform",
+      modelId: "mock-model",
+      toolPermissions: rpPolicy.toToolPermissions(),
+      maxDelegationDepth: 0,
+      lorebookEnabled: true,
+      narrativeContextEnabled: true,
+    };
+
+    const executor = new ToolExecutor();
+    executor.registerLocal({
+      name: "core_memory_append",
+      description: "Append to core memory",
+      parameters: { type: "object", properties: {} },
+      effectClass: "immediate_write",
+      traceVisibility: "public",
+      async execute() { return { success: true }; },
+    });
+    executor.registerLocal({
+      name: "core_memory_replace",
+      description: "Replace core memory",
+      parameters: { type: "object", properties: {} },
+      effectClass: "immediate_write",
+      traceVisibility: "public",
+      async execute() { return { success: true }; },
+    });
+    executor.registerLocal({
+      name: "delegate_task",
+      description: "Delegate a task",
+      parameters: { type: "object", properties: {} },
+      async execute() { return { success: true }; },
+    });
+    executor.registerLocal({
+      name: "memory_read",
+      description: "Read memory",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "public",
+      async execute() { return { success: true }; },
+    });
+    executor.registerLocal({
+      name: "memory_search",
+      description: "Search memory",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "public",
+      async execute() { return { success: true }; },
+    });
+
+    const filtered = getFilteredSchemas(rpProfile, executor);
+    const names = filtered.map((s) => s.name);
+
+    expect(names).not.toContain("core_memory_append");
+    expect(names).not.toContain("core_memory_replace");
+    expect(names).not.toContain("delegate_task");
+
+    expect(names).toContain("memory_read");
+    expect(names).toContain("memory_search");
   });
 });
 

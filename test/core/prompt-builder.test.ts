@@ -72,6 +72,7 @@ function makeDataSources(): {
 		memory: {
 			getCoreMemoryBlocks: (agentId: string) =>
 				`<core_memory>${agentId}</core_memory>`,
+			getRecentCognition: () => `recent cognition content`,
 			getMemoryHints: async (userMessage: string) => `hint for ${userMessage}`,
 		},
 		operational: {
@@ -131,10 +132,28 @@ describe("PromptBuilder", () => {
 
 		const slots = output.sections.map((section) => section.slot);
 		expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);
+	});
+
+	it("omits RECENT_COGNITION slot when getRecentCognition returns empty string", async () => {
+		const dataSources = makeDataSources();
+		dataSources.memory.getRecentCognition = () => "";
+		const builder = new PromptBuilder(dataSources);
+
+		const output = await builder.build({
+			profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+			viewerContext: BASE_VIEWER_CONTEXT,
+			userMessage: "remember this",
+			conversationMessages: CONVERSATION,
+			budget: BASE_BUDGET,
+		});
+
+		const slots = output.sections.map((section) => section.slot);
+		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(false);
 	});
 
 	it("builds task-agent prompt with lorebook disabled using only preamble and conversation", async () => {

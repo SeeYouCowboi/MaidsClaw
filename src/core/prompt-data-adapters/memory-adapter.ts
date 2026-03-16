@@ -12,6 +12,10 @@ export class MemoryAdapter implements MemoryDataSource {
     return getCoreMemoryBlocks(agentId, this.db);
   }
 
+  getRecentCognition(_viewerContext: ViewerContext): string {
+    return "";
+  }
+
   async getMemoryHints(
     userMessage: string,
     viewerContext: ViewerContext,

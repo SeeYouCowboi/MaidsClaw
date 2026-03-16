@@ -219,6 +219,8 @@ function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
     description:
       `Search visible narrative memory using full-text search. Returns matching events and facts scoped to your visibility. ` +
       POINTER_GUIDE,
+    effectClass: "read_only",
+    traceVisibility: "public",
     parameters: {
       type: "object",
       properties: {
@@ -248,6 +250,8 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
     description:
       `Deep graph-aware exploration of memory. Use for complex questions about causes, relationships, and timelines. ` +
       POINTER_GUIDE,
+    effectClass: "read_only",
+    traceVisibility: "public",
     parameters: {
       type: "object",
       properties: {
