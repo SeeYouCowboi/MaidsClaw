@@ -106,11 +106,11 @@ export class InteractionStore {
     return row !== undefined;
   }
 
-  upsertRecentCognitionSlot(sessionId: string, agentId: string, settlementId: string): void {
+  upsertRecentCognitionSlot(sessionId: string, agentId: string, settlementId: string, slotPayload: string = "[]"): void {
     this.db.raw.prepare(
       `INSERT OR REPLACE INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at)
-       VALUES (?, ?, ?, '[]', ?)`,
-    ).run(sessionId, agentId, settlementId, Date.now());
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(sessionId, agentId, settlementId, slotPayload, Date.now());
   }
 
   getBySession(sessionId: string, options?: GetBySessionOptions): InteractionRecord[] {

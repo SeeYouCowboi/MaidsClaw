@@ -12,8 +12,20 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
 import type { ViewerContext } from "../memory/types.js";
 import type { MemoryFlushRequest, MemoryTaskAgent } from "../memory/task-agent.js";
-import type { RpBufferedExecutionResult, RpTurnOutcomeSubmission } from "./rp-turn-contract.js";
+import type {
+  RpBufferedExecutionResult,
+  RpTurnOutcomeSubmission,
+  CognitionOp,
+  CognitionKind,
+  AssertionRecord,
+  EvaluationRecord,
+  CommitmentRecord,
+  CognitionEntityRef,
+  CognitionSelector,
+} from "./rp-turn-contract.js";
 import type { SessionService } from "../session/service.js";
+import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
+import type { ProjectionAppendix } from "../core/types.js";
 
 type TurnServiceAgentLoop = {
   run(request: AgentRunRequest): AsyncIterable<Chunk>;
@@ -33,6 +45,7 @@ export class TurnService {
       agentId: string;
       role: AgentProfile["role"];
     }) => ViewerContext | Promise<ViewerContext>,
+    private readonly projectionSink?: RuntimeProjectionSink,
   ) {}
 
   async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
@@ -116,6 +129,7 @@ export class TurnService {
 
   private async *runRpBufferedTurn(request: AgentRunRequest, turnRangeStart: number): AsyncGenerator<Chunk> {
     let bufferedResult: RpBufferedExecutionResult;
+    let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
 
     try {
       if (!this.agentLoop.runBuffered) {
@@ -207,7 +221,8 @@ export class TurnService {
     }
 
     try {
-      const viewerSnapshot = await this.resolveViewerSnapshot(request.sessionId, "rp_agent");
+      const resolvedViewerSnapshot = await this.resolveViewerSnapshot(request.sessionId, "rp_agent");
+      viewerSnapshot = resolvedViewerSnapshot;
       this.interactionStore.runInTransaction(() => {
         const settlementPayload: TurnSettlementPayload = {
           settlementId,
@@ -215,7 +230,7 @@ export class TurnService {
           sessionId: request.sessionId,
           publicReply: outcome.publicReply,
           hasPublicReply,
-          viewerSnapshot,
+          viewerSnapshot: resolvedViewerSnapshot,
         };
 
         this.commitService.commitWithId({
@@ -243,10 +258,12 @@ export class TurnService {
           });
         }
 
+        const slotPayload = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? []);
         this.interactionStore.upsertRecentCognitionSlot(
           request.sessionId,
           this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
           settlementId,
+          JSON.stringify(slotPayload),
         );
       });
     } catch (error: unknown) {
@@ -269,6 +286,17 @@ export class TurnService {
       });
       return;
     }
+
+    const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown";
+    this.projectionSink?.onProjectionEligible(
+      createProjectionAppendix({
+        publicReply: outcome.publicReply,
+        agentId: queueOwnerAgentId,
+        settlementId,
+        locationEntityId: String(viewerSnapshot?.currentLocationEntityId ?? "unknown"),
+      }),
+      request.sessionId,
+    );
 
     if (hasPublicReply) {
       yield {
@@ -430,6 +458,22 @@ export class TurnService {
   }
 }
 
+function createProjectionAppendix(params: {
+  publicReply: string;
+  agentId: string;
+  settlementId: string;
+  locationEntityId: string;
+}): ProjectionAppendix {
+  return {
+    publicSummarySeed: params.publicReply,
+    primaryActorEntityId: params.agentId,
+    locationEntityId: params.locationEntityId,
+    eventCategory: "speech",
+    projectionClass: params.publicReply.trim().length > 0 ? "area_candidate" : "non_projectable",
+    sourceRecordId: params.settlementId,
+  };
+}
+
 function toDialogueRecords(records: InteractionRecord[]): Array<{
   role: "user" | "assistant";
   content: string;
@@ -462,6 +506,67 @@ function toDialogueRecords(records: InteractionRecord[]): Array<{
       };
     })
     .filter((record): record is DialogueRecord => record !== undefined);
+}
+
+type CognitionSlotItem = {
+  kind: CognitionKind;
+  key: string;
+  summary: string;
+};
+
+function refValue(ref: CognitionEntityRef | CognitionSelector): string {
+  if ("value" in ref) return ref.value;
+  return (ref as CognitionSelector).key;
+}
+
+function summarizeAssertion(record: AssertionRecord): string {
+  return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
+}
+
+function summarizeEvaluation(record: EvaluationRecord): string {
+  const targetLabel = refValue(record.target);
+  const dims = record.dimensions.map((d) => `${d.name}:${d.value}`).join(", ");
+  return `eval ${targetLabel} [${dims}]`;
+}
+
+function summarizeCommitment(record: CommitmentRecord): string {
+  let targetDesc: string;
+  if (typeof record.target === "object" && "action" in record.target) {
+    targetDesc = record.target.action;
+  } else if (typeof record.target === "object" && "predicate" in record.target) {
+    targetDesc = (record.target as { predicate?: string }).predicate ?? "";
+  } else {
+    targetDesc = "";
+  }
+  return `${record.mode}: ${targetDesc} (${record.status})`;
+}
+
+function buildCognitionSlotPayload(ops: CognitionOp[]): CognitionSlotItem[] {
+  const items: CognitionSlotItem[] = [];
+
+  for (const op of ops) {
+    if (op.op === "upsert") {
+      const record = op.record;
+      let summary: string;
+      switch (record.kind) {
+        case "assertion":
+          summary = summarizeAssertion(record as AssertionRecord);
+          break;
+        case "evaluation":
+          summary = summarizeEvaluation(record as EvaluationRecord);
+          break;
+        case "commitment":
+          summary = summarizeCommitment(record as CommitmentRecord);
+          break;
+      }
+      items.push({ kind: record.kind, key: record.key, summary });
+    } else if (op.op === "retract") {
+      items.push({ kind: op.target.kind, key: op.target.key, summary: "[retracted]" });
+    }
+  }
+
+  // Cap at last 8 items
+  return items.slice(-8);
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {

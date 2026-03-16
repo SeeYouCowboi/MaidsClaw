@@ -1,6 +1,7 @@
 import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
+import type { CognitionKind } from "../runtime/rp-turn-contract.js";
 import type { NavigatorResult, ViewerContext } from "./types";
 
 /**
@@ -100,4 +101,40 @@ export function formatNavigatorEvidence(
   }
 
   return lines.join("\n").trimEnd();
+}
+
+type RecentCognitionSlotRow = {
+  slot_payload: string;
+};
+
+type SlotItem = {
+  kind: CognitionKind;
+  key: string;
+  summary: string;
+};
+
+export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
+  const row = db.get<RecentCognitionSlotRow>(
+    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
+    [sessionId, agentId],
+  );
+
+  if (row === undefined) {
+    return "";
+  }
+
+  let items: SlotItem[];
+  try {
+    items = JSON.parse(row.slot_payload) as SlotItem[];
+  } catch {
+    return "";
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return "";
+  }
+
+  return items
+    .map((item) => `\u2022 [${item.kind}] ${item.summary}`)
+    .join("\n");
 }

@@ -345,6 +345,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     memoryTaskAgent,
     sessionService,
     viewerContextResolver,
+    options.projectionSink,
   );
 
   const shutdown = (): void => {
