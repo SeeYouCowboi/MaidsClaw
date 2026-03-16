@@ -106,6 +106,23 @@ export class InteractionStore {
     return row !== undefined;
   }
 
+  findRecordByCorrelatedTurnId(
+    sessionId: string,
+    correlatedTurnId: string,
+    actorType: string,
+  ): InteractionRecord | undefined {
+    const row = this.db.get<InteractionRow>(
+      `SELECT *
+       FROM interaction_records
+       WHERE session_id = ?
+         AND correlated_turn_id = ?
+         AND actor_type = ?
+       LIMIT 1`,
+      [sessionId, correlatedTurnId, actorType],
+    );
+    return row ? rowToRecord(row) : undefined;
+  }
+
   upsertRecentCognitionSlot(sessionId: string, agentId: string, settlementId: string, slotPayload: string = "[]"): void {
     this.db.raw.prepare(
       `INSERT OR REPLACE INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at)

@@ -52,16 +52,23 @@ export class TurnService {
   ) {}
 
   async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
-    const userRecord = this.commitService.commit({
-      sessionId: request.sessionId,
-      actorType: "user",
-      recordType: "message",
-      payload: {
-        role: "user",
-        content: getLatestUserMessage(request.messages),
-      },
-      correlatedTurnId: request.requestId,
-    });
+    const existingUserRecord = this.interactionStore.findRecordByCorrelatedTurnId(
+      request.sessionId,
+      request.requestId,
+      "user",
+    );
+    const userRecord =
+      existingUserRecord ??
+      this.commitService.commit({
+        sessionId: request.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: {
+          role: "user",
+          content: getLatestUserMessage(request.messages),
+        },
+        correlatedTurnId: request.requestId,
+      });
 
     const turnRangeStart = userRecord.recordIndex;
     const assistantActorType = this.resolveAssistantActorType(request.sessionId);
@@ -207,12 +214,18 @@ export class TurnService {
       return;
     }
 
-    const settlementId = crypto.randomUUID();
+    const settlementId = `stl:${request.requestId}`;
     if (this.interactionStore.settlementExists(settlementId)) {
-      if (hasPublicReply) {
+      const existingSettlement = this.interactionStore
+        .getBySession(request.sessionId)
+        .find((record) => record.recordId === settlementId && record.recordType === "turn_settlement");
+      const existingPayload = existingSettlement?.payload as Partial<TurnSettlementPayload> | undefined;
+      const replayPublicReply = typeof existingPayload?.publicReply === "string" ? existingPayload.publicReply : "";
+
+      if (replayPublicReply.length > 0) {
         yield {
           type: "text_delta",
-          text: outcome.publicReply,
+          text: replayPublicReply,
         };
       }
       yield {
@@ -266,7 +279,7 @@ export class TurnService {
 
         if (hasPrivateOps && this.graphStorage) {
           const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "";
-          const committer = new CognitionOpCommitter(this.graphStorage, queueOwnerAgentId);
+          const committer = new CognitionOpCommitter(this.graphStorage, queueOwnerAgentId, resolvedViewerSnapshot.currentLocationEntityId);
           committer.commit(outcome.privateCommit!.ops, settlementId);
         }
 

@@ -55,7 +55,6 @@ describe("TurnService", () => {
   let flushSelector: FlushSelector;
   let sessionService: SessionService;
   let graphStorage: GraphStorageService;
-  let originalRandomUUID: () => string;
 
   beforeEach(() => {
     db = openDatabase({ path: ":memory:" });
@@ -66,15 +65,9 @@ describe("TurnService", () => {
     flushSelector = new FlushSelector(store);
     sessionService = new SessionService();
     graphStorage = new GraphStorageService(db);
-    originalRandomUUID = crypto.randomUUID;
   });
 
   afterEach(() => {
-    Object.defineProperty(crypto, "randomUUID", {
-      value: originalRandomUUID,
-      configurable: true,
-      writable: true,
-    });
     closeDatabaseGracefully(db);
   });
 
@@ -257,26 +250,8 @@ describe("TurnService", () => {
     expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(true);
   });
 
-  it("RP duplicate settlementId replay is idempotent and produces no duplicate records", async () => {
+  it("RP replay with same requestId is idempotent and produces no duplicate records", async () => {
     const session = sessionService.createSession("rp:alice");
-    const fixedIds = [
-      "fixed-user-1",
-      "fixed-settlement",
-      "fixed-assistant-1",
-      "fixed-user-2",
-      "fixed-settlement",
-    ];
-    Object.defineProperty(crypto, "randomUUID", {
-      value: () => {
-        const value = fixedIds.shift();
-        if (!value) {
-          return originalRandomUUID();
-        }
-        return value;
-      },
-      configurable: true,
-      writable: true,
-    });
 
     const turnService = new TurnService(
       makeRpBufferedLoop({
@@ -298,15 +273,15 @@ describe("TurnService", () => {
     const firstChunks = await collectChunks(
       turnService.run({
         sessionId: session.sessionId,
-        requestId: "req-rp-dup-1",
+        requestId: "req-1",
         messages: [{ role: "user", content: "hello" }],
       }),
     );
     const secondChunks = await collectChunks(
       turnService.run({
         sessionId: session.sessionId,
-        requestId: "req-rp-dup-2",
-        messages: [{ role: "user", content: "hello again" }],
+        requestId: "req-1",
+        messages: [{ role: "user", content: "hello" }],
       }),
     );
 
@@ -320,7 +295,16 @@ describe("TurnService", () => {
     ]);
 
     const records = store.getBySession(session.sessionId);
+    expect(
+      records.filter(
+        (record) =>
+          record.recordType === "message" &&
+          record.actorType === "user" &&
+          record.correlatedTurnId === "req-1",
+      ),
+    ).toHaveLength(1);
     expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
+    expect(records.find((record) => record.recordType === "turn_settlement")?.recordId).toBe("stl:req-1");
     expect(
       records.filter(
         (record) =>
@@ -580,6 +564,84 @@ describe("TurnService", () => {
       ["rp:alice", "assert-retract"],
     );
     expect(row?.epistemic_status).toBe("retracted");
+  });
+
+  it("current_location entity ref uses settlement snapshot entity ID instead of dynamic graph lookup", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const locationEntityId = graphStorage.upsertEntity({
+      pointerKey: "location:garden",
+      displayName: "Garden",
+      entityType: "location",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "location-assert-1",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "is_at",
+                    object: { kind: "entity", ref: { kind: "special", value: "current_location" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      () => ({
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        session_id: session.sessionId,
+        current_area_id: locationEntityId,
+      }),
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-current-location-snapshot",
+        messages: [{ role: "user", content: "where am I?" }],
+      }),
+    );
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
+
+    const row = db.get<{ target_entity_id: number }>(
+      `SELECT target_entity_id
+       FROM agent_fact_overlay
+       WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "location-assert-1"],
+    );
+    expect(row).toBeDefined();
+    expect(row?.target_entity_id).toBe(locationEntityId);
   });
 
   it("touch op is rejected and does not persist settlement", async () => {
