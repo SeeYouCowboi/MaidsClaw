@@ -398,6 +398,19 @@ export class GraphStorageService {
     return row?.id ?? null;
   }
 
+  getEntityById(id: number): { pointerKey: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT pointer_key
+         FROM entity_nodes
+         WHERE id = ?
+         LIMIT 1`,
+      )
+      .get(id) as { pointer_key: string } | null;
+
+    return row ? { pointerKey: row.pointer_key } : null;
+  }
+
   upsertExplicitAssertion(params: UpsertExplicitAssertionInput): void {
     const sourceEntityId = this.resolveEntityByPointerKey(params.sourcePointerKey, params.agentId);
     const targetEntityId = this.resolveEntityByPointerKey(params.targetPointerKey, params.agentId);

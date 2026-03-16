@@ -13,6 +13,7 @@ export class CognitionOpCommitter {
   constructor(
     private readonly storage: GraphStorageService,
     private readonly agentId: string,
+    private readonly currentLocationEntityId?: number,
   ) {}
 
   commit(ops: CognitionOp[], settlementId: string): void {
@@ -120,6 +121,11 @@ export class CognitionOpCommitter {
     }
     if (ref.value === "user") {
       return "__user__";
+    }
+
+    if (this.currentLocationEntityId !== undefined) {
+      const entity = this.storage.getEntityById(this.currentLocationEntityId);
+      if (entity) return entity.pointerKey;
     }
 
     const pointerKey = "__current_location__";
