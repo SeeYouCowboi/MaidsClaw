@@ -72,11 +72,24 @@ describe("Interaction Schema", () => {
   it("returns applied migration IDs on first run, empty on second", () => {
     const db = createTestDb();
     const applied1 = runInteractionMigrations(db);
-    expect(applied1.length).toBe(1);
+    expect(applied1.length).toBe(2);
     expect(applied1[0]).toBe("interaction:001:create-interaction-records");
+    expect(applied1[1]).toBe("interaction:002:add-turn-settlement");
 
     const applied2 = runInteractionMigrations(db);
     expect(applied2.length).toBe(0);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("creates recent_cognition_slots table after migrations", () => {
+    const db = createTestDb();
+    runInteractionMigrations(db);
+
+    const table = db.get<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='recent_cognition_slots'",
+    );
+    expect(table?.name).toBe("recent_cognition_slots");
 
     closeDatabaseGracefully(db);
   });
@@ -583,7 +596,7 @@ describe("CommitService", () => {
   it("accepts all valid recordType values", () => {
     const recordTypes = [
       "message", "tool_call", "tool_result", "delegation",
-      "task_result", "schedule_trigger", "status",
+      "task_result", "schedule_trigger", "status", "turn_settlement",
     ] as const;
     let threw = false;
     try {

@@ -19,6 +19,7 @@ const VALID_RECORD_TYPES: readonly string[] = [
   "task_result",
   "schedule_trigger",
   "status",
+  "turn_settlement",
 ];
 
 export type CommitInput = Omit<InteractionRecord, "recordId" | "recordIndex" | "committedAt">;

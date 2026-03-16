@@ -14,7 +14,7 @@ export type ActorType =
   | "autonomy";
 
 // Record types — what kind of event this is
-// EXACTLY 7 record types allowed
+// EXACTLY 8 record types allowed
 export type RecordType =
   | "message"
   | "tool_call"
@@ -22,7 +22,8 @@ export type RecordType =
   | "delegation"
   | "task_result"
   | "schedule_trigger"
-  | "status";
+  | "status"
+  | "turn_settlement";
 
 // The core interaction record — append-only log entry
 export type InteractionRecord = {
@@ -77,4 +78,21 @@ export type TaskResultPayload = {
 export type StatusPayload = {
   event: string;
   details?: unknown;
+};
+
+export type TurnSettlementPayload = {
+  settlementId: string;
+  requestId: string;
+  sessionId: string;
+  publicReply: string;
+  hasPublicReply: boolean;
+  viewerSnapshot: {
+    selfPointerKey: string;
+    userPointerKey: string;
+    currentLocationEntityId?: number;
+  };
+};
+
+export type AssistantMessagePayloadV3 = MessagePayload & {
+  settlementId?: string;
 };
