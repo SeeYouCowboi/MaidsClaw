@@ -79,6 +79,33 @@ export class InteractionStore {
     }
   }
 
+  runInTransaction<T>(fn: (store: InteractionStore) => T): T {
+    if (this.db.raw.inTransaction) {
+      return fn(this);
+    }
+
+    this.db.raw.prepare("BEGIN IMMEDIATE").run();
+    try {
+      const result = fn(this);
+      this.db.raw.prepare("COMMIT").run();
+      return result;
+    } catch (error) {
+      this.db.raw.prepare("ROLLBACK").run();
+      throw error;
+    }
+  }
+
+  settlementExists(settlementId: string): boolean {
+    const row = this.db.get<{ existing: number }>(
+      `SELECT 1 AS existing
+       FROM interaction_records
+       WHERE record_id = ? AND record_type = 'turn_settlement'
+       LIMIT 1`,
+      [settlementId],
+    );
+    return row !== undefined;
+  }
+
   getBySession(sessionId: string, options?: GetBySessionOptions): InteractionRecord[] {
     const conditions: string[] = ["session_id = ?"];
     const params: unknown[] = [sessionId];

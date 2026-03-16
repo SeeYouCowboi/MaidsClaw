@@ -177,6 +177,77 @@ describe("InteractionStore", () => {
     expect((caughtError as MaidsClawError).code).toBe("INTERACTION_DUPLICATE_RECORD");
   });
 
+  it("runInTransaction: commits all records or none on failure", () => {
+    const successSessionId = "sess-tx-ok";
+    store.runInTransaction((txStore) => {
+      txStore.commit({
+        sessionId: successSessionId,
+        recordId: "tx-ok-0",
+        recordIndex: 0,
+        actorType: "user",
+        recordType: "message",
+        payload: { value: 0 },
+        committedAt: 1000,
+      });
+      txStore.commit({
+        sessionId: successSessionId,
+        recordId: "tx-ok-1",
+        recordIndex: 1,
+        actorType: "rp_agent",
+        recordType: "message",
+        payload: { value: 1 },
+        committedAt: 1001,
+      });
+    });
+
+    const committed = store.getBySession(successSessionId);
+    expect(committed.length).toBe(2);
+
+    const rollbackSessionId = "sess-tx-rb";
+    let threw = false;
+    try {
+      store.runInTransaction((txStore) => {
+        txStore.commit({
+          sessionId: rollbackSessionId,
+          recordId: "tx-rb-0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { value: 0 },
+          committedAt: 2000,
+        });
+        throw new Error("force rollback");
+      });
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(true);
+    expect(store.getBySession(rollbackSessionId).length).toBe(0);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("settlementExists: returns false before commit and true after turn_settlement commit", () => {
+    const settlementId = "settlement-1";
+    expect(store.settlementExists(settlementId)).toBe(false);
+
+    store.commit({
+      sessionId: "sess-settlement",
+      recordId: settlementId,
+      recordIndex: 0,
+      actorType: "system",
+      recordType: "turn_settlement",
+      payload: { settlementId },
+      committedAt: 3000,
+    });
+
+    expect(store.settlementExists(settlementId)).toBe(true);
+    expect(store.settlementExists("missing-settlement")).toBe(false);
+
+    closeDatabaseGracefully(db);
+  });
+
   it("getBySession: returns records in order by recordIndex", () => {
     for (let i = 0; i < 5; i++) {
       store.commit({
@@ -518,6 +589,68 @@ describe("CommitService", () => {
     expect(a0.recordIndex).toBe(0);
     expect(b0.recordIndex).toBe(0);
     expect(a1.recordIndex).toBe(1);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("commitBatch: assigns consecutive recordIndex values inside one transaction", () => {
+    service.commit(makeCommitInput({ sessionId: "sess-batch" }));
+
+    const records = service.commitBatch([
+      makeCommitInput({ sessionId: "sess-batch", actorType: "user", payload: { n: 0 } }),
+      makeCommitInput({ sessionId: "sess-batch", actorType: "rp_agent", payload: { n: 1 } }),
+      makeCommitInput({ sessionId: "sess-batch", actorType: "maiden", recordType: "status", payload: { n: 2 } }),
+    ]);
+
+    expect(records.length).toBe(3);
+    expect(records[0].recordIndex).toBe(1);
+    expect(records[1].recordIndex).toBe(2);
+    expect(records[2].recordIndex).toBe(3);
+
+    const persisted = store.getBySession("sess-batch");
+    expect(persisted.length).toBe(4);
+    expect(persisted[1].recordIndex).toBe(1);
+    expect(persisted[2].recordIndex).toBe(2);
+    expect(persisted[3].recordIndex).toBe(3);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("commitWithId: accepts custom recordId for turn_settlement", () => {
+    const record = service.commitWithId({
+      ...makeCommitInput({
+        sessionId: "sess-custom-settlement",
+        actorType: "system",
+        recordType: "turn_settlement",
+        payload: { settlementId: "settlement-custom" },
+      }),
+      recordId: "settlement-custom",
+    });
+
+    expect(record.recordId).toBe("settlement-custom");
+    expect(record.recordType).toBe("turn_settlement");
+    expect(store.settlementExists("settlement-custom")).toBe(true);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("commitWithId: rejects custom recordId for non-turn_settlement record type", () => {
+    let caughtError: unknown = null;
+    try {
+      service.commitWithId({
+        ...makeCommitInput({
+          sessionId: "sess-custom-invalid",
+          recordType: "message",
+        }),
+        recordId: "not-allowed",
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError !== null).toBe(true);
+    expect(caughtError instanceof MaidsClawError).toBe(true);
+    expect((caughtError as MaidsClawError).code).toBe("INTERACTION_INVALID_FIELD");
 
     closeDatabaseGracefully(db);
   });
