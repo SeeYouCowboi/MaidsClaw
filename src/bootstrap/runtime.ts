@@ -170,6 +170,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   const interactionStore = new InteractionStore(db);
   const commitService = new CommitService(interactionStore);
   const flushSelector = new FlushSelector(interactionStore);
+  const graphStorage = new GraphStorageService(db);
 
   registerRuntimeTools(toolExecutor, runtimeServices);
 
@@ -203,12 +204,11 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
         }
 
         if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
-          const storage = new GraphStorageService(db);
           const coreMemory = new CoreMemoryService(db);
           const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
-          const materialization = new MaterializationService(db.raw, storage);
+          const materialization = new MaterializationService(db.raw, graphStorage);
           const provider = new MemoryTaskModelProviderAdapter(modelRegistry, memoryMigrationModelId, effectiveOrganizerEmbeddingModelId!);
-          memoryTaskAgent = new MemoryTaskAgent(db.raw, storage, coreMemory, embeddings, materialization, provider);
+          memoryTaskAgent = new MemoryTaskAgent(db.raw, graphStorage, coreMemory, embeddings, materialization, provider);
           memoryPipelineReady = true;
           memoryPipelineStatus = "ready";
         }
@@ -346,6 +346,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     sessionService,
     viewerContextResolver,
     options.projectionSink,
+    graphStorage,
   );
 
   const shutdown = (): void => {

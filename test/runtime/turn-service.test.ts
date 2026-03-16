@@ -5,6 +5,8 @@ import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { InteractionStore } from "../../src/interaction/store.js";
+import { runMemoryMigrations } from "../../src/memory/schema.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
 import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { SessionService } from "../../src/session/service.js";
@@ -52,15 +54,18 @@ describe("TurnService", () => {
   let commitService: CommitService;
   let flushSelector: FlushSelector;
   let sessionService: SessionService;
+  let graphStorage: GraphStorageService;
   let originalRandomUUID: () => string;
 
   beforeEach(() => {
     db = openDatabase({ path: ":memory:" });
     runInteractionMigrations(db);
+    runMemoryMigrations(db);
     store = new InteractionStore(db);
     commitService = new CommitService(store);
     flushSelector = new FlushSelector(store);
     sessionService = new SessionService();
+    graphStorage = new GraphStorageService(db);
     originalRandomUUID = crypto.randomUUID;
   });
 
@@ -87,6 +92,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const runChunks = await collectChunks(
@@ -132,6 +140,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const runChunks = await collectChunks(
@@ -163,6 +174,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const runChunks = await collectChunks(
@@ -201,6 +215,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const originalUpsert = store.upsertRecentCognitionSlot.bind(store);
@@ -273,6 +290,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const firstChunks = await collectChunks(
@@ -311,6 +331,300 @@ describe("TurnService", () => {
     ).toHaveLength(1);
   });
 
+  it("assertion upsert writes cognition key, settlement id, and mapped epistemic status", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert-1",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-assertion",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
+
+    const settlementRecord = store.getBySession(session.sessionId).find((record) => record.recordType === "turn_settlement");
+    const row = db.get<{ cognition_key: string; settlement_id: string; epistemic_status: string }>(
+      `SELECT cognition_key, settlement_id, epistemic_status
+       FROM agent_fact_overlay
+       WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "assert-1"],
+    );
+    expect(row).toBeDefined();
+    expect(row?.cognition_key).toBe("assert-1");
+    expect(row?.settlement_id).toBe(settlementRecord?.recordId);
+    expect(row?.epistemic_status).toBe("confirmed");
+  });
+
+  it("evaluation upsert writes explicit kind and metadata dimensions", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval-1",
+                  target: { kind: "pointer_key", value: "target:bob" },
+                  dimensions: [{ name: "trust", value: 0.8 }],
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-evaluation",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const row = db.get<{ explicit_kind: string; metadata_json: string }>(
+      `SELECT explicit_kind, metadata_json
+       FROM agent_event_overlay
+       WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "eval-1"],
+    );
+    expect(row?.explicit_kind).toBe("evaluation");
+    const metadata = row ? JSON.parse(row.metadata_json) : null;
+    expect(metadata?.dimensions).toEqual([{ name: "trust", value: 0.8 }]);
+  });
+
+  it("commitment upsert writes explicit commitment kind", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "commitment",
+                  key: "commit-1",
+                  mode: "goal",
+                  target: { action: "protect household" },
+                  status: "active",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-commitment",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const row = db.get<{ explicit_kind: string }>(
+      `SELECT explicit_kind
+       FROM agent_event_overlay
+       WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "commit-1"],
+    );
+    expect(row?.explicit_kind).toBe("commitment");
+  });
+
+  it("retract op marks existing assertion as retracted", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertExplicitAssertion({
+      agentId: "rp:alice",
+      cognitionKey: "assert-retract",
+      settlementId: "seed-settlement",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "target:bob",
+      stance: "accepted",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{ op: "retract", target: { kind: "assertion", key: "assert-retract" } }],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-retract",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const row = db.get<{ epistemic_status: string }>(
+      `SELECT epistemic_status
+       FROM agent_fact_overlay
+       WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "assert-retract"],
+    );
+    expect(row?.epistemic_status).toBe("retracted");
+  });
+
+  it("touch op is rejected and does not persist settlement", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{ op: "touch" } as unknown as never],
+          },
+        },
+      } as unknown as RpBufferedExecutionResult),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-touch",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    expect(runChunks).toEqual([
+      {
+        type: "error",
+        code: "TURN_SETTLEMENT_FAILED",
+        message: "touch is not supported in V3 baseline",
+        retriable: false,
+      },
+    ]);
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
+  });
+
   it("non-RP maiden session preserves streaming path behavior", async () => {
     const session = sessionService.createSession("maid:violet");
     const streamChunks: Chunk[] = [
@@ -325,6 +639,9 @@ describe("TurnService", () => {
       flushSelector,
       null,
       sessionService,
+      undefined,
+      undefined,
+      graphStorage,
     );
 
     const runChunks = await collectChunks(

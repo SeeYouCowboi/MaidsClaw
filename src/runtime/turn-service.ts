@@ -10,6 +10,8 @@ import type {
 } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
+import { CognitionOpCommitter } from "../memory/cognition-op-committer.js";
+import type { GraphStorageService } from "../memory/storage.js";
 import type { ViewerContext } from "../memory/types.js";
 import type { MemoryFlushRequest, MemoryTaskAgent } from "../memory/task-agent.js";
 import type {
@@ -46,6 +48,7 @@ export class TurnService {
       role: AgentProfile["role"];
     }) => ViewerContext | Promise<ViewerContext>,
     private readonly projectionSink?: RuntimeProjectionSink,
+    private readonly graphStorage?: GraphStorageService,
   ) {}
 
   async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
@@ -256,6 +259,12 @@ export class TurnService {
             payload: assistantPayload,
             correlatedTurnId: request.requestId,
           });
+        }
+
+        if (hasPrivateOps && this.graphStorage) {
+          const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "";
+          const committer = new CognitionOpCommitter(this.graphStorage, queueOwnerAgentId);
+          committer.commit(outcome.privateCommit!.ops, settlementId);
         }
 
         const slotPayload = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? []);
