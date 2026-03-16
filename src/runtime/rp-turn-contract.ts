@@ -98,6 +98,18 @@ export function validateRpTurnOutcome(raw: unknown): RpTurnOutcomeSubmission {
     if (!Array.isArray(commit.ops)) {
       throw new Error("privateCommit.ops must be an array");
     }
+    for (const op of commit.ops as Array<Record<string, unknown>>) {
+      if (op.op === "upsert") {
+        const record = op.record as Record<string, unknown> | undefined;
+        if (record && record.kind === "assertion") {
+          const proposition = record.proposition as Record<string, unknown> | undefined;
+          const object = proposition?.object as Record<string, unknown> | undefined;
+          if (!object || object.kind !== "entity") {
+            throw new Error("assertion proposition.object must be entity-based (kind: 'entity')");
+          }
+        }
+      }
+    }
   }
 
   const publicReply = obj.publicReply as string;

@@ -85,6 +85,33 @@ describe("validateRpTurnOutcome", () => {
       })
     ).toThrow("empty turn");
   });
+
+  it("rejects assertion with non-entity object (scalar)", () => {
+    expect(() =>
+      validateRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "hello",
+        privateCommit: {
+          schemaVersion: "rp_private_cognition_v3",
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "test",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "knows",
+                  object: { kind: "scalar", value: 42 },
+                },
+                stance: "accepted",
+              },
+            },
+          ],
+        },
+      })
+    ).toThrow("assertion proposition.object must be entity-based (kind: 'entity')");
+  });
 });
 
 describe("makeSubmitRpTurnTool", () => {
