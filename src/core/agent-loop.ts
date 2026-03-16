@@ -9,9 +9,11 @@ import type { PromptRenderer } from "./prompt-renderer.js";
 import { createRunContext } from "./run-context.js";
 import { NoopRuntimeProjectionSink } from "./runtime-projection.js";
 import type { RuntimeProjectionSink } from "./runtime-projection.js";
+import type { RpBufferedExecutionResult, RpTurnOutcomeSubmission } from "../runtime/rp-turn-contract.js";
+import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
 import { calculateTokenBudget } from "./token-budget.js";
 import type { ProjectionAppendix } from "./types.js";
-import type { ToolExecutor } from "./tools/tool-executor.js";
+import { ToolExecutor } from "./tools/tool-executor.js";
 import { getFilteredSchemas, canExecuteTool } from "./tools/tool-access-policy.js";
 
 type PendingToolCall = {
@@ -275,6 +277,167 @@ export class AgentLoop {
     }
   }
 
+  async runBuffered(request: AgentRunRequest): Promise<RpBufferedExecutionResult> {
+    const delegationDepth = request.delegationDepth ?? 0;
+    if (delegationDepth >= this.maxDelegationDepth) {
+      throw new MaidsClawError({
+        code: "DELEGATION_DEPTH_EXCEEDED",
+        message: `Delegation depth ${delegationDepth} reached max ${this.maxDelegationDepth}`,
+        retriable: false,
+      });
+    }
+
+    const runContext = createRunContext(request.sessionId, request.requestId, this.profile.id, {
+      delegationDepth,
+      parentRunId: request.parentRunId,
+    });
+    const loopLogger = this.logger?.child({
+      session_id: request.sessionId,
+      request_id: request.requestId,
+      agent_id: this.profile.id,
+    });
+
+    const bufferedToolExecutor = this.createBufferedToolExecutor();
+    const initialPromptState = await this.buildInitialPromptState(request);
+    const workingMessages = [...initialPromptState.messages];
+    const systemPrompt = initialPromptState.systemPrompt;
+    let turnIndex = 0;
+
+    while (true) {
+      turnIndex += 1;
+      const pendingToolCalls = new Map<string, PendingToolCall>();
+      const completedToolCalls: PendingToolCall[] = [];
+      const assistantBlocks: ContentBlock[] = [];
+      const assistantToolBlockIndices = new Map<string, number>();
+      let assistantText = "";
+
+      try {
+        const completionRequest = this.buildCompletionRequest(workingMessages, systemPrompt, bufferedToolExecutor);
+        for await (const chunk of this.modelProvider.chatCompletion(completionRequest)) {
+          if (chunk.type === "error") {
+            return { error: chunk.message };
+          }
+
+          if (chunk.type === "text_delta") {
+            assistantText += chunk.text;
+            appendTextBlock(assistantBlocks, chunk);
+            continue;
+          }
+
+          if (chunk.type === "tool_use_start") {
+            pendingToolCalls.set(chunk.id, {
+              id: chunk.id,
+              name: chunk.name,
+              argumentsJson: "",
+            });
+            assistantToolBlockIndices.set(chunk.id, assistantBlocks.length);
+            assistantBlocks.push({
+              type: "tool_use",
+              id: chunk.id,
+              name: chunk.name,
+              input: {},
+            });
+            continue;
+          }
+
+          if (chunk.type === "tool_use_delta") {
+            const pending = pendingToolCalls.get(chunk.id);
+            if (pending) {
+              pending.argumentsJson += chunk.partialJson;
+            }
+            continue;
+          }
+
+          if (chunk.type === "tool_use_end") {
+            const pending = pendingToolCalls.get(chunk.id);
+            if (pending) {
+              completedToolCalls.push(pending);
+              pendingToolCalls.delete(chunk.id);
+            }
+          }
+        }
+      } catch (error) {
+        const wrapped = wrapError(error, { code: "MODEL_API_ERROR", retriable: true });
+        loopLogger?.error("Agent loop model call failed", wrapped, { turn: turnIndex });
+        return { error: wrapped.message };
+      }
+
+      const normalizedToolCalls: Array<{
+        id: string;
+        name: string;
+        params: Record<string, unknown>;
+      }> = [];
+
+      try {
+        for (const toolCall of completedToolCalls) {
+          const parsed = parseToolArgs(toolCall);
+          const blockIndex = assistantToolBlockIndices.get(toolCall.id);
+          if (blockIndex !== undefined) {
+            assistantBlocks[blockIndex] = {
+              type: "tool_use",
+              id: toolCall.id,
+              name: toolCall.name,
+              input: parsed,
+            };
+          }
+
+          normalizedToolCalls.push({
+            id: toolCall.id,
+            name: toolCall.name,
+            params: parsed,
+          });
+        }
+      } catch (error) {
+        const wrapped = wrapError(error, { code: "TOOL_ARGUMENT_INVALID", retriable: false });
+        loopLogger?.warn("Agent loop received malformed tool arguments", { turn: turnIndex, code: wrapped.code });
+        return { error: wrapped.message };
+      }
+
+      const assistantMessage = finalizeAssistantMessage(assistantBlocks, assistantText);
+      if (assistantMessage) {
+        workingMessages.push(assistantMessage);
+      }
+
+      if (normalizedToolCalls.length === 0) {
+        return { error: "RP turn ended without submit_rp_turn" };
+      }
+
+      try {
+        for (const toolCall of normalizedToolCalls) {
+          if (!canExecuteTool(this.profile, toolCall.name)) {
+            return {
+              error: `Tool '${toolCall.name}' is not permitted for agent '${this.profile.id}'`,
+            };
+          }
+
+          const toolSchema = bufferedToolExecutor.getSchemas().find((schema) => schema.name === toolCall.name);
+          if (!toolSchema || (toolSchema.effectClass !== "read_only" && toolSchema.traceVisibility !== "private_runtime")) {
+            return { error: `Tool '${toolCall.name}' is not allowed in buffered RP mode` };
+          }
+
+          const result = await bufferedToolExecutor.execute(toolCall.name, toolCall.params, {
+            sessionId: request.sessionId,
+            agentId: runContext.agentId,
+          });
+
+          if (toolCall.name === "submit_rp_turn") {
+            return { outcome: result as RpTurnOutcomeSubmission };
+          }
+
+          workingMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: stringifyToolResult(result),
+          });
+        }
+      } catch (error) {
+        const wrapped = wrapError(error, { code: "MCP_TOOL_ERROR", retriable: false });
+        loopLogger?.error("Agent loop tool execution failed", wrapped, { turn: turnIndex });
+        return { error: wrapped.message };
+      }
+    }
+  }
+
   private async buildInitialPromptState(
     request: AgentRunRequest
   ): Promise<{ systemPrompt: string; messages: ChatMessage[] }> {
@@ -313,17 +476,39 @@ export class AgentLoop {
     };
   }
 
-  private buildCompletionRequest(messages: ChatMessage[], systemPrompt: string): ChatCompletionRequest {
+  private buildCompletionRequest(
+    messages: ChatMessage[],
+    systemPrompt: string,
+    toolExecutor: ToolExecutor = this.toolExecutor
+  ): ChatCompletionRequest {
     return {
       modelId: this.profile.modelId,
       systemPrompt,
       messages,
-      tools: getFilteredSchemas(this.profile, this.toolExecutor).map((tool) => ({
+      tools: getFilteredSchemas(this.profile, toolExecutor).map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: tool.parameters,
       })),
     };
+  }
+
+  private createBufferedToolExecutor(): ToolExecutor {
+    const bufferedToolExecutor = new ToolExecutor();
+
+    for (const schema of this.toolExecutor.getSchemas()) {
+      bufferedToolExecutor.registerLocal({
+        name: schema.name,
+        description: schema.description,
+        parameters: schema.parameters,
+        effectClass: schema.effectClass,
+        traceVisibility: schema.traceVisibility,
+        execute: async (params, context) => this.toolExecutor.execute(schema.name, params, context),
+      });
+    }
+
+    bufferedToolExecutor.registerLocal(makeSubmitRpTurnTool());
+    return bufferedToolExecutor;
   }
 }
 

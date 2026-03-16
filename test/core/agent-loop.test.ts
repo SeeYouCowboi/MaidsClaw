@@ -296,6 +296,176 @@ describe("AgentLoop", () => {
   });
 });
 
+describe("AgentLoop.runBuffered", () => {
+  const rpProfile = (allowedTools: string[]): AgentProfile => ({
+    id: "agent-rp-buffered-1",
+    role: "rp_agent",
+    lifecycle: "persistent",
+    userFacing: true,
+    outputMode: "freeform",
+    modelId: "mock-model",
+    toolPermissions: allowedTools.map((toolName) => ({ toolName, allowed: true })),
+    maxDelegationDepth: 3,
+    lorebookEnabled: true,
+    narrativeContextEnabled: true,
+  });
+
+  it("happy path: submit_rp_turn returns buffered outcome", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_1",
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"Your tea is ready."}',
+        },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    const loop = new AgentLoop({
+      profile: rpProfile(["submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-happy",
+      requestId: "request-rp-happy",
+      messages: [{ role: "user", content: "Reply in character" }],
+    });
+
+    expect(result).toEqual({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "Your tea is ready.",
+      },
+    });
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("Your tea is ready.");
+    }
+  });
+
+  it("silent-private turn: empty publicReply with privateCommit ops is valid", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_2", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_2",
+          partialJson:
+            '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"","privateCommit":{"schemaVersion":"rp_private_cognition_v3","ops":[{"op":"upsert","record":{"kind":"commitment","key":"k1","mode":"intent","target":{"action":"observe"},"status":"active"}}]}}',
+        },
+        { type: "tool_use_end", id: "call_2" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const loop = new AgentLoop({
+      profile: rpProfile(["submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: new ToolExecutor(),
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-silent",
+      requestId: "request-rp-silent",
+      messages: [{ role: "user", content: "Think silently" }],
+    });
+
+    expect("outcome" in result).toBe(true);
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("");
+      expect(result.outcome.privateCommit?.ops.length).toBe(1);
+    }
+  });
+
+  it("returns error when no submit_rp_turn is called", async () => {
+    const model = new MockModelProvider([[{ type: "text_delta", text: "Only text." }, { type: "message_end", stopReason: "end_turn" }]]);
+    const loop = new AgentLoop({
+      profile: rpProfile(["submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: new ToolExecutor(),
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-nosubmit",
+      requestId: "request-rp-nosubmit",
+      messages: [{ role: "user", content: "no tool" }],
+    });
+
+    expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
+  });
+
+  it("returns chunk message when model emits error chunk", async () => {
+    const model = new MockModelProvider([
+      [
+        {
+          type: "error",
+          code: "MODEL_DOWN",
+          message: "upstream timeout",
+          retriable: true,
+        },
+      ],
+    ]);
+    const loop = new AgentLoop({
+      profile: rpProfile(["submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: new ToolExecutor(),
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-error",
+      requestId: "request-rp-error",
+      messages: [{ role: "user", content: "test" }],
+    });
+
+    expect(result).toEqual({ error: "upstream timeout" });
+  });
+
+  it("blocks immediate_write tool calls in buffered mode", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_3", name: "unsafe_write" },
+        { type: "tool_use_delta", id: "call_3", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_3" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    let executed = false;
+    executor.registerLocal({
+      name: "unsafe_write",
+      description: "Writes immediately",
+      parameters: { type: "object", properties: {} },
+      effectClass: "immediate_write",
+      traceVisibility: "public",
+      async execute() {
+        executed = true;
+        return { ok: true };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: rpProfile(["unsafe_write", "submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-block",
+      requestId: "request-rp-block",
+      messages: [{ role: "user", content: "try write" }],
+    });
+
+    expect(result).toEqual({ error: "Tool 'unsafe_write' is not allowed in buffered RP mode" });
+    expect(executed).toBe(false);
+  });
+});
+
 describe("RunContext", () => {
   it("creates default run context shape", () => {
     const now = Date.now();

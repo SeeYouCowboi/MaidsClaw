@@ -31,6 +31,7 @@ import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
 import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { TurnService } from "../runtime/turn-service.js";
+import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
 import { resolveStoragePaths } from "../storage/paths.js";
@@ -272,14 +273,55 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   const turnServiceAgentLoop = {
     async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
       const canonicalAgentId = sessionService.getSession(request.sessionId)?.agentId ?? MAIDEN_PROFILE.id;
+      const profile = agentRegistry.get(canonicalAgentId);
       const loop = createAgentLoop(canonicalAgentId);
       if (!loop) {
         throw new Error(`No agent loop available for agent '${canonicalAgentId}'`);
       }
 
+      if (profile?.role === "rp_agent") {
+        const bufferedResult = await loop.runBuffered(request);
+        if ("error" in bufferedResult) {
+          yield {
+            type: "error",
+            code: "RP_BUFFERED_EXECUTION_FAILED",
+            message: bufferedResult.error,
+            retriable: false,
+          };
+          return;
+        }
+
+        if (bufferedResult.outcome.publicReply.length > 0) {
+          yield {
+            type: "text_delta",
+            text: bufferedResult.outcome.publicReply,
+          };
+        }
+
+        yield {
+          type: "message_end",
+          stopReason: "end_turn",
+        };
+        return;
+      }
+
       for await (const chunk of loop.run(request)) {
         yield chunk;
       }
+    },
+    async runBuffered(request: AgentRunRequest): Promise<RpBufferedExecutionResult> {
+      const canonicalAgentId = sessionService.getSession(request.sessionId)?.agentId ?? MAIDEN_PROFILE.id;
+      const profile = agentRegistry.get(canonicalAgentId);
+      const loop = createAgentLoop(canonicalAgentId);
+      if (!loop) {
+        throw new Error(`No agent loop available for agent '${canonicalAgentId}'`);
+      }
+
+      if (profile?.role !== "rp_agent") {
+        return { error: `Buffered RP mode is only available for rp_agent sessions` };
+      }
+
+      return loop.runBuffered(request);
     },
   } as unknown as AgentLoop;
 
