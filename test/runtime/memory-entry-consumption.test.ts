@@ -176,10 +176,21 @@ describe("memory-entry-consumption: live runtime integration", () => {
         };
       });
 
-      const mockLoop = makeMockAgentLoop([
-        { type: "text_delta", text: "Acknowledged." },
-        { type: "message_end", stopReason: "end_turn" },
-      ]);
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) {
+            yield chunk;
+          }
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v3" as const,
+              publicReply: "Acknowledged.",
+            },
+          };
+        },
+      } as unknown as AgentLoop;
 
       const turnService = new TurnService(
         mockLoop,
@@ -204,7 +215,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(migrateCalls[0]?.flushMode).toBe("dialogue_slice");
       expect(migrateCalls[0]?.dialogueRecords).toHaveLength(10);
       expect(migrateCalls[0]?.rangeStart).toBe(0);
-      expect(migrateCalls[0]?.rangeEnd).toBe(9);
+      expect(migrateCalls[0]?.rangeEnd).toBe(10);
 
       const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
       expect(unprocessedRange).toBeUndefined();

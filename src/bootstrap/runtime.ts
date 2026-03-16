@@ -49,7 +49,9 @@ function resolveDatabasePath(options: RuntimeBootstrapOptions): string {
     return options.databasePath;
   }
 
-  const envDbPath = process.env.MAIDSCLAW_DB_PATH;
+  const envDbPath = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env?.MAIDSCLAW_DB_PATH;
   return resolveStoragePaths({ databasePath: envDbPath }).databasePath;
 }
 
@@ -58,7 +60,9 @@ function resolveDataDir(options: RuntimeBootstrapOptions): string {
     return options.dataDir;
   }
 
-  const envDataDir = process.env.MAIDSCLAW_DATA_DIR;
+  const envDataDir = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env?.MAIDSCLAW_DATA_DIR;
   return resolveStoragePaths({ dataDir: envDataDir }).dataDir;
 }
 
@@ -247,6 +251,15 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   });
 
   const promptRenderer = new PromptRenderer();
+  const viewerContextResolver = ({
+    sessionId,
+    agentId,
+    role,
+  }: {
+    sessionId: string;
+    agentId: string;
+    role: AgentProfile["role"];
+  }) => resolveViewerContext(agentId, blackboard, { sessionId, role });
 
   const createAgentLoop = (agentId: string): AgentLoop | null => {
     const profile = agentRegistry.get(agentId);
@@ -262,8 +275,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
         toolExecutor,
         promptBuilder,
         promptRenderer,
-        viewerContextResolver: ({ sessionId, agentId, role }) =>
-          resolveViewerContext(agentId, blackboard, { sessionId, role }),
+        viewerContextResolver,
       });
     } catch {
       return null;
@@ -332,6 +344,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     flushSelector,
     memoryTaskAgent,
     sessionService,
+    viewerContextResolver,
   );
 
   const shutdown = (): void => {
