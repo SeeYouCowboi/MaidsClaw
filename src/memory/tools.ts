@@ -1,3 +1,4 @@
+import type { EffectClass, TraceVisibility } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
 import type { ViewerContext } from "./types";
@@ -10,6 +11,8 @@ export type MemoryToolDefinition = {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  effectClass?: EffectClass;
+  traceVisibility?: TraceVisibility;
   handler: (args: Record<string, unknown>, viewerContext: ViewerContext) => unknown | Promise<unknown>;
 };
 
@@ -63,6 +66,8 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
       `Append content to a Core Memory block. Blocks hold persistent agent knowledge. ` +
       `Labels: 'character' (agent persona) or 'user' (user info). ` +
       POINTER_GUIDE,
+    effectClass: "immediate_write",
+    traceVisibility: "public",
     parameters: {
       type: "object",
       properties: {
@@ -108,6 +113,8 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
       `Replace content in a Core Memory block (first occurrence). ` +
       `Labels: 'character' (agent persona) or 'user' (user info). ` +
       POINTER_GUIDE,
+    effectClass: "immediate_write",
+    traceVisibility: "public",
     parameters: {
       type: "object",
       properties: {
@@ -158,6 +165,8 @@ function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
     description:
       `Read memory by pointer. Provide ONE of: entity (pointer key), topic (name), event_ids, or fact_ids. ` +
       POINTER_GUIDE,
+    effectClass: "read_only",
+    traceVisibility: "public",
     parameters: {
       type: "object",
       properties: {

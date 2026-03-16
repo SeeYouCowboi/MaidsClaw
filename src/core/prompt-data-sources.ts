@@ -14,6 +14,7 @@ export type LoreDataSource = {
 
 export type MemoryDataSource = {
   getCoreMemoryBlocks(agentId: string): string;
+  getRecentCognition(viewerContext: ViewerContext): string;
   getMemoryHints(userMessage: string, viewerContext: ViewerContext): Promise<string>;
 };
 

@@ -1,4 +1,4 @@
-import type { ViewerContext } from "../types.js";
+import type { ViewerContext } from "../../memory/types.js";
 
 export type JsonSchema = {
   type?: string;
@@ -18,15 +18,22 @@ export type DispatchContext = {
   [key: string]: unknown;
 };
 
+export type EffectClass = "read_only" | "deferred_write" | "immediate_write";
+export type TraceVisibility = "public" | "debug" | "private_runtime";
+
 export type ToolSchema = {
   name: string;
   description: string;
   parameters: JsonSchema;
+  effectClass?: EffectClass;
+  traceVisibility?: TraceVisibility;
 };
 
 export interface ToolDefinition {
   name: string;
   description: string;
   parameters: JsonSchema;
+  effectClass?: EffectClass;
+  traceVisibility?: TraceVisibility;
   execute(params: unknown, context?: DispatchContext): Promise<unknown>;
 }
