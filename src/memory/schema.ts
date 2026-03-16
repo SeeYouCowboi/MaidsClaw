@@ -48,7 +48,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, cognition_key TEXT, explicit_kind TEXT, settlement_id TEXT, op_index INTEGER, metadata_json TEXT, cognition_status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_agent_event_overlay_agent_event ON agent_event_overlay(agent_id, event_id)`,
   `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, belief_type TEXT, confidence REAL, epistemic_status TEXT CHECK (epistemic_status IN ('confirmed', 'suspected', 'hypothetical', 'retracted')), provenance TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
@@ -71,9 +71,6 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_world_fts USING fts5(content, tokenize='trigram')`,
 ];
 
-const COGNITION_EVENT_OVERLAY_TABLE_SQL =
-  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, explicit_kind TEXT, settlement_id TEXT, op_index INTEGER, metadata_json TEXT, cognition_status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL)`;
-
 const MEMORY_MIGRATIONS: MigrationStep[] = [
   {
     id: "memory:001:create-memory-schema",
@@ -86,9 +83,6 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:002:add-cognition-keys",
     description: "Add cognition keys and metadata columns to overlays",
     up: (db: Db) => {
-      // Ensure latest table definition is present for fresh databases.
-      db.exec(COGNITION_EVENT_OVERLAY_TABLE_SQL);
-
       addColumnIfMissing(db, "agent_fact_overlay", "cognition_key", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "settlement_id", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "op_index", "INTEGER");

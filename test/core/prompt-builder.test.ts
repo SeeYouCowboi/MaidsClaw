@@ -72,7 +72,7 @@ function makeDataSources(): {
 		memory: {
 			getCoreMemoryBlocks: (agentId: string) =>
 				`<core_memory>${agentId}</core_memory>`,
-			getRecentCognition: () => `recent cognition content`,
+			getRecentCognition: () => `\u2022 [assertion] Alice trusts Bob (accepted)\n\u2022 [evaluation] eval Bob [trust:8, warmth:7]`,
 			getMemoryHints: async (userMessage: string) => `hint for ${userMessage}`,
 		},
 		operational: {
@@ -137,6 +137,10 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);
+
+		const recentCognitionContent = getSectionContent(output.sections, PromptSectionSlot.RECENT_COGNITION);
+		expect(recentCognitionContent).toContain("\u2022 [assertion]");
+		expect(recentCognitionContent).toContain("\u2022 [evaluation]");
 	});
 
 	it("omits RECENT_COGNITION slot when getRecentCognition returns empty string", async () => {

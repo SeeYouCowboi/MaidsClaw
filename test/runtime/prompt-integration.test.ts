@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import type { AgentProfile } from "../../src/agents/profile.js";
 import { AgentLoop } from "../../src/core/agent-loop.js";
@@ -9,6 +9,15 @@ import type { PromptRenderer } from "../../src/core/prompt-renderer.js";
 import { PromptSectionSlot } from "../../src/core/prompt-template.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { ViewerContext } from "../../src/memory/types.js";
+import { CommitService } from "../../src/interaction/commit-service.js";
+import { FlushSelector } from "../../src/interaction/flush-selector.js";
+import { runInteractionMigrations } from "../../src/interaction/schema.js";
+import { InteractionStore } from "../../src/interaction/store.js";
+import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
+import { TurnService } from "../../src/runtime/turn-service.js";
+import { SessionService } from "../../src/session/service.js";
+import { closeDatabaseGracefully, type Db, openDatabase } from "../../src/storage/database.js";
+import { getRecentCognition } from "../../src/memory/prompt-data.js";
 
 const RP_PROFILE: AgentProfile = {
   id: "rp:alice",
@@ -176,6 +185,116 @@ describe("runtime prompt integration", () => {
     expect(model.requests).toHaveLength(1);
     expect(model.requests[0]?.systemPrompt).toBe(`You are agent ${RP_PROFILE.id} with role ${RP_PROFILE.role}.`);
     expect(model.requests[0]?.messages).toEqual([{ role: "user", content: "Hello" }]);
+  });
+});
+
+describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
+  let db: Db;
+  let store: InteractionStore;
+  let commitService: CommitService;
+  let flushSelector: FlushSelector;
+  let sessionService: SessionService;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runInteractionMigrations(db);
+    store = new InteractionStore(db);
+    commitService = new CommitService(store);
+    flushSelector = new FlushSelector(store);
+    sessionService = new SessionService();
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  it("settles an RP turn with cognition ops then builds next prompt with RECENT_COGNITION bullets", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    const loop = {
+      async *run(): AsyncGenerator<Chunk> {
+        yield* ([] as Chunk[]);
+      },
+      async runBuffered(): Promise<RpBufferedExecutionResult> {
+        return {
+          outcome: {
+            schemaVersion: "rp_turn_outcome_v3",
+            publicReply: "I see.",
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [
+                {
+                  op: "upsert" as const,
+                  record: {
+                    kind: "assertion" as const,
+                    key: "trust-bob",
+                    proposition: {
+                      subject: { kind: "special" as const, value: "self" as const },
+                      predicate: "trusts",
+                      object: { kind: "entity", ref: { kind: "pointer_key" as const, value: "Bob" } },
+                    },
+                    stance: "accepted" as const,
+                  },
+                },
+                {
+                  op: "upsert" as const,
+                  record: {
+                    kind: "evaluation" as const,
+                    key: "eval-bob",
+                    target: { kind: "pointer_key" as const, value: "Bob" },
+                    dimensions: [
+                      { name: "trust", value: 8 },
+                      { name: "warmth", value: 7 },
+                    ],
+                  },
+                },
+                {
+                  op: "upsert" as const,
+                  record: {
+                    kind: "commitment" as const,
+                    key: "goal-protect-bob",
+                    mode: "goal" as const,
+                    target: { action: "protect Bob from harm" },
+                    status: "active" as const,
+                  },
+                },
+                {
+                  op: "retract" as const,
+                  target: { kind: "assertion" as const, key: "old-grudge" },
+                },
+              ],
+            },
+          },
+        };
+      },
+    };
+
+    const turnService = new TurnService(
+      loop,
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+    );
+
+    const chunks: Chunk[] = [];
+    for await (const chunk of turnService.run({
+      sessionId: session.sessionId,
+      requestId: "req-cognition-1",
+      messages: [{ role: "user", content: "hello Bob" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.find((c) => c.type === "error")).toBeUndefined();
+
+    const cognitionText = getRecentCognition("rp:alice", session.sessionId, db);
+
+    expect(cognitionText).toContain("\u2022 [assertion] self trusts Bob (accepted)");
+    expect(cognitionText).toContain("\u2022 [evaluation] eval Bob [trust:8, warmth:7]");
+    expect(cognitionText).toContain("\u2022 [commitment] goal: protect Bob from harm (active)");
+    expect(cognitionText).toContain("\u2022 [assertion] [retracted]");
   });
 });
 
