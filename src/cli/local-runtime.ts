@@ -1,6 +1,8 @@
 import type { Chunk } from "../core/chunk.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import { TraceStore } from "./trace-store.js";
+import { CliError, EXIT_RUNTIME } from "./errors.js";
 import type {
   PrivateCommitSummary,
   PublicChunkRecord,
@@ -22,15 +24,31 @@ export class LocalRuntime {
   constructor(private readonly runtime: RuntimeBootstrapResult) {}
 
   async executeTurn(params: LocalTurnParams): Promise<TurnExecutionResult> {
+    // Validate agentId matches session owner — refuse silently wrong agent
+    const session = this.runtime.sessionService.getSession(params.sessionId);
+    if (session && session.agentId !== params.agentId) {
+      throw new CliError(
+        "AGENT_SESSION_MISMATCH",
+        `Agent "${params.agentId}" does not own session "${params.sessionId}" (owner: "${session.agentId}")`,
+        EXIT_RUNTIME,
+      );
+    }
+
     const requestId = crypto.randomUUID();
     let assistantText = "";
     const publicChunks: PublicChunkRecord[] = [];
     const toolEvents: PublicChunkRecord[] = [];
 
+    // Honor --save-trace: use runtime traceStore or create a per-turn one
+    const perTurnTraceStore = params.saveTrace
+      ? (this.runtime.traceStore ?? new TraceStore())
+      : undefined;
+
     const stream = this.runtime.turnService.run({
       sessionId: params.sessionId,
       requestId,
       messages: [{ role: "user", content: params.text }],
+      traceStore: perTurnTraceStore,
     });
 
     for await (const chunk of stream) {
