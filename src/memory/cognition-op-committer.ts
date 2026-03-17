@@ -8,6 +8,7 @@ import type {
   EvaluationRecord,
 } from "../runtime/rp-turn-contract.js";
 import { GraphStorageService } from "./storage.js";
+import type { NodeRef } from "./types.js";
 
 export class CognitionOpCommitter {
   constructor(
@@ -16,7 +17,9 @@ export class CognitionOpCommitter {
     private readonly currentLocationEntityId?: number,
   ) {}
 
-  commit(ops: CognitionOp[], settlementId: string): void {
+  commit(ops: CognitionOp[], settlementId: string): NodeRef[] {
+    const refs: NodeRef[] = [];
+    const unresolvedKeys: string[] = [];
     for (let opIndex = 0; opIndex < ops.length; opIndex += 1) {
       const op = ops[opIndex] as CognitionOp | { op: string; record?: CognitionRecord; target?: CognitionSelector };
       if (op.op === "touch") {
@@ -28,7 +31,15 @@ export class CognitionOpCommitter {
       }
 
       if (op.op === "upsert" && op.record) {
-        this.commitUpsert(op.record, settlementId, opIndex);
+        try {
+          refs.push(this.commitUpsert(op.record, settlementId, opIndex));
+        } catch (err) {
+          if (err instanceof MaidsClawError && err.code === "COGNITION_UNRESOLVED_REFS") {
+            unresolvedKeys.push(op.record.key);
+          } else {
+            throw err;
+          }
+        }
         continue;
       }
 
@@ -36,14 +47,25 @@ export class CognitionOpCommitter {
         this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind);
       }
     }
+
+    if (unresolvedKeys.length > 0) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Explicit settlement ${settlementId} has ${unresolvedKeys.length} unresolved cognition key(s): ${unresolvedKeys.join(", ")}`,
+        retriable: true,
+        details: { settlementId, unresolvedKeys },
+      });
+    }
+
+    return refs;
   }
 
-  private commitUpsert(record: CognitionRecord, settlementId: string, opIndex: number): void {
+  private commitUpsert(record: CognitionRecord, settlementId: string, opIndex: number): NodeRef {
     if (record.kind === "assertion") {
       const sourcePointerKey = this.resolveEntityPointerKey(record.proposition.subject);
       const targetPointerKey = this.resolveEntityPointerKey(record.proposition.object.ref);
 
-      this.storage.upsertExplicitAssertion({
+      const result = this.storage.upsertExplicitAssertion({
         agentId: this.agentId,
         cognitionKey: record.key,
         settlementId,
@@ -55,11 +77,11 @@ export class CognitionOpCommitter {
         confidence: record.confidence,
         provenance: record.provenance,
       });
-      return;
+      return result.ref;
     }
 
     if (record.kind === "evaluation") {
-      this.storage.upsertExplicitEvaluation({
+      const result = this.storage.upsertExplicitEvaluation({
         agentId: this.agentId,
         cognitionKey: record.key,
         settlementId,
@@ -70,10 +92,10 @@ export class CognitionOpCommitter {
         emotionTags: record.emotionTags,
         notes: record.notes,
       });
-      return;
+      return result.ref;
     }
 
-    this.storage.upsertExplicitCommitment({
+    const result = this.storage.upsertExplicitCommitment({
       agentId: this.agentId,
       cognitionKey: record.key,
       settlementId,
@@ -86,6 +108,7 @@ export class CognitionOpCommitter {
       priority: record.priority,
       horizon: record.horizon,
     });
+    return result.ref;
   }
 
   private resolveEvaluationTargetEntityId(record: EvaluationRecord): number | undefined {
@@ -94,7 +117,16 @@ export class CognitionOpCommitter {
     }
 
     const pointerKey = this.resolveEntityPointerKey(record.target);
-    return this.storage.resolveEntityByPointerKey(pointerKey, this.agentId) ?? undefined;
+    const entityId = this.storage.resolveEntityByPointerKey(pointerKey, this.agentId);
+    if (entityId === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for evaluation target: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
+    }
+    return entityId;
   }
 
   private resolveCommitmentTargetEntityId(record: CommitmentRecord): number | undefined {
@@ -104,11 +136,29 @@ export class CognitionOpCommitter {
       }
 
       const pointerKey = this.resolveEntityPointerKey(record.target.target);
-      return this.storage.resolveEntityByPointerKey(pointerKey, this.agentId) ?? undefined;
+      const entityId = this.storage.resolveEntityByPointerKey(pointerKey, this.agentId);
+      if (entityId === null) {
+        throw new MaidsClawError({
+          code: "COGNITION_UNRESOLVED_REFS",
+          message: `Unresolved entity ref for commitment action target: ${pointerKey}`,
+          retriable: true,
+          details: { unresolvedPointerKeys: [pointerKey] },
+        });
+      }
+      return entityId;
     }
 
     const pointerKey = this.resolveEntityPointerKey(record.target.subject);
-    return this.storage.resolveEntityByPointerKey(pointerKey, this.agentId) ?? undefined;
+    const entityId = this.storage.resolveEntityByPointerKey(pointerKey, this.agentId);
+    if (entityId === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for commitment subject: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
+    }
+    return entityId;
   }
 
   private resolveEntityPointerKey(ref: CognitionEntityRef): string {

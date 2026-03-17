@@ -1,3 +1,4 @@
+import { MaidsClawError } from "../core/errors.js";
 import type { Db } from "../storage/database.js";
 import { MAX_INTEGER, makeNodeRef } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
@@ -411,11 +412,23 @@ export class GraphStorageService {
     return row ? { pointerKey: row.pointer_key } : null;
   }
 
-  upsertExplicitAssertion(params: UpsertExplicitAssertionInput): void {
+  upsertExplicitAssertion(params: UpsertExplicitAssertionInput): { id: number; ref: NodeRef } {
     const sourceEntityId = this.resolveEntityByPointerKey(params.sourcePointerKey, params.agentId);
     const targetEntityId = this.resolveEntityByPointerKey(params.targetPointerKey, params.agentId);
     if (sourceEntityId === null || targetEntityId === null) {
-      return;
+      const unresolvedPointerKeys: string[] = [];
+      if (sourceEntityId === null) unresolvedPointerKeys.push(params.sourcePointerKey);
+      if (targetEntityId === null) unresolvedPointerKeys.push(params.targetPointerKey);
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity refs in explicit assertion: ${unresolvedPointerKeys.join(", ")}`,
+        retriable: true,
+        details: {
+          unresolvedPointerKeys,
+          cognitionKey: params.cognitionKey,
+          settlementId: params.settlementId,
+        },
+      });
     }
 
     const now = Date.now();
@@ -423,9 +436,46 @@ export class GraphStorageService {
     const cognitionKey = params.cognitionKey?.normalize("NFC");
 
     if (cognitionKey) {
-      this.db
+      const existing = this.db
         .prepare(
-          `INSERT OR REPLACE INTO agent_fact_overlay (
+          `SELECT id FROM agent_fact_overlay
+           WHERE agent_id = ? AND cognition_key = ?`,
+        )
+        .get(params.agentId, cognitionKey) as { id: number } | null;
+
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE agent_fact_overlay
+             SET source_entity_id = ?,
+                 target_entity_id = ?,
+                 predicate = ?,
+                 confidence = ?,
+                 epistemic_status = ?,
+                 provenance = ?,
+                 settlement_id = ?,
+                 op_index = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            sourceEntityId,
+            targetEntityId,
+            params.predicate,
+            params.confidence ?? null,
+            epistemicStatus,
+            params.provenance ?? null,
+            params.settlementId,
+            params.opIndex,
+            now,
+            existing.id,
+          );
+        return { id: existing.id, ref: makeNodeRef("private_belief", existing.id) };
+      }
+
+      const result = this.db
+        .prepare(
+          `INSERT INTO agent_fact_overlay (
             agent_id,
             source_entity_id,
             target_entity_id,
@@ -458,10 +508,11 @@ export class GraphStorageService {
           now,
           now,
         );
-      return;
+      const newId = Number(result.lastInsertRowid);
+      return { id: newId, ref: makeNodeRef("private_belief", newId) };
     }
 
-    this.db
+    const result = this.db
       .prepare(
         `INSERT INTO agent_fact_overlay (
           agent_id,
@@ -494,9 +545,11 @@ export class GraphStorageService {
         now,
         now,
       );
+    const newId = Number(result.lastInsertRowid);
+    return { id: newId, ref: makeNodeRef("private_belief", newId) };
   }
 
-  upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput): void {
+  upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput): { id: number; ref: NodeRef } {
     const now = Date.now();
     const cognitionKey = params.cognitionKey?.normalize("NFC");
     const metadataJson = JSON.stringify({
@@ -506,9 +559,38 @@ export class GraphStorageService {
     });
 
     if (cognitionKey) {
-      this.db
+      const existing = this.db
         .prepare(
-          `INSERT OR REPLACE INTO agent_event_overlay (
+          `SELECT id FROM agent_event_overlay
+           WHERE agent_id = ? AND cognition_key = ? AND cognition_status = 'active'`,
+        )
+        .get(params.agentId, cognitionKey) as { id: number } | null;
+
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE agent_event_overlay
+             SET salience = ?,
+                 primary_actor_entity_id = ?,
+                 metadata_json = ?,
+                 settlement_id = ?,
+                 op_index = ?
+             WHERE id = ?`,
+          )
+          .run(
+            params.salience ?? null,
+            params.targetEntityId ?? null,
+            metadataJson,
+            params.settlementId,
+            params.opIndex,
+            existing.id,
+          );
+        return { id: existing.id, ref: makeNodeRef("private_event", existing.id) };
+      }
+
+      const result = this.db
+        .prepare(
+          `INSERT INTO agent_event_overlay (
             event_id,
             agent_id,
             role,
@@ -550,10 +632,11 @@ export class GraphStorageService {
           metadataJson,
           now,
         );
-      return;
+      const newId = Number(result.lastInsertRowid);
+      return { id: newId, ref: makeNodeRef("private_event", newId) };
     }
 
-    this.db
+    const result = this.db
       .prepare(
         `INSERT INTO agent_event_overlay (
           event_id,
@@ -595,9 +678,11 @@ export class GraphStorageService {
         metadataJson,
         now,
       );
+    const newId = Number(result.lastInsertRowid);
+    return { id: newId, ref: makeNodeRef("private_event", newId) };
   }
 
-  upsertExplicitCommitment(params: UpsertExplicitCommitmentInput): void {
+  upsertExplicitCommitment(params: UpsertExplicitCommitmentInput): { id: number; ref: NodeRef } {
     const now = Date.now();
     const cognitionKey = params.cognitionKey?.normalize("NFC");
     const metadataJson = JSON.stringify({
@@ -609,9 +694,38 @@ export class GraphStorageService {
     });
 
     if (cognitionKey) {
-      this.db
+      const existing = this.db
         .prepare(
-          `INSERT OR REPLACE INTO agent_event_overlay (
+          `SELECT id FROM agent_event_overlay
+           WHERE agent_id = ? AND cognition_key = ? AND cognition_status = 'active'`,
+        )
+        .get(params.agentId, cognitionKey) as { id: number } | null;
+
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE agent_event_overlay
+             SET salience = ?,
+                 primary_actor_entity_id = ?,
+                 metadata_json = ?,
+                 settlement_id = ?,
+                 op_index = ?
+             WHERE id = ?`,
+          )
+          .run(
+            params.salience ?? null,
+            params.targetEntityId ?? null,
+            metadataJson,
+            params.settlementId,
+            params.opIndex,
+            existing.id,
+          );
+        return { id: existing.id, ref: makeNodeRef("private_event", existing.id) };
+      }
+
+      const result = this.db
+        .prepare(
+          `INSERT INTO agent_event_overlay (
             event_id,
             agent_id,
             role,
@@ -653,10 +767,11 @@ export class GraphStorageService {
           metadataJson,
           now,
         );
-      return;
+      const newId = Number(result.lastInsertRowid);
+      return { id: newId, ref: makeNodeRef("private_event", newId) };
     }
 
-    this.db
+    const result = this.db
       .prepare(
         `INSERT INTO agent_event_overlay (
           event_id,
@@ -698,6 +813,8 @@ export class GraphStorageService {
         metadataJson,
         now,
       );
+    const newId = Number(result.lastInsertRowid);
+    return { id: newId, ref: makeNodeRef("private_event", newId) };
   }
 
   retractExplicitCognition(agentId: string, cognitionKey: string, kind: "assertion" | "evaluation" | "commitment"): void {

@@ -44,6 +44,7 @@ export type ErrorCode =
   // RP runtime errors
   | "RP_TURN_OUTCOME_INVALID"
   | "COGNITION_OP_UNSUPPORTED"
+  | "COGNITION_UNRESOLVED_REFS"
   // Session errors
   | "SESSION_NOT_FOUND"
   | "SESSION_CLOSED"
