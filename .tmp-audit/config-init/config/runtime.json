@@ -1,7 +1,0 @@
-{
-  "memory": {
-    "migrationChatModelId": "claude-3-5-sonnet-20241022",
-    "embeddingModelId": "text-embedding-3-small",
-    "organizerEmbeddingModelId": "text-embedding-3-small"
-  }
-}
