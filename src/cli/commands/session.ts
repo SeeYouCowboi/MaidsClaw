@@ -10,12 +10,14 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
+import type { CliMode } from "../types.js";
+import { GatewayClient } from "../gateway-client.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
-const KNOWN_CREATE_FLAGS = new Set(["agent", "json", "quiet", "cwd"]);
-const KNOWN_CLOSE_FLAGS = new Set(["session", "json", "quiet", "cwd"]);
-const KNOWN_RECOVER_FLAGS = new Set(["session", "json", "quiet", "cwd"]);
+const KNOWN_CREATE_FLAGS = new Set(["agent", "mode", "base-url", "json", "quiet", "cwd"]);
+const KNOWN_CLOSE_FLAGS = new Set(["session", "mode", "base-url", "json", "quiet", "cwd"]);
+const KNOWN_RECOVER_FLAGS = new Set(["session", "mode", "base-url", "json", "quiet", "cwd"]);
 
 // ── Flag validation helper ───────────────────────────────────────────
 
@@ -60,6 +62,34 @@ function requireStringFlag(
   return value;
 }
 
+function resolveModeAndBaseUrl(args: ParsedArgs): { mode: CliMode; baseUrl: string } {
+  const modeRaw = args.flags.mode;
+  let mode: CliMode = "local";
+  if (modeRaw !== undefined) {
+    if (typeof modeRaw !== "string") {
+      throw new CliError("MISSING_FLAG_VALUE", "--mode requires a value", EXIT_USAGE);
+    }
+    if (modeRaw !== "local" && modeRaw !== "gateway") {
+      throw new CliError(
+        "INVALID_FLAG_VALUE",
+        `Invalid mode: "${modeRaw}". Must be "local" or "gateway".`,
+        EXIT_USAGE,
+      );
+    }
+    mode = modeRaw;
+  }
+
+  const baseUrlRaw = args.flags["base-url"];
+  if (baseUrlRaw === true) {
+    throw new CliError("MISSING_FLAG_VALUE", "--base-url requires a value", EXIT_USAGE);
+  }
+
+  return {
+    mode,
+    baseUrl: typeof baseUrlRaw === "string" ? baseUrlRaw : "http://localhost:3000",
+  };
+}
+
 // ── session create ───────────────────────────────────────────────────
 
 async function handleSessionCreate(
@@ -68,6 +98,28 @@ async function handleSessionCreate(
 ): Promise<void> {
   validateFlags(KNOWN_CREATE_FLAGS, args, "session create");
   const agentId = requireStringFlag(args, "agent", "session create");
+  const { mode, baseUrl } = resolveModeAndBaseUrl(args);
+
+  if (mode === "gateway") {
+    const client = new GatewayClient(baseUrl);
+    const record = await client.createSession(agentId);
+
+    if (ctx.json) {
+      writeJson({
+        ok: true,
+        command: "session create",
+        mode,
+        data: {
+          session_id: record.session_id,
+          agent_id: agentId,
+          created_at: record.created_at,
+        },
+      });
+    } else if (!ctx.quiet) {
+      writeText(record.session_id);
+    }
+    return;
+  }
 
   const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
 
@@ -93,7 +145,7 @@ async function handleSessionCreate(
       writeJson({
         ok: true,
         command: "session create",
-        mode: ctx.mode,
+        mode,
         data: {
           session_id: record.sessionId,
           agent_id: record.agentId,
@@ -116,6 +168,29 @@ async function handleSessionClose(
 ): Promise<void> {
   validateFlags(KNOWN_CLOSE_FLAGS, args, "session close");
   const sessionId = requireStringFlag(args, "session", "session close");
+  const { mode, baseUrl } = resolveModeAndBaseUrl(args);
+
+  if (mode === "gateway") {
+    const client = new GatewayClient(baseUrl);
+    const closed = await client.closeSession(sessionId);
+    const flushRan = false;
+
+    if (ctx.json) {
+      writeJson({
+        ok: true,
+        command: "session close",
+        mode,
+        data: {
+          session_id: closed.session_id,
+          closed_at: closed.closed_at,
+          flush_ran: flushRan,
+        },
+      });
+    } else if (!ctx.quiet) {
+      writeText(`Session ${closed.session_id} closed at ${closed.closed_at}`);
+    }
+    return;
+  }
 
   const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
 
@@ -161,7 +236,7 @@ async function handleSessionClose(
       writeJson({
         ok: true,
         command: "session close",
-        mode: ctx.mode,
+        mode,
         data: {
           session_id: closed.sessionId,
           closed_at: closed.closedAt,
@@ -184,6 +259,28 @@ async function handleSessionRecover(
 ): Promise<void> {
   validateFlags(KNOWN_RECOVER_FLAGS, args, "session recover");
   const sessionId = requireStringFlag(args, "session", "session recover");
+  const { mode, baseUrl } = resolveModeAndBaseUrl(args);
+
+  if (mode === "gateway") {
+    const client = new GatewayClient(baseUrl);
+    await client.recoverSession(sessionId);
+
+    if (ctx.json) {
+      writeJson({
+        ok: true,
+        command: "session recover",
+        mode,
+        data: {
+          session_id: sessionId,
+          recovered: true,
+          note: "recovery does not canonize partial output",
+        },
+      });
+    } else if (!ctx.quiet) {
+      writeText(`Session ${sessionId} recovered (partial output not canonized)`);
+    }
+    return;
+  }
 
   const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
 
@@ -228,7 +325,7 @@ async function handleSessionRecover(
       writeJson({
         ok: true,
         command: "session recover",
-        mode: ctx.mode,
+        mode,
         data: {
           session_id: sessionId,
           recovered: true,

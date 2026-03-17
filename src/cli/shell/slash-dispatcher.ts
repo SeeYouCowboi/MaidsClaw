@@ -1,53 +1,35 @@
-/**
- * Slash command dispatcher for the interactive chat shell.
- *
- * Routes `/inspect`, `/transcript`, `/prompt`, `/chunks`, `/logs`,
- * `/memory`, `/diagnose`, `/trace`, `/raw`, `/recover`, `/close`,
- * `/mode`, `/exit`, `/quit`, and `/help` to the appropriate handlers.
- *
- * Inspect commands delegate to view models from T16, not shell-only data models.
- */
-
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { diagnose } from "../diagnostic-catalog.js";
+import { GatewayClient } from "../gateway-client.js";
 import type { InspectContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
 import {
-	loadSummaryView,
-	loadTranscriptView,
-	loadPromptView,
 	loadChunksView,
 	loadLogsView,
 	loadMemoryView,
+	loadPromptView,
+	loadSummaryView,
 	loadTraceView,
+	loadTranscriptView,
+	type InspectViewLoadParams,
 } from "../inspect/view-models.js";
-import type { InspectViewLoadParams } from "../inspect/view-models.js";
 import { writeText } from "../output.js";
 import type { ShellState } from "./state.js";
 
-// ── Types ─────────────────────────────────────────────────────────────
-
 export type SlashDispatchResult = {
-	/** If true, the shell should exit. */
 	exit: boolean;
 };
 
 export type SlashDispatchContext = {
 	state: ShellState;
-	runtime: RuntimeBootstrapResult;
+	runtime?: RuntimeBootstrapResult;
+	gatewayClient?: GatewayClient;
 };
 
-// ── Dispatcher ────────────────────────────────────────────────────────
-
-/**
- * Dispatch a slash command.
- * @param line — the full input line starting with `/`
- * @returns result indicating whether the shell should exit
- */
-export function dispatchSlashCommand(
+export async function dispatchSlashCommand(
 	line: string,
 	ctx: SlashDispatchContext,
-): SlashDispatchResult {
+): Promise<SlashDispatchResult> {
 	const trimmed = line.trim();
 	const parts = trimmed.split(/\s+/);
 	const command = parts[0].toLowerCase();
@@ -57,73 +39,60 @@ export function dispatchSlashCommand(
 		case "/inspect":
 		case "/summary":
 			return handleSummary(ctx, args);
-
 		case "/transcript":
 			return handleTranscript(ctx, args);
-
 		case "/prompt":
 			return handlePrompt(ctx, args);
-
 		case "/chunks":
 			return handleChunks(ctx, args);
-
 		case "/logs":
 			return handleLogs(ctx, args);
-
 		case "/memory":
 			return handleMemory(ctx, args);
-
 		case "/diagnose":
 			return handleDiagnose(ctx, args);
-
 		case "/trace":
 			return handleTrace(ctx, args);
-
 		case "/raw":
 			return handleRaw(ctx, args);
-
 		case "/recover":
 			return handleRecover(ctx);
-
 		case "/close":
 			return handleClose(ctx);
-
 		case "/mode":
 			return handleMode(ctx, args);
-
 		case "/exit":
 		case "/quit":
 			return { exit: true };
-
 		case "/help":
 			return handleHelp();
-
 		default:
 			writeText(`Unknown slash command: ${command}. Type /help for available commands.`);
 			return { exit: false };
 	}
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
 function buildInspectContext(state: ShellState, args: string[]): InspectContext {
-	const ctx: InspectContext = {
+	const context: InspectContext = {
 		sessionId: state.sessionId,
 		agentId: state.agentId,
 	};
 
-	// Allow explicit --request override from args
 	const reqIdx = args.indexOf("--request");
 	if (reqIdx !== -1 && reqIdx + 1 < args.length) {
-		ctx.requestId = args[reqIdx + 1];
+		context.requestId = args[reqIdx + 1];
 	} else if (state.lastRequestId) {
-		ctx.requestId = state.lastRequestId;
+		context.requestId = state.lastRequestId;
 	}
 
-	return ctx;
+	return context;
 }
 
 function buildViewParams(ctx: SlashDispatchContext, args: string[]): InspectViewLoadParams {
+	if (!ctx.runtime) {
+		throw new Error("Local runtime is unavailable");
+	}
+
 	return {
 		runtime: ctx.runtime,
 		traceStore: ctx.runtime.traceStore,
@@ -133,129 +102,183 @@ function buildViewParams(ctx: SlashDispatchContext, args: string[]): InspectView
 	};
 }
 
-function requireLastRequestId(state: ShellState, commandName: string): boolean {
-	if (!state.lastRequestId) {
-		writeText(
-			`No request context available for ${commandName}. ` +
-			`Send a message first, or use ${commandName} --request <id>.`,
-		);
-		return false;
+function requireRequestId(state: ShellState, commandName: string): boolean {
+	if (state.lastRequestId) {
+		return true;
 	}
-	return true;
+	writeText(
+		`No request context available for ${commandName}. Send a message first, or use ${commandName} --request <id>.`,
+	);
+	return false;
 }
 
-// ── Slash command handlers ────────────────────────────────────────────
+function requireGatewayClient(ctx: SlashDispatchContext): GatewayClient {
+	if (!ctx.gatewayClient) {
+		throw new Error("Gateway client is unavailable");
+	}
+	return ctx.gatewayClient;
+}
 
-function handleSummary(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+function requireRuntime(ctx: SlashDispatchContext): RuntimeBootstrapResult {
+	if (!ctx.runtime) {
+		throw new Error("Local runtime is unavailable");
+	}
+	return ctx.runtime;
+}
+
+async function handleSummary(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const inspectCtx = buildInspectContext(ctx.state, args);
-	if (!inspectCtx.requestId) {
-		if (!requireLastRequestId(ctx.state, "/summary")) return { exit: false };
+	if (!inspectCtx.requestId && !requireRequestId(ctx.state, "/summary")) {
+		return { exit: false };
 	}
 
 	try {
-		const view = loadSummaryView(buildViewParams(ctx, args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const view = await requireGatewayClient(ctx).getSummary(inspectCtx.requestId!);
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadSummaryView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading summary: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleTranscript(ctx: SlashDispatchContext, _args: string[]): SlashDispatchResult {
+async function handleTranscript(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	try {
-		const view = loadTranscriptView(buildViewParams(ctx, _args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const view = await requireGatewayClient(ctx).getTranscript(ctx.state.sessionId, ctx.state.rawMode);
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadTranscriptView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading transcript: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handlePrompt(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handlePrompt(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const inspectCtx = buildInspectContext(ctx.state, args);
-	if (!inspectCtx.requestId) {
-		if (!requireLastRequestId(ctx.state, "/prompt")) return { exit: false };
+	if (!inspectCtx.requestId && !requireRequestId(ctx.state, "/prompt")) {
+		return { exit: false };
 	}
 
 	try {
-		const view = loadPromptView(buildViewParams(ctx, args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const view = await requireGatewayClient(ctx).getPrompt(inspectCtx.requestId!);
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadPromptView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading prompt: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleChunks(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleChunks(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const inspectCtx = buildInspectContext(ctx.state, args);
-	if (!inspectCtx.requestId) {
-		if (!requireLastRequestId(ctx.state, "/chunks")) return { exit: false };
+	if (!inspectCtx.requestId && !requireRequestId(ctx.state, "/chunks")) {
+		return { exit: false };
 	}
 
 	try {
-		const view = loadChunksView(buildViewParams(ctx, args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const view = await requireGatewayClient(ctx).getChunks(inspectCtx.requestId!);
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadChunksView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading chunks: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleLogs(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleLogs(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	try {
-		const view = loadLogsView(buildViewParams(ctx, args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const inspectCtx = buildInspectContext(ctx.state, args);
+			const view = await requireGatewayClient(ctx).getLogs({
+				requestId: inspectCtx.requestId,
+				sessionId: inspectCtx.sessionId,
+				agentId: inspectCtx.agentId,
+			});
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadLogsView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading logs: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleMemory(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleMemory(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	try {
-		const view = loadMemoryView(buildViewParams(ctx, args));
-		writeText(renderText(view));
+		if (ctx.state.mode === "gateway") {
+			const inspectCtx = buildInspectContext(ctx.state, args);
+			const view = await requireGatewayClient(ctx).getMemory(
+				inspectCtx.sessionId ?? ctx.state.sessionId,
+				inspectCtx.agentId,
+			);
+			writeText(renderText(view));
+		} else {
+			writeText(renderText(loadMemoryView(buildViewParams(ctx, args))));
+		}
 	} catch (err) {
 		writeText(`Error loading memory: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleDiagnose(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleDiagnose(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const inspectCtx = buildInspectContext(ctx.state, args);
-	if (!inspectCtx.requestId) {
-		if (!requireLastRequestId(ctx.state, "/diagnose")) return { exit: false };
+	if (!inspectCtx.requestId && !requireRequestId(ctx.state, "/diagnose")) {
+		return { exit: false };
 	}
 
 	try {
-		const entry = diagnose({
-			runtime: ctx.runtime,
-			traceStore: ctx.runtime.traceStore,
-			context: inspectCtx,
-		});
-		writeText(renderText(entry));
+		if (ctx.state.mode === "gateway") {
+			const entry = await requireGatewayClient(ctx).diagnose(inspectCtx.requestId!);
+			writeText(renderText(entry));
+		} else {
+			const runtime = requireRuntime(ctx);
+			const entry = diagnose({
+				runtime,
+				traceStore: runtime.traceStore,
+				context: inspectCtx,
+			});
+			writeText(renderText(entry));
+		}
 	} catch (err) {
 		writeText(`Error running diagnose: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleTrace(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleTrace(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const inspectCtx = buildInspectContext(ctx.state, args);
-	if (!inspectCtx.requestId) {
-		if (!requireLastRequestId(ctx.state, "/trace")) return { exit: false };
+	if (!inspectCtx.requestId && !requireRequestId(ctx.state, "/trace")) {
+		return { exit: false };
 	}
 
 	try {
-		const view = loadTraceView(buildViewParams(ctx, args), false);
-		writeText(renderJson(view));
+		if (ctx.state.mode === "gateway") {
+			const view = await requireGatewayClient(ctx).getTrace(inspectCtx.requestId!);
+			writeText(renderJson(view));
+		} else {
+			writeText(renderJson(loadTraceView(buildViewParams(ctx, args), false)));
+		}
 	} catch (err) {
 		writeText(`Error loading trace: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleRaw(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
+async function handleRaw(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
 	const toggle = args[0]?.toLowerCase();
 	if (toggle === "on") {
 		ctx.state.rawMode = true;
@@ -270,24 +293,36 @@ function handleRaw(ctx: SlashDispatchContext, args: string[]): SlashDispatchResu
 	return { exit: false };
 }
 
-function handleRecover(ctx: SlashDispatchContext): SlashDispatchResult {
+async function handleRecover(ctx: SlashDispatchContext): Promise<SlashDispatchResult> {
 	try {
-		if (!ctx.runtime.sessionService.requiresRecovery(ctx.state.sessionId)) {
-			writeText(`Session ${ctx.state.sessionId} is not in recovery state.`);
-			return { exit: false };
+		if (ctx.state.mode === "gateway") {
+			await requireGatewayClient(ctx).recoverSession(ctx.state.sessionId);
+			writeText(`Session ${ctx.state.sessionId} recovered (partial output not canonized).`);
+		} else {
+			const runtime = requireRuntime(ctx);
+			if (!runtime.sessionService.requiresRecovery(ctx.state.sessionId)) {
+				writeText(`Session ${ctx.state.sessionId} is not in recovery state.`);
+				return { exit: false };
+			}
+			runtime.sessionService.clearRecoveryRequired(ctx.state.sessionId);
+			writeText(`Session ${ctx.state.sessionId} recovered (partial output not canonized).`);
 		}
-		ctx.runtime.sessionService.clearRecoveryRequired(ctx.state.sessionId);
-		writeText(`Session ${ctx.state.sessionId} recovered (partial output not canonized).`);
 	} catch (err) {
 		writeText(`Error recovering session: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	return { exit: false };
 }
 
-function handleClose(ctx: SlashDispatchContext): SlashDispatchResult {
+async function handleClose(ctx: SlashDispatchContext): Promise<SlashDispatchResult> {
 	try {
-		const closed = ctx.runtime.sessionService.closeSession(ctx.state.sessionId);
-		writeText(`Session ${closed.sessionId} closed at ${closed.closedAt}.`);
+		if (ctx.state.mode === "gateway") {
+			const closed = await requireGatewayClient(ctx).closeSession(ctx.state.sessionId);
+			writeText(`Session ${closed.session_id} closed at ${closed.closed_at}.`);
+		} else {
+			const runtime = requireRuntime(ctx);
+			const closed = runtime.sessionService.closeSession(ctx.state.sessionId);
+			writeText(`Session ${closed.sessionId} closed at ${closed.closedAt}.`);
+		}
 		writeText("Exiting shell.");
 		return { exit: true };
 	} catch (err) {
@@ -296,15 +331,14 @@ function handleClose(ctx: SlashDispatchContext): SlashDispatchResult {
 	return { exit: false };
 }
 
-function handleMode(ctx: SlashDispatchContext, args: string[]): SlashDispatchResult {
-	const newMode = args[0]?.toLowerCase();
-	if (newMode === "local") {
+async function handleMode(ctx: SlashDispatchContext, args: string[]): Promise<SlashDispatchResult> {
+	const nextMode = args[0]?.toLowerCase();
+	if (nextMode === "local") {
 		ctx.state.mode = "local";
 		writeText("Mode: local");
-	} else if (newMode === "gateway") {
+	} else if (nextMode === "gateway") {
 		ctx.state.mode = "gateway";
 		writeText("Mode: gateway");
-		writeText("Warning: Gateway mode is not yet fully implemented.");
 	} else {
 		writeText(`Current mode: ${ctx.state.mode}`);
 		writeText("Usage: /mode local|gateway");
@@ -312,26 +346,25 @@ function handleMode(ctx: SlashDispatchContext, args: string[]): SlashDispatchRes
 	return { exit: false };
 }
 
-function handleHelp(): SlashDispatchResult {
-	const lines = [
+async function handleHelp(): Promise<SlashDispatchResult> {
+	writeText([
 		"Available slash commands:",
-		"  /summary, /inspect    — View summary for last request",
-		"  /transcript           — View session transcript",
-		"  /prompt               — View prompt for last request",
-		"  /chunks               — View public chunks for last request",
-		"  /logs                 — View logs for session/request",
-		"  /memory               — View memory state for session",
-		"  /diagnose             — Run diagnostic for last request",
-		"  /trace                — Export trace for last request",
-		"  /raw on|off           — Toggle raw observation mode",
-		"  /recover              — Recover current session",
-		"  /close                — Close session and exit",
-		"  /mode local|gateway   — Switch operating mode",
-		"  /exit, /quit          — Exit shell",
-		"  /help                 — Show this help",
+		"  /summary, /inspect    - View summary for last request",
+		"  /transcript           - View session transcript",
+		"  /prompt               - View prompt for last request",
+		"  /chunks               - View public chunks for last request",
+		"  /logs                 - View logs for session/request",
+		"  /memory               - View memory state for session",
+		"  /diagnose             - Run diagnostic for last request",
+		"  /trace                - Export trace for last request",
+		"  /raw on|off           - Toggle raw observation mode",
+		"  /recover              - Recover current session",
+		"  /close                - Close session and exit",
+		"  /mode local|gateway   - Switch operating mode",
+		"  /exit, /quit          - Exit shell",
+		"  /help                 - Show this help",
 		"",
 		"Inspect commands accept --request <id> to override the implicit last request.",
-	];
-	writeText(lines.join("\n"));
+	].join("\n"));
 	return { exit: false };
 }

@@ -79,89 +79,89 @@ describe("SlashDispatcher", () => {
 		return { state, runtime: mockRuntime };
 	}
 
-	it("/help does not exit", () => {
+	it("/help does not exit", async () => {
 		const ctx = makeContext();
-		const result = dispatchSlashCommand("/help", ctx);
+		const result = await dispatchSlashCommand("/help", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/exit signals exit", () => {
+	it("/exit signals exit", async () => {
 		const ctx = makeContext();
-		const result = dispatchSlashCommand("/exit", ctx);
+		const result = await dispatchSlashCommand("/exit", ctx);
 		expect(result.exit).toBe(true);
 	});
 
-	it("/quit signals exit", () => {
+	it("/quit signals exit", async () => {
 		const ctx = makeContext();
-		const result = dispatchSlashCommand("/quit", ctx);
+		const result = await dispatchSlashCommand("/quit", ctx);
 		expect(result.exit).toBe(true);
 	});
 
-	it("/summary without lastRequestId prints error (does not crash)", () => {
+	it("/summary without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/summary", ctx);
+		const result = await dispatchSlashCommand("/summary", ctx);
 		expect(result.exit).toBe(false);
 		// Should not crash — just print error about missing request context
 	});
 
-	it("/inspect without lastRequestId prints error (does not crash)", () => {
+	it("/inspect without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/inspect", ctx);
+		const result = await dispatchSlashCommand("/inspect", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/prompt without lastRequestId prints error (does not crash)", () => {
+	it("/prompt without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/prompt", ctx);
+		const result = await dispatchSlashCommand("/prompt", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/chunks without lastRequestId prints error (does not crash)", () => {
+	it("/chunks without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/chunks", ctx);
+		const result = await dispatchSlashCommand("/chunks", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/diagnose without lastRequestId prints error (does not crash)", () => {
+	it("/diagnose without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/diagnose", ctx);
+		const result = await dispatchSlashCommand("/diagnose", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/trace without lastRequestId prints error (does not crash)", () => {
+	it("/trace without lastRequestId prints error (does not crash)", async () => {
 		const ctx = makeContext({ lastRequestId: undefined });
-		const result = dispatchSlashCommand("/trace", ctx);
+		const result = await dispatchSlashCommand("/trace", ctx);
 		expect(result.exit).toBe(false);
 	});
 
-	it("/raw on toggles raw mode on", () => {
+	it("/raw on toggles raw mode on", async () => {
 		const ctx = makeContext();
 		expect(ctx.state.rawMode).toBe(false);
-		dispatchSlashCommand("/raw on", ctx);
+		await dispatchSlashCommand("/raw on", ctx);
 		expect(ctx.state.rawMode).toBe(true);
 	});
 
-	it("/raw off toggles raw mode off", () => {
+	it("/raw off toggles raw mode off", async () => {
 		const ctx = makeContext({ rawMode: true });
-		dispatchSlashCommand("/raw off", ctx);
+		await dispatchSlashCommand("/raw off", ctx);
 		expect(ctx.state.rawMode).toBe(false);
 	});
 
-	it("/mode local sets mode", () => {
+	it("/mode local sets mode", async () => {
 		const ctx = makeContext({ mode: "gateway" });
-		dispatchSlashCommand("/mode local", ctx);
+		await dispatchSlashCommand("/mode local", ctx);
 		expect(ctx.state.mode).toBe("local");
 	});
 
-	it("/mode gateway sets mode", () => {
+	it("/mode gateway sets mode", async () => {
 		const ctx = makeContext({ mode: "local" });
-		dispatchSlashCommand("/mode gateway", ctx);
+		await dispatchSlashCommand("/mode gateway", ctx);
 		expect(ctx.state.mode).toBe("gateway");
 	});
 
-	it("unknown slash command does not crash", () => {
+	it("unknown slash command does not crash", async () => {
 		const ctx = makeContext();
-		const result = dispatchSlashCommand("/nonexistent", ctx);
+		const result = await dispatchSlashCommand("/nonexistent", ctx);
 		expect(result.exit).toBe(false);
 	});
 });

@@ -96,6 +96,7 @@ export function bootstrapApp(options: AppBootstrapOptions = {}): AppBootstrapRes
     ? new GatewayServer({
       port,
       host,
+      runtime,
       sessionService: runtime.sessionService,
       createAgentLoop: runtime.createAgentLoop,
       turnService: runtime.turnService,

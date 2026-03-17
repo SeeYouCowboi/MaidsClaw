@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { bootstrapApp } from "../../bootstrap/app-bootstrap.js";
 import type { CliContext } from "../context.js";
 import { diagnose } from "../diagnostic-catalog.js";
+import { GatewayClient } from "../gateway-client.js";
 import { CliError, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { resolveContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
@@ -19,15 +20,17 @@ import { writeJson, writeText } from "../output.js";
 import { type ParsedArgs, registerCommand } from "../parser.js";
 import { TraceStore } from "../trace-store.js";
 
-const KNOWN_SUMMARY_FLAGS = new Set(["request", "json", "quiet", "cwd"]);
-const KNOWN_TRANSCRIPT_FLAGS = new Set(["session", "raw", "json", "quiet", "cwd"]);
-const KNOWN_PROMPT_FLAGS = new Set(["request", "sections", "json", "quiet", "cwd"]);
-const KNOWN_CHUNKS_FLAGS = new Set(["request", "json", "quiet", "cwd"]);
+const KNOWN_SUMMARY_FLAGS = new Set(["request", "mode", "base-url", "json", "quiet", "cwd"]);
+const KNOWN_TRANSCRIPT_FLAGS = new Set(["session", "raw", "mode", "base-url", "json", "quiet", "cwd"]);
+const KNOWN_PROMPT_FLAGS = new Set(["request", "sections", "mode", "base-url", "json", "quiet", "cwd"]);
+const KNOWN_CHUNKS_FLAGS = new Set(["request", "mode", "base-url", "json", "quiet", "cwd"]);
 
 const KNOWN_LOGS_FLAGS = new Set([
 	"request",
 	"session",
 	"agent",
+	"mode",
+	"base-url",
 	"json",
 	"quiet",
 	"cwd",
@@ -35,6 +38,8 @@ const KNOWN_LOGS_FLAGS = new Set([
 const KNOWN_MEMORY_FLAGS = new Set([
 	"session",
 	"agent",
+	"mode",
+	"base-url",
 	"json",
 	"quiet",
 	"cwd",
@@ -44,11 +49,13 @@ const KNOWN_TRACE_FLAGS = new Set([
 	"output",
 	"out",
 	"unsafe-raw",
+	"mode",
+	"base-url",
 	"json",
 	"quiet",
 	"cwd",
 ]);
-const KNOWN_DIAGNOSE_FLAGS = new Set(["request", "json", "quiet", "cwd"]);
+const KNOWN_DIAGNOSE_FLAGS = new Set(["request", "mode", "base-url", "json", "quiet", "cwd"]);
 
 function validateFlags(
 	knownFlags: Set<string>,
@@ -98,6 +105,37 @@ function requireStringFlag(
 		);
 	}
 	return value;
+}
+
+function resolveModeAndBaseUrl(
+	ctx: CliContext,
+	args: ParsedArgs,
+): { mode: "local" | "gateway"; baseUrl: string } {
+	const modeRaw = args.flags["mode"];
+	let mode: "local" | "gateway" = ctx.mode;
+	if (modeRaw !== undefined) {
+		if (typeof modeRaw !== "string") {
+			throw new CliError("MISSING_FLAG_VALUE", "--mode requires a value", EXIT_USAGE);
+		}
+		if (modeRaw !== "local" && modeRaw !== "gateway") {
+			throw new CliError(
+				"INVALID_FLAG_VALUE",
+				`Invalid mode: "${modeRaw}". Must be "local" or "gateway".`,
+				EXIT_USAGE,
+			);
+		}
+		mode = modeRaw;
+	}
+
+	const baseUrlRaw = args.flags["base-url"];
+	if (baseUrlRaw === true) {
+		throw new CliError("MISSING_FLAG_VALUE", "--base-url requires a value", EXIT_USAGE);
+	}
+
+	return {
+		mode,
+		baseUrl: typeof baseUrlRaw === "string" ? baseUrlRaw : "http://localhost:3000",
+	};
 }
 
 function toCliError(err: unknown): CliError {
@@ -168,6 +206,17 @@ async function handleDebugSummary(
 ): Promise<void> {
 	validateFlags(KNOWN_SUMMARY_FLAGS, args, "debug summary");
 	const requestId = requireStringFlag(args, "request", "debug summary");
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const view = await new GatewayClient(baseUrl).getSummary(requestId);
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug summary", mode, data: view });
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -181,7 +230,7 @@ async function handleDebugSummary(
 	});
 
 	if (ctx.json) {
-		writeJson({ ok: true, command: "debug summary", mode: ctx.mode, data: view });
+		writeJson({ ok: true, command: "debug summary", mode, data: view });
 	} else if (!ctx.quiet) {
 		writeText(renderText(view));
 	}
@@ -196,6 +245,17 @@ async function handleDebugTranscript(
 	validateFlags(KNOWN_TRANSCRIPT_FLAGS, args, "debug transcript");
 	const sessionId = requireStringFlag(args, "session", "debug transcript");
 	const raw = args.flags["raw"] === true;
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const view = await new GatewayClient(baseUrl).getTranscript(sessionId, raw);
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug transcript", mode, data: view });
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -212,7 +272,7 @@ async function handleDebugTranscript(
 	});
 
 	if (ctx.json) {
-		writeJson({ ok: true, command: "debug transcript", mode: ctx.mode, data: view });
+		writeJson({ ok: true, command: "debug transcript", mode, data: view });
 	} else if (!ctx.quiet) {
 		writeText(renderText(view));
 	}
@@ -227,6 +287,18 @@ async function handleDebugPrompt(
 	validateFlags(KNOWN_PROMPT_FLAGS, args, "debug prompt");
 	const requestId = requireStringFlag(args, "request", "debug prompt");
 	const sections = args.flags["sections"] === true;
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const view = await new GatewayClient(baseUrl).getPrompt(requestId);
+		const outputView = sections ? view : { ...view, sections: undefined };
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug prompt", mode, data: outputView });
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -244,7 +316,7 @@ async function handleDebugPrompt(
 		: { ...view, sections: undefined };
 
 	if (ctx.json) {
-		writeJson({ ok: true, command: "debug prompt", mode: ctx.mode, data: outputView });
+		writeJson({ ok: true, command: "debug prompt", mode, data: outputView });
 	} else if (!ctx.quiet) {
 		writeText(renderText(view));
 	}
@@ -258,6 +330,17 @@ async function handleDebugChunks(
 ): Promise<void> {
 	validateFlags(KNOWN_CHUNKS_FLAGS, args, "debug chunks");
 	const requestId = requireStringFlag(args, "request", "debug chunks");
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const view = await new GatewayClient(baseUrl).getChunks(requestId);
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug chunks", mode, data: view });
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -271,7 +354,7 @@ async function handleDebugChunks(
 	});
 
 	if (ctx.json) {
-		writeJson({ ok: true, command: "debug chunks", mode: ctx.mode, data: view });
+		writeJson({ ok: true, command: "debug chunks", mode, data: view });
 	} else if (!ctx.quiet) {
 		writeText(renderText(view));
 	}
@@ -282,6 +365,22 @@ async function handleDebugLogs(
 	args: ParsedArgs,
 ): Promise<void> {
 	validateFlags(KNOWN_LOGS_FLAGS, args, "debug logs");
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const resolved = resolveContext(ctx, args);
+		const view = await new GatewayClient(baseUrl).getLogs({
+			requestId: resolved.requestId,
+			sessionId: resolved.sessionId,
+			agentId: resolved.agentId,
+		});
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug logs", mode, data: view });
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -291,12 +390,12 @@ async function handleDebugLogs(
 			runtime: app.runtime,
 			traceStore,
 			context: resolveContext(ctx, args),
-			mode: ctx.mode,
+			mode,
 		});
 	});
 
 	if (ctx.json) {
-		writeJson({ ok: true, command: "debug logs", mode: ctx.mode, data: view });
+		writeJson({ ok: true, command: "debug logs", mode, data: view });
 	} else if (!ctx.quiet) {
 		writeText(renderText(view));
 	}
@@ -307,6 +406,29 @@ async function handleDebugMemory(
 	args: ParsedArgs,
 ): Promise<void> {
 	validateFlags(KNOWN_MEMORY_FLAGS, args, "debug memory");
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const resolved = resolveContext(ctx, args);
+		if (!resolved.sessionId) {
+			throw new Error("INSPECT_SESSION_ID_REQUIRED");
+		}
+		const view = await new GatewayClient(baseUrl).getMemory(
+			resolved.sessionId,
+			resolved.agentId,
+		);
+		if (ctx.json) {
+			writeJson({
+				ok: true,
+				command: "debug memory",
+				mode,
+				data: view,
+			});
+		} else if (!ctx.quiet) {
+			writeText(renderText(view));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -316,7 +438,7 @@ async function handleDebugMemory(
 			runtime: app.runtime,
 			traceStore,
 			context: resolveContext(ctx, args),
-			mode: ctx.mode,
+			mode,
 		});
 	});
 
@@ -324,7 +446,7 @@ async function handleDebugMemory(
 		writeJson({
 			ok: true,
 			command: "debug memory",
-			mode: ctx.mode,
+			mode,
 			data: view,
 		});
 	} else if (!ctx.quiet) {
@@ -359,6 +481,48 @@ async function handleDebugTrace(
 		getOptionalStringFlag(childArgs, "output") ??
 		getOptionalStringFlag(childArgs, "out");
 	const unsafeRaw = childArgs.flags["unsafe-raw"] === true;
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, childArgs);
+
+	if (mode === "gateway" && unsafeRaw) {
+		new GatewayClient(baseUrl).rejectUnsafeRaw();
+	}
+
+	if (mode === "gateway") {
+		const view = await new GatewayClient(baseUrl).getTrace(requestId);
+
+		if (output) {
+			const outputPath = resolve(ctx.cwd, output);
+			mkdirSync(dirname(outputPath), { recursive: true });
+			writeFileSync(outputPath, `${renderJson(view.bundle)}\n`, "utf8");
+			if (ctx.json) {
+				writeJson({
+					ok: true,
+					command: "debug trace export",
+					mode,
+					data: {
+						request_id: requestId,
+						unsafe_raw_settlement_mode: view.unsafe_raw_settlement_mode,
+						output: outputPath,
+					},
+				});
+			} else if (!ctx.quiet) {
+				writeText(outputPath);
+			}
+			return;
+		}
+
+		if (ctx.json) {
+			writeJson({
+				ok: true,
+				command: "debug trace export",
+				mode,
+				data: view.bundle,
+			});
+		} else if (!ctx.quiet) {
+			writeText(renderJson(view.bundle));
+		}
+		return;
+	}
 
 	const view = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -369,7 +533,7 @@ async function handleDebugTrace(
 				runtime: app.runtime,
 				traceStore,
 				context: { requestId },
-				mode: ctx.mode,
+				mode,
 			},
 			unsafeRaw,
 		);
@@ -384,7 +548,7 @@ async function handleDebugTrace(
 			writeJson({
 				ok: true,
 				command: "debug trace export",
-				mode: ctx.mode,
+				mode,
 				data: {
 					request_id: requestId,
 					unsafe_raw_settlement_mode: view.unsafe_raw_settlement_mode,
@@ -401,7 +565,7 @@ async function handleDebugTrace(
 		writeJson({
 			ok: true,
 			command: "debug trace export",
-			mode: ctx.mode,
+			mode,
 			data: view.bundle,
 		});
 	} else if (!ctx.quiet) {
@@ -414,6 +578,18 @@ async function handleDebugDiagnose(
 	args: ParsedArgs,
 ): Promise<void> {
 	validateFlags(KNOWN_DIAGNOSE_FLAGS, args, "debug diagnose");
+	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
+
+	if (mode === "gateway") {
+		const requestId = requireStringFlag(args, "request", "debug diagnose");
+		const entry = await new GatewayClient(baseUrl).diagnose(requestId);
+		if (ctx.json) {
+			writeJson({ ok: true, command: "debug diagnose", mode, data: entry });
+		} else if (!ctx.quiet) {
+			writeText(renderText(entry));
+		}
+		return;
+	}
 
 	const entry = await withRuntime(ctx, (app) => {
 		const traceStore =
@@ -430,7 +606,7 @@ async function handleDebugDiagnose(
 		writeJson({
 			ok: true,
 			command: "debug diagnose",
-			mode: ctx.mode,
+			mode,
 			data: entry,
 		});
 	} else if (!ctx.quiet) {

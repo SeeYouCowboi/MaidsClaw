@@ -2,6 +2,17 @@ import type { GatewayEvent, GatewayEventType } from "../core/types.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
 import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
+import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import { diagnose } from "../cli/diagnostic-catalog.js";
+import {
+  loadChunksView,
+  loadLogsView,
+  loadMemoryView,
+  loadPromptView,
+  loadSummaryView,
+  loadTraceView,
+  loadTranscriptView,
+} from "../cli/inspect/view-models.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import { createSseStream } from "./sse.js";
@@ -18,6 +29,7 @@ export type ControllerContext = {
   healthChecks?: Record<string, HealthCheckFn>;
   createAgentLoop?: AgentLoopFactory;
   turnService?: TurnService;
+  runtime?: RuntimeBootstrapResult;
   /** Narrow hook to check if an agent is registered. Returns true if agent exists. */
   hasAgent?: (agentId: string) => boolean;
 };
@@ -100,6 +112,47 @@ function extractSessionId(url: URL): string | undefined {
     return parts[3];
   }
   return undefined;
+}
+
+function extractRequestId(url: URL): string | undefined {
+  const parts = url.pathname.split("/");
+  if (parts.length >= 4 && parts[1] === "v1" && parts[2] === "requests") {
+    return parts[3];
+  }
+  return undefined;
+}
+
+function extractOptionalQueryParam(url: URL, key: string): string | undefined {
+  const value = url.searchParams.get(key);
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function requireRuntime(ctx: ControllerContext): RuntimeBootstrapResult | Response {
+  if (ctx.runtime) {
+    return ctx.runtime;
+  }
+
+  const err = new MaidsClawError({
+    code: "INTERNAL_ERROR",
+    message: "Gateway runtime is unavailable",
+    retriable: false,
+  });
+  return errorResponse(err, 503);
+}
+
+function badRequest(message: string): Response {
+  return errorResponse(
+    new MaidsClawError({
+      code: "INTERNAL_ERROR",
+      message,
+      retriable: false,
+    }),
+    400,
+  );
 }
 
 // ── Controllers ──────────────────────────────────────────────────────────────
@@ -456,4 +509,180 @@ export async function handleRecoverSession(
 
   ctx.sessionService.clearRecoveryRequired(sessionId);
   return jsonResponse({ session_id: sessionId, recovered: true });
+}
+
+export function handleRequestSummary(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const requestId = extractRequestId(new URL(req.url));
+  if (!requestId) {
+    return badRequest("Missing request_id in path");
+  }
+
+  return jsonResponse(
+    loadSummaryView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: { requestId },
+      mode: "gateway",
+    }),
+  );
+}
+
+export function handleRequestPrompt(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const requestId = extractRequestId(new URL(req.url));
+  if (!requestId) {
+    return badRequest("Missing request_id in path");
+  }
+
+  return jsonResponse(
+    loadPromptView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: { requestId },
+      mode: "gateway",
+    }),
+  );
+}
+
+export function handleRequestChunks(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const requestId = extractRequestId(new URL(req.url));
+  if (!requestId) {
+    return badRequest("Missing request_id in path");
+  }
+
+  return jsonResponse(
+    loadChunksView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: { requestId },
+      mode: "gateway",
+    }),
+  );
+}
+
+export function handleRequestDiagnose(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const requestId = extractRequestId(new URL(req.url));
+  if (!requestId) {
+    return badRequest("Missing request_id in path");
+  }
+
+  return jsonResponse(
+    diagnose({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: { requestId },
+    }),
+  );
+}
+
+export function handleRequestTrace(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const requestId = extractRequestId(new URL(req.url));
+  if (!requestId) {
+    return badRequest("Missing request_id in path");
+  }
+
+  return jsonResponse(
+    loadTraceView(
+      {
+        runtime,
+        traceStore: runtime.traceStore,
+        context: { requestId },
+        mode: "gateway",
+      },
+      false,
+    ),
+  );
+}
+
+export function handleSessionTranscript(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const url = new URL(req.url);
+  const sessionId = extractSessionId(url);
+  if (!sessionId) {
+    return badRequest("Missing session_id in path");
+  }
+
+  return jsonResponse(
+    loadTranscriptView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: { sessionId },
+      raw: url.searchParams.get("raw") === "true",
+      mode: "gateway",
+    }),
+  );
+}
+
+export function handleSessionMemory(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const url = new URL(req.url);
+  const sessionId = extractSessionId(url);
+  if (!sessionId) {
+    return badRequest("Missing session_id in path");
+  }
+
+  return jsonResponse(
+    loadMemoryView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: {
+        sessionId,
+        agentId: extractOptionalQueryParam(url, "agent_id"),
+      },
+      mode: "gateway",
+    }),
+  );
+}
+
+export function handleLogs(req: Request, ctx: ControllerContext): Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+
+  const url = new URL(req.url);
+  return jsonResponse(
+    loadLogsView({
+      runtime,
+      traceStore: runtime.traceStore,
+      context: {
+        requestId: extractOptionalQueryParam(url, "request_id"),
+        sessionId: extractOptionalQueryParam(url, "session_id"),
+        agentId: extractOptionalQueryParam(url, "agent_id"),
+      },
+      mode: "gateway",
+    }),
+  );
 }

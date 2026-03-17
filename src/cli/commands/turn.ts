@@ -16,6 +16,7 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
+import { GatewayClient } from "../gateway-client.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -24,6 +25,7 @@ const KNOWN_SEND_FLAGS = new Set([
   "text",
   "agent",
   "mode",
+  "base-url",
   "raw",
   "save-trace",
   "json",
@@ -95,7 +97,7 @@ async function handleTurnSend(
     agentIdOverride = args.flags["agent"];
   }
 
-  // Optional: --mode (local|gateway) — only local supported for now
+  let mode: "local" | "gateway" = "local";
   if (args.flags["mode"] !== undefined) {
     if (typeof args.flags["mode"] !== "string") {
       throw new CliError(
@@ -111,13 +113,19 @@ async function handleTurnSend(
         EXIT_USAGE,
       );
     }
-    if (args.flags["mode"] === "gateway") {
+    mode = args.flags["mode"];
+  }
+
+  let baseUrl = "http://localhost:3000";
+  if (args.flags["base-url"] !== undefined) {
+    if (typeof args.flags["base-url"] !== "string") {
       throw new CliError(
-        "NOT_IMPLEMENTED",
-        "Gateway mode is not yet implemented. Use --mode local.",
-        EXIT_RUNTIME,
+        "MISSING_FLAG_VALUE",
+        "--base-url requires a value",
+        EXIT_USAGE,
       );
     }
+    baseUrl = args.flags["base-url"];
   }
 
   // Optional: --raw (include public_chunks and tool_events)
@@ -125,6 +133,75 @@ async function handleTurnSend(
 
   // Optional: --save-trace (enable trace capture)
   const saveTrace = args.flags["save-trace"] === true;
+
+  if (mode === "gateway") {
+    const client = new GatewayClient(baseUrl);
+    const streamed = await client.streamTurn({
+      sessionId,
+      text,
+      ...(agentIdOverride ? { agentId: agentIdOverride } : {}),
+    });
+
+    if (streamed.hadError) {
+      throw new CliError(
+        "TURN_STREAM_FAILED",
+        streamed.errorMessage ?? "Gateway turn failed",
+        EXIT_RUNTIME,
+      );
+    }
+
+    const summary = await client.getSummary(streamed.requestId);
+    const privateCommitKinds = summary.settlement.private_commit_kinds ?? [];
+
+    const responseData: Record<string, unknown> = {
+      session_id: summary.session_id ?? sessionId,
+      request_id: streamed.requestId,
+      assistant_text: streamed.assistantText,
+      has_public_reply: summary.has_public_reply,
+      private_commit: {
+        present: summary.private_commit_count > 0,
+        op_count: summary.private_commit_count,
+        kinds: privateCommitKinds,
+      },
+      recovery_required: summary.recovery_required,
+      ...(summary.settlement.settlement_id
+        ? { settlement_id: summary.settlement.settlement_id }
+        : {}),
+    };
+
+    if (raw) {
+      responseData.public_chunks = streamed.publicChunks;
+      responseData.tool_events = streamed.toolEvents;
+    }
+
+    if (ctx.json) {
+      writeJson({
+        ok: true,
+        command: "turn send",
+        mode,
+        data: responseData,
+      });
+    } else if (!ctx.quiet) {
+      const assistantText = typeof responseData.assistant_text === "string"
+        ? responseData.assistant_text
+        : "";
+      const privateCommit = responseData.private_commit as {
+        present: boolean;
+      };
+      if (assistantText) {
+        writeText(assistantText);
+      } else if (privateCommit.present) {
+        writeText("[silent turn — private commit only]");
+      } else {
+        writeText("[no output]");
+      }
+      if (summary.recovery_required) {
+        writeText("\n⚠ Session requires recovery.");
+      }
+    }
+
+    return;
+  }
 
   // Bootstrap runtime
   const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
@@ -203,7 +280,7 @@ async function handleTurnSend(
       writeJson({
         ok: true,
         command: "turn send",
-        mode: ctx.mode,
+        mode,
         data: responseData,
       });
     } else if (!ctx.quiet) {

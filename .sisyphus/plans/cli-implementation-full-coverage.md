@@ -912,7 +912,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add logs memory trace and diagnose commands` | Files: [`src/cli/commands/debug.ts`, `src/cli/diagnostic-catalog.ts`, `src/cli/trace-store.ts`, `src/cli/inspect/view-models.ts`, `src/memory/pending-settlement-sweeper.ts`]
 
-- [ ] 19. Enable Gateway Mode support and Session Shell / Standalone Wrapper Command equivalence
+- [x] 19. Enable Gateway Mode support and Session Shell / Standalone Wrapper Command equivalence
 
   **What to do**: Extend the transport abstraction and command surfaces so Gateway Mode satisfies the same session/turn/chat and inspect semantics as Local Mode. Add explicit remote evidence endpoints backed by the shared 请求级证据模型 / `Inspect 视图模型`: `GET /v1/requests/{request_id}/summary`, `GET /v1/requests/{request_id}/prompt`, `GET /v1/requests/{request_id}/chunks`, `GET /v1/requests/{request_id}/diagnose`, `GET /v1/requests/{request_id}/trace`, `GET /v1/sessions/{session_id}/transcript`, `GET /v1/sessions/{session_id}/memory[?agent_id=...]`, and `GET /v1/logs?request_id=...&session_id=...&agent_id=...`. Then add Gateway Mode support to `session *`, `turn send`, `chat`, and all `debug *` 独立包装命令 without changing their command contracts.
   **Must NOT do**: Do not overload SSE with raw settlement payload. Do not reconstruct inspect state from free-form logs or text scraping. Do not permit remote `--unsafe-raw`; `不安全 Raw Settlement 模式` remains local-only.

@@ -12,6 +12,7 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeText } from "../output.js";
+import { GatewayClient } from "../gateway-client.js";
 import { createShellState } from "../shell/state.js";
 import { SessionShell } from "../shell/session-shell.js";
 
@@ -121,18 +122,38 @@ async function handleChat(
 	// Optional: --save-trace
 	const saveTrace = args.flags["save-trace"] === true;
 
-	// Gateway mode not yet implemented
 	if (mode === "gateway") {
-		throw new CliError(
-			"NOT_IMPLEMENTED",
-			"Gateway mode is not yet implemented. Use --mode local.",
-			EXIT_RUNTIME,
-		);
+		const client = new GatewayClient(baseUrl ?? "http://localhost:3000");
+		if (!sessionId) {
+			const created = await client.createSession(agentId);
+			sessionId = created.session_id;
+		}
+
+		if (!ctx.quiet) {
+			writeText(`MaidsClaw Chat — session ${sessionId} — agent ${agentId}`);
+			writeText("Type a message to chat, or /help for slash commands.\n");
+		}
+
+		const state = createShellState({
+			sessionId,
+			agentId,
+			mode,
+			baseUrl,
+		});
+
+		const shell = new SessionShell(state, undefined, {
+			saveTrace,
+			gatewayClient: client,
+		});
+		await shell.run();
+
+		if (!ctx.quiet) {
+			writeText("\nGoodbye.");
+		}
+		return;
 	}
 
-	// Bootstrap runtime
 	const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-
 	let app: ReturnType<typeof bootstrapApp>;
 	try {
 		app = bootstrapApp({
