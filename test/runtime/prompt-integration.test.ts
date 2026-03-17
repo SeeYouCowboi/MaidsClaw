@@ -291,10 +291,10 @@ describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
 
     const cognitionText = getRecentCognition("rp:alice", session.sessionId, db);
 
-    expect(cognitionText).toContain("\u2022 [assertion] self trusts Bob (accepted)");
-    expect(cognitionText).toContain("\u2022 [evaluation] eval Bob [trust:8, warmth:7]");
-    expect(cognitionText).toContain("\u2022 [commitment] goal: protect Bob from harm (active)");
-    expect(cognitionText).toContain("\u2022 [assertion] [retracted]");
+    expect(cognitionText).toContain("\u2022 [assertion:trust-bob] self trusts Bob (accepted)");
+    expect(cognitionText).toContain("\u2022 [evaluation:eval-bob] eval Bob [trust:8, warmth:7]");
+    expect(cognitionText).toContain("\u2022 [commitment:goal-protect-bob] goal: protect Bob from harm (active)");
+    expect(cognitionText).toContain("\u2022 [assertion:old-grudge] (retracted)");
   });
 });
 
