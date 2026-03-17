@@ -44,7 +44,10 @@ import { runSessionMigrations } from "../session/migrations.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
-import { ensureDirectoryExists, resolveStoragePaths } from "../storage/paths.js";
+import {
+	ensureDirectoryExists,
+	resolveStoragePaths,
+} from "../storage/paths.js";
 import { registerRuntimeTools } from "./tools.js";
 import type {
 	MemoryPipelineStatus,
@@ -142,7 +145,10 @@ function buildHealthChecks(
 	return healthChecks;
 }
 
-function buildAgentRegistry(options: RuntimeBootstrapOptions, runtimeCwd: string): AgentRegistry {
+function buildAgentRegistry(
+	options: RuntimeBootstrapOptions,
+	runtimeCwd: string,
+): AgentRegistry {
 	const registry = new AgentRegistry();
 	const mergedProfiles = new Map<string, AgentProfile>();
 

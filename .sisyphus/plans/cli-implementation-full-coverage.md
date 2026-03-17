@@ -644,7 +644,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): normalize local turn transport` | Files: [`src/cli/local-runtime.ts`, `src/cli/types.ts`, `src/runtime/turn-service.ts`]
 
-- [ ] 13. Implement Local Mode `session *` and `turn send` on the normalized transport contract
+- [x] 13. Implement Local Mode `session *` and `turn send` on the normalized transport contract
 
   **What to do**: Implement `session create`, `session close`, `session recover`, and `turn send` for Local Mode on top of T12. Preserve `--raw`, `--save-trace`, and JSON-safe non-interactive output. `turn send` must emit assistant text, optional tool events, public raw chunks in `--raw`, settlement-aware result fields for RP turns, and success for silent-private outcomes. `session close` must surface whether session-close flush ran; `session recover` must call `discard_partial_turn` semantics and state explicitly that recovery does not canonize partial output. Keep the command transport boundary clean so T19 can later add Gateway Mode without changing command semantics.
   **Must NOT do**: Do not expose internal `submit_rp_turn` payloads via `--raw`. Do not treat silent-private turns as empty-output failures. Do not let `session recover` silently no-op on non-recovery sessions.
@@ -776,7 +776,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add trace capture and trace store` | Files: [`src/cli/trace-store.ts`, `src/core/agent-loop.ts`, `src/runtime/turn-service.ts`, `src/memory/pending-settlement-sweeper.ts`, `src/interaction/redaction.ts`]
 
-- [ ] 16. Build the shared 请求级证据模型、Inspect 视图模型、and diagnostic catalog
+- [x] 16. Build the shared 请求级证据模型、Inspect 视图模型、and diagnostic catalog
 
   **What to do**: Implement `src/cli/inspect/context-resolver.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`, and `src/cli/diagnostic-catalog.ts`. These modules must load and normalize request/session evidence from interaction records, redacted settlements, trace bundles, recent cognition slots, flush state, pending sweeper jobs, runtime health, and captured logs; expose stable `Inspect 视图模型` for `summary`, `transcript`, `prompt`, `chunks`, `logs`, `memory`, `trace export`, and `diagnose`; and centrally enforce the distinction between `Raw 观察模式` and local-only `不安全 Raw Settlement 模式`. This task must land before any Gateway Mode endpoints or独立包装命令 consume the model.
   **Must NOT do**: Do not let shell inspect or独立包装命令 bypass these view models. Do not use free-form grep over log text as the primary evidence source. Do not let `--raw` imply raw settlement access.

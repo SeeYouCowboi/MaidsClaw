@@ -16,6 +16,8 @@ import { registerConfigCommands } from "../src/cli/commands/config.js";
 import { registerAgentCommands } from "../src/cli/commands/agent.js";
 import { registerServerCommands } from "../src/cli/commands/server.js";
 import { registerHealthCommand } from "../src/cli/commands/health.js";
+import { registerSessionCommands } from "../src/cli/commands/session.js";
+import { registerTurnCommands } from "../src/cli/commands/turn.js";
 
 // ── Stub handler factory ─────────────────────────────────────────────
 
@@ -63,21 +65,11 @@ registerHealthCommand();
 // agent namespace — real handlers from src/cli/commands/agent.ts
 registerAgentCommands();
 
-// session namespace
-for (const sub of ["create", "close", "recover"]) {
-  registerCommand({
-    namespace: "session",
-    subcommand: sub,
-    handler: stubHandler(`session ${sub}`),
-  });
-}
+// session namespace — real handlers from src/cli/commands/session.ts
+registerSessionCommands();
 
-// turn namespace
-registerCommand({
-  namespace: "turn",
-  subcommand: "send",
-  handler: stubHandler("turn send"),
-});
+// turn namespace — real handler from src/cli/commands/turn.ts
+registerTurnCommands();
 
 // chat (namespace-only, interactive — REJECTS --json)
 registerCommand({
