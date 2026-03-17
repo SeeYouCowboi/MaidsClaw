@@ -23,6 +23,7 @@ import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { runMemoryMigrations } from "../memory/schema.js";
+import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
 import { TransactionBatcher } from "../memory/transaction-batcher.js";
@@ -31,6 +32,7 @@ import { PersonaService } from "../persona/service.js";
 import { SessionService } from "../session/service.js";
 import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { TurnService } from "../runtime/turn-service.js";
+import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
 import { Blackboard } from "../state/blackboard.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
 import { resolveStoragePaths } from "../storage/paths.js";
@@ -48,7 +50,9 @@ function resolveDatabasePath(options: RuntimeBootstrapOptions): string {
     return options.databasePath;
   }
 
-  const envDbPath = process.env.MAIDSCLAW_DB_PATH;
+  const envDbPath = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env?.MAIDSCLAW_DB_PATH;
   return resolveStoragePaths({ databasePath: envDbPath }).databasePath;
 }
 
@@ -57,7 +61,9 @@ function resolveDataDir(options: RuntimeBootstrapOptions): string {
     return options.dataDir;
   }
 
-  const envDataDir = process.env.MAIDSCLAW_DATA_DIR;
+  const envDataDir = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env?.MAIDSCLAW_DATA_DIR;
   return resolveStoragePaths({ dataDir: envDataDir }).dataDir;
 }
 
@@ -165,6 +171,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   const interactionStore = new InteractionStore(db);
   const commitService = new CommitService(interactionStore);
   const flushSelector = new FlushSelector(interactionStore);
+  const graphStorage = new GraphStorageService(db);
 
   registerRuntimeTools(toolExecutor, runtimeServices);
 
@@ -198,12 +205,11 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
         }
 
         if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
-          const storage = new GraphStorageService(db);
           const coreMemory = new CoreMemoryService(db);
           const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
-          const materialization = new MaterializationService(db.raw, storage);
+          const materialization = new MaterializationService(db.raw, graphStorage);
           const provider = new MemoryTaskModelProviderAdapter(modelRegistry, memoryMigrationModelId, effectiveOrganizerEmbeddingModelId!);
-          memoryTaskAgent = new MemoryTaskAgent(db.raw, storage, coreMemory, embeddings, materialization, provider);
+          memoryTaskAgent = new MemoryTaskAgent(db.raw, graphStorage, coreMemory, embeddings, materialization, provider);
           memoryPipelineReady = true;
           memoryPipelineStatus = "ready";
         }
@@ -246,6 +252,15 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   });
 
   const promptRenderer = new PromptRenderer();
+  const viewerContextResolver = ({
+    sessionId,
+    agentId,
+    role,
+  }: {
+    sessionId: string;
+    agentId: string;
+    role: AgentProfile["role"];
+  }) => resolveViewerContext(agentId, blackboard, { sessionId, role });
 
   const createAgentLoop = (agentId: string): AgentLoop | null => {
     const profile = agentRegistry.get(agentId);
@@ -261,8 +276,7 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
         toolExecutor,
         promptBuilder,
         promptRenderer,
-        viewerContextResolver: ({ sessionId, agentId, role }) =>
-          resolveViewerContext(agentId, blackboard, { sessionId, role }),
+        viewerContextResolver,
       });
     } catch {
       return null;
@@ -272,14 +286,55 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
   const turnServiceAgentLoop = {
     async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
       const canonicalAgentId = sessionService.getSession(request.sessionId)?.agentId ?? MAIDEN_PROFILE.id;
+      const profile = agentRegistry.get(canonicalAgentId);
       const loop = createAgentLoop(canonicalAgentId);
       if (!loop) {
         throw new Error(`No agent loop available for agent '${canonicalAgentId}'`);
       }
 
+      if (profile?.role === "rp_agent") {
+        const bufferedResult = await loop.runBuffered(request);
+        if ("error" in bufferedResult) {
+          yield {
+            type: "error",
+            code: "RP_BUFFERED_EXECUTION_FAILED",
+            message: bufferedResult.error,
+            retriable: false,
+          };
+          return;
+        }
+
+        if (bufferedResult.outcome.publicReply.length > 0) {
+          yield {
+            type: "text_delta",
+            text: bufferedResult.outcome.publicReply,
+          };
+        }
+
+        yield {
+          type: "message_end",
+          stopReason: "end_turn",
+        };
+        return;
+      }
+
       for await (const chunk of loop.run(request)) {
         yield chunk;
       }
+    },
+    async runBuffered(request: AgentRunRequest): Promise<RpBufferedExecutionResult> {
+      const canonicalAgentId = sessionService.getSession(request.sessionId)?.agentId ?? MAIDEN_PROFILE.id;
+      const profile = agentRegistry.get(canonicalAgentId);
+      const loop = createAgentLoop(canonicalAgentId);
+      if (!loop) {
+        throw new Error(`No agent loop available for agent '${canonicalAgentId}'`);
+      }
+
+      if (profile?.role !== "rp_agent") {
+        return { error: `Buffered RP mode is only available for rp_agent sessions` };
+      }
+
+      return loop.runBuffered(request);
     },
   } as unknown as AgentLoop;
 
@@ -290,9 +345,18 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     flushSelector,
     memoryTaskAgent,
     sessionService,
+    viewerContextResolver,
+    options.projectionSink,
+    graphStorage,
   );
 
+  const pendingSettlementSweeper = memoryTaskAgent
+    ? new PendingSettlementSweeper(db, interactionStore, flushSelector, memoryTaskAgent)
+    : null;
+  pendingSettlementSweeper?.start();
+
   const shutdown = (): void => {
+    pendingSettlementSweeper?.stop();
     closeDatabaseGracefully(db);
   };
 

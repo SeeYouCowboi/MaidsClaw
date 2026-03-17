@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema";
 import { CoreMemoryService } from "./core-memory";
-import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence } from "./prompt-data";
+import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition } from "./prompt-data";
+import { openDatabase, closeDatabaseGracefully, type Db } from "../storage/database.js";
+import { runInteractionMigrations } from "../interaction/schema.js";
 import type { ViewerContext, NavigatorResult, NodeRef } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -457,5 +459,140 @@ describe("formatNavigatorEvidence", () => {
     expect(output).not.toContain("<user>");
     expect(output).not.toContain("<assistant>");
     expect(output).not.toContain("You are");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRecentCognition
+// ---------------------------------------------------------------------------
+
+describe("getRecentCognition", () => {
+  let db: Db;
+
+  function insertSlot(agentId: string, sessionId: string, entries: unknown[]) {
+    db.run(
+      "INSERT OR REPLACE INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at) VALUES (?, ?, ?, ?, ?)",
+      [sessionId, agentId, "stl:test", JSON.stringify(entries), Date.now()],
+    );
+  }
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runInteractionMigrations(db);
+  });
+
+  it("returns empty string when no slot exists", () => {
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    expect(result).toBe("");
+  });
+
+  it("returns empty string for invalid JSON payload", () => {
+    db.run(
+      "INSERT INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ["sess-1", "agent-1", "stl:x", "not-json", Date.now()],
+    );
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    expect(result).toBe("");
+  });
+
+  it("recent cognition compresses latest state and retracts", () => {
+    const entries = [
+      { settlementId: "stl:1", committedAt: 1000, kind: "assertion", key: "trust-bob", summary: "self trusts Bob (accepted)", status: "active" },
+      { settlementId: "stl:2", committedAt: 2000, kind: "assertion", key: "trust-bob", summary: "self trusts Bob (tentative)", status: "active" },
+      { settlementId: "stl:1", committedAt: 1000, kind: "evaluation", key: "eval-bob", summary: "eval Bob [trust:5]", status: "active" },
+      { settlementId: "stl:2", committedAt: 2000, kind: "evaluation", key: "eval-bob", summary: "eval Bob [trust:8]", status: "active" },
+      { settlementId: "stl:3", committedAt: 3000, kind: "assertion", key: "old-grudge", summary: "(retracted)", status: "retracted" },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[assertion:trust-bob] self trusts Bob (tentative)");
+    expect(result).not.toContain("self trusts Bob (accepted)");
+
+    expect(result).toContain("[evaluation:eval-bob] eval Bob [trust:8]");
+    expect(result).not.toContain("eval Bob [trust:5]");
+
+    expect(result).toContain("[assertion:old-grudge] (retracted)");
+
+    const lines = result.split("\n");
+    expect(lines.length).toBe(3);
+
+    expect(lines[0]).toContain("[assertion:old-grudge]");
+    expect(lines[1]).toContain("[assertion:trust-bob]");
+    expect(lines[2]).toContain("[evaluation:eval-bob]");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("recent cognition caps rendered items to 10", () => {
+    const entries = Array.from({ length: 15 }, (_, i) => ({
+      settlementId: `stl:${i}`,
+      committedAt: 1000 + i,
+      kind: "assertion",
+      key: `key-${i}`,
+      summary: `summary ${i}`,
+      status: "active" as const,
+    }));
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    const lines = result.split("\n");
+    expect(lines.length).toBe(10);
+
+    expect(lines[0]).toContain("[assertion:key-14]");
+    expect(lines[9]).toContain("[assertion:key-5]");
+
+    expect(result).not.toContain("key-4");
+    expect(result).not.toContain("key-0");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("renders newest-first ordering by committedAt", () => {
+    const entries = [
+      { settlementId: "stl:1", committedAt: 3000, kind: "commitment", key: "goal-a", summary: "goal A", status: "active" },
+      { settlementId: "stl:2", committedAt: 1000, kind: "assertion", key: "fact-b", summary: "fact B", status: "active" },
+      { settlementId: "stl:3", committedAt: 2000, kind: "evaluation", key: "eval-c", summary: "eval C", status: "active" },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    const lines = result.split("\n");
+    expect(lines[0]).toContain("goal-a");
+    expect(lines[1]).toContain("eval-c");
+    expect(lines[2]).toContain("fact-b");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("staged recent cognition appears before flush but NOT in getMemoryHints", async () => {
+    // Run memory migrations to ensure search_docs_private table exists
+    createMemorySchema(db as unknown as Database);
+
+    // Insert staged cognition directly into recent_cognition_slots (simulating settlement-time staging)
+    const stagedEntries = [
+      {
+        settlementId: "stl:staged-1",
+        committedAt: Date.now(),
+        kind: "assertion",
+        key: "staged-belief",
+        summary: "This is a staged belief before flush",
+        status: "active" as const,
+      },
+    ];
+    insertSlot("agent-1", "sess-1", stagedEntries);
+
+    // Verify getRecentCognition returns the staged entry (pre-flush continuity)
+    const recentResult = getRecentCognition("agent-1", "sess-1", db);
+    expect(recentResult).toContain("[assertion:staged-belief]");
+    expect(recentResult).toContain("This is a staged belief before flush");
+
+    // Verify getMemoryHints does NOT include staged cognition (retrieval is flush-backed only)
+    const ctx = makeViewerContext({ viewer_agent_id: "agent-1", session_id: "sess-1" });
+    const hintsResult = await getMemoryHints("staged belief", ctx, db);
+    expect(hintsResult).toBe("");
+
+    closeDatabaseGracefully(db);
   });
 });

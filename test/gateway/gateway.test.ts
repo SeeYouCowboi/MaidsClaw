@@ -966,6 +966,64 @@ describe("Real TurnService-backed gateway path", () => {
     }
   });
 
+  it("real-path RP session emits status, full delta, then done", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "tool_use_start", id: "call_1", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_1",
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"Welcome back, master."}',
+        },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      sessionService: runtime.sessionService,
+      turnService: runtime.turnService,
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "rp:default" }),
+      });
+      expect(createRes.status).toBe(201);
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "rp:default",
+          request_id: "req-real-rp-1",
+          user_message: { id: "msg-rp-1", text: "Hello" },
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const events = parseSseEvents(await res.text());
+      expect(events.map((event) => event.type)).toEqual(["status", "delta", "done"]);
+      expect(events[1]?.data).toEqual({ text: "Welcome back, master." });
+      expect(events[2]?.data).toEqual({ total_tokens: 0 });
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
   it("real-path failed turn sets recovery_required and blocks next turn", async () => {
     const chunkRef: { value: Chunk[] } = {
       value: [

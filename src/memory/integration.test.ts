@@ -476,4 +476,315 @@ describe("Memory integration", () => {
 		expect(verdict).toBe("APPROVE");
 		console.info(`Main [${passed}/${total} pass] | VERDICT: ${verdict}`);
 	});
+
+	it("explicit cognition becomes searchable after flush organize", async () => {
+		const db = freshDb();
+		const storage = new GraphStorageService(db);
+		const coreMemory = new CoreMemoryService(db);
+		const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+		const materialization = new MaterializationService(db, storage);
+		const retrieval = new RetrievalService(db);
+
+		coreMemory.initializeBlocks("agent-1");
+
+		storage.upsertEntity({
+			pointerKey: "__self__",
+			displayName: "Maid",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "agent-1",
+		});
+		storage.upsertEntity({
+			pointerKey: "__user__",
+			displayName: "Master",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "agent-1",
+		});
+
+		const provider = new MockModelProvider(
+			[
+				[],
+				[],
+				[{ name: "update_index_block", arguments: { new_text: "" } }],
+			],
+			[
+				new Float32Array([1, 0]),
+				new Float32Array([0.99, 0.01]),
+				new Float32Array([0.98, 0.02]),
+			],
+		);
+
+		const flushRequest: MemoryFlushRequest = {
+			sessionId: "session-rp-1",
+			agentId: "agent-1",
+			rangeStart: 1,
+			rangeEnd: 3,
+			flushMode: "dialogue_slice",
+			idempotencyKey: "queue:explicit-search-1",
+			queueOwnerAgentId: "agent-1",
+			dialogueRecords: [
+				{ role: "user", content: "I trust you", timestamp: 1000, recordId: "u-trust", recordIndex: 1 },
+				{ role: "assistant", content: "Thank you master", timestamp: 1100, recordId: "a-trust", recordIndex: 2 },
+			],
+			interactionRecords: [
+				{
+					sessionId: "session-rp-1",
+					recordId: "u-trust",
+					recordIndex: 1,
+					actorType: "user",
+					recordType: "message",
+					payload: { role: "user", content: "I trust you" },
+					correlatedTurnId: "req-trust",
+					committedAt: 1000,
+				},
+				{
+					sessionId: "session-rp-1",
+					recordId: "a-trust",
+					recordIndex: 2,
+					actorType: "rp_agent",
+					recordType: "message",
+					payload: { role: "assistant", content: "Thank you master" },
+					correlatedTurnId: "req-trust",
+					committedAt: 1100,
+				},
+				{
+					sessionId: "session-rp-1",
+					recordId: "stl:req-trust",
+					recordIndex: 3,
+					actorType: "rp_agent",
+					recordType: "turn_settlement",
+					payload: {
+						settlementId: "stl:req-trust",
+						requestId: "req-trust",
+						sessionId: "session-rp-1",
+						ownerAgentId: "agent-1",
+						publicReply: "Thank you master",
+						hasPublicReply: true,
+						viewerSnapshot: {
+							selfPointerKey: "__self__",
+							userPointerKey: "__user__",
+						},
+						privateCommit: {
+							schemaVersion: "rp_private_cognition_v3",
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "assert:master-trusts-me",
+										proposition: {
+											subject: { kind: "special", value: "user" },
+											predicate: "trusts",
+											object: { kind: "entity", ref: { kind: "special", value: "self" } },
+										},
+										stance: "accepted",
+									},
+								},
+							],
+						},
+					},
+					correlatedTurnId: "req-trust",
+					committedAt: 1150,
+				},
+			],
+		};
+
+		const taskAgent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+		const migration = await taskAgent.runMigrate(flushRequest);
+
+		const beliefRow = db
+			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-trusts-me'`)
+			.get() as { id: number } | null;
+		expect(beliefRow).not.toBeNull();
+		const beliefRef = makeNodeRef("private_belief", beliefRow!.id);
+
+		await taskAgent.runOrganize({
+			agentId: "agent-1",
+			sessionId: "session-rp-1",
+			batchId: "explicit-organize-1",
+			changedNodeRefs: [beliefRef],
+			embeddingModelId: "memory-task-organizer-v1",
+		});
+
+		const privateSearchDocs = db
+			.prepare(
+				`SELECT content FROM search_docs_private WHERE agent_id = 'agent-1' AND source_ref = ?`,
+			)
+			.all(beliefRef) as Array<{ content: string }>;
+		expect(privateSearchDocs.length).toBeGreaterThanOrEqual(1);
+		expect(privateSearchDocs.some((doc) => doc.content.includes("trusts"))).toBe(true);
+
+		const searchResults = await retrieval.searchVisibleNarrative("trusts", makeViewer());
+		expect(searchResults.some((row) => row.scope === "private")).toBe(true);
+	});
+
+	it("retracted explicit cognition is removed from private search docs after organizer", async () => {
+		const db = freshDb();
+		const storage = new GraphStorageService(db);
+		const coreMemory = new CoreMemoryService(db);
+		const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+		const materialization = new MaterializationService(db, storage);
+		const retrieval = new RetrievalService(db);
+
+		coreMemory.initializeBlocks("agent-1");
+
+		storage.upsertEntity({
+			pointerKey: "__self__",
+			displayName: "Maid",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "agent-1",
+		});
+		storage.upsertEntity({
+			pointerKey: "__user__",
+			displayName: "Master",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "agent-1",
+		});
+
+		const provider = new MockModelProvider(
+			[
+				[],
+				[],
+				[{ name: "update_index_block", arguments: { new_text: "" } }],
+				[{ name: "update_index_block", arguments: { new_text: "" } }],
+			],
+			[
+				new Float32Array([1, 0]),
+				new Float32Array([0.99, 0.01]),
+				new Float32Array([0.98, 0.02]),
+				new Float32Array([0.97, 0.03]),
+			],
+		);
+
+		// Step 1: Create an explicit assertion via flush pipeline
+		const flushRequest: MemoryFlushRequest = {
+			sessionId: "session-rp-1",
+			agentId: "agent-1",
+			rangeStart: 1,
+			rangeEnd: 3,
+			flushMode: "dialogue_slice",
+			idempotencyKey: "queue:retract-search-1",
+			queueOwnerAgentId: "agent-1",
+			dialogueRecords: [
+				{ role: "user", content: "I trust you completely", timestamp: 2000, recordId: "u-retract", recordIndex: 1 },
+				{ role: "assistant", content: "Thank you master", timestamp: 2100, recordId: "a-retract", recordIndex: 2 },
+			],
+			interactionRecords: [
+				{
+					sessionId: "session-rp-1",
+					recordId: "u-retract",
+					recordIndex: 1,
+					actorType: "user",
+					recordType: "message",
+					payload: { role: "user", content: "I trust you completely" },
+					correlatedTurnId: "req-retract",
+					committedAt: 2000,
+				},
+				{
+					sessionId: "session-rp-1",
+					recordId: "a-retract",
+					recordIndex: 2,
+					actorType: "rp_agent",
+					recordType: "message",
+					payload: { role: "assistant", content: "Thank you master" },
+					correlatedTurnId: "req-retract",
+					committedAt: 2100,
+				},
+				{
+					sessionId: "session-rp-1",
+					recordId: "stl:req-retract",
+					recordIndex: 3,
+					actorType: "rp_agent",
+					recordType: "turn_settlement",
+					payload: {
+						settlementId: "stl:req-retract",
+						requestId: "req-retract",
+						sessionId: "session-rp-1",
+						ownerAgentId: "agent-1",
+						publicReply: "Thank you master",
+						hasPublicReply: true,
+						viewerSnapshot: {
+							selfPointerKey: "__self__",
+							userPointerKey: "__user__",
+						},
+						privateCommit: {
+							schemaVersion: "rp_private_cognition_v3",
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "assert:master-loyalty",
+										proposition: {
+											subject: { kind: "special", value: "user" },
+											predicate: "is loyal to",
+											object: { kind: "entity", ref: { kind: "special", value: "self" } },
+										},
+										stance: "accepted",
+									},
+								},
+							],
+						},
+					},
+					correlatedTurnId: "req-retract",
+					committedAt: 2150,
+				},
+			],
+		};
+
+		const taskAgent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+		const migration = await taskAgent.runMigrate(flushRequest);
+
+		const beliefRow = db
+			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-loyalty'`)
+			.get() as { id: number } | null;
+		expect(beliefRow).not.toBeNull();
+		const beliefRef = makeNodeRef("private_belief", beliefRow!.id);
+
+		// Step 2: Run organizer — verify search_docs_private has the entry
+		await taskAgent.runOrganize({
+			agentId: "agent-1",
+			sessionId: "session-rp-1",
+			batchId: "retract-organize-1",
+			changedNodeRefs: [beliefRef],
+			embeddingModelId: "memory-task-organizer-v1",
+		});
+
+		const docsBeforeRetract = db
+			.prepare(`SELECT content FROM search_docs_private WHERE source_ref = ?`)
+			.all(beliefRef) as Array<{ content: string }>;
+		expect(docsBeforeRetract.length).toBeGreaterThanOrEqual(1);
+		expect(docsBeforeRetract.some((doc) => doc.content.includes("loyal"))).toBe(true);
+
+		// Step 3: Retract the assertion
+		storage.retractExplicitCognition("agent-1", "assert:master-loyalty", "assertion");
+
+		// Verify the row is now retracted
+		const retractedRow = db
+			.prepare(`SELECT epistemic_status FROM agent_fact_overlay WHERE id = ?`)
+			.get(beliefRow!.id) as { epistemic_status: string };
+		expect(retractedRow.epistemic_status).toBe("retracted");
+
+		// Step 4: Run organizer again with the retracted ref in changedNodeRefs
+		await taskAgent.runOrganize({
+			agentId: "agent-1",
+			sessionId: "session-rp-1",
+			batchId: "retract-organize-2",
+			changedNodeRefs: [beliefRef],
+			embeddingModelId: "memory-task-organizer-v1",
+		});
+
+		// Step 5: Verify search_docs_private entry is DELETED
+		const docsAfterRetract = db
+			.prepare(`SELECT content FROM search_docs_private WHERE source_ref = ?`)
+			.all(beliefRef) as Array<{ content: string }>;
+		expect(docsAfterRetract.length).toBe(0);
+
+		// Also verify it no longer appears in search results
+		const searchResults = await retrieval.searchVisibleNarrative("loyal", makeViewer());
+		expect(searchResults.some((row) => row.scope === "private")).toBe(false);
+	});
 });

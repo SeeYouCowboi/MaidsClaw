@@ -19,6 +19,7 @@ const VALID_RECORD_TYPES: readonly string[] = [
   "task_result",
   "schedule_trigger",
   "status",
+  "turn_settlement",
 ];
 
 export type CommitInput = Omit<InteractionRecord, "recordId" | "recordIndex" | "committedAt">;
@@ -31,6 +32,62 @@ export class CommitService {
   }
 
   commit(input: CommitInput): InteractionRecord {
+    return this.commitInternal(input);
+  }
+
+  commitWithId(input: CommitInput & { recordId: string }): InteractionRecord {
+    return this.commitInternal(input, input.recordId);
+  }
+
+  commitBatch(inputs: CommitInput[]): InteractionRecord[] {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    return this.store.runInTransaction(() => {
+      const nextIndexBySession = new Map<string, number>();
+      const records: InteractionRecord[] = [];
+
+      for (const input of inputs) {
+        this.validateInput(input);
+
+        if (!nextIndexBySession.has(input.sessionId)) {
+          nextIndexBySession.set(input.sessionId, this.getNextIndex(input.sessionId));
+        }
+
+        const recordIndex = nextIndexBySession.get(input.sessionId)!;
+        nextIndexBySession.set(input.sessionId, recordIndex + 1);
+
+        const record = this.buildRecord(input, crypto.randomUUID(), recordIndex);
+        this.store.commit(record);
+        records.push(record);
+      }
+
+      return records;
+    });
+  }
+
+  private commitInternal(input: CommitInput, recordIdOverride?: string): InteractionRecord {
+    this.validateInput(input);
+
+    if (recordIdOverride !== undefined && input.recordType !== "turn_settlement") {
+      throw new MaidsClawError({
+        code: "INTERACTION_INVALID_FIELD",
+        message: "Custom recordId is only allowed for turn_settlement records",
+        retriable: false,
+        details: { field: "recordId", recordType: input.recordType },
+      });
+    }
+
+    const recordId = recordIdOverride ?? crypto.randomUUID();
+    const recordIndex = this.getNextIndex(input.sessionId);
+
+    const record = this.buildRecord(input, recordId, recordIndex);
+    this.store.commit(record);
+    return record;
+  }
+
+  private validateInput(input: CommitInput): void {
     if (!VALID_ACTOR_TYPES.includes(input.actorType)) {
       throw new MaidsClawError({
         code: "INTERACTION_INVALID_FIELD",
@@ -48,9 +105,9 @@ export class CommitService {
         details: { field: "recordType", value: input.recordType },
       });
     }
+  }
 
-    const recordId = crypto.randomUUID();
-    const recordIndex = this.getNextIndex(input.sessionId);
+  private buildRecord(input: CommitInput, recordId: string, recordIndex: number): InteractionRecord {
     const committedAt = Date.now();
 
     const record: InteractionRecord = {
@@ -67,7 +124,6 @@ export class CommitService {
       record.correlatedTurnId = input.correlatedTurnId;
     }
 
-    this.store.commit(record);
     return record;
   }
 

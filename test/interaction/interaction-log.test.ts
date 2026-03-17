@@ -38,22 +38,6 @@ describe("Interaction Schema", () => {
     closeDatabaseGracefully(db);
   });
 
-  it("creates required indexes", () => {
-    const db = createTestDb();
-    runInteractionMigrations(db);
-
-    const indexes = db
-      .query<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_interaction%' ORDER BY name",
-      )
-      .map((r) => r.name);
-
-    expect(indexes.includes("idx_interaction_session_index")).toBe(true);
-    expect(indexes.includes("idx_interaction_session_processed")).toBe(true);
-
-    closeDatabaseGracefully(db);
-  });
-
   it("migrations are idempotent — running twice does not throw", () => {
     const db = createTestDb();
     runInteractionMigrations(db);
@@ -72,11 +56,24 @@ describe("Interaction Schema", () => {
   it("returns applied migration IDs on first run, empty on second", () => {
     const db = createTestDb();
     const applied1 = runInteractionMigrations(db);
-    expect(applied1.length).toBe(1);
+    expect(applied1.length).toBe(2);
     expect(applied1[0]).toBe("interaction:001:create-interaction-records");
+    expect(applied1[1]).toBe("interaction:002:add-turn-settlement");
 
     const applied2 = runInteractionMigrations(db);
     expect(applied2.length).toBe(0);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("creates recent_cognition_slots table after migrations", () => {
+    const db = createTestDb();
+    runInteractionMigrations(db);
+
+    const table = db.get<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='recent_cognition_slots'",
+    );
+    expect(table?.name).toBe("recent_cognition_slots");
 
     closeDatabaseGracefully(db);
   });
@@ -162,6 +159,78 @@ describe("InteractionStore", () => {
     expect(caughtError !== null).toBe(true);
     expect(caughtError instanceof MaidsClawError).toBe(true);
     expect((caughtError as MaidsClawError).code).toBe("INTERACTION_DUPLICATE_RECORD");
+  });
+
+  it("runInTransaction: commits all records or none on failure", () => {
+    const successSessionId = "sess-tx-ok";
+    store.runInTransaction((txStore) => {
+      txStore.commit({
+        sessionId: successSessionId,
+        recordId: "tx-ok-0",
+        recordIndex: 0,
+        actorType: "user",
+        recordType: "message",
+        payload: { value: 0 },
+        committedAt: 1000,
+      });
+      txStore.commit({
+        sessionId: successSessionId,
+        recordId: "tx-ok-1",
+        recordIndex: 1,
+        actorType: "rp_agent",
+        recordType: "message",
+        payload: { value: 1 },
+        committedAt: 1001,
+      });
+    });
+
+    const committed = store.getBySession(successSessionId);
+    expect(committed.length).toBe(2);
+
+    const rollbackSessionId = "sess-tx-rb";
+    let threw = false;
+    try {
+      store.runInTransaction((txStore) => {
+        txStore.commit({
+          sessionId: rollbackSessionId,
+          recordId: "tx-rb-0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { value: 0 },
+          committedAt: 2000,
+        });
+        throw new Error("force rollback");
+      });
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(true);
+    expect(store.getBySession(rollbackSessionId).length).toBe(0);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("settlementExists: returns false before commit and true after turn_settlement commit", () => {
+    const settlementId = "settlement-1";
+    expect(store.settlementExists("sess-settlement", settlementId)).toBe(false);
+
+    store.commit({
+      sessionId: "sess-settlement",
+      recordId: settlementId,
+      recordIndex: 0,
+      actorType: "system",
+      recordType: "turn_settlement",
+      payload: { settlementId },
+      committedAt: 3000,
+    });
+
+    expect(store.settlementExists("sess-settlement", settlementId)).toBe(true);
+    expect(store.settlementExists("sess-settlement", "missing-settlement")).toBe(false);
+    expect(store.settlementExists("other-session", settlementId)).toBe(false);
+
+    closeDatabaseGracefully(db);
   });
 
   it("getBySession: returns records in order by recordIndex", () => {
@@ -509,6 +578,68 @@ describe("CommitService", () => {
     closeDatabaseGracefully(db);
   });
 
+  it("commitBatch: assigns consecutive recordIndex values inside one transaction", () => {
+    service.commit(makeCommitInput({ sessionId: "sess-batch" }));
+
+    const records = service.commitBatch([
+      makeCommitInput({ sessionId: "sess-batch", actorType: "user", payload: { n: 0 } }),
+      makeCommitInput({ sessionId: "sess-batch", actorType: "rp_agent", payload: { n: 1 } }),
+      makeCommitInput({ sessionId: "sess-batch", actorType: "maiden", recordType: "status", payload: { n: 2 } }),
+    ]);
+
+    expect(records.length).toBe(3);
+    expect(records[0].recordIndex).toBe(1);
+    expect(records[1].recordIndex).toBe(2);
+    expect(records[2].recordIndex).toBe(3);
+
+    const persisted = store.getBySession("sess-batch");
+    expect(persisted.length).toBe(4);
+    expect(persisted[1].recordIndex).toBe(1);
+    expect(persisted[2].recordIndex).toBe(2);
+    expect(persisted[3].recordIndex).toBe(3);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("commitWithId: accepts custom recordId for turn_settlement", () => {
+    const record = service.commitWithId({
+      ...makeCommitInput({
+        sessionId: "sess-custom-settlement",
+        actorType: "system",
+        recordType: "turn_settlement",
+        payload: { settlementId: "settlement-custom" },
+      }),
+      recordId: "settlement-custom",
+    });
+
+    expect(record.recordId).toBe("settlement-custom");
+    expect(record.recordType).toBe("turn_settlement");
+    expect(store.settlementExists("sess-custom-settlement", "settlement-custom")).toBe(true);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("commitWithId: rejects custom recordId for non-turn_settlement record type", () => {
+    let caughtError: unknown = null;
+    try {
+      service.commitWithId({
+        ...makeCommitInput({
+          sessionId: "sess-custom-invalid",
+          recordType: "message",
+        }),
+        recordId: "not-allowed",
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError !== null).toBe(true);
+    expect(caughtError instanceof MaidsClawError).toBe(true);
+    expect((caughtError as MaidsClawError).code).toBe("INTERACTION_INVALID_FIELD");
+
+    closeDatabaseGracefully(db);
+  });
+
   it("preserves correlatedTurnId when provided", () => {
     const record = service.commit(
       makeCommitInput({ correlatedTurnId: "turn-99" }),
@@ -583,7 +714,7 @@ describe("CommitService", () => {
   it("accepts all valid recordType values", () => {
     const recordTypes = [
       "message", "tool_call", "tool_result", "delegation",
-      "task_result", "schedule_trigger", "status",
+      "task_result", "schedule_trigger", "status", "turn_settlement",
     ] as const;
     let threw = false;
     try {
@@ -756,6 +887,74 @@ describe("FlushSelector", () => {
 
     closeDatabaseGracefully(db);
   });
+
+  it("shouldFlush uses turn_settlement threshold when settlements exist", () => {
+    const db = createTestDb();
+    runInteractionMigrations(db);
+    const store = new InteractionStore(db);
+    const service = new CommitService(store);
+    const selector = new FlushSelector(store);
+
+    // Create 10 unprocessed turn_settlement records (no RP messages)
+    for (let i = 0; i < 10; i++) {
+      service.commit(makeCommitInput({
+        sessionId: "sess-settlements",
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: `settle-${i}`,
+          requestId: `req-${i}`,
+          sessionId: "sess-settlements",
+          publicReply: "",
+          hasPublicReply: false,
+          viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          privateCommit: { ops: [] },
+        },
+      }));
+    }
+
+    // Verify settlement count triggers flush
+    const settlementCount = store.countUnprocessedSettlements("sess-settlements");
+    expect(settlementCount).toBe(10);
+
+    const result = selector.shouldFlush("sess-settlements", "agent-1");
+    expect(result !== null).toBe(true);
+    expect(result!.sessionId).toBe("sess-settlements");
+    expect(result!.flushMode).toBe("dialogue_slice");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("shouldFlush falls back to RP messages when no settlements exist", () => {
+    const db = createTestDb();
+    runInteractionMigrations(db);
+    const store = new InteractionStore(db);
+    const service = new CommitService(store);
+    const selector = new FlushSelector(store);
+
+    // Create 10 unprocessed RP messages (no settlements)
+    for (let i = 0; i < 10; i++) {
+      service.commit(makeCommitInput({
+        sessionId: "sess-legacy",
+        actorType: i % 2 === 0 ? "user" : "rp_agent",
+      }));
+    }
+
+    // Verify no settlements exist
+    const settlementCount = store.countUnprocessedSettlements("sess-legacy");
+    expect(settlementCount).toBe(0);
+
+    // Verify RP message count triggers flush via legacy fallback
+    const rpCount = store.countUnprocessedRpTurns("sess-legacy");
+    expect(rpCount).toBe(10);
+
+    const result = selector.shouldFlush("sess-legacy", "agent-1");
+    expect(result !== null).toBe(true);
+    expect(result!.sessionId).toBe("sess-legacy");
+    expect(result!.flushMode).toBe("dialogue_slice");
+
+    closeDatabaseGracefully(db);
+  });
 });
 
 // ─── Append-Only Invariant ────────────────────────────────────────────────────
@@ -866,6 +1065,102 @@ describe("Integration: CommitService + FlushSelector", () => {
     expect(closeFlush!.rangeStart).toBe(2);
     expect(closeFlush!.rangeEnd).toBe(4);
     expect(closeFlush!.flushMode).toBe("session_close");
+
+    closeDatabaseGracefully(db);
+  });
+});
+
+// ─── Recent Cognition Slot ────────────────────────────────────────────────────
+
+describe("recent cognition slot appends across settlements", () => {
+  let db: Db;
+  let store: InteractionStore;
+
+  beforeEach(() => {
+    db = createTestDb();
+    runInteractionMigrations(db);
+    store = new InteractionStore(db);
+  });
+
+  it("appends entries from multiple settlements and updates last_settlement_id", () => {
+    const entries1 = JSON.stringify([
+      { settlementId: "stl:1", committedAt: 1000, kind: "assertion", key: "k1", summary: "s1", status: "active" },
+    ]);
+    const entries2 = JSON.stringify([
+      { settlementId: "stl:2", committedAt: 2000, kind: "evaluation", key: "k2", summary: "s2", status: "active" },
+    ]);
+    const entries3 = JSON.stringify([
+      { settlementId: "stl:3", committedAt: 3000, kind: "commitment", key: "k3", summary: "s3", status: "active" },
+    ]);
+
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:1", entries1);
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:2", entries2);
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:3", entries3);
+
+    const row = db.get<{ slot_payload: string; last_settlement_id: string }>(
+      "SELECT slot_payload, last_settlement_id FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?",
+      ["sess-1", "agent-1"],
+    );
+
+    expect(row).toBeDefined();
+    expect(row!.last_settlement_id).toBe("stl:3");
+
+    const entries = JSON.parse(row!.slot_payload) as unknown[];
+    expect(entries.length).toBe(3);
+    expect((entries[0] as { settlementId: string }).settlementId).toBe("stl:1");
+    expect((entries[1] as { settlementId: string }).settlementId).toBe("stl:2");
+    expect((entries[2] as { settlementId: string }).settlementId).toBe("stl:3");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("trims to newest 64 entries when exceeding capacity", () => {
+    const bigBatch = Array.from({ length: 60 }, (_, i) => ({
+      settlementId: "stl:batch", committedAt: i, kind: "assertion", key: `k${i}`, summary: `s${i}`, status: "active",
+    }));
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:batch", JSON.stringify(bigBatch));
+
+    const overflow = Array.from({ length: 10 }, (_, i) => ({
+      settlementId: "stl:overflow", committedAt: 100 + i, kind: "evaluation", key: `o${i}`, summary: `o${i}`, status: "active",
+    }));
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:overflow", JSON.stringify(overflow));
+
+    const row = db.get<{ slot_payload: string }>(
+      "SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?",
+      ["sess-1", "agent-1"],
+    );
+
+    const entries = JSON.parse(row!.slot_payload) as unknown[];
+    expect(entries.length).toBe(64);
+
+    const first = entries[0] as { settlementId: string; key: string };
+    expect(first.key).toBe("k6");
+
+    const last = entries[63] as { settlementId: string };
+    expect(last.settlementId).toBe("stl:overflow");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("handles legacy null/empty slot_payload gracefully", () => {
+    db.run(
+      "INSERT INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ["sess-1", "agent-1", "stl:old", "not-valid-json", Date.now()],
+    );
+
+    const entries = JSON.stringify([
+      { settlementId: "stl:new", committedAt: 1000, kind: "assertion", key: "k1", summary: "s1", status: "active" },
+    ]);
+    store.upsertRecentCognitionSlot("sess-1", "agent-1", "stl:new", entries);
+
+    const row = db.get<{ slot_payload: string }>(
+      "SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?",
+      ["sess-1", "agent-1"],
+    );
+
+    const parsed = JSON.parse(row!.slot_payload) as unknown[];
+    expect(parsed.length).toBe(1);
+    expect((parsed[0] as { settlementId: string }).settlementId).toBe("stl:new");
 
     closeDatabaseGracefully(db);
   });

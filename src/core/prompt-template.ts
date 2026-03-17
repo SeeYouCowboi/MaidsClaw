@@ -9,6 +9,7 @@ export enum PromptSectionSlot {
   SYSTEM_PREAMBLE = "system_preamble",    // Required: agent identity/role
   WORLD_RULES = "world_rules",            // Optional: lore canon world rules
   CORE_MEMORY = "core_memory",            // Optional: agent's core memory blocks
+  RECENT_COGNITION = "recent_cognition",  // Optional: recent private cognition entries
   LORE_ENTRIES = "lore_entries",           // Optional: triggered lore entries
   OPERATIONAL_STATE = "operational_state", // Optional: blackboard excerpts
   MEMORY_HINTS = "memory_hints",          // Optional: memory search results
@@ -23,6 +24,7 @@ export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
   PromptSectionSlot.CORE_MEMORY,
+  PromptSectionSlot.RECENT_COGNITION,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,
   PromptSectionSlot.MEMORY_HINTS,

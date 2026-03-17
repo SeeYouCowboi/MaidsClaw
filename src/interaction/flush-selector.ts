@@ -11,7 +11,14 @@ export class FlushSelector {
   }
 
   shouldFlush(sessionId: string, agentId: string): MemoryFlushRequest | null {
-    const count = this.store.countUnprocessedRpTurns(sessionId);
+    // Settlement-aware flush detection with legacy fallback:
+    // ANY unprocessed settlements → use settlement count (captures silent-private turns).
+    // ZERO settlements → fall back to RP message count for legacy/hybrid sessions.
+    const settlementCount = this.store.countUnprocessedSettlements(sessionId);
+    const count = settlementCount > 0
+      ? settlementCount
+      : this.store.countUnprocessedRpTurns(sessionId);
+
     if (count < FLUSH_THRESHOLD) {
       return null;
     }

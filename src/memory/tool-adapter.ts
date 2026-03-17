@@ -58,7 +58,7 @@ function resolveViewerRole(context: DispatchContext | undefined, services: Runti
 }
 
 export function adaptMemoryTool(memTool: MemoryToolDefinition, services: RuntimeServices): ToolDefinition {
-  return {
+  const adapted: ToolDefinition = {
     name: memTool.name,
     description: memTool.description,
     parameters: memTool.parameters,
@@ -71,4 +71,7 @@ export function adaptMemoryTool(memTool: MemoryToolDefinition, services: Runtime
       return memTool.handler(args, viewerContext);
     },
   };
+  if (memTool.effectClass) adapted.effectClass = memTool.effectClass;
+  if (memTool.traceVisibility) adapted.traceVisibility = memTool.traceVisibility;
+  return adapted;
 }

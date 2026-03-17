@@ -1,6 +1,7 @@
 import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
+
 import type { NavigatorResult, ViewerContext } from "./types";
 
 /**
@@ -100,4 +101,62 @@ export function formatNavigatorEvidence(
   }
 
   return lines.join("\n").trimEnd();
+}
+
+type RecentCognitionSlotRow = {
+  slot_payload: string;
+};
+
+type RecentCognitionEntry = {
+  settlementId: string;
+  committedAt: number;
+  kind: string;
+  key: string;
+  summary: string;
+  status?: "active" | "retracted";
+};
+
+export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
+  const row = db.get<RecentCognitionSlotRow>(
+    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
+    [sessionId, agentId],
+  );
+
+  if (row === undefined) {
+    return "";
+  }
+
+  let entries: RecentCognitionEntry[];
+  try {
+    entries = JSON.parse(row.slot_payload) as RecentCognitionEntry[];
+  } catch {
+    return "";
+  }
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return "";
+  }
+
+  const latestByKey = new Map<string, RecentCognitionEntry>();
+  for (const entry of entries) {
+    const compoundKey = `${entry.kind}:${entry.key}`;
+    const existing = latestByKey.get(compoundKey);
+    if (!existing || (entry.committedAt ?? 0) >= (existing.committedAt ?? 0)) {
+      latestByKey.set(compoundKey, entry);
+    }
+  }
+
+  const compacted = Array.from(latestByKey.values())
+    .sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
+
+  const rendered = compacted.slice(0, 10);
+
+  return rendered
+    .map((entry) => {
+      if (entry.status === "retracted") {
+        return `\u2022 [${entry.kind}:${entry.key}] (retracted)`;
+      }
+      return `\u2022 [${entry.kind}:${entry.key}] ${entry.summary}`;
+    })
+    .join("\n");
 }

@@ -11,6 +11,7 @@ import type { Db } from "../storage/database.js";
 import type { Database } from "bun:sqlite";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
+import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
@@ -49,6 +50,7 @@ export type RuntimeBootstrapOptions = {
   blackboard?: Blackboard;
   modelRegistry?: DefaultModelServiceRegistry;
   toolExecutor?: ToolExecutor;
+  projectionSink?: RuntimeProjectionSink;
 };
 
 export type MemoryPipelineStatus =

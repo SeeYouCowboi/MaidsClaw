@@ -1,530 +1,958 @@
-import { beforeEach, describe, expect, it } from "bun:test";
-import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { InteractionStore } from "../../src/interaction/store.js";
-import type {
-	MemoryFlushRequest,
-	MemoryTaskAgent,
-} from "../../src/memory/task-agent.js";
+import { runMemoryMigrations } from "../../src/memory/schema.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
+import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { SessionService } from "../../src/session/service.js";
-import {
-	closeDatabaseGracefully,
-	type Db,
-	openDatabase,
-} from "../../src/storage/database.js";
+import { closeDatabaseGracefully, type Db, openDatabase } from "../../src/storage/database.js";
 
-function makeAgentLoop(chunks: Chunk[]): {
-	run: (request: AgentRunRequest) => AsyncGenerator<Chunk>;
-} {
-	return {
-		async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
-			for (const chunk of chunks) {
-				yield chunk;
-			}
-		},
-	};
+type TurnServiceLoop = {
+  run(request: AgentRunRequest): AsyncIterable<Chunk>;
+  runBuffered?: (request: AgentRunRequest) => Promise<RpBufferedExecutionResult>;
+};
+
+function makeStreamingLoop(chunks: Chunk[]): TurnServiceLoop {
+  return {
+    async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    },
+  };
 }
 
-function makeThrowingAgentLoop(error: unknown): {
-	run: (request: AgentRunRequest) => AsyncGenerator<Chunk>;
-} {
-	return {
-		async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
-			for (const chunk of [] as Chunk[]) {
-				yield chunk;
-			}
-			throw error;
-		},
-	};
-}
-
-function makeMemoryTaskAgent(
-	runMigrate: (request: MemoryFlushRequest) => Promise<unknown>,
-): MemoryTaskAgent {
-	return {
-		runMigrate,
-	} as unknown as MemoryTaskAgent;
+function makeRpBufferedLoop(result: RpBufferedExecutionResult): TurnServiceLoop {
+  return {
+    async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+      for (const chunk of [] as Chunk[]) {
+        yield chunk;
+      }
+    },
+    async runBuffered(_request: AgentRunRequest) {
+      return result;
+    },
+  };
 }
 
 async function collectChunks(stream: AsyncGenerator<Chunk>): Promise<Chunk[]> {
-	const chunks: Chunk[] = [];
-	for await (const chunk of stream) {
-		chunks.push(chunk);
-	}
-	return chunks;
+  const chunks: Chunk[] = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return chunks;
 }
 
 describe("TurnService", () => {
-	let db: Db;
-	let store: InteractionStore;
-	let commitService: CommitService;
-	let flushSelector: FlushSelector;
-	let sessionService: SessionService;
+  let db: Db;
+  let store: InteractionStore;
+  let commitService: CommitService;
+  let flushSelector: FlushSelector;
+  let sessionService: SessionService;
+  let graphStorage: GraphStorageService;
 
-	beforeEach(() => {
-		db = openDatabase({ path: ":memory:" });
-		runInteractionMigrations(db);
-		store = new InteractionStore(db);
-		commitService = new CommitService(store);
-		flushSelector = new FlushSelector(store);
-		sessionService = new SessionService();
-	});
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runInteractionMigrations(db);
+    runMemoryMigrations(db);
+    store = new InteractionStore(db);
+    commitService = new CommitService(store);
+    flushSelector = new FlushSelector(store);
+    sessionService = new SessionService();
+    graphStorage = new GraphStorageService(db);
+  });
 
-	it("success settlement commits canonical assistant message", async () => {
-		const session = sessionService.createSession("rp:alice");
-		const chunks: Chunk[] = [
-			{ type: "text_delta", text: "Hello" },
-			{ type: "text_delta", text: " there" },
-			{ type: "message_end", stopReason: "end_turn" },
-		];
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
 
-		const turnService = new TurnService(
-			makeAgentLoop(chunks) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+  it("RP success settlement writes turn_settlement and assistant message and emits synthetic text", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Good evening, master.",
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		try {
-			const runChunks = await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-1",
-					messages: [{ role: "user", content: "Good evening" }],
-				}),
-			);
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-rp-success",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
 
-			expect(runChunks).toEqual(chunks);
-			const records = store.getBySession(session.sessionId);
-			expect(records).toHaveLength(2);
-			expect(records[0]?.actorType).toBe("user");
-			expect(records[0]?.recordType).toBe("message");
-			expect(records[0]?.correlatedTurnId).toBe("req-1");
-			expect(records[0]?.payload).toEqual({
-				role: "user",
-				content: "Good evening",
-			});
-			expect(records[1]?.actorType).toBe("rp_agent");
-			expect(records[1]?.recordType).toBe("message");
-			expect(records[1]?.correlatedTurnId).toBe("req-1");
-			expect(records[1]?.payload).toEqual({
-				role: "assistant",
-				content: "Hello there",
-			});
-			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(false);
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    expect(runChunks).toEqual([
+      { type: "text_delta", text: "Good evening, master." },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
 
-	it("success with no assistant text does not commit empty assistant message", async () => {
-		const session = sessionService.createSession("rp:alice");
-		const chunks: Chunk[] = [
-			{ type: "message_end", stopReason: "end_turn" },
-		];
+    const records = store.getBySession(session.sessionId);
+    expect(records).toHaveLength(3);
+    expect(records[1]?.recordType).toBe("turn_settlement");
+    expect(records[1]?.actorType).toBe("rp_agent");
+    expect(records[2]?.recordType).toBe("message");
+    expect(records[2]?.payload).toEqual({
+      role: "assistant",
+      content: "Good evening, master.",
+      settlementId: records[1]?.recordId,
+    });
+  });
 
-		const turnService = new TurnService(
-			makeAgentLoop(chunks) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+  it("RP silent-private turn settles without assistant message and without text_delta", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{ op: "retract", target: { kind: "assertion", key: "quiet-step" } }],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		try {
-			const runChunks = await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-empty",
-					messages: [{ role: "user", content: "hello" }],
-				}),
-			);
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-rp-silent",
+        messages: [{ role: "user", content: "think quietly" }],
+      }),
+    );
 
-			expect(runChunks).toEqual(chunks);
-			const records = store.getBySession(session.sessionId);
-			expect(records).toHaveLength(1);
-			expect(records[0]?.actorType).toBe("user");
-			expect(records[0]?.recordType).toBe("message");
-			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(false);
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
 
-	it("failed_no_output settlement commits status record, not assistant message", async () => {
-		const session = sessionService.createSession("rp:alice");
-		const chunks: Chunk[] = [
-			{
-				type: "error",
-				code: "MODEL_ERROR",
-				message: "model failed",
-				retriable: true,
-			},
-		];
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
+    expect(records.filter((record) => record.recordType === "message" && record.actorType === "rp_agent")).toHaveLength(0);
+  });
 
-		const turnService = new TurnService(
-			makeAgentLoop(chunks) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+  it("RP illegal empty turn emits error and writes no turn_settlement", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		try {
-			const runChunks = await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-fail-1",
-					messages: [{ role: "user", content: "hello" }],
-				}),
-			);
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-rp-illegal-empty",
+        messages: [{ role: "user", content: "..." }],
+      }),
+    );
 
-			expect(runChunks).toEqual(chunks);
-			const records = store.getBySession(session.sessionId);
-			expect(records).toHaveLength(2);
-			expect(records[0]?.recordType).toBe("message");
-			expect(records[1]?.recordType).toBe("status");
-			expect(records[1]?.actorType).toBe("system");
-			expect(records[1]?.payload).toEqual({
-				event: "turn_failure",
-				details: {
-					outcome: "failed_no_output",
-					request_id: "req-fail-1",
-					error_code: "MODEL_ERROR",
-					error_message: "model failed",
-					partial_text: "",
-					assistant_visible_activity: false,
-					committed_at: expect.any(Number),
-				},
-			});
-			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(false);
-			expect(
-				store.getMinMaxUnprocessedIndex(session.sessionId),
-			).toBeUndefined();
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    expect(runChunks).toEqual([
+      {
+        type: "error",
+        code: "RP_EMPTY_TURN",
+        message: "empty turn: publicReply is empty and privateCommit has no ops",
+        retriable: false,
+      },
+    ]);
 
-	it("failed_with_partial_output settlement commits status record and sets recovery_required", async () => {
-		const session = sessionService.createSession("rp:alice");
-		const chunks: Chunk[] = [
-			{ type: "text_delta", text: "partial" },
-			{
-				type: "error",
-				code: "STREAM_ABORTED",
-				message: "stream aborted",
-				retriable: false,
-			},
-		];
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
+    expect(records.filter((record) => record.recordType === "status")).toHaveLength(1);
+  });
 
-		const turnService = new TurnService(
-			makeAgentLoop(chunks) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+  it("RP settlement transaction failure rolls back settlement/message and marks recovery_required", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "I started replying",
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		try {
-			const runChunks = await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-fail-2",
-					messages: [{ role: "user", content: "hello" }],
-				}),
-			);
+    const originalUpsert = store.upsertRecentCognitionSlot.bind(store);
+    store.upsertRecentCognitionSlot = () => {
+      throw new Error("slot write failed");
+    };
 
-			expect(runChunks).toEqual(chunks);
-			const records = store.getBySession(session.sessionId);
-			expect(records).toHaveLength(2);
-			expect(records[0]?.recordType).toBe("message");
-			expect(records[1]?.recordType).toBe("status");
-			expect(records[1]?.payload).toEqual({
-				event: "turn_failure",
-				details: {
-					outcome: "failed_with_partial_output",
-					request_id: "req-fail-2",
-					error_code: "STREAM_ABORTED",
-					error_message: "stream aborted",
-					partial_text: "partial",
-					assistant_visible_activity: true,
-					committed_at: expect.any(Number),
-				},
-			});
-			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(true);
-			expect(
-				store.getMinMaxUnprocessedIndex(session.sessionId),
-			).toBeUndefined();
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-rp-settlement-fail",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
 
-	it("thrown exception from agent loop settles as failure and yields error chunk", async () => {
-		const session = sessionService.createSession("rp:alice");
+    store.upsertRecentCognitionSlot = originalUpsert;
 
-		const turnService = new TurnService(
-			makeThrowingAgentLoop(new Error("loop exploded")) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+    expect(runChunks).toEqual([
+      {
+        type: "error",
+        code: "TURN_SETTLEMENT_FAILED",
+        message: "slot write failed",
+        retriable: false,
+      },
+    ]);
 
-		try {
-			const runChunks = await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-fail-3",
-					messages: [{ role: "user", content: "hello" }],
-				}),
-			);
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
+    expect(
+      records.filter(
+        (record) =>
+          record.recordType === "message" &&
+          record.actorType === "rp_agent" &&
+          (record.payload as { role?: string }).role === "assistant",
+      ),
+    ).toHaveLength(0);
+    expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(true);
+  });
 
-			// Must yield an error chunk so the gateway sees the failure
-			expect(runChunks).toHaveLength(1);
-			expect(runChunks[0]?.type).toBe("error");
-			if (runChunks[0]?.type === "error") {
-				expect(runChunks[0].code).toBe("AGENT_LOOP_EXCEPTION");
-				expect(runChunks[0].message).toBe("loop exploded");
-				expect(runChunks[0].retriable).toBe(false);
-			}
+  it("RP replay with same requestId is idempotent and produces no duplicate records", async () => {
+    const session = sessionService.createSession("rp:alice");
 
-			const records = store.getBySession(session.sessionId);
-			expect(records).toHaveLength(2);
-			expect(records[1]?.recordType).toBe("status");
-			expect(records[1]?.payload).toEqual({
-				event: "turn_failure",
-				details: {
-					outcome: "failed_no_output",
-					request_id: "req-fail-3",
-					error_code: "AGENT_LOOP_EXCEPTION",
-					error_message: "loop exploded",
-					partial_text: "",
-					assistant_visible_activity: false,
-					committed_at: expect.any(Number),
-				},
-			});
-			expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(false);
-			expect(
-				store.getMinMaxUnprocessedIndex(session.sessionId),
-			).toBeUndefined();
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Replay-safe reply",
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-	it("failed turn records are marked processed without affecting earlier unprocessed records", async () => {
-		const session = sessionService.createSession("rp:alice");
-		commitService.commit({
-			sessionId: session.sessionId,
-			actorType: "user",
-			recordType: "message",
-			payload: { role: "user", content: "older user" },
-		});
-		commitService.commit({
-			sessionId: session.sessionId,
-			actorType: "rp_agent",
-			recordType: "message",
-			payload: { role: "assistant", content: "older assistant" },
-		});
+    const firstChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-1",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+    const secondChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-1",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
 
-		const turnService = new TurnService(
-			makeAgentLoop([
-				{ type: "tool_use_start", id: "tool-1", name: "search" },
-				{
-					type: "error",
-					code: "TOOL_TIMEOUT",
-					message: "tool timeout",
-					retriable: true,
-				},
-			]) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			null,
-			sessionService,
-		);
+    expect(firstChunks).toEqual([
+      { type: "text_delta", text: "Replay-safe reply" },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
+    expect(secondChunks).toEqual([
+      { type: "text_delta", text: "Replay-safe reply" },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
 
-		try {
-			await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-fail-4",
-					messages: [{ role: "user", content: "new turn" }],
-				}),
-			);
+    const records = store.getBySession(session.sessionId);
+    expect(
+      records.filter(
+        (record) =>
+          record.recordType === "message" &&
+          record.actorType === "user" &&
+          record.correlatedTurnId === "req-1",
+      ),
+    ).toHaveLength(1);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
+    expect(records.find((record) => record.recordType === "turn_settlement")?.recordId).toBe("stl:req-1");
+    expect(
+      records.filter(
+        (record) =>
+          record.recordType === "message" &&
+          record.actorType === "rp_agent" &&
+          (record.payload as { content?: string }).content === "Replay-safe reply",
+      ),
+    ).toHaveLength(1);
+  });
 
-			const rows = db.query<{ record_index: number; is_processed: number }>(
-				"SELECT record_index, is_processed FROM interaction_records WHERE session_id = ? ORDER BY record_index ASC",
-				[session.sessionId],
-			);
+  it("persists full privateCommit ops without settlement overlay writes", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
 
-			expect(rows).toEqual([
-				{ record_index: 0, is_processed: 0 },
-				{ record_index: 1, is_processed: 0 },
-				{ record_index: 2, is_processed: 1 },
-				{ record_index: 3, is_processed: 1 },
-			]);
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Hello",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            summary: "mixed ops",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert-full",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+                  },
+                  stance: "accepted",
+                  confidence: 0.9,
+                  salience: 5,
+                },
+              },
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval-full",
+                  target: { kind: "pointer_key", value: "target:bob" },
+                  dimensions: [{ name: "trust", value: 0.8 }],
+                },
+              },
+              {
+                op: "retract",
+                target: { kind: "commitment", key: "old-commit" },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-	it("enriches and flushes when threshold is reached, then marks range processed on success", async () => {
-		const session = sessionService.createSession("rp:alice");
-		for (let i = 0; i < 8; i += 1) {
-			commitService.commit({
-				sessionId: session.sessionId,
-				actorType: "user",
-				recordType: "message",
-				payload: { role: "user", content: `seed ${i}` },
-			});
-		}
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-full-commit",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
 
-		const migrateCalls: MemoryFlushRequest[] = [];
-		const memoryTaskAgent = makeMemoryTaskAgent(async (request) => {
-			migrateCalls.push(request);
-			return {
-				batch_id: request.idempotencyKey,
-				private_event_ids: [],
-				private_belief_ids: [],
-				entity_ids: [],
-				fact_ids: [],
-			};
-		});
+    expect(runChunks).toEqual([
+      { type: "text_delta", text: "Hello" },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
 
-		const turnService = new TurnService(
-			makeAgentLoop([
-				{ type: "text_delta", text: "assistant line" },
-				{ type: "message_end", stopReason: "end_turn" },
-			]) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			memoryTaskAgent,
-			sessionService,
-		);
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+    expect(payload.ownerAgentId).toBe("rp:alice");
 
-		try {
-			await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-2",
-					messages: [{ role: "user", content: "trigger flush" }],
-				}),
-			);
+    const commit = payload.privateCommit as { schemaVersion: string; summary: string; ops: Array<Record<string, unknown>> };
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.summary).toBe("mixed ops");
+    expect(commit.ops).toHaveLength(3);
+    expect(commit.ops[0]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "assertion",
+        key: "assert-full",
+        proposition: {
+          subject: { kind: "special", value: "self" },
+          predicate: "trusts",
+          object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+        },
+        stance: "accepted",
+        confidence: 0.9,
+        salience: 5,
+      },
+    });
+    expect(commit.ops[1]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "evaluation",
+        key: "eval-full",
+        target: { kind: "pointer_key", value: "target:bob" },
+        dimensions: [{ name: "trust", value: 0.8 }],
+      },
+    });
+    expect(commit.ops[2]).toEqual({
+      op: "retract",
+      target: { kind: "commitment", key: "old-commit" },
+    });
 
-			expect(migrateCalls).toHaveLength(1);
-			expect(migrateCalls[0]?.queueOwnerAgentId).toBe("rp:alice");
-			expect(migrateCalls[0]?.dialogueRecords).toHaveLength(10);
-			expect(migrateCalls[0]?.rangeStart).toBe(0);
-			expect(migrateCalls[0]?.rangeEnd).toBe(9);
-			expect(
-				store.getMinMaxUnprocessedIndex(session.sessionId),
-			).toBeUndefined();
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const factCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(factCount!.cnt).toBe(0);
+    const eventCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(eventCount!.cnt).toBe(0);
+  });
 
-	it("does not mark processed range when migrate fails", async () => {
-		const session = sessionService.createSession("rp:alice");
-		for (let i = 0; i < 8; i += 1) {
-			commitService.commit({
-				sessionId: session.sessionId,
-				actorType: "user",
-				recordType: "message",
-				payload: { role: "user", content: `seed ${i}` },
-			});
-		}
+  it("assertion upsert persists full op in settlement without overlay write", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
 
-		const migrateCalls: MemoryFlushRequest[] = [];
-		const memoryTaskAgent = makeMemoryTaskAgent(async (request) => {
-			migrateCalls.push(request);
-			throw new Error("migrate failed");
-		});
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert-1",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		const turnService = new TurnService(
-			makeAgentLoop([
-				{ type: "text_delta", text: "assistant line" },
-				{ type: "message_end", stopReason: "end_turn" },
-			]) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			memoryTaskAgent,
-			sessionService,
-		);
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-assertion",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
 
-		try {
-			await collectChunks(
-				turnService.run({
-					sessionId: session.sessionId,
-					requestId: "req-3",
-					messages: [{ role: "user", content: "trigger flush" }],
-				}),
-			);
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+    expect(payload.ownerAgentId).toBe("rp:alice");
+    const commit = payload.privateCommit as { schemaVersion: string; ops: Array<Record<string, unknown>> };
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "assertion",
+        key: "assert-1",
+        proposition: {
+          subject: { kind: "special", value: "self" },
+          predicate: "trusts",
+          object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+        },
+        stance: "accepted",
+      },
+    });
 
-			expect(migrateCalls).toHaveLength(1);
-			const range = store.getMinMaxUnprocessedIndex(session.sessionId);
-			expect(range).toBeDefined();
-			expect(range?.min).toBe(0);
-			expect(range?.max).toBe(9);
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const row = db.get<{ cognition_key: string }>(
+      `SELECT cognition_key FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "assert-1"],
+    );
+    expect(row).toBeUndefined();
+  });
 
-	it("flushOnSessionClose is best effort and still attempts migrate", async () => {
-		const session = sessionService.createSession("rp:alice");
-		commitService.commit({
-			sessionId: session.sessionId,
-			actorType: "user",
-			recordType: "message",
-			payload: { role: "user", content: "first" },
-		});
-		commitService.commit({
-			sessionId: session.sessionId,
-			actorType: "rp_agent",
-			recordType: "message",
-			payload: { role: "assistant", content: "second" },
-		});
+  it("evaluation upsert persists full op in settlement without overlay write", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
 
-		const migrateCalls: MemoryFlushRequest[] = [];
-		const memoryTaskAgent = makeMemoryTaskAgent(async (request) => {
-			migrateCalls.push(request);
-			throw new Error("session close failure");
-		});
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval-1",
+                  target: { kind: "pointer_key", value: "target:bob" },
+                  dimensions: [{ name: "trust", value: 0.8 }],
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
 
-		const turnService = new TurnService(
-			makeAgentLoop([]) as unknown as AgentLoop,
-			commitService,
-			store,
-			flushSelector,
-			memoryTaskAgent,
-			sessionService,
-		);
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-evaluation",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
 
-		try {
-			await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
-			expect(migrateCalls).toHaveLength(1);
-			expect(migrateCalls[0]?.flushMode).toBe("session_close");
-			expect(migrateCalls[0]?.queueOwnerAgentId).toBe("rp:alice");
-			expect(migrateCalls[0]?.dialogueRecords).toHaveLength(2);
-			expect(store.getMinMaxUnprocessedIndex(session.sessionId)).toBeDefined();
-		} finally {
-			closeDatabaseGracefully(db);
-		}
-	});
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { kind: string; dimensions: unknown[] } }).record.dimensions).toEqual([{ name: "trust", value: 0.8 }]);
+
+    const row = db.get<{ explicit_kind: string }>(
+      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "eval-1"],
+    );
+    expect(row).toBeUndefined();
+  });
+
+  it("commitment upsert persists full op in settlement without overlay write", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "commitment",
+                  key: "commit-1",
+                  mode: "goal",
+                  target: { action: "protect household" },
+                  status: "active",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-commitment",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { kind: string } }).record.kind).toBe("commitment");
+
+    const row = db.get<{ explicit_kind: string }>(
+      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "commit-1"],
+    );
+    expect(row).toBeUndefined();
+  });
+
+  it("retract op persists in settlement without modifying overlay at settlement time", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertExplicitAssertion({
+      agentId: "rp:alice",
+      cognitionKey: "assert-retract",
+      settlementId: "seed-settlement",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "target:bob",
+      stance: "accepted",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{ op: "retract", target: { kind: "assertion", key: "assert-retract" } }],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-retract",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({ op: "retract", target: { kind: "assertion", key: "assert-retract" } });
+
+    const row = db.get<{ epistemic_status: string }>(
+      `SELECT epistemic_status FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "assert-retract"],
+    );
+    expect(row?.epistemic_status).toBe("confirmed");
+  });
+
+  it("current_location assertion persists full op in settlement without overlay write", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const locationEntityId = graphStorage.upsertEntity({
+      pointerKey: "location:garden",
+      displayName: "Garden",
+      entityType: "location",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "location-assert-1",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "is_at",
+                    object: { kind: "entity", ref: { kind: "special", value: "current_location" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      () => ({
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        session_id: session.sessionId,
+        current_area_id: locationEntityId,
+      }),
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-current-location-snapshot",
+        messages: [{ role: "user", content: "where am I?" }],
+      }),
+    );
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { key: string } }).record.key).toBe("location-assert-1");
+    expect(payload.viewerSnapshot).toEqual({
+      selfPointerKey: "__self__",
+      userPointerKey: "__user__",
+      currentLocationEntityId: locationEntityId,
+    });
+
+    const row = db.get<{ target_entity_id: number }>(
+      `SELECT target_entity_id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      ["rp:alice", "location-assert-1"],
+    );
+    expect(row).toBeUndefined();
+  });
+
+  it("touch op is stored verbatim in settlement without processing errors", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{ op: "touch" } as unknown as never],
+          },
+        },
+      } as unknown as RpBufferedExecutionResult),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cognition-touch",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    // Settlement succeeds — ops are persisted verbatim, not processed at settlement
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
+    const payload = records.find((r) => r.recordType === "turn_settlement")!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({ op: "touch" });
+  });
+
+  it("latentScratchpad from outcome is not persisted in settlement payload", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Hello with scratchpad",
+          latentScratchpad: "SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "commitment",
+                  key: "scratch-test",
+                  mode: "goal",
+                  target: { action: "test scratchpad exclusion" },
+                  status: "active",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-scratchpad-exclusion",
+        messages: [{ role: "user", content: "think hard" }],
+      }),
+    );
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+
+    // latentScratchpad must NOT appear anywhere in the persisted settlement payload
+    expect(payload.latentScratchpad).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST");
+    expect(JSON.stringify(payload)).not.toContain("latentScratchpad");
+
+    // Verify the rest of the settlement is well-formed
+    expect(payload.publicReply).toBe("Hello with scratchpad");
+    expect(payload.privateCommit).toBeDefined();
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+
+    // Also verify raw DB content doesn't contain it
+    const rawRow = db.get<{ payload: string }>(
+      `SELECT payload FROM interaction_records WHERE record_type = 'turn_settlement' AND session_id = ?`,
+      [session.sessionId],
+    );
+    expect(rawRow).toBeDefined();
+    expect(rawRow!.payload).not.toContain("latentScratchpad");
+    expect(rawRow!.payload).not.toContain("SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST");
+  });
+
+  it("non-RP maiden session preserves streaming path behavior", async () => {
+    const session = sessionService.createSession("maid:violet");
+    const streamChunks: Chunk[] = [
+      { type: "text_delta", text: "Good" },
+      { type: "text_delta", text: " day" },
+      { type: "message_end", stopReason: "end_turn" },
+    ];
+    const turnService = new TurnService(
+      makeStreamingLoop(streamChunks),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-maiden-stream",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    expect(runChunks).toEqual(streamChunks);
+
+    const records = store.getBySession(session.sessionId);
+    expect(records).toHaveLength(2);
+    expect(records[1]?.actorType).toBe("maiden");
+    expect(records[1]?.recordType).toBe("message");
+    expect(records[1]?.payload).toEqual({
+      role: "assistant",
+      content: "Good day",
+    });
+  });
 });

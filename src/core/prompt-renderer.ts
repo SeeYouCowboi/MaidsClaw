@@ -26,6 +26,7 @@ const SYSTEM_SLOTS = new Set<PromptSectionSlot>([
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
   PromptSectionSlot.CORE_MEMORY,
+  PromptSectionSlot.RECENT_COGNITION,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,
   PromptSectionSlot.MEMORY_HINTS,

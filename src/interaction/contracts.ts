@@ -2,6 +2,7 @@
 // These are the ONLY interaction types allowed in the system
 
 import type { ProjectionAppendix } from "../core/types.js";
+import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
 
 // Actor types — who produced an interaction record
 // EXACTLY 6 actor types allowed
@@ -14,7 +15,7 @@ export type ActorType =
   | "autonomy";
 
 // Record types — what kind of event this is
-// EXACTLY 7 record types allowed
+// EXACTLY 8 record types allowed
 export type RecordType =
   | "message"
   | "tool_call"
@@ -22,7 +23,8 @@ export type RecordType =
   | "delegation"
   | "task_result"
   | "schedule_trigger"
-  | "status";
+  | "status"
+  | "turn_settlement";
 
 // The core interaction record — append-only log entry
 export type InteractionRecord = {
@@ -77,4 +79,23 @@ export type TaskResultPayload = {
 export type StatusPayload = {
   event: string;
   details?: unknown;
+};
+
+export type TurnSettlementPayload = {
+  settlementId: string;
+  requestId: string;
+  sessionId: string;
+  ownerAgentId: string;
+  publicReply: string;
+  hasPublicReply: boolean;
+  viewerSnapshot: {
+    selfPointerKey: string;
+    userPointerKey: string;
+    currentLocationEntityId?: number;
+  };
+  privateCommit?: PrivateCognitionCommit;
+};
+
+export type AssistantMessagePayloadV3 = MessagePayload & {
+  settlementId?: string;
 };

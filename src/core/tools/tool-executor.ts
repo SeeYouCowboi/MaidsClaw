@@ -69,11 +69,14 @@ export class ToolExecutor {
   getSchemas(): ToolSchema[] {
     const localSchemas: ToolSchema[] = [];
     for (const tool of this.localTools.values()) {
-      localSchemas.push({
+      const schema: ToolSchema = {
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters,
-      });
+      };
+      if (tool.effectClass) schema.effectClass = tool.effectClass;
+      if (tool.traceVisibility) schema.traceVisibility = tool.traceVisibility;
+      localSchemas.push(schema);
     }
 
     for (const registration of this.mcpServers.values()) {
@@ -85,11 +88,14 @@ export class ToolExecutor {
     const remoteSchemas: ToolSchema[] = [];
     for (const registration of this.mcpServers.values()) {
       for (const tool of registration.tools.values()) {
-        remoteSchemas.push({
+        const schema: ToolSchema = {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-        });
+        };
+        if (tool.effectClass) schema.effectClass = tool.effectClass;
+        if (tool.traceVisibility) schema.traceVisibility = tool.traceVisibility;
+        remoteSchemas.push(schema);
       }
     }
 

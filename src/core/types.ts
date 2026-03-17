@@ -72,11 +72,5 @@ export type MemoryFlushRequest = {
 };
 
 // Viewer context — auto-injected by ToolExecutor, never passed by agents
-export type ViewerRole = "maiden" | "rp_agent" | "task_agent";
-
-export type ViewerContext = {
-  agentId: string;
-  sessionId: string;
-  role: ViewerRole;
-  currentLocationEntityId?: string;
-};
+// Canonical shape lives in src/memory/types.ts; re-exported here for src/core/ consumers.
+export type { ViewerContext, ViewerRole } from "../memory/types.js";

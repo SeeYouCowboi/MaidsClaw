@@ -41,6 +41,10 @@ export type ErrorCode =
   // Interaction log errors
   | "INTERACTION_DUPLICATE_RECORD"
   | "INTERACTION_INVALID_FIELD"
+  // RP runtime errors
+  | "RP_TURN_OUTCOME_INVALID"
+  | "COGNITION_OP_UNSUPPORTED"
+  | "COGNITION_UNRESOLVED_REFS"
   // Session errors
   | "SESSION_NOT_FOUND"
   | "SESSION_CLOSED"

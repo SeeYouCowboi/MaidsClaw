@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
+import { MaidsClawError } from "../core/errors.js";
 import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "./schema.js";
 import { GraphStorageService } from "./storage.js";
 
@@ -341,5 +342,214 @@ describe("GraphStorageService", () => {
 
     const after = db.prepare(`SELECT count(*) as cnt FROM topics`).get() as { cnt: number };
     expect(after.cnt).toBe(0);
+  });
+
+  it("explicit upserts return private node refs", () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const assertionResult = storage.upsertExplicitAssertion({
+      agentId: "agent-1",
+      cognitionKey: "assert:trust",
+      settlementId: "stl-1",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "__user__",
+      stance: "accepted",
+    });
+    expect(assertionResult).not.toBeNull();
+    expect(assertionResult!.id).toBeGreaterThan(0);
+    expect(assertionResult!.ref).toBe(makeNodeRef("private_belief", assertionResult!.id));
+
+    const evalResult = storage.upsertExplicitEvaluation({
+      agentId: "agent-1",
+      cognitionKey: "eval:mood",
+      settlementId: "stl-1",
+      opIndex: 1,
+      dimensions: [{ name: "valence", value: 0.8 }],
+    });
+    expect(evalResult.id).toBeGreaterThan(0);
+    expect(evalResult.ref).toBe(makeNodeRef("private_event", evalResult.id));
+
+    const commitResult = storage.upsertExplicitCommitment({
+      agentId: "agent-1",
+      cognitionKey: "commit:help",
+      settlementId: "stl-1",
+      opIndex: 2,
+      mode: "goal",
+      target: { action: "help user" },
+      status: "active",
+    });
+    expect(commitResult.id).toBeGreaterThan(0);
+    expect(commitResult.ref).toBe(makeNodeRef("private_event", commitResult.id));
+
+    // Non-keyed assertion also returns ref
+    const nonKeyedResult = storage.upsertExplicitAssertion({
+      agentId: "agent-1",
+      settlementId: "stl-1",
+      opIndex: 3,
+      sourcePointerKey: "__self__",
+      predicate: "observes",
+      targetPointerKey: "__user__",
+      stance: "tentative",
+    });
+    expect(nonKeyedResult).not.toBeNull();
+    expect(nonKeyedResult!.ref).toBe(makeNodeRef("private_belief", nonKeyedResult!.id));
+  });
+
+  it("explicit cognition re-upsert preserves stable node refs", () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    // Assertion: same cognition_key → same id
+    const a1 = storage.upsertExplicitAssertion({
+      agentId: "agent-1",
+      cognitionKey: "assert:stable",
+      settlementId: "stl-1",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "__user__",
+      stance: "accepted",
+      confidence: 0.5,
+    });
+    const a2 = storage.upsertExplicitAssertion({
+      agentId: "agent-1",
+      cognitionKey: "assert:stable",
+      settlementId: "stl-2",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "__user__",
+      stance: "tentative",
+      confidence: 0.9,
+    });
+    expect(a1).not.toBeNull();
+    expect(a2).not.toBeNull();
+    expect(a2!.id).toBe(a1!.id);
+    expect(a2!.ref).toBe(a1!.ref);
+
+    // Verify content was updated
+    const updatedRow = db
+      .prepare(`SELECT epistemic_status, confidence FROM agent_fact_overlay WHERE id = ?`)
+      .get(a1!.id) as { epistemic_status: string; confidence: number };
+    expect(updatedRow.epistemic_status).toBe("suspected");
+    expect(updatedRow.confidence).toBe(0.9);
+
+    // Only one row exists for this cognition_key
+    const factCount = db
+      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'assert:stable'`)
+      .get() as { cnt: number };
+    expect(factCount.cnt).toBe(1);
+
+    // Evaluation: same cognition_key → same id
+    const e1 = storage.upsertExplicitEvaluation({
+      agentId: "agent-1",
+      cognitionKey: "eval:stable",
+      settlementId: "stl-1",
+      opIndex: 0,
+      dimensions: [{ name: "valence", value: 0.3 }],
+    });
+    const e2 = storage.upsertExplicitEvaluation({
+      agentId: "agent-1",
+      cognitionKey: "eval:stable",
+      settlementId: "stl-2",
+      opIndex: 0,
+      dimensions: [{ name: "valence", value: 0.9 }],
+    });
+    expect(e2.id).toBe(e1.id);
+    expect(e2.ref).toBe(e1.ref);
+
+    const eventCount = db
+      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'eval:stable'`)
+      .get() as { cnt: number };
+    expect(eventCount.cnt).toBe(1);
+
+    // Commitment: same cognition_key → same id
+    const c1 = storage.upsertExplicitCommitment({
+      agentId: "agent-1",
+      cognitionKey: "commit:stable",
+      settlementId: "stl-1",
+      opIndex: 0,
+      mode: "goal",
+      target: { action: "help" },
+      status: "active",
+    });
+    const c2 = storage.upsertExplicitCommitment({
+      agentId: "agent-1",
+      cognitionKey: "commit:stable",
+      settlementId: "stl-2",
+      opIndex: 0,
+      mode: "goal",
+      target: { action: "help more" },
+      status: "paused",
+    });
+    expect(c2.id).toBe(c1.id);
+    expect(c2.ref).toBe(c1.ref);
+
+    const commitCount = db
+      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'commit:stable'`)
+      .get() as { cnt: number };
+    expect(commitCount.cnt).toBe(1);
+  });
+
+  it("explicit assertion unresolved refs no longer silently drop", () => {
+    // Do NOT create __self__ or __user__ entities — pointer keys won't resolve
+
+    let caughtError: unknown;
+    try {
+      storage.upsertExplicitAssertion({
+        agentId: "agent-1",
+        cognitionKey: "assert:unresolved",
+        settlementId: "stl-unresolved",
+        opIndex: 0,
+        sourcePointerKey: "__self__",
+        predicate: "trusts",
+        targetPointerKey: "__user__",
+        stance: "accepted",
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    // Must throw a structured MaidsClawError
+    expect(caughtError).toBeInstanceOf(MaidsClawError);
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_UNRESOLVED_REFS");
+    expect(mce.retriable).toBe(true);
+    expect((mce.details as { unresolvedPointerKeys: string[] }).unresolvedPointerKeys).toContain("__self__");
+    expect((mce.details as { unresolvedPointerKeys: string[] }).unresolvedPointerKeys).toContain("__user__");
+    expect((mce.details as { settlementId: string }).settlementId).toBe("stl-unresolved");
+
+    // Verify no overlay rows were written
+    const row = db
+      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved'`)
+      .get() as { cnt: number };
+    expect(row.cnt).toBe(0);
   });
 });

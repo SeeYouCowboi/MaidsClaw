@@ -1,36 +1,81 @@
-import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
+import type { AgentRunRequest } from "../core/agent-loop.js";
+import type { AgentProfile } from "../agents/profile.js";
 import type { Chunk } from "../core/chunk.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
-import type { CommitService } from "../interaction/commit-service.js";
-import type { InteractionRecord } from "../interaction/contracts.js";
+import type { CommitService, CommitInput } from "../interaction/commit-service.js";
+import type {
+  AssistantMessagePayloadV3,
+  InteractionRecord,
+  TurnSettlementPayload,
+} from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
+import type { GraphStorageService } from "../memory/storage.js";
+import type { ViewerContext } from "../memory/types.js";
 import type { MemoryFlushRequest, MemoryTaskAgent } from "../memory/task-agent.js";
+import type {
+  RpBufferedExecutionResult,
+  RpTurnOutcomeSubmission,
+  CognitionOp,
+  CognitionKind,
+  AssertionRecord,
+  EvaluationRecord,
+  CommitmentRecord,
+  CognitionEntityRef,
+  CognitionSelector,
+} from "./rp-turn-contract.js";
 import type { SessionService } from "../session/service.js";
+import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
+import type { ProjectionAppendix } from "../core/types.js";
+
+type TurnServiceAgentLoop = {
+  run(request: AgentRunRequest): AsyncIterable<Chunk>;
+  runBuffered?: (request: AgentRunRequest) => Promise<RpBufferedExecutionResult>;
+};
 
 export class TurnService {
   constructor(
-    private readonly agentLoop: AgentLoop,
+    private readonly agentLoop: TurnServiceAgentLoop,
     private readonly commitService: CommitService,
     private readonly interactionStore: InteractionStore,
     private readonly flushSelector: FlushSelector,
     private readonly memoryTaskAgent: MemoryTaskAgent | null,
     private readonly sessionService: SessionService,
+    private readonly viewerContextResolver?: (params: {
+      sessionId: string;
+      agentId: string;
+      role: AgentProfile["role"];
+    }) => ViewerContext | Promise<ViewerContext>,
+    private readonly projectionSink?: RuntimeProjectionSink,
+    private readonly graphStorage?: GraphStorageService,
   ) {}
 
   async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
-    const userRecord = this.commitService.commit({
-      sessionId: request.sessionId,
-      actorType: "user",
-      recordType: "message",
-      payload: {
-        role: "user",
-        content: getLatestUserMessage(request.messages),
-      },
-      correlatedTurnId: request.requestId,
-    });
+    const existingUserRecord = this.interactionStore.findRecordByCorrelatedTurnId(
+      request.sessionId,
+      request.requestId,
+      "user",
+    );
+    const userRecord =
+      existingUserRecord ??
+      this.commitService.commit({
+        sessionId: request.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: {
+          role: "user",
+          content: getLatestUserMessage(request.messages),
+        },
+        correlatedTurnId: request.requestId,
+      });
 
     const turnRangeStart = userRecord.recordIndex;
+    const assistantActorType = this.resolveAssistantActorType(request.sessionId);
+
+    if (assistantActorType === "rp_agent") {
+      yield* this.runRpBufferedTurn(request, turnRangeStart);
+      return;
+    }
 
     let assistantText = "";
     let hasAssistantVisibleActivity = false;
@@ -68,7 +113,7 @@ export class TurnService {
       if (assistantText.length > 0) {
         this.commitService.commit({
           sessionId: request.sessionId,
-          actorType: this.resolveAssistantActorType(request.sessionId),
+          actorType: assistantActorType,
           recordType: "message",
           payload: {
             role: "assistant",
@@ -81,6 +126,252 @@ export class TurnService {
       await this.flushIfDue(request.sessionId);
       return;
     }
+
+    this.handleFailedTurn({
+      request,
+      turnRangeStart,
+      errorChunk,
+      assistantText,
+      hasAssistantVisibleActivity,
+    });
+  }
+
+  private async *runRpBufferedTurn(request: AgentRunRequest, turnRangeStart: number): AsyncGenerator<Chunk> {
+    let bufferedResult: RpBufferedExecutionResult;
+    let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
+
+    try {
+      if (!this.agentLoop.runBuffered) {
+        throw new Error("RP buffered execution is unavailable");
+      }
+      bufferedResult = await this.agentLoop.runBuffered(request);
+    } catch (error: unknown) {
+      const errorChunk = {
+        code: "AGENT_LOOP_EXCEPTION",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      yield {
+        type: "error" as const,
+        code: errorChunk.code,
+        message: errorChunk.message,
+        retriable: false,
+      };
+      this.handleFailedTurn({
+        request,
+        turnRangeStart,
+        errorChunk,
+        assistantText: "",
+        hasAssistantVisibleActivity: false,
+      });
+      return;
+    }
+
+    if ("error" in bufferedResult) {
+      const errorChunk = {
+        code: "RP_BUFFERED_EXECUTION_FAILED",
+        message: bufferedResult.error,
+      };
+      yield {
+        type: "error" as const,
+        code: errorChunk.code,
+        message: errorChunk.message,
+        retriable: false,
+      };
+      this.handleFailedTurn({
+        request,
+        turnRangeStart,
+        errorChunk,
+        assistantText: "",
+        hasAssistantVisibleActivity: false,
+      });
+      return;
+    }
+
+    const outcome = bufferedResult.outcome;
+    const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
+    const hasPublicReply = outcome.publicReply.length > 0;
+    const hasAssistantVisibleActivity = hasPublicReply;
+
+    if (!hasPublicReply && !hasPrivateOps) {
+      const errorChunk = {
+        code: "RP_EMPTY_TURN",
+        message: "empty turn: publicReply is empty and privateCommit has no ops",
+      };
+      yield {
+        type: "error" as const,
+        code: errorChunk.code,
+        message: errorChunk.message,
+        retriable: false,
+      };
+      this.handleFailedTurn({
+        request,
+        turnRangeStart,
+        errorChunk,
+        assistantText: outcome.publicReply,
+        hasAssistantVisibleActivity,
+      });
+      return;
+    }
+
+    const settlementId = `stl:${request.requestId}`;
+    if (this.interactionStore.settlementExists(request.sessionId, settlementId)) {
+      const existingSettlement = this.interactionStore
+        .getBySession(request.sessionId)
+        .find((record) => record.recordId === settlementId && record.recordType === "turn_settlement");
+      const existingPayload = existingSettlement?.payload as Partial<TurnSettlementPayload> | undefined;
+      const replayPublicReply = typeof existingPayload?.publicReply === "string" ? existingPayload.publicReply : "";
+
+      if (replayPublicReply.length > 0) {
+        yield {
+          type: "text_delta",
+          text: replayPublicReply,
+        };
+      }
+      yield {
+        type: "message_end",
+        stopReason: "end_turn",
+      };
+      await this.flushIfDue(request.sessionId);
+      return;
+    }
+
+    try {
+      const resolvedViewerSnapshot = await this.resolveViewerSnapshot(request.sessionId, "rp_agent");
+      viewerSnapshot = resolvedViewerSnapshot;
+      this.interactionStore.runInTransaction(() => {
+        const settlementPayload: TurnSettlementPayload = {
+          settlementId,
+          requestId: request.requestId,
+          sessionId: request.sessionId,
+          ownerAgentId: this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
+          publicReply: outcome.publicReply,
+          hasPublicReply,
+          viewerSnapshot: resolvedViewerSnapshot,
+          privateCommit: hasPrivateOps
+            ? outcome.privateCommit
+            : undefined,
+        };
+
+        this.commitService.commitWithId({
+          sessionId: request.sessionId,
+          actorType: "rp_agent",
+          recordId: settlementId,
+          recordType: "turn_settlement",
+          payload: settlementPayload,
+          correlatedTurnId: request.requestId,
+        });
+
+        if (hasPublicReply) {
+          const assistantPayload: AssistantMessagePayloadV3 = {
+            role: "assistant",
+            content: outcome.publicReply,
+            settlementId,
+          };
+
+          this.commitService.commit({
+            sessionId: request.sessionId,
+            actorType: "rp_agent",
+            recordType: "message",
+            payload: assistantPayload,
+            correlatedTurnId: request.requestId,
+          });
+        }
+
+        const slotEntries = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? [], settlementId);
+        this.interactionStore.upsertRecentCognitionSlot(
+          request.sessionId,
+          this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
+          settlementId,
+          JSON.stringify(slotEntries),
+        );
+      });
+    } catch (error: unknown) {
+      const errorChunk = {
+        code: "TURN_SETTLEMENT_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      };
+      yield {
+        type: "error" as const,
+        code: errorChunk.code,
+        message: errorChunk.message,
+        retriable: false,
+      };
+      this.handleFailedTurn({
+        request,
+        turnRangeStart,
+        errorChunk,
+        assistantText: outcome.publicReply,
+        hasAssistantVisibleActivity,
+      });
+      return;
+    }
+
+    const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown";
+    this.projectionSink?.onProjectionEligible(
+      createProjectionAppendix({
+        publicReply: outcome.publicReply,
+        agentId: queueOwnerAgentId,
+        settlementId,
+        locationEntityId: String(viewerSnapshot?.currentLocationEntityId ?? "unknown"),
+      }),
+      request.sessionId,
+    );
+
+    if (hasPublicReply) {
+      yield {
+        type: "text_delta",
+        text: outcome.publicReply,
+      };
+    }
+    yield {
+      type: "message_end",
+      stopReason: "end_turn",
+    };
+
+    await this.flushIfDue(request.sessionId);
+  }
+
+  private async resolveViewerSnapshot(
+    sessionId: string,
+    role: AgentProfile["role"],
+  ): Promise<TurnSettlementPayload["viewerSnapshot"]> {
+    const agentId = this.resolveQueueOwnerAgentId(sessionId) ?? "";
+    const viewerContext = await this.resolveViewerContext({ sessionId, agentId, role });
+    const currentLocationEntityId =
+      typeof viewerContext.current_area_id === "number" ? viewerContext.current_area_id : undefined;
+
+    return {
+      selfPointerKey: "__self__",
+      userPointerKey: "__user__",
+      currentLocationEntityId,
+    };
+  }
+
+  private async resolveViewerContext(params: {
+    sessionId: string;
+    agentId: string;
+    role: AgentProfile["role"];
+  }): Promise<ViewerContext> {
+    if (this.viewerContextResolver) {
+      return await this.viewerContextResolver(params);
+    }
+
+    return {
+      viewer_agent_id: params.agentId,
+      viewer_role: params.role,
+      session_id: params.sessionId,
+      current_area_id: undefined,
+    };
+  }
+
+  private handleFailedTurn(params: {
+    request: AgentRunRequest;
+    turnRangeStart: number;
+    errorChunk: { code?: string; message?: string };
+    assistantText: string;
+    hasAssistantVisibleActivity: boolean;
+  }): void {
+    const { request, turnRangeStart, errorChunk, assistantText, hasAssistantVisibleActivity } = params;
 
     const outcome = hasAssistantVisibleActivity
       ? "failed_with_partial_output"
@@ -103,7 +394,7 @@ export class TurnService {
         },
       },
       correlatedTurnId: request.requestId,
-    });
+    } satisfies CommitInput);
 
     this.interactionStore.markRangeProcessed(request.sessionId, turnRangeStart, statusRecord.recordIndex);
     if (hasAssistantVisibleActivity) {
@@ -164,6 +455,7 @@ export class TurnService {
     await this.memoryTaskAgent.runMigrate({
       ...flushRequest,
       dialogueRecords: toDialogueRecords(records),
+      interactionRecords: records,
       queueOwnerAgentId,
     });
 
@@ -184,6 +476,22 @@ export class TurnService {
     }
     return "rp_agent";
   }
+}
+
+function createProjectionAppendix(params: {
+  publicReply: string;
+  agentId: string;
+  settlementId: string;
+  locationEntityId: string;
+}): ProjectionAppendix {
+  return {
+    publicSummarySeed: params.publicReply,
+    primaryActorEntityId: params.agentId,
+    locationEntityId: params.locationEntityId,
+    eventCategory: "speech",
+    projectionClass: params.publicReply.trim().length > 0 ? "area_candidate" : "non_projectable",
+    sourceRecordId: params.settlementId,
+  };
 }
 
 function toDialogueRecords(records: InteractionRecord[]): Array<{
@@ -218,6 +526,82 @@ function toDialogueRecords(records: InteractionRecord[]): Array<{
       };
     })
     .filter((record): record is DialogueRecord => record !== undefined);
+}
+
+type RecentCognitionEntry = {
+  settlementId: string;
+  committedAt: number;
+  kind: CognitionKind;
+  key: string;
+  summary: string;
+  status: "active" | "retracted";
+};
+
+function refValue(ref: CognitionEntityRef | CognitionSelector): string {
+  if ("value" in ref) return ref.value;
+  return (ref as CognitionSelector).key;
+}
+
+function summarizeAssertion(record: AssertionRecord): string {
+  return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
+}
+
+function summarizeEvaluation(record: EvaluationRecord): string {
+  const targetLabel = refValue(record.target);
+  const dims = record.dimensions.map((d) => `${d.name}:${d.value}`).join(", ");
+  return `eval ${targetLabel} [${dims}]`;
+}
+
+function summarizeCommitment(record: CommitmentRecord): string {
+  let targetDesc: string;
+  if (typeof record.target === "object" && "action" in record.target) {
+    targetDesc = record.target.action;
+  } else if (typeof record.target === "object" && "predicate" in record.target) {
+    targetDesc = (record.target as { predicate?: string }).predicate ?? "";
+  } else {
+    targetDesc = "";
+  }
+  return `${record.mode}: ${targetDesc} (${record.status})`;
+}
+
+function buildCognitionSlotPayload(ops: CognitionOp[], settlementId: string): RecentCognitionEntry[] {
+  const committedAt = Date.now();
+  const items: RecentCognitionEntry[] = [];
+
+  for (const op of ops) {
+    if (op.op === "upsert") {
+      const record = op.record;
+      let summary: string;
+      switch (record.kind) {
+        case "assertion":
+          summary = summarizeAssertion(record as AssertionRecord);
+          break;
+        case "evaluation":
+          summary = summarizeEvaluation(record as EvaluationRecord);
+          break;
+        case "commitment":
+          summary = summarizeCommitment(record as CommitmentRecord);
+          break;
+      }
+      items.push({ settlementId, committedAt, kind: record.kind, key: record.key, summary, status: "active" });
+    } else if (op.op === "retract") {
+      items.push({ settlementId, committedAt, kind: op.target.kind, key: op.target.key, summary: "(retracted)", status: "retracted" });
+    }
+  }
+
+  return items;
+}
+
+function summarizeCognitionOps(ops: CognitionOp[]): Array<{ key: string; kind: string }> {
+  const result: Array<{ key: string; kind: string }> = [];
+  for (const op of ops) {
+    if (op.op === "upsert") {
+      result.push({ key: op.record.key, kind: op.record.kind });
+    } else if (op.op === "retract") {
+      result.push({ key: op.target.key, kind: op.target.kind });
+    }
+  }
+  return result;
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {
