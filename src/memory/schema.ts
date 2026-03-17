@@ -29,7 +29,9 @@ export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
 export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS _memory_runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS _memory_maintenance_jobs (id INTEGER PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL, payload TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS _memory_maintenance_jobs (id INTEGER PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL, idempotency_key TEXT, payload TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, next_attempt_at INTEGER)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_maintenance_job_type_key ON _memory_maintenance_jobs(job_type, idempotency_key) WHERE idempotency_key IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_job_type_next_attempt ON _memory_maintenance_jobs(job_type, next_attempt_at)`,
   `CREATE TABLE IF NOT EXISTS event_nodes (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, raw_text TEXT, summary TEXT, timestamp INTEGER NOT NULL, created_at INTEGER NOT NULL, participants TEXT, emotion TEXT, topic_id INTEGER, visibility_scope TEXT NOT NULL DEFAULT 'area_visible' CHECK (visibility_scope IN ('area_visible', 'world_public')), location_entity_id INTEGER NOT NULL, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'observation', 'state_change')), primary_actor_entity_id INTEGER, promotion_class TEXT NOT NULL DEFAULT 'none' CHECK (promotion_class IN ('none', 'world_candidate')), source_record_id TEXT, event_origin TEXT NOT NULL CHECK (event_origin IN ('runtime_projection', 'delayed_materialization', 'promotion')))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_area_source_record ON event_nodes(source_record_id) WHERE source_record_id IS NOT NULL AND visibility_scope = 'area_visible'`,
   `CREATE INDEX IF NOT EXISTS idx_event_nodes_session_timestamp ON event_nodes(session_id, timestamp)`,
@@ -99,6 +101,21 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
+      );
+    },
+  },
+  {
+    id: "memory:003:add-maintenance-job-key-and-schedule",
+    description: "Add idempotency key and schedule columns to memory maintenance jobs",
+    up: (db: Db) => {
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "idempotency_key", "TEXT");
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "next_attempt_at", "INTEGER");
+
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_maintenance_job_type_key ON _memory_maintenance_jobs(job_type, idempotency_key) WHERE idempotency_key IS NOT NULL`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_job_type_next_attempt ON _memory_maintenance_jobs(job_type, next_attempt_at)`,
       );
     },
   },

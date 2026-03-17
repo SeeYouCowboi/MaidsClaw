@@ -1,13 +1,23 @@
 import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { MaidsClawError } from "../../src/core/errors.js";
 import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
+import { EmbeddingService } from "../../src/memory/embeddings.js";
+import { MaterializationService } from "../../src/memory/materialization.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
+import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { InteractionStore } from "../../src/interaction/store.js";
-import type { MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
-import { MemoryIngestionPolicy } from "../../src/memory/task-agent.js";
+import {
+  MemoryIngestionPolicy,
+  MemoryTaskAgent,
+  type MemoryFlushRequest,
+} from "../../src/memory/task-agent.js";
+import { PendingSettlementSweeper } from "../../src/memory/pending-settlement-sweeper.js";
+import type { PrivateCognitionCommit, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
@@ -30,12 +40,100 @@ function makeMockMemoryTaskAgent(
   } as unknown as MemoryTaskAgent;
 }
 
+class DeterministicMemoryModelProvider {
+  readonly defaultEmbeddingModelId = "test-embedding-model";
+  private chatResponses: Array<Array<{ name: string; arguments: Record<string, unknown> }>>;
+
+  constructor(chatResponses: Array<Array<{ name: string; arguments: Record<string, unknown> }>>) {
+    this.chatResponses = [...chatResponses];
+  }
+
+  async chat(): Promise<Array<{ name: string; arguments: Record<string, unknown> }>> {
+    return this.chatResponses.shift() ?? [];
+  }
+
+  async embed(texts: string[]): Promise<Float32Array[]> {
+    return texts.map((_, index) => new Float32Array([index + 1, 0.5]));
+  }
+}
+
 async function collectChunks(stream: AsyncGenerator<Chunk>): Promise<Chunk[]> {
   const chunks: Chunk[] = [];
   for await (const chunk of stream) {
     chunks.push(chunk);
   }
   return chunks;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 1000): Promise<void> {
+  const startedAt = Date.now();
+  while (!check()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Condition not met before timeout");
+    }
+    await sleep(10);
+  }
+}
+
+function commitPendingSettlementRange(params: {
+  interactionStore: InteractionStore;
+  sessionId: string;
+  agentId: string;
+  requestId: string;
+  committedAt: number;
+  userContent?: string;
+}): void {
+  const { interactionStore, sessionId, agentId, requestId, committedAt, userContent = "hello" } = params;
+  interactionStore.commit({
+    sessionId,
+    recordId: `usr:${requestId}`,
+    recordIndex: 0,
+    actorType: "user",
+    recordType: "message",
+    payload: { role: "user", content: userContent },
+    correlatedTurnId: requestId,
+    committedAt,
+  });
+  interactionStore.commit({
+    sessionId,
+    recordId: `stl:${requestId}`,
+    recordIndex: 1,
+    actorType: "rp_agent",
+    recordType: "turn_settlement",
+    payload: {
+      settlementId: `stl:${requestId}`,
+      requestId,
+      sessionId,
+      ownerAgentId: agentId,
+      publicReply: "",
+      hasPublicReply: false,
+      viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+      privateCommit: {
+        schemaVersion: "rp_private_cognition_v3",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: `assert:${requestId}`,
+              proposition: {
+                subject: { kind: "special", value: "self" },
+                predicate: "trusts",
+                object: { kind: "entity", ref: { kind: "special", value: "user" } },
+              },
+              stance: "accepted",
+            },
+          },
+        ],
+      },
+    } satisfies TurnSettlementPayload,
+    correlatedTurnId: requestId,
+    committedAt: committedAt + 1,
+  });
 }
 
 describe("memory-entry-consumption: live runtime integration", () => {
@@ -157,12 +255,33 @@ describe("memory-entry-consumption: live runtime integration", () => {
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
 
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 9; i++) {
         commitService.commit({
           sessionId: session.sessionId,
-          actorType: i % 2 === 0 ? "user" : "rp_agent",
+          actorType: "user",
           recordType: "message",
-          payload: { role: i % 2 === 0 ? "user" : "assistant", content: `seed turn ${i}` },
+          payload: { role: "user", content: `seed user ${i}` },
+        });
+        commitService.commitWithId({
+          sessionId: session.sessionId,
+          actorType: "rp_agent",
+          recordId: `stl:seed-${i}`,
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: `stl:seed-${i}`,
+            requestId: `req-seed-${i}`,
+            sessionId: session.sessionId,
+            ownerAgentId: "rp:alice",
+            publicReply: `response ${i}`,
+            hasPublicReply: true,
+            viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          } satisfies TurnSettlementPayload,
+        });
+        commitService.commit({
+          sessionId: session.sessionId,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: `response ${i}` },
         });
       }
 
@@ -215,9 +334,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(migrateCalls[0]?.sessionId).toBe(session.sessionId);
       expect(migrateCalls[0]?.queueOwnerAgentId).toBe("rp:alice");
       expect(migrateCalls[0]?.flushMode).toBe("dialogue_slice");
-      expect(migrateCalls[0]?.dialogueRecords).toHaveLength(10);
+      expect(migrateCalls[0]?.dialogueRecords).toHaveLength(20);
       expect(migrateCalls[0]?.rangeStart).toBe(0);
-      expect(migrateCalls[0]?.rangeEnd).toBe(10);
+      expect(migrateCalls[0]?.rangeEnd).toBe(29);
 
       const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
       expect(unprocessedRange).toBeUndefined();
@@ -393,6 +512,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
           settlementId,
           requestId: "req-silent-1",
           sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
           publicReply: "",
           hasPublicReply: false,
           viewerSnapshot: {
@@ -400,7 +520,20 @@ describe("memory-entry-consumption: live runtime integration", () => {
             userPointerKey: "__user__",
           },
           privateCommit: {
-            ops: [{ key: "belief:alice_is_kind", kind: "assertion" }],
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "belief:alice_is_kind",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "is_kind",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+              },
+            }],
           },
         } satisfies TurnSettlementPayload,
         correlatedTurnId: "req-silent-1",
@@ -446,6 +579,119 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("explicit settlement flush writes authoritative cognition during migrate", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const storage = new GraphStorageService(runtime.db);
+      storage.upsertEntity({
+        pointerKey: "__self__",
+        displayName: "Alice",
+        entityType: "person",
+        memoryScope: "private_overlay",
+        ownerAgentId: "rp:alice",
+      });
+      storage.upsertEntity({
+        pointerKey: "__user__",
+        displayName: "User",
+        entityType: "person",
+        memoryScope: "private_overlay",
+        ownerAgentId: "rp:alice",
+      });
+
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "Can I trust you?" },
+        correlatedTurnId: "req-explicit-flush",
+      });
+
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: "stl:req-explicit-flush",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:req-explicit-flush",
+          requestId: "req-explicit-flush",
+          sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
+          publicReply: "",
+          hasPublicReply: false,
+          viewerSnapshot: {
+            selfPointerKey: "__self__",
+            userPointerKey: "__user__",
+          },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:flush-authoritative",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-explicit-flush",
+      });
+
+      const beforeFlush = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+        ["rp:alice", "assert:flush-authoritative"],
+      );
+      expect(beforeFlush?.cnt).toBe(0);
+
+      const coreMemory = new CoreMemoryService(runtime.db);
+      coreMemory.initializeBlocks("rp:alice");
+      const memoryTaskAgent = new MemoryTaskAgent(
+        runtime.db.raw,
+        storage,
+        coreMemory,
+        new EmbeddingService(runtime.db, new TransactionBatcher(runtime.db)),
+        new MaterializationService(runtime.db.raw, storage),
+        new DeterministicMemoryModelProvider([
+          [],
+          [],
+          [{ name: "update_index_block", arguments: { new_text: "" } }],
+        ]),
+      );
+
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        memoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
+
+      const afterFlush = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+        ["rp:alice", "assert:flush-authoritative"],
+      );
+      expect(afterFlush?.cnt).toBe(1);
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it("buildMigrateInput with settled explicit cognition excludes private belief/event tools from call one", () => {
     const policy = new MemoryIngestionPolicy();
 
@@ -453,6 +699,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       settlementId: "settle-1",
       requestId: "req-1",
       sessionId: "sess-1",
+      ownerAgentId: "rp:alice",
       publicReply: "Hello",
       hasPublicReply: true,
       viewerSnapshot: {
@@ -460,9 +707,30 @@ describe("memory-entry-consumption: live runtime integration", () => {
         userPointerKey: "__user__",
       },
       privateCommit: {
+        schemaVersion: "rp_private_cognition_v3",
         ops: [
-          { key: "belief:trust_user", kind: "assertion" },
-          { key: "eval:mood_cheerful", kind: "evaluation" },
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "belief:trust_user",
+              proposition: {
+                subject: { kind: "special", value: "self" },
+                predicate: "trusts",
+                object: { kind: "entity", ref: { kind: "special", value: "user" } },
+              },
+              stance: "accepted",
+            },
+          },
+          {
+            op: "upsert",
+            record: {
+              kind: "evaluation",
+              key: "eval:mood_cheerful",
+              target: { kind: "special", value: "self" },
+              dimensions: [{ name: "mood", value: 0.9 }],
+            },
+          },
         ],
       },
     };
@@ -518,7 +786,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
     const attachedPayload = settlementAttachments[0]!.payload as TurnSettlementPayload;
     expect(attachedPayload.privateCommit?.ops.length).toBe(2);
-    expect(attachedPayload.privateCommit?.ops[0]?.key).toBe("belief:trust_user");
+    const firstOp = attachedPayload.privateCommit?.ops[0];
+    expect(firstOp?.op === "upsert" && firstOp.record.key === "belief:trust_user").toBe(true);
 
     expect(input.dialogue).toHaveLength(2);
   });
@@ -556,10 +825,26 @@ describe("memory-entry-consumption: live runtime integration", () => {
             settlementId: "settle-2",
             requestId: "req-2",
             sessionId: "sess-1",
+            ownerAgentId: "rp:alice",
             publicReply: "",
             hasPublicReply: false,
             viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-            privateCommit: { ops: [{ key: "belief:x", kind: "assertion" }] },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [{
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "belief:x",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "believes",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                },
+              }],
+            },
           } satisfies TurnSettlementPayload,
           committedAt: 2000,
         },
@@ -631,6 +916,936 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
       expect(unprocessedRange).toBeUndefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("flush ingestion still receives raw settlement payloads", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "Hello" },
+        correlatedTurnId: "req-raw-test",
+      });
+
+      const settlementId = "stl:req-raw-test";
+      const rawOps: CognitionOp[] = [
+        {
+          op: "upsert",
+          record: {
+            kind: "assertion",
+            key: "belief:alice_is_kind",
+            proposition: {
+              subject: { kind: "special", value: "self" },
+              predicate: "is_kind",
+              object: { kind: "entity", ref: { kind: "special", value: "user" } },
+            },
+            stance: "accepted",
+          },
+        },
+        {
+          op: "upsert",
+          record: {
+            kind: "evaluation",
+            key: "eval:mood_happy",
+            target: { kind: "special", value: "self" },
+            dimensions: [{ name: "mood", value: 0.9 }],
+          },
+        },
+      ];
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: settlementId,
+        recordType: "turn_settlement",
+        payload: {
+          settlementId,
+          requestId: "req-raw-test",
+          sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
+          publicReply: "Hello there",
+          hasPublicReply: true,
+          viewerSnapshot: {
+            selfPointerKey: "__self__",
+            userPointerKey: "__user__",
+            currentLocationEntityId: 42,
+          },
+          privateCommit: { schemaVersion: "rp_private_cognition_v3", ops: rawOps },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-raw-test",
+      });
+
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const mockMemoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        mockMemoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
+
+      expect(migrateCalls).toHaveLength(1);
+      const receivedRecords = migrateCalls[0]?.interactionRecords ?? [];
+      const settlementRecords = receivedRecords.filter((r) => r.recordType === "turn_settlement");
+
+      expect(settlementRecords).toHaveLength(1);
+
+      const receivedPayload = settlementRecords[0]!.payload as TurnSettlementPayload;
+
+      // Verify raw data is present - flush path must receive unredacted records
+      expect(receivedPayload.viewerSnapshot).toBeDefined();
+      expect(receivedPayload.viewerSnapshot.currentLocationEntityId).toBe(42);
+      expect(receivedPayload.viewerSnapshot.selfPointerKey).toBe("__self__");
+      expect(receivedPayload.viewerSnapshot.userPointerKey).toBe("__user__");
+
+      expect(receivedPayload.privateCommit).toBeDefined();
+      expect(receivedPayload.privateCommit?.ops).toBeDefined();
+      expect(receivedPayload.privateCommit?.ops).toHaveLength(2);
+      const op0 = receivedPayload.privateCommit?.ops[0];
+      expect(op0?.op === "upsert" && op0.record.key === "belief:alice_is_kind").toBe(true);
+      const op1 = receivedPayload.privateCommit?.ops[1];
+      expect(op1?.op === "upsert" && op1.record.kind === "evaluation").toBe(true);
+
+      // Verify the redacted flag is NOT present - this proves raw path is used
+      expect((receivedPayload.viewerSnapshot as { redacted?: boolean }).redacted).toBeUndefined();
+      expect((receivedPayload.privateCommit as { redacted?: boolean }).redacted).toBeUndefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("buildMigrateInput preserves full privateCommit settlement attachments", () => {
+    const policy = new MemoryIngestionPolicy();
+
+    const fullOps: CognitionOp[] = [
+      {
+        op: "upsert",
+        record: {
+          kind: "assertion",
+          key: "belief:user_is_trustworthy",
+          salience: 0.9,
+          confidence: 0.85,
+          proposition: {
+            subject: { kind: "special", value: "user" },
+            predicate: "is_trustworthy",
+            object: { kind: "entity", ref: { kind: "special", value: "self" } },
+          },
+          stance: "accepted",
+          basis: "observation",
+        },
+      },
+      {
+        op: "retract",
+        target: { kind: "evaluation", key: "eval:mood_sad" },
+      },
+    ];
+
+    const privateCommit: PrivateCognitionCommit = {
+      schemaVersion: "rp_private_cognition_v3",
+      summary: "Trust established after conversation",
+      ops: fullOps,
+    };
+
+    const settlementPayload: TurnSettlementPayload = {
+      settlementId: "settle-full-1",
+      requestId: "req-full-1",
+      sessionId: "sess-full-1",
+      ownerAgentId: "rp:alice",
+      publicReply: "I trust you.",
+      hasPublicReply: true,
+      viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+      privateCommit,
+    };
+
+    const flushRequest: MemoryFlushRequest = {
+      sessionId: "sess-full-1",
+      agentId: "rp:alice",
+      rangeStart: 0,
+      rangeEnd: 2,
+      flushMode: "session_close",
+      idempotencyKey: "test-full-commit",
+      dialogueRecords: [
+        { role: "user", content: "Can I trust you?", timestamp: 1000, recordId: "r0", recordIndex: 0 },
+        { role: "assistant", content: "I trust you.", timestamp: 2000, recordId: "r1", recordIndex: 1 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "sess-full-1",
+          recordId: "r0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Can I trust you?" },
+          committedAt: 1000,
+        },
+        {
+          sessionId: "sess-full-1",
+          recordId: "r1",
+          recordIndex: 1,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "I trust you." },
+          committedAt: 2000,
+        },
+        {
+          sessionId: "sess-full-1",
+          recordId: "settle-full-1",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: settlementPayload,
+          committedAt: 3000,
+        },
+      ],
+    };
+
+    const input = policy.buildMigrateInput(flushRequest);
+
+    // Verify explicitSettlements populated with full metadata
+    expect(input.explicitSettlements).toHaveLength(1);
+    const meta = input.explicitSettlements[0]!;
+    expect(meta.settlementId).toBe("settle-full-1");
+    expect(meta.requestId).toBe("req-full-1");
+    expect(meta.ownerAgentId).toBe("rp:alice");
+
+    // Full privateCommit preserved — NOT collapsed to {key, kind} summaries
+    expect(meta.privateCommit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(meta.privateCommit.summary).toBe("Trust established after conversation");
+    expect(meta.privateCommit.ops).toHaveLength(2);
+
+    // Full upsert op with complete record shape
+    const upsertOp = meta.privateCommit.ops[0]!;
+    expect(upsertOp.op).toBe("upsert");
+    if (upsertOp.op === "upsert") {
+      expect(upsertOp.record.kind).toBe("assertion");
+      expect(upsertOp.record.key).toBe("belief:user_is_trustworthy");
+      expect(upsertOp.record.salience).toBe(0.9);
+      expect(upsertOp.record.confidence).toBe(0.85);
+      if (upsertOp.record.kind === "assertion") {
+        expect(upsertOp.record.proposition.predicate).toBe("is_trustworthy");
+        expect(upsertOp.record.stance).toBe("accepted");
+        expect(upsertOp.record.basis).toBe("observation");
+      }
+    }
+
+    // Full retract op with complete target shape
+    const retractOp = meta.privateCommit.ops[1]!;
+    expect(retractOp.op).toBe("retract");
+    if (retractOp.op === "retract") {
+      expect(retractOp.target.kind).toBe("evaluation");
+      expect(retractOp.target.key).toBe("eval:mood_sad");
+    }
+
+    // Attachment-level explicitMeta also populated
+    const settlementAttachment = input.attachments.find((a) => a.recordType === "turn_settlement");
+    expect(settlementAttachment).toBeDefined();
+    expect(settlementAttachment!.explicitMeta).toBeDefined();
+    expect(settlementAttachment!.explicitMeta!.settlementId).toBe("settle-full-1");
+    expect(settlementAttachment!.explicitMeta!.privateCommit.ops).toHaveLength(2);
+  });
+
+  it("buildMigrateInput partitions explicit settlements from ordinary turns", () => {
+    const policy = new MemoryIngestionPolicy();
+
+    const explicitSettlement: TurnSettlementPayload = {
+      settlementId: "settle-explicit",
+      requestId: "req-explicit",
+      sessionId: "sess-partition",
+      ownerAgentId: "rp:alice",
+      publicReply: "Hello",
+      hasPublicReply: true,
+      viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+      privateCommit: {
+        schemaVersion: "rp_private_cognition_v3",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "commitment",
+              key: "goal:help_user",
+              mode: "goal",
+              target: { action: "assist_user" },
+              status: "active",
+              priority: 1,
+              horizon: "immediate",
+            },
+          },
+        ],
+      },
+    };
+
+    const ordinarySettlement: TurnSettlementPayload = {
+      settlementId: "settle-ordinary",
+      requestId: "req-ordinary",
+      sessionId: "sess-partition",
+      ownerAgentId: "rp:alice",
+      publicReply: "Yes",
+      hasPublicReply: true,
+      viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+      // No privateCommit — ordinary turn with no explicit cognition
+    };
+
+    const flushRequest: MemoryFlushRequest = {
+      sessionId: "sess-partition",
+      agentId: "rp:alice",
+      rangeStart: 0,
+      rangeEnd: 5,
+      flushMode: "dialogue_slice",
+      idempotencyKey: "test-partition",
+      interactionRecords: [
+        {
+          sessionId: "sess-partition",
+          recordId: "r0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "First question" },
+          committedAt: 1000,
+        },
+        {
+          sessionId: "sess-partition",
+          recordId: "r1",
+          recordIndex: 1,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Hello" },
+          committedAt: 2000,
+        },
+        {
+          sessionId: "sess-partition",
+          recordId: "settle-explicit",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: explicitSettlement,
+          committedAt: 2500,
+        },
+        {
+          sessionId: "sess-partition",
+          recordId: "tool-1",
+          recordIndex: 3,
+          actorType: "rp_agent",
+          recordType: "tool_call",
+          payload: { toolCallId: "tc-1", toolName: "memory_search", arguments: { query: "test" } },
+          committedAt: 3000,
+        },
+        {
+          sessionId: "sess-partition",
+          recordId: "r2",
+          recordIndex: 4,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Yes" },
+          committedAt: 4000,
+        },
+        {
+          sessionId: "sess-partition",
+          recordId: "settle-ordinary",
+          recordIndex: 5,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: ordinarySettlement,
+          committedAt: 4500,
+        },
+      ],
+    };
+
+    const input = policy.buildMigrateInput(flushRequest);
+
+    // Only the explicit settlement appears in explicitSettlements
+    expect(input.explicitSettlements).toHaveLength(1);
+    expect(input.explicitSettlements[0]!.settlementId).toBe("settle-explicit");
+    expect(input.explicitSettlements[0]!.privateCommit.ops).toHaveLength(1);
+    expect(input.explicitSettlements[0]!.privateCommit.ops[0]!.op).toBe("upsert");
+
+    // Both settlements still appear as attachments
+    const settlementAttachments = input.attachments.filter((a) => a.recordType === "turn_settlement");
+    expect(settlementAttachments).toHaveLength(2);
+
+    // Only the explicit settlement attachment has explicitMeta
+    const withMeta = settlementAttachments.filter((a) => a.explicitMeta !== undefined);
+    const withoutMeta = settlementAttachments.filter((a) => a.explicitMeta === undefined);
+    expect(withMeta).toHaveLength(1);
+    expect(withoutMeta).toHaveLength(1);
+    expect(withMeta[0]!.explicitMeta!.settlementId).toBe("settle-explicit");
+
+    // Tool call attachment has no explicitMeta
+    const toolAttachment = input.attachments.find((a) => a.recordType === "tool_call");
+    expect(toolAttachment).toBeDefined();
+    expect(toolAttachment!.explicitMeta).toBeUndefined();
+
+    // Dialogue includes both ordinary and explicit turns
+    expect(input.dialogue).toHaveLength(3);
+    expect(input.dialogue.map((d) => d.content)).toEqual(["First question", "Hello", "Yes"]);
+  });
+
+  it("buildMigrateInput preserves dialogue with empty content when turn_settlement exists in range (with explicitSettlements metadata)", () => {
+    const policy = new MemoryIngestionPolicy();
+
+    const privateCommit: PrivateCognitionCommit = {
+      schemaVersion: "rp_private_cognition_v3",
+      summary: "Silent observation",
+      ops: [
+        {
+          op: "upsert",
+          record: {
+            kind: "evaluation",
+            key: "eval:situation_assessment",
+            target: { kind: "special", value: "user" },
+            dimensions: [{ name: "anxiety", value: 0.7 }],
+            emotionTags: ["concern"],
+            notes: "User seems worried",
+          },
+        },
+      ],
+    };
+
+    const flushRequest: MemoryFlushRequest = {
+      sessionId: "sess-empty-content",
+      agentId: "rp:alice",
+      rangeStart: 0,
+      rangeEnd: 2,
+      flushMode: "session_close",
+      idempotencyKey: "test-empty-content",
+      dialogueRecords: [
+        { role: "user", content: "...", timestamp: 1000, recordId: "r0", recordIndex: 0 },
+        { role: "assistant", content: "", timestamp: 2000, recordId: "r1", recordIndex: 1 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "sess-empty-content",
+          recordId: "r0",
+          recordIndex: 0,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "..." },
+          committedAt: 1000,
+        },
+        {
+          sessionId: "sess-empty-content",
+          recordId: "r1",
+          recordIndex: 1,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "" },
+          committedAt: 2000,
+        },
+        {
+          sessionId: "sess-empty-content",
+          recordId: "settle-empty",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "settle-empty",
+            requestId: "req-empty",
+            sessionId: "sess-empty-content",
+            ownerAgentId: "rp:alice",
+            publicReply: "",
+            hasPublicReply: false,
+            viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+            privateCommit,
+          } satisfies TurnSettlementPayload,
+          committedAt: 3000,
+        },
+      ],
+    };
+
+    const input = policy.buildMigrateInput(flushRequest);
+
+    // Empty-content dialogue row preserved (not filtered) due to settlement in range
+    expect(input.dialogue).toHaveLength(2);
+    expect(input.dialogue[0]!.content).toBe("...");
+    expect(input.dialogue[1]!.content).toBe("");
+
+    // explicitSettlements populated with full metadata
+    expect(input.explicitSettlements).toHaveLength(1);
+    expect(input.explicitSettlements[0]!.settlementId).toBe("settle-empty");
+    expect(input.explicitSettlements[0]!.ownerAgentId).toBe("rp:alice");
+    expect(input.explicitSettlements[0]!.privateCommit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(input.explicitSettlements[0]!.privateCommit.summary).toBe("Silent observation");
+    expect(input.explicitSettlements[0]!.privateCommit.ops).toHaveLength(1);
+
+    // Full evaluation record shape preserved
+    const evalOp = input.explicitSettlements[0]!.privateCommit.ops[0]!;
+    expect(evalOp.op).toBe("upsert");
+    if (evalOp.op === "upsert") {
+      expect(evalOp.record.kind).toBe("evaluation");
+      if (evalOp.record.kind === "evaluation") {
+        expect(evalOp.record.dimensions).toHaveLength(1);
+        expect(evalOp.record.dimensions[0]!.name).toBe("anxiety");
+        expect(evalOp.record.emotionTags).toEqual(["concern"]);
+      }
+    }
+
+    // Settlement attachment also has explicitMeta
+    const settlementAttachment = input.attachments.find((a) => a.recordType === "turn_settlement");
+    expect(settlementAttachment!.explicitMeta).toBeDefined();
+  });
+
+  it("explicit unresolved refs leave interaction records unprocessed", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const storage = new GraphStorageService(runtime.db);
+
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "Can I trust you?" },
+        correlatedTurnId: "req-unresolved-flush",
+      });
+
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: "stl:req-unresolved-flush",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:req-unresolved-flush",
+          requestId: "req-unresolved-flush",
+          sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
+          publicReply: "",
+          hasPublicReply: false,
+          viewerSnapshot: {
+            selfPointerKey: "__self__",
+            userPointerKey: "__user__",
+          },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:flush-unresolved",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-unresolved-flush",
+      });
+
+      const coreMemory = new CoreMemoryService(runtime.db);
+      coreMemory.initializeBlocks("rp:alice");
+      const memoryTaskAgent = new MemoryTaskAgent(
+        runtime.db.raw,
+        storage,
+        coreMemory,
+        new EmbeddingService(runtime.db, new TransactionBatcher(runtime.db)),
+        new MaterializationService(runtime.db.raw, storage),
+        new DeterministicMemoryModelProvider([
+          [],
+        ]),
+      );
+
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        memoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
+
+      const afterFlush = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+        ["rp:alice", "assert:flush-unresolved"],
+      );
+      expect(afterFlush?.cnt).toBe(0);
+
+      const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
+      expect(unprocessedRange).toBeDefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("startup sweeper flushes persisted pending settlements", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-startup",
+        agentId: "rp:alice",
+        requestId: "req-startup",
+        committedAt: Date.now(),
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 10_000,
+      });
+      sweeper.start();
+
+      await waitFor(() => migrateCalls.length === 1);
+
+      expect(migrateCalls[0]?.flushMode).toBe("session_close");
+      expect(migrateCalls[0]?.sessionId).toBe("sess-startup");
+      expect(migrateCalls[0]?.agentId).toBe("rp:alice");
+      expect(interactionStore.getUnprocessedRangeForSession("sess-startup")).toBeNull();
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("periodic sweeper ignores fresh active settlements but processes stale ones", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      const nowMs = Date.now();
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 20,
+      });
+      sweeper.start();
+      await sleep(30);
+
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-stale",
+        agentId: "rp:alice",
+        requestId: "req-stale",
+        committedAt: nowMs - 130_000,
+      });
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-fresh",
+        agentId: "rp:bob",
+        requestId: "req-fresh",
+        committedAt: nowMs - 30_000,
+      });
+
+      await waitFor(() => migrateCalls.length === 1);
+
+      expect(migrateCalls[0]?.sessionId).toBe("sess-stale");
+      expect(interactionStore.getUnprocessedRangeForSession("sess-stale")).toBeNull();
+      expect(interactionStore.getUnprocessedRangeForSession("sess-fresh")).not.toBeNull();
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("unresolved explicit refs create backoff state instead of hot-loop retries", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      let attempts = 0;
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async () => {
+        attempts += 1;
+        throw new MaidsClawError({
+          code: "COGNITION_UNRESOLVED_REFS",
+          message: "missing explicit refs",
+          retriable: true,
+        });
+      });
+
+      let nowMs = 2_000_000;
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-backoff",
+        agentId: "rp:alice",
+        requestId: "req-backoff",
+        committedAt: nowMs - 130_000,
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 20,
+        now: () => nowMs,
+        random: () => 0,
+      });
+      sweeper.start();
+
+      await waitFor(() => attempts === 1);
+      await sleep(80);
+      expect(attempts).toBe(1);
+
+      const job = runtime.db.get<{ status: string; next_attempt_at: number; payload: string }>(
+        `SELECT status, next_attempt_at, payload
+         FROM _memory_maintenance_jobs
+         WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
+        ["pending_flush:sess-backoff"],
+      );
+      expect(job).toBeDefined();
+      expect(job?.status).toBe("retry_scheduled");
+      expect(job?.next_attempt_at).toBe(nowMs + 300_000);
+      const payload = JSON.parse(job!.payload) as {
+        failureCount: number;
+        lastErrorCode: string;
+      };
+      expect(payload.failureCount).toBe(1);
+      expect(payload.lastErrorCode).toBe("COGNITION_UNRESOLVED_REFS");
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("five unresolved-ref failures move a sweep job to blocked_manual", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      let attempts = 0;
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async () => {
+        attempts += 1;
+        throw new MaidsClawError({
+          code: "COGNITION_UNRESOLVED_REFS",
+          message: "missing explicit refs",
+          retriable: true,
+        });
+      });
+
+      let nowMs = 3_000_000;
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-block",
+        agentId: "rp:alice",
+        requestId: "req-block",
+        committedAt: nowMs - 130_000,
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 20,
+        now: () => nowMs,
+        random: () => 0,
+      });
+      sweeper.start();
+
+      await waitFor(() => attempts === 1);
+      for (let i = 0; i < 4; i += 1) {
+        nowMs += 10 * 60 * 60_000;
+        await waitFor(() => attempts === i + 2);
+      }
+
+      const job = runtime.db.get<{ status: string; payload: string }>(
+        `SELECT status, payload
+         FROM _memory_maintenance_jobs
+         WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
+        ["pending_flush:sess-block"],
+      );
+      expect(job?.status).toBe("blocked_manual");
+      const payload = JSON.parse(job!.payload) as { failureCount: number; nextAttemptAt: number | null };
+      expect(payload.failureCount).toBe(5);
+      expect(payload.nextAttemptAt).toBeNull();
+
+      nowMs += 10 * 60 * 60_000;
+      await sleep(80);
+      expect(attempts).toBe(5);
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("failed sweeper flush leaves settlement range unprocessed", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      let attempts = 0;
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async () => {
+        attempts += 1;
+        throw new MaidsClawError({
+          code: "TOOL_ARGUMENT_INVALID",
+          message: "invalid payload",
+          retriable: false,
+        });
+      });
+
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-hard-fail",
+        agentId: "rp:alice",
+        requestId: "req-hard-fail",
+        committedAt: Date.now() - 130_000,
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 20,
+      });
+      sweeper.start();
+
+      await waitFor(() => attempts === 1);
+
+      const range = interactionStore.getUnprocessedRangeForSession("sess-hard-fail");
+      expect(range).not.toBeNull();
+
+      const job = runtime.db.get<{ status: string; payload: string }>(
+        `SELECT status, payload
+         FROM _memory_maintenance_jobs
+         WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
+        ["pending_flush:sess-hard-fail"],
+      );
+      expect(job?.status).toBe("failed_hard");
+      const payload = JSON.parse(job!.payload) as { lastErrorCode: string };
+      expect(payload.lastErrorCode).toBe("TOOL_ARGUMENT_INVALID");
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("sweeper backoff survives when unprocessed range expands", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      let attempts = 0;
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async () => {
+        attempts += 1;
+        throw new MaidsClawError({
+          code: "COGNITION_UNRESOLVED_REFS",
+          message: "missing explicit refs",
+          retriable: true,
+        });
+      });
+
+      let nowMs = 5_000_000;
+      commitPendingSettlementRange({
+        interactionStore,
+        sessionId: "sess-expand",
+        agentId: "rp:alice",
+        requestId: "req-expand-1",
+        committedAt: nowMs - 130_000,
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 20,
+        now: () => nowMs,
+        random: () => 0,
+      });
+      sweeper.start();
+
+      await waitFor(() => attempts === 1);
+      await sleep(80);
+      expect(attempts).toBe(1);
+
+      const jobAfterFirst = runtime.db.get<{ status: string; next_attempt_at: number; payload: string }>(
+        `SELECT status, next_attempt_at, payload
+         FROM _memory_maintenance_jobs
+         WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
+        ["pending_flush:sess-expand"],
+      );
+      expect(jobAfterFirst).toBeDefined();
+      expect(jobAfterFirst?.status).toBe("retry_scheduled");
+      expect(jobAfterFirst?.next_attempt_at).toBe(nowMs + 300_000);
+
+      const payloadAfterFirst = JSON.parse(jobAfterFirst!.payload) as {
+        failureCount: number;
+        rangeEnd: number;
+      };
+      expect(payloadAfterFirst.failureCount).toBe(1);
+      expect(payloadAfterFirst.rangeEnd).toBe(1);
+
+      interactionStore.commit({
+        sessionId: "sess-expand",
+        recordId: "usr:req-expand-2",
+        recordIndex: 2,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "another message" },
+        correlatedTurnId: "req-expand-2",
+        committedAt: nowMs - 120_000,
+      });
+
+      await sleep(100);
+      expect(attempts).toBe(1);
+
+      const jobAfterExpand = runtime.db.get<{ status: string; next_attempt_at: number; payload: string }>(
+        `SELECT status, next_attempt_at, payload
+         FROM _memory_maintenance_jobs
+         WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
+        ["pending_flush:sess-expand"],
+      );
+      expect(jobAfterExpand).toBeDefined();
+      expect(jobAfterExpand?.status).toBe("retry_scheduled");
+
+      const payloadAfterExpand = JSON.parse(jobAfterExpand!.payload) as {
+        failureCount: number;
+      };
+      expect(payloadAfterExpand.failureCount).toBe(1);
+
+      sweeper.stop();
     } finally {
       runtime.shutdown();
     }

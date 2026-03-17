@@ -23,6 +23,7 @@ import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { runMemoryMigrations } from "../memory/schema.js";
+import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
 import { TransactionBatcher } from "../memory/transaction-batcher.js";
@@ -349,7 +350,13 @@ export function bootstrapRuntime(options: RuntimeBootstrapOptions = {}): Runtime
     graphStorage,
   );
 
+  const pendingSettlementSweeper = memoryTaskAgent
+    ? new PendingSettlementSweeper(db, interactionStore, flushSelector, memoryTaskAgent)
+    : null;
+  pendingSettlementSweeper?.start();
+
   const shutdown = (): void => {
+    pendingSettlementSweeper?.stop();
     closeDatabaseGracefully(db);
   };
 
