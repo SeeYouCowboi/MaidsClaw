@@ -12,6 +12,8 @@ import { writeJson, writeText } from "../src/cli/output.js";
 import { registerCommand, dispatch } from "../src/cli/parser.js";
 import type { CliContext } from "../src/cli/context.js";
 import type { CommandHandler, ParsedArgs } from "../src/cli/parser.js";
+import { registerConfigCommands } from "../src/cli/commands/config.js";
+import { registerAgentCommands } from "../src/cli/commands/agent.js";
 
 // ── Stub handler factory ─────────────────────────────────────────────
 
@@ -47,14 +49,8 @@ function stubHandler(commandName: string): CommandHandler {
 
 // ── Register command stubs ───────────────────────────────────────────
 
-// config namespace
-for (const sub of ["init", "validate", "doctor", "show", "write-runtime"]) {
-  registerCommand({
-    namespace: "config",
-    subcommand: sub,
-    handler: stubHandler(`config ${sub}`),
-  });
-}
+// config namespace — real handler from src/cli/commands/config.ts
+registerConfigCommands();
 
 // server namespace
 registerCommand({
@@ -69,23 +65,8 @@ registerCommand({
   handler: stubHandler("health"),
 });
 
-// agent namespace
-for (const sub of [
-  "list",
-  "show",
-  "create-rp",
-  "create-task",
-  "enable",
-  "disable",
-  "remove",
-  "validate",
-]) {
-  registerCommand({
-    namespace: "agent",
-    subcommand: sub,
-    handler: stubHandler(`agent ${sub}`),
-  });
-}
+// agent namespace — real handlers from src/cli/commands/agent.ts
+registerAgentCommands();
 
 // session namespace
 for (const sub of ["create", "close", "recover"]) {

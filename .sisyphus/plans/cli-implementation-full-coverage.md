@@ -335,7 +335,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add core parser and output contracts` | Files: [`scripts/cli.ts`, `src/cli/parser.ts`, `src/cli/output.ts`, `src/cli/errors.ts`, `src/cli/types.ts`, `src/cli/context.ts`, `package.json`]
 
-- [ ] 6. Implement `config init` and create the full Phase 1 example/config scaffold
+- [x] 6. Implement `config init` and create the full Phase 1 example/config scaffold
 
   **What to do**: Implement `maidsclaw config init [--force] [--with-runtime] [--json]` on top of the new CLI core and config-path alignment. Copy `.env.example`, `config/providers.example.json`, `config/auth.example.json`, `config/agents.example.json`, `config/personas.example.json`, `config/lore.example.json`, and `config/runtime.example.json` into the working project as `.env`, `config/providers.json`, `config/auth.json`, `config/agents.json`, `config/personas.json`, `config/lore.json`, and `config/runtime.json`. Default to non-destructive behavior, report `created` / `skipped` / `overwritten` per file, and make `--with-runtime` a synonym for explicitly including `config/runtime.json` even if future init presets are introduced.
   **Must NOT do**: Do not overwrite existing files unless `--force` is present. Do not omit `config/runtime.json`. Do not silently create partial scaffolds without reporting every target file action.
@@ -379,7 +379,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config init command` | Files: [`scripts/cli.ts`, `src/cli/commands/config.ts`, `config/runtime.example.json`, `.env.example`, `config/*.example.json`]
 
-- [ ] 7. Implement `config validate` with stable error categories and precise locators
+- [x] 7. Implement `config validate` with stable error categories and precise locators
 
   **What to do**: Implement `maidsclaw config validate [--json]` so it validates JSON syntax, required files, required env vars, runtime memory shape, persona uniqueness, and file-backed agent correctness using the shared diagnostics from T4. Emit the exact documented category set (`config.parse_error`, `config.missing_required_file`, `config.missing_required_env`, `config.invalid_agent_role`, `config.duplicate_agent_id`, `config.duplicate_persona_id`, `config.agent_persona_not_found`, `config.invalid_runtime_memory_shape`, `config.rp_missing_submit_rp_turn_permission`) with deterministic locators.
   **Must NOT do**: Do not emit generic validation failures without category and locator. Do not reimplement RP tool-policy checks separately from the shared agent validator. Do not require runtime bootstrap to validate static file shape.
@@ -422,7 +422,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config validate command` | Files: [`src/cli/commands/config.ts`, `src/cli/agent-loader.ts`, `src/core/config.ts`, `src/core/config-schema.ts`]
 
-- [ ] 8. Implement `config doctor` as runtime-readiness diagnosis, not syntax validation
+- [x] 8. Implement `config doctor` as runtime-readiness diagnosis, not syntax validation
 
   **What to do**: Implement `maidsclaw config doctor [--json]` to answer whether the current project is `ready`, `degraded`, or `blocked`, identify the primary cause, and provide the smallest corrective action with concrete locators. Use config loading, auth resolution, model normalization, agent/persona graph validation, and shared app-bootstrap/runtime health results to compute memory-pipeline status (`ready`, `missing_embedding_model`, `chat_model_unavailable`, `embedding_model_unavailable`, `organizer_embedding_model_unavailable`) and likely degraded/blocking causes.
   **Must NOT do**: Do not reuse `config validate` output verbatim as the doctor result. Do not hide the primary cause behind a list of raw errors. Do not start a long-lived server to answer doctor.
@@ -466,7 +466,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config doctor command` | Files: [`src/cli/commands/config.ts`, `src/bootstrap/runtime.ts`, `src/core/config.ts`, `src/core/models/registry.ts`]
 
-- [ ] 9. Implement `config show` and `config write-runtime` with safe secret and merge behavior
+- [x] 9. Implement `config show` and `config write-runtime` with safe secret and merge behavior
 
   **What to do**: Implement `maidsclaw config show [server|storage|memory|runtime|providers|agents|personas|auth|all] [--json] [--show-secrets]` and `maidsclaw config write-runtime --migration-chat-model <id> --embedding-model <id> [--organizer-embedding-model <id>] [--force] [--json]`. `config show` must render parsed/effective views while redacting secrets by default in both text and JSON; `config write-runtime` must create or update only the `memory` section of `config/runtime.json`, preserve unrelated keys, and default organizer embedding to the base embedding model when omitted.
   **Must NOT do**: Do not print secrets by default. Do not rewrite unrelated runtime keys. Do not discard existing `config/runtime.json` content outside the `memory` object.
@@ -552,7 +552,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add server start and health commands` | Files: [`src/cli/commands/server.ts`, `src/cli/commands/health.ts`, `src/bootstrap/runtime.ts`, `src/gateway/server.ts`, `src/gateway/controllers.ts`]
 
-- [ ] 11. Implement the full `agent *` command suite against file and runtime sources
+- [x] 11. Implement the full `agent *` command suite against file and runtime sources
 
   **What to do**: Implement `agent list`, `agent show`, `agent create-rp`, `agent create-task`, `agent enable`, `agent disable`, `agent remove`, and `agent validate`. File-source operations must mutate `config/agents.json` through the shared file store; runtime-source operations must boot runtime and inspect the registered profiles after T4 injection. `agent list` must default to `agent_id`, `role`, `model_id`, `persona_id`, `enabled`, and `source`; `agent show` must include full agent data plus persona/tool-permission summary; `create-rp` must clone the RP preset defaults, require an existing persona, and include `submit_rp_turn`; `create-task` must clone task-agent defaults; enable/disable must write an explicit `enabled` field while preserving file shape.
   **Must NOT do**: Do not treat file source and runtime source as the same thing. Do not allow `agent remove` without `--force`. Do not mutate unrelated agent fields when toggling `enabled`.
