@@ -1,6 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
+import type { CognitionOp, PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
+import { CognitionOpCommitter } from "./cognition-op-committer.js";
 import { makeNodeRef } from "./schema.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
@@ -25,6 +27,7 @@ export type DialogueRecord = {
   timestamp: number;
   recordId?: string;
   recordIndex?: number;
+  correlatedTurnId?: string;
 };
 
 export type MemoryFlushRequest = CoreMemoryFlushRequest & {
@@ -41,10 +44,19 @@ export type GraphOrganizerJob = {
   embeddingModelId: string;
 };
 
+export type ExplicitSettlementMeta = {
+  settlementId: string;
+  requestId: string;
+  ownerAgentId: string;
+  privateCommit: PrivateCognitionCommit;
+};
+
 type IngestionAttachment = {
   recordType: "tool_call" | "tool_result" | "delegation" | "task_result" | "turn_settlement";
   payload: unknown;
   committedAt: number;
+  correlatedTurnId?: string;
+  explicitMeta?: ExplicitSettlementMeta;
 };
 
 type IngestionInput = {
@@ -53,6 +65,7 @@ type IngestionInput = {
   sessionId: string;
   dialogue: DialogueRecord[];
   attachments: IngestionAttachment[];
+  explicitSettlements: ExplicitSettlementMeta[];
 };
 
 export type ToolCallResult = {
@@ -188,6 +201,9 @@ const CALL_TWO_TOOLS: ChatToolDefinition[] = [
   },
 ];
 
+const EXPLICIT_SUPPORT_TOOL_NAMES = new Set(["create_entity", "create_alias", "create_logic_edge"]);
+const EXPLICIT_SUPPORT_TOOLS: ChatToolDefinition[] = CALL_ONE_TOOLS.filter((tool) => EXPLICIT_SUPPORT_TOOL_NAMES.has(tool.name));
+
 export class MemoryIngestionPolicy {
   constructor(private readonly interactionLogReader?: (request: MemoryFlushRequest) => InteractionRecord[]) {}
 
@@ -215,6 +231,7 @@ export class MemoryIngestionPolicy {
           timestamp: record.committedAt,
           recordId: record.recordId,
           recordIndex: record.recordIndex,
+          correlatedTurnId: record.correlatedTurnId,
         } satisfies DialogueRecord;
       })
       .filter((record): record is DialogueRecord => record !== undefined);
@@ -253,7 +270,23 @@ export class MemoryIngestionPolicy {
         recordType: record.recordType,
         payload: record.payload,
         committedAt: record.committedAt,
+        correlatedTurnId: record.correlatedTurnId,
       })) as IngestionAttachment[];
+
+    const explicitSettlements: ExplicitSettlementMeta[] = [];
+    for (const attachment of attachments) {
+      if (attachment.recordType !== "turn_settlement") continue;
+      const p = attachment.payload as TurnSettlementPayload | undefined;
+      if (!p || !p.privateCommit || !p.privateCommit.ops || p.privateCommit.ops.length === 0) continue;
+      const meta: ExplicitSettlementMeta = {
+        settlementId: p.settlementId,
+        requestId: p.requestId,
+        ownerAgentId: p.ownerAgentId,
+        privateCommit: p.privateCommit,
+      };
+      attachment.explicitMeta = meta;
+      explicitSettlements.push(meta);
+    }
 
     return {
       batchId: flushRequest.idempotencyKey,
@@ -261,6 +294,7 @@ export class MemoryIngestionPolicy {
       sessionId: flushRequest.sessionId,
       dialogue: mergedDialogue,
       attachments,
+      explicitSettlements,
     };
   }
 }
@@ -317,34 +351,79 @@ export class MemoryTaskAgent {
       changedNodeRefs: [],
     };
 
-    const hasExplicitCognition = ingest.attachments.some((attachment) => {
-      if (attachment.recordType !== "turn_settlement") return false;
-      const payload = attachment.payload as TurnSettlementPayload | undefined;
-      return (payload?.privateCommit?.ops?.length ?? 0) > 0;
-    });
-
-    const callOneTools = hasExplicitCognition
-      ? CALL_ONE_TOOLS.filter((tool) => tool.name !== "create_private_belief" && tool.name !== "create_private_event")
-      : CALL_ONE_TOOLS;
-
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
-      const systemPrompt = hasExplicitCognition
-        ? "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private. NOTE: Explicit private cognition has already been committed for settled turns in this batch. Do NOT re-create private beliefs or events for those turns — focus on entities, aliases, and logic edges only."
-        : "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.";
+      for (const explicitMeta of ingest.explicitSettlements) {
+        const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
+        const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
+        const explicitSupportCall = await this.modelProvider.chat(
+          [
+            {
+              role: "system",
+              content:
+                "You are a memory migration support engine for authoritative explicit cognition. Use tools only to resolve canonical entities and aliases needed by authoritative explicit ops. Do not invent or rewrite private beliefs/events. Create only supporting entities, aliases, and logic edges when strictly necessary.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({ ingest: explicitIngest, existingContext: explicitContext }),
+            },
+          ],
+          EXPLICIT_SUPPORT_TOOLS,
+        );
+
+        this.applyCallOneToolCalls(
+          {
+            ...flushRequest,
+            agentId: explicitMeta.ownerAgentId,
+          },
+          explicitSupportCall,
+          created,
+        );
+
+        const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
+        const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
+        const commitRefs = new CognitionOpCommitter(this.storage, explicitMeta.ownerAgentId, currentLocationEntityId).commit(
+          explicitMeta.privateCommit.ops,
+          explicitMeta.settlementId,
+        );
+        created.changedNodeRefs.push(...commitRefs);
+        this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCommit.ops, created);
+      }
+
+      const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
+      const dedupedIngest: IngestionInput = {
+        ...ingest,
+        dialogue: ingest.dialogue.filter(
+          (row) => !row.correlatedTurnId || !explicitRequestIds.has(row.correlatedTurnId),
+        ),
+        attachments: ingest.attachments.filter((attachment) => {
+          if (attachment.correlatedTurnId && explicitRequestIds.has(attachment.correlatedTurnId)) {
+            return false;
+          }
+          if (attachment.recordType === "turn_settlement") {
+            const payload = attachment.payload as TurnSettlementPayload | undefined;
+            if (payload?.requestId && explicitRequestIds.has(payload.requestId)) {
+              return false;
+            }
+          }
+          return true;
+        }),
+        explicitSettlements: [],
+      };
 
       const callOne = await this.modelProvider.chat(
         [
           {
             role: "system",
-            content: systemPrompt,
+            content:
+              "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.",
           },
           {
             role: "user",
-            content: JSON.stringify({ ingest, existingContext }),
+            content: JSON.stringify({ ingest: dedupedIngest, existingContext }),
           },
         ],
-        callOneTools,
+        CALL_ONE_TOOLS,
       );
 
       const createdPrivateEvents = this.applyCallOneToolCalls(flushRequest, callOne, created);
@@ -424,6 +503,96 @@ export class MemoryTaskAgent {
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
+  }
+
+  private buildExplicitIngest(ingest: IngestionInput, requestId: string): IngestionInput {
+    return {
+      ...ingest,
+      dialogue: ingest.dialogue.filter((row) => row.correlatedTurnId === requestId),
+      attachments: ingest.attachments.filter((attachment) => {
+        if (attachment.correlatedTurnId === requestId) {
+          return true;
+        }
+        if (attachment.recordType !== "turn_settlement") {
+          return false;
+        }
+        const payload = attachment.payload as TurnSettlementPayload | undefined;
+        return payload?.requestId === requestId;
+      }),
+      explicitSettlements: ingest.explicitSettlements.filter((meta) => meta.requestId === requestId),
+    };
+  }
+
+  private findSettlementPayload(
+    attachments: IngestionAttachment[],
+    settlementId: string,
+  ): TurnSettlementPayload | undefined {
+    const settlementAttachment = attachments.find(
+      (attachment) => attachment.explicitMeta?.settlementId === settlementId,
+    );
+    if (!settlementAttachment) {
+      return undefined;
+    }
+    return settlementAttachment.payload as TurnSettlementPayload;
+  }
+
+  private collectExplicitSettlementRefs(
+    agentId: string,
+    settlementId: string,
+    ops: CognitionOp[],
+    created: CreatedState,
+  ): void {
+    const eventRows = this.db
+      .prepare(
+        `SELECT id FROM agent_event_overlay
+         WHERE agent_id = ? AND settlement_id = ?`,
+      )
+      .all(agentId, settlementId) as Array<{ id: number }>;
+    for (const row of eventRows) {
+      created.privateEventIds.push(row.id);
+      created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+    }
+
+    const beliefRows = this.db
+      .prepare(
+        `SELECT id FROM agent_fact_overlay
+         WHERE agent_id = ? AND settlement_id = ?`,
+      )
+      .all(agentId, settlementId) as Array<{ id: number }>;
+    for (const row of beliefRows) {
+      created.privateBeliefIds.push(row.id);
+      created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
+    }
+
+    for (const op of ops) {
+      if (op.op !== "retract") {
+        continue;
+      }
+      if (op.target.kind === "assertion") {
+        const row = this.db
+          .prepare(
+            `SELECT id FROM agent_fact_overlay
+             WHERE agent_id = ? AND cognition_key = ?`,
+          )
+          .get(agentId, op.target.key) as { id: number } | null;
+        if (row) {
+          created.privateBeliefIds.push(row.id);
+          created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
+        }
+        continue;
+      }
+
+      const row = this.db
+        .prepare(
+          `SELECT id FROM agent_event_overlay
+           WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
+        )
+        .get(agentId, op.target.key, op.target.kind) as { id: number } | null;
+      if (row) {
+        created.privateEventIds.push(row.id);
+        created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+      }
+    }
   }
 
   private async runOrganizeInternal(job: GraphOrganizerJob): Promise<GraphOrganizerResult> {
@@ -1106,9 +1275,13 @@ export class MemoryTaskAgent {
 
     if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare(`SELECT private_notes, projectable_summary, agent_id FROM agent_event_overlay WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; agent_id: string } | null;
+        .prepare(`SELECT private_notes, projectable_summary, agent_id, cognition_status FROM agent_event_overlay WHERE id = ?`)
+        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; agent_id: string; cognition_status: string | null } | null;
       if (!row) {
+        return;
+      }
+      if (row.cognition_status === "retracted") {
+        this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
       const content = `${row.private_notes ?? ""} ${row.projectable_summary ?? ""}`.trim();
@@ -1118,9 +1291,13 @@ export class MemoryTaskAgent {
 
     if (parsed.kind === "private_belief") {
       const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string } | null;
+        .prepare(`SELECT predicate, provenance, agent_id, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
+        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; epistemic_status: string | null } | null;
       if (!row) {
+        return;
+      }
+      if (row.epistemic_status === "retracted") {
+        this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
       this.storage.syncSearchDoc("private", nodeRef, `${row.predicate} ${row.provenance ?? ""}`.trim(), row.agent_id);

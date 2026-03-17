@@ -1,11 +1,18 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
+import { MaidsClawError } from "../core/errors.js";
 import { CoreMemoryService } from "./core-memory.js";
 import { EmbeddingService } from "./embeddings.js";
 import { MaterializationService } from "./materialization.js";
 import { createMemorySchema, makeNodeRef } from "./schema.js";
 import { GraphStorageService } from "./storage.js";
-import { MemoryTaskAgent, type GraphOrganizerJob, type MemoryFlushRequest } from "./task-agent.js";
+import {
+  MemoryTaskAgent,
+  type ChatMessage,
+  type ChatToolDefinition,
+  type GraphOrganizerJob,
+  type MemoryFlushRequest,
+} from "./task-agent.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 
 type ToolCallResult = {
@@ -17,6 +24,7 @@ class MockModelProvider {
   readonly defaultEmbeddingModelId: string = "test-embedding-model";
   public chatCalls = 0;
   public embedCalls = 0;
+  public chatInputs: Array<{ messages: ChatMessage[]; tools: ChatToolDefinition[] }> = [];
 
   constructor(
     private readonly chatResponses: Array<ToolCallResult[] | Error>,
@@ -24,8 +32,9 @@ class MockModelProvider {
       texts.map((_, index) => new Float32Array([index + 1, 0.1])),
   ) {}
 
-  async chat(): Promise<ToolCallResult[]> {
+  async chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]> {
     this.chatCalls += 1;
+    this.chatInputs.push({ messages, tools });
     const next = this.chatResponses.shift();
     if (!next) {
       return [];
@@ -156,6 +165,257 @@ describe("MemoryTaskAgent", () => {
       .prepare(`SELECT projection_class FROM agent_event_overlay WHERE id = ?`)
       .get(result.private_event_ids[0]) as { projection_class: string };
     expect(privateEvent.projection_class).toBe("area_candidate");
+  });
+
+  it("explicit settlements are ingested during flush and ordinary turns still extract private beliefs", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const provider = new MockModelProvider([
+      [],
+      [
+        {
+          name: "create_entity",
+          arguments: {
+            pointer_key: "person:carol",
+            display_name: "Carol",
+            entity_type: "person",
+            memory_scope: "private_overlay",
+          },
+        },
+        {
+          name: "create_private_belief",
+          arguments: {
+            source: "person:carol",
+            target: "person:carol",
+            predicate: "seems_tired",
+            belief_type: "observation",
+            confidence: 0.7,
+          },
+        },
+      ],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-explicit-mixed",
+      dialogueRecords: [
+        { role: "user", content: "Trust me.", timestamp: 1000, recordId: "u-explicit", recordIndex: 1 },
+        { role: "assistant", content: "I do.", timestamp: 1100, recordId: "a-explicit", recordIndex: 2 },
+        { role: "user", content: "Carol is exhausted.", timestamp: 1200, recordId: "u-ordinary", recordIndex: 3 },
+        {
+          role: "assistant",
+          content: "Noted. Carol looks exhausted.",
+          timestamp: 1300,
+          recordId: "a-ordinary",
+          recordIndex: 4,
+        },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-explicit",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Trust me." },
+          correlatedTurnId: "req-explicit",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "a-explicit",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "I do." },
+          correlatedTurnId: "req-explicit",
+          committedAt: 1100,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-explicit",
+          recordIndex: 3,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-explicit",
+            requestId: "req-explicit",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "I do.",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [
+                {
+                  op: "upsert",
+                  record: {
+                    kind: "assertion",
+                    key: "assert:explicit-trust",
+                    proposition: {
+                      subject: { kind: "special", value: "self" },
+                      predicate: "trusts",
+                      object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                    },
+                    stance: "accepted",
+                  },
+                },
+              ],
+            },
+          },
+          correlatedTurnId: "req-explicit",
+          committedAt: 1150,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "u-ordinary",
+          recordIndex: 4,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Carol is exhausted." },
+          correlatedTurnId: "req-ordinary",
+          committedAt: 1200,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "a-ordinary",
+          recordIndex: 5,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Noted. Carol looks exhausted." },
+          correlatedTurnId: "req-ordinary",
+          committedAt: 1300,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(flushRequest);
+
+    expect(provider.chatCalls).toBe(3);
+
+    const explicitRow = db
+      .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE cognition_key = 'assert:explicit-trust'`)
+      .get() as { cognition_key: string } | null;
+    expect(explicitRow?.cognition_key).toBe("assert:explicit-trust");
+
+    const ordinaryBelief = db
+      .prepare(`SELECT predicate FROM agent_fact_overlay WHERE predicate = 'seems_tired'`)
+      .get() as { predicate: string } | null;
+    expect(ordinaryBelief?.predicate).toBe("seems_tired");
+  });
+
+  it("ordinary CALL_ONE excludes dialogue already covered by explicit settlements", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const provider = new MockModelProvider([[], [], [{ name: "update_index_block", arguments: { new_text: "" } }]]);
+
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-explicit-only",
+      dialogueRecords: [
+        { role: "user", content: "Explicit turn user", timestamp: 1000, recordId: "u-explicit", recordIndex: 1 },
+        { role: "assistant", content: "Explicit turn assistant", timestamp: 1100, recordId: "a-explicit", recordIndex: 2 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-explicit",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Explicit turn user" },
+          correlatedTurnId: "req-explicit-only",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "a-explicit",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Explicit turn assistant" },
+          correlatedTurnId: "req-explicit-only",
+          committedAt: 1100,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-explicit-only",
+          recordIndex: 3,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-explicit-only",
+            requestId: "req-explicit-only",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "Explicit turn assistant",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [
+                {
+                  op: "upsert",
+                  record: {
+                    kind: "assertion",
+                    key: "assert:explicit-only",
+                    proposition: {
+                      subject: { kind: "special", value: "self" },
+                      predicate: "trusts",
+                      object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                    },
+                    stance: "accepted",
+                  },
+                },
+              ],
+            },
+          },
+          correlatedTurnId: "req-explicit-only",
+          committedAt: 1150,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(flushRequest);
+
+    expect(provider.chatCalls).toBe(3);
+    const ordinaryCallUserPayload = provider.chatInputs[1]?.messages[1]?.content;
+    const ordinaryCallIngest = JSON.parse(String(ordinaryCallUserPayload)) as { ingest: { dialogue: unknown[] } };
+    expect(ordinaryCallIngest.ingest.dialogue).toHaveLength(0);
   });
 
   it("Call 1 + 2 are atomic and roll back fully if hot-path LLM fails", async () => {
@@ -395,6 +655,212 @@ describe("MemoryTaskAgent", () => {
       .prepare(`SELECT count(*) as cnt FROM search_docs_private WHERE agent_id = 'agent-1'`)
       .get() as { cnt: number };
     expect(privateDocCount.cnt).toBeGreaterThanOrEqual(1);
+  });
+
+  it("explicit cognition node refs flow into organize and private search docs", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const provider = new MockModelProvider(
+      [[], [], [{ name: "update_index_block", arguments: { new_text: "" } }]],
+      () => [new Float32Array([1, 0]), new Float32Array([0.99, 0.01])],
+    );
+
+    let capturedJob: GraphOrganizerJob | undefined;
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-explicit-refs",
+      dialogueRecords: [
+        { role: "user", content: "Explicit ref test user", timestamp: 1000, recordId: "u-ref", recordIndex: 1 },
+        { role: "assistant", content: "Explicit ref test asst", timestamp: 1100, recordId: "a-ref", recordIndex: 2 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-ref",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Explicit ref test user" },
+          correlatedTurnId: "req-refs",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "a-ref",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "Explicit ref test asst" },
+          correlatedTurnId: "req-refs",
+          committedAt: 1100,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-refs",
+          recordIndex: 3,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-refs",
+            requestId: "req-refs",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "Explicit ref test asst",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [
+                {
+                  op: "upsert",
+                  record: {
+                    kind: "assertion",
+                    key: "assert:ref-test",
+                    proposition: {
+                      subject: { kind: "special", value: "self" },
+                      predicate: "trusts",
+                      object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                    },
+                    stance: "accepted",
+                  },
+                },
+              ],
+            },
+          },
+          correlatedTurnId: "req-refs",
+          committedAt: 1150,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    (agent as unknown as { runOrganize: (job: GraphOrganizerJob) => Promise<unknown> }).runOrganize = async (job) => {
+      capturedJob = job;
+      return { updated_embedding_refs: [], updated_semantic_edge_count: 0, updated_score_refs: [] };
+    };
+
+    await agent.runMigrate(flushRequest);
+
+    expect(capturedJob).toBeDefined();
+    const beliefRefs = capturedJob!.changedNodeRefs.filter((ref) => ref.startsWith("private_belief:"));
+    expect(beliefRefs.length).toBeGreaterThanOrEqual(1);
+
+    const assertionRow = db
+      .prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:ref-test'`)
+      .get() as { id: number };
+    expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("private_belief", assertionRow.id));
+  });
+
+  it("explicit unresolved refs roll back migrate and keep the range retryable", async () => {
+    const provider = new MockModelProvider([
+      [],
+    ]);
+
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-unresolved",
+      dialogueRecords: [
+        { role: "user", content: "Trust me.", timestamp: 1000, recordId: "u-unresolved", recordIndex: 1 },
+        { role: "assistant", content: "I do.", timestamp: 1100, recordId: "a-unresolved", recordIndex: 2 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-unresolved",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Trust me." },
+          correlatedTurnId: "req-unresolved",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "a-unresolved",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "message",
+          payload: { role: "assistant", content: "I do." },
+          correlatedTurnId: "req-unresolved",
+          committedAt: 1100,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-unresolved",
+          recordIndex: 3,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-unresolved",
+            requestId: "req-unresolved",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "I do.",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v3",
+              ops: [
+                {
+                  op: "upsert",
+                  record: {
+                    kind: "assertion",
+                    key: "assert:unresolved-trust",
+                    proposition: {
+                      subject: { kind: "special", value: "self" },
+                      predicate: "trusts",
+                      object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                    },
+                    stance: "accepted",
+                  },
+                },
+              ],
+            },
+          },
+          correlatedTurnId: "req-unresolved",
+          committedAt: 1150,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let caughtError: unknown;
+    try {
+      await agent.runMigrate(flushRequest);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(MaidsClawError);
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_UNRESOLVED_REFS");
+    expect(mce.retriable).toBe(true);
+    expect((mce.details as { settlementId: string }).settlementId).toBe("stl:req-unresolved");
+    expect((mce.details as { unresolvedKeys: string[] }).unresolvedKeys).toContain("assert:unresolved-trust");
+
+    const overlayCount = db
+      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved-trust'`)
+      .get() as { cnt: number };
+    expect(overlayCount.cnt).toBe(0);
   });
 
   it("exposes no onTurn or onSessionEnd trigger hooks", () => {
