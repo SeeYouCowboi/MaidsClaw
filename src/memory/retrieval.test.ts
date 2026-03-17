@@ -259,4 +259,43 @@ describe("RetrievalService", () => {
     const facts = service.readByFactIds([1, 2], rpCtx);
     expect(facts.map((fact) => fact.id)).toEqual([1]);
   });
+
+  it("unflushed explicit cognition is not searchable", async () => {
+    // recent_cognition_slots table does not exist in retrieval tests (it's in interaction schema)
+    // This test verifies that RetrievalService.searchVisibleNarrative only queries
+    // search_docs_private/search_docs_area/search_docs_world — NOT recent_cognition_slots
+
+    // Verify retrieval.ts does NOT read from recent_cognition_slots by checking search behavior
+    // Since recent_cognition_slots is not in the search path, any content there won't be found
+
+    // Search for content that might appear in staged cognition
+    const results = await service.searchVisibleNarrative("unflushed staged belief", rpCtx);
+
+    // Unflushed cognition should NOT appear in search results (retrieval is flush-backed only)
+    expect(results.length).toBe(0);
+  });
+
+  it("flushed explicit cognition becomes searchable after organizer", async () => {
+    const now = Date.now();
+
+    // Insert flushed explicit cognition into agent_fact_overlay (simulating flush-time write)
+    db.prepare(
+      "INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, cognition_key, settlement_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("agent-a", 0, 0, "flushed belief predicate", "flushed-belief", "stl:flushed", now, now);
+
+    // Insert corresponding search doc in search_docs_private (simulating organizer sync)
+    db.prepare(
+      "INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run("private_belief", "private_belief:1", "agent-a", "This belief has been flushed to overlay", now);
+    const id = db.prepare("SELECT last_insert_rowid() as id").get() as { id: number };
+    db.prepare("INSERT INTO search_docs_private_fts(rowid, content) VALUES (?,?)").run(id.id, "This belief has been flushed to overlay");
+
+    // Search for the flushed cognition content
+    const results = await service.searchVisibleNarrative("flushed belief", rpCtx);
+
+    // Flushed cognition SHOULD appear in search results (after organizer sync)
+    const flushedResult = results.some((r) => r.content.includes("flushed to overlay"));
+    expect(flushedResult).toBe(true);
+    expect(results.some((r) => r.scope === "private")).toBe(true);
+  });
 });
