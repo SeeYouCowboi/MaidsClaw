@@ -688,7 +688,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add local session and turn commands` | Files: [`src/cli/commands/session.ts`, `src/cli/commands/turn.ts`, `src/cli/local-runtime.ts`, `src/runtime/turn-service.ts`]
 
-- [ ] 14. Implement `maidsclaw chat` as the primary Local Mode `REPL + Inspect` session shell
+- [x] 14. Implement `maidsclaw chat` as the primary Local Mode `REPL + Inspect` session shell
 
   **What to do**: Implement `src/cli/shell/state.ts`, `src/cli/shell/session-shell.ts`, and `src/cli/shell/slash-dispatcher.ts` using Node/Bun `readline` APIs. Build `maidsclaw chat --agent <agent_id> [--session <session_id>] [--mode local|gateway] [--base-url <url>] [--save-trace]` as a Local Mode-first shell: auto-create a session when one is not supplied, maintain current shell context (`session_id`, `agent_id`, latest `request_id`, latest `settlement_id`, `Raw 观察模式` toggle), print assistant content followed by a compact post-turn status line, and implement `/inspect`, `/summary`, `/transcript`, `/prompt`, `/chunks`, `/logs`, `/memory`, `/diagnose`, `/trace`, `/raw on|off`, `/recover`, `/close`, `/mode`, `/exit`, and `/help`. Reuse T13 for sends and T16 for inspect reads; keep the transport boundary clean so T19 can later enable Gateway Mode on the same shell.
   **Must NOT do**: Do not build a full-screen TUI. Do not keep shell-only inspect logic. Do not default to raw settlement data. Do not silently guess identifiers when current context is insufficient.

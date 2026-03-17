@@ -18,6 +18,7 @@ import { registerServerCommands } from "../src/cli/commands/server.js";
 import { registerHealthCommand } from "../src/cli/commands/health.js";
 import { registerSessionCommands } from "../src/cli/commands/session.js";
 import { registerTurnCommands } from "../src/cli/commands/turn.js";
+import { registerChatCommand } from "../src/cli/commands/chat.js";
 
 // ── Stub handler factory ─────────────────────────────────────────────
 
@@ -71,34 +72,8 @@ registerSessionCommands();
 // turn namespace — real handler from src/cli/commands/turn.ts
 registerTurnCommands();
 
-// chat (namespace-only, interactive — REJECTS --json)
-registerCommand({
-  namespace: "chat",
-  handler: async (ctx: CliContext, args: ParsedArgs): Promise<void> => {
-    // chat is the ONLY interactive command — it MUST NOT use the JSON stdout path
-    if (ctx.json) {
-      throw new CliError(
-        "INVALID_FLAG",
-        "chat command does not support --json mode",
-        EXIT_USAGE,
-      );
-    }
-
-    // Reject unknown flags
-    const unknownFlags = Object.keys(args.flags);
-    if (unknownFlags.length > 0) {
-      throw new CliError(
-        "UNKNOWN_FLAGS",
-        `Unknown flag(s) for "chat": ${unknownFlags.map((f) => `--${f}`).join(", ")}`,
-        EXIT_USAGE,
-      );
-    }
-
-    if (!ctx.quiet) {
-      writeText("chat: interactive mode not yet implemented");
-    }
-  },
-});
+// chat — real handler from src/cli/commands/chat.ts
+registerChatCommand();
 
 // debug namespace
 for (const sub of [
