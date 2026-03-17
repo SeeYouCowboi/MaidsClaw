@@ -8,7 +8,8 @@
     "build": "tsc --noEmit",
     "test": "bun test",
     "start": "bun run src/index.ts",
-    "check:native": "cargo check --manifest-path native/Cargo.toml"
+    "check:native": "cargo check --manifest-path native/Cargo.toml",
+    "cli": "bun run scripts/cli.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.37",

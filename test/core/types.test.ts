@@ -402,14 +402,14 @@ describe("GatewayEvent", () => {
 describe("ViewerContext", () => {
   it("has correct shape", () => {
     const ctx: ViewerContext = {
-      agentId: "agent-1",
-      sessionId: "sess-1",
-      role: "maiden",
-      currentLocationEntityId: "loc-1",
+      viewer_agent_id: "agent-1",
+      session_id: "sess-1",
+      viewer_role: "maiden",
+      current_area_id: 1,
     };
 
-    expect(ctx.role).toBe("maiden");
-    expect(ctx.currentLocationEntityId).toBe("loc-1");
+    expect(ctx.viewer_role).toBe("maiden");
+    expect(ctx.current_area_id).toBe(1);
   });
 
   it("supports all ViewerRole values", () => {

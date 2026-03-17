@@ -95,7 +95,7 @@ describe("ToolExecutor", () => {
     const context: DispatchContext = {
       sessionId: "s1",
       agentId: "a1",
-      viewerContext: { sessionId: "s1", agentId: "a1", role: "task_agent" },
+      viewerContext: { session_id: "s1", viewer_agent_id: "a1", viewer_role: "task_agent" },
     };
 
     const result = await executor.execute("local_add", { a: 2, b: 3 }, context);

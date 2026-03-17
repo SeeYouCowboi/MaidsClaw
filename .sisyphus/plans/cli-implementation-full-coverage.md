@@ -116,7 +116,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 > Implementation + Test = ONE task. Never separate.
 > EVERY task MUST have: Agent Profile + Parallelization + QA Scenarios.
 
-- [ ] 1. Extract one shared app bootstrap for server paths and Local Mode
+- [x] 1. Extract one shared app bootstrap for server paths and Local Mode
 
   **What to do**: Add a shared app-bootstrap module that performs config loading, runtime bootstrap, health-check mapping, and optional Gateway server construction once. `src/index.ts`, `scripts/start-dev.ts`, `server start`, and Local Mode entrypoints must all call that shared assembly instead of duplicating `loadConfig()` + `bootstrapRuntime()` + `GatewayServer` wiring. Thread `cwd`/config-root resolution through this layer so CLI global `--cwd` changes the same runtime inputs that server startup uses.
   **Must NOT do**: Do not fork `bootstrapRuntime()` behavior. Do not leave duplicate server bootstrap logic in `src/index.ts` and `scripts/start-dev.ts`. Do not make CLI local mode bypass the same health and memory-pipeline state the server uses.
@@ -159,7 +159,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): extract shared app bootstrap` | Files: [`src/index.ts`, `scripts/start-dev.ts`, `src/bootstrap/runtime.ts`, `src/bootstrap/types.ts`, `src/gateway/server.ts`]
 
-- [ ] 2. Persist local session lifecycle across separate CLI invocations
+- [x] 2. Persist local session lifecycle across separate CLI invocations
 
   **What to do**: Add SQLite-backed session persistence for Local Mode so `session create`, `turn send`, `session close`, and `session recover` work across separate CLI processes against the same database path. Create a dedicated session migration/module, store `session_id`, `agent_id`, `created_at`, `closed_at`, and `recovery_required`, and adapt `SessionService` to read/write through that persistent store while keeping the existing public methods and error codes intact.
   **Must NOT do**: Do not keep standalone local sessions in memory-only state. Do not change session IDs between commands. Do not break the existing gateway-facing `SessionService` method contract.
@@ -203,7 +203,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): persist local sessions` | Files: [`src/session/service.ts`, `src/bootstrap/runtime.ts`, `src/storage/migrations.ts`]
 
-- [ ] 3. Align Phase 1 config files with runtime loading for agents, personas, lore, and runtime settings
+- [x] 3. Align Phase 1 config files with runtime loading for agents, personas, lore, and runtime settings
 
   **What to do**: Make `config/agents.json`, `config/personas.json`, `config/lore.json`, and `config/runtime.json` the canonical Phase 1 CLI-visible configuration files. Add `config/runtime.example.json`, extend startup/config helpers to resolve these files relative to `--cwd`, and add adapters so runtime persona/lore loading can prefer `config/personas.json` and `config/lore.json` when present while preserving fallback compatibility with `data/personas/*.json` and `data/lore/*.json` for existing repo behavior.
   **Must NOT do**: Do not leave `config/personas.json` / `config/lore.json` as dead files unused by runtime. Do not remove compatibility fallback for existing `data/` loaders. Do not create separate config semantics for CLI versus runtime.
@@ -248,7 +248,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): align config files with runtime loaders` | Files: [`config/runtime.example.json`, `src/core/config.ts`, `src/bootstrap/runtime.ts`, `src/persona/loader.ts`, `src/lore/loader.ts`]
 
-- [ ] 4. Implement file-backed agent store, loader, and reusable validation diagnostics
+- [x] 4. Implement file-backed agent store, loader, and reusable validation diagnostics
 
   **What to do**: Add `src/cli/agent-file-store.ts` and `src/cli/agent-loader.ts` to read and write `config/agents.json`, treat missing `enabled` as `true`, normalize `modelId` with `normalizeModelRef()`, validate `role`, unique IDs, persona references, and tool-policy compatibility, and inject the validated profiles into `RuntimeBootstrapOptions.agentProfiles`. Expose one reusable diagnostics function used by `config validate`, `config doctor`, `agent validate`, and runtime bootstrap so the same RP-policy and model/persona checks do not get reimplemented in multiple command handlers.
   **Must NOT do**: Do not duplicate validation logic across commands. Do not allow an RP allowlist that omits `submit_rp_turn`. Do not mutate preset profiles in place.
@@ -292,7 +292,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add file-backed agent loader and validators` | Files: [`src/cli/agent-file-store.ts`, `src/cli/agent-loader.ts`, `src/bootstrap/runtime.ts`, `src/agents/rp/tool-policy.ts`, `src/core/models/registry.ts`]
 
-- [ ] 5. Build the zero-dependency CLI core scaffold, parser, output contracts, and exit codes
+- [x] 5. Build the zero-dependency CLI core scaffold, parser, output contracts, and exit codes
 
   **What to do**: Add `scripts/cli.ts`, `src/cli/parser.ts`, `src/cli/output.ts`, `src/cli/errors.ts`, `src/cli/types.ts`, and `src/cli/context.ts`. Implement a table-driven parser using `process.argv` with no new runtime dependencies, support global `--json`, `--quiet`, and `--cwd`, reserve `chat` as the only interactive command, map exit codes to the document's stable set (`0/2/3/4/5`), and standardize non-interactive JSON envelopes as `{ ok, command, mode?, data?, diagnostics?, error? }`.
   **Must NOT do**: Do not add a CLI framework dependency in Phase 1. Do not let `chat` share the non-interactive JSON stdout path. Do not let commands silently ignore unknown flags or invalid subcommands.
