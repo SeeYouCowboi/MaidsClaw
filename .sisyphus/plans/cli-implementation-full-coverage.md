@@ -957,7 +957,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add gateway support for shell and standalone wrapper commands` | Files: [`src/gateway/routes.ts`, `src/gateway/controllers.ts`, `src/gateway/server.ts`, `src/cli/gateway-client.ts`, `src/cli/commands/*`]
 
-- [ ] 20. Complete the CLI test matrix, docs/examples, and acceptance runbook
+- [x] 20. Complete the CLI test matrix, docs/examples, and acceptance runbook
 
   **What to do**: Add `bun:test` coverage for parser/exit codes, `config init` idempotency, config validation categories, config doctor statuses, agent CRUD and loader behavior, persistent local sessions, Local Mode `turn send`, chat shell current-context behavior, `Session Shell` / `Standalone Wrapper Command` 对等, RP buffered/silent-private success, settlement replay/idempotency, settlement rollback, recent cognition prompt continuity, flush selector behavior, pending sweeper backoff states, diagnose mapping, JSON envelope stability, `Raw 观察模式` / `不安全 Raw Settlement 模式` boundaries, and final Gateway evidence parity. Update `README.md` and `docs/README.zh-CN.md` with CLI usage/examples centered on `chat`, `turn send`, and `debug *` 独立包装命令, plus a short acceptance runbook describing the automated commands that prove completion.
   **Must NOT do**: Do not introduce a second test runner. Do not leave acceptance criteria unbound to tests or deterministic command checks. Do not add CI-specific workflow files unless they are directly required to execute the repo's existing build/test commands.
