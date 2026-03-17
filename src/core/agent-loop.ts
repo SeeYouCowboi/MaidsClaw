@@ -1,20 +1,21 @@
 import type { AgentProfile } from "../agents/profile.js";
+import type { TraceStore } from "../cli/trace-store.js";
+import type { ViewerContext } from "../memory/types.js";
+import type { RpBufferedExecutionResult, RpTurnOutcomeSubmission } from "../runtime/rp-turn-contract.js";
+import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
 import type { Chunk, TextDeltaChunk } from "./chunk.js";
 import { MaidsClawError, wrapError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type { ChatCompletionRequest, ChatMessage, ChatModelProvider, ContentBlock } from "./models/chat-provider.js";
-import type { ViewerContext } from "../memory/types.js";
 import type { PromptBuilder } from "./prompt-builder.js";
 import type { PromptRenderer } from "./prompt-renderer.js";
 import { createRunContext } from "./run-context.js";
 import { NoopRuntimeProjectionSink } from "./runtime-projection.js";
 import type { RuntimeProjectionSink } from "./runtime-projection.js";
-import type { RpBufferedExecutionResult, RpTurnOutcomeSubmission } from "../runtime/rp-turn-contract.js";
-import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
 import { calculateTokenBudget } from "./token-budget.js";
 import type { ProjectionAppendix } from "./types.js";
-import { ToolExecutor } from "./tools/tool-executor.js";
 import { getFilteredSchemas, canExecuteTool } from "./tools/tool-access-policy.js";
+import { ToolExecutor } from "./tools/tool-executor.js";
 
 type PendingToolCall = {
   id: string;
@@ -40,10 +41,11 @@ export interface AgentLoopOptions {
 
 export interface AgentRunRequest {
   sessionId: string;
-  requestId: string;
+  requestId?: string;
   messages: ChatMessage[];
   delegationDepth?: number;
   parentRunId?: string;
+  traceStore?: TraceStore;
 }
 
 export class AgentLoop {
@@ -70,6 +72,7 @@ export class AgentLoop {
   }
 
   async *run(request: AgentRunRequest): AsyncIterable<Chunk> {
+    const requestId = request.requestId ?? `req:${Date.now()}`;
     const delegationDepth = request.delegationDepth ?? 0;
     if (delegationDepth >= this.maxDelegationDepth) {
       throw new MaidsClawError({
@@ -79,17 +82,19 @@ export class AgentLoop {
       });
     }
 
-    const runContext = createRunContext(request.sessionId, request.requestId, this.profile.id, {
+    request.traceStore?.initTrace(requestId, request.sessionId, this.profile.id);
+
+    const runContext = createRunContext(request.sessionId, requestId, this.profile.id, {
       delegationDepth,
       parentRunId: request.parentRunId,
     });
     const loopLogger = this.logger?.child({
       session_id: request.sessionId,
-      request_id: request.requestId,
+      request_id: requestId,
       agent_id: this.profile.id,
     });
 
-    const initialPromptState = await this.buildInitialPromptState(request);
+    const initialPromptState = await this.buildInitialPromptState({ ...request, requestId });
     const workingMessages = [...initialPromptState.messages];
     const systemPrompt = initialPromptState.systemPrompt;
     let turnIndex = 0;
@@ -160,6 +165,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "MODEL_API_ERROR", retriable: true });
         loopLogger?.error("Agent loop model call failed", wrapped, { turn: turnIndex });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "error",
+          message: `agent_loop model call failed: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         yield {
           type: "error",
           code: wrapped.code,
@@ -197,6 +207,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "TOOL_ARGUMENT_INVALID", retriable: false });
         loopLogger?.warn("Agent loop received malformed tool arguments", { turn: turnIndex, code: wrapped.code });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "warn",
+          message: `agent_loop malformed tool arguments: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         yield {
           type: "error",
           code: wrapped.code,
@@ -210,8 +225,8 @@ export class AgentLoop {
       if (assistantMessage) {
         workingMessages.push(assistantMessage);
         if (sawMessageEnd) {
-          this.projectionSink.onProjectionEligible(
-            createProjectionAppendix(assistantText, runContext.agentId, request.requestId, turnIndex),
+            this.projectionSink.onProjectionEligible(
+            createProjectionAppendix(assistantText, runContext.agentId, requestId, turnIndex),
             request.sessionId
           );
         }
@@ -257,6 +272,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "MCP_TOOL_ERROR", retriable: false });
         loopLogger?.error("Agent loop tool execution failed", wrapped, { turn: turnIndex });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "error",
+          message: `agent_loop tool execution failed: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         if (activeToolCall) {
           yield {
             type: "tool_execution_result" as const,
@@ -278,6 +298,7 @@ export class AgentLoop {
   }
 
   async runBuffered(request: AgentRunRequest): Promise<RpBufferedExecutionResult> {
+    const requestId = request.requestId ?? `req:${Date.now()}`;
     const delegationDepth = request.delegationDepth ?? 0;
     if (delegationDepth >= this.maxDelegationDepth) {
       throw new MaidsClawError({
@@ -287,18 +308,20 @@ export class AgentLoop {
       });
     }
 
-    const runContext = createRunContext(request.sessionId, request.requestId, this.profile.id, {
+    request.traceStore?.initTrace(requestId, request.sessionId, this.profile.id);
+
+    const runContext = createRunContext(request.sessionId, requestId, this.profile.id, {
       delegationDepth,
       parentRunId: request.parentRunId,
     });
     const loopLogger = this.logger?.child({
       session_id: request.sessionId,
-      request_id: request.requestId,
+      request_id: requestId,
       agent_id: this.profile.id,
     });
 
     const bufferedToolExecutor = this.createBufferedToolExecutor();
-    const initialPromptState = await this.buildInitialPromptState(request);
+    const initialPromptState = await this.buildInitialPromptState({ ...request, requestId });
     const workingMessages = [...initialPromptState.messages];
     const systemPrompt = initialPromptState.systemPrompt;
     let turnIndex = 0;
@@ -359,6 +382,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "MODEL_API_ERROR", retriable: true });
         loopLogger?.error("Agent loop model call failed", wrapped, { turn: turnIndex });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "error",
+          message: `agent_loop buffered model call failed: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         return { error: wrapped.message };
       }
 
@@ -390,6 +418,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "TOOL_ARGUMENT_INVALID", retriable: false });
         loopLogger?.warn("Agent loop received malformed tool arguments", { turn: turnIndex, code: wrapped.code });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "warn",
+          message: `agent_loop buffered malformed tool arguments: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         return { error: wrapped.message };
       }
 
@@ -433,6 +466,11 @@ export class AgentLoop {
       } catch (error) {
         const wrapped = wrapError(error, { code: "MCP_TOOL_ERROR", retriable: false });
         loopLogger?.error("Agent loop tool execution failed", wrapped, { turn: turnIndex });
+        request.traceStore?.addLogEntry(requestId, {
+          level: "error",
+          message: `agent_loop buffered tool execution failed: ${wrapped.code}`,
+          timestamp: Date.now(),
+        });
         return { error: wrapped.message };
       }
     }
@@ -442,8 +480,15 @@ export class AgentLoop {
     request: AgentRunRequest
   ): Promise<{ systemPrompt: string; messages: ChatMessage[] }> {
     if (!this.promptBuilder || !this.promptRenderer) {
+      const fallbackSystemPrompt = buildSystemPrompt(this.profile);
+      if (request.requestId) {
+        request.traceStore?.addPromptCapture(request.requestId, {
+          sections: {},
+          rendered_system: fallbackSystemPrompt,
+        });
+      }
       return {
-        systemPrompt: buildSystemPrompt(this.profile),
+        systemPrompt: fallbackSystemPrompt,
         messages: [...request.messages],
       };
     }
@@ -469,6 +514,16 @@ export class AgentLoop {
     });
 
     const rendered = this.promptRenderer.render({ sections: promptSections.sections });
+
+    if (request.requestId) {
+      const sectionMap = Object.fromEntries(
+        promptSections.sections.map((section) => [section.slot, section.content])
+      );
+      request.traceStore?.addPromptCapture(request.requestId, {
+        sections: sectionMap,
+        rendered_system: rendered.systemPrompt,
+      });
+    }
 
     return {
       systemPrompt: rendered.systemPrompt,

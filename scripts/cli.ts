@@ -14,6 +14,8 @@ import type { CliContext } from "../src/cli/context.js";
 import type { CommandHandler, ParsedArgs } from "../src/cli/parser.js";
 import { registerConfigCommands } from "../src/cli/commands/config.js";
 import { registerAgentCommands } from "../src/cli/commands/agent.js";
+import { registerServerCommands } from "../src/cli/commands/server.js";
+import { registerHealthCommand } from "../src/cli/commands/health.js";
 
 // ── Stub handler factory ─────────────────────────────────────────────
 
@@ -52,18 +54,11 @@ function stubHandler(commandName: string): CommandHandler {
 // config namespace — real handler from src/cli/commands/config.ts
 registerConfigCommands();
 
-// server namespace
-registerCommand({
-  namespace: "server",
-  subcommand: "start",
-  handler: stubHandler("server start"),
-});
+// server namespace — real handler from src/cli/commands/server.ts
+registerServerCommands();
 
-// health (namespace-only, no subcommand)
-registerCommand({
-  namespace: "health",
-  handler: stubHandler("health"),
-});
+// health — real handler from src/cli/commands/health.ts
+registerHealthCommand();
 
 // agent namespace — real handlers from src/cli/commands/agent.ts
 registerAgentCommands();

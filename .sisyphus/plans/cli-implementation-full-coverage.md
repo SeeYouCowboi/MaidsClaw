@@ -508,7 +508,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config show and write-runtime` | Files: [`src/cli/commands/config.ts`, `src/core/config.ts`, `config/runtime.example.json`]
 
-- [ ] 10. Implement `server start` and `health` on top of the shared runtime path
+- [x] 10. Implement `server start` and `health` on top of the shared runtime path
 
   **What to do**: Implement `maidsclaw server start [--host <host>] [--port <port>] [--debug-capture] [--json]` and `maidsclaw health [--base-url <url>] [--json]`. `server start` must use the shared app-bootstrap from T1, optionally enable trace capture, print the bound address plus health summary/memory pipeline/sweeper enabled state, and avoid introducing a second server assembly path. `health` must default `--base-url` to `http://localhost:3000`, request `/healthz` and `/readyz`, preserve raw responses in JSON mode, and render `storage`, `models`, `tools`, `memory_pipeline`, and organizer-embedding result (when available) separately in text mode.
   **Must NOT do**: Do not build a CLI-specific server runtime. Do not collapse `/healthz` and `/readyz` into one opaque result. Do not hide degraded memory pipeline status.
@@ -600,7 +600,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add agent management commands` | Files: [`src/cli/commands/agent.ts`, `src/cli/agent-file-store.ts`, `src/cli/agent-loader.ts`, `src/agents/presets.ts`]
 
-- [ ] 12. Define one normalized Local Mode turn/result contract and transport abstraction
+- [x] 12. Define one normalized Local Mode turn/result contract and transport abstraction
 
   **What to do**: Add a normalized Local Mode transport layer in `src/cli/local-runtime.ts` and `src/cli/types.ts` that exposes one `TurnExecutionResult` contract for command handlers, shell state, and later Gateway adapters. The normalized result must include `mode`, `session_id`, `request_id`, optional `settlement_id`, `assistant_text`, `has_public_reply`, `private_commit.present`, `private_commit.op_count`, `private_commit.kinds`, `recovery_required`, and ordered public chunk/tool-event collections. Build this around the real runtime path now, and keep the abstraction transport-agnostic so T19 can plug Gateway Mode into the same contract later.
   **Must NOT do**: Do not let command handlers consume raw `Chunk` arrays directly. Do not infer RP settlement success from assistant text emptiness. Do not bake Gateway-specific assumptions into the initial Local Mode contract.
@@ -731,7 +731,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add local chat repl inspect shell` | Files: [`src/cli/commands/chat.ts`, `src/cli/shell/state.ts`, `src/cli/shell/session-shell.ts`, `src/cli/shell/slash-dispatcher.ts`]
 
-- [ ] 15. Add trace/log capture substrate and persist stable request-scoped trace bundles
+- [x] 15. Add trace/log capture substrate and persist stable request-scoped trace bundles
 
   **What to do**: Add a dedicated CLI/runtime trace substrate centered on `request_id` and stored under `data/debug/traces/`. Capture prompt sections/system/conversation at the end of `AgentLoop.buildInitialPromptState()`, capture public chunks during turn execution, capture `turn_settlement` only after the transaction commits, capture memory flush requests/results and pending sweeper job state after persistence, and capture structured diagnostic log entries through explicit runtime trace hooks rather than stdout scraping. Persist one stable redacted JSON bundle per request and make it the additive evidence layer for export/debug, not a replacement for interaction records.
   **Must NOT do**: Do not parse `console.log` output from `src/core/logger.ts` as the canonical logs source. Do not serialize `latentScratchpad`. Do not write settlement data to the trace bundle before the settlement transaction commits.

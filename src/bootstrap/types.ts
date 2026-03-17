@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
+import type { TraceStore } from "../cli/trace-store.js";
 import type { AgentLoop } from "../core/agent-loop.js";
 import type { ConfigResult } from "../core/config-schema.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
@@ -55,6 +56,8 @@ export type RuntimeBootstrapOptions = {
 	modelRegistry?: DefaultModelServiceRegistry;
 	toolExecutor?: ToolExecutor;
 	projectionSink?: RuntimeProjectionSink;
+	traceStore?: TraceStore;
+	traceCaptureEnabled?: boolean;
 };
 
 export type MemoryPipelineStatus =
@@ -83,6 +86,7 @@ export type RuntimeBootstrapResult = {
 	effectiveOrganizerEmbeddingModelId: string | undefined;
 	healthChecks: Record<string, RuntimeHealthStatus>;
 	migrationStatus: RuntimeMigrationStatus;
+	traceStore?: TraceStore;
 	shutdown: () => void;
 };
 

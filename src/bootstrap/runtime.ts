@@ -1,5 +1,5 @@
-import { dirname, isAbsolute, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
 	MAIDEN_PROFILE,
 	PRESET_PROFILES,
@@ -8,6 +8,7 @@ import {
 import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadFileAgents } from "../cli/agent-loader.js";
+import { TraceStore } from "../cli/trace-store.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
@@ -317,6 +318,11 @@ export function bootstrapRuntime(
 	});
 
 	const dataDir = resolveDataDir(options, runtimeCwd);
+	const traceStore =
+		options.traceStore ??
+		(options.traceCaptureEnabled
+			? new TraceStore(join(dataDir, "debug", "traces"))
+			: undefined);
 	const storagePaths = resolveStoragePaths({ dataDir });
 	const configPersonasPath = join(runtimeCwd, "config", "personas.json");
 	const configLorePath = join(runtimeCwd, "config", "lore.json");
@@ -450,6 +456,7 @@ export function bootstrapRuntime(
 		viewerContextResolver,
 		options.projectionSink,
 		graphStorage,
+		traceStore,
 	);
 
 	const pendingSettlementSweeper = memoryTaskAgent
@@ -486,6 +493,7 @@ export function bootstrapRuntime(
 		effectiveOrganizerEmbeddingModelId,
 		healthChecks,
 		migrationStatus,
+		traceStore,
 		shutdown,
 	};
 }

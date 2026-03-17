@@ -15,6 +15,19 @@ type InteractionRow = {
   is_processed: number;
 };
 
+type PendingSettlementJobRow = {
+  status: string;
+  payload: string | null;
+  next_attempt_at: number | null;
+};
+
+type PendingSettlementJobPayload = {
+  failureCount?: number;
+  nextAttemptAt?: number | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+};
+
 function rowToRecord(row: InteractionRow): InteractionRecord {
   const record: InteractionRecord = {
     sessionId: row.session_id,
@@ -241,6 +254,43 @@ export class InteractionStore {
     return row.max_idx;
   }
 
+  getPendingSettlementJobState(sessionId: string): {
+    status?: string;
+    failure_count?: number;
+    next_attempt_at?: number | null;
+    last_error_code?: string | null;
+    last_error_message?: string | null;
+  } | null {
+    const row = this.db.get<PendingSettlementJobRow>(
+      `SELECT status, payload, next_attempt_at
+       FROM _memory_maintenance_jobs
+       WHERE job_type = ? AND idempotency_key = ?
+       LIMIT 1`,
+      ["pending_settlement_flush", `pending_flush:${sessionId}`],
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    let payload: PendingSettlementJobPayload | null = null;
+    if (row.payload) {
+      try {
+        payload = JSON.parse(row.payload) as PendingSettlementJobPayload;
+      } catch {
+        payload = null;
+      }
+    }
+
+    return {
+      status: row.status,
+      failure_count: payload?.failureCount,
+      next_attempt_at: row.next_attempt_at ?? payload?.nextAttemptAt ?? null,
+      last_error_code: payload?.lastErrorCode ?? null,
+      last_error_message: payload?.lastErrorMessage ?? null,
+    };
+  }
+
   /**
    * Count unprocessed turn_settlement records for a session.
    * Used for settlement-aware flush threshold detection.
@@ -314,7 +364,6 @@ export class InteractionStore {
           oldestSettlementAt: row.oldest_settlement_at,
         });
       } catch {
-        continue;
       }
     }
 
