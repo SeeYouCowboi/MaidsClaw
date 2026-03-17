@@ -822,7 +822,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add shared evidence loader and inspect models` | Files: [`src/cli/inspect/context-resolver.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`, `src/cli/diagnostic-catalog.ts`, `src/cli/trace-store.ts`]
 
-- [ ] 17. Implement `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` as独立包装命令
+- [x] 17. Implement `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` as独立包装命令
 
   **What to do**: Implement standalone non-interactive `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` on top of T16 view models. `summary` must be request-scoped and include session, agent, settlement, result, error code, `has_public_reply`, `private_commit_op_count`, memory flush status, and pending sweep state; `transcript` must be session-scoped and show raw user/assistant text plus interaction boundaries with redacted settlements by default and tool/status records in `Raw 观察模式`; `prompt` must expose rendered system prompt, conversation messages, optional section breakdown, and `RECENT_COGNITION` when available; `chunks` must list ordered public chunk types and clearly separate them from private runtime state. Land these as Local Mode-first 独立包装命令; T19 extends them to Gateway Mode.
   **Must NOT do**: Do not create a second fetch/render path separate from shell slash inspect. Do not let `debug transcript --raw` expose raw settlement payload. Do not reorder chunk sequences.
@@ -867,7 +867,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add summary transcript prompt and chunks commands` | Files: [`src/cli/commands/debug.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`]
 
-- [ ] 18. Implement `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose` as独立包装命令
+- [x] 18. Implement `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose` as独立包装命令
 
   **What to do**: Implement the remaining non-interactive `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose`. `logs` must filter by request/session/agent and show timestamp + level from the captured trace/log substrate; `memory` must show readiness, core memory summary, staged recent cognition, flush-backed retrieval state, latest flush request/result, pending sweeper job state, last error, and organizer status when available; `trace export` must write a stable JSON bundle, redacted by default and local-only for `--unsafe-raw`; `diagnose` must return `primary_cause`, `subsystem`, `locator`, `evidence`, `likely_source_files`, and `next_commands` using the diagnostic catalog from T16, with subsystem categories restricted to `configuration`, `bootstrap`, `rp_turn_contract`, `interaction_log`, `turn_settlement`, `gateway`, `prompt`, `model_call`, `tool_execution`, `session_recovery`, `pending_settlement`, and `memory_pipeline`. Land these as Local Mode-first 独立包装命令; T19 extends them to Gateway Mode.
   **Must NOT do**: Do not rely on stdout logger scraping. Do not allow local `--unsafe-raw` to bypass redaction anywhere except raw settlement payload reads. Do not produce vague "check logs" diagnoses without concrete locator and next commands.

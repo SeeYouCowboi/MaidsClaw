@@ -376,9 +376,7 @@ export function loadTraceView(
 			...(trace ? { trace } : {}),
 			...(settlement
 				? {
-					interaction_settlement: unsafeRawMode
-						? settlement.payload
-						: redactInteractionRecord(settlement).payload,
+					interaction_settlement: settlement.payload,
 				}
 				: {}),
 		},
