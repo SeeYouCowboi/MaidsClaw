@@ -214,7 +214,7 @@ describe("InteractionStore", () => {
 
   it("settlementExists: returns false before commit and true after turn_settlement commit", () => {
     const settlementId = "settlement-1";
-    expect(store.settlementExists(settlementId)).toBe(false);
+    expect(store.settlementExists("sess-settlement", settlementId)).toBe(false);
 
     store.commit({
       sessionId: "sess-settlement",
@@ -226,8 +226,9 @@ describe("InteractionStore", () => {
       committedAt: 3000,
     });
 
-    expect(store.settlementExists(settlementId)).toBe(true);
-    expect(store.settlementExists("missing-settlement")).toBe(false);
+    expect(store.settlementExists("sess-settlement", settlementId)).toBe(true);
+    expect(store.settlementExists("sess-settlement", "missing-settlement")).toBe(false);
+    expect(store.settlementExists("other-session", settlementId)).toBe(false);
 
     closeDatabaseGracefully(db);
   });
@@ -613,7 +614,7 @@ describe("CommitService", () => {
 
     expect(record.recordId).toBe("settlement-custom");
     expect(record.recordType).toBe("turn_settlement");
-    expect(store.settlementExists("settlement-custom")).toBe(true);
+    expect(store.settlementExists("sess-custom-settlement", "settlement-custom")).toBe(true);
 
     closeDatabaseGracefully(db);
   });

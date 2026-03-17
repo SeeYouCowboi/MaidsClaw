@@ -180,7 +180,12 @@ export class CognitionOpCommitter {
 
     const pointerKey = "__current_location__";
     if (this.storage.resolveEntityByPointerKey(pointerKey, this.agentId) === null) {
-      throw new Error("current_location cannot be resolved");
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for current_location: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
     }
     return pointerKey;
   }

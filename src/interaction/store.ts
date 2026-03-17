@@ -95,13 +95,13 @@ export class InteractionStore {
     }
   }
 
-  settlementExists(settlementId: string): boolean {
+  settlementExists(sessionId: string, settlementId: string): boolean {
     const row = this.db.get<{ existing: number }>(
       `SELECT 1 AS existing
        FROM interaction_records
-       WHERE record_id = ? AND record_type = 'turn_settlement'
+       WHERE session_id = ? AND record_id = ? AND record_type = 'turn_settlement'
        LIMIT 1`,
-      [settlementId],
+      [sessionId, settlementId],
     );
     return row !== undefined;
   }

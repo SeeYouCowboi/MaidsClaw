@@ -214,7 +214,7 @@ export class TurnService {
     }
 
     const settlementId = `stl:${request.requestId}`;
-    if (this.interactionStore.settlementExists(settlementId)) {
+    if (this.interactionStore.settlementExists(request.sessionId, settlementId)) {
       const existingSettlement = this.interactionStore
         .getBySession(request.sessionId)
         .find((record) => record.recordId === settlementId && record.recordType === "turn_settlement");
