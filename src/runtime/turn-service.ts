@@ -10,7 +10,6 @@ import type {
 } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
-import { CognitionOpCommitter } from "../memory/cognition-op-committer.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type { ViewerContext } from "../memory/types.js";
 import type { MemoryFlushRequest, MemoryTaskAgent } from "../memory/task-agent.js";
@@ -244,11 +243,12 @@ export class TurnService {
           settlementId,
           requestId: request.requestId,
           sessionId: request.sessionId,
+          ownerAgentId: this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
           publicReply: outcome.publicReply,
           hasPublicReply,
           viewerSnapshot: resolvedViewerSnapshot,
           privateCommit: hasPrivateOps
-            ? { ops: summarizeCognitionOps(outcome.privateCommit!.ops) }
+            ? outcome.privateCommit
             : undefined,
         };
 
@@ -277,18 +277,12 @@ export class TurnService {
           });
         }
 
-        if (hasPrivateOps && this.graphStorage) {
-          const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "";
-          const committer = new CognitionOpCommitter(this.graphStorage, queueOwnerAgentId, resolvedViewerSnapshot.currentLocationEntityId);
-          committer.commit(outcome.privateCommit!.ops, settlementId);
-        }
-
-        const slotPayload = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? []);
+        const slotEntries = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? [], settlementId);
         this.interactionStore.upsertRecentCognitionSlot(
           request.sessionId,
           this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
           settlementId,
-          JSON.stringify(slotPayload),
+          JSON.stringify(slotEntries),
         );
       });
     } catch (error: unknown) {
@@ -534,10 +528,13 @@ function toDialogueRecords(records: InteractionRecord[]): Array<{
     .filter((record): record is DialogueRecord => record !== undefined);
 }
 
-type CognitionSlotItem = {
+type RecentCognitionEntry = {
+  settlementId: string;
+  committedAt: number;
   kind: CognitionKind;
   key: string;
   summary: string;
+  status: "active" | "retracted";
 };
 
 function refValue(ref: CognitionEntityRef | CognitionSelector): string {
@@ -567,8 +564,9 @@ function summarizeCommitment(record: CommitmentRecord): string {
   return `${record.mode}: ${targetDesc} (${record.status})`;
 }
 
-function buildCognitionSlotPayload(ops: CognitionOp[]): CognitionSlotItem[] {
-  const items: CognitionSlotItem[] = [];
+function buildCognitionSlotPayload(ops: CognitionOp[], settlementId: string): RecentCognitionEntry[] {
+  const committedAt = Date.now();
+  const items: RecentCognitionEntry[] = [];
 
   for (const op of ops) {
     if (op.op === "upsert") {
@@ -585,14 +583,13 @@ function buildCognitionSlotPayload(ops: CognitionOp[]): CognitionSlotItem[] {
           summary = summarizeCommitment(record as CommitmentRecord);
           break;
       }
-      items.push({ kind: record.kind, key: record.key, summary });
+      items.push({ settlementId, committedAt, kind: record.kind, key: record.key, summary, status: "active" });
     } else if (op.op === "retract") {
-      items.push({ kind: op.target.kind, key: op.target.key, summary: "[retracted]" });
+      items.push({ settlementId, committedAt, kind: op.target.kind, key: op.target.key, summary: "(retracted)", status: "retracted" });
     }
   }
 
-  // Cap at last 8 items
-  return items.slice(-8);
+  return items;
 }
 
 function summarizeCognitionOps(ops: CognitionOp[]): Array<{ key: string; kind: string }> {

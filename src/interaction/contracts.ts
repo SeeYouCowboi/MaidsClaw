@@ -2,6 +2,7 @@
 // These are the ONLY interaction types allowed in the system
 
 import type { ProjectionAppendix } from "../core/types.js";
+import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
 
 // Actor types — who produced an interaction record
 // EXACTLY 6 actor types allowed
@@ -84,6 +85,7 @@ export type TurnSettlementPayload = {
   settlementId: string;
   requestId: string;
   sessionId: string;
+  ownerAgentId: string;
   publicReply: string;
   hasPublicReply: boolean;
   viewerSnapshot: {
@@ -91,9 +93,7 @@ export type TurnSettlementPayload = {
     userPointerKey: string;
     currentLocationEntityId?: number;
   };
-  privateCommit?: {
-    ops: Array<{ key: string; kind: string }>;
-  };
+  privateCommit?: PrivateCognitionCommit;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

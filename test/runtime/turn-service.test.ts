@@ -315,7 +315,138 @@ describe("TurnService", () => {
     ).toHaveLength(1);
   });
 
-  it("assertion upsert writes cognition key, settlement id, and mapped epistemic status", async () => {
+  it("persists full privateCommit ops without settlement overlay writes", async () => {
+    const session = sessionService.createSession("rp:alice");
+    graphStorage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+    graphStorage.upsertEntity({
+      pointerKey: "target:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:alice",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Hello",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            summary: "mixed ops",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert-full",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+                  },
+                  stance: "accepted",
+                  confidence: 0.9,
+                  salience: 5,
+                },
+              },
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval-full",
+                  target: { kind: "pointer_key", value: "target:bob" },
+                  dimensions: [{ name: "trust", value: 0.8 }],
+                },
+              },
+              {
+                op: "retract",
+                target: { kind: "commitment", key: "old-commit" },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-full-commit",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    expect(runChunks).toEqual([
+      { type: "text_delta", text: "Hello" },
+      { type: "message_end", stopReason: "end_turn" },
+    ]);
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+    expect(payload.ownerAgentId).toBe("rp:alice");
+
+    const commit = payload.privateCommit as { schemaVersion: string; summary: string; ops: Array<Record<string, unknown>> };
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.summary).toBe("mixed ops");
+    expect(commit.ops).toHaveLength(3);
+    expect(commit.ops[0]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "assertion",
+        key: "assert-full",
+        proposition: {
+          subject: { kind: "special", value: "self" },
+          predicate: "trusts",
+          object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+        },
+        stance: "accepted",
+        confidence: 0.9,
+        salience: 5,
+      },
+    });
+    expect(commit.ops[1]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "evaluation",
+        key: "eval-full",
+        target: { kind: "pointer_key", value: "target:bob" },
+        dimensions: [{ name: "trust", value: 0.8 }],
+      },
+    });
+    expect(commit.ops[2]).toEqual({
+      op: "retract",
+      target: { kind: "commitment", key: "old-commit" },
+    });
+
+    const factCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(factCount!.cnt).toBe(0);
+    const eventCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(eventCount!.cnt).toBe(0);
+  });
+
+  it("assertion upsert persists full op in settlement without overlay write", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -376,20 +507,35 @@ describe("TurnService", () => {
     );
     expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
 
-    const settlementRecord = store.getBySession(session.sessionId).find((record) => record.recordType === "turn_settlement");
-    const row = db.get<{ cognition_key: string; settlement_id: string; epistemic_status: string }>(
-      `SELECT cognition_key, settlement_id, epistemic_status
-       FROM agent_fact_overlay
-       WHERE agent_id = ? AND cognition_key = ?`,
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+    expect(payload.ownerAgentId).toBe("rp:alice");
+    const commit = payload.privateCommit as { schemaVersion: string; ops: Array<Record<string, unknown>> };
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({
+      op: "upsert",
+      record: {
+        kind: "assertion",
+        key: "assert-1",
+        proposition: {
+          subject: { kind: "special", value: "self" },
+          predicate: "trusts",
+          object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
+        },
+        stance: "accepted",
+      },
+    });
+
+    const row = db.get<{ cognition_key: string }>(
+      `SELECT cognition_key FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "assert-1"],
     );
-    expect(row).toBeDefined();
-    expect(row?.cognition_key).toBe("assert-1");
-    expect(row?.settlement_id).toBe(settlementRecord?.recordId);
-    expect(row?.epistemic_status).toBe("confirmed");
+    expect(row).toBeUndefined();
   });
 
-  it("evaluation upsert writes explicit kind and metadata dimensions", async () => {
+  it("evaluation upsert persists full op in settlement without overlay write", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "target:bob",
@@ -438,18 +584,20 @@ describe("TurnService", () => {
       }),
     );
 
-    const row = db.get<{ explicit_kind: string; metadata_json: string }>(
-      `SELECT explicit_kind, metadata_json
-       FROM agent_event_overlay
-       WHERE agent_id = ? AND cognition_key = ?`,
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { kind: string; dimensions: unknown[] } }).record.dimensions).toEqual([{ name: "trust", value: 0.8 }]);
+
+    const row = db.get<{ explicit_kind: string }>(
+      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "eval-1"],
     );
-    expect(row?.explicit_kind).toBe("evaluation");
-    const metadata = row ? JSON.parse(row.metadata_json) : null;
-    expect(metadata?.dimensions).toEqual([{ name: "trust", value: 0.8 }]);
+    expect(row).toBeUndefined();
   });
 
-  it("commitment upsert writes explicit commitment kind", async () => {
+  it("commitment upsert persists full op in settlement without overlay write", async () => {
     const session = sessionService.createSession("rp:alice");
 
     const turnService = new TurnService(
@@ -492,16 +640,20 @@ describe("TurnService", () => {
       }),
     );
 
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { kind: string } }).record.kind).toBe("commitment");
+
     const row = db.get<{ explicit_kind: string }>(
-      `SELECT explicit_kind
-       FROM agent_event_overlay
-       WHERE agent_id = ? AND cognition_key = ?`,
+      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "commit-1"],
     );
-    expect(row?.explicit_kind).toBe("commitment");
+    expect(row).toBeUndefined();
   });
 
-  it("retract op marks existing assertion as retracted", async () => {
+  it("retract op persists in settlement without modifying overlay at settlement time", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -557,16 +709,20 @@ describe("TurnService", () => {
       }),
     );
 
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({ op: "retract", target: { kind: "assertion", key: "assert-retract" } });
+
     const row = db.get<{ epistemic_status: string }>(
-      `SELECT epistemic_status
-       FROM agent_fact_overlay
-       WHERE agent_id = ? AND cognition_key = ?`,
+      `SELECT epistemic_status FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "assert-retract"],
     );
-    expect(row?.epistemic_status).toBe("retracted");
+    expect(row?.epistemic_status).toBe("confirmed");
   });
 
-  it("current_location entity ref uses settlement snapshot entity ID instead of dynamic graph lookup", async () => {
+  it("current_location assertion persists full op in settlement without overlay write", async () => {
     const session = sessionService.createSession("rp:alice");
 
     graphStorage.upsertEntity({
@@ -634,17 +790,25 @@ describe("TurnService", () => {
     );
     expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
 
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    const payload = settlement!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect((commit.ops[0] as { record: { key: string } }).record.key).toBe("location-assert-1");
+    expect(payload.viewerSnapshot).toEqual({
+      selfPointerKey: "__self__",
+      userPointerKey: "__user__",
+      currentLocationEntityId: locationEntityId,
+    });
+
     const row = db.get<{ target_entity_id: number }>(
-      `SELECT target_entity_id
-       FROM agent_fact_overlay
-       WHERE agent_id = ? AND cognition_key = ?`,
+      `SELECT target_entity_id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "location-assert-1"],
     );
-    expect(row).toBeDefined();
-    expect(row?.target_entity_id).toBe(locationEntityId);
+    expect(row).toBeUndefined();
   });
 
-  it("touch op is rejected and does not persist settlement", async () => {
+  it("touch op is stored verbatim in settlement without processing errors", async () => {
     const session = sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
@@ -675,16 +839,82 @@ describe("TurnService", () => {
       }),
     );
 
-    expect(runChunks).toEqual([
-      {
-        type: "error",
-        code: "TURN_SETTLEMENT_FAILED",
-        message: "touch is not supported in V3 baseline",
-        retriable: false,
-      },
-    ]);
+    // Settlement succeeds — ops are persisted verbatim, not processed at settlement
+    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
     const records = store.getBySession(session.sessionId);
-    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
+    const payload = records.find((r) => r.recordType === "turn_settlement")!.payload as Record<string, unknown>;
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+    expect(commit.ops[0]).toEqual({ op: "touch" });
+  });
+
+  it("latentScratchpad from outcome is not persisted in settlement payload", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v3",
+          publicReply: "Hello with scratchpad",
+          latentScratchpad: "SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST",
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "commitment",
+                  key: "scratch-test",
+                  mode: "goal",
+                  target: { action: "test scratchpad exclusion" },
+                  status: "active",
+                },
+              },
+            ],
+          },
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-scratchpad-exclusion",
+        messages: [{ role: "user", content: "think hard" }],
+      }),
+    );
+
+    const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
+    expect(settlement).toBeDefined();
+    const payload = settlement!.payload as Record<string, unknown>;
+
+    // latentScratchpad must NOT appear anywhere in the persisted settlement payload
+    expect(payload.latentScratchpad).toBeUndefined();
+    expect(JSON.stringify(payload)).not.toContain("SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST");
+    expect(JSON.stringify(payload)).not.toContain("latentScratchpad");
+
+    // Verify the rest of the settlement is well-formed
+    expect(payload.publicReply).toBe("Hello with scratchpad");
+    expect(payload.privateCommit).toBeDefined();
+    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(commit.ops).toHaveLength(1);
+
+    // Also verify raw DB content doesn't contain it
+    const rawRow = db.get<{ payload: string }>(
+      `SELECT payload FROM interaction_records WHERE record_type = 'turn_settlement' AND session_id = ?`,
+      [session.sessionId],
+    );
+    expect(rawRow).toBeDefined();
+    expect(rawRow!.payload).not.toContain("latentScratchpad");
+    expect(rawRow!.payload).not.toContain("SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST");
   });
 
   it("non-RP maiden session preserves streaming path behavior", async () => {
