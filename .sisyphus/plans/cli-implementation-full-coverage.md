@@ -1003,10 +1003,10 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
   **Commit**: NO | Message: `test(cli): complete acceptance coverage and docs` | Files: [`test/cli/**/*`, `test/runtime/**/*`, `test/gateway/**/*`, `README.md`, `docs/README.zh-CN.md`]
 
 ## Final Verification Wave (4 parallel agents, ALL must APPROVE)
-- [ ] F1. Plan Compliance Audit — oracle
-- [ ] F2. Code Quality Review — unspecified-high
-- [ ] F3. Real Manual QA — unspecified-high (+ playwright if UI is later added; Phase 1 terminal flows remain Bash/interactive_bash)
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F1. Plan Compliance Audit — oracle
+- [x] F2. Code Quality Review — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high (+ playwright if UI is later added; Phase 1 terminal flows remain Bash/interactive_bash)
+- [x] F4. Scope Fidelity Check — deep
 
 ## Commit Strategy
 - Commit after each completed wave, not after every task.

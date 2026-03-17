@@ -71,12 +71,13 @@ async function handleServerStart(
 
   let app: Awaited<ReturnType<typeof bootstrapApp>>;
   try {
-    app = bootstrapApp({
-      cwd: ctx.cwd,
-      enableGateway: true,
-      ...(port !== undefined ? { port } : {}),
-      ...(host !== undefined ? { host } : {}),
-    });
+app = bootstrapApp({
+cwd: ctx.cwd,
+enableGateway: true,
+...(port !== undefined ? { port } : {}),
+...(host !== undefined ? { host } : {}),
+traceCaptureEnabled: debugCapture,
+});
   } catch (err) {
     throw new CliError(
       "SERVER_START_FAILED",

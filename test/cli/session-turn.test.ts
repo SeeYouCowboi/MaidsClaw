@@ -296,7 +296,7 @@ describe("session commands", () => {
       } catch (err) {
         expect(err instanceof CliError).toBe(true);
         const cliErr = err as CliError;
-        expect(cliErr.code).toBe("NOT_IN_RECOVERY");
+        expect(cliErr.code).toBe("SESSION_NOT_IN_RECOVERY");
         expect(cliErr.exitCode).toBe(4);
       }
     });

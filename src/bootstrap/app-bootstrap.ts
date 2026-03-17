@@ -75,15 +75,16 @@ export function bootstrapApp(options: AppBootstrapOptions = {}): AppBootstrapRes
     throw new Error(`Invalid port: ${port}`);
   }
 
-	const runtime = bootstrapRuntime({
-		cwd: options.cwd,
-		databasePath,
-		dataDir,
-		busyTimeoutMs: options.busyTimeoutMs,
-    memoryMigrationModelId,
-    memoryEmbeddingModelId,
-    memoryOrganizerEmbeddingModelId,
-  });
+const runtime = bootstrapRuntime({
+cwd: options.cwd,
+databasePath,
+dataDir,
+busyTimeoutMs: options.busyTimeoutMs,
+memoryMigrationModelId,
+memoryEmbeddingModelId,
+memoryOrganizerEmbeddingModelId,
+traceCaptureEnabled: options.traceCaptureEnabled,
+});
 
   const healthChecks = Object.fromEntries(
     Object.entries(runtime.healthChecks).map(([name, status]) => [

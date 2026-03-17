@@ -227,10 +227,11 @@ async function handleSessionClose(
       );
     }
 
-    const closed = app.runtime.sessionService.closeSession(sessionId);
+		const closed = app.runtime.sessionService.closeSession(sessionId);
 
-    // TODO: flush_ran will be determined by actual flush execution in later tasks
-    const flushRan = false;
+		const agentId = session.agentId;
+		const flushRan = await app.runtime.turnService.flushOnSessionClose(sessionId, agentId);
+
 
     if (ctx.json) {
       writeJson({
@@ -312,7 +313,7 @@ async function handleSessionRecover(
     // MUST NOT silently no-op on non-recovery sessions
     if (!app.runtime.sessionService.requiresRecovery(sessionId)) {
       throw new CliError(
-        "NOT_IN_RECOVERY",
+        "SESSION_NOT_IN_RECOVERY",
         `Session ${sessionId} is not in recovery state. Recovery is only valid for sessions that encountered an error during turn execution.`,
         EXIT_RUNTIME,
       );

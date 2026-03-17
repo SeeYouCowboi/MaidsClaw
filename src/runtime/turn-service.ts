@@ -530,9 +530,9 @@ export class TurnService {
 		}
 	}
 
-	async flushOnSessionClose(sessionId: string, agentId: string): Promise<void> {
+	async flushOnSessionClose(sessionId: string, agentId: string): Promise<boolean> {
 		if (this.memoryTaskAgent === null) {
-			return;
+			return false;
 		}
 
 		const flushRequest = this.flushSelector.buildSessionCloseFlush(
@@ -540,13 +540,14 @@ export class TurnService {
 			agentId,
 		);
 		if (flushRequest === null) {
-			return;
+			return false;
 		}
 
 		try {
 			await this.runFlush(flushRequest, agentId);
+			return true;
 		} catch {
-			return;
+			return false;
 		}
 	}
 

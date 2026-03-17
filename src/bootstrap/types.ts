@@ -91,18 +91,19 @@ export type RuntimeBootstrapResult = {
 };
 
 export type AppBootstrapOptions = {
-	port?: number;
-	host?: string;
-	cwd?: string;
-	configDir?: string;
-	databasePath?: string;
-	dataDir?: string;
-	busyTimeoutMs?: number;
-	memoryMigrationModelId?: string;
-	memoryEmbeddingModelId?: string;
-	memoryOrganizerEmbeddingModelId?: string;
-	enableGateway?: boolean;
-	requireAllProviders?: boolean;
+port?: number;
+host?: string;
+cwd?: string;
+configDir?: string;
+databasePath?: string;
+dataDir?: string;
+busyTimeoutMs?: number;
+memoryMigrationModelId?: string;
+memoryEmbeddingModelId?: string;
+memoryOrganizerEmbeddingModelId?: string;
+enableGateway?: boolean;
+requireAllProviders?: boolean;
+traceCaptureEnabled?: boolean;
 };
 
 export type AppBootstrapResult = {
