@@ -9,6 +9,18 @@ export class PersonaAdapter implements PersonaDataSource {
     if (!card) {
       return undefined;
     }
-    return card.systemPrompt ?? card.persona;
+
+    let prompt = card.systemPrompt ?? card.persona;
+
+    if (card.hiddenTasks && card.hiddenTasks.length > 0) {
+      const taskList = card.hiddenTasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
+      prompt += `\n\n<hidden_objectives>\n${taskList}\n</hidden_objectives>`;
+    }
+
+    if (card.privatePersona) {
+      prompt += `\n\n<private_persona>\n${card.privatePersona}\n</private_persona>`;
+    }
+
+    return prompt;
   }
 }

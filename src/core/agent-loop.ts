@@ -427,6 +427,7 @@ export class AgentLoop {
 					workingMessages,
 					systemPrompt,
 					bufferedToolExecutor,
+					{ forceToolUse: true },
 				);
 				for await (const chunk of this.modelProvider.chatCompletion(
 					completionRequest,
@@ -726,12 +727,14 @@ export class AgentLoop {
 		messages: ChatMessage[],
 		systemPrompt: string,
 		toolExecutor: ToolExecutor = this.toolExecutor,
+		options?: { forceToolUse?: boolean },
 	): ChatCompletionRequest {
 		return {
 			modelId: this.profile.modelId,
 			systemPrompt,
 			messages,
 			maxTokens: this.profile.maxOutputTokens,
+			toolChoice: options?.forceToolUse ? { type: "any" } : undefined,
 			tools: getFilteredSchemas(this.profile, toolExecutor).map((tool) => ({
 				name: tool.name,
 				description: tool.description,

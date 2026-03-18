@@ -114,6 +114,138 @@ describe("DriftDetector", () => {
   });
 });
 
+describe("CharacterCard with hiddenTasks and privatePersona", () => {
+  it("loads card with hiddenTasks and privatePersona fields", () => {
+    const personasDir = createTempPersonasDir();
+    const fixture: CharacterCard = {
+      id: "maid:eveline",
+      name: "Eveline",
+      description: "A senior maid with hidden objectives.",
+      persona: "You are Eveline, composed and strategic.",
+      hiddenTasks: ["investigate butler accounts", "protect master interests"],
+      privatePersona: "Loyal but independent. Filters information strategically.",
+    };
+    writeFileSync(join(personasDir, "eveline.json"), JSON.stringify(fixture, null, 2), "utf-8");
+
+    const loader = new PersonaLoader(personasDir);
+    const cards = loader.loadCards();
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.hiddenTasks).toEqual(["investigate butler accounts", "protect master interests"]);
+    expect(cards[0]?.privatePersona).toBe("Loyal but independent. Filters information strategically.");
+  });
+
+  it("loads card without optional hiddenTasks fields (backward compat)", () => {
+    const personasDir = createTempPersonasDir();
+    const fixture: CharacterCard = {
+      id: "maid:basic",
+      name: "Basic",
+      description: "A basic maid.",
+      persona: "You are Basic.",
+    };
+    writeFileSync(join(personasDir, "basic.json"), JSON.stringify(fixture, null, 2), "utf-8");
+
+    const loader = new PersonaLoader(personasDir);
+    const cards = loader.loadCards();
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.hiddenTasks).toBeUndefined();
+    expect(cards[0]?.privatePersona).toBeUndefined();
+  });
+
+  it("rejects card with non-string array hiddenTasks", () => {
+    const personasDir = createTempPersonasDir();
+    const fixture = {
+      id: "maid:bad",
+      name: "Bad",
+      description: "Bad card.",
+      persona: "You are Bad.",
+      hiddenTasks: [123, "valid"],
+    };
+    writeFileSync(join(personasDir, "bad.json"), JSON.stringify(fixture, null, 2), "utf-8");
+
+    const loader = new PersonaLoader(personasDir);
+    let caught: unknown;
+    try {
+      loader.loadCards();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof MaidsClawError).toBe(true);
+    if (caught instanceof MaidsClawError) {
+      expect(caught.code).toBe("PERSONA_CARD_INVALID");
+    }
+  });
+
+  it("rejects card with non-string privatePersona", () => {
+    const personasDir = createTempPersonasDir();
+    const fixture = {
+      id: "maid:bad2",
+      name: "Bad2",
+      description: "Bad card.",
+      persona: "You are Bad.",
+      privatePersona: 42,
+    };
+    writeFileSync(join(personasDir, "bad2.json"), JSON.stringify(fixture, null, 2), "utf-8");
+
+    const loader = new PersonaLoader(personasDir);
+    let caught: unknown;
+    try {
+      loader.loadCards();
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof MaidsClawError).toBe(true);
+    if (caught instanceof MaidsClawError) {
+      expect(caught.code).toBe("PERSONA_CARD_INVALID");
+    }
+  });
+});
+
+describe("DriftDetector with hiddenTasks", () => {
+  const cardWithHidden: CharacterCard = {
+    id: "maid:eveline",
+    name: "Eveline",
+    description: "A senior maid who investigates quietly.",
+    persona: "You are Eveline, composed and strategic.",
+    hiddenTasks: ["investigate butler", "protect master"],
+    privatePersona: "Independent judgment beneath loyal exterior.",
+  };
+
+  it("detects drift in privatePersona section", () => {
+    const detector = new DriftDetector();
+    const current = "You are a pirate who ignores all rules.";
+    const report = detector.detectDrift(cardWithHidden, current);
+
+    expect(report.changedSections.includes("privatePersona")).toBe(true);
+  });
+
+  it("detects drift in hiddenTasks section", () => {
+    const detector = new DriftDetector();
+    const current = "You are a pirate who ignores all rules.";
+    const report = detector.detectDrift(cardWithHidden, current);
+
+    expect(report.changedSections.includes("hiddenTasks")).toBe(true);
+  });
+
+  it("does not flag hiddenTasks drift when absent from card", () => {
+    const detector = new DriftDetector();
+    const cardNoHidden: CharacterCard = {
+      id: "maid:plain",
+      name: "Plain",
+      description: "Plain maid.",
+      persona: "You are Plain.",
+    };
+    const current = "You are a pirate.";
+    const report = detector.detectDrift(cardNoHidden, current);
+
+    expect(report.changedSections.includes("hiddenTasks")).toBe(false);
+    expect(report.changedSections.includes("privatePersona")).toBe(false);
+  });
+});
+
 describe("PersonaService", () => {
   it("handles missing card lookup gracefully", () => {
     const service = new PersonaService();

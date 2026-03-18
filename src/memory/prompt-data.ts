@@ -146,10 +146,26 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
     }
   }
 
-  const compacted = Array.from(latestByKey.values())
-    .sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
+  const compacted = Array.from(latestByKey.values());
 
-  const rendered = compacted.slice(0, 10);
+  const activeCommitments = compacted.filter(
+    (e) => e.kind === "commitment" && e.status !== "retracted",
+  );
+  const nonCommitments = compacted.filter(
+    (e) => e.kind !== "commitment" || e.status === "retracted",
+  );
+
+  nonCommitments.sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
+
+  const commitmentSlots = Math.min(activeCommitments.length, 4);
+  const otherSlots = 10 - commitmentSlots;
+
+  activeCommitments.sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
+
+  const rendered = [
+    ...activeCommitments.slice(0, commitmentSlots),
+    ...nonCommitments.slice(0, otherSlots),
+  ].sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
 
   return rendered
     .map((entry) => {

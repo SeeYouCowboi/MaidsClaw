@@ -32,10 +32,16 @@ export type ChatMessage = {
   toolCallId?: string;
 };
 
+export type ToolChoiceSpec =
+  | { type: "auto" }
+  | { type: "any" }
+  | { type: "tool"; name: string };
+
 export type ChatCompletionRequest = {
   modelId: string;
   messages: ChatMessage[];
   tools?: ToolSchema[];
+  toolChoice?: ToolChoiceSpec;
   maxTokens?: number;
   temperature?: number;
   systemPrompt?: string;

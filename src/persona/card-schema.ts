@@ -13,6 +13,10 @@ export type CharacterCard = {
   systemPrompt?: string;
   tags?: string[];
   createdAt?: number;
+  /** Hidden internal objectives not revealed to the user but available to the agent. */
+  hiddenTasks?: string[];
+  /** Internal persona description — motivations and constraints the character conceals. */
+  privatePersona?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -67,6 +71,17 @@ export function isCharacterCard(value: unknown): value is CharacterCard {
   }
 
   if (value.createdAt !== undefined && typeof value.createdAt !== "number") {
+    return false;
+  }
+
+  if (
+    value.hiddenTasks !== undefined
+    && (!Array.isArray(value.hiddenTasks) || value.hiddenTasks.some((t) => typeof t !== "string"))
+  ) {
+    return false;
+  }
+
+  if (value.privatePersona !== undefined && typeof value.privatePersona !== "string") {
     return false;
   }
 

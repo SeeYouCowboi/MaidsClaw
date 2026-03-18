@@ -104,12 +104,28 @@ export function validateRpTurnOutcome(raw: unknown): RpTurnOutcomeSubmission {
     for (const op of commit.ops as Array<Record<string, unknown>>) {
       if (op.op === "upsert") {
         const record = op.record as Record<string, unknown> | undefined;
-        if (record && record.kind === "assertion") {
+        if (!record || typeof record !== "object") {
+          throw new Error("upsert op must have a record object");
+        }
+        if (typeof record.key !== "string" || record.key.trim() === "") {
+          throw new Error("upsert record.key must be a non-empty string");
+        }
+        if (record.kind === "assertion") {
           const proposition = record.proposition as Record<string, unknown> | undefined;
-          const object = proposition?.object as Record<string, unknown> | undefined;
-          if (!object || object.kind !== "entity") {
-            throw new Error("assertion proposition.object must be entity-based (kind: 'entity')");
+          if (proposition) {
+            const object = proposition.object as Record<string, unknown> | undefined;
+            // Normalize: models often produce { kind: "pointer_key", value: "x" } directly
+            // instead of the canonical { kind: "entity", ref: { kind: "pointer_key", value: "x" } }.
+            if (object && object.kind !== "entity") {
+              proposition.object = { kind: "entity", ref: object };
+            }
           }
+        }
+      }
+      if (op.op === "retract") {
+        const target = op.target as Record<string, unknown> | undefined;
+        if (!target || typeof target.key !== "string" || target.key.trim() === "") {
+          throw new Error("retract target.key must be a non-empty string");
         }
       }
     }

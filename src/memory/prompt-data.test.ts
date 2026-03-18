@@ -549,6 +549,97 @@ describe("getRecentCognition", () => {
     closeDatabaseGracefully(db);
   });
 
+  it("prioritizes active commitments even when older than other entries", () => {
+    const entries = Array.from({ length: 12 }, (_, i) => ({
+      settlementId: `stl:${i}`,
+      committedAt: 1000 + i * 100,
+      kind: "assertion",
+      key: `fact-${i}`,
+      summary: `fact ${i}`,
+      status: "active" as const,
+    }));
+
+    entries.push({
+      settlementId: "stl:early",
+      committedAt: 500,
+      kind: "commitment",
+      key: "old-goal",
+      summary: "investigate butler accounts",
+      status: "active" as const,
+    });
+    entries.push({
+      settlementId: "stl:early2",
+      committedAt: 600,
+      kind: "commitment",
+      key: "old-goal-2",
+      summary: "protect master interests",
+      status: "active" as const,
+    });
+
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[commitment:old-goal]");
+    expect(result).toContain("[commitment:old-goal-2]");
+
+    const lines = result.split("\n");
+    expect(lines.length).toBe(10);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("caps commitment priority slots to 4", () => {
+    const entries: Array<{settlementId: string; committedAt: number; kind: string; key: string; summary: string; status: "active" | "retracted"}> = [];
+
+    for (let i = 0; i < 6; i++) {
+      entries.push({
+        settlementId: `stl:c${i}`,
+        committedAt: 100 + i,
+        kind: "commitment",
+        key: `commit-${i}`,
+        summary: `commitment ${i}`,
+        status: "active",
+      });
+    }
+
+    for (let i = 0; i < 10; i++) {
+      entries.push({
+        settlementId: `stl:a${i}`,
+        committedAt: 2000 + i,
+        kind: "assertion",
+        key: `assert-${i}`,
+        summary: `assertion ${i}`,
+        status: "active",
+      });
+    }
+
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    const commitmentLines = result.split("\n").filter((l: string) => l.includes("[commitment:"));
+    expect(commitmentLines.length).toBe(4);
+
+    const lines = result.split("\n");
+    expect(lines.length).toBe(10);
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("retracted commitments do not get priority slots", () => {
+    const entries = [
+      { settlementId: "stl:1", committedAt: 100, kind: "commitment", key: "retracted-goal", summary: "abandoned", status: "retracted" as const },
+      { settlementId: "stl:2", committedAt: 200, kind: "assertion", key: "fact-1", summary: "a fact", status: "active" as const },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+    expect(result).toContain("[commitment:retracted-goal] (retracted)");
+    expect(result).toContain("[assertion:fact-1]");
+
+    closeDatabaseGracefully(db);
+  });
+
   it("renders newest-first ordering by committedAt", () => {
     const entries = [
       { settlementId: "stl:1", committedAt: 3000, kind: "commitment", key: "goal-a", summary: "goal A", status: "active" },

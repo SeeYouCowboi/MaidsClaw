@@ -265,8 +265,26 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       messages.unshift({ role: "system", content: systemPrompt });
     }
 
+    // Strip provider prefix (e.g. "moonshot/kimi-k2.5" → "kimi-k2.5") —
+    // the prefix is an internal routing mechanism, not part of the API model name.
+    const bareModelId = request.modelId.includes("/")
+      ? request.modelId.slice(request.modelId.indexOf("/") + 1)
+      : request.modelId;
+
+    // Map provider-agnostic toolChoice to OpenAI's tool_choice format
+    let toolChoice: string | Record<string, unknown> | undefined;
+    if (request.toolChoice) {
+      if (request.toolChoice.type === "auto") {
+        toolChoice = "auto";
+      } else if (request.toolChoice.type === "any") {
+        toolChoice = "required";
+      } else if (request.toolChoice.type === "tool") {
+        toolChoice = { type: "function", function: { name: request.toolChoice.name } };
+      }
+    }
+
     const result: Record<string, unknown> = {
-      model: request.modelId,
+      model: bareModelId,
       stream: true,
       temperature: request.temperature,
       max_tokens: request.maxTokens,
@@ -279,6 +297,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
           parameters: tool.inputSchema,
         },
       })),
+      tool_choice: toolChoice,
     };
 
     if (this.options.supportsStreamingUsage) {

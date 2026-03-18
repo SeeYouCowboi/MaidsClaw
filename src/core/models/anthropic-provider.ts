@@ -198,13 +198,29 @@ export class AnthropicChatProvider implements ChatModelProvider {
   private toRequestPayload(request: ChatCompletionRequest): Record<string, unknown> {
     const systemPrompt = request.systemPrompt ?? request.messages.find((message) => message.role === "system")?.content;
 
+    // Strip provider prefix (e.g. "minimax/model-x" → "model-x")
+    const bareModelId = request.modelId.includes("/")
+      ? request.modelId.slice(request.modelId.indexOf("/") + 1)
+      : request.modelId;
+
+    // Map provider-agnostic toolChoice to Anthropic's tool_choice format
+    let toolChoice: Record<string, unknown> | undefined;
+    if (request.toolChoice) {
+      if (request.toolChoice.type === "tool") {
+        toolChoice = { type: "tool", name: request.toolChoice.name };
+      } else {
+        toolChoice = { type: request.toolChoice.type };
+      }
+    }
+
     return {
-      model: request.modelId,
+      model: bareModelId,
       max_tokens: request.maxTokens ?? 1024,
       temperature: request.temperature,
       stream: true,
       system: typeof systemPrompt === "string" ? systemPrompt : undefined,
       tools: request.tools?.map((tool) => this.toAnthropicTool(tool)),
+      tool_choice: toolChoice,
       messages: request.messages
         .filter((message) => message.role !== "system")
         .map((message) => this.toAnthropicMessage(message)),

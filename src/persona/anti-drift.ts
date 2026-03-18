@@ -88,6 +88,15 @@ export class DriftDetector {
     if (isSectionChanged(originalCard.description, currentPersonaText)) {
       changedSections.push("description");
     }
+    if (originalCard.privatePersona && isSectionChanged(originalCard.privatePersona, currentPersonaText)) {
+      changedSections.push("privatePersona");
+    }
+    if (originalCard.hiddenTasks) {
+      const hiddenTasksText = originalCard.hiddenTasks.join(" ");
+      if (hiddenTasksText.length > 0 && isSectionChanged(hiddenTasksText, currentPersonaText)) {
+        changedSections.push("hiddenTasks");
+      }
+    }
 
     const hasDrift = driftScore > 0.3;
     const summary = hasDrift
