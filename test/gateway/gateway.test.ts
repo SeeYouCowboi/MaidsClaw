@@ -1,4 +1,5 @@
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import type { ChatModelProvider } from "../../src/core/models/chat-provider.js";
@@ -914,7 +915,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -982,7 +983,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1034,7 +1035,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1101,7 +1102,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1184,7 +1185,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
 
     const failingTool = {
       name: "lookup",
@@ -1253,7 +1254,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: throwingProvider }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1302,7 +1303,7 @@ describe("Real TurnService-backed gateway path", () => {
         },
       ],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry });
+    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",

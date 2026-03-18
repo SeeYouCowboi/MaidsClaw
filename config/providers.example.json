@@ -29,13 +29,40 @@
       ]
     },
     {
-      "_comment": "Moonshot/Kimi — OpenAI-compatible. Set MOONSHOT_API_KEY in .env or use config/auth.json",
-      "id": "moonshot",
-      "displayName": "Moonshot (Kimi)",
+      "_comment": "Kimi for Coding — subscription-based. Set KIMI_CODING_API_KEY in .env or use config/auth.json",
+      "id": "kimi-coding",
+      "displayName": "Kimi for Coding",
       "transportFamily": "openai-compatible",
       "apiKind": "openai",
       "riskTier": "compatible",
-      "baseUrl": "https://api.moonshot.ai/v1",
+      "baseUrl": "https://api.kimi.com/coding",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "defaultChatModelId": "kimi-for-coding",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "displayName": "Kimi For Coding",
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsEmbedding": false
+        }
+      ]
+    },
+    {
+      "_comment": "Moonshot Platform — pay-per-token metered API. Set MOONSHOT_API_KEY in .env or use config/auth.json",
+      "id": "moonshot",
+      "displayName": "Moonshot (Metered API)",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "https://api.moonshot.cn",
       "authModes": ["api-key"],
       "selectionPolicy": {
         "enabledByDefault": true,
@@ -47,8 +74,26 @@
         {
           "id": "kimi-k2.5",
           "displayName": "Kimi K2.5",
-          "contextWindow": 256000,
-          "maxOutputTokens": 8192,
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsEmbedding": false
+        },
+        {
+          "id": "kimi-k2-0905-preview",
+          "displayName": "Kimi K2 0905 Preview",
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsEmbedding": false
+        },
+        {
+          "id": "kimi-k2-turbo-preview",
+          "displayName": "Kimi K2 Turbo Preview",
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
           "supportsTools": true,
           "supportsVision": true,
           "supportsEmbedding": false
@@ -56,25 +101,25 @@
       ]
     },
     {
-      "_comment": "MiniMax — OpenAI-compatible. Set MINIMAX_API_KEY in .env or use config/auth.json",
+      "_comment": "MiniMax — Anthropic-compatible. Set MINIMAX_API_KEY in .env or use config/auth.json",
       "id": "minimax",
       "displayName": "MiniMax",
-      "transportFamily": "openai-compatible",
-      "apiKind": "openai",
+      "transportFamily": "anthropic-native",
+      "apiKind": "anthropic",
       "riskTier": "compatible",
-      "baseUrl": "https://api.minimax.io/v1",
+      "baseUrl": "https://api.minimaxi.com/anthropic",
       "authModes": ["api-key"],
       "selectionPolicy": {
         "enabledByDefault": true,
         "eligibleForAutoFallback": false,
         "isAutoDefault": false
       },
-      "defaultChatModelId": "MiniMax-M2.5",
+      "defaultChatModelId": "MiniMax-M2.7-highspeed",
       "models": [
         {
-          "id": "MiniMax-M2.5",
-          "displayName": "MiniMax M2.5",
-          "contextWindow": 200000,
+          "id": "MiniMax-M2.7-highspeed",
+          "displayName": "MiniMax M2.7 Highspeed",
+          "contextWindow": 204800,
           "maxOutputTokens": 8192,
           "supportsTools": true,
           "supportsVision": false,

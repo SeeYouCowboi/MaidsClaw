@@ -3,6 +3,7 @@ import type { Chunk } from "../../../src/core/chunk.js";
 import { resolveProviderCredential } from "../../../src/core/config.js";
 import { MaidsClawError } from "../../../src/core/errors.js";
 import { bootstrapRegistry } from "../../../src/core/models/bootstrap.js";
+import { AnthropicChatProvider } from "../../../src/core/models/anthropic-provider.js";
 import { OpenAIProvider } from "../../../src/core/models/openai-provider.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ const originalEnv = { ...process.env };
 beforeEach(() => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.KIMI_CODING_API_KEY;
   delete process.env.MOONSHOT_API_KEY;
   delete process.env.MINIMAX_API_KEY;
 });
@@ -54,8 +56,8 @@ afterEach(() => {
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
-describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
-  it("resolves moonshot/kimi-for-coding to an OpenAIProvider via bootstrapRegistry", async () => {
+describe("Kimi for Coding via OpenAI-compatible transport", () => {
+  it("resolves kimi-coding/kimi-for-coding to an OpenAIProvider via bootstrapRegistry", async () => {
     const fetchCalls: string[] = [];
     const mockFetch = (async (input: RequestInfo | URL) => {
       fetchCalls.push(String(input));
@@ -68,18 +70,17 @@ describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
 
     const registry = bootstrapRegistry({
       auth: {
-        credentials: [{ provider: "moonshot", type: "api-key", apiKey: "sk-moonshot-test" }],
+        credentials: [{ provider: "kimi-coding", type: "api-key", apiKey: "sk-kimi-test" }],
       },
       fetchImpl: mockFetch,
     });
 
-    const provider = registry.resolveChat("moonshot/kimi-for-coding");
+    const provider = registry.resolveChat("kimi-coding/kimi-for-coding");
     expect(provider instanceof OpenAIProvider).toBe(true);
 
-    // Drive a request to verify the correct baseUrl is used
     await collectChunks(
       provider.chatCompletion({
-        modelId: "moonshot/kimi-for-coding",
+        modelId: "kimi-coding/kimi-for-coding",
         messages: [{ role: "user", content: "ping" }],
       }),
     );
@@ -88,12 +89,12 @@ describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
     expect(fetchCalls[0]).toContain("api.kimi.com/coding");
   });
 
-  it("throws MODEL_NOT_CONFIGURED when no moonshot credentials exist", () => {
+  it("throws MODEL_NOT_CONFIGURED when no kimi-coding credentials exist", () => {
     const registry = bootstrapRegistry();
 
     let thrown: unknown;
     try {
-      registry.resolveChat("moonshot/kimi-for-coding");
+      registry.resolveChat("kimi-coding/kimi-for-coding");
     } catch (error) {
       thrown = error;
     }
@@ -103,8 +104,8 @@ describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
   });
 });
 
-describe("MiniMax via OpenAI-compatible transport", () => {
-  it("resolves minimax/MiniMax-M2.5 to an OpenAIProvider via bootstrapRegistry", async () => {
+describe("Moonshot (Metered API) via OpenAI-compatible transport", () => {
+  it("resolves moonshot/kimi-k2.5 to an OpenAIProvider via bootstrapRegistry", async () => {
     const fetchCalls: string[] = [];
     const mockFetch = (async (input: RequestInfo | URL) => {
       fetchCalls.push(String(input));
@@ -112,6 +113,126 @@ describe("MiniMax via OpenAI-compatible transport", () => {
         `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n\n`,
         `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
         "data: [DONE]\n\n",
+      ]);
+    }) as typeof fetch;
+
+    const registry = bootstrapRegistry({
+      auth: {
+        credentials: [{ provider: "moonshot", type: "api-key", apiKey: "sk-platform-test" }],
+      },
+      fetchImpl: mockFetch,
+    });
+
+    const provider = registry.resolveChat("moonshot/kimi-k2.5");
+    expect(provider instanceof OpenAIProvider).toBe(true);
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "moonshot/kimi-k2.5",
+        messages: [{ role: "user", content: "ping" }],
+      }),
+    );
+
+    expect(fetchCalls.length).toBe(1);
+    expect(fetchCalls[0]).toContain("api.moonshot.cn");
+  });
+
+  it("throws MODEL_NOT_CONFIGURED when no moonshot credentials exist", () => {
+    const registry = bootstrapRegistry();
+
+    let thrown: unknown;
+    try {
+      registry.resolveChat("moonshot/kimi-k2.5");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown instanceof MaidsClawError).toBe(true);
+    expect((thrown as MaidsClawError).code).toBe("MODEL_NOT_CONFIGURED");
+  });
+
+  it("does not send extraHeaders (unlike Kimi for Coding)", async () => {
+    const capturedHeaders: Record<string, string>[] = [];
+    const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers: Record<string, string> = {};
+      if (init?.headers) {
+        const h = init.headers as Record<string, string>;
+        for (const [key, value] of Object.entries(h)) {
+          headers[key.toLowerCase()] = value;
+        }
+      }
+      capturedHeaders.push(headers);
+      return sseResponse([
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+    }) as typeof fetch;
+
+    const registry = bootstrapRegistry({
+      auth: {
+        credentials: [{ provider: "moonshot", type: "api-key", apiKey: "sk-platform-test" }],
+      },
+      fetchImpl: mockFetch,
+    });
+
+    const provider = registry.resolveChat("moonshot/kimi-k2.5");
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "moonshot/kimi-k2.5",
+        messages: [{ role: "user", content: "test" }],
+      }),
+    );
+
+    expect(capturedHeaders.length).toBe(1);
+    expect(capturedHeaders[0]["user-agent"]).toBeUndefined();
+  });
+});
+
+describe("Streaming chunk normalization (Moonshot Metered)", () => {
+  it("emits text_delta chunks from SSE stream", async () => {
+    const mockFetch = (async (_input: RequestInfo | URL) => {
+      return sseResponse([
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "Hello from Platform" } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+    }) as typeof fetch;
+
+    const registry = bootstrapRegistry({
+      auth: {
+        credentials: [{ provider: "moonshot", type: "api-key", apiKey: "sk-platform-test" }],
+      },
+      fetchImpl: mockFetch,
+    });
+
+    const provider = registry.resolveChat("moonshot/kimi-k2.5");
+    const chunks = await collectChunks(
+      provider.chatCompletion({
+        modelId: "moonshot/kimi-k2.5",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    const textDeltas = chunks.filter((c) => c.type === "text_delta");
+    expect(textDeltas.length).toBeGreaterThan(0);
+    expect(textDeltas[0]).toEqual({ type: "text_delta", text: "Hello from Platform" });
+
+    const messageEnds = chunks.filter((c) => c.type === "message_end");
+    expect(messageEnds.length).toBe(1);
+  });
+});
+
+describe("MiniMax via Anthropic-compatible transport", () => {
+  it("resolves minimax/MiniMax-M2.7-highspeed to an AnthropicChatProvider via bootstrapRegistry", async () => {
+    const fetchCalls: string[] = [];
+    const mockFetch = (async (input: RequestInfo | URL) => {
+      fetchCalls.push(String(input));
+      return sseResponse([
+        `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 0 } } })}\n\n`,
+        `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "hi" } })}\n\n`,
+        `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } })}\n\n`,
+        `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
       ]);
     }) as typeof fetch;
 
@@ -122,19 +243,18 @@ describe("MiniMax via OpenAI-compatible transport", () => {
       fetchImpl: mockFetch,
     });
 
-    const provider = registry.resolveChat("minimax/MiniMax-M2.5");
-    expect(provider instanceof OpenAIProvider).toBe(true);
+    const provider = registry.resolveChat("minimax/MiniMax-M2.7-highspeed");
+    expect(provider instanceof AnthropicChatProvider).toBe(true);
 
-    // Drive a request to verify the correct baseUrl is used
     await collectChunks(
       provider.chatCompletion({
-        modelId: "minimax/MiniMax-M2.5",
+        modelId: "minimax/MiniMax-M2.7-highspeed",
         messages: [{ role: "user", content: "ping" }],
       }),
     );
 
     expect(fetchCalls.length).toBe(1);
-    expect(fetchCalls[0]).toContain("api.minimaxi.com");
+    expect(fetchCalls[0]).toContain("api.minimaxi.com/anthropic");
   });
 
   it("throws MODEL_NOT_CONFIGURED when no minimax credentials exist", () => {
@@ -142,7 +262,7 @@ describe("MiniMax via OpenAI-compatible transport", () => {
 
     let thrown: unknown;
     try {
-      registry.resolveChat("minimax/MiniMax-M2.5");
+      registry.resolveChat("minimax/MiniMax-M2.7-highspeed");
     } catch (error) {
       thrown = error;
     }
@@ -152,7 +272,7 @@ describe("MiniMax via OpenAI-compatible transport", () => {
   });
 });
 
-describe("Streaming chunk normalization (Moonshot)", () => {
+describe("Streaming chunk normalization (Kimi for Coding)", () => {
   it("emits text_delta chunks from SSE stream", async () => {
     const mockFetch = (async (_input: RequestInfo | URL) => {
       return sseResponse([
@@ -164,15 +284,15 @@ describe("Streaming chunk normalization (Moonshot)", () => {
 
     const registry = bootstrapRegistry({
       auth: {
-        credentials: [{ provider: "moonshot", type: "api-key", apiKey: "sk-moonshot-test" }],
+        credentials: [{ provider: "kimi-coding", type: "api-key", apiKey: "sk-kimi-test" }],
       },
       fetchImpl: mockFetch,
     });
 
-    const provider = registry.resolveChat("moonshot/kimi-for-coding");
+    const provider = registry.resolveChat("kimi-coding/kimi-for-coding");
     const chunks = await collectChunks(
       provider.chatCompletion({
-        modelId: "moonshot/kimi-for-coding",
+        modelId: "kimi-coding/kimi-for-coding",
         messages: [{ role: "user", content: "hello" }],
       }),
     );
@@ -187,6 +307,17 @@ describe("Streaming chunk normalization (Moonshot)", () => {
 });
 
 describe("Env var credential resolution", () => {
+  it("resolveProviderCredential picks up KIMI_CODING_API_KEY from env", () => {
+    process.env.KIMI_CODING_API_KEY = "sk-kimi-env-test";
+
+    const credential = resolveProviderCredential("kimi-coding", { credentials: [] });
+
+    expect(credential).toBeDefined();
+    expect(credential!.type).toBe("api-key");
+    expect(credential!.provider).toBe("kimi-coding");
+    expect((credential as { apiKey: string }).apiKey).toBe("sk-kimi-env-test");
+  });
+
   it("resolveProviderCredential picks up MOONSHOT_API_KEY from env", () => {
     process.env.MOONSHOT_API_KEY = "sk-env-moonshot";
 

@@ -72,6 +72,7 @@ describe("bootstrapRuntime", () => {
     const runtime = bootstrapRuntime({
       databasePath: ":memory:",
       modelRegistry,
+      agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
     });
 
     try {

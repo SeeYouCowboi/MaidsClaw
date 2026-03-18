@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
-import { MAIDEN_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
+import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
 
 function createTestRegistry(): DefaultModelServiceRegistry {
@@ -25,6 +25,7 @@ describe("dev/prod parity", () => {
     const runtime = bootstrapRuntime({
       databasePath: ":memory:",
       modelRegistry: createTestRegistry(),
+      agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
     });
 
     try {
@@ -40,6 +41,7 @@ describe("dev/prod parity", () => {
     const runtime = bootstrapRuntime({
       databasePath: ":memory:",
       modelRegistry: createTestRegistry(),
+      agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
     });
 
     try {

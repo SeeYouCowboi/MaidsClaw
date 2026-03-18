@@ -2,10 +2,16 @@
   "_comment": "Project-local credentials for MaidsClaw providers. Copy to config/auth.json and fill in real values. This file is gitignored.",
   "credentials": [
     {
-      "_comment_1": "Tier B: Moonshot/Kimi API key (replaces MOONSHOT_API_KEY env var)",
+      "_comment_1": "Tier B: Kimi for Coding API key — subscription-based (replaces KIMI_CODING_API_KEY env var)",
+      "type": "api-key",
+      "provider": "kimi-coding",
+      "apiKey": "sk-kimi-PLACEHOLDER"
+    },
+    {
+      "_comment_1b": "Tier B: Moonshot Platform metered API key — pay-per-token (replaces MOONSHOT_API_KEY env var)",
       "type": "api-key",
       "provider": "moonshot",
-      "apiKey": "sk-moonshot-PLACEHOLDER"
+      "apiKey": "sk-PLACEHOLDER"
     },
     {
       "_comment_2": "Tier B: MiniMax API key (replaces MINIMAX_API_KEY env var)",

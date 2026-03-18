@@ -114,6 +114,13 @@ function resolveBootstrapCredential(providerId: string, auth: AuthConfig | undef
     }
   }
 
+  if (providerId === "kimi-coding") {
+    const apiKey = process.env.KIMI_CODING_API_KEY;
+    if (apiKey && apiKey.trim() !== "") {
+      return { type: "api-key", provider: "kimi-coding", apiKey };
+    }
+  }
+
   if (providerId === "moonshot") {
     const apiKey = process.env.MOONSHOT_API_KEY;
     if (apiKey && apiKey.trim() !== "") {

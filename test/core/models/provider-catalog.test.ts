@@ -8,14 +8,15 @@ import {
 import type { ProviderCatalogEntry } from "../../../src/core/models/provider-types.js";
 
 describe("Provider catalog", () => {
-  it("contains all 7 required built-in provider IDs", () => {
-    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(7);
-    expect(BUILT_IN_PROVIDERS).toHaveLength(7);
+  it("contains all 8 required built-in provider IDs", () => {
+    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(8);
+    expect(BUILT_IN_PROVIDERS).toHaveLength(8);
 
     const expectedIds = [
       "anthropic",
       "openai",
       "bailian",
+      "kimi-coding",
       "moonshot",
       "minimax",
       "openai-chatgpt-codex-oauth",
@@ -98,7 +99,7 @@ describe("Provider catalog", () => {
     expect(openai!.baseUrl).toBe("https://my-proxy.example.com");
     // Other built-in providers should still be present
     expect(merged.find((p) => p.id === "anthropic")).toBeDefined();
-    expect(merged).toHaveLength(7);
+    expect(merged).toHaveLength(8);
   });
 
   it("mergeProviderOverrides adds new user-defined provider not in built-in list", () => {
@@ -133,18 +134,31 @@ describe("Provider catalog", () => {
 
     expect(local).toBeDefined();
     expect(local!.displayName).toBe("My Local LLM");
-    expect(merged).toHaveLength(8); // 7 built-in + 1 custom
+    expect(merged).toHaveLength(9); // 8 built-in + 1 custom
   });
 
-  it("moonshot baseUrl is https://api.kimi.com/coding", () => {
+  it("kimi-coding baseUrl is https://api.kimi.com/coding", () => {
+    const kimiCoding = getBuiltInProvider("kimi-coding");
+    expect(kimiCoding).toBeDefined();
+    expect(kimiCoding!.baseUrl).toBe("https://api.kimi.com/coding");
+  });
+
+  it("moonshot baseUrl is https://api.moonshot.cn/v1", () => {
     const moonshot = getBuiltInProvider("moonshot");
     expect(moonshot).toBeDefined();
-    expect(moonshot!.baseUrl).toBe("https://api.kimi.com/coding");
+    expect(moonshot!.baseUrl).toBe("https://api.moonshot.cn");
   });
 
-  it("minimax baseUrl is https://api.minimaxi.com", () => {
+  it("moonshot has no extraHeaders", () => {
+    const moonshot = getBuiltInProvider("moonshot");
+    expect(moonshot).toBeDefined();
+    expect(moonshot!.extraHeaders).toBeUndefined();
+  });
+
+  it("minimax baseUrl is https://api.minimaxi.com/anthropic", () => {
     const minimax = getBuiltInProvider("minimax");
     expect(minimax).toBeDefined();
-    expect(minimax!.baseUrl).toBe("https://api.minimaxi.com");
+    expect(minimax!.baseUrl).toBe("https://api.minimaxi.com/anthropic");
+    expect(minimax!.transportFamily).toBe("anthropic-native");
   });
 });
