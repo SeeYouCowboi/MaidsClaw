@@ -13,6 +13,7 @@ import { registerChatCommand } from "../src/cli/commands/chat.js";
 import { registerConfigCommands } from "../src/cli/commands/config.js";
 import { registerDebugCommands } from "../src/cli/commands/debug.js";
 import { registerHealthCommand } from "../src/cli/commands/health.js";
+import { registerHelpCommand } from "../src/cli/commands/help.js";
 import { registerServerCommands } from "../src/cli/commands/server.js";
 import { registerSessionCommands } from "../src/cli/commands/session.js";
 import { registerTurnCommands } from "../src/cli/commands/turn.js";
@@ -44,6 +45,9 @@ registerChatCommand();
 
 // debug namespace — real handlers from src/cli/commands/debug.ts
 registerDebugCommands();
+
+// help — usage information
+registerHelpCommand();
 
 // ── Entry point ──────────────────────────────────────────────────────
 

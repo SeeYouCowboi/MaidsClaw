@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun:*)",
+      "Bash(source .env:*)",
+      "WebFetch(domain:www.kimi.com)"
+    ]
+  }
+}

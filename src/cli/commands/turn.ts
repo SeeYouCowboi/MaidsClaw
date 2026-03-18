@@ -311,6 +311,7 @@ export function registerTurnCommands(): void {
   registerCommand({
     namespace: "turn",
     subcommand: "send",
+    description: "Send a user message and get a response",
     handler: handleTurnSend,
   });
 }

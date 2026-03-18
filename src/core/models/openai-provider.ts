@@ -13,6 +13,7 @@ type OpenAIChatProviderOptions = {
   fetchImpl?: FetchFn;
   logger?: Logger;
   supportsStreamingUsage?: boolean;
+  extraHeaders?: Record<string, string>;
 };
 
 type OpenAIChatDeltaToolCall = {
@@ -59,21 +60,57 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
   }
 
   async *chatCompletion(request: ChatCompletionRequest): AsyncIterable<Chunk> {
+    const payload = this.toChatRequestPayload(request);
+    const payloadJson = JSON.stringify(payload);
+    this.logger?.debug("Model request", {
+      model: payload.model,
+      messageCount: (payload.messages as unknown[])?.length,
+      toolCount: (payload.tools as unknown[])?.length,
+      maxTokens: payload.max_tokens,
+      payloadBytes: payloadJson.length,
+    });
+
     const response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.options.apiKey}`,
+        ...this.options.extraHeaders,
       },
-      body: JSON.stringify(this.toChatRequestPayload(request)),
+      body: payloadJson,
     });
 
     if (!response.ok) {
+      let errorBody: string | undefined;
+      try {
+        errorBody = await response.text();
+      } catch {
+        errorBody = undefined;
+      }
+
+      const parsedError = parseErrorBody(errorBody);
+      const msgRoles = (payload.messages as Array<{ role?: string; tool_call_id?: string }>)
+        ?.map((m) => `${m.role}${m.tool_call_id ? `(tcid:${m.tool_call_id})` : ""}`)
+        ?.join(", ");
+      this.logger?.error("Model API error", {
+        status: response.status,
+        errorType: parsedError?.type,
+        errorMessage: parsedError?.message,
+        messageRoles: msgRoles,
+        errorBody: errorBody?.slice(0, 500),
+      });
+
       throw new MaidsClawError({
         code: "MODEL_API_ERROR",
-        message: `OpenAI chat API returned ${response.status}`,
+        message: `OpenAI chat API returned ${response.status}: ${parsedError?.message ?? errorBody?.slice(0, 200) ?? "no body"} [roles: ${msgRoles}]`,
         retriable: response.status >= 500,
-        details: { status: response.status },
+        details: {
+          status: response.status,
+          errorType: parsedError?.type,
+          errorMessage: parsedError?.message,
+          messageRoles: msgRoles,
+          errorBody: errorBody?.slice(0, 500),
+        },
       });
     }
 
@@ -199,6 +236,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.options.apiKey}`,
+        ...this.options.extraHeaders,
       },
       body: JSON.stringify({
         model: modelId || this.defaultEmbeddingModel,
@@ -257,6 +295,28 @@ function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
       role: message.role === "tool" ? "tool" : message.role,
       content: message.content,
       tool_call_id: message.toolCallId,
+    };
+  }
+
+  const textBlocks = message.content.filter((b) => b.type === "text");
+  const toolUseBlocks = message.content.filter((b) => b.type === "tool_use");
+
+  if (toolUseBlocks.length > 0 && message.role === "assistant") {
+    const textContent = textBlocks.map((b) => b.text).join("");
+    const toolCalls = toolUseBlocks.map((b, i) => ({
+      id: b.id,
+      type: "function" as const,
+      index: i,
+      function: {
+        name: b.name,
+        arguments: typeof b.input === "string" ? b.input : JSON.stringify(b.input),
+      },
+    }));
+
+    return {
+      role: "assistant",
+      content: textContent || null,
+      tool_calls: toolCalls,
     };
   }
 
@@ -341,6 +401,16 @@ async function* parseSseEvents(stream: ReadableStream<Uint8Array>): AsyncIterabl
     if (parsed.event || parsed.data) {
       yield parsed;
     }
+  }
+}
+
+function parseErrorBody(body: string | undefined): { type?: string; message?: string } | undefined {
+  if (!body) return undefined;
+  try {
+    const parsed = JSON.parse(body) as { error?: { type?: string; message?: string } };
+    return parsed?.error;
+  } catch {
+    return undefined;
   }
 }
 

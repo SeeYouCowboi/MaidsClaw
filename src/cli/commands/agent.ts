@@ -723,48 +723,56 @@ export function registerAgentCommands(): void {
 	registerCommand({
 		namespace: "agent",
 		subcommand: "list",
+		description: "List all registered agents",
 		handler: handleAgentList,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "show",
+		description: "Show details of a specific agent",
 		handler: handleAgentShow,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "create-rp",
+		description: "Create an RP agent from a persona",
 		handler: handleAgentCreateRp,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "create-task",
+		description: "Create a task agent",
 		handler: handleAgentCreateTask,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "enable",
+		description: "Enable a disabled agent",
 		handler: handleAgentEnable,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "disable",
+		description: "Disable an agent",
 		handler: handleAgentDisable,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "remove",
+		description: "Remove an agent from config",
 		handler: handleAgentRemove,
 	});
 
 	registerCommand({
 		namespace: "agent",
 		subcommand: "validate",
+		description: "Validate agent configuration",
 		handler: handleAgentValidate,
 	});
 }

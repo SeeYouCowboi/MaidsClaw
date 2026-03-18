@@ -167,6 +167,7 @@ export function registerServerCommands(): void {
   registerCommand({
     namespace: "server",
     subcommand: "start",
+    description: "Start the gateway HTTP server",
     handler: handleServerStart,
   });
 }

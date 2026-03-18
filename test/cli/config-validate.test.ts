@@ -114,6 +114,8 @@ async function runValidate(
 
 let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
+let savedMoonshotKey: string | undefined;
+let savedBailianKey: string | undefined;
 
 // ── Test suite ──────────────────────────────────────────────────────
 
@@ -124,6 +126,8 @@ describe("config validate", () => {
     // Save and set env vars so env checks pass by default
     savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
     savedOpenAIKey = process.env.OPENAI_API_KEY;
+    savedMoonshotKey = process.env.MOONSHOT_API_KEY;
+    savedBailianKey = process.env.BAILIAN_API_KEY;
     process.env.ANTHROPIC_API_KEY = "sk-test-key";
   });
 
@@ -139,6 +143,16 @@ describe("config validate", () => {
       process.env.OPENAI_API_KEY = savedOpenAIKey;
     } else {
       delete process.env.OPENAI_API_KEY;
+    }
+    if (savedMoonshotKey !== undefined) {
+      process.env.MOONSHOT_API_KEY = savedMoonshotKey;
+    } else {
+      delete process.env.MOONSHOT_API_KEY;
+    }
+    if (savedBailianKey !== undefined) {
+      process.env.BAILIAN_API_KEY = savedBailianKey;
+    } else {
+      delete process.env.BAILIAN_API_KEY;
     }
   });
 
@@ -203,9 +217,11 @@ describe("config validate", () => {
     writeEnv(tmpRoot);
     writeConfigJson(tmpRoot, "providers.json", {});
 
-    // Clear both API keys
+    // Clear all API keys
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.MOONSHOT_API_KEY;
+    delete process.env.BAILIAN_API_KEY;
 
     const result = await runValidate(tmpRoot);
 
@@ -414,6 +430,8 @@ describe("config validate", () => {
     // Clear env vars
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.MOONSHOT_API_KEY;
+    delete process.env.BAILIAN_API_KEY;
 
     // Write malformed agents.json
     writeConfigRaw(tmpRoot, "agents.json", "not json!");

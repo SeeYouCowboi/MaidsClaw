@@ -618,6 +618,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "summary",
+		description: "Show turn summary for a session",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugSummary(ctx, args);
@@ -630,6 +631,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "transcript",
+		description: "Show full transcript for a session",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugTranscript(ctx, args);
@@ -642,6 +644,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "prompt",
+		description: "Show rendered prompt for a turn",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugPrompt(ctx, args);
@@ -654,6 +657,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "chunks",
+		description: "Show raw model chunks for a turn",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugChunks(ctx, args);
@@ -666,6 +670,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "logs",
+		description: "Show diagnostic logs",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugLogs(ctx, args);
@@ -678,6 +683,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "memory",
+		description: "Inspect memory graph data",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugMemory(ctx, args);
@@ -690,6 +696,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "trace",
+		description: "Show execution trace for a turn",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugTrace(ctx, args);
@@ -702,6 +709,7 @@ export function registerDebugCommands(): void {
 	registerCommand({
 		namespace: "debug",
 		subcommand: "diagnose",
+		description: "Run diagnostic catalog checks",
 		handler: async (ctx, args) => {
 			try {
 				await handleDebugDiagnose(ctx, args);

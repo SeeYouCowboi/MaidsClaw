@@ -24,7 +24,6 @@ export class LocalRuntime {
   constructor(private readonly runtime: RuntimeBootstrapResult) {}
 
   async executeTurn(params: LocalTurnParams): Promise<TurnExecutionResult> {
-    // Validate agentId matches session owner — refuse silently wrong agent
     const session = this.runtime.sessionService.getSession(params.sessionId);
     if (session && session.agentId !== params.agentId) {
       throw new CliError(
@@ -39,15 +38,20 @@ export class LocalRuntime {
     const publicChunks: PublicChunkRecord[] = [];
     const toolEvents: PublicChunkRecord[] = [];
 
-    // Honor --save-trace: use runtime traceStore or create a per-turn one
     const perTurnTraceStore = params.saveTrace
       ? (this.runtime.traceStore ?? new TraceStore())
       : undefined;
 
+    const conversationHistory = this.buildConversationHistory(params.sessionId);
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...conversationHistory,
+      { role: "user", content: params.text },
+    ];
+
     const stream = this.runtime.turnService.run({
       sessionId: params.sessionId,
       requestId,
-      messages: [{ role: "user", content: params.text }],
+      messages,
       traceStore: perTurnTraceStore,
     });
 
@@ -92,6 +96,39 @@ export class LocalRuntime {
       public_chunks: publicChunks,
       tool_events: toolEvents,
     };
+  }
+
+  private buildConversationHistory(
+    sessionId: string,
+  ): Array<{ role: "user" | "assistant"; content: string }> {
+    type MessageRow = {
+      actor_type: string;
+      payload: string;
+    };
+
+    const rows = this.runtime.db.query<MessageRow>(
+      `SELECT actor_type, payload FROM interaction_records
+       WHERE session_id = ? AND record_type = 'message'
+       ORDER BY record_index ASC`,
+      [sessionId],
+    );
+
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload) as { role?: string; content?: string };
+        const role = payload.role;
+        if (role !== "user" && role !== "assistant") continue;
+        const content = typeof payload.content === "string" ? payload.content : "";
+        if (content.length === 0) continue;
+        messages.push({ role, content });
+      } catch {
+        continue;
+      }
+    }
+
+    return messages;
   }
 
   private readSettlementPayload(

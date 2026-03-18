@@ -46,10 +46,19 @@ describe("validateRpTurnOutcome", () => {
     ).toThrow("schemaVersion");
   });
 
-  it("rejects wrong schemaVersion", () => {
+  it("accepts and normalizes non-standard schemaVersion", () => {
+    const result = validateRpTurnOutcome({
+      schemaVersion: "wrong_version",
+      publicReply: "hello",
+    });
+    expect(result.schemaVersion).toBe("rp_turn_outcome_v3");
+    expect(result.publicReply).toBe("hello");
+  });
+
+  it("rejects empty schemaVersion", () => {
     expect(() =>
       validateRpTurnOutcome({
-        schemaVersion: "wrong_version",
+        schemaVersion: "",
         publicReply: "hello",
       })
     ).toThrow("schemaVersion");

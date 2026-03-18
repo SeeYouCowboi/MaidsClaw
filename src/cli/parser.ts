@@ -28,6 +28,7 @@ export type CommandHandler = (
 export type CommandRoute = {
   namespace: string;
   subcommand?: string;
+  description?: string;
   handler: CommandHandler;
 };
 
@@ -43,6 +44,11 @@ export function registerCommand(route: CommandRoute): void {
 /** Clear all registered commands. Exported for testing only. */
 export function resetCommands(): void {
   routes.length = 0;
+}
+
+/** Return a read-only snapshot of registered routes (for help introspection). */
+export function getRoutes(): ReadonlyArray<Readonly<CommandRoute>> {
+  return routes;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
@@ -79,16 +85,22 @@ function parseCommandArgs(argv: string[]): ParsedArgs {
 
 function showUsage(): void {
   const namespaces = getKnownNamespaces();
+  const maxLen = Math.max(...namespaces.map((ns) => ns.length));
   const lines = [
     "Usage: maidsclaw <command> [subcommand] [flags]",
     "",
     "Commands:",
-    ...namespaces.map((ns) => `  ${ns}`),
+    ...namespaces.map((ns) => {
+      const desc = routes.find((r) => r.namespace === ns)?.description ?? "";
+      return `  ${ns.padEnd(maxLen + 2)}${desc}`;
+    }),
     "",
     "Global flags:",
     "  --json          Output in JSON format",
     "  --quiet         Suppress non-essential output",
     "  --cwd <path>    Override working directory",
+    "",
+    "Run 'bun cli help <command>' for details on a specific command.",
   ];
   process.stderr.write(lines.join("\n") + "\n");
 }

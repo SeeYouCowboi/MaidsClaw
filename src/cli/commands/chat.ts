@@ -226,6 +226,7 @@ async function handleChat(
 export function registerChatCommand(): void {
 	registerCommand({
 		namespace: "chat",
+		description: "Start an interactive chat session",
 		handler: handleChat,
 	});
 }

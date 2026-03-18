@@ -382,7 +382,7 @@ describe("AgentLoop.runBuffered", () => {
     }
   });
 
-  it("returns error when no submit_rp_turn is called", async () => {
+  it("falls back to synthesized outcome when model responds with text but no submit_rp_turn", async () => {
     const model = new MockModelProvider([[{ type: "text_delta", text: "Only text." }, { type: "message_end", stopReason: "end_turn" }]]);
     const loop = new AgentLoop({
       profile: rpProfile(["submit_rp_turn"]),
@@ -394,6 +394,26 @@ describe("AgentLoop.runBuffered", () => {
       sessionId: "session-rp-nosubmit",
       requestId: "request-rp-nosubmit",
       messages: [{ role: "user", content: "no tool" }],
+    });
+
+    expect("outcome" in result).toBe(true);
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("Only text.");
+    }
+  });
+
+  it("returns error when no submit_rp_turn is called and no text produced", async () => {
+    const model = new MockModelProvider([[{ type: "message_end", stopReason: "end_turn" }]]);
+    const loop = new AgentLoop({
+      profile: rpProfile(["submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: new ToolExecutor(),
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-rp-empty",
+      requestId: "request-rp-empty",
+      messages: [{ role: "user", content: "nothing" }],
     });
 
     expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
@@ -425,9 +445,10 @@ describe("AgentLoop.runBuffered", () => {
     expect(result).toEqual({ error: "upstream timeout" });
   });
 
-  it("blocks immediate_write tool calls in buffered mode", async () => {
+  it("skips immediate_write tool calls in buffered mode without executing them", async () => {
     const model = new MockModelProvider([
       [
+        { type: "text_delta", text: "Skipped the write." },
         { type: "tool_use_start", id: "call_3", name: "unsafe_write" },
         { type: "tool_use_delta", id: "call_3", partialJson: "{}" },
         { type: "tool_use_end", id: "call_3" },
@@ -461,7 +482,11 @@ describe("AgentLoop.runBuffered", () => {
       messages: [{ role: "user", content: "try write" }],
     });
 
-    expect(result).toEqual({ error: "Tool 'unsafe_write' is not allowed in buffered RP mode" });
+    // Tool was skipped gracefully, text fallback synthesizes outcome
+    expect("outcome" in result).toBe(true);
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("Skipped the write.");
+    }
     expect(executed).toBe(false);
   });
 });

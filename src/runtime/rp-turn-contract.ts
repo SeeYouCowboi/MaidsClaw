@@ -78,11 +78,14 @@ export function validateRpTurnOutcome(raw: unknown): RpTurnOutcomeSubmission {
 
   const obj = raw as Record<string, unknown>;
 
-  if (obj.schemaVersion !== "rp_turn_outcome_v3") {
+  // Accept any schemaVersion and normalize — some models (e.g. Kimi) produce
+  // non-standard versions like "2021-01-01" instead of "rp_turn_outcome_v3".
+  if (typeof obj.schemaVersion !== "string" || obj.schemaVersion.trim() === "") {
     throw new Error(
-      `schemaVersion must be "rp_turn_outcome_v3", got ${JSON.stringify(obj.schemaVersion)}`
+      `schemaVersion must be a non-empty string, got ${JSON.stringify(obj.schemaVersion)}`
     );
   }
+  obj.schemaVersion = "rp_turn_outcome_v3";
 
   if (typeof obj.publicReply !== "string") {
     throw new Error(

@@ -397,6 +397,22 @@ export class AgentLoop {
 		const systemPrompt = initialPromptState.systemPrompt;
 		let turnIndex = 0;
 
+		const systemPromptLen = systemPrompt.length;
+		const conversationLen = workingMessages.length;
+		const estimatedTokens = Math.ceil(
+			(systemPromptLen + JSON.stringify(workingMessages).length) / 4,
+		);
+		loopLogger?.info("runBuffered prompt assembled", {
+			systemPromptChars: systemPromptLen,
+			conversationMessages: conversationLen,
+			estimatedInputTokens: estimatedTokens,
+		});
+		request.traceStore?.addLogEntry(requestId, {
+			level: "info",
+			message: `prompt: sysLen=${systemPromptLen} msgs=${conversationLen} estTokens=${estimatedTokens}`,
+			timestamp: Date.now(),
+		});
+
 		while (true) {
 			turnIndex += 1;
 			const pendingToolCalls = new Map<string, PendingToolCall>();
@@ -404,6 +420,7 @@ export class AgentLoop {
 			const assistantBlocks: ContentBlock[] = [];
 			const assistantToolBlockIndices = new Map<string, number>();
 			let assistantText = "";
+			const modelCallStart = Date.now();
 
 			try {
 				const completionRequest = this.buildCompletionRequest(
@@ -415,6 +432,16 @@ export class AgentLoop {
 					completionRequest,
 				)) {
 					if (chunk.type === "error") {
+						loopLogger?.warn("Model returned error chunk", {
+							turn: turnIndex,
+							error: chunk.message,
+							elapsedMs: Date.now() - modelCallStart,
+						});
+						request.traceStore?.addLogEntry(requestId, {
+							level: "error",
+							message: `model error (turn ${turnIndex}, ${Date.now() - modelCallStart}ms): ${chunk.message}`,
+							timestamp: Date.now(),
+						});
 						return { error: chunk.message };
 					}
 
@@ -457,20 +484,29 @@ export class AgentLoop {
 					}
 				}
 			} catch (error) {
+				const modelCallMs = Date.now() - modelCallStart;
 				const wrapped = wrapError(error, {
 					code: "MODEL_API_ERROR",
 					retriable: true,
 				});
 				loopLogger?.error("Agent loop model call failed", wrapped, {
 					turn: turnIndex,
+					elapsedMs: modelCallMs,
 				});
 				request.traceStore?.addLogEntry(requestId, {
 					level: "error",
-					message: `agent_loop buffered model call failed: ${wrapped.code}`,
+					message: `model call failed (turn ${turnIndex}, ${modelCallMs}ms): ${wrapped.code} — ${wrapped.message}`,
 					timestamp: Date.now(),
 				});
 				return { error: wrapped.message };
 			}
+
+			const modelCallMs = Date.now() - modelCallStart;
+			request.traceStore?.addLogEntry(requestId, {
+				level: "info",
+				message: `model call done (turn ${turnIndex}, ${modelCallMs}ms): textLen=${assistantText.length} toolCalls=${completedToolCalls.length}`,
+				timestamp: Date.now(),
+			});
 
 			const normalizedToolCalls: Array<{
 				id: string;
@@ -523,15 +559,40 @@ export class AgentLoop {
 			}
 
 			if (normalizedToolCalls.length === 0) {
+				if (assistantText.length > 0) {
+					loopLogger?.info("Text fallback: model returned text without tool call", {
+						turn: turnIndex,
+						textLen: assistantText.length,
+					});
+					return {
+						outcome: {
+							schemaVersion: "rp_turn_outcome_v3",
+							publicReply: assistantText,
+						},
+					};
+				}
+				loopLogger?.warn("Empty result: model returned no text and no tool calls", {
+					turn: turnIndex,
+					elapsedMs: modelCallMs,
+					conversationMessages: workingMessages.length,
+				});
+				request.traceStore?.addLogEntry(requestId, {
+					level: "warn",
+					message: `empty result (turn ${turnIndex}): no text, no tools, ${modelCallMs}ms, ${workingMessages.length} msgs`,
+					timestamp: Date.now(),
+				});
 				return { error: "RP turn ended without submit_rp_turn" };
 			}
 
 			try {
 				for (const toolCall of normalizedToolCalls) {
 					if (!canExecuteTool(this.profile, toolCall.name)) {
-						return {
-							error: `Tool '${toolCall.name}' is not permitted for agent '${this.profile.id}'`,
-						};
+						// Skip non-permitted tools gracefully instead of aborting
+						loopLogger?.warn("Skipping non-permitted tool in buffered RP mode", {
+							tool: toolCall.name,
+							turn: turnIndex,
+						});
+						continue;
 					}
 
 					const toolSchema = bufferedToolExecutor
@@ -542,9 +603,12 @@ export class AgentLoop {
 						(toolSchema.effectClass !== "read_only" &&
 							toolSchema.traceVisibility !== "private_runtime")
 					) {
-						return {
-							error: `Tool '${toolCall.name}' is not allowed in buffered RP mode`,
-						};
+						// Skip non-allowed tools gracefully instead of aborting
+						loopLogger?.warn("Skipping non-allowed tool in buffered RP mode", {
+							tool: toolCall.name,
+							turn: turnIndex,
+						});
+						continue;
 					}
 
 					const result = await bufferedToolExecutor.execute(
@@ -580,6 +644,17 @@ export class AgentLoop {
 					timestamp: Date.now(),
 				});
 				return { error: wrapped.message };
+			}
+
+			// If we reach here, all tool calls were processed but none was submit_rp_turn.
+			// If we have assistant text, use the text fallback instead of looping.
+			if (assistantText.length > 0) {
+				return {
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v3",
+						publicReply: assistantText,
+					},
+				};
 			}
 		}
 	}
@@ -656,6 +731,7 @@ export class AgentLoop {
 			modelId: this.profile.modelId,
 			systemPrompt,
 			messages,
+			maxTokens: this.profile.maxOutputTokens,
 			tools: getFilteredSchemas(this.profile, toolExecutor).map((tool) => ({
 				name: tool.name,
 				description: tool.description,

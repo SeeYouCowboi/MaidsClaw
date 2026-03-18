@@ -223,7 +223,7 @@ export class TurnService {
 			return;
 		}
 
-		if ("error" in bufferedResult) {
+			if ("error" in bufferedResult) {
 			const errorChunk = {
 				code: "RP_BUFFERED_EXECUTION_FAILED",
 				message: bufferedResult.error,
@@ -231,7 +231,7 @@ export class TurnService {
 			this.traceLog(
 				requestId,
 				"error",
-				"RP buffered execution returned error result",
+				`RP buffered execution failed: ${bufferedResult.error}`,
 			);
 			yield {
 				type: "error" as const,

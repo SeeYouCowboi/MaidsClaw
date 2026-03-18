@@ -8,13 +8,14 @@ import {
 import type { ProviderCatalogEntry } from "../../../src/core/models/provider-types.js";
 
 describe("Provider catalog", () => {
-  it("contains all 6 required built-in provider IDs", () => {
-    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(6);
-    expect(BUILT_IN_PROVIDERS).toHaveLength(6);
+  it("contains all 7 required built-in provider IDs", () => {
+    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(7);
+    expect(BUILT_IN_PROVIDERS).toHaveLength(7);
 
     const expectedIds = [
       "anthropic",
       "openai",
+      "bailian",
       "moonshot",
       "minimax",
       "openai-chatgpt-codex-oauth",
@@ -97,7 +98,7 @@ describe("Provider catalog", () => {
     expect(openai!.baseUrl).toBe("https://my-proxy.example.com");
     // Other built-in providers should still be present
     expect(merged.find((p) => p.id === "anthropic")).toBeDefined();
-    expect(merged).toHaveLength(6);
+    expect(merged).toHaveLength(7);
   });
 
   it("mergeProviderOverrides adds new user-defined provider not in built-in list", () => {
@@ -132,18 +133,18 @@ describe("Provider catalog", () => {
 
     expect(local).toBeDefined();
     expect(local!.displayName).toBe("My Local LLM");
-    expect(merged).toHaveLength(7); // 6 built-in + 1 custom
+    expect(merged).toHaveLength(8); // 7 built-in + 1 custom
   });
 
-  it("moonshot baseUrl is https://api.moonshot.ai/v1", () => {
+  it("moonshot baseUrl is https://api.kimi.com/coding", () => {
     const moonshot = getBuiltInProvider("moonshot");
     expect(moonshot).toBeDefined();
-    expect(moonshot!.baseUrl).toBe("https://api.moonshot.ai/v1");
+    expect(moonshot!.baseUrl).toBe("https://api.kimi.com/coding");
   });
 
-  it("minimax baseUrl is https://api.minimax.io/v1", () => {
+  it("minimax baseUrl is https://api.minimaxi.com", () => {
     const minimax = getBuiltInProvider("minimax");
     expect(minimax).toBeDefined();
-    expect(minimax!.baseUrl).toBe("https://api.minimax.io/v1");
+    expect(minimax!.baseUrl).toBe("https://api.minimaxi.com");
   });
 });

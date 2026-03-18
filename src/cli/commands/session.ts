@@ -350,16 +350,19 @@ export function registerSessionCommands(): void {
   registerCommand({
     namespace: "session",
     subcommand: "create",
+    description: "Create a new chat session",
     handler: handleSessionCreate,
   });
   registerCommand({
     namespace: "session",
     subcommand: "close",
+    description: "Close an active session",
     handler: handleSessionClose,
   });
   registerCommand({
     namespace: "session",
     subcommand: "recover",
+    description: "Recover a crashed session",
     handler: handleSessionRecover,
   });
 }

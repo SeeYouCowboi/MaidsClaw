@@ -128,6 +128,7 @@ async function handleHealth(
 export function registerHealthCommand(): void {
   registerCommand({
     namespace: "health",
+    description: "Check runtime health status",
     handler: handleHealth,
   });
 }

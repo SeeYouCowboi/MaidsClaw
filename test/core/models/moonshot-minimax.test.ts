@@ -55,7 +55,7 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
-  it("resolves moonshot/kimi-k2.5 to an OpenAIProvider via bootstrapRegistry", async () => {
+  it("resolves moonshot/kimi-for-coding to an OpenAIProvider via bootstrapRegistry", async () => {
     const fetchCalls: string[] = [];
     const mockFetch = (async (input: RequestInfo | URL) => {
       fetchCalls.push(String(input));
@@ -73,19 +73,19 @@ describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
       fetchImpl: mockFetch,
     });
 
-    const provider = registry.resolveChat("moonshot/kimi-k2.5");
+    const provider = registry.resolveChat("moonshot/kimi-for-coding");
     expect(provider instanceof OpenAIProvider).toBe(true);
 
     // Drive a request to verify the correct baseUrl is used
     await collectChunks(
       provider.chatCompletion({
-        modelId: "moonshot/kimi-k2.5",
+        modelId: "moonshot/kimi-for-coding",
         messages: [{ role: "user", content: "ping" }],
       }),
     );
 
     expect(fetchCalls.length).toBe(1);
-    expect(fetchCalls[0]).toContain("api.moonshot.ai");
+    expect(fetchCalls[0]).toContain("api.kimi.com/coding");
   });
 
   it("throws MODEL_NOT_CONFIGURED when no moonshot credentials exist", () => {
@@ -93,7 +93,7 @@ describe("Moonshot (Kimi) via OpenAI-compatible transport", () => {
 
     let thrown: unknown;
     try {
-      registry.resolveChat("moonshot/kimi-k2.5");
+      registry.resolveChat("moonshot/kimi-for-coding");
     } catch (error) {
       thrown = error;
     }
@@ -134,7 +134,7 @@ describe("MiniMax via OpenAI-compatible transport", () => {
     );
 
     expect(fetchCalls.length).toBe(1);
-    expect(fetchCalls[0]).toContain("api.minimax.io");
+    expect(fetchCalls[0]).toContain("api.minimaxi.com");
   });
 
   it("throws MODEL_NOT_CONFIGURED when no minimax credentials exist", () => {
@@ -169,10 +169,10 @@ describe("Streaming chunk normalization (Moonshot)", () => {
       fetchImpl: mockFetch,
     });
 
-    const provider = registry.resolveChat("moonshot/kimi-k2.5");
+    const provider = registry.resolveChat("moonshot/kimi-for-coding");
     const chunks = await collectChunks(
       provider.chatCompletion({
-        modelId: "moonshot/kimi-k2.5",
+        modelId: "moonshot/kimi-for-coding",
         messages: [{ role: "user", content: "hello" }],
       }),
     );

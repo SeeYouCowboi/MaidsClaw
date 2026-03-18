@@ -66,4 +66,5 @@ export type ProviderCatalogEntry = {
   models: ModelCatalogEntry[];
   warningMessage?: string; // shown on instantiation for experimental providers
   supportsStreamingUsage?: boolean; // true if provider supports stream_options.include_usage
+  extraHeaders?: Record<string, string>; // additional HTTP headers sent with every request
 };

@@ -122,10 +122,14 @@ function makeSettlementPayload(
 
 let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
+let savedMoonshotKey: string | undefined;
+let savedBailianKey: string | undefined;
 
 function saveEnvKeys(): void {
 	savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
 	savedOpenAIKey = process.env.OPENAI_API_KEY;
+	savedMoonshotKey = process.env.MOONSHOT_API_KEY;
+	savedBailianKey = process.env.BAILIAN_API_KEY;
 }
 
 function restoreEnvKeys(): void {
@@ -133,6 +137,10 @@ function restoreEnvKeys(): void {
 	else delete process.env.ANTHROPIC_API_KEY;
 	if (savedOpenAIKey !== undefined) process.env.OPENAI_API_KEY = savedOpenAIKey;
 	else delete process.env.OPENAI_API_KEY;
+	if (savedMoonshotKey !== undefined) process.env.MOONSHOT_API_KEY = savedMoonshotKey;
+	else delete process.env.MOONSHOT_API_KEY;
+	if (savedBailianKey !== undefined) process.env.BAILIAN_API_KEY = savedBailianKey;
+	else delete process.env.BAILIAN_API_KEY;
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -255,6 +263,8 @@ describe("CLI Acceptance Runbook", () => {
 			// No .env, clear keys, malformed agents, dup personas
 			delete process.env.ANTHROPIC_API_KEY;
 			delete process.env.OPENAI_API_KEY;
+			delete process.env.MOONSHOT_API_KEY;
+			delete process.env.BAILIAN_API_KEY;
 
 			writeFileSync(join(tmpRoot, "config", "agents.json"), "not json!", "utf-8");
 			writeFileSync(
@@ -316,6 +326,8 @@ describe("CLI Acceptance Runbook", () => {
 			mkdirSync(join(tmpRoot, "config"), { recursive: true });
 			delete process.env.ANTHROPIC_API_KEY;
 			delete process.env.OPENAI_API_KEY;
+			delete process.env.MOONSHOT_API_KEY;
+			delete process.env.BAILIAN_API_KEY;
 
 			writeFileSync(
 				join(tmpRoot, "config", "runtime.json"),
