@@ -74,7 +74,7 @@ describe("model ref bootstrap behavior", () => {
   });
 
   it("leaves non-legacy refs unchanged", () => {
-    expect(normalizeModelRef("moonshot/kimi-k2.5")).toBe("moonshot/kimi-k2.5");
+    expect(normalizeModelRef("moonshot/kimi-for-coding")).toBe("moonshot/kimi-for-coding");
     expect(normalizeModelRef("minimax/MiniMax-M2.5")).toBe("minimax/MiniMax-M2.5");
     expect(normalizeModelRef("my-custom-model")).toBe("my-custom-model");
   });

@@ -283,6 +283,49 @@ That's it. No new TypeScript source files needed for a standard API-key provider
 
 ---
 
+## CLI
+
+MaidsClaw includes a Phase 1 CLI (`maidsclaw`) for local and gateway-mode interaction.
+
+### Quick Start
+
+```bash
+# Initialize project config files
+bun run cli config init
+
+# Validate configuration
+bun run cli config validate
+
+# Check runtime readiness
+bun run cli config doctor
+
+# Start an interactive chat session
+bun run cli chat --agent <agent_id>
+
+# Send a non-interactive turn
+bun run cli turn send --session <session_id> --text "Hello" --json
+
+# Inspect the last request
+bun run cli debug summary --request <request_id> --json
+```
+
+### Commands
+
+- `config init/validate/doctor/show/write-runtime` — project configuration
+- `server start` / `health` — gateway server
+- `agent list/show/create-rp/create-task/enable/disable/remove/validate` — agent management
+- `session create/close/recover` — session lifecycle
+- `turn send` — send a non-interactive turn
+- `chat` — interactive session shell with slash inspect commands
+- `debug summary/transcript/prompt/chunks/logs/memory/trace/diagnose` — request-level evidence
+
+### Mode Support
+
+- **Local Mode** (default): direct runtime access
+- **Gateway Mode**: `--mode gateway --base-url http://localhost:3000`
+
+---
+
 ## Common Commands
 
 ```bash

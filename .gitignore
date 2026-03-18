@@ -34,3 +34,9 @@ package-lock.json
 
 # Reference docs (local only)
 reference/
+.tmp-audit/
+/config/agents.json
+/config/lore.json
+/config/personas.json
+/config/providers.json
+/config/runtime.json

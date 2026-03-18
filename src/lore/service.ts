@@ -9,7 +9,7 @@
  * (Prompt Builder).
  */
 
-import { join } from "path";
+import { join } from "node:path";
 
 import type { LoreEntry, LoreScope } from "./entry-schema.js";
 import { loadLoreEntries, type LoreLoadResult } from "./loader.js";
@@ -18,6 +18,7 @@ import { findMatchingEntries, type MatchOptions } from "./matcher.js";
 export type LoreServiceOptions = {
   /** Root data directory. Lore files are read from `<dataDir>/lore/`. */
   dataDir: string;
+  configLorePath?: string;
 };
 
 export type LoreService = {
@@ -43,7 +44,7 @@ export function createLoreService(options: LoreServiceOptions): LoreService {
 
   return {
     loadAll(): LoreLoadResult {
-      const result = loadLoreEntries(loreDir);
+      const result = loadLoreEntries(loreDir, options.configLorePath);
       entries = result.entries;
       return result;
     },

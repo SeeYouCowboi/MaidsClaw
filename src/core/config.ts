@@ -1,6 +1,6 @@
 import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig, AuthConfig, AuthConfigResult, AuthCredential, MemoryConfig, RuntimeConfig, RuntimeConfigResult } from "./config-schema.js";
-import { readFileSync, existsSync } from "fs";
-import { join, resolve } from "path";
+import { readFileSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
@@ -16,10 +16,12 @@ const DEFAULT_EMBEDDING_DIMENSION = 1536;
 export function loadConfig(options?: {
   configDir?: string;       // Optional override for config directory location
   runtimeFilePath?: string; // Optional direct path to runtime.json for testing
+  cwd?: string;
   requireAllProviders?: boolean; // Default: true — fail if any provider key missing
 }): ConfigResult {
   const errors: ConfigError[] = [];
   const requireAllProviders = options?.requireAllProviders ?? true;
+  const cwd = options?.cwd ?? process.cwd();
   
   // Get required provider API keys
   const anthropicApiKey = getRequiredEnv("ANTHROPIC_API_KEY");
@@ -50,7 +52,7 @@ export function loadConfig(options?: {
   // Get server config with defaults
   const portStr = getOptionalEnv("MAIDSCLAW_PORT", String(DEFAULT_PORT));
   const port = parseInt(portStr, 10);
-  if (isNaN(port) || port < 1 || port > 65535) {
+  if (Number.isNaN(port) || port < 1 || port > 65535) {
     errors.push({
       type: "CONFIG_ERROR",
       field: "MAIDSCLAW_PORT",
@@ -61,16 +63,19 @@ export function loadConfig(options?: {
   const host = getOptionalEnv("MAIDSCLAW_HOST", DEFAULT_HOST);
   
   // Get storage config with defaults
-  const databasePath = resolvePath(getOptionalEnv("MAIDSCLAW_DB_PATH", DEFAULT_DB_PATH));
-  const dataDir = resolvePath(getOptionalEnv("MAIDSCLAW_DATA_DIR", DEFAULT_DATA_DIR));
+  const databasePath = resolvePath(getOptionalEnv("MAIDSCLAW_DB_PATH", DEFAULT_DB_PATH), cwd);
+  const dataDir = resolvePath(getOptionalEnv("MAIDSCLAW_DATA_DIR", DEFAULT_DATA_DIR), cwd);
   
   // Get native modules setting
   const nativeModulesStr = getOptionalEnv("MAIDSCLAW_NATIVE_MODULES", String(DEFAULT_NATIVE_MODULES));
   const nativeModulesEnabled = nativeModulesStr.toLowerCase() === "true";
 
   // Load runtime config from file (memory settings, etc.)
-  const runtimeFilePath = options?.runtimeFilePath ?? join(options?.configDir ?? join(process.cwd(), "config"), "runtime.json");
-  const runtimeResult = loadRuntimeConfig({ runtimeFilePath });
+  const configDir = resolvePath(options?.configDir ?? "config", cwd);
+  const runtimeFilePath = options?.runtimeFilePath
+    ? resolvePath(options.runtimeFilePath, cwd)
+    : join(configDir, "runtime.json");
+  const runtimeResult = loadRuntimeConfig({ runtimeFilePath, cwd });
   const fileMemory = runtimeResult.ok ? runtimeResult.runtime.memory : undefined;
 
   // Resolve memory config: env overrides file, organizerEmbeddingModelId defaults to embeddingModelId
@@ -124,8 +129,11 @@ export function loadConfig(options?: {
 }
 
 // Load runtime config from project-local config/runtime.json
-export function loadRuntimeConfig(options?: { runtimeFilePath?: string }): RuntimeConfigResult {
-  const filePath = options?.runtimeFilePath ?? join(process.cwd(), "config", "runtime.json");
+export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: string }): RuntimeConfigResult {
+  const cwd = options?.cwd ?? process.cwd();
+  const filePath = options?.runtimeFilePath
+    ? resolvePath(options.runtimeFilePath, cwd)
+    : join(cwd, "config", "runtime.json");
 
   if (!existsSync(filePath)) {
     return { ok: true, runtime: {} };
@@ -183,20 +191,6 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string }): Runti
   return { ok: true, runtime };
 }
 
-// Parse a config JSON file safely
-function parseConfigFile<T>(filePath: string): T | undefined {
-  if (!existsSync(filePath)) {
-    return undefined;
-  }
-  
-  try {
-    const content = readFileSync(filePath, "utf-8");
-    return JSON.parse(content) as T;
-  } catch {
-    return undefined;
-  }
-}
-
 // Get required env var or return null
 function getRequiredEnv(name: string): string | null {
   const value = process.env[name];
@@ -215,13 +209,12 @@ function getOptionalEnv(name: string, defaultVal: string): string {
   return value;
 }
 
-// Resolve relative paths relative to process.cwd()
-function resolvePath(p: string): string {
+function resolvePath(p: string, cwd: string): string {
   if (p.startsWith("/") || p.match(/^[a-zA-Z]:[\\/]/)) {
     // Absolute path (Unix or Windows)
     return p;
   }
-  return resolve(process.cwd(), p);
+  return resolve(cwd, p);
 }
 
 // Env var override map: providerId → env var name
@@ -235,8 +228,11 @@ const PROVIDER_ENV_MAP: Record<string, { envVar: string; credType: "api-key" | "
 };
 
 // Load auth credentials from project-local config/auth.json
-export function loadAuthConfig(options?: { authFilePath?: string }): AuthConfigResult {
-  const filePath = options?.authFilePath ?? join(process.cwd(), "config", "auth.json");
+export function loadAuthConfig(options?: { authFilePath?: string; cwd?: string }): AuthConfigResult {
+  const cwd = options?.cwd ?? process.cwd();
+  const filePath = options?.authFilePath
+    ? resolvePath(options.authFilePath, cwd)
+    : join(cwd, "config", "auth.json");
 
   if (!existsSync(filePath)) {
     return { ok: true, auth: { credentials: [] } };

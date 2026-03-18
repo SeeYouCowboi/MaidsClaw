@@ -6,6 +6,14 @@ import {
   handleTurnStream,
   handleCloseSession,
   handleRecoverSession,
+  handleRequestSummary,
+  handleRequestPrompt,
+  handleRequestChunks,
+  handleRequestDiagnose,
+  handleRequestTrace,
+  handleSessionTranscript,
+  handleSessionMemory,
+  handleLogs,
 } from "./controllers.js";
 
 export type RouteHandler = (req: Request, ctx: ControllerContext) => Response | Promise<Response>;
@@ -44,6 +52,14 @@ export const ROUTES: RouteEntry[] = [
   { method: "POST", pattern: "/v1/sessions/{session_id}/turns:stream", handler: handleTurnStream },
   { method: "POST", pattern: "/v1/sessions/{session_id}/close", handler: handleCloseSession },
   { method: "POST", pattern: "/v1/sessions/{session_id}/recover", handler: handleRecoverSession },
+  { method: "GET", pattern: "/v1/requests/{request_id}/summary", handler: handleRequestSummary },
+  { method: "GET", pattern: "/v1/requests/{request_id}/prompt", handler: handleRequestPrompt },
+  { method: "GET", pattern: "/v1/requests/{request_id}/chunks", handler: handleRequestChunks },
+  { method: "GET", pattern: "/v1/requests/{request_id}/diagnose", handler: handleRequestDiagnose },
+  { method: "GET", pattern: "/v1/requests/{request_id}/trace", handler: handleRequestTrace },
+  { method: "GET", pattern: "/v1/sessions/{session_id}/transcript", handler: handleSessionTranscript },
+  { method: "GET", pattern: "/v1/sessions/{session_id}/memory", handler: handleSessionMemory },
+  { method: "GET", pattern: "/v1/logs", handler: handleLogs },
 ];
 
 /**

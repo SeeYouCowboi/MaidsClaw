@@ -34,6 +34,7 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       fetchImpl: context.fetchImpl,
       logger: context.logger as ConstructorParameters<typeof OpenAIProvider>[0]["logger"],
       supportsStreamingUsage: entry.supportsStreamingUsage,
+      extraHeaders: entry.extraHeaders,
     });
     return { chatProvider: provider, embeddingProvider: provider };
   },
@@ -103,6 +104,20 @@ function resolveBootstrapCredential(providerId: string, auth: AuthConfig | undef
     const apiKey = process.env.OPENAI_API_KEY;
     if (apiKey && apiKey.trim() !== "") {
       return { type: "api-key", provider: "openai", apiKey };
+    }
+  }
+
+  if (providerId === "bailian") {
+    const apiKey = process.env.BAILIAN_API_KEY;
+    if (apiKey && apiKey.trim() !== "") {
+      return { type: "api-key", provider: "bailian", apiKey };
+    }
+  }
+
+  if (providerId === "moonshot") {
+    const apiKey = process.env.MOONSHOT_API_KEY;
+    if (apiKey && apiKey.trim() !== "") {
+      return { type: "api-key", provider: "moonshot", apiKey };
     }
   }
 

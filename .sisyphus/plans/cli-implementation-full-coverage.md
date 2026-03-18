@@ -116,7 +116,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 > Implementation + Test = ONE task. Never separate.
 > EVERY task MUST have: Agent Profile + Parallelization + QA Scenarios.
 
-- [ ] 1. Extract one shared app bootstrap for server paths and Local Mode
+- [x] 1. Extract one shared app bootstrap for server paths and Local Mode
 
   **What to do**: Add a shared app-bootstrap module that performs config loading, runtime bootstrap, health-check mapping, and optional Gateway server construction once. `src/index.ts`, `scripts/start-dev.ts`, `server start`, and Local Mode entrypoints must all call that shared assembly instead of duplicating `loadConfig()` + `bootstrapRuntime()` + `GatewayServer` wiring. Thread `cwd`/config-root resolution through this layer so CLI global `--cwd` changes the same runtime inputs that server startup uses.
   **Must NOT do**: Do not fork `bootstrapRuntime()` behavior. Do not leave duplicate server bootstrap logic in `src/index.ts` and `scripts/start-dev.ts`. Do not make CLI local mode bypass the same health and memory-pipeline state the server uses.
@@ -159,7 +159,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): extract shared app bootstrap` | Files: [`src/index.ts`, `scripts/start-dev.ts`, `src/bootstrap/runtime.ts`, `src/bootstrap/types.ts`, `src/gateway/server.ts`]
 
-- [ ] 2. Persist local session lifecycle across separate CLI invocations
+- [x] 2. Persist local session lifecycle across separate CLI invocations
 
   **What to do**: Add SQLite-backed session persistence for Local Mode so `session create`, `turn send`, `session close`, and `session recover` work across separate CLI processes against the same database path. Create a dedicated session migration/module, store `session_id`, `agent_id`, `created_at`, `closed_at`, and `recovery_required`, and adapt `SessionService` to read/write through that persistent store while keeping the existing public methods and error codes intact.
   **Must NOT do**: Do not keep standalone local sessions in memory-only state. Do not change session IDs between commands. Do not break the existing gateway-facing `SessionService` method contract.
@@ -203,7 +203,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): persist local sessions` | Files: [`src/session/service.ts`, `src/bootstrap/runtime.ts`, `src/storage/migrations.ts`]
 
-- [ ] 3. Align Phase 1 config files with runtime loading for agents, personas, lore, and runtime settings
+- [x] 3. Align Phase 1 config files with runtime loading for agents, personas, lore, and runtime settings
 
   **What to do**: Make `config/agents.json`, `config/personas.json`, `config/lore.json`, and `config/runtime.json` the canonical Phase 1 CLI-visible configuration files. Add `config/runtime.example.json`, extend startup/config helpers to resolve these files relative to `--cwd`, and add adapters so runtime persona/lore loading can prefer `config/personas.json` and `config/lore.json` when present while preserving fallback compatibility with `data/personas/*.json` and `data/lore/*.json` for existing repo behavior.
   **Must NOT do**: Do not leave `config/personas.json` / `config/lore.json` as dead files unused by runtime. Do not remove compatibility fallback for existing `data/` loaders. Do not create separate config semantics for CLI versus runtime.
@@ -248,7 +248,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): align config files with runtime loaders` | Files: [`config/runtime.example.json`, `src/core/config.ts`, `src/bootstrap/runtime.ts`, `src/persona/loader.ts`, `src/lore/loader.ts`]
 
-- [ ] 4. Implement file-backed agent store, loader, and reusable validation diagnostics
+- [x] 4. Implement file-backed agent store, loader, and reusable validation diagnostics
 
   **What to do**: Add `src/cli/agent-file-store.ts` and `src/cli/agent-loader.ts` to read and write `config/agents.json`, treat missing `enabled` as `true`, normalize `modelId` with `normalizeModelRef()`, validate `role`, unique IDs, persona references, and tool-policy compatibility, and inject the validated profiles into `RuntimeBootstrapOptions.agentProfiles`. Expose one reusable diagnostics function used by `config validate`, `config doctor`, `agent validate`, and runtime bootstrap so the same RP-policy and model/persona checks do not get reimplemented in multiple command handlers.
   **Must NOT do**: Do not duplicate validation logic across commands. Do not allow an RP allowlist that omits `submit_rp_turn`. Do not mutate preset profiles in place.
@@ -292,7 +292,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add file-backed agent loader and validators` | Files: [`src/cli/agent-file-store.ts`, `src/cli/agent-loader.ts`, `src/bootstrap/runtime.ts`, `src/agents/rp/tool-policy.ts`, `src/core/models/registry.ts`]
 
-- [ ] 5. Build the zero-dependency CLI core scaffold, parser, output contracts, and exit codes
+- [x] 5. Build the zero-dependency CLI core scaffold, parser, output contracts, and exit codes
 
   **What to do**: Add `scripts/cli.ts`, `src/cli/parser.ts`, `src/cli/output.ts`, `src/cli/errors.ts`, `src/cli/types.ts`, and `src/cli/context.ts`. Implement a table-driven parser using `process.argv` with no new runtime dependencies, support global `--json`, `--quiet`, and `--cwd`, reserve `chat` as the only interactive command, map exit codes to the document's stable set (`0/2/3/4/5`), and standardize non-interactive JSON envelopes as `{ ok, command, mode?, data?, diagnostics?, error? }`.
   **Must NOT do**: Do not add a CLI framework dependency in Phase 1. Do not let `chat` share the non-interactive JSON stdout path. Do not let commands silently ignore unknown flags or invalid subcommands.
@@ -335,7 +335,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add core parser and output contracts` | Files: [`scripts/cli.ts`, `src/cli/parser.ts`, `src/cli/output.ts`, `src/cli/errors.ts`, `src/cli/types.ts`, `src/cli/context.ts`, `package.json`]
 
-- [ ] 6. Implement `config init` and create the full Phase 1 example/config scaffold
+- [x] 6. Implement `config init` and create the full Phase 1 example/config scaffold
 
   **What to do**: Implement `maidsclaw config init [--force] [--with-runtime] [--json]` on top of the new CLI core and config-path alignment. Copy `.env.example`, `config/providers.example.json`, `config/auth.example.json`, `config/agents.example.json`, `config/personas.example.json`, `config/lore.example.json`, and `config/runtime.example.json` into the working project as `.env`, `config/providers.json`, `config/auth.json`, `config/agents.json`, `config/personas.json`, `config/lore.json`, and `config/runtime.json`. Default to non-destructive behavior, report `created` / `skipped` / `overwritten` per file, and make `--with-runtime` a synonym for explicitly including `config/runtime.json` even if future init presets are introduced.
   **Must NOT do**: Do not overwrite existing files unless `--force` is present. Do not omit `config/runtime.json`. Do not silently create partial scaffolds without reporting every target file action.
@@ -379,7 +379,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config init command` | Files: [`scripts/cli.ts`, `src/cli/commands/config.ts`, `config/runtime.example.json`, `.env.example`, `config/*.example.json`]
 
-- [ ] 7. Implement `config validate` with stable error categories and precise locators
+- [x] 7. Implement `config validate` with stable error categories and precise locators
 
   **What to do**: Implement `maidsclaw config validate [--json]` so it validates JSON syntax, required files, required env vars, runtime memory shape, persona uniqueness, and file-backed agent correctness using the shared diagnostics from T4. Emit the exact documented category set (`config.parse_error`, `config.missing_required_file`, `config.missing_required_env`, `config.invalid_agent_role`, `config.duplicate_agent_id`, `config.duplicate_persona_id`, `config.agent_persona_not_found`, `config.invalid_runtime_memory_shape`, `config.rp_missing_submit_rp_turn_permission`) with deterministic locators.
   **Must NOT do**: Do not emit generic validation failures without category and locator. Do not reimplement RP tool-policy checks separately from the shared agent validator. Do not require runtime bootstrap to validate static file shape.
@@ -422,7 +422,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config validate command` | Files: [`src/cli/commands/config.ts`, `src/cli/agent-loader.ts`, `src/core/config.ts`, `src/core/config-schema.ts`]
 
-- [ ] 8. Implement `config doctor` as runtime-readiness diagnosis, not syntax validation
+- [x] 8. Implement `config doctor` as runtime-readiness diagnosis, not syntax validation
 
   **What to do**: Implement `maidsclaw config doctor [--json]` to answer whether the current project is `ready`, `degraded`, or `blocked`, identify the primary cause, and provide the smallest corrective action with concrete locators. Use config loading, auth resolution, model normalization, agent/persona graph validation, and shared app-bootstrap/runtime health results to compute memory-pipeline status (`ready`, `missing_embedding_model`, `chat_model_unavailable`, `embedding_model_unavailable`, `organizer_embedding_model_unavailable`) and likely degraded/blocking causes.
   **Must NOT do**: Do not reuse `config validate` output verbatim as the doctor result. Do not hide the primary cause behind a list of raw errors. Do not start a long-lived server to answer doctor.
@@ -466,7 +466,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config doctor command` | Files: [`src/cli/commands/config.ts`, `src/bootstrap/runtime.ts`, `src/core/config.ts`, `src/core/models/registry.ts`]
 
-- [ ] 9. Implement `config show` and `config write-runtime` with safe secret and merge behavior
+- [x] 9. Implement `config show` and `config write-runtime` with safe secret and merge behavior
 
   **What to do**: Implement `maidsclaw config show [server|storage|memory|runtime|providers|agents|personas|auth|all] [--json] [--show-secrets]` and `maidsclaw config write-runtime --migration-chat-model <id> --embedding-model <id> [--organizer-embedding-model <id>] [--force] [--json]`. `config show` must render parsed/effective views while redacting secrets by default in both text and JSON; `config write-runtime` must create or update only the `memory` section of `config/runtime.json`, preserve unrelated keys, and default organizer embedding to the base embedding model when omitted.
   **Must NOT do**: Do not print secrets by default. Do not rewrite unrelated runtime keys. Do not discard existing `config/runtime.json` content outside the `memory` object.
@@ -508,7 +508,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add config show and write-runtime` | Files: [`src/cli/commands/config.ts`, `src/core/config.ts`, `config/runtime.example.json`]
 
-- [ ] 10. Implement `server start` and `health` on top of the shared runtime path
+- [x] 10. Implement `server start` and `health` on top of the shared runtime path
 
   **What to do**: Implement `maidsclaw server start [--host <host>] [--port <port>] [--debug-capture] [--json]` and `maidsclaw health [--base-url <url>] [--json]`. `server start` must use the shared app-bootstrap from T1, optionally enable trace capture, print the bound address plus health summary/memory pipeline/sweeper enabled state, and avoid introducing a second server assembly path. `health` must default `--base-url` to `http://localhost:3000`, request `/healthz` and `/readyz`, preserve raw responses in JSON mode, and render `storage`, `models`, `tools`, `memory_pipeline`, and organizer-embedding result (when available) separately in text mode.
   **Must NOT do**: Do not build a CLI-specific server runtime. Do not collapse `/healthz` and `/readyz` into one opaque result. Do not hide degraded memory pipeline status.
@@ -552,7 +552,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add server start and health commands` | Files: [`src/cli/commands/server.ts`, `src/cli/commands/health.ts`, `src/bootstrap/runtime.ts`, `src/gateway/server.ts`, `src/gateway/controllers.ts`]
 
-- [ ] 11. Implement the full `agent *` command suite against file and runtime sources
+- [x] 11. Implement the full `agent *` command suite against file and runtime sources
 
   **What to do**: Implement `agent list`, `agent show`, `agent create-rp`, `agent create-task`, `agent enable`, `agent disable`, `agent remove`, and `agent validate`. File-source operations must mutate `config/agents.json` through the shared file store; runtime-source operations must boot runtime and inspect the registered profiles after T4 injection. `agent list` must default to `agent_id`, `role`, `model_id`, `persona_id`, `enabled`, and `source`; `agent show` must include full agent data plus persona/tool-permission summary; `create-rp` must clone the RP preset defaults, require an existing persona, and include `submit_rp_turn`; `create-task` must clone task-agent defaults; enable/disable must write an explicit `enabled` field while preserving file shape.
   **Must NOT do**: Do not treat file source and runtime source as the same thing. Do not allow `agent remove` without `--force`. Do not mutate unrelated agent fields when toggling `enabled`.
@@ -600,7 +600,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add agent management commands` | Files: [`src/cli/commands/agent.ts`, `src/cli/agent-file-store.ts`, `src/cli/agent-loader.ts`, `src/agents/presets.ts`]
 
-- [ ] 12. Define one normalized Local Mode turn/result contract and transport abstraction
+- [x] 12. Define one normalized Local Mode turn/result contract and transport abstraction
 
   **What to do**: Add a normalized Local Mode transport layer in `src/cli/local-runtime.ts` and `src/cli/types.ts` that exposes one `TurnExecutionResult` contract for command handlers, shell state, and later Gateway adapters. The normalized result must include `mode`, `session_id`, `request_id`, optional `settlement_id`, `assistant_text`, `has_public_reply`, `private_commit.present`, `private_commit.op_count`, `private_commit.kinds`, `recovery_required`, and ordered public chunk/tool-event collections. Build this around the real runtime path now, and keep the abstraction transport-agnostic so T19 can plug Gateway Mode into the same contract later.
   **Must NOT do**: Do not let command handlers consume raw `Chunk` arrays directly. Do not infer RP settlement success from assistant text emptiness. Do not bake Gateway-specific assumptions into the initial Local Mode contract.
@@ -644,7 +644,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): normalize local turn transport` | Files: [`src/cli/local-runtime.ts`, `src/cli/types.ts`, `src/runtime/turn-service.ts`]
 
-- [ ] 13. Implement Local Mode `session *` and `turn send` on the normalized transport contract
+- [x] 13. Implement Local Mode `session *` and `turn send` on the normalized transport contract
 
   **What to do**: Implement `session create`, `session close`, `session recover`, and `turn send` for Local Mode on top of T12. Preserve `--raw`, `--save-trace`, and JSON-safe non-interactive output. `turn send` must emit assistant text, optional tool events, public raw chunks in `--raw`, settlement-aware result fields for RP turns, and success for silent-private outcomes. `session close` must surface whether session-close flush ran; `session recover` must call `discard_partial_turn` semantics and state explicitly that recovery does not canonize partial output. Keep the command transport boundary clean so T19 can later add Gateway Mode without changing command semantics.
   **Must NOT do**: Do not expose internal `submit_rp_turn` payloads via `--raw`. Do not treat silent-private turns as empty-output failures. Do not let `session recover` silently no-op on non-recovery sessions.
@@ -688,7 +688,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add local session and turn commands` | Files: [`src/cli/commands/session.ts`, `src/cli/commands/turn.ts`, `src/cli/local-runtime.ts`, `src/runtime/turn-service.ts`]
 
-- [ ] 14. Implement `maidsclaw chat` as the primary Local Mode `REPL + Inspect` session shell
+- [x] 14. Implement `maidsclaw chat` as the primary Local Mode `REPL + Inspect` session shell
 
   **What to do**: Implement `src/cli/shell/state.ts`, `src/cli/shell/session-shell.ts`, and `src/cli/shell/slash-dispatcher.ts` using Node/Bun `readline` APIs. Build `maidsclaw chat --agent <agent_id> [--session <session_id>] [--mode local|gateway] [--base-url <url>] [--save-trace]` as a Local Mode-first shell: auto-create a session when one is not supplied, maintain current shell context (`session_id`, `agent_id`, latest `request_id`, latest `settlement_id`, `Raw 观察模式` toggle), print assistant content followed by a compact post-turn status line, and implement `/inspect`, `/summary`, `/transcript`, `/prompt`, `/chunks`, `/logs`, `/memory`, `/diagnose`, `/trace`, `/raw on|off`, `/recover`, `/close`, `/mode`, `/exit`, and `/help`. Reuse T13 for sends and T16 for inspect reads; keep the transport boundary clean so T19 can later enable Gateway Mode on the same shell.
   **Must NOT do**: Do not build a full-screen TUI. Do not keep shell-only inspect logic. Do not default to raw settlement data. Do not silently guess identifiers when current context is insufficient.
@@ -731,7 +731,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add local chat repl inspect shell` | Files: [`src/cli/commands/chat.ts`, `src/cli/shell/state.ts`, `src/cli/shell/session-shell.ts`, `src/cli/shell/slash-dispatcher.ts`]
 
-- [ ] 15. Add trace/log capture substrate and persist stable request-scoped trace bundles
+- [x] 15. Add trace/log capture substrate and persist stable request-scoped trace bundles
 
   **What to do**: Add a dedicated CLI/runtime trace substrate centered on `request_id` and stored under `data/debug/traces/`. Capture prompt sections/system/conversation at the end of `AgentLoop.buildInitialPromptState()`, capture public chunks during turn execution, capture `turn_settlement` only after the transaction commits, capture memory flush requests/results and pending sweeper job state after persistence, and capture structured diagnostic log entries through explicit runtime trace hooks rather than stdout scraping. Persist one stable redacted JSON bundle per request and make it the additive evidence layer for export/debug, not a replacement for interaction records.
   **Must NOT do**: Do not parse `console.log` output from `src/core/logger.ts` as the canonical logs source. Do not serialize `latentScratchpad`. Do not write settlement data to the trace bundle before the settlement transaction commits.
@@ -776,7 +776,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add trace capture and trace store` | Files: [`src/cli/trace-store.ts`, `src/core/agent-loop.ts`, `src/runtime/turn-service.ts`, `src/memory/pending-settlement-sweeper.ts`, `src/interaction/redaction.ts`]
 
-- [ ] 16. Build the shared 请求级证据模型、Inspect 视图模型、and diagnostic catalog
+- [x] 16. Build the shared 请求级证据模型、Inspect 视图模型、and diagnostic catalog
 
   **What to do**: Implement `src/cli/inspect/context-resolver.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`, and `src/cli/diagnostic-catalog.ts`. These modules must load and normalize request/session evidence from interaction records, redacted settlements, trace bundles, recent cognition slots, flush state, pending sweeper jobs, runtime health, and captured logs; expose stable `Inspect 视图模型` for `summary`, `transcript`, `prompt`, `chunks`, `logs`, `memory`, `trace export`, and `diagnose`; and centrally enforce the distinction between `Raw 观察模式` and local-only `不安全 Raw Settlement 模式`. This task must land before any Gateway Mode endpoints or独立包装命令 consume the model.
   **Must NOT do**: Do not let shell inspect or独立包装命令 bypass these view models. Do not use free-form grep over log text as the primary evidence source. Do not let `--raw` imply raw settlement access.
@@ -822,7 +822,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add shared evidence loader and inspect models` | Files: [`src/cli/inspect/context-resolver.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`, `src/cli/diagnostic-catalog.ts`, `src/cli/trace-store.ts`]
 
-- [ ] 17. Implement `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` as独立包装命令
+- [x] 17. Implement `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` as独立包装命令
 
   **What to do**: Implement standalone non-interactive `debug summary`, `debug transcript`, `debug prompt`, and `debug chunks` on top of T16 view models. `summary` must be request-scoped and include session, agent, settlement, result, error code, `has_public_reply`, `private_commit_op_count`, memory flush status, and pending sweep state; `transcript` must be session-scoped and show raw user/assistant text plus interaction boundaries with redacted settlements by default and tool/status records in `Raw 观察模式`; `prompt` must expose rendered system prompt, conversation messages, optional section breakdown, and `RECENT_COGNITION` when available; `chunks` must list ordered public chunk types and clearly separate them from private runtime state. Land these as Local Mode-first 独立包装命令; T19 extends them to Gateway Mode.
   **Must NOT do**: Do not create a second fetch/render path separate from shell slash inspect. Do not let `debug transcript --raw` expose raw settlement payload. Do not reorder chunk sequences.
@@ -867,7 +867,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add summary transcript prompt and chunks commands` | Files: [`src/cli/commands/debug.ts`, `src/cli/inspect/view-models.ts`, `src/cli/inspect/renderers.ts`]
 
-- [ ] 18. Implement `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose` as独立包装命令
+- [x] 18. Implement `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose` as独立包装命令
 
   **What to do**: Implement the remaining non-interactive `debug logs`, `debug memory`, `debug trace export`, and `debug diagnose`. `logs` must filter by request/session/agent and show timestamp + level from the captured trace/log substrate; `memory` must show readiness, core memory summary, staged recent cognition, flush-backed retrieval state, latest flush request/result, pending sweeper job state, last error, and organizer status when available; `trace export` must write a stable JSON bundle, redacted by default and local-only for `--unsafe-raw`; `diagnose` must return `primary_cause`, `subsystem`, `locator`, `evidence`, `likely_source_files`, and `next_commands` using the diagnostic catalog from T16, with subsystem categories restricted to `configuration`, `bootstrap`, `rp_turn_contract`, `interaction_log`, `turn_settlement`, `gateway`, `prompt`, `model_call`, `tool_execution`, `session_recovery`, `pending_settlement`, and `memory_pipeline`. Land these as Local Mode-first 独立包装命令; T19 extends them to Gateway Mode.
   **Must NOT do**: Do not rely on stdout logger scraping. Do not allow local `--unsafe-raw` to bypass redaction anywhere except raw settlement payload reads. Do not produce vague "check logs" diagnoses without concrete locator and next commands.
@@ -912,7 +912,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add logs memory trace and diagnose commands` | Files: [`src/cli/commands/debug.ts`, `src/cli/diagnostic-catalog.ts`, `src/cli/trace-store.ts`, `src/cli/inspect/view-models.ts`, `src/memory/pending-settlement-sweeper.ts`]
 
-- [ ] 19. Enable Gateway Mode support and Session Shell / Standalone Wrapper Command equivalence
+- [x] 19. Enable Gateway Mode support and Session Shell / Standalone Wrapper Command equivalence
 
   **What to do**: Extend the transport abstraction and command surfaces so Gateway Mode satisfies the same session/turn/chat and inspect semantics as Local Mode. Add explicit remote evidence endpoints backed by the shared 请求级证据模型 / `Inspect 视图模型`: `GET /v1/requests/{request_id}/summary`, `GET /v1/requests/{request_id}/prompt`, `GET /v1/requests/{request_id}/chunks`, `GET /v1/requests/{request_id}/diagnose`, `GET /v1/requests/{request_id}/trace`, `GET /v1/sessions/{session_id}/transcript`, `GET /v1/sessions/{session_id}/memory[?agent_id=...]`, and `GET /v1/logs?request_id=...&session_id=...&agent_id=...`. Then add Gateway Mode support to `session *`, `turn send`, `chat`, and all `debug *` 独立包装命令 without changing their command contracts.
   **Must NOT do**: Do not overload SSE with raw settlement payload. Do not reconstruct inspect state from free-form logs or text scraping. Do not permit remote `--unsafe-raw`; `不安全 Raw Settlement 模式` remains local-only.
@@ -957,7 +957,7 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
 
   **Commit**: NO | Message: `feat(cli): add gateway support for shell and standalone wrapper commands` | Files: [`src/gateway/routes.ts`, `src/gateway/controllers.ts`, `src/gateway/server.ts`, `src/cli/gateway-client.ts`, `src/cli/commands/*`]
 
-- [ ] 20. Complete the CLI test matrix, docs/examples, and acceptance runbook
+- [x] 20. Complete the CLI test matrix, docs/examples, and acceptance runbook
 
   **What to do**: Add `bun:test` coverage for parser/exit codes, `config init` idempotency, config validation categories, config doctor statuses, agent CRUD and loader behavior, persistent local sessions, Local Mode `turn send`, chat shell current-context behavior, `Session Shell` / `Standalone Wrapper Command` 对等, RP buffered/silent-private success, settlement replay/idempotency, settlement rollback, recent cognition prompt continuity, flush selector behavior, pending sweeper backoff states, diagnose mapping, JSON envelope stability, `Raw 观察模式` / `不安全 Raw Settlement 模式` boundaries, and final Gateway evidence parity. Update `README.md` and `docs/README.zh-CN.md` with CLI usage/examples centered on `chat`, `turn send`, and `debug *` 独立包装命令, plus a short acceptance runbook describing the automated commands that prove completion.
   **Must NOT do**: Do not introduce a second test runner. Do not leave acceptance criteria unbound to tests or deterministic command checks. Do not add CI-specific workflow files unless they are directly required to execute the repo's existing build/test commands.
@@ -1003,10 +1003,10 @@ Wave 4: `debug *` 独立包装命令, Gateway Mode support, tests/docs/acceptanc
   **Commit**: NO | Message: `test(cli): complete acceptance coverage and docs` | Files: [`test/cli/**/*`, `test/runtime/**/*`, `test/gateway/**/*`, `README.md`, `docs/README.zh-CN.md`]
 
 ## Final Verification Wave (4 parallel agents, ALL must APPROVE)
-- [ ] F1. Plan Compliance Audit — oracle
-- [ ] F2. Code Quality Review — unspecified-high
-- [ ] F3. Real Manual QA — unspecified-high (+ playwright if UI is later added; Phase 1 terminal flows remain Bash/interactive_bash)
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F1. Plan Compliance Audit — oracle
+- [x] F2. Code Quality Review — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high (+ playwright if UI is later added; Phase 1 terminal flows remain Bash/interactive_bash)
+- [x] F4. Scope Fidelity Check — deep
 
 ## Commit Strategy
 - Commit after each completed wave, not after every task.

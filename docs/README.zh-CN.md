@@ -274,6 +274,49 @@ cp config/auth.example.json config/auth.json
 
 ---
 
+## CLI
+
+MaidsClaw 包含一个 Phase 1 命令行工具 (`maidsclaw`)，支持本地模式和网关模式。
+
+### 快速开始
+
+```bash
+# 初始化项目配置文件
+bun run cli config init
+
+# 校验配置
+bun run cli config validate
+
+# 检查运行时就绪状态
+bun run cli config doctor
+
+# 启动交互式对话
+bun run cli chat --agent <agent_id>
+
+# 发送非交互式回合
+bun run cli turn send --session <session_id> --text "你好" --json
+
+# 查看请求摘要
+bun run cli debug summary --request <request_id> --json
+```
+
+### 命令一览
+
+- `config init/validate/doctor/show/write-runtime` — 项目配置管理
+- `server start` / `health` — 网关服务
+- `agent list/show/create-rp/create-task/enable/disable/remove/validate` — Agent 管理
+- `session create/close/recover` — 会话生命周期
+- `turn send` — 非交互式发送回合
+- `chat` — 交互式会话 shell，支持 slash inspect 命令
+- `debug summary/transcript/prompt/chunks/logs/memory/trace/diagnose` — 请求级证据查看
+
+### 模式支持
+
+- **本地模式**（默认）：直接访问运行时
+- **网关模式**：`--mode gateway --base-url http://localhost:3000`
+
+---
+
 ## 常用命令
 
 ```bash

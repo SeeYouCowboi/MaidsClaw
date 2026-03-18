@@ -1,629 +1,905 @@
-import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { AgentProfile } from "../agents/profile.js";
+import type { TraceStore } from "../cli/trace-store.js";
+import type {
+	LogEntry,
+	PublicChunkRecord,
+	RedactedSettlement,
+} from "../cli/types.js";
+import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
-import type { CommitService, CommitInput } from "../interaction/commit-service.js";
-import type {
-  AssistantMessagePayloadV3,
-  InteractionRecord,
-  TurnSettlementPayload,
-} from "../interaction/contracts.js";
-import type { FlushSelector } from "../interaction/flush-selector.js";
-import type { InteractionStore } from "../interaction/store.js";
-import type { GraphStorageService } from "../memory/storage.js";
-import type { ViewerContext } from "../memory/types.js";
-import type { MemoryFlushRequest, MemoryTaskAgent } from "../memory/task-agent.js";
-import type {
-  RpBufferedExecutionResult,
-  RpTurnOutcomeSubmission,
-  CognitionOp,
-  CognitionKind,
-  AssertionRecord,
-  EvaluationRecord,
-  CommitmentRecord,
-  CognitionEntityRef,
-  CognitionSelector,
-} from "./rp-turn-contract.js";
-import type { SessionService } from "../session/service.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ProjectionAppendix } from "../core/types.js";
+import type {
+	CommitInput,
+	CommitService,
+} from "../interaction/commit-service.js";
+import type {
+	AssistantMessagePayloadV3,
+	InteractionRecord,
+	TurnSettlementPayload,
+} from "../interaction/contracts.js";
+import type { FlushSelector } from "../interaction/flush-selector.js";
+import { redactInteractionRecord } from "../interaction/redaction.js";
+import type { InteractionStore } from "../interaction/store.js";
+import type { GraphStorageService } from "../memory/storage.js";
+import type {
+	MemoryFlushRequest,
+	MemoryTaskAgent,
+} from "../memory/task-agent.js";
+import type { ViewerContext } from "../memory/types.js";
+import type { SessionService } from "../session/service.js";
+import type {
+	AssertionRecord,
+	CognitionEntityRef,
+	CognitionKind,
+	CognitionOp,
+	CognitionSelector,
+	CommitmentRecord,
+	EvaluationRecord,
+	RpBufferedExecutionResult,
+} from "./rp-turn-contract.js";
 
 type TurnServiceAgentLoop = {
-  run(request: AgentRunRequest): AsyncIterable<Chunk>;
-  runBuffered?: (request: AgentRunRequest) => Promise<RpBufferedExecutionResult>;
+	run(request: AgentRunRequest): AsyncIterable<Chunk>;
+	runBuffered?: (
+		request: AgentRunRequest,
+	) => Promise<RpBufferedExecutionResult>;
 };
 
 export class TurnService {
-  constructor(
-    private readonly agentLoop: TurnServiceAgentLoop,
-    private readonly commitService: CommitService,
-    private readonly interactionStore: InteractionStore,
-    private readonly flushSelector: FlushSelector,
-    private readonly memoryTaskAgent: MemoryTaskAgent | null,
-    private readonly sessionService: SessionService,
-    private readonly viewerContextResolver?: (params: {
-      sessionId: string;
-      agentId: string;
-      role: AgentProfile["role"];
-    }) => ViewerContext | Promise<ViewerContext>,
-    private readonly projectionSink?: RuntimeProjectionSink,
-    private readonly graphStorage?: GraphStorageService,
-  ) {}
+	constructor(
+		private readonly agentLoop: TurnServiceAgentLoop,
+		private readonly commitService: CommitService,
+		private readonly interactionStore: InteractionStore,
+		private readonly flushSelector: FlushSelector,
+		private readonly memoryTaskAgent: MemoryTaskAgent | null,
+		private readonly sessionService: SessionService,
+		private readonly viewerContextResolver?: (params: {
+			sessionId: string;
+			agentId: string;
+			role: AgentProfile["role"];
+		}) => ViewerContext | Promise<ViewerContext>,
+		private readonly projectionSink?: RuntimeProjectionSink,
+		_graphStorage?: GraphStorageService,
+		private readonly traceStore?: TraceStore,
+	) {}
 
-  async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
-    const existingUserRecord = this.interactionStore.findRecordByCorrelatedTurnId(
-      request.sessionId,
-      request.requestId,
-      "user",
-    );
-    const userRecord =
-      existingUserRecord ??
-      this.commitService.commit({
-        sessionId: request.sessionId,
-        actorType: "user",
-        recordType: "message",
-        payload: {
-          role: "user",
-          content: getLatestUserMessage(request.messages),
-        },
-        correlatedTurnId: request.requestId,
-      });
+	async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
+		const requestId = request.requestId ?? `req:${Date.now()}`;
+		const effectiveRequest: AgentRunRequest = {
+			...request,
+			requestId,
+			traceStore: request.traceStore ?? this.traceStore,
+		};
 
-    const turnRangeStart = userRecord.recordIndex;
-    const assistantActorType = this.resolveAssistantActorType(request.sessionId);
+		this.traceStore?.initTrace(
+			requestId,
+			request.sessionId,
+			this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown",
+		);
 
-    if (assistantActorType === "rp_agent") {
-      yield* this.runRpBufferedTurn(request, turnRangeStart);
-      return;
-    }
+		const existingUserRecord =
+			this.interactionStore.findRecordByCorrelatedTurnId(
+				effectiveRequest.sessionId,
+				requestId,
+				"user",
+			);
+		const userRecord =
+			existingUserRecord ??
+			this.commitService.commit({
+				sessionId: effectiveRequest.sessionId,
+				actorType: "user",
+				recordType: "message",
+				payload: {
+					role: "user",
+					content: getLatestUserMessage(effectiveRequest.messages),
+				},
+				correlatedTurnId: requestId,
+			});
 
-    let assistantText = "";
-    let hasAssistantVisibleActivity = false;
-    let errorChunk: { code?: string; message?: string } | null = null;
+		const turnRangeStart = userRecord.recordIndex;
+		const assistantActorType = this.resolveAssistantActorType(
+			effectiveRequest.sessionId,
+		);
 
-    try {
-      for await (const chunk of this.agentLoop.run(request)) {
-        if (chunk.type === "text_delta") {
-          if (chunk.text.length > 0) {
-            assistantText += chunk.text;
-            hasAssistantVisibleActivity = true;
-          }
-        } else if (chunk.type === "tool_use_start" || chunk.type === "tool_use_delta" || chunk.type === "tool_use_end") {
-          hasAssistantVisibleActivity = true;
-        } else if (chunk.type === "error") {
-          errorChunk = { code: chunk.code, message: chunk.message };
-        }
+		if (assistantActorType === "rp_agent") {
+			yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
+			return;
+		}
 
-        yield chunk;
-      }
-    } catch (error: unknown) {
-      errorChunk = {
-        code: "AGENT_LOOP_EXCEPTION",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code ?? "UNKNOWN",
-        message: errorChunk.message ?? "Unknown error",
-        retriable: false,
-      };
-    }
+		let assistantText = "";
+		let hasAssistantVisibleActivity = false;
+		let errorChunk: { code?: string; message?: string } | null = null;
 
-    if (errorChunk === null) {
-      if (assistantText.length > 0) {
-        this.commitService.commit({
-          sessionId: request.sessionId,
-          actorType: assistantActorType,
-          recordType: "message",
-          payload: {
-            role: "assistant",
-            content: assistantText,
-          },
-          correlatedTurnId: request.requestId,
-        });
-      }
+		try {
+			for await (const chunk of this.agentLoop.run(effectiveRequest)) {
+				this.traceChunk(requestId, chunk);
+				if (chunk.type === "text_delta") {
+					if (chunk.text.length > 0) {
+						assistantText += chunk.text;
+						hasAssistantVisibleActivity = true;
+					}
+				} else if (
+					chunk.type === "tool_use_start" ||
+					chunk.type === "tool_use_delta" ||
+					chunk.type === "tool_use_end"
+				) {
+					hasAssistantVisibleActivity = true;
+				} else if (chunk.type === "error") {
+					errorChunk = { code: chunk.code, message: chunk.message };
+				}
 
-      await this.flushIfDue(request.sessionId);
-      return;
-    }
+				yield chunk;
+			}
+		} catch (error: unknown) {
+			this.traceLog(
+				requestId,
+				"error",
+				"Agent loop threw during streaming run",
+			);
+			errorChunk = {
+				code: "AGENT_LOOP_EXCEPTION",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code ?? "UNKNOWN",
+				message: errorChunk.message ?? "Unknown error",
+				retriable: false,
+			};
+		}
 
-    this.handleFailedTurn({
-      request,
-      turnRangeStart,
-      errorChunk,
-      assistantText,
-      hasAssistantVisibleActivity,
-    });
-  }
+		if (errorChunk === null) {
+			if (assistantText.length > 0) {
+				this.commitService.commit({
+					sessionId: effectiveRequest.sessionId,
+					actorType: assistantActorType,
+					recordType: "message",
+					payload: {
+						role: "assistant",
+						content: assistantText,
+					},
+					correlatedTurnId: requestId,
+				});
+			}
 
-  private async *runRpBufferedTurn(request: AgentRunRequest, turnRangeStart: number): AsyncGenerator<Chunk> {
-    let bufferedResult: RpBufferedExecutionResult;
-    let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
+			await this.flushIfDue(effectiveRequest.sessionId, requestId);
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-    try {
-      if (!this.agentLoop.runBuffered) {
-        throw new Error("RP buffered execution is unavailable");
-      }
-      bufferedResult = await this.agentLoop.runBuffered(request);
-    } catch (error: unknown) {
-      const errorChunk = {
-        code: "AGENT_LOOP_EXCEPTION",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      this.handleFailedTurn({
-        request,
-        turnRangeStart,
-        errorChunk,
-        assistantText: "",
-        hasAssistantVisibleActivity: false,
-      });
-      return;
-    }
+		this.handleFailedTurn({
+			request,
+			turnRangeStart,
+			errorChunk,
+			assistantText,
+			hasAssistantVisibleActivity,
+		});
+		this.traceLog(requestId, "error", "Turn failed and recovery path executed");
+		this.traceStore?.finalizeTrace(requestId);
+	}
 
-    if ("error" in bufferedResult) {
-      const errorChunk = {
-        code: "RP_BUFFERED_EXECUTION_FAILED",
-        message: bufferedResult.error,
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      this.handleFailedTurn({
-        request,
-        turnRangeStart,
-        errorChunk,
-        assistantText: "",
-        hasAssistantVisibleActivity: false,
-      });
-      return;
-    }
+	private async *runRpBufferedTurn(
+		request: AgentRunRequest,
+		turnRangeStart: number,
+	): AsyncGenerator<Chunk> {
+		const requestId = request.requestId ?? `req:${Date.now()}`;
+		const effectiveRequest: AgentRunRequest = {
+			...request,
+			requestId,
+			traceStore: request.traceStore ?? this.traceStore,
+		};
 
-    const outcome = bufferedResult.outcome;
-    const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
-    const hasPublicReply = outcome.publicReply.length > 0;
-    const hasAssistantVisibleActivity = hasPublicReply;
+		let bufferedResult: RpBufferedExecutionResult;
+		let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
+		let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
 
-    if (!hasPublicReply && !hasPrivateOps) {
-      const errorChunk = {
-        code: "RP_EMPTY_TURN",
-        message: "empty turn: publicReply is empty and privateCommit has no ops",
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      this.handleFailedTurn({
-        request,
-        turnRangeStart,
-        errorChunk,
-        assistantText: outcome.publicReply,
-        hasAssistantVisibleActivity,
-      });
-      return;
-    }
+		try {
+			if (!this.agentLoop.runBuffered) {
+				throw new Error("RP buffered execution is unavailable");
+			}
+			bufferedResult = await this.agentLoop.runBuffered(effectiveRequest);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP buffered execution threw");
+			const errorChunk = {
+				code: "AGENT_LOOP_EXCEPTION",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-    const settlementId = `stl:${request.requestId}`;
-    if (this.interactionStore.settlementExists(request.sessionId, settlementId)) {
-      const existingSettlement = this.interactionStore
-        .getBySession(request.sessionId)
-        .find((record) => record.recordId === settlementId && record.recordType === "turn_settlement");
-      const existingPayload = existingSettlement?.payload as Partial<TurnSettlementPayload> | undefined;
-      const replayPublicReply = typeof existingPayload?.publicReply === "string" ? existingPayload.publicReply : "";
+			if ("error" in bufferedResult) {
+			const errorChunk = {
+				code: "RP_BUFFERED_EXECUTION_FAILED",
+				message: bufferedResult.error,
+			};
+			this.traceLog(
+				requestId,
+				"error",
+				`RP buffered execution failed: ${bufferedResult.error}`,
+			);
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-      if (replayPublicReply.length > 0) {
-        yield {
-          type: "text_delta",
-          text: replayPublicReply,
-        };
-      }
-      yield {
-        type: "message_end",
-        stopReason: "end_turn",
-      };
-      await this.flushIfDue(request.sessionId);
-      return;
-    }
+		const outcome = bufferedResult.outcome;
+		const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
+		const hasPublicReply = outcome.publicReply.length > 0;
+		const hasAssistantVisibleActivity = hasPublicReply;
 
-    try {
-      const resolvedViewerSnapshot = await this.resolveViewerSnapshot(request.sessionId, "rp_agent");
-      viewerSnapshot = resolvedViewerSnapshot;
-      this.interactionStore.runInTransaction(() => {
-        const settlementPayload: TurnSettlementPayload = {
-          settlementId,
-          requestId: request.requestId,
-          sessionId: request.sessionId,
-          ownerAgentId: this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
-          publicReply: outcome.publicReply,
-          hasPublicReply,
-          viewerSnapshot: resolvedViewerSnapshot,
-          privateCommit: hasPrivateOps
-            ? outcome.privateCommit
-            : undefined,
-        };
+		if (!hasPublicReply && !hasPrivateOps) {
+			const errorChunk = {
+				code: "RP_EMPTY_TURN",
+				message:
+					"empty turn: publicReply is empty and privateCommit has no ops",
+			};
+			this.traceLog(requestId, "warn", "RP buffered outcome was empty");
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: outcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-        this.commitService.commitWithId({
-          sessionId: request.sessionId,
-          actorType: "rp_agent",
-          recordId: settlementId,
-          recordType: "turn_settlement",
-          payload: settlementPayload,
-          correlatedTurnId: request.requestId,
-        });
+		const settlementId = `stl:${requestId}`;
+		if (
+			this.interactionStore.settlementExists(
+				effectiveRequest.sessionId,
+				settlementId,
+			)
+		) {
+			const existingSettlement = this.interactionStore
+				.getBySession(effectiveRequest.sessionId)
+				.find(
+					(record) =>
+						record.recordId === settlementId &&
+						record.recordType === "turn_settlement",
+				);
+			const existingPayload = existingSettlement?.payload as
+				| Partial<TurnSettlementPayload>
+				| undefined;
+			const replayPublicReply =
+				typeof existingPayload?.publicReply === "string"
+					? existingPayload.publicReply
+					: "";
 
-        if (hasPublicReply) {
-          const assistantPayload: AssistantMessagePayloadV3 = {
-            role: "assistant",
-            content: outcome.publicReply,
-            settlementId,
-          };
+			if (replayPublicReply.length > 0) {
+				const chunk: Chunk = {
+					type: "text_delta",
+					text: replayPublicReply,
+				};
+				this.traceChunk(requestId, chunk);
+				yield chunk;
+			}
+			const messageEndChunk: Chunk = {
+				type: "message_end",
+				stopReason: "end_turn",
+			};
+			this.traceChunk(requestId, messageEndChunk);
+			yield messageEndChunk;
+			await this.flushIfDue(effectiveRequest.sessionId, requestId);
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-          this.commitService.commit({
-            sessionId: request.sessionId,
-            actorType: "rp_agent",
-            recordType: "message",
-            payload: assistantPayload,
-            correlatedTurnId: request.requestId,
-          });
-        }
+		try {
+			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
+				effectiveRequest.sessionId,
+				"rp_agent",
+			);
+			viewerSnapshot = resolvedViewerSnapshot;
+			this.interactionStore.runInTransaction(() => {
+				const settlementPayload: TurnSettlementPayload = {
+					settlementId,
+					requestId,
+					sessionId: effectiveRequest.sessionId,
+					ownerAgentId:
+						this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
+					publicReply: outcome.publicReply,
+					hasPublicReply,
+					viewerSnapshot: resolvedViewerSnapshot,
+					privateCommit: hasPrivateOps ? outcome.privateCommit : undefined,
+				};
 
-        const slotEntries = buildCognitionSlotPayload(outcome.privateCommit?.ops ?? [], settlementId);
-        this.interactionStore.upsertRecentCognitionSlot(
-          request.sessionId,
-          this.resolveQueueOwnerAgentId(request.sessionId) ?? "",
-          settlementId,
-          JSON.stringify(slotEntries),
-        );
-      });
-    } catch (error: unknown) {
-      const errorChunk = {
-        code: "TURN_SETTLEMENT_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      this.handleFailedTurn({
-        request,
-        turnRangeStart,
-        errorChunk,
-        assistantText: outcome.publicReply,
-        hasAssistantVisibleActivity,
-      });
-      return;
-    }
+				this.commitService.commitWithId({
+					sessionId: effectiveRequest.sessionId,
+					actorType: "rp_agent",
+					recordId: settlementId,
+					recordType: "turn_settlement",
+					payload: settlementPayload,
+					correlatedTurnId: requestId,
+				});
 
-    const queueOwnerAgentId = this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown";
-    this.projectionSink?.onProjectionEligible(
-      createProjectionAppendix({
-        publicReply: outcome.publicReply,
-        agentId: queueOwnerAgentId,
-        settlementId,
-        locationEntityId: String(viewerSnapshot?.currentLocationEntityId ?? "unknown"),
-      }),
-      request.sessionId,
-    );
+				if (hasPublicReply) {
+					const assistantPayload: AssistantMessagePayloadV3 = {
+						role: "assistant",
+						content: outcome.publicReply,
+						settlementId,
+					};
 
-    if (hasPublicReply) {
-      yield {
-        type: "text_delta",
-        text: outcome.publicReply,
-      };
-    }
-    yield {
-      type: "message_end",
-      stopReason: "end_turn",
-    };
+					this.commitService.commit({
+						sessionId: effectiveRequest.sessionId,
+						actorType: "rp_agent",
+						recordType: "message",
+						payload: assistantPayload,
+						correlatedTurnId: requestId,
+					});
+				}
 
-    await this.flushIfDue(request.sessionId);
-  }
+				const slotEntries = buildCognitionSlotPayload(
+					outcome.privateCommit?.ops ?? [],
+					settlementId,
+				);
+				this.interactionStore.upsertRecentCognitionSlot(
+					effectiveRequest.sessionId,
+					this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
+					settlementId,
+					JSON.stringify(slotEntries),
+				);
+				settlementPayloadAfterCommit = settlementPayload;
+			});
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "Turn settlement transaction failed");
+			const errorChunk = {
+				code: "TURN_SETTLEMENT_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: outcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
 
-  private async resolveViewerSnapshot(
-    sessionId: string,
-    role: AgentProfile["role"],
-  ): Promise<TurnSettlementPayload["viewerSnapshot"]> {
-    const agentId = this.resolveQueueOwnerAgentId(sessionId) ?? "";
-    const viewerContext = await this.resolveViewerContext({ sessionId, agentId, role });
-    const currentLocationEntityId =
-      typeof viewerContext.current_area_id === "number" ? viewerContext.current_area_id : undefined;
+		if (settlementPayloadAfterCommit) {
+			this.traceStore?.addSettlement(
+				requestId,
+				this.toRedactedSettlementSummary(
+					effectiveRequest.sessionId,
+					settlementPayloadAfterCommit,
+				),
+			);
+		}
 
-    return {
-      selfPointerKey: "__self__",
-      userPointerKey: "__user__",
-      currentLocationEntityId,
-    };
-  }
+		const queueOwnerAgentId =
+			this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "unknown";
+		this.projectionSink?.onProjectionEligible(
+			createProjectionAppendix({
+				publicReply: outcome.publicReply,
+				agentId: queueOwnerAgentId,
+				settlementId,
+				locationEntityId: String(
+					viewerSnapshot?.currentLocationEntityId ?? "unknown",
+				),
+			}),
+			effectiveRequest.sessionId,
+		);
 
-  private async resolveViewerContext(params: {
-    sessionId: string;
-    agentId: string;
-    role: AgentProfile["role"];
-  }): Promise<ViewerContext> {
-    if (this.viewerContextResolver) {
-      return await this.viewerContextResolver(params);
-    }
+		if (hasPublicReply) {
+			const textChunk: Chunk = {
+				type: "text_delta",
+				text: outcome.publicReply,
+			};
+			this.traceChunk(requestId, textChunk);
+			yield textChunk;
+		}
+		const messageEndChunk: Chunk = {
+			type: "message_end",
+			stopReason: "end_turn",
+		};
+		this.traceChunk(requestId, messageEndChunk);
+		yield messageEndChunk;
 
-    return {
-      viewer_agent_id: params.agentId,
-      viewer_role: params.role,
-      session_id: params.sessionId,
-      current_area_id: undefined,
-    };
-  }
+		await this.flushIfDue(effectiveRequest.sessionId, requestId);
+		this.traceStore?.finalizeTrace(requestId);
+	}
 
-  private handleFailedTurn(params: {
-    request: AgentRunRequest;
-    turnRangeStart: number;
-    errorChunk: { code?: string; message?: string };
-    assistantText: string;
-    hasAssistantVisibleActivity: boolean;
-  }): void {
-    const { request, turnRangeStart, errorChunk, assistantText, hasAssistantVisibleActivity } = params;
+	private async resolveViewerSnapshot(
+		sessionId: string,
+		role: AgentProfile["role"],
+	): Promise<TurnSettlementPayload["viewerSnapshot"]> {
+		const agentId = this.resolveQueueOwnerAgentId(sessionId) ?? "";
+		const viewerContext = await this.resolveViewerContext({
+			sessionId,
+			agentId,
+			role,
+		});
+		const currentLocationEntityId =
+			typeof viewerContext.current_area_id === "number"
+				? viewerContext.current_area_id
+				: undefined;
 
-    const outcome = hasAssistantVisibleActivity
-      ? "failed_with_partial_output"
-      : "failed_no_output";
+		return {
+			selfPointerKey: "__self__",
+			userPointerKey: "__user__",
+			currentLocationEntityId,
+		};
+	}
 
-    const statusRecord = this.commitService.commit({
-      sessionId: request.sessionId,
-      actorType: "system",
-      recordType: "status",
-      payload: {
-        event: "turn_failure",
-        details: {
-          outcome,
-          request_id: request.requestId,
-          error_code: errorChunk.code ?? "UNKNOWN",
-          error_message: errorChunk.message ?? "Unknown error",
-          partial_text: assistantText,
-          assistant_visible_activity: hasAssistantVisibleActivity,
-          committed_at: Date.now(),
-        },
-      },
-      correlatedTurnId: request.requestId,
-    } satisfies CommitInput);
+	private async resolveViewerContext(params: {
+		sessionId: string;
+		agentId: string;
+		role: AgentProfile["role"];
+	}): Promise<ViewerContext> {
+		if (this.viewerContextResolver) {
+			return await this.viewerContextResolver(params);
+		}
 
-    this.interactionStore.markRangeProcessed(request.sessionId, turnRangeStart, statusRecord.recordIndex);
-    if (hasAssistantVisibleActivity) {
-      this.sessionService.setRecoveryRequired(request.sessionId);
-    }
-  }
+		return {
+			viewer_agent_id: params.agentId,
+			viewer_role: params.role,
+			session_id: params.sessionId,
+			current_area_id: undefined,
+		};
+	}
 
-  async flushOnSessionClose(sessionId: string, agentId: string): Promise<void> {
-    if (this.memoryTaskAgent === null) {
-      return;
-    }
+	private handleFailedTurn(params: {
+		request: AgentRunRequest;
+		turnRangeStart: number;
+		errorChunk: { code?: string; message?: string };
+		assistantText: string;
+		hasAssistantVisibleActivity: boolean;
+	}): void {
+		const {
+			request,
+			turnRangeStart,
+			errorChunk,
+			assistantText,
+			hasAssistantVisibleActivity,
+		} = params;
+		const requestId = request.requestId ?? `req:${Date.now()}`;
 
-    const flushRequest = this.flushSelector.buildSessionCloseFlush(sessionId, agentId);
-    if (flushRequest === null) {
-      return;
-    }
+		const outcome = hasAssistantVisibleActivity
+			? "failed_with_partial_output"
+			: "failed_no_output";
 
-    try {
-      await this.runFlush(flushRequest, agentId);
-    } catch {
-      return;
-    }
-  }
+		const statusRecord = this.commitService.commit({
+			sessionId: request.sessionId,
+			actorType: "system",
+			recordType: "status",
+			payload: {
+				event: "turn_failure",
+				details: {
+					outcome,
+					request_id: requestId,
+					error_code: errorChunk.code ?? "UNKNOWN",
+					error_message: errorChunk.message ?? "Unknown error",
+					partial_text: assistantText,
+					assistant_visible_activity: hasAssistantVisibleActivity,
+					committed_at: Date.now(),
+				},
+			},
+			correlatedTurnId: requestId,
+		} satisfies CommitInput);
 
-  private async flushIfDue(sessionId: string): Promise<void> {
-    if (this.memoryTaskAgent === null) {
-      return;
-    }
+		this.interactionStore.markRangeProcessed(
+			request.sessionId,
+			turnRangeStart,
+			statusRecord.recordIndex,
+		);
+		if (hasAssistantVisibleActivity) {
+			this.sessionService.setRecoveryRequired(request.sessionId);
+		}
+	}
 
-    const queueOwnerAgentId = this.resolveQueueOwnerAgentId(sessionId);
-    if (!queueOwnerAgentId) {
-      return;
-    }
+	async flushOnSessionClose(sessionId: string, agentId: string): Promise<boolean> {
+		if (this.memoryTaskAgent === null) {
+			return false;
+		}
 
-    const flushRequest = this.flushSelector.shouldFlush(sessionId, queueOwnerAgentId);
-    if (flushRequest === null) {
-      return;
-    }
+		const flushRequest = this.flushSelector.buildSessionCloseFlush(
+			sessionId,
+			agentId,
+		);
+		if (flushRequest === null) {
+			return false;
+		}
 
-    try {
-      await this.runFlush(flushRequest, queueOwnerAgentId);
-    } catch {
-      return;
-    }
-  }
+		try {
+			await this.runFlush(flushRequest, agentId);
+			return true;
+		} catch {
+			return false;
+		}
+	}
 
-  private async runFlush(flushRequest: MemoryFlushRequest, queueOwnerAgentId: string): Promise<void> {
-    if (this.memoryTaskAgent === null) {
-      return;
-    }
+	private async flushIfDue(
+		sessionId: string,
+		requestId?: string,
+	): Promise<void> {
+		if (this.memoryTaskAgent === null) {
+			return;
+		}
 
-    const records = this.interactionStore.getByRange(
-      flushRequest.sessionId,
-      flushRequest.rangeStart,
-      flushRequest.rangeEnd,
-    );
+		const queueOwnerAgentId = this.resolveQueueOwnerAgentId(sessionId);
+		if (!queueOwnerAgentId) {
+			return;
+		}
 
-    await this.memoryTaskAgent.runMigrate({
-      ...flushRequest,
-      dialogueRecords: toDialogueRecords(records),
-      interactionRecords: records,
-      queueOwnerAgentId,
-    });
+		const flushRequest = this.flushSelector.shouldFlush(
+			sessionId,
+			queueOwnerAgentId,
+		);
+		if (flushRequest === null) {
+			if (requestId) {
+				this.traceStore?.addFlushResult(requestId, {
+					requested: false,
+					pending_job:
+						this.interactionStore.getPendingSettlementJobState(sessionId) ??
+						undefined,
+				});
+			}
+			return;
+		}
 
-    this.interactionStore.markProcessed(flushRequest.sessionId, flushRequest.rangeEnd);
-  }
+		try {
+			await this.runFlush(flushRequest, queueOwnerAgentId, requestId);
+		} catch {
+			if (requestId) {
+				this.traceStore?.addFlushResult(requestId, {
+					requested: true,
+					result: "failed",
+					pending_job:
+						this.interactionStore.getPendingSettlementJobState(sessionId) ??
+						undefined,
+				});
+			}
+			return;
+		}
+	}
 
-  private resolveQueueOwnerAgentId(sessionId: string): string | undefined {
-    return this.sessionService.getSession(sessionId)?.agentId;
-  }
+	private async runFlush(
+		flushRequest: MemoryFlushRequest,
+		queueOwnerAgentId: string,
+		requestId?: string,
+	): Promise<void> {
+		if (this.memoryTaskAgent === null) {
+			return;
+		}
 
-  private resolveAssistantActorType(sessionId: string): "rp_agent" | "maiden" | "task_agent" {
-    const agentId = this.resolveQueueOwnerAgentId(sessionId);
-    if (agentId?.startsWith("maid:")) {
-      return "maiden";
-    }
-    if (agentId?.startsWith("task:")) {
-      return "task_agent";
-    }
-    return "rp_agent";
-  }
+		const records = this.interactionStore.getByRange(
+			flushRequest.sessionId,
+			flushRequest.rangeStart,
+			flushRequest.rangeEnd,
+		);
+
+		await this.memoryTaskAgent.runMigrate({
+			...flushRequest,
+			dialogueRecords: toDialogueRecords(records),
+			interactionRecords: records as never,
+			queueOwnerAgentId,
+		});
+
+		this.interactionStore.markProcessed(
+			flushRequest.sessionId,
+			flushRequest.rangeEnd,
+		);
+		if (requestId) {
+			this.traceStore?.addFlushResult(requestId, {
+				requested: true,
+				result: "succeeded",
+				pending_job:
+					this.interactionStore.getPendingSettlementJobState(
+						flushRequest.sessionId,
+					) ?? undefined,
+			});
+		}
+	}
+
+	private resolveQueueOwnerAgentId(sessionId: string): string | undefined {
+		return this.sessionService.getSession(sessionId)?.agentId;
+	}
+
+	private resolveAssistantActorType(
+		sessionId: string,
+	): "rp_agent" | "maiden" | "task_agent" {
+		const agentId = this.resolveQueueOwnerAgentId(sessionId);
+		if (agentId?.startsWith("maid:")) {
+			return "maiden";
+		}
+		if (agentId?.startsWith("task:")) {
+			return "task_agent";
+		}
+		return "rp_agent";
+	}
+
+	private traceChunk(requestId: string, chunk: Chunk): void {
+		const record = toPublicChunkRecord(chunk);
+		if (!record) {
+			return;
+		}
+		this.traceStore?.addChunk(requestId, record);
+	}
+
+	private traceLog(
+		requestId: string,
+		level: LogEntry["level"],
+		message: string,
+	): void {
+		this.traceStore?.addLogEntry(requestId, {
+			level,
+			message,
+			timestamp: Date.now(),
+		});
+	}
+
+	private toRedactedSettlementSummary(
+		sessionId: string,
+		payload: TurnSettlementPayload,
+	): RedactedSettlement {
+		const redacted = redactInteractionRecord({
+			sessionId,
+			recordId: payload.settlementId,
+			recordIndex: -1,
+			actorType: "rp_agent",
+			recordType: "turn_settlement",
+			payload,
+			committedAt: Date.now(),
+		});
+
+		const redactedPayload = redacted.payload as {
+			privateCommit?: { opCount?: number; kinds?: string[] };
+		};
+
+		return {
+			type: "turn_settlement",
+			op_count: redactedPayload.privateCommit?.opCount,
+			kinds: redactedPayload.privateCommit?.kinds,
+		};
+	}
+}
+
+function toPublicChunkRecord(chunk: Chunk): PublicChunkRecord | null {
+	const timestamp = Date.now();
+	switch (chunk.type) {
+		case "text_delta":
+			return { type: chunk.type, timestamp, text: chunk.text };
+		case "tool_use_start":
+			return { type: chunk.type, timestamp, id: chunk.id, name: chunk.name };
+		case "tool_use_delta":
+			return {
+				type: chunk.type,
+				timestamp,
+				id: chunk.id,
+				partialJson: chunk.partialJson,
+			};
+		case "tool_use_end":
+			return { type: chunk.type, timestamp, id: chunk.id };
+		case "tool_execution_result":
+			return {
+				type: chunk.type,
+				timestamp,
+				id: chunk.id,
+				name: chunk.name,
+				result: chunk.result,
+				isError: chunk.isError,
+			};
+		case "message_end":
+			return {
+				type: chunk.type,
+				timestamp,
+				stopReason: chunk.stopReason,
+				inputTokens: chunk.inputTokens,
+				outputTokens: chunk.outputTokens,
+			};
+		case "error":
+			return {
+				type: chunk.type,
+				timestamp,
+				code: chunk.code,
+				message: chunk.message,
+				retriable: chunk.retriable,
+			};
+		default:
+			return null;
+	}
 }
 
 function createProjectionAppendix(params: {
-  publicReply: string;
-  agentId: string;
-  settlementId: string;
-  locationEntityId: string;
+	publicReply: string;
+	agentId: string;
+	settlementId: string;
+	locationEntityId: string;
 }): ProjectionAppendix {
-  return {
-    publicSummarySeed: params.publicReply,
-    primaryActorEntityId: params.agentId,
-    locationEntityId: params.locationEntityId,
-    eventCategory: "speech",
-    projectionClass: params.publicReply.trim().length > 0 ? "area_candidate" : "non_projectable",
-    sourceRecordId: params.settlementId,
-  };
+	return {
+		publicSummarySeed: params.publicReply,
+		primaryActorEntityId: params.agentId,
+		locationEntityId: params.locationEntityId,
+		eventCategory: "speech",
+		projectionClass:
+			params.publicReply.trim().length > 0
+				? "area_candidate"
+				: "non_projectable",
+		sourceRecordId: params.settlementId,
+	};
 }
 
 function toDialogueRecords(records: InteractionRecord[]): Array<{
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  recordId: string;
-  recordIndex: number;
+	role: "user" | "assistant";
+	content: string;
+	timestamp: number;
+	recordId: string;
+	recordIndex: number;
 }> {
-  type DialogueRecord = {
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-    recordId: string;
-    recordIndex: number;
-  };
+	type DialogueRecord = {
+		role: "user" | "assistant";
+		content: string;
+		timestamp: number;
+		recordId: string;
+		recordIndex: number;
+	};
 
-  return records
-    .filter((record) => record.recordType === "message")
-    .map((record): DialogueRecord | undefined => {
-      const payload = record.payload as { role?: unknown; content?: unknown };
-      const role = payload.role;
-      if (role !== "user" && role !== "assistant") {
-        return undefined;
-      }
-      return {
-        role,
-        content: typeof payload.content === "string" ? payload.content : "",
-        timestamp: record.committedAt,
-        recordId: record.recordId,
-        recordIndex: record.recordIndex,
-      };
-    })
-    .filter((record): record is DialogueRecord => record !== undefined);
+	return records
+		.filter((record) => record.recordType === "message")
+		.map((record): DialogueRecord | undefined => {
+			const payload = record.payload as { role?: unknown; content?: unknown };
+			const role = payload.role;
+			if (role !== "user" && role !== "assistant") {
+				return undefined;
+			}
+			return {
+				role,
+				content: typeof payload.content === "string" ? payload.content : "",
+				timestamp: record.committedAt,
+				recordId: record.recordId,
+				recordIndex: record.recordIndex,
+			};
+		})
+		.filter((record): record is DialogueRecord => record !== undefined);
 }
 
 type RecentCognitionEntry = {
-  settlementId: string;
-  committedAt: number;
-  kind: CognitionKind;
-  key: string;
-  summary: string;
-  status: "active" | "retracted";
+	settlementId: string;
+	committedAt: number;
+	kind: CognitionKind;
+	key: string;
+	summary: string;
+	status: "active" | "retracted";
 };
 
 function refValue(ref: CognitionEntityRef | CognitionSelector): string {
-  if ("value" in ref) return ref.value;
-  return (ref as CognitionSelector).key;
+	if ("value" in ref) return ref.value;
+	return (ref as CognitionSelector).key;
 }
 
 function summarizeAssertion(record: AssertionRecord): string {
-  return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
+	return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
 }
 
 function summarizeEvaluation(record: EvaluationRecord): string {
-  const targetLabel = refValue(record.target);
-  const dims = record.dimensions.map((d) => `${d.name}:${d.value}`).join(", ");
-  return `eval ${targetLabel} [${dims}]`;
+	const targetLabel = refValue(record.target);
+	const dims = record.dimensions.map((d) => `${d.name}:${d.value}`).join(", ");
+	return `eval ${targetLabel} [${dims}]`;
 }
 
 function summarizeCommitment(record: CommitmentRecord): string {
-  let targetDesc: string;
-  if (typeof record.target === "object" && "action" in record.target) {
-    targetDesc = record.target.action;
-  } else if (typeof record.target === "object" && "predicate" in record.target) {
-    targetDesc = (record.target as { predicate?: string }).predicate ?? "";
-  } else {
-    targetDesc = "";
-  }
-  return `${record.mode}: ${targetDesc} (${record.status})`;
+	let targetDesc: string;
+	if (typeof record.target === "object" && "action" in record.target) {
+		targetDesc = record.target.action;
+	} else if (
+		typeof record.target === "object" &&
+		"predicate" in record.target
+	) {
+		targetDesc = (record.target as { predicate?: string }).predicate ?? "";
+	} else {
+		targetDesc = "";
+	}
+	return `${record.mode}: ${targetDesc} (${record.status})`;
 }
 
-function buildCognitionSlotPayload(ops: CognitionOp[], settlementId: string): RecentCognitionEntry[] {
-  const committedAt = Date.now();
-  const items: RecentCognitionEntry[] = [];
+function buildCognitionSlotPayload(
+	ops: CognitionOp[],
+	settlementId: string,
+): RecentCognitionEntry[] {
+	const committedAt = Date.now();
+	const items: RecentCognitionEntry[] = [];
 
-  for (const op of ops) {
-    if (op.op === "upsert") {
-      const record = op.record;
-      let summary: string;
-      switch (record.kind) {
-        case "assertion":
-          summary = summarizeAssertion(record as AssertionRecord);
-          break;
-        case "evaluation":
-          summary = summarizeEvaluation(record as EvaluationRecord);
-          break;
-        case "commitment":
-          summary = summarizeCommitment(record as CommitmentRecord);
-          break;
-      }
-      items.push({ settlementId, committedAt, kind: record.kind, key: record.key, summary, status: "active" });
-    } else if (op.op === "retract") {
-      items.push({ settlementId, committedAt, kind: op.target.kind, key: op.target.key, summary: "(retracted)", status: "retracted" });
-    }
-  }
+	for (const op of ops) {
+		if (op.op === "upsert") {
+			const record = op.record;
+			let summary: string;
+			switch (record.kind) {
+				case "assertion":
+					summary = summarizeAssertion(record as AssertionRecord);
+					break;
+				case "evaluation":
+					summary = summarizeEvaluation(record as EvaluationRecord);
+					break;
+				case "commitment":
+					summary = summarizeCommitment(record as CommitmentRecord);
+					break;
+			}
+			items.push({
+				settlementId,
+				committedAt,
+				kind: record.kind,
+				key: record.key,
+				summary,
+				status: "active",
+			});
+		} else if (op.op === "retract") {
+			items.push({
+				settlementId,
+				committedAt,
+				kind: op.target.kind,
+				key: op.target.key,
+				summary: "(retracted)",
+				status: "retracted",
+			});
+		}
+	}
 
-  return items;
-}
-
-function summarizeCognitionOps(ops: CognitionOp[]): Array<{ key: string; kind: string }> {
-  const result: Array<{ key: string; kind: string }> = [];
-  for (const op of ops) {
-    if (op.op === "upsert") {
-      result.push({ key: op.record.key, kind: op.record.kind });
-    } else if (op.op === "retract") {
-      result.push({ key: op.target.key, kind: op.target.kind });
-    }
-  }
-  return result;
+	return items;
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || message.role !== "user") {
-      continue;
-    }
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (!message || message.role !== "user") {
+			continue;
+		}
 
-    if (typeof message.content === "string") {
-      return message.content;
-    }
+		if (typeof message.content === "string") {
+			return message.content;
+		}
 
-    return message.content
-      .map((block) => {
-        if (block.type === "text") {
-          return block.text;
-        }
-        return JSON.stringify(block);
-      })
-      .join("\n");
-  }
+		return message.content
+			.map((block) => {
+				if (block.type === "text") {
+					return block.text;
+				}
+				return JSON.stringify(block);
+			})
+			.join("\n");
+	}
 
-  return "";
+	return "";
 }
