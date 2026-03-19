@@ -12,7 +12,7 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeText } from "../output.js";
-import { GatewayClient } from "../gateway-client.js";
+import { GatewayClient } from "../../cli/gateway-client.js";
 import { createShellState } from "../shell/state.js";
 import { SessionShell } from "../shell/session-shell.js";
 

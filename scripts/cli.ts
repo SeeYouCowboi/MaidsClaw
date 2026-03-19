@@ -8,42 +8,42 @@
  * NOT at the top level of this file.
  */
 
-import { registerAgentCommands } from "../src/cli/commands/agent.js";
-import { registerChatCommand } from "../src/cli/commands/chat.js";
-import { registerConfigCommands } from "../src/cli/commands/config.js";
-import { registerDebugCommands } from "../src/cli/commands/debug.js";
-import { registerHealthCommand } from "../src/cli/commands/health.js";
-import { registerHelpCommand } from "../src/cli/commands/help.js";
-import { registerServerCommands } from "../src/cli/commands/server.js";
-import { registerSessionCommands } from "../src/cli/commands/session.js";
-import { registerTurnCommands } from "../src/cli/commands/turn.js";
-import { CliError, EXIT_RUNTIME } from "../src/cli/errors.js";
-import { dispatch } from "../src/cli/parser.js";
+import { registerAgentCommands } from "../src/terminal-cli/commands/agent.js";
+import { registerChatCommand } from "../src/terminal-cli/commands/chat.js";
+import { registerConfigCommands } from "../src/terminal-cli/commands/config.js";
+import { registerDebugCommands } from "../src/terminal-cli/commands/debug.js";
+import { registerHealthCommand } from "../src/terminal-cli/commands/health.js";
+import { registerHelpCommand } from "../src/terminal-cli/commands/help.js";
+import { registerServerCommands } from "../src/terminal-cli/commands/server.js";
+import { registerSessionCommands } from "../src/terminal-cli/commands/session.js";
+import { registerTurnCommands } from "../src/terminal-cli/commands/turn.js";
+import { CliError, EXIT_RUNTIME } from "../src/terminal-cli/errors.js";
+import { dispatch } from "../src/terminal-cli/parser.js";
 
 // ── Register commands ────────────────────────────────────────────────
 
-// config namespace — real handler from src/cli/commands/config.ts
+// config namespace — real handler from src/terminal-cli/commands/config.ts
 registerConfigCommands();
 
-// server namespace — real handler from src/cli/commands/server.ts
+// server namespace — real handler from src/terminal-cli/commands/server.ts
 registerServerCommands();
 
-// health — real handler from src/cli/commands/health.ts
+// health — real handler from src/terminal-cli/commands/health.ts
 registerHealthCommand();
 
-// agent namespace — real handlers from src/cli/commands/agent.ts
+// agent namespace — real handlers from src/terminal-cli/commands/agent.ts
 registerAgentCommands();
 
-// session namespace — real handlers from src/cli/commands/session.ts
+// session namespace — real handlers from src/terminal-cli/commands/session.ts
 registerSessionCommands();
 
-// turn namespace — real handler from src/cli/commands/turn.ts
+// turn namespace — real handler from src/terminal-cli/commands/turn.ts
 registerTurnCommands();
 
-// chat — real handler from src/cli/commands/chat.ts
+// chat — real handler from src/terminal-cli/commands/chat.ts
 registerChatCommand();
 
-// debug namespace — real handlers from src/cli/commands/debug.ts
+// debug namespace — real handlers from src/terminal-cli/commands/debug.ts
 registerDebugCommands();
 
 // help — usage information

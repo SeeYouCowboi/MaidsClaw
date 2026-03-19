@@ -1,4 +1,4 @@
-import type { DiagnosticEntry } from "../diagnostic-catalog.js";
+import type { DiagnosticEntry } from "../../cli/diagnostic-catalog.js";
 import type {
 	ChunksView,
 	LogsView,
@@ -7,7 +7,7 @@ import type {
 	SummaryView,
 	TraceView,
 	TranscriptView,
-} from "./view-models.js";
+} from "../../cli/inspect/view-models.js";
 
 export function renderJson(viewModel: unknown): string {
 	return JSON.stringify(viewModel, null, 2);

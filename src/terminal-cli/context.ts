@@ -2,7 +2,7 @@
  * CLI context — the global flags and environment visible to every command handler.
  */
 
-import type { CliMode } from "./types.js";
+import type { CliMode } from "../cli/types.js";
 import { CliError, EXIT_USAGE } from "./errors.js";
 
 // ── CliContext ────────────────────────────────────────────────────────

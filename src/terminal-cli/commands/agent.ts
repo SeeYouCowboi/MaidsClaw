@@ -15,7 +15,7 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_CONFIG, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
-import type { CliDiagnostic } from "../types.js";
+import type { CliDiagnostic } from "../../cli/types.js";
 import {
 	readAgentFile,
 	writeAgentFile,

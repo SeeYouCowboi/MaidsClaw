@@ -17,7 +17,7 @@ import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { ObservationEvent } from "../../app/contracts/execution.js";
-import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
+import { createAppClientRuntime, type AppClientRuntime } from "../../cli/app-client-runtime.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 

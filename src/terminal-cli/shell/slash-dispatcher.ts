@@ -1,6 +1,6 @@
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
-import { diagnose } from "../diagnostic-catalog.js";
-import { GatewayClient } from "../gateway-client.js";
+import { diagnose } from "../../cli/diagnostic-catalog.js";
+import { GatewayClient } from "../../cli/gateway-client.js";
 import type { InspectContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
 import {
@@ -12,7 +12,7 @@ import {
 	loadTraceView,
 	loadTranscriptView,
 	type InspectViewLoadParams,
-} from "../inspect/view-models.js";
+} from "../../cli/inspect/view-models.js";
 import { writeText } from "../output.js";
 import type { ShellState } from "./state.js";
 

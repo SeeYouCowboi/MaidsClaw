@@ -1,0 +1,49 @@
+Task 11: Move terminal-only CLI surface to src/terminal-cli/
+=============================================================
+
+Files moved to src/terminal-cli/:
+  - context.ts (CLI flags context)
+  - errors.ts (CliError, exit codes)
+  - output.ts (writeJson, writeText, writeError)
+  - parser.ts (command registration, dispatch)
+  - commands/agent.ts
+  - commands/chat.ts
+  - commands/config.ts
+  - commands/debug.ts
+  - commands/health.ts
+  - commands/help.ts
+  - commands/server.ts
+  - commands/session.ts
+  - commands/turn.ts
+  - shell/session-shell.ts
+  - shell/slash-dispatcher.ts
+  - shell/state.ts
+  - inspect/renderers.ts
+  - inspect/context-resolver.ts
+
+Files remaining in src/cli/:
+  - types.ts (CliMode, JsonEnvelope, CliDiagnostic)
+  - local-runtime.ts (thin wrapper -> src/app/clients/local/)
+  - gateway-client.ts (compatibility facade -> gateway app clients)
+  - app-client-runtime.ts (bootstrap + client factory)
+  - diagnostic-catalog.ts (shim -> src/app/diagnostics/)
+  - inspect/view-models.ts (shim -> src/app/inspect/)
+
+Callers updated:
+  - scripts/cli.ts: all imports now from src/terminal-cli/*
+  - test/cli/chat-shell.test.ts: imports from src/terminal-cli/*
+  - test/cli/acceptance.test.ts: imports from src/terminal-cli/*
+
+No imports from src/terminal-cli/ in:
+  - src/app/
+  - src/runtime/
+  - src/bootstrap/
+  - src/gateway/
+
+Build verification:
+  NODE_OPTIONS="--max-old-space-size=4096" npx tsc -p tsconfig.build.json --noEmit
+  Result: only pre-existing error at openai-provider.ts(96,9)
+
+Test verification:
+  bun test test/cli/chat-shell.test.ts test/cli/acceptance.test.ts
+  Result: 48 pass, 0 fail, 125 expect() calls

@@ -1,11 +1,11 @@
 import { describe, expect, it, beforeEach } from "bun:test";
-import { createShellState } from "../../src/cli/shell/state.js";
-import type { ShellState } from "../../src/cli/shell/state.js";
-import { dispatchSlashCommand } from "../../src/cli/shell/slash-dispatcher.js";
-import type { SlashDispatchContext } from "../../src/cli/shell/slash-dispatcher.js";
-import { registerCommand, dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerChatCommand } from "../../src/cli/commands/chat.js";
-import { CliError } from "../../src/cli/errors.js";
+import { createShellState } from "../../src/terminal-cli/shell/state.js";
+import type { ShellState } from "../../src/terminal-cli/shell/state.js";
+import { dispatchSlashCommand } from "../../src/terminal-cli/shell/slash-dispatcher.js";
+import type { SlashDispatchContext } from "../../src/terminal-cli/shell/slash-dispatcher.js";
+import { registerCommand, dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerChatCommand } from "../../src/terminal-cli/commands/chat.js";
+import { CliError } from "../../src/terminal-cli/errors.js";
 
 // ── ShellState tests ──────────────────────────────────────────────────
 
