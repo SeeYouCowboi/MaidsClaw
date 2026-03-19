@@ -1,7 +1,6 @@
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
-import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
 import type { ObservationEvent } from "../app/contracts/execution.js";
 import { LocalHealthClient } from "../app/clients/local/local-health-client.js";
@@ -16,13 +15,10 @@ export type SubsystemStatus = "ok" | "degraded" | "unavailable";
 
 export type HealthCheckFn = () => SubsystemStatus;
 
-export type AgentLoopFactory = (agentId: string) => AgentLoop | null;
-
 /** Shared context injected into every controller */
 export type ControllerContext = {
   sessionService: SessionService;
   healthChecks?: Record<string, HealthCheckFn>;
-  createAgentLoop?: AgentLoopFactory;
   turnService?: TurnService;
   runtime?: RuntimeBootstrapResult;
   /** Narrow hook to check if an agent is registered. Returns true if agent exists. */
@@ -385,7 +381,9 @@ export async function handleTurnStream(
       }
       return createSseStream(sessionId, requestId, errorStream());
     }
-  } else if (!ctx.createAgentLoop) {
+  } else {
+    // Fallback stub when no turnService is provided (test-only path;
+    // production bootstrapApp always supplies turnService).
     try {
       observationStream = mapChunkStreamToObservations(executeUserTurn(
         {
@@ -425,46 +423,6 @@ export async function handleTurnStream(
       }
       return createSseStream(sessionId, requestId, errorStream());
     }
-  } else {
-    if (!canonicalAgentId) {
-      async function* errorStream(): AsyncGenerator<GatewayEvent> {
-        yield makeEvent(sessionId!, requestId, "error", {
-          code: "SESSION_NOT_FOUND",
-          message: `Session not found: ${sessionId}`,
-          retriable: false,
-        });
-      }
-      return createSseStream(sessionId, requestId, errorStream());
-    }
-
-    const agentLoop = ctx.createAgentLoop(canonicalAgentId);
-    if (!agentLoop) {
-      async function* errorStream(): AsyncGenerator<GatewayEvent> {
-        yield makeEvent(sessionId!, requestId, "error", {
-          code: "AGENT_NOT_CONFIGURED",
-          message: `No agent loop available for agent '${canonicalAgentId}'`,
-          retriable: false,
-        });
-      }
-      return createSseStream(sessionId, requestId, errorStream());
-    }
-
-    const runRequest: AgentRunRequest & {
-      agentId: string;
-      userMessageId?: string;
-      clientContext?: unknown;
-      metadata?: unknown;
-    } = {
-      sessionId,
-      requestId,
-      messages: [{ role: "user", content: userText }],
-      agentId: canonicalAgentId,
-      userMessageId: body.user_message?.id,
-      clientContext: body.client_context,
-      metadata: body.metadata,
-    };
-
-    observationStream = mapChunkStreamToObservations(agentLoop.run(runRequest));
   }
 
   async function* agentStream(): AsyncGenerator<GatewayEvent> {

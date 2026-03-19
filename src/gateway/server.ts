@@ -2,7 +2,7 @@ import type { Server } from "bun";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
 import type { SessionService } from "../session/service.js";
 import type { TurnService } from "../runtime/turn-service.js";
-import type { AgentLoopFactory, ControllerContext, HealthCheckFn } from "./controllers.js";
+import type { ControllerContext, HealthCheckFn } from "./controllers.js";
 import { resolveRoute } from "./routes.js";
 
 export type GatewayServerOptions = {
@@ -10,7 +10,6 @@ export type GatewayServerOptions = {
   host: string;
   runtime?: RuntimeBootstrapResult;
   sessionService: SessionService;
-  createAgentLoop?: AgentLoopFactory;
   turnService?: TurnService;
   healthChecks?: Record<string, HealthCheckFn>;
   /** Narrow hook to check if an agent is registered. Returns true if agent exists. */
@@ -33,7 +32,6 @@ export class GatewayServer {
     const ctx: ControllerContext = {
       sessionService: this.options.sessionService,
       runtime: this.options.runtime,
-      createAgentLoop: this.options.createAgentLoop,
       turnService: this.options.turnService,
       healthChecks: this.options.healthChecks,
       hasAgent: this.options.hasAgent,

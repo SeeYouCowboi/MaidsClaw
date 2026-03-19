@@ -104,6 +104,12 @@ export class TurnService {
 		return this.run(request);
 	}
 
+	/**
+	 * @internal Low-level turn entry point.
+	 * Callers must supply a fully assembled `messages` array.
+	 * Prefer {@link runUserTurn} for top-level user-initiated turns.
+	 * Intended for tests, delegation, and scenarios requiring explicit message control.
+	 */
 	async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
 		const requestId = request.requestId ?? `req:${Date.now()}`;
 		const effectiveRequest: AgentRunRequest = {
