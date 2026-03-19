@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach } from "bun:test";
-import { dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerServerCommands } from "../../src/cli/commands/server.js";
-import { registerHealthCommand } from "../../src/cli/commands/health.js";
-import { CliError } from "../../src/cli/errors.js";
+import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerServerCommands } from "../../src/terminal-cli/commands/server.js";
+import { registerHealthCommand } from "../../src/terminal-cli/commands/health.js";
+import { CliError } from "../../src/terminal-cli/errors.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────

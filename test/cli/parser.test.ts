@@ -3,10 +3,10 @@ import {
   registerCommand,
   dispatch,
   resetCommands,
-} from "../../src/cli/parser.js";
-import type { ParsedArgs } from "../../src/cli/parser.js";
-import type { CliContext } from "../../src/cli/context.js";
-import { CliError, EXIT_USAGE } from "../../src/cli/errors.js";
+} from "../../src/terminal-cli/parser.js";
+import type { ParsedArgs } from "../../src/terminal-cli/parser.js";
+import type { CliContext } from "../../src/terminal-cli/context.js";
+import { CliError, EXIT_USAGE } from "../../src/terminal-cli/errors.js";
 
 describe("CLI Parser", () => {
   beforeEach(() => {

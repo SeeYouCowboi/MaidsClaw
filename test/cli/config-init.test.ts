@@ -6,9 +6,9 @@ import {
   registerCommand,
   dispatch,
   resetCommands,
-} from "../../src/cli/parser.js";
-import { registerConfigCommands } from "../../src/cli/commands/config.js";
-import type { ConfigInitData } from "../../src/cli/commands/config.js";
+} from "../../src/terminal-cli/parser.js";
+import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
+import type { ConfigInitData } from "../../src/terminal-cli/commands/config.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────

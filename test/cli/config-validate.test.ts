@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CliContext } from "../../src/cli/context.js";
+import type { CliContext } from "../../src/terminal-cli/context.js";
 import type { CliDiagnostic } from "../../src/cli/types.js";
 
 /**
@@ -13,8 +13,8 @@ import type { CliDiagnostic } from "../../src/cli/types.js";
  * But for unit tests, it's cleaner to import the handler indirectly.
  * We'll test via the parser dispatch mechanism.
  */
-import { dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerConfigCommands } from "../../src/cli/commands/config.js";
+import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
 
 // ── Temp directory helpers ──────────────────────────────────────────
 

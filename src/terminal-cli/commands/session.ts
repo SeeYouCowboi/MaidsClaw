@@ -9,6 +9,7 @@ import { registerCommand } from "../parser.js";
 import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
+import { MaidsClawError } from "../../core/errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { CliMode } from "../../cli/types.js";
 import { createAppClientRuntime, type AppClientRuntime } from "../../cli/app-client-runtime.js";
@@ -206,6 +207,16 @@ async function handleSessionRecover(
     } else if (!ctx.quiet) {
       writeText(`Session ${sessionId} recovered (partial output not canonized)`);
     }
+  } catch (err) {
+    if (err instanceof MaidsClawError) {
+      if (err.code === "SESSION_NOT_FOUND") {
+        throw new CliError("SESSION_NOT_FOUND", err.message, EXIT_RUNTIME);
+      }
+      if (err.code === "SESSION_NOT_IN_RECOVERY" || err.code === "INVALID_ACTION") {
+        throw new CliError("SESSION_NOT_IN_RECOVERY", err.message, EXIT_RUNTIME);
+      }
+    }
+    throw err;
   } finally {
     runtime.shutdown();
   }

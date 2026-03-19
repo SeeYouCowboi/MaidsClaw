@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerSessionCommands } from "../../src/cli/commands/session.js";
-import { registerTurnCommands } from "../../src/cli/commands/turn.js";
-import { CliError } from "../../src/cli/errors.js";
+import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
+import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
+import { CliError } from "../../src/terminal-cli/errors.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
 import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";

@@ -8,9 +8,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerAgentCommands } from "../../src/cli/commands/agent.js";
-import { CliError } from "../../src/cli/errors.js";
+import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerAgentCommands } from "../../src/terminal-cli/commands/agent.js";
+import { CliError } from "../../src/terminal-cli/errors.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
 import type { AgentFileEntry } from "../../src/app/config/agents/agent-file-store.js";
 

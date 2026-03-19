@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { dispatch, resetCommands } from "../../src/cli/parser.js";
-import { registerConfigCommands } from "../../src/cli/commands/config.js";
+import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
 
 type ConfigDoctorResponse = {
   ok: boolean;
