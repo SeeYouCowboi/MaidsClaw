@@ -24,7 +24,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { bootstrapApp } from "../src/bootstrap/app-bootstrap.js";
-import { createLocalRuntime } from "../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../src/terminal-cli/local-runtime.js";
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -676,7 +676,7 @@ async function evaluateWithJudge(
 	turnDef: TurnDef,
 	response: string,
 	history: TurnRecord[],
-	localRuntime: InstanceType<typeof import("../src/cli/local-runtime.js").LocalRuntime>,
+	localRuntime: InstanceType<typeof import("../src/terminal-cli/local-runtime.js").LocalRuntime>,
 	judgeSessionId: string,
 	agentId: string,
 ): Promise<JudgeResult> {
@@ -753,7 +753,7 @@ type DimensionScores = {
 
 async function evaluateDimensions(
 	history: TurnRecord[],
-	localRuntime: InstanceType<typeof import("../src/cli/local-runtime.js").LocalRuntime>,
+	localRuntime: InstanceType<typeof import("../src/terminal-cli/local-runtime.js").LocalRuntime>,
 	judgeSessionId: string,
 	agentId: string,
 ): Promise<DimensionScores> {

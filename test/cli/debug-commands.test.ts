@@ -5,7 +5,7 @@ import { bootstrapApp } from "../../src/bootstrap/app-bootstrap.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
-import type { JsonEnvelope } from "../../src/cli/types.js";
+import type { JsonEnvelope } from "../../src/terminal-cli/types.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { InteractionStore } from "../../src/interaction/store.js";

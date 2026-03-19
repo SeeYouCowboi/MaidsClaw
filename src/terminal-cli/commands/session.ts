@@ -11,8 +11,8 @@ import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { MaidsClawError } from "../../core/errors.js";
 import { writeJson, writeText } from "../output.js";
-import type { CliMode } from "../../cli/types.js";
-import { createAppClientRuntime, type AppClientRuntime } from "../../cli/app-client-runtime.js";
+import type { CliMode } from "../types.js";
+import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 

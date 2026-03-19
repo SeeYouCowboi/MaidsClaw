@@ -7,7 +7,7 @@
  */
 
 import { bootstrapApp } from "../src/bootstrap/app-bootstrap.js";
-import { createLocalRuntime } from "../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../src/terminal-cli/local-runtime.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

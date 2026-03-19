@@ -13,7 +13,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { bootstrapApp } from "../src/bootstrap/app-bootstrap.js";
-import { createLocalRuntime } from "../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../src/terminal-cli/local-runtime.js";
 
 const INTER_TURN_DELAY_MS = 2000;
 const MAX_TURNS = parseInt(process.env.MAX_TURNS ?? "70", 10);

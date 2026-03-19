@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TraceStore } from "../../src/cli/trace-store.js";
+import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 
 describe("TraceStore", () => {
 	it("creates a trace bundle file keyed by request_id", () => {

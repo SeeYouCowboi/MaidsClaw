@@ -5,7 +5,7 @@ import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
 import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
-import { GatewayClient } from "../../src/cli/gateway-client.js";
+import { GatewayClient } from "../../src/terminal-cli/gateway-client.js";
 import { CliError } from "../../src/terminal-cli/errors.js";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { CommitService } from "../../src/interaction/commit-service.js";

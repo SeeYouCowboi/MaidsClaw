@@ -3,7 +3,7 @@
  * Minimal diagnostic: run ONE RP turn and dump every chunk + result.
  */
 import { bootstrapApp } from "../src/bootstrap/app-bootstrap.js";
-import { createLocalRuntime } from "../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../src/terminal-cli/local-runtime.js";
 
 const AGENT_ID = process.env.AGENT_ID ?? "rp:eveline";
 

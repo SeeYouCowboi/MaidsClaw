@@ -92,7 +92,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       const msgRoles = (payload.messages as Array<{ role?: string; tool_call_id?: string }>)
         ?.map((m) => `${m.role}${m.tool_call_id ? `(tcid:${m.tool_call_id})` : ""}`)
         ?.join(", ");
-      this.logger?.error("Model API error", {
+      this.logger?.error("Model API error", undefined, {
         status: response.status,
         errorType: parsedError?.type,
         errorMessage: parsedError?.message,

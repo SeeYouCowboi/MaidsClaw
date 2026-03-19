@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliContext } from "../../src/terminal-cli/context.js";
-import type { CliDiagnostic } from "../../src/cli/types.js";
+import type { CliDiagnostic } from "../../src/terminal-cli/types.js";
 
 /**
  * To test `handleConfigValidate` without going through dispatch + registerCommand,

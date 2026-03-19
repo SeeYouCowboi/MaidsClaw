@@ -9,7 +9,7 @@ import {
 } from "../../src/terminal-cli/parser.js";
 import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
 import type { ConfigInitData } from "../../src/terminal-cli/commands/config.js";
-import type { JsonEnvelope } from "../../src/cli/types.js";
+import type { JsonEnvelope } from "../../src/terminal-cli/types.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

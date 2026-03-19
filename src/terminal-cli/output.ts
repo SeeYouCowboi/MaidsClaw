@@ -8,7 +8,7 @@
 
 import type { CliContext } from "./context.js";
 import type { CliError } from "./errors.js";
-import type { JsonEnvelope } from "../cli/types.js";
+import type { JsonEnvelope } from "./types.js";
 
 /**
  * Write a JSON envelope to stdout (single line, newline-terminated).

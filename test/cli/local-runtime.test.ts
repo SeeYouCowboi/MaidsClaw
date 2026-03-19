@@ -12,7 +12,7 @@ import { TurnService } from "../../src/runtime/turn-service.js";
 import { SessionService } from "../../src/session/service.js";
 import { closeDatabaseGracefully, openDatabase, type Db } from "../../src/storage/database.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
-import { createLocalRuntime } from "../../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../../src/terminal-cli/local-runtime.js";
 import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
 
 type TurnServiceLoop = {

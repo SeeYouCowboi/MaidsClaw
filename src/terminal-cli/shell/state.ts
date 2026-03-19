@@ -5,7 +5,7 @@
  * The state is mutated in-place as turns execute and slash commands are processed.
  */
 
-import type { CliMode } from "../../cli/types.js";
+import type { CliMode } from "../types.js";
 
 // ── ShellState ────────────────────────────────────────────────────────
 

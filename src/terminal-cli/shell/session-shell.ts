@@ -11,9 +11,9 @@
 
 import readline from "readline";
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
-import { createLocalRuntime } from "../../cli/local-runtime.js";
-import type { LocalRuntime } from "../../cli/local-runtime.js";
-import { GatewayClient } from "../../cli/gateway-client.js";
+import { createLocalRuntime } from "../local-runtime.js";
+import type { LocalRuntime } from "../local-runtime.js";
+import { GatewayClient } from "../gateway-client.js";
 import { writeText } from "../output.js";
 import { dispatchSlashCommand } from "./slash-dispatcher.js";
 import type { ShellState } from "./state.js";

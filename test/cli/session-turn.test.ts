@@ -5,7 +5,7 @@ import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
 import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
 import { CliError } from "../../src/terminal-cli/errors.js";
-import type { JsonEnvelope } from "../../src/cli/types.js";
+import type { JsonEnvelope } from "../../src/terminal-cli/types.js";
 import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
@@ -19,7 +19,7 @@ import { TurnService } from "../../src/runtime/turn-service.js";
 import { SessionService } from "../../src/session/service.js";
 import { closeDatabaseGracefully, openDatabase, type Db } from "../../src/storage/database.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
-import { createLocalRuntime } from "../../src/cli/local-runtime.js";
+import { createLocalRuntime } from "../../src/terminal-cli/local-runtime.js";
 import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import type { CliContext } from "../context.js";
 import {
 	createAppClientRuntime,
 	type AppClientRuntime,
-} from "../../cli/app-client-runtime.js";
+} from "../app-client-runtime.js";
 import { CliError, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { resolveContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
