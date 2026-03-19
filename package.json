@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json --noEmit",
     "test": "bun test",
     "start": "bun run src/index.ts",
     "check:native": "cargo check --manifest-path native/Cargo.toml",

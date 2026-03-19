@@ -27,9 +27,11 @@
       "@gateway/*": ["src/gateway/*"],
       "@session/*": ["src/session/*"],
       "@storage/*": ["src/storage/*"],
-      "@native/*": ["src/native-fallbacks/*"]
+      "@native/*": ["src/native-fallbacks/*"],
+      "@app/*": ["src/app/*"],
+      "@terminal-cli/*": ["src/terminal-cli/*"]
     }
   },
   "include": ["src/**/*", "test/**/*", "types/**/*"],
-  "exclude": ["node_modules", "dist", "native", "src/**/*.test.ts"]
+  "exclude": ["node_modules", "dist", "native"]
 }
