@@ -146,8 +146,17 @@ TypeScript fallbacks exist, so the system can still run without a compiled Rust 
 ```text
 MaidsClaw/
 ├─ src/
+│  ├─ app/               Application layer: clients, config, contracts, diagnostics, inspect, turn
+│  │  ├─ clients/        Transport-neutral client interfaces + local/gateway implementations
+│  │  ├─ contracts/      Shared execution/trace/inspect/session type contracts
+│  │  ├─ diagnostics/    Trace store and trace reader
+│  │  ├─ inspect/        InspectQueryService and inspect view-models
+│  │  └─ turn/           UserTurnService and TurnService.runUserTurn
+│  ├─ terminal-cli/      Terminal-only CLI: commands, shell, inspect renderers, output
+│  ├─ cli/               Thin compatibility shims (intentional facades, not active logic)
 │  ├─ agents/            Agent profiles, registry, lifecycle, maiden/RP/task agents
 │  ├─ core/              Loop, prompt assembly, model access, tools, config, events
+│  │  └─ contracts/      Viewer context types shared across boundaries
 │  ├─ memory/            Core memory, retrieval, embeddings, materialization, promotion
 │  ├─ persona/           Character cards and anti-drift constraints
 │  ├─ lore/              World knowledge and lore matching

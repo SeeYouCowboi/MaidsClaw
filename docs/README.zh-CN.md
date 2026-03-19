@@ -148,8 +148,17 @@ MaidsClaw 的女仆感主要来自这几层，而不是只靠 prompt 口癖:
 ```text
 MaidsClaw/
 ├─ src/
+│  ├─ app/             应用层：clients、contracts、diagnostics、inspect、turn
+│  │  ├─ clients/      传输无关客户端接口 + 本地/网关实现
+│  │  ├─ contracts/    执行/追踪/检视/会话类型契约
+│  │  ├─ diagnostics/  TraceStore 与 trace 读取器
+│  │  ├─ inspect/      InspectQueryService 与检视视图模型
+│  │  └─ turn/         UserTurnService 与 TurnService.runUserTurn
+│  ├─ terminal-cli/    终端专属 CLI：命令、shell、检视渲染器、输出
+│  ├─ cli/             兼容性薄层 shim（门面，非业务逻辑）
 │  ├─ agents/          Agent profile、注册、生命周期、女仆长/角色/任务代理
 │  ├─ core/            主循环、prompt、模型接入、工具执行、配置与事件系统
+│  │  └─ contracts/    跨边界共享的 viewer context 类型
 │  ├─ memory/          核心记忆、检索、嵌入、物化、提升
 │  ├─ persona/         角色卡与人设约束
 │  ├─ lore/            世界观与 lore 匹配
