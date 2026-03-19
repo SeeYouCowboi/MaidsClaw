@@ -1,5 +1,5 @@
 import type { AgentProfile } from "../agents/profile.js";
-import type { TraceStore } from "../cli/trace-store.js";
+import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { ViewerContext } from "./contracts/viewer-context.js";
 import type {
 	RpBufferedExecutionResult,

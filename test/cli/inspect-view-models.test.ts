@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
 import { diagnose } from "../../src/cli/diagnostic-catalog.js";
-import { TraceStore } from "../../src/cli/trace-store.js";
 import {
 	loadSummaryView,
 	loadTranscriptView,

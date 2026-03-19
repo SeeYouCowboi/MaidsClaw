@@ -1,7 +1,7 @@
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
 import { InteractionStore } from "../interaction/store.js";
-import type { TraceStore } from "./trace-store.js";
 import type { InspectContext } from "./inspect/context-resolver.js";
 
 export type DiagnosticEntry = {

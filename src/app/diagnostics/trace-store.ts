@@ -1,13 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { ObservationEvent } from "../app/contracts/execution.js";
-import type { RedactedSettlement } from "../app/contracts/inspect.js";
+import type { ObservationEvent } from "../contracts/execution.js";
+import type { RedactedSettlement } from "../contracts/inspect.js";
 import type {
   FlushCapture,
   LogEntry,
   PromptCapture,
   TraceBundle,
-} from "../app/contracts/trace.js";
+} from "../contracts/trace.js";
+import { readTrace } from "./trace-reader.js";
 
 const UNKNOWN_AGENT_ID = "unknown";
 const UNKNOWN_SESSION_ID = "unknown";
@@ -92,16 +93,7 @@ export class TraceStore {
   }
 
   readTrace(requestId: string): TraceBundle | null {
-    const tracePath = this.getTracePath(requestId);
-    if (!existsSync(tracePath)) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(readFileSync(tracePath, "utf8")) as TraceBundle;
-    } catch {
-      return null;
-    }
+    return readTrace(this.getTracePath(requestId));
   }
 
   private ensureBundle(requestId: string): TraceBundle {

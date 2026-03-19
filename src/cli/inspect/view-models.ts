@@ -8,7 +8,7 @@ import type {
 import { redactInteractionRecord } from "../../interaction/redaction.js";
 import { InteractionStore } from "../../interaction/store.js";
 import type { LogEntry, TraceBundle } from "../../app/contracts/trace.js";
-import type { TraceStore } from "../trace-store.js";
+import type { TraceStore } from "../../app/diagnostics/trace-store.js";
 import type { CliMode } from "../types.js";
 import {
 	requireRequestId,

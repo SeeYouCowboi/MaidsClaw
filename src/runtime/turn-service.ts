@@ -2,7 +2,7 @@ import type { AgentProfile } from "../agents/profile.js";
 import type { ObservationEvent } from "../app/contracts/execution.js";
 import type { RedactedSettlement } from "../app/contracts/inspect.js";
 import type { LogEntry } from "../app/contracts/trace.js";
-import type { TraceStore } from "../cli/trace-store.js";
+import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";

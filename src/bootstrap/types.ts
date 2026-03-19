@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
-import type { TraceStore } from "../cli/trace-store.js";
+import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentLoop } from "../core/agent-loop.js";
 import type { ConfigResult } from "../core/config-schema.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";

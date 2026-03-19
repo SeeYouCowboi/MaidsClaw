@@ -1,7 +1,7 @@
 import type { Chunk } from "../core/chunk.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
-import { TraceStore } from "./trace-store.js";
+import { TraceStore } from "../app/diagnostics/trace-store.js";
 import { CliError, EXIT_RUNTIME } from "./errors.js";
 import type {
   ObservationEvent,

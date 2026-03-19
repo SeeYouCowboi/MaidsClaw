@@ -18,7 +18,7 @@ import {
 } from "../inspect/view-models.js";
 import { writeJson, writeText } from "../output.js";
 import { type ParsedArgs, registerCommand } from "../parser.js";
-import { TraceStore } from "../trace-store.js";
+import { TraceStore } from "../../app/diagnostics/trace-store.js";
 
 const KNOWN_SUMMARY_FLAGS = new Set(["request", "mode", "base-url", "json", "quiet", "cwd"]);
 const KNOWN_TRANSCRIPT_FLAGS = new Set(["session", "raw", "mode", "base-url", "json", "quiet", "cwd"]);

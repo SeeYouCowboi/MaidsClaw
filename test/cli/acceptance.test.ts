@@ -40,7 +40,7 @@ import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
-import { TraceStore } from "../../src/cli/trace-store.js";
+import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
