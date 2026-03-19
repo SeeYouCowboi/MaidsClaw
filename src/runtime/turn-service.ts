@@ -45,6 +45,15 @@ type TurnServiceAgentLoop = {
 	) => Promise<RpBufferedExecutionResult>;
 };
 
+export type RunUserTurnParams = {
+	sessionId: string;
+	userText: string;
+	requestId?: string;
+	metadata?: {
+		traceStore?: TraceStore;
+	};
+};
+
 export class TurnService {
 	constructor(
 		private readonly agentLoop: TurnServiceAgentLoop,
@@ -62,6 +71,38 @@ export class TurnService {
 		_graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
 	) {}
+
+	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
+		const history = this.interactionStore.getMessageRecords(params.sessionId);
+		const messages: ChatMessage[] = [];
+		for (const record of history) {
+			const payload = record.payload as { role?: unknown; content?: unknown };
+			if (payload.role !== "user" && payload.role !== "assistant") {
+				continue;
+			}
+			messages.push({
+				role: payload.role,
+				content:
+					typeof payload.content === "string"
+						? payload.content
+						: String(payload.content ?? ""),
+			});
+		}
+
+		messages.push({
+			role: "user",
+			content: params.userText,
+		});
+
+		const request: AgentRunRequest = {
+			sessionId: params.sessionId,
+			requestId: params.requestId,
+			messages,
+			traceStore: params.metadata?.traceStore,
+		};
+
+		return this.run(request);
+	}
 
 	async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
 		const requestId = request.requestId ?? `req:${Date.now()}`;

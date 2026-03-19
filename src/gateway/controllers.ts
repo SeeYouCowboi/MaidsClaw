@@ -1,8 +1,9 @@
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
-import { MaidsClawError } from "../core/errors.js";
+import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
 import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import { executeUserTurn } from "../app/turn/user-turn-service.js";
 import { diagnose } from "../app/diagnostics/diagnose-service.js";
 import {
   loadChunksView,
@@ -265,93 +266,46 @@ export async function handleTurnStream(
 
   const requestId = body.request_id ?? crypto.randomUUID();
 
-  // Validate session exists and is open
-  if (!ctx.sessionService.isOpen(sessionId)) {
-    const session = ctx.sessionService.getSession(sessionId);
-    const errorCode = session ? "SESSION_CLOSED" : "SESSION_NOT_FOUND";
-    const errorMsg = session
-      ? `Session is closed: ${sessionId}`
-      : `Session not found: ${sessionId}`;
-
-    // Return SSE stream with error event
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "error", {
-        code: errorCode,
-        message: errorMsg,
-        retriable: false,
-      });
-    }
-    return createSseStream(sessionId, requestId, errorStream());
-  }
-
   const session = ctx.sessionService.getSession(sessionId);
-  if (!session) {
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "error", {
-        code: "SESSION_NOT_FOUND",
-        message: `Session not found: ${sessionId}`,
-        retriable: false,
-      });
-    }
-    return createSseStream(sessionId, requestId, errorStream());
-  }
-
-  if (body.agent_id && body.agent_id !== session.agentId) {
-    const ownershipError = new MaidsClawError({
-      code: "AGENT_OWNERSHIP_MISMATCH",
-      message: `Session '${sessionId}' is owned by agent '${session.agentId}', not '${body.agent_id}'`,
-      retriable: false,
-      details: {
-        sessionId,
-        ownerAgentId: session.agentId,
-        requestedAgentId: body.agent_id,
-      },
-    });
-
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "error", {
-        code: ownershipError.code,
-        message: ownershipError.message,
-        retriable: ownershipError.retriable,
-      });
-    }
-    return createSseStream(sessionId, requestId, errorStream());
-  }
-
-  // Block recovery_required sessions
-  if (ctx.sessionService.isRecoveryRequired(sessionId)) {
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "error", {
-        code: "SESSION_RECOVERY_REQUIRED",
-        message: `Session '${sessionId}' requires recovery before accepting new turns`,
-        retriable: false,
-      });
-    }
-    return createSseStream(sessionId, requestId, errorStream());
-  }
-
-  const canonicalAgentId = session.agentId;
+  const canonicalAgentId = session?.agentId ?? body.agent_id;
 
   const userText = body.user_message?.text ?? "";
-  const runRequest: AgentRunRequest & {
-    agentId: string;
-    userMessageId?: string;
-    clientContext?: unknown;
-    metadata?: unknown;
-  } = {
-    sessionId,
-    requestId,
-    messages: [{ role: "user", content: userText }],
-    agentId: canonicalAgentId,
-    userMessageId: body.user_message?.id,
-    clientContext: body.client_context,
-    metadata: body.metadata,
-  };
 
   let runLoop: AsyncIterable<Chunk>;
 
   if (ctx.turnService) {
-    runLoop = ctx.turnService.run(runRequest);
+    try {
+      runLoop = executeUserTurn(
+        {
+          sessionId,
+          agentId: body.agent_id,
+          userText,
+          requestId,
+          metadata: {
+            traceStore: ctx.runtime?.traceStore,
+          },
+        },
+        {
+          sessionService: ctx.sessionService,
+          turnService: ctx.turnService,
+        },
+      );
+    } catch (error) {
+      const mappedCode = mapTurnValidationErrorCode(error);
+      const message = isMaidsClawError(error)
+        ? error.message
+        : (error instanceof Error ? error.message : String(error));
+      const retriable = isMaidsClawError(error) ? error.retriable : false;
+
+      async function* errorStream(): AsyncGenerator<GatewayEvent> {
+        yield makeEvent(sessionId!, requestId, "error", {
+          code: mappedCode,
+          message,
+          retriable,
+        });
+      }
+      return createSseStream(sessionId, requestId, errorStream());
+    }
   } else if (!ctx.createAgentLoop) {
     async function* stubStream(): AsyncGenerator<GatewayEvent> {
       yield makeEvent(sessionId!, requestId, "status", { message: "processing" });
@@ -360,6 +314,17 @@ export async function handleTurnStream(
     }
     return createSseStream(sessionId, requestId, stubStream());
   } else {
+    if (!canonicalAgentId) {
+      async function* errorStream(): AsyncGenerator<GatewayEvent> {
+        yield makeEvent(sessionId!, requestId, "error", {
+          code: "SESSION_NOT_FOUND",
+          message: `Session not found: ${sessionId}`,
+          retriable: false,
+        });
+      }
+      return createSseStream(sessionId, requestId, errorStream());
+    }
+
     const agentLoop = ctx.createAgentLoop(canonicalAgentId);
     if (!agentLoop) {
       async function* errorStream(): AsyncGenerator<GatewayEvent> {
@@ -371,6 +336,21 @@ export async function handleTurnStream(
       }
       return createSseStream(sessionId, requestId, errorStream());
     }
+
+    const runRequest: AgentRunRequest & {
+      agentId: string;
+      userMessageId?: string;
+      clientContext?: unknown;
+      metadata?: unknown;
+    } = {
+      sessionId,
+      requestId,
+      messages: [{ role: "user", content: userText }],
+      agentId: canonicalAgentId,
+      userMessageId: body.user_message?.id,
+      clientContext: body.client_context,
+      metadata: body.metadata,
+    };
 
     runLoop = agentLoop.run(runRequest);
   }
@@ -417,6 +397,24 @@ export async function handleTurnStream(
   }
 
   return createSseStream(sessionId, requestId, agentStream());
+}
+
+function mapTurnValidationErrorCode(error: unknown): string {
+  if (!isMaidsClawError(error)) {
+    return "INTERNAL_ERROR";
+  }
+
+  if (
+    error.code === "INVALID_ACTION"
+    && typeof error.details === "object"
+    && error.details !== null
+    && "reason" in error.details
+    && (error.details as { reason?: unknown }).reason === "SESSION_RECOVERY_REQUIRED"
+  ) {
+    return "SESSION_RECOVERY_REQUIRED";
+  }
+
+  return error.code;
 }
 
 /** POST /v1/sessions/{session_id}/close — close session */

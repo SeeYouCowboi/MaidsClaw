@@ -1,3 +1,4 @@
 - 2026-03-19: Trace infrastructure can live in `src/app/diagnostics` without changing wire/storage format by preserving `TraceStore` method surface and delegating file parse to `trace-reader.ts`.
 - 2026-03-19 08:28:37Z InteractionStore now exposes request-scoped lookup primitives (findSessionIdByRequestId, getSettlementPayload) and a message-only query (getMessageRecords) so app callers can stop using raw SQL over interaction_records.
 - 2026-03-19: Inspect read-model fallback can avoid full session scans by resolving `sessionId` through `InteractionStore.findSessionIdByRequestId(requestId)` and only reading records from that resolved session.
+- 2026-03-19: `TurnService.runUserTurn()` can stay thin by reading history via `InteractionStore.getMessageRecords()`, appending current user text, and delegating straight to `run()` so user commit/flush/recovery/trace finalize remains single-sourced.

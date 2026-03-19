@@ -1,8 +1,8 @@
 import type { Chunk } from "../core/chunk.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import { executeUserTurn } from "../app/turn/user-turn-service.js";
 import { TraceStore } from "../app/diagnostics/trace-store.js";
-import { CliError, EXIT_RUNTIME } from "./errors.js";
 import type {
   ObservationEvent,
   TurnExecutionResult,
@@ -26,15 +26,6 @@ export class LocalRuntime {
   constructor(private readonly runtime: RuntimeBootstrapResult) {}
 
   async executeTurn(params: LocalTurnParams): Promise<TurnExecutionResult> {
-    const session = this.runtime.sessionService.getSession(params.sessionId);
-    if (session && session.agentId !== params.agentId) {
-      throw new CliError(
-        "AGENT_SESSION_MISMATCH",
-        `Agent "${params.agentId}" does not own session "${params.sessionId}" (owner: "${session.agentId}")`,
-        EXIT_RUNTIME,
-      );
-    }
-
     const requestId = crypto.randomUUID();
     let assistantText = "";
     const publicChunks: ObservationEvent[] = [];
@@ -44,17 +35,17 @@ export class LocalRuntime {
       ? (this.runtime.traceStore ?? new TraceStore())
       : undefined;
 
-    const conversationHistory = this.buildConversationHistory(params.sessionId);
-    const messages: Array<{ role: "user" | "assistant"; content: string }> = [
-      ...conversationHistory,
-      { role: "user", content: params.text },
-    ];
-
-    const stream = this.runtime.turnService.run({
+    const stream = executeUserTurn({
       sessionId: params.sessionId,
+      agentId: params.agentId,
+      userText: params.text,
       requestId,
-      messages,
-      traceStore: perTurnTraceStore,
+      metadata: {
+        traceStore: perTurnTraceStore,
+      },
+    }, {
+      sessionService: this.runtime.sessionService,
+      turnService: this.runtime.turnService,
     });
 
     for await (const chunk of stream) {
@@ -98,39 +89,6 @@ export class LocalRuntime {
       public_chunks: publicChunks,
       tool_events: toolEvents,
     };
-  }
-
-  private buildConversationHistory(
-    sessionId: string,
-  ): Array<{ role: "user" | "assistant"; content: string }> {
-    type MessageRow = {
-      actor_type: string;
-      payload: string;
-    };
-
-    const rows = this.runtime.db.query<MessageRow>(
-      `SELECT actor_type, payload FROM interaction_records
-       WHERE session_id = ? AND record_type = 'message'
-       ORDER BY record_index ASC`,
-      [sessionId],
-    );
-
-    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-
-    for (const row of rows) {
-      try {
-        const payload = JSON.parse(row.payload) as { role?: string; content?: string };
-        const role = payload.role;
-        if (role !== "user" && role !== "assistant") continue;
-        const content = typeof payload.content === "string" ? payload.content : "";
-        if (content.length === 0) continue;
-        messages.push({ role, content });
-      } catch {
-        continue;
-      }
-    }
-
-    return messages;
   }
 
   private readSettlementPayload(
