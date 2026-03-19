@@ -1,5 +1,10 @@
 import type { GatewayEvent } from "../core/types.js";
-import type { PublicChunkRecord } from "./types.js";
+import type { ObservationEvent } from "../app/contracts/execution.js";
+import type {
+  SessionCloseResult,
+  SessionCreateResult,
+  SessionRecoverResult,
+} from "../app/contracts/session.js";
 import type {
   ChunksView,
   LogsView,
@@ -21,8 +26,8 @@ type GatewayErrorPayload = {
 export type GatewayStreamTurnResult = {
   requestId: string;
   assistantText: string;
-  publicChunks: PublicChunkRecord[];
-  toolEvents: PublicChunkRecord[];
+  publicChunks: ObservationEvent[];
+  toolEvents: ObservationEvent[];
   hadError: boolean;
   errorMessage?: string;
 };
@@ -34,20 +39,20 @@ export class GatewayClient {
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   }
 
-  async createSession(agentId: string): Promise<{ session_id: string; created_at: number }> {
+  async createSession(agentId: string): Promise<SessionCreateResult> {
     return this.requestJson("/v1/sessions", {
       method: "POST",
       body: JSON.stringify({ agent_id: agentId }),
     });
   }
 
-  async closeSession(sessionId: string): Promise<{ session_id: string; closed_at: number }> {
+  async closeSession(sessionId: string): Promise<SessionCloseResult> {
     return this.requestJson(`/v1/sessions/${encodeURIComponent(sessionId)}/close`, {
       method: "POST",
     });
   }
 
-  async recoverSession(sessionId: string): Promise<{ session_id: string; recovered: boolean }> {
+  async recoverSession(sessionId: string): Promise<SessionRecoverResult> {
     return this.requestJson(`/v1/sessions/${encodeURIComponent(sessionId)}/recover`, {
       method: "POST",
       body: JSON.stringify({ action: "discard_partial_turn" }),
@@ -80,8 +85,8 @@ export class GatewayClient {
     const body = await response.text();
     const events = this.parseSseEvents(body);
 
-    const publicChunks: PublicChunkRecord[] = [];
-    const toolEvents: PublicChunkRecord[] = [];
+    const publicChunks: ObservationEvent[] = [];
+    const toolEvents: ObservationEvent[] = [];
     let assistantText = "";
     let requestId = params.requestId ?? "";
     let hadError = false;
@@ -99,19 +104,17 @@ export class GatewayClient {
           type: "text_delta",
           timestamp: event.ts,
           text,
-          content: text,
         });
         continue;
       }
 
       if (event.type === "tool_call") {
-        const mapped: PublicChunkRecord = {
+        const mapped: ObservationEvent = {
           type: "tool_call",
           timestamp: event.ts,
           id: this.readStringField(event.data, "id"),
-          name: this.readStringField(event.data, "name"),
-          toolName: this.readStringField(event.data, "name"),
-          toolInput: event.data,
+          tool: this.readStringField(event.data, "name"),
+          input: event.data,
         };
         publicChunks.push(mapped);
         toolEvents.push(mapped);
@@ -119,14 +122,12 @@ export class GatewayClient {
       }
 
       if (event.type === "tool_result") {
-        const mapped: PublicChunkRecord = {
+        const mapped: ObservationEvent = {
           type: "tool_result",
           timestamp: event.ts,
           id: this.readStringField(event.data, "id"),
-          name: this.readStringField(event.data, "name"),
-          toolName: this.readStringField(event.data, "name"),
-          toolResult: event.data,
-          result: event.data,
+          tool: this.readStringField(event.data, "name"),
+          output: event.data,
         };
         publicChunks.push(mapped);
         toolEvents.push(mapped);
@@ -143,7 +144,6 @@ export class GatewayClient {
           timestamp: event.ts,
           code: this.readStringField(event.data, "code"),
           message,
-          content: message,
         });
         continue;
       }

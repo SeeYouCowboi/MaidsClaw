@@ -666,7 +666,7 @@ function seedChunksCase(cwd: string, requestId: string): string {
 		const traceStore = new TraceStore(tracesPath);
 		traceStore.initTrace(requestId, session.sessionId, "rp:alice");
 		traceStore.addChunk(requestId, { type: "text_delta", timestamp: 1000, text: "Hello" });
-		traceStore.addChunk(requestId, { type: "tool_use_start", timestamp: 2000, name: "memory_read" });
+		traceStore.addChunk(requestId, { type: "tool_use_start", timestamp: 2000, tool: "memory_read" });
 		traceStore.addChunk(requestId, { type: "text_delta", timestamp: 3000, text: " world" });
 		traceStore.addChunk(requestId, { type: "message_end", timestamp: 4000 });
 		traceStore.finalizeTrace(requestId);

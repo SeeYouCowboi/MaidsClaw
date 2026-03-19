@@ -4,10 +4,12 @@ import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
 import { TraceStore } from "./trace-store.js";
 import { CliError, EXIT_RUNTIME } from "./errors.js";
 import type {
-  PrivateCommitSummary,
-  PublicChunkRecord,
+  ObservationEvent,
   TurnExecutionResult,
-} from "./types.js";
+} from "../app/contracts/execution.js";
+import type {
+  PrivateCommitSummary,
+} from "../app/contracts/inspect.js";
 
 export type LocalTurnParams = {
   sessionId: string;
@@ -35,8 +37,8 @@ export class LocalRuntime {
 
     const requestId = crypto.randomUUID();
     let assistantText = "";
-    const publicChunks: PublicChunkRecord[] = [];
-    const toolEvents: PublicChunkRecord[] = [];
+    const publicChunks: ObservationEvent[] = [];
+    const toolEvents: ObservationEvent[] = [];
 
     const perTurnTraceStore = params.saveTrace
       ? (this.runtime.traceStore ?? new TraceStore())
@@ -159,54 +161,43 @@ export function createLocalRuntime(runtime: RuntimeBootstrapResult): LocalRuntim
   return new LocalRuntime(runtime);
 }
 
-function normalizeChunk(chunk: Chunk, timestamp: number): PublicChunkRecord | null {
+function normalizeChunk(chunk: Chunk, timestamp: number): ObservationEvent | null {
   switch (chunk.type) {
     case "text_delta":
       return {
         type: "text_delta",
         timestamp,
         text: chunk.text,
-        content: chunk.text,
       };
     case "tool_use_start":
       return {
         type: "tool_use_start",
         timestamp,
         id: chunk.id,
-        name: chunk.name,
-        toolName: chunk.name,
-        toolInput: { id: chunk.id, status: "started" },
+        tool: chunk.name,
+        input: { id: chunk.id, status: "started" },
       };
     case "tool_use_delta":
       return {
         type: "tool_use_delta",
         timestamp,
         id: chunk.id,
-        partialJson: chunk.partialJson,
-        toolInput: {
-          id: chunk.id,
-          status: "arguments_delta",
-          partial_json: chunk.partialJson,
-        },
+        input_delta: chunk.partialJson,
       };
     case "tool_use_end":
       return {
         type: "tool_use_end",
         timestamp,
         id: chunk.id,
-        toolInput: { id: chunk.id, status: "arguments_complete" },
       };
     case "tool_execution_result":
       return {
         type: "tool_execution_result",
         timestamp,
         id: chunk.id,
-        name: chunk.name,
-        result: chunk.result,
-        isError: chunk.isError,
-        toolName: chunk.name,
-        toolInput: { id: chunk.id, status: chunk.isError ? "failed" : "completed" },
-        toolResult: chunk.result,
+        tool: chunk.name,
+        output: chunk.result,
+        is_error: chunk.isError,
       };
     case "error":
       return {
@@ -215,20 +206,15 @@ function normalizeChunk(chunk: Chunk, timestamp: number): PublicChunkRecord | nu
         code: chunk.code,
         message: chunk.message,
         retriable: chunk.retriable,
-        content: chunk.message,
-        toolInput: { code: chunk.code, retriable: chunk.retriable },
       };
     case "message_end":
       return {
         type: "message_end",
         timestamp,
-        stopReason: chunk.stopReason,
-        inputTokens: chunk.inputTokens,
-        outputTokens: chunk.outputTokens,
-        toolInput: {
-          stopReason: chunk.stopReason,
-          inputTokens: chunk.inputTokens,
-          outputTokens: chunk.outputTokens,
+        stop_reason: chunk.stopReason,
+        usage: {
+          input_tokens: chunk.inputTokens,
+          output_tokens: chunk.outputTokens,
         },
       };
     default:

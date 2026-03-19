@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { ObservationEvent } from "../app/contracts/execution.js";
+import type { RedactedSettlement } from "../app/contracts/inspect.js";
 import type {
   FlushCapture,
   LogEntry,
   PromptCapture,
-  PublicChunkRecord,
-  RedactedSettlement,
   TraceBundle,
-} from "./types.js";
+} from "../app/contracts/trace.js";
 
 const UNKNOWN_AGENT_ID = "unknown";
 const UNKNOWN_SESSION_ID = "unknown";
@@ -42,7 +42,7 @@ export class TraceStore {
     };
   }
 
-  addChunk(requestId: string, chunk: PublicChunkRecord): void {
+  addChunk(requestId: string, chunk: ObservationEvent): void {
     const bundle = this.ensureBundle(requestId);
     bundle.public_chunks.push({ ...chunk });
   }

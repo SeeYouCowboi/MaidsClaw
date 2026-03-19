@@ -13,7 +13,7 @@ import { SessionService } from "../../src/session/service.js";
 import { closeDatabaseGracefully, openDatabase, type Db } from "../../src/storage/database.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
 import { createLocalRuntime } from "../../src/cli/local-runtime.js";
-import type { TurnExecutionResult } from "../../src/cli/types.js";
+import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
 
 type TurnServiceLoop = {
   run(request: AgentRunRequest): AsyncIterable<Chunk>;

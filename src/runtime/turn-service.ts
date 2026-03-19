@@ -1,10 +1,8 @@
 import type { AgentProfile } from "../agents/profile.js";
+import type { ObservationEvent } from "../app/contracts/execution.js";
+import type { RedactedSettlement } from "../app/contracts/inspect.js";
+import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../cli/trace-store.js";
-import type {
-	LogEntry,
-	PublicChunkRecord,
-	RedactedSettlement,
-} from "../cli/types.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
@@ -697,19 +695,25 @@ export class TurnService {
 	}
 }
 
-function toPublicChunkRecord(chunk: Chunk): PublicChunkRecord | null {
+function toPublicChunkRecord(chunk: Chunk): ObservationEvent | null {
 	const timestamp = Date.now();
 	switch (chunk.type) {
 		case "text_delta":
 			return { type: chunk.type, timestamp, text: chunk.text };
 		case "tool_use_start":
-			return { type: chunk.type, timestamp, id: chunk.id, name: chunk.name };
+			return {
+				type: chunk.type,
+				timestamp,
+				id: chunk.id,
+				tool: chunk.name,
+				input: { id: chunk.id, status: "started" },
+			};
 		case "tool_use_delta":
 			return {
 				type: chunk.type,
 				timestamp,
 				id: chunk.id,
-				partialJson: chunk.partialJson,
+				input_delta: chunk.partialJson,
 			};
 		case "tool_use_end":
 			return { type: chunk.type, timestamp, id: chunk.id };
@@ -718,17 +722,19 @@ function toPublicChunkRecord(chunk: Chunk): PublicChunkRecord | null {
 				type: chunk.type,
 				timestamp,
 				id: chunk.id,
-				name: chunk.name,
-				result: chunk.result,
-				isError: chunk.isError,
+				tool: chunk.name,
+				output: chunk.result,
+				is_error: chunk.isError,
 			};
 		case "message_end":
 			return {
 				type: chunk.type,
 				timestamp,
-				stopReason: chunk.stopReason,
-				inputTokens: chunk.inputTokens,
-				outputTokens: chunk.outputTokens,
+				stop_reason: chunk.stopReason,
+				usage: {
+					input_tokens: chunk.inputTokens,
+					output_tokens: chunk.outputTokens,
+				},
 			};
 		case "error":
 			return {

@@ -1,0 +1,45 @@
+Task: T2 - split CLI type contracts and move app-facing contracts
+
+Changed files:
+- src/app/contracts/execution.ts
+- src/app/contracts/inspect.ts
+- src/app/contracts/session.ts
+- src/app/contracts/trace.ts
+- src/cli/types.ts
+- src/runtime/turn-service.ts
+- src/cli/gateway-client.ts
+- src/cli/local-runtime.ts
+- src/cli/trace-store.ts
+- src/cli/inspect/view-models.ts
+- test/cli/acceptance.test.ts
+- test/cli/local-runtime.test.ts
+- test/cli/session-turn.test.ts
+- test/cli/debug-commands.test.ts
+
+Contract split evidence:
+- Migrated PromptCapture/FlushCapture/LogEntry/TraceBundle -> src/app/contracts/trace.ts
+- Migrated RedactedSettlement/PrivateCommitSummary -> src/app/contracts/inspect.ts
+- Migrated TurnExecutionResult -> src/app/contracts/execution.ts
+- Added session-level app contracts and execution mode -> src/app/contracts/session.ts
+- Trimmed src/cli/types.ts to terminal-only CliMode/JsonEnvelope/CliDiagnostic
+
+Unified observation event model evidence:
+- Introduced app-level ObservationEvent in src/app/contracts/execution.ts
+- Removed alias pairs from shared contract (no toolName/toolResult/content or name/result/text duplicates)
+- Canonical fields now used in shared contract: tool, input, input_delta, output, is_error, stop_reason, usage
+- Updated runtime/local/gateway mapping sites to emit canonical ObservationEvent fields
+
+Import ownership evidence:
+- src/runtime/turn-service.ts now imports app contracts (execution/inspect/trace), not cli/types
+- src/cli/gateway-client.ts now imports ObservationEvent and session contracts from src/app/contracts
+- src/cli/trace-store.ts now imports execution/inspect/trace contracts from src/app/contracts
+- tests importing TurnExecutionResult now use src/app/contracts/execution.ts
+
+Verification:
+1) LSP diagnostics on changed files: clean (no diagnostics)
+2) Build command:
+   bun run build
+   Output:
+   src/core/models/openai-provider.ts(96,9): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ code: string; message: string; retriable: boolean; details?: unknown; }'.
+
+Result: build reports only the pre-existing openai-provider.ts:96 error, with no new errors introduced by this task.

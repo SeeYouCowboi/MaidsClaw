@@ -7,8 +7,9 @@ import type {
 } from "../../interaction/contracts.js";
 import { redactInteractionRecord } from "../../interaction/redaction.js";
 import { InteractionStore } from "../../interaction/store.js";
+import type { LogEntry, TraceBundle } from "../../app/contracts/trace.js";
 import type { TraceStore } from "../trace-store.js";
-import type { CliMode, LogEntry, TraceBundle } from "../types.js";
+import type { CliMode } from "../types.js";
 import {
 	requireRequestId,
 	type InspectContext,
@@ -277,16 +278,21 @@ export function loadChunksView(params: InspectViewLoadParams): ChunksView {
 	return {
 		request_id: requestId,
 		public_only: true,
-		chunks: (trace?.public_chunks ?? []).map((chunk, index) => ({
-			index,
-			type: chunk.type,
-			...(chunk.timestamp !== undefined ? { timestamp: chunk.timestamp } : {}),
-			...(typeof chunk.text === "string"
-				? { preview: chunk.text }
-				: typeof chunk.message === "string"
-					? { preview: chunk.message }
-					: {}),
-		})),
+		chunks: (trace?.public_chunks ?? []).map((chunk, index) => {
+			let preview: string | undefined;
+			if (chunk.type === "text_delta") {
+				preview = chunk.text;
+			} else if (chunk.type === "error") {
+				preview = chunk.message;
+			}
+
+			return {
+				index,
+				type: chunk.type,
+				...(chunk.timestamp !== undefined ? { timestamp: chunk.timestamp } : {}),
+				...(preview !== undefined ? { preview } : {}),
+			};
+		}),
 	};
 }
 
