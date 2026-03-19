@@ -12,7 +12,7 @@ import { dispatch, resetCommands } from "../../src/cli/parser.js";
 import { registerAgentCommands } from "../../src/cli/commands/agent.js";
 import { CliError } from "../../src/cli/errors.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
-import type { AgentFileEntry } from "../../src/cli/agent-file-store.js";
+import type { AgentFileEntry } from "../../src/app/config/agents/agent-file-store.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 

@@ -17,9 +17,9 @@ import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_CONFIG } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { CliDiagnostic } from "../types.js";
-import { validateAgentFile } from "../agent-loader.js";
-import type { AgentDiagnostic } from "../agent-loader.js";
-import type { AgentFileEntry } from "../agent-file-store.js";
+import { validateAgentFile } from "../../app/config/agents/agent-loader.js";
+import type { AgentDiagnostic } from "../../app/config/agents/agent-loader.js";
+import type { AgentFileEntry } from "../../app/config/agents/agent-file-store.js";
 import {
   loadConfig,
   loadRuntimeConfig,

@@ -1,19 +1,17 @@
 // Agent loader — validates file entries, loads into AgentProfile[], exposes reusable diagnostics
 
-import type { AgentProfile, AgentRole, ToolPermission } from "../agents/profile.js";
-import { normalizeModelRef } from "../core/models/registry.js";
+import type { AgentProfile, AgentRole, ToolPermission } from "../../../agents/profile.js";
+import { normalizeModelRef } from "../../../core/models/registry.js";
 import { type AgentFileEntry, readAgentFile } from "./agent-file-store.js";
 
 // ─── Diagnostic types ────────────────────────────────────────
 
-/** Diagnostic code for agent validation errors */
 export type AgentDiagnosticCode =
 	| "config.invalid_agent_role"
 	| "config.duplicate_agent_id"
 	| "config.agent_persona_not_found"
 	| "config.rp_missing_submit_rp_turn_permission";
 
-/** A single validation diagnostic */
 export type AgentDiagnostic = {
 	code: AgentDiagnosticCode;
 	message: string;
@@ -162,10 +160,6 @@ export function validateAgentFile(
 
 // ─── Loader ──────────────────────────────────────────────────
 
-/**
- * Convert a validated AgentFileEntry to an AgentProfile.
- * Does NOT mutate preset profiles — creates new objects.
- */
 function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 	const role = entry.role as AgentRole;
 	const defaults = ROLE_DEFAULTS[role] ?? ROLE_DEFAULTS.task_agent;
@@ -197,7 +191,6 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 	};
 }
 
-/** Result of loading agents from file */
 export type LoadFileAgentsResult = {
 	agents: AgentProfile[];
 	diagnostics: AgentDiagnostic[];
@@ -209,9 +202,6 @@ export type LoadFileAgentsResult = {
  * - Missing file → zero agents, zero diagnostics (file is optional)
  * - Missing `enabled` field → treated as true
  * - Invalid entries produce diagnostics but do NOT prevent valid entries from loading
- *
- * @param filePath — path to config/agents.json
- * @param personaIds — optional known persona IDs for reference checking
  */
 export function loadFileAgents(
 	filePath: string,
@@ -225,7 +215,6 @@ export function loadFileAgents(
 
 	const diagnostics = validateAgentFile(entries, personaIds);
 
-	// Collect IDs of entries with fatal diagnostics (invalid role, duplicate)
 	const fatalIds = new Set<string>();
 	for (const d of diagnostics) {
 		if (
@@ -238,22 +227,18 @@ export function loadFileAgents(
 		}
 	}
 
-	// Filter to enabled entries without fatal errors, then convert
 	const agents: AgentProfile[] = [];
 	const processedIds = new Set<string>();
 
 	for (const entry of entries) {
-		// Skip disabled entries (missing enabled = true)
 		if (entry.enabled === false) {
 			continue;
 		}
 
-		// Skip entries with fatal validation errors
 		if (fatalIds.has(entry.id)) {
 			continue;
 		}
 
-		// Skip duplicate IDs (keep first occurrence)
 		if (processedIds.has(entry.id)) {
 			continue;
 		}

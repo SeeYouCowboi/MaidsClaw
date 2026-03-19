@@ -7,7 +7,7 @@ import {
 } from "../agents/presets.js";
 import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
-import { loadFileAgents } from "../cli/agent-loader.js";
+import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { TraceStore } from "../cli/trace-store.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";

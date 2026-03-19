@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentFileEntry } from "../../src/cli/agent-file-store.js";
+import type { AgentFileEntry } from "../../src/app/config/agents/agent-file-store.js";
 import {
 	loadFileAgents,
 	validateAgentFile,
 	type AgentDiagnostic,
-} from "../../src/cli/agent-loader.js";
+} from "../../src/app/config/agents/agent-loader.js";
 
 // ─── Temp directory helpers ──────────────────────────────────
 

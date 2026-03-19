@@ -19,7 +19,7 @@ import { registerChatCommand } from "../../src/cli/commands/chat.js";
 import { CliError, EXIT_USAGE } from "../../src/cli/errors.js";
 import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
 import type { JsonEnvelope } from "../../src/cli/types.js";
-import type { AgentFileEntry } from "../../src/cli/agent-file-store.js";
+import type { AgentFileEntry } from "../../src/app/config/agents/agent-file-store.js";
 import { createShellState } from "../../src/cli/shell/state.js";
 import { dispatchSlashCommand } from "../../src/cli/shell/slash-dispatcher.js";
 import type { SlashDispatchContext } from "../../src/cli/shell/slash-dispatcher.js";

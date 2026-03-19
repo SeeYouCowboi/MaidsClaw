@@ -1,7 +1,7 @@
 // Agent file store — read/write config/agents.json as typed AgentFileEntry objects
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { AgentRole, OutputMode, AgentLifecycle } from "../agents/profile.js";
+import type { AgentRole, OutputMode, AgentLifecycle } from "../../../agents/profile.js";
 
 /** Shape of a single agent entry in config/agents.json */
 export type AgentFileEntry = {

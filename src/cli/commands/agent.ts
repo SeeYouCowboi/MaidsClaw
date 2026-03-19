@@ -20,11 +20,11 @@ import {
 	readAgentFile,
 	writeAgentFile,
 	type AgentFileEntry,
-} from "../agent-file-store.js";
+} from "../../app/config/agents/agent-file-store.js";
 import {
 	validateAgentFile,
 	type AgentDiagnostic,
-} from "../agent-loader.js";
+} from "../../app/config/agents/agent-loader.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
