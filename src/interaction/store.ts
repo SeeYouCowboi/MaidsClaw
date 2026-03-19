@@ -1,6 +1,6 @@
 import { MaidsClawError } from "../core/errors.js";
 import type { Db } from "../storage/database.js";
-import type { InteractionRecord } from "./contracts.js";
+import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 
 type InteractionRow = {
   id: number;
@@ -19,6 +19,10 @@ type PendingSettlementJobRow = {
   status: string;
   payload: string | null;
   next_attempt_at: number | null;
+};
+
+type PayloadRow = {
+  payload: string;
 };
 
 type PendingSettlementJobPayload = {
@@ -134,6 +138,72 @@ export class InteractionStore {
       [sessionId, correlatedTurnId, actorType],
     );
     return row ? rowToRecord(row) : undefined;
+  }
+
+  findSessionIdByRequestId(requestId: string): string | undefined {
+    const rows = this.db.query<{ session_id: string }>(
+      `SELECT DISTINCT session_id
+       FROM interaction_records
+       WHERE correlated_turn_id = ?`,
+      [requestId],
+    );
+
+    if (rows.length === 0) {
+      return undefined;
+    }
+
+    if (rows.length > 1) {
+      throw new MaidsClawError({
+        code: "REQUEST_ID_AMBIGUOUS",
+        message: `Request id maps to multiple sessions: requestId=${requestId}`,
+        retriable: false,
+        details: {
+          requestId,
+          sessionIds: rows.map((row) => row.session_id),
+        },
+      });
+    }
+
+    return rows[0].session_id;
+  }
+
+  getSettlementPayload(sessionId: string, requestId: string): TurnSettlementPayload | undefined {
+    const row = this.db.get<PayloadRow>(
+      `SELECT payload
+       FROM interaction_records
+       WHERE session_id = ?
+         AND correlated_turn_id = ?
+         AND record_type = 'turn_settlement'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [sessionId, requestId],
+    );
+
+    if (!row) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(row.payload) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        return undefined;
+      }
+      return parsed as TurnSettlementPayload;
+    } catch {
+      return undefined;
+    }
+  }
+
+  getMessageRecords(sessionId: string): InteractionRecord[] {
+    const rows = this.db.query<InteractionRow>(
+      `SELECT *
+       FROM interaction_records
+       WHERE session_id = ?
+         AND record_type = 'message'
+       ORDER BY record_index ASC`,
+      [sessionId],
+    );
+    return rows.map(rowToRecord);
   }
 
   /**

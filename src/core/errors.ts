@@ -41,6 +41,7 @@ export type ErrorCode =
   // Interaction log errors
   | "INTERACTION_DUPLICATE_RECORD"
   | "INTERACTION_INVALID_FIELD"
+  | "REQUEST_ID_AMBIGUOUS"
   // RP runtime errors
   | "RP_TURN_OUTCOME_INVALID"
   | "COGNITION_OP_UNSUPPORTED"

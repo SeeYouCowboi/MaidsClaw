@@ -1,0 +1,11 @@
+## Task 6 - InteractionStore request/session primitives (2026-03-19 08:28:37Z)
+- Added findSessionIdByRequestId(requestId) in src/interaction/store.ts with distinct session lookup and explicit MaidsClawError (REQUEST_ID_AMBIGUOUS) when one request maps to multiple sessions.
+- Added getSettlementPayload(sessionId, requestId) in src/interaction/store.ts to read latest turn_settlement payload by session+request scope.
+- Added getMessageRecords(sessionId) in src/interaction/store.ts to return ordered record_type=message records only.
+- Added tests in test/interaction/store-request-lookup.test.ts covering unique-hit, missing-hit, ambiguity-error, settlement lookup, and message-only retrieval.
+
+### Verification
+- bun test test/interaction/store-request-lookup.test.ts -> PASS (6 tests, 0 fail).
+- bun run build -> expected pre-existing error only at src/core/models/openai-provider.ts:96 (TS2353 status field).
+- LSP diagnostics on changed files are clean: src/interaction/store.ts, src/core/errors.ts, test/interaction/store-request-lookup.test.ts.
+

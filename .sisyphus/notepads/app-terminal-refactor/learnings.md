@@ -1,0 +1,2 @@
+- 2026-03-19: Trace infrastructure can live in `src/app/diagnostics` without changing wire/storage format by preserving `TraceStore` method surface and delegating file parse to `trace-reader.ts`.
+- 2026-03-19 08:28:37Z InteractionStore now exposes request-scoped lookup primitives (findSessionIdByRequestId, getSettlementPayload) and a message-only query (getMessageRecords) so app callers can stop using raw SQL over interaction_records.
