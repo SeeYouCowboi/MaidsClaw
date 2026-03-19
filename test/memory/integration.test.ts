@@ -1,19 +1,19 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import { AliasService } from "./alias.js";
-import { CoreMemoryService } from "./core-memory.js";
-import { EmbeddingService } from "./embeddings.js";
-import { MaterializationService } from "./materialization.js";
-import { GraphNavigator } from "./navigator.js";
-import { PromotionService } from "./promotion.js";
-import { getMemoryHints } from "./prompt-data.js";
-import { RetrievalService } from "./retrieval.js";
-import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "./schema.js";
-import { GraphStorageService } from "./storage.js";
-import { type MemoryFlushRequest, MemoryTaskAgent } from "./task-agent.js";
-import { buildMemoryTools } from "./tools.js";
-import { TransactionBatcher } from "./transaction-batcher.js";
-import type { NodeRef, ViewerContext } from "./types.js";
+import { AliasService } from "../../src/memory/alias.js";
+import { CoreMemoryService } from "../../src/memory/core-memory.js";
+import { EmbeddingService } from "../../src/memory/embeddings.js";
+import { MaterializationService } from "../../src/memory/materialization.js";
+import { GraphNavigator } from "../../src/memory/navigator.js";
+import { PromotionService } from "../../src/memory/promotion.js";
+import { getMemoryHints } from "../../src/memory/prompt-data.js";
+import { RetrievalService } from "../../src/memory/retrieval.js";
+import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "../../src/memory/schema.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
+import { type MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import { buildMemoryTools } from "../../src/memory/tools.js";
+import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
+import type { NodeRef, ViewerContext } from "../../src/memory/types.js";
 
 type ToolCallResult = {
 	name: string;
