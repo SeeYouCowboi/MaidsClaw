@@ -426,6 +426,11 @@ export async function handleTurnStream(
       return createSseStream(sessionId, requestId, errorStream());
     }
   } else {
+    // @legacy-test-path — This branch exists only for gateway integration tests
+    // that inject a bare createAgentLoop without a full TurnService.
+    // In production bootstrapApp always provides turnService, so this path is unreachable.
+    // It bypasses runUserTurn (no history, no user record commit, no trace).
+    // TODO: Migrate gateway tests to provide a stub TurnService and remove this branch.
     if (!canonicalAgentId) {
       async function* errorStream(): AsyncGenerator<GatewayEvent> {
         yield makeEvent(sessionId!, requestId, "error", {

@@ -83,6 +83,12 @@ export class AgentLoop {
 		this.maxDelegationDepth = options.maxDelegationDepth ?? 3;
 	}
 
+	/**
+	 * @internal Low-level streaming agent execution.
+	 * Production code should call {@link TurnService.runUserTurn} instead,
+	 * which handles history assembly, user record commit, and post-processing.
+	 * Direct usage is reserved for TurnService internals and test harnesses.
+	 */
 	async *run(request: AgentRunRequest): AsyncIterable<Chunk> {
 		const requestId = request.requestId ?? `req:${Date.now()}`;
 		const delegationDepth = request.delegationDepth ?? 0;
