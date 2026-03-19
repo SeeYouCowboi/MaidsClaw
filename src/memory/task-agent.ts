@@ -1,8 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
-import type { CognitionOp, PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
-import { CognitionOpCommitter } from "./cognition-op-committer.js";
+import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
+import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
+import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
+import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
@@ -15,8 +17,6 @@ import type {
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
-  NodeRefKind,
-  SemanticEdgeType,
 } from "./types.js";
 
 export type { MigrationResult, GraphOrganizerResult } from "./types.js";
@@ -51,7 +51,7 @@ export type ExplicitSettlementMeta = {
   privateCommit: PrivateCognitionCommit;
 };
 
-type IngestionAttachment = {
+export type IngestionAttachment = {
   recordType: "tool_call" | "tool_result" | "delegation" | "task_result" | "turn_settlement";
   payload: unknown;
   committedAt: number;
@@ -59,7 +59,7 @@ type IngestionAttachment = {
   explicitMeta?: ExplicitSettlementMeta;
 };
 
-type IngestionInput = {
+export type IngestionInput = {
   batchId: string;
   agentId: string;
   sessionId: string;
@@ -90,7 +90,7 @@ export type MemoryTaskModelProvider = {
   embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
 
-type CreatedState = {
+export type CreatedState = {
   privateEventIds: number[];
   privateBeliefIds: number[];
   entityIds: number[];
@@ -302,6 +302,9 @@ export class MemoryIngestionPolicy {
 export class MemoryTaskAgent {
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
+  private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
+  private readonly coreMemoryIndexUpdater: CoreMemoryIndexUpdater;
+  private readonly graphOrganizer: GraphOrganizer;
   private migrateTail: Promise<unknown> = Promise.resolve();
   private organizeTail: Promise<unknown> = Promise.resolve();
 
@@ -325,6 +328,23 @@ export class MemoryTaskAgent {
         },
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
+    this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
+      this.db,
+      this.storage,
+      this.modelProvider,
+      (agentId) => this.loadExistingContext(agentId),
+      (request, toolCalls, created) => {
+        this.applyCallOneToolCalls(request, toolCalls, created);
+      },
+    );
+    this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
+    this.graphOrganizer = new GraphOrganizer(
+      this.db,
+      this.storage,
+      this.coreMemory,
+      this.embeddings,
+      this.modelProvider,
+    );
   }
 
   runMigrate(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
@@ -353,42 +373,7 @@ export class MemoryTaskAgent {
 
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
-      for (const explicitMeta of ingest.explicitSettlements) {
-        const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
-        const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
-        const explicitSupportCall = await this.modelProvider.chat(
-          [
-            {
-              role: "system",
-              content:
-                "You are a memory migration support engine for authoritative explicit cognition. Use tools only to resolve canonical entities and aliases needed by authoritative explicit ops. Do not invent or rewrite private beliefs/events. Create only supporting entities, aliases, and logic edges when strictly necessary.",
-            },
-            {
-              role: "user",
-              content: JSON.stringify({ ingest: explicitIngest, existingContext: explicitContext }),
-            },
-          ],
-          EXPLICIT_SUPPORT_TOOLS,
-        );
-
-        this.applyCallOneToolCalls(
-          {
-            ...flushRequest,
-            agentId: explicitMeta.ownerAgentId,
-          },
-          explicitSupportCall,
-          created,
-        );
-
-        const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
-        const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
-        const commitRefs = new CognitionOpCommitter(this.storage, explicitMeta.ownerAgentId, currentLocationEntityId).commit(
-          explicitMeta.privateCommit.ops,
-          explicitMeta.settlementId,
-        );
-        created.changedNodeRefs.push(...commitRefs);
-        this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCommit.ops, created);
-      }
+      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS);
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
       const dedupedIngest: IngestionInput = {
@@ -434,43 +419,7 @@ export class MemoryTaskAgent {
 
       this.createSameEpisodeEdgesForBatch(createdPrivateEvents);
 
-      const indexBlock = this.coreMemory.getBlock(flushRequest.agentId, "index");
-      const callTwo = await this.modelProvider.chat(
-        [
-          {
-            role: "system",
-            content:
-              "Choose index-worthy additions only. Keep concise lines with pointer addresses @pointer_key, #topic, e:id, f:id.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              currentIndexText: indexBlock.value,
-              createdItems: {
-                entityIds: created.entityIds,
-                privateEventIds: created.privateEventIds,
-                privateBeliefIds: created.privateBeliefIds,
-                factIds: created.factIds,
-              },
-            }),
-          },
-        ],
-        CALL_TWO_TOOLS,
-      );
-
-      const newIndexText = this.extractUpdatedIndex(callTwo, indexBlock.value);
-      if (newIndexText !== indexBlock.value) {
-        const replaced = this.coreMemory.replaceBlock(
-          flushRequest.agentId,
-          "index",
-          indexBlock.value,
-          newIndexText,
-          "task-agent",
-        );
-        if (!replaced.success) {
-          throw new Error(`Index update failed: ${replaced.reason}`);
-        }
-      }
+      await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
 
       this.db.prepare("COMMIT").run();
     } catch (error) {
@@ -504,217 +453,8 @@ export class MemoryTaskAgent {
       fact_ids: created.factIds,
     };
   }
-
-  private buildExplicitIngest(ingest: IngestionInput, requestId: string): IngestionInput {
-    return {
-      ...ingest,
-      dialogue: ingest.dialogue.filter((row) => row.correlatedTurnId === requestId),
-      attachments: ingest.attachments.filter((attachment) => {
-        if (attachment.correlatedTurnId === requestId) {
-          return true;
-        }
-        if (attachment.recordType !== "turn_settlement") {
-          return false;
-        }
-        const payload = attachment.payload as TurnSettlementPayload | undefined;
-        return payload?.requestId === requestId;
-      }),
-      explicitSettlements: ingest.explicitSettlements.filter((meta) => meta.requestId === requestId),
-    };
-  }
-
-  private findSettlementPayload(
-    attachments: IngestionAttachment[],
-    settlementId: string,
-  ): TurnSettlementPayload | undefined {
-    const settlementAttachment = attachments.find(
-      (attachment) => attachment.explicitMeta?.settlementId === settlementId,
-    );
-    if (!settlementAttachment) {
-      return undefined;
-    }
-    return settlementAttachment.payload as TurnSettlementPayload;
-  }
-
-  private collectExplicitSettlementRefs(
-    agentId: string,
-    settlementId: string,
-    ops: CognitionOp[],
-    created: CreatedState,
-  ): void {
-    const eventRows = this.db
-      .prepare(
-        `SELECT id FROM agent_event_overlay
-         WHERE agent_id = ? AND settlement_id = ?`,
-      )
-      .all(agentId, settlementId) as Array<{ id: number }>;
-    for (const row of eventRows) {
-      created.privateEventIds.push(row.id);
-      created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
-    }
-
-    const beliefRows = this.db
-      .prepare(
-        `SELECT id FROM agent_fact_overlay
-         WHERE agent_id = ? AND settlement_id = ?`,
-      )
-      .all(agentId, settlementId) as Array<{ id: number }>;
-    for (const row of beliefRows) {
-      created.privateBeliefIds.push(row.id);
-      created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
-    }
-
-    for (const op of ops) {
-      if (op.op !== "retract") {
-        continue;
-      }
-      if (op.target.kind === "assertion") {
-        const row = this.db
-          .prepare(
-            `SELECT id FROM agent_fact_overlay
-             WHERE agent_id = ? AND cognition_key = ?`,
-          )
-          .get(agentId, op.target.key) as { id: number } | null;
-        if (row) {
-          created.privateBeliefIds.push(row.id);
-          created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
-        }
-        continue;
-      }
-
-      const row = this.db
-        .prepare(
-          `SELECT id FROM agent_event_overlay
-           WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
-        )
-        .get(agentId, op.target.key, op.target.kind) as { id: number } | null;
-      if (row) {
-        created.privateEventIds.push(row.id);
-        created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
-      }
-    }
-  }
-
   private async runOrganizeInternal(job: GraphOrganizerJob): Promise<GraphOrganizerResult> {
-    const uniqueRefs = Array.from(new Set(job.changedNodeRefs));
-    if (uniqueRefs.length === 0) {
-      return { updated_embedding_refs: [], updated_semantic_edge_count: 0, updated_score_refs: [] };
-    }
-
-    const nodes = uniqueRefs
-      .map((nodeRef) => {
-        const parsed = this.parseNodeRef(nodeRef);
-        if (!parsed) {
-          return undefined;
-        }
-        const content = this.renderNodeContent(nodeRef);
-        if (!content) {
-          return undefined;
-        }
-        return { nodeRef, nodeKind: parsed.kind, content };
-      })
-      .filter((node): node is { nodeRef: NodeRef; nodeKind: NodeRefKind; content: string } => node !== undefined);
-
-    if (nodes.length === 0) {
-      return { updated_embedding_refs: [], updated_semantic_edge_count: 0, updated_score_refs: [] };
-    }
-
-    const embeddings = await this.modelProvider.embed(
-      nodes.map((node) => node.content),
-      "memory_index",
-      job.embeddingModelId,
-    );
-
-    const entries = nodes.map((node, index) => ({
-      nodeRef: node.nodeRef,
-      nodeKind: node.nodeKind,
-      viewType: "primary" as const,
-      modelId: job.embeddingModelId,
-      embedding: embeddings[index] ?? new Float32Array([0]),
-    }));
-
-    this.embeddings.batchStoreEmbeddings(entries);
-
-    let semanticEdgeCount = 0;
-    const scoreTargets = new Set<NodeRef>();
-
-    for (let index = 0; index < entries.length; index += 1) {
-      const source = entries[index];
-      const sourceContent = nodes[index]?.content ?? "";
-      const neighbors = this.embeddings.queryNearestNeighbors(source.embedding, {
-        nodeKind: source.nodeKind,
-        agentId: job.agentId,
-        limit: 20,
-      });
-
-      let similarCount = 0;
-      let conflictCount = 0;
-      let bridgeCount = 0;
-
-      for (const neighbor of neighbors) {
-        if (neighbor.nodeRef === source.nodeRef) {
-          continue;
-        }
-
-        const targetContent = this.renderNodeContent(neighbor.nodeRef) ?? "";
-        const relation = this.selectSemanticRelation(
-          source.nodeRef,
-          source.nodeKind,
-          sourceContent,
-          neighbor.nodeRef,
-          neighbor.nodeKind as NodeRefKind,
-          targetContent,
-          neighbor.similarity,
-          job.agentId,
-        );
-
-        if (!relation) {
-          continue;
-        }
-
-        if (relation === "semantic_similar" && similarCount >= 4) {
-          continue;
-        }
-        if (relation === "conflict_or_update" && conflictCount >= 2) {
-          continue;
-        }
-        if (relation === "entity_bridge" && bridgeCount >= 2) {
-          continue;
-        }
-
-        this.storage.upsertSemanticEdge(source.nodeRef, neighbor.nodeRef, relation, neighbor.similarity);
-        semanticEdgeCount += 1;
-        scoreTargets.add(source.nodeRef);
-        scoreTargets.add(neighbor.nodeRef);
-        this.addOneHopNeighbors(neighbor.nodeRef, scoreTargets);
-
-        if (relation === "semantic_similar") {
-          similarCount += 1;
-        }
-        if (relation === "conflict_or_update") {
-          conflictCount += 1;
-        }
-        if (relation === "entity_bridge") {
-          bridgeCount += 1;
-        }
-      }
-    }
-
-    const scoreRefs = Array.from(scoreTargets);
-    for (const nodeRef of scoreRefs) {
-      const score = this.computeNodeScore(nodeRef, job.agentId);
-      this.storage.upsertNodeScores(nodeRef, score.salience, score.centrality, score.bridgeScore);
-    }
-
-    for (const nodeRef of uniqueRefs) {
-      this.syncSearchProjection(nodeRef, job.agentId);
-    }
-
-    return {
-      updated_embedding_refs: entries.map((entry) => entry.nodeRef),
-      updated_semantic_edge_count: semanticEdgeCount,
-      updated_score_refs: scoreRefs,
-    };
+    return this.graphOrganizer.run(job);
   }
 
   private assertQueueOwnership(flushRequest: MemoryFlushRequest): void {
@@ -928,391 +668,6 @@ export class MemoryTaskAgent {
     }
   }
 
-  private extractUpdatedIndex(toolCalls: ToolCallResult[], fallback: string): string {
-    for (const call of toolCalls) {
-      if (call.name !== "update_index_block") {
-        continue;
-      }
-      const newText = this.asOptionalString(call.arguments.new_text);
-      if (newText !== null) {
-        return newText;
-      }
-    }
-    return fallback;
-  }
-
-  private parseNodeRef(nodeRef: NodeRef): { kind: NodeRefKind; id: number } | undefined {
-    const [kindRaw, idRaw] = nodeRef.split(":");
-    const id = Number(idRaw);
-    if (!Number.isInteger(id) || id <= 0) {
-      return undefined;
-    }
-    if (
-      kindRaw !== "event" &&
-      kindRaw !== "entity" &&
-      kindRaw !== "fact" &&
-      kindRaw !== "private_event" &&
-      kindRaw !== "private_belief"
-    ) {
-      return undefined;
-    }
-    return { kind: kindRaw, id };
-  }
-
-  private renderNodeContent(nodeRef: NodeRef): string | undefined {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed) {
-      return undefined;
-    }
-
-    if (parsed.kind === "entity") {
-      const row = this.db
-        .prepare(`SELECT display_name, summary, entity_type FROM entity_nodes WHERE id = ?`)
-        .get(parsed.id) as { display_name: string; summary: string | null; entity_type: string } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.display_name} ${row.entity_type} ${row.summary ?? ""}`.trim();
-    }
-
-    if (parsed.kind === "event") {
-      const row = this.db
-        .prepare(`SELECT summary, raw_text, event_category FROM event_nodes WHERE id = ?`)
-        .get(parsed.id) as { summary: string | null; raw_text: string | null; event_category: string } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.summary ?? ""} ${row.raw_text ?? ""} ${row.event_category}`.trim();
-    }
-
-    if (parsed.kind === "fact") {
-      const row = this.db
-        .prepare(`SELECT source_entity_id, predicate, target_entity_id FROM fact_edges WHERE id = ?`)
-        .get(parsed.id) as { source_entity_id: number; predicate: string; target_entity_id: number } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
-    }
-
-    if (parsed.kind === "private_event") {
-      const row = this.db
-        .prepare(`SELECT private_notes, projectable_summary, event_category FROM agent_event_overlay WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; event_category: string } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.private_notes ?? ""} ${row.projectable_summary ?? ""} ${row.event_category}`.trim();
-    }
-
-    const row = this.db
-      .prepare(`SELECT predicate, provenance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-      .get(parsed.id) as { predicate: string; provenance: string | null; epistemic_status: string | null } | null;
-    if (!row) {
-      return undefined;
-    }
-    return `${row.predicate} ${row.provenance ?? ""} ${row.epistemic_status ?? ""}`.trim();
-  }
-
-  private selectSemanticRelation(
-    sourceRef: NodeRef,
-    sourceKind: NodeRefKind,
-    sourceContent: string,
-    targetRef: NodeRef,
-    targetKind: NodeRefKind,
-    targetContent: string,
-    similarity: number,
-    agentId: string,
-  ): SemanticEdgeType | null {
-    if (sourceKind === targetKind && similarity >= 0.9 && this.hasStructuralOverlap(sourceContent, targetContent)) {
-      return "conflict_or_update";
-    }
-
-    if (sourceKind === targetKind && similarity >= 0.82 && this.isMutualTopFive(sourceRef, targetRef, sourceKind, agentId)) {
-      return "semantic_similar";
-    }
-
-    if (sourceKind !== targetKind && similarity >= 0.78 && this.isCuratedBridgePair(sourceKind, targetKind)) {
-      if (this.hasStructuralOverlap(sourceContent, targetContent)) {
-        return "entity_bridge";
-      }
-    }
-
-    return null;
-  }
-
-  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string): boolean {
-    const row = this.db
-      .prepare(`SELECT embedding FROM node_embeddings WHERE node_ref = ? ORDER BY updated_at DESC LIMIT 1`)
-      .get(targetRef) as { embedding: Buffer | Uint8Array } | null;
-    if (!row) {
-      return false;
-    }
-    const targetVector = this.embeddings.deserializeEmbedding(Buffer.from(row.embedding));
-    const nearest = this.embeddings.queryNearestNeighbors(targetVector, {
-      nodeKind,
-      agentId,
-      limit: 5,
-    });
-    return nearest.some((candidate) => candidate.nodeRef === sourceRef || candidate.nodeRef === targetRef);
-  }
-
-  private isCuratedBridgePair(a: NodeRefKind, b: NodeRefKind): boolean {
-    const key = `${a}:${b}`;
-    const allowed = new Set([
-      "event:entity",
-      "entity:event",
-      "private_event:entity",
-      "entity:private_event",
-      "fact:entity",
-      "entity:fact",
-      "private_belief:entity",
-      "entity:private_belief",
-    ]);
-    return allowed.has(key);
-  }
-
-  private hasStructuralOverlap(sourceContent: string, targetContent: string): boolean {
-    const sourceTokens = new Set(sourceContent.toLowerCase().split(/\W+/).filter((token) => token.length > 2));
-    const targetTokens = new Set(targetContent.toLowerCase().split(/\W+/).filter((token) => token.length > 2));
-    let overlap = 0;
-    for (const token of sourceTokens) {
-      if (targetTokens.has(token)) {
-        overlap += 1;
-      }
-      if (overlap >= 2) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private addOneHopNeighbors(nodeRef: NodeRef, output: Set<NodeRef>): void {
-    const rows = this.db
-      .prepare(
-        `SELECT source_node_ref, target_node_ref FROM semantic_edges
-         WHERE source_node_ref = ? OR target_node_ref = ?`,
-      )
-      .all(nodeRef, nodeRef) as Array<{ source_node_ref: NodeRef; target_node_ref: NodeRef }>;
-
-    for (const row of rows) {
-      output.add(row.source_node_ref);
-      output.add(row.target_node_ref);
-    }
-  }
-
-  private computeNodeScore(nodeRef: NodeRef, agentId: string): { salience: number; centrality: number; bridgeScore: number } {
-    const now = Date.now();
-    const edgeRows = this.db
-      .prepare(
-        `SELECT source_node_ref, target_node_ref, weight
-         FROM semantic_edges
-         WHERE source_node_ref = ? OR target_node_ref = ?`,
-      )
-      .all(nodeRef, nodeRef) as Array<{ source_node_ref: NodeRef; target_node_ref: NodeRef; weight: number }>;
-
-    const recurrence = Math.min(1, edgeRows.length / 10);
-    const updatedAt = this.lookupNodeUpdatedAt(nodeRef) ?? now;
-    const recency = Math.max(0, 1 - (now - updatedAt) / (7 * 24 * 60 * 60 * 1000));
-    const indexBlock = this.coreMemory.getBlock(agentId, "index");
-    const indexPresence = indexBlock.value.includes(nodeRef) ? 1 : 0;
-    const persistenceRow = this.db.prepare(`SELECT node_ref FROM node_scores WHERE node_ref = ?`).get(nodeRef) as
-      | { node_ref: NodeRef }
-      | null;
-    const persistence = persistenceRow ? 1 : 0.5;
-
-    const salience =
-      0.35 * recurrence +
-      0.25 * recency +
-      0.2 * indexPresence +
-      0.2 * persistence;
-
-    const semanticDegree = edgeRows.reduce((sum, row) => sum + Math.max(0, row.weight), 0);
-    const logicDegree = this.lookupLogicDegree(nodeRef);
-    const centrality = semanticDegree + logicDegree;
-
-    const sourceCluster = this.lookupTopicCluster(nodeRef);
-    let crossClusterWeight = 0;
-    let totalWeight = 0;
-    for (const row of edgeRows) {
-      const neighbor = row.source_node_ref === nodeRef ? row.target_node_ref : row.source_node_ref;
-      const neighborCluster = this.lookupTopicCluster(neighbor);
-      const weight = Math.max(0, row.weight);
-      totalWeight += weight;
-      if (sourceCluster !== neighborCluster) {
-        crossClusterWeight += weight;
-      }
-    }
-    const bridgeScore = totalWeight > 0 ? crossClusterWeight / totalWeight : 0;
-
-    return { salience, centrality, bridgeScore };
-  }
-
-  private lookupNodeUpdatedAt(nodeRef: NodeRef): number | undefined {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed) {
-      return undefined;
-    }
-
-    if (parsed.kind === "entity") {
-      const row = this.db.prepare(`SELECT updated_at FROM entity_nodes WHERE id = ?`).get(parsed.id) as
-        | { updated_at: number }
-        | null;
-      return row?.updated_at;
-    }
-
-    if (parsed.kind === "event") {
-      const row = this.db.prepare(`SELECT created_at FROM event_nodes WHERE id = ?`).get(parsed.id) as
-        | { created_at: number }
-        | null;
-      return row?.created_at;
-    }
-
-    if (parsed.kind === "fact") {
-      const row = this.db.prepare(`SELECT t_created FROM fact_edges WHERE id = ?`).get(parsed.id) as
-        | { t_created: number }
-        | null;
-      return row?.t_created;
-    }
-
-    if (parsed.kind === "private_event") {
-      const row = this.db.prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`).get(parsed.id) as
-        | { created_at: number }
-        | null;
-      return row?.created_at;
-    }
-
-    const row = this.db.prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`).get(parsed.id) as
-      | { updated_at: number }
-      | null;
-    return row?.updated_at;
-  }
-
-  private lookupLogicDegree(nodeRef: NodeRef): number {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed || parsed.kind !== "event") {
-      return 0;
-    }
-
-    const row = this.db
-      .prepare(
-        `SELECT (SELECT count(*) FROM logic_edges WHERE source_event_id = ?) +
-                (SELECT count(*) FROM logic_edges WHERE target_event_id = ?) as degree`,
-      )
-      .get(parsed.id, parsed.id) as { degree: number };
-    return row.degree;
-  }
-
-  private lookupTopicCluster(nodeRef: NodeRef): number | null {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed) {
-      return null;
-    }
-
-    if (parsed.kind === "event") {
-      const row = this.db.prepare(`SELECT topic_id FROM event_nodes WHERE id = ?`).get(parsed.id) as
-        | { topic_id: number | null }
-        | null;
-      return row?.topic_id ?? null;
-    }
-
-    if (parsed.kind === "private_event") {
-      const row = this.db
-        .prepare(
-          `SELECT e.topic_id
-           FROM agent_event_overlay a
-           JOIN event_nodes e ON e.id = a.event_id
-           WHERE a.id = ?`,
-        )
-        .get(parsed.id) as { topic_id: number | null } | null;
-      return row?.topic_id ?? null;
-    }
-
-    return null;
-  }
-
-  private syncSearchProjection(nodeRef: NodeRef, agentId: string): void {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed) {
-      return;
-    }
-
-    if (parsed.kind === "event") {
-      const row = this.db
-        .prepare(`SELECT summary, visibility_scope, location_entity_id FROM event_nodes WHERE id = ?`)
-        .get(parsed.id) as { summary: string | null; visibility_scope: string; location_entity_id: number } | null;
-      if (!row || !row.summary) {
-        return;
-      }
-      if (row.visibility_scope === "area_visible") {
-        this.storage.syncSearchDoc("area", nodeRef, row.summary, undefined, row.location_entity_id);
-      } else {
-        this.storage.syncSearchDoc("world", nodeRef, row.summary);
-      }
-      return;
-    }
-
-    if (parsed.kind === "entity") {
-      const row = this.db
-        .prepare(`SELECT display_name, summary, memory_scope, owner_agent_id FROM entity_nodes WHERE id = ?`)
-        .get(parsed.id) as {
-        display_name: string;
-        summary: string | null;
-        memory_scope: "shared_public" | "private_overlay";
-        owner_agent_id: string | null;
-      } | null;
-      if (!row) {
-        return;
-      }
-      const content = `${row.display_name} ${row.summary ?? ""}`.trim();
-      if (row.memory_scope === "private_overlay") {
-        this.storage.syncSearchDoc("private", nodeRef, content, row.owner_agent_id ?? agentId);
-      } else {
-        this.storage.syncSearchDoc("world", nodeRef, content);
-      }
-      return;
-    }
-
-    if (parsed.kind === "private_event") {
-      const row = this.db
-        .prepare(`SELECT private_notes, projectable_summary, agent_id, cognition_status FROM agent_event_overlay WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; agent_id: string; cognition_status: string | null } | null;
-      if (!row) {
-        return;
-      }
-      if (row.cognition_status === "retracted") {
-        this.storage.removeSearchDoc("private", nodeRef);
-        return;
-      }
-      const content = `${row.private_notes ?? ""} ${row.projectable_summary ?? ""}`.trim();
-      this.storage.syncSearchDoc("private", nodeRef, content, row.agent_id);
-      return;
-    }
-
-    if (parsed.kind === "private_belief") {
-      const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; epistemic_status: string | null } | null;
-      if (!row) {
-        return;
-      }
-      if (row.epistemic_status === "retracted") {
-        this.storage.removeSearchDoc("private", nodeRef);
-        return;
-      }
-      this.storage.syncSearchDoc("private", nodeRef, `${row.predicate} ${row.provenance ?? ""}`.trim(), row.agent_id);
-      return;
-    }
-
-    const row = this.db
-      .prepare(`SELECT source_entity_id, predicate, target_entity_id FROM fact_edges WHERE id = ?`)
-      .get(parsed.id) as { source_entity_id: number; predicate: string; target_entity_id: number } | null;
-    if (!row) {
-      return;
-    }
-    this.storage.syncSearchDoc("world", nodeRef, `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`);
-  }
-
   private resolveEntityReference(
     value: unknown,
     agentId: string,
@@ -1374,8 +729,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    const parsed = this.parseNodeRef(value as NodeRef);
-    if (!parsed) {
+    if (!/^(event|entity|fact|private_event|private_belief):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;
