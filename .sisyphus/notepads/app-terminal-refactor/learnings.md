@@ -3,3 +3,4 @@
 - 2026-03-19: Inspect read-model fallback can avoid full session scans by resolving `sessionId` through `InteractionStore.findSessionIdByRequestId(requestId)` and only reading records from that resolved session.
 - 2026-03-19: `TurnService.runUserTurn()` can stay thin by reading history via `InteractionStore.getMessageRecords()`, appending current user text, and delegating straight to `run()` so user commit/flush/recovery/trace finalize remains single-sourced.
 - 2026-03-19: A transport-neutral client layer works best when commands bootstrap one `AppClients` bundle (`session`, `turn`, `inspect`, `health`) and only choose transport once at runtime creation, rather than branching per command operation.
+- 2026-03-19: F4 scope check confirms `src/cli` now contains only six intentional shim files (`types`, `local-runtime`, `gateway-client`, `diagnostic-catalog`, `inspect/view-models`, `app-client-runtime`) with no extra compatibility re-export surface.
