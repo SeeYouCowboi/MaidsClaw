@@ -122,7 +122,24 @@ describe("VisibilityPolicy", () => {
 		});
 	});
 
-	// ── Scenario 5: SQL predicate builders ───────────────────────────
+	// ── Scenario 5: Area hierarchy visibility ────────────────────────
+
+	describe("Area hierarchy visibility", () => {
+		it("area_visible event visible when location is in visible_area_ids (ancestor)", () => {
+			// Kitchen(10) ⊂ Wing(5) ⊂ Mansion(1)
+			const v = viewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] });
+			const eventInWing = { visibility_scope: "area_visible", location_entity_id: 5 };
+			expect(policy.isEventVisible(v, eventInWing)).toBe(true);
+		});
+
+		it("area_visible event NOT visible for sibling area", () => {
+			const v = viewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] });
+			const eventInLivingRoom = { visibility_scope: "area_visible", location_entity_id: 11 };
+			expect(policy.isEventVisible(v, eventInLivingRoom)).toBe(false);
+		});
+	});
+
+	// ── Scenario 6: SQL predicate builders ───────────────────────────
 
 	describe("SQL predicate builders", () => {
 		it("eventVisibilityPredicate with area includes area clause", () => {
@@ -136,6 +153,11 @@ describe("VisibilityPolicy", () => {
 			const sql = policy.eventVisibilityPredicate(viewer({ current_area_id: undefined }));
 			expect(sql).toContain("world_public");
 			expect(sql).not.toContain("area_visible");
+		});
+
+		it("eventVisibilityPredicate with visible_area_ids includes all areas", () => {
+			const sql = policy.eventVisibilityPredicate(viewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] }));
+			expect(sql).toContain("IN (10,5,1)");
 		});
 
 		it("entityVisibilityPredicate includes viewer_agent_id", () => {

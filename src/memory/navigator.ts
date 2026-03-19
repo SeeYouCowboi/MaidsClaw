@@ -451,7 +451,8 @@ export class GraphNavigator {
       });
     }
 
-    const eventRows = viewerContext.current_area_id != null
+    const visibleAreas = this.resolveVisibleAreas(viewerContext);
+    const eventRows = visibleAreas.length > 0
       ? this.db
           .prepare(
             `SELECT id, participants, primary_actor_entity_id, timestamp, summary
@@ -459,10 +460,10 @@ export class GraphNavigator {
              WHERE id IN (${placeholders})
                AND (
                  visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+                 OR (visibility_scope='area_visible' AND location_entity_id IN (${visibleAreas.map(() => "?").join(",")}))
                )`,
           )
-          .all(...ids, viewerContext.current_area_id) as Array<{
+          .all(...ids, ...visibleAreas) as Array<{
           id: number;
           participants: string | null;
           primary_actor_entity_id: number | null;
@@ -575,10 +576,11 @@ export class GraphNavigator {
     }
 
     const participantConditions = ids.map(() => "participants LIKE ?").join(" OR ");
-    const areaClause = viewerContext.current_area_id != null
+    const entityVisibleAreas = this.resolveVisibleAreas(viewerContext);
+    const areaClause = entityVisibleAreas.length > 0
       ? `AND (
          visibility_scope='world_public'
-         OR (visibility_scope='area_visible' AND location_entity_id=?)
+         OR (visibility_scope='area_visible' AND location_entity_id IN (${entityVisibleAreas.map(() => "?").join(",")}))
        )`
       : `AND visibility_scope='world_public'`;
     const participantSql =
@@ -593,7 +595,7 @@ export class GraphNavigator {
     const participantBindings = [
       ...ids,
       ...ids.map((id) => `%entity:${id}%`),
-      ...(viewerContext.current_area_id != null ? [viewerContext.current_area_id] : []),
+      ...entityVisibleAreas,
     ];
     const participantRows = this.db.prepare(participantSql).all(
       ...participantBindings,
@@ -1335,6 +1337,16 @@ export class GraphNavigator {
     return filtered;
   }
 
+  private resolveVisibleAreas(viewerContext: ViewerContext): number[] {
+    if (viewerContext.visible_area_ids && viewerContext.visible_area_ids.length > 0) {
+      return viewerContext.visible_area_ids;
+    }
+    if (viewerContext.current_area_id != null) {
+      return [viewerContext.current_area_id];
+    }
+    return [];
+  }
+
   private isNodeVisible(nodeRef: NodeRef, viewerContext: ViewerContext): boolean {
     const parsed = this.parseNodeRef(nodeRef);
     if (!parsed) {
@@ -1375,10 +1387,11 @@ export class GraphNavigator {
       if (!row) {
         return false;
       }
-      return (
-        row.visibility_scope === "world_public" ||
-        (row.visibility_scope === "area_visible" && viewerContext.current_area_id != null && row.location_entity_id === viewerContext.current_area_id)
-      );
+      if (row.visibility_scope === "world_public") {
+        return true;
+      }
+      const visibleAreas = this.resolveVisibleAreas(viewerContext);
+      return row.visibility_scope === "area_visible" && visibleAreas.includes(row.location_entity_id);
     }
 
     if (parsed.kind === "fact") {

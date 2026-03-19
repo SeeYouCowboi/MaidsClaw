@@ -17,11 +17,11 @@ export class VisibilityPolicy {
       return true;
     }
     if (event.visibility_scope === "area_visible") {
-      // When current_area_id is absent (degraded context), skip area-visible entirely
-      if (viewerContext.current_area_id == null) {
+      const visibleAreas = this.resolveVisibleAreas(viewerContext);
+      if (visibleAreas.length === 0) {
         return false;
       }
-      return event.location_entity_id === viewerContext.current_area_id;
+      return visibleAreas.includes(event.location_entity_id);
     }
     // system_only, owner_private — never visible via this method
     return false;
@@ -84,10 +84,12 @@ export class VisibilityPolicy {
 
   eventVisibilityPredicate(viewerContext: ViewerContext, tableAlias?: string): string {
     const prefix = tableAlias ? `${tableAlias}.` : "";
-    if (viewerContext.current_area_id == null) {
+    const visibleAreas = this.resolveVisibleAreas(viewerContext);
+    if (visibleAreas.length === 0) {
       return `(${prefix}visibility_scope = 'world_public')`;
     }
-    return `(${prefix}visibility_scope = 'world_public' OR (${prefix}visibility_scope = 'area_visible' AND ${prefix}location_entity_id = ${viewerContext.current_area_id}))`;
+    const areaList = visibleAreas.join(",");
+    return `(${prefix}visibility_scope = 'world_public' OR (${prefix}visibility_scope = 'area_visible' AND ${prefix}location_entity_id IN (${areaList})))`;
   }
 
   entityVisibilityPredicate(viewerContext: ViewerContext, tableAlias?: string): string {
@@ -98,5 +100,19 @@ export class VisibilityPolicy {
   privateNodePredicate(viewerContext: ViewerContext, tableAlias?: string): string {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return `${prefix}agent_id = '${viewerContext.viewer_agent_id}'`;
+  }
+
+  /**
+   * Resolve the list of area IDs visible to this viewer.
+   * Prefers `visible_area_ids` (hierarchy-aware); falls back to singleton `current_area_id`.
+   */
+  private resolveVisibleAreas(viewerContext: ViewerContext): number[] {
+    if (viewerContext.visible_area_ids && viewerContext.visible_area_ids.length > 0) {
+      return viewerContext.visible_area_ids;
+    }
+    if (viewerContext.current_area_id != null) {
+      return [viewerContext.current_area_id];
+    }
+    return [];
   }
 }

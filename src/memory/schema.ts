@@ -71,6 +71,8 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_area_fts USING fts5(content, tokenize='trigram')`,
   `CREATE TABLE IF NOT EXISTS search_docs_world (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_world_fts USING fts5(content, tokenize='trigram')`,
+  `CREATE TABLE IF NOT EXISTS area_hierarchy (area_entity_id INTEGER PRIMARY KEY, parent_area_id INTEGER, FOREIGN KEY (area_entity_id) REFERENCES entity_nodes(id), FOREIGN KEY (parent_area_id) REFERENCES entity_nodes(id))`,
+  `CREATE INDEX IF NOT EXISTS idx_area_hierarchy_parent ON area_hierarchy(parent_area_id)`,
 ];
 
 const MEMORY_MIGRATIONS: MigrationStep[] = [
@@ -116,6 +118,18 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_job_type_next_attempt ON _memory_maintenance_jobs(job_type, next_attempt_at)`,
+      );
+    },
+  },
+  {
+    id: "memory:004:add-area-hierarchy",
+    description: "Add area_hierarchy table for nested area visibility",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS area_hierarchy (area_entity_id INTEGER PRIMARY KEY, parent_area_id INTEGER, FOREIGN KEY (area_entity_id) REFERENCES entity_nodes(id), FOREIGN KEY (parent_area_id) REFERENCES entity_nodes(id))`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_area_hierarchy_parent ON area_hierarchy(parent_area_id)`,
       );
     },
   },

@@ -135,13 +135,19 @@ describe("VisibilityPolicy", () => {
     it("returns correct SQL without table alias", () => {
       const viewer = makeViewer({ current_area_id: 42 });
       const sql = policy.eventVisibilityPredicate(viewer);
-      expect(sql).toBe("(visibility_scope = 'world_public' OR (visibility_scope = 'area_visible' AND location_entity_id = 42))");
+      expect(sql).toBe("(visibility_scope = 'world_public' OR (visibility_scope = 'area_visible' AND location_entity_id IN (42)))");
     });
 
     it("returns correct SQL with table alias", () => {
       const viewer = makeViewer({ current_area_id: 7 });
       const sql = policy.eventVisibilityPredicate(viewer, "e");
-      expect(sql).toBe("(e.visibility_scope = 'world_public' OR (e.visibility_scope = 'area_visible' AND e.location_entity_id = 7))");
+      expect(sql).toBe("(e.visibility_scope = 'world_public' OR (e.visibility_scope = 'area_visible' AND e.location_entity_id IN (7)))");
+    });
+
+    it("returns correct SQL with multiple visible_area_ids", () => {
+      const viewer = makeViewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] });
+      const sql = policy.eventVisibilityPredicate(viewer);
+      expect(sql).toBe("(visibility_scope = 'world_public' OR (visibility_scope = 'area_visible' AND location_entity_id IN (10,5,1)))");
     });
   });
 
@@ -170,6 +176,38 @@ describe("VisibilityPolicy", () => {
       const viewer = makeViewer({ viewer_agent_id: "agent-z" });
       const sql = policy.privateNodePredicate(viewer, "o");
       expect(sql).toBe("o.agent_id = 'agent-z'");
+    });
+  });
+
+  // ── Area hierarchy visibility ─────────────────────────────────────
+
+  describe("Area hierarchy (visible_area_ids)", () => {
+    it("area_visible event visible when location is in visible_area_ids", () => {
+      // Kitchen (10) ⊂ Service Wing (5) ⊂ Mansion (1)
+      const viewer = makeViewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] });
+      // Event in Kitchen — visible (current area)
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 10 })).toBe(true);
+      // Event in Service Wing — visible (parent area)
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 5 })).toBe(true);
+      // Event in Mansion — visible (grandparent area)
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 1 })).toBe(true);
+    });
+
+    it("area_visible event NOT visible when location is sibling area", () => {
+      // Agent in Kitchen (10), can see [10, 5, 1] — but NOT Living Room (11)
+      const viewer = makeViewer({ current_area_id: 10, visible_area_ids: [10, 5, 1] });
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 11 })).toBe(false);
+    });
+
+    it("falls back to current_area_id when visible_area_ids not set", () => {
+      const viewer = makeViewer({ current_area_id: 42 });
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 42 })).toBe(true);
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 99 })).toBe(false);
+    });
+
+    it("returns false when both visible_area_ids and current_area_id are absent", () => {
+      const viewer = makeViewer({ current_area_id: undefined, visible_area_ids: undefined });
+      expect(policy.isEventVisible(viewer, { visibility_scope: "area_visible", location_entity_id: 1 })).toBe(false);
     });
   });
 });

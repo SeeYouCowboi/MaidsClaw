@@ -50,6 +50,20 @@ export class RetrievalService {
     this.embeddingService = new EmbeddingService(db, batcher);
   }
 
+  /**
+   * Resolve the list of area IDs visible to this viewer.
+   * Prefers `visible_area_ids` (hierarchy-aware); falls back to singleton `current_area_id`.
+   */
+  private resolveVisibleAreas(viewerContext: ViewerContext): number[] {
+    if (viewerContext.visible_area_ids && viewerContext.visible_area_ids.length > 0) {
+      return viewerContext.visible_area_ids;
+    }
+    if (viewerContext.current_area_id != null) {
+      return [viewerContext.current_area_id];
+    }
+    return [];
+  }
+
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
     const resolvedPointer = this.resolveRedirect(pointerKey, viewerContext.viewer_agent_id);
     const entity = this.resolveEntityByPointer(resolvedPointer, viewerContext.viewer_agent_id);
@@ -63,17 +77,18 @@ export class RetrievalService {
       )
       .all(entity.id, entity.id, MAX_INTEGER) as FactEdge[];
 
-    const events = viewerContext.current_area_id != null
+    const visibleAreas = this.resolveVisibleAreas(viewerContext);
+    const events = visibleAreas.length > 0
       ? this.db
           .prepare(
             `SELECT * FROM event_nodes
              WHERE (participants LIKE ? OR primary_actor_entity_id=?)
                AND (
                  visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+                 OR (visibility_scope='area_visible' AND location_entity_id IN (${visibleAreas.map(() => "?").join(",")}))
                )`,
           )
-          .all(`%entity:${entity.id}%`, entity.id, viewerContext.current_area_id) as EventNode[]
+          .all(`%entity:${entity.id}%`, entity.id, ...visibleAreas) as EventNode[]
       : this.db
           .prepare(
             `SELECT * FROM event_nodes
@@ -106,17 +121,18 @@ export class RetrievalService {
       return { topic: null, events: [], overlays: [] };
     }
 
-    const events = viewerContext.current_area_id != null
+    const visibleAreas = this.resolveVisibleAreas(viewerContext);
+    const events = visibleAreas.length > 0
       ? this.db
           .prepare(
             `SELECT * FROM event_nodes
              WHERE topic_id=?
                AND (
                  visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+                 OR (visibility_scope='area_visible' AND location_entity_id IN (${visibleAreas.map(() => "?").join(",")}))
                )`,
           )
-          .all(topic.id, viewerContext.current_area_id) as EventNode[]
+          .all(topic.id, ...visibleAreas) as EventNode[]
       : this.db
           .prepare(
             `SELECT * FROM event_nodes
@@ -144,17 +160,18 @@ export class RetrievalService {
     }
 
     const placeholders = ids.map(() => "?").join(",");
-    return viewerContext.current_area_id != null
+    const visibleAreas = this.resolveVisibleAreas(viewerContext);
+    return visibleAreas.length > 0
       ? this.db
           .prepare(
             `SELECT * FROM event_nodes
              WHERE id IN (${placeholders})
                AND (
                  visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
+                 OR (visibility_scope='area_visible' AND location_entity_id IN (${visibleAreas.map(() => "?").join(",")}))
                )`,
           )
-          .all(...ids, viewerContext.current_area_id) as EventNode[]
+          .all(...ids, ...visibleAreas) as EventNode[]
       : this.db
           .prepare(
             `SELECT * FROM event_nodes
@@ -197,15 +214,17 @@ export class RetrievalService {
     }
 
     if (viewerContext.viewer_role !== "task_agent") {
-      if (viewerContext.current_area_id != null) {
+      const visibleAreas = this.resolveVisibleAreas(viewerContext);
+      if (visibleAreas.length > 0) {
+        const areaPlaceholders = visibleAreas.map(() => "?").join(",");
         const areaRows = this.db
           .prepare(
             `SELECT d.source_ref, d.doc_type, d.content
              FROM search_docs_area d
              JOIN search_docs_area_fts f ON f.rowid = d.id
-             WHERE f.content MATCH ? AND d.location_entity_id=?`,
+             WHERE f.content MATCH ? AND d.location_entity_id IN (${areaPlaceholders})`,
           )
-          .all(safeQuery, viewerContext.current_area_id) as SearchRow[];
+          .all(safeQuery, ...visibleAreas) as SearchRow[];
         rawResults.push(...areaRows.map((row) => this.mapSearchRow(row, "area", 0.9)));
       }
       const worldRows = this.db
