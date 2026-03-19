@@ -1,24 +1,15 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { bootstrapApp } from "../../bootstrap/app-bootstrap.js";
 import type { CliContext } from "../context.js";
-import { diagnose } from "../diagnostic-catalog.js";
-import { GatewayClient } from "../gateway-client.js";
+import {
+	createAppClientRuntime,
+	type AppClientRuntime,
+} from "../app-client-runtime.js";
 import { CliError, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { resolveContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
-import {
-	loadChunksView,
-	loadLogsView,
-	loadMemoryView,
-	loadPromptView,
-	loadSummaryView,
-	loadTraceView,
-	loadTranscriptView,
-} from "../inspect/view-models.js";
 import { writeJson, writeText } from "../output.js";
 import { type ParsedArgs, registerCommand } from "../parser.js";
-import { TraceStore } from "../../app/diagnostics/trace-store.js";
 
 const KNOWN_SUMMARY_FLAGS = new Set(["request", "mode", "base-url", "json", "quiet", "cwd"]);
 const KNOWN_TRANSCRIPT_FLAGS = new Set(["session", "raw", "mode", "base-url", "json", "quiet", "cwd"]);
@@ -172,16 +163,16 @@ function toCliError(err: unknown): CliError {
 	return new CliError("DEBUG_COMMAND_FAILED", String(err), EXIT_RUNTIME);
 }
 
-async function withRuntime<T>(
+function openClientRuntime(
 	ctx: CliContext,
-	work: (app: ReturnType<typeof bootstrapApp>) => T,
-): Promise<T> {
-	let app: ReturnType<typeof bootstrapApp>;
+	mode: "local" | "gateway",
+	baseUrl: string,
+): AppClientRuntime {
 	try {
-		app = bootstrapApp({
+		return createAppClientRuntime({
+			mode,
 			cwd: ctx.cwd,
-			enableGateway: false,
-			requireAllProviders: false,
+			baseUrl,
 		});
 	} catch (err) {
 		throw new CliError(
@@ -190,11 +181,19 @@ async function withRuntime<T>(
 			EXIT_RUNTIME,
 		);
 	}
+}
 
+async function withClientRuntime<T>(
+	ctx: CliContext,
+	mode: "local" | "gateway",
+	baseUrl: string,
+	work: (runtime: AppClientRuntime) => Promise<T>,
+): Promise<T> {
+	const runtime = openClientRuntime(ctx, mode, baseUrl);
 	try {
-		return work(app);
+		return await work(runtime);
 	} finally {
-		app.shutdown();
+		runtime.shutdown();
 	}
 }
 
@@ -207,27 +206,8 @@ async function handleDebugSummary(
 	validateFlags(KNOWN_SUMMARY_FLAGS, args, "debug summary");
 	const requestId = requireStringFlag(args, "request", "debug summary");
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const view = await new GatewayClient(baseUrl).getSummary(requestId);
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug summary", mode, data: view });
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadSummaryView({
-			runtime: app.runtime,
-			traceStore,
-			context: { requestId },
-		});
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getSummary(requestId));
 
 	if (ctx.json) {
 		writeJson({ ok: true, command: "debug summary", mode, data: view });
@@ -246,30 +226,8 @@ async function handleDebugTranscript(
 	const sessionId = requireStringFlag(args, "session", "debug transcript");
 	const raw = args.flags["raw"] === true;
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const view = await new GatewayClient(baseUrl).getTranscript(sessionId, raw);
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug transcript", mode, data: view });
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadTranscriptView({
-			runtime: app.runtime,
-			traceStore,
-			context: { sessionId },
-			raw,
-			// unsafeRaw intentionally NOT exposed via CLI --raw
-			// --raw shows tool/status records but NOT raw settlement payload
-		});
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getTranscript(sessionId, raw));
 
 	if (ctx.json) {
 		writeJson({ ok: true, command: "debug transcript", mode, data: view });
@@ -288,28 +246,8 @@ async function handleDebugPrompt(
 	const requestId = requireStringFlag(args, "request", "debug prompt");
 	const sections = args.flags["sections"] === true;
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const view = await new GatewayClient(baseUrl).getPrompt(requestId);
-		const outputView = sections ? view : { ...view, sections: undefined };
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug prompt", mode, data: outputView });
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadPromptView({
-			runtime: app.runtime,
-			traceStore,
-			context: { requestId },
-		});
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getPrompt(requestId));
 
 	const outputView = sections
 		? view
@@ -331,27 +269,8 @@ async function handleDebugChunks(
 	validateFlags(KNOWN_CHUNKS_FLAGS, args, "debug chunks");
 	const requestId = requireStringFlag(args, "request", "debug chunks");
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const view = await new GatewayClient(baseUrl).getChunks(requestId);
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug chunks", mode, data: view });
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadChunksView({
-			runtime: app.runtime,
-			traceStore,
-			context: { requestId },
-		});
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getChunks(requestId));
 
 	if (ctx.json) {
 		writeJson({ ok: true, command: "debug chunks", mode, data: view });
@@ -366,33 +285,13 @@ async function handleDebugLogs(
 ): Promise<void> {
 	validateFlags(KNOWN_LOGS_FLAGS, args, "debug logs");
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const resolved = resolveContext(ctx, args);
-		const view = await new GatewayClient(baseUrl).getLogs({
+	const resolved = resolveContext(ctx, args);
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getLogs({
 			requestId: resolved.requestId,
 			sessionId: resolved.sessionId,
 			agentId: resolved.agentId,
-		});
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug logs", mode, data: view });
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadLogsView({
-			runtime: app.runtime,
-			traceStore,
-			context: resolveContext(ctx, args),
-			mode,
-		});
-	});
+		}));
 
 	if (ctx.json) {
 		writeJson({ ok: true, command: "debug logs", mode, data: view });
@@ -407,40 +306,15 @@ async function handleDebugMemory(
 ): Promise<void> {
 	validateFlags(KNOWN_MEMORY_FLAGS, args, "debug memory");
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const resolved = resolveContext(ctx, args);
-		if (!resolved.sessionId) {
-			throw new Error("INSPECT_SESSION_ID_REQUIRED");
-		}
-		const view = await new GatewayClient(baseUrl).getMemory(
-			resolved.sessionId,
-			resolved.agentId,
-		);
-		if (ctx.json) {
-			writeJson({
-				ok: true,
-				command: "debug memory",
-				mode,
-				data: view,
-			});
-		} else if (!ctx.quiet) {
-			writeText(renderText(view));
-		}
-		return;
+	const resolved = resolveContext(ctx, args);
+	if (!resolved.sessionId) {
+		throw new Error("INSPECT_SESSION_ID_REQUIRED");
 	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadMemoryView({
-			runtime: app.runtime,
-			traceStore,
-			context: resolveContext(ctx, args),
-			mode,
-		});
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getMemory(
+			resolved.sessionId!,
+			resolved.agentId,
+		));
 
 	if (ctx.json) {
 		writeJson({
@@ -482,62 +356,8 @@ async function handleDebugTrace(
 		getOptionalStringFlag(childArgs, "out");
 	const unsafeRaw = childArgs.flags["unsafe-raw"] === true;
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, childArgs);
-
-	if (mode === "gateway" && unsafeRaw) {
-		new GatewayClient(baseUrl).rejectUnsafeRaw();
-	}
-
-	if (mode === "gateway") {
-		const view = await new GatewayClient(baseUrl).getTrace(requestId);
-
-		if (output) {
-			const outputPath = resolve(ctx.cwd, output);
-			mkdirSync(dirname(outputPath), { recursive: true });
-			writeFileSync(outputPath, `${renderJson(view.bundle)}\n`, "utf8");
-			if (ctx.json) {
-				writeJson({
-					ok: true,
-					command: "debug trace export",
-					mode,
-					data: {
-						request_id: requestId,
-						unsafe_raw_settlement_mode: view.unsafe_raw_settlement_mode,
-						output: outputPath,
-					},
-				});
-			} else if (!ctx.quiet) {
-				writeText(outputPath);
-			}
-			return;
-		}
-
-		if (ctx.json) {
-			writeJson({
-				ok: true,
-				command: "debug trace export",
-				mode,
-				data: view.bundle,
-			});
-		} else if (!ctx.quiet) {
-			writeText(renderJson(view.bundle));
-		}
-		return;
-	}
-
-	const view = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return loadTraceView(
-			{
-				runtime: app.runtime,
-				traceStore,
-				context: { requestId },
-				mode,
-			},
-			unsafeRaw,
-		);
-	});
+	const view = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.getTrace(requestId, { unsafeRaw }));
 
 	if (output) {
 		const outputPath = resolve(ctx.cwd, output);
@@ -579,28 +399,9 @@ async function handleDebugDiagnose(
 ): Promise<void> {
 	validateFlags(KNOWN_DIAGNOSE_FLAGS, args, "debug diagnose");
 	const { mode, baseUrl } = resolveModeAndBaseUrl(ctx, args);
-
-	if (mode === "gateway") {
-		const requestId = requireStringFlag(args, "request", "debug diagnose");
-		const entry = await new GatewayClient(baseUrl).diagnose(requestId);
-		if (ctx.json) {
-			writeJson({ ok: true, command: "debug diagnose", mode, data: entry });
-		} else if (!ctx.quiet) {
-			writeText(renderText(entry));
-		}
-		return;
-	}
-
-	const entry = await withRuntime(ctx, (app) => {
-		const traceStore =
-			app.runtime.traceStore ??
-			new TraceStore(resolve(ctx.cwd, "data", "debug", "traces"));
-		return diagnose({
-			runtime: app.runtime,
-			traceStore,
-			context: resolveContext(ctx, args),
-		});
-	});
+	const requestId = requireStringFlag(args, "request", "debug diagnose");
+	const entry = await withClientRuntime(ctx, mode, baseUrl, (runtime) =>
+		runtime.clients.inspect.diagnose(requestId));
 
 	if (ctx.json) {
 		writeJson({

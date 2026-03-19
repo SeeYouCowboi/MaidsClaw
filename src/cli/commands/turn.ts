@@ -16,7 +16,8 @@ import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
-import { GatewayClient } from "../gateway-client.js";
+import type { ObservationEvent } from "../../app/contracts/execution.js";
+import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -134,34 +135,74 @@ async function handleTurnSend(
   // Optional: --save-trace (enable trace capture)
   const saveTrace = args.flags["save-trace"] === true;
 
-  if (mode === "gateway") {
-    const client = new GatewayClient(baseUrl);
-    const streamed = await client.streamTurn({
-      sessionId,
-      text,
-      ...(agentIdOverride ? { agentId: agentIdOverride } : {}),
-    });
+  let runtime: AppClientRuntime;
+  try {
+    runtime = createAppClientRuntime({ mode, cwd: ctx.cwd, baseUrl });
+  } catch (err) {
+    throw new CliError(
+      "BOOTSTRAP_FAILED",
+      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
+      EXIT_RUNTIME,
+    );
+  }
 
-    if (streamed.hadError) {
+  try {
+    const session = await runtime.clients.session.getSession(sessionId);
+    if (!session) {
       throw new CliError(
-        "TURN_STREAM_FAILED",
-        streamed.errorMessage ?? "Gateway turn failed",
+        "SESSION_NOT_FOUND",
+        `Session not found: ${sessionId}`,
         EXIT_RUNTIME,
       );
     }
 
-    const summary = await client.getSummary(streamed.requestId);
-    const privateCommitKinds = summary.settlement.private_commit_kinds ?? [];
+    if (session.closed_at !== undefined) {
+      throw new CliError(
+        "SESSION_CLOSED",
+        `Session ${sessionId} is closed. Create a new session or recover this one.`,
+        EXIT_RUNTIME,
+      );
+    }
 
+    const requestId = crypto.randomUUID();
+    const assistantParts: string[] = [];
+    const publicChunks: ObservationEvent[] = [];
+    const toolEvents: ObservationEvent[] = [];
+    let turnError: string | undefined;
+
+    for await (const event of runtime.clients.turn.streamTurn({
+      sessionId,
+      text,
+      ...(agentIdOverride ?? session.agent_id ? { agentId: agentIdOverride ?? session.agent_id } : {}),
+      requestId,
+      saveTrace,
+    })) {
+      publicChunks.push(event);
+      if (event.type === "text_delta") {
+        assistantParts.push(event.text);
+      }
+      if (isToolEvent(event)) {
+        toolEvents.push(event);
+      }
+      if (event.type === "error") {
+        turnError = event.message;
+      }
+    }
+
+    if (turnError) {
+      throw new CliError("TURN_STREAM_FAILED", turnError, EXIT_RUNTIME);
+    }
+
+    const summary = await runtime.clients.inspect.getSummary(requestId);
     const responseData: Record<string, unknown> = {
       session_id: summary.session_id ?? sessionId,
-      request_id: streamed.requestId,
-      assistant_text: streamed.assistantText,
+      request_id: requestId,
+      assistant_text: assistantParts.join(""),
       has_public_reply: summary.has_public_reply,
       private_commit: {
         present: summary.private_commit_count > 0,
         op_count: summary.private_commit_count,
-        kinds: privateCommitKinds,
+        kinds: summary.settlement.private_commit_kinds ?? [],
       },
       recovery_required: summary.recovery_required,
       ...(summary.settlement.settlement_id
@@ -170,8 +211,8 @@ async function handleTurnSend(
     };
 
     if (raw) {
-      responseData.public_chunks = streamed.publicChunks;
-      responseData.tool_events = streamed.toolEvents;
+      responseData.public_chunks = publicChunks;
+      responseData.tool_events = toolEvents;
     }
 
     if (ctx.json) {
@@ -199,107 +240,20 @@ async function handleTurnSend(
         writeText("\n⚠ Session requires recovery.");
       }
     }
-
-    return;
-  }
-
-  // Bootstrap runtime
-  const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-
-  let app: ReturnType<typeof bootstrapApp>;
-  try {
-    app = bootstrapApp({
-      cwd: ctx.cwd,
-      enableGateway: false,
-      requireAllProviders: false,
-    });
-  } catch (err) {
-    throw new CliError(
-      "BOOTSTRAP_FAILED",
-      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
-      EXIT_RUNTIME,
-    );
-  }
-
-  try {
-    // Validate session exists and is open
-    const session = app.runtime.sessionService.getSession(sessionId);
-    if (!session) {
-      throw new CliError(
-        "SESSION_NOT_FOUND",
-        `Session not found: ${sessionId}`,
-        EXIT_RUNTIME,
-      );
-    }
-
-    if (session.closedAt !== undefined) {
-      throw new CliError(
-        "SESSION_CLOSED",
-        `Session ${sessionId} is closed. Create a new session or recover this one.`,
-        EXIT_RUNTIME,
-      );
-    }
-
-    // Resolve agent ID: explicit flag > session's agent
-    const agentId = agentIdOverride ?? session.agentId;
-
-    // Create LocalRuntime and execute turn
-    const { createLocalRuntime } = await import("../local-runtime.js");
-    const localRuntime = createLocalRuntime(app.runtime);
-
-    const result = await localRuntime.executeTurn({
-      sessionId,
-      agentId,
-      text,
-      saveTrace,
-    });
-
-    // Build response data — silent-private turns are OK (not failures)
-    const responseData: Record<string, unknown> = {
-      session_id: result.session_id,
-      request_id: result.request_id,
-      assistant_text: result.assistant_text,
-      has_public_reply: result.has_public_reply,
-      private_commit: result.private_commit,
-      recovery_required: result.recovery_required,
-    };
-
-    // Include settlement_id when present (RP turns)
-    if (result.settlement_id !== undefined) {
-      responseData.settlement_id = result.settlement_id;
-    }
-
-    // --raw: include public_chunks and tool_events
-    // Does NOT expose internal submit_rp_turn payloads
-    if (raw) {
-      responseData.public_chunks = result.public_chunks;
-      responseData.tool_events = result.tool_events;
-    }
-
-    if (ctx.json) {
-      writeJson({
-        ok: true,
-        command: "turn send",
-        mode,
-        data: responseData,
-      });
-    } else if (!ctx.quiet) {
-      // Text mode output
-      if (result.assistant_text) {
-        writeText(result.assistant_text);
-      } else if (result.private_commit.present) {
-        writeText("[silent turn — private commit only]");
-      } else {
-        writeText("[no output]");
-      }
-
-      if (result.recovery_required) {
-        writeText("\n⚠ Session requires recovery.");
-      }
-    }
   } finally {
-    app.shutdown();
+    runtime.shutdown();
   }
+}
+
+function isToolEvent(event: ObservationEvent): boolean {
+  return (
+    event.type === "tool_use_start"
+    || event.type === "tool_use_delta"
+    || event.type === "tool_use_end"
+    || event.type === "tool_execution_result"
+    || event.type === "tool_call"
+    || event.type === "tool_result"
+  );
 }
 
 // ── Registration ─────────────────────────────────────────────────────

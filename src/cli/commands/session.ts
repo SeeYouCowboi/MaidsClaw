@@ -11,7 +11,7 @@ import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { CliMode } from "../types.js";
-import { GatewayClient } from "../gateway-client.js";
+import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -99,11 +99,10 @@ async function handleSessionCreate(
   validateFlags(KNOWN_CREATE_FLAGS, args, "session create");
   const agentId = requireStringFlag(args, "agent", "session create");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
+  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
-  if (mode === "gateway") {
-    const client = new GatewayClient(baseUrl);
-    const record = await client.createSession(agentId);
-
+  try {
+    const record = await runtime.clients.session.createSession(agentId);
     if (ctx.json) {
       writeJson({
         ok: true,
@@ -118,45 +117,8 @@ async function handleSessionCreate(
     } else if (!ctx.quiet) {
       writeText(record.session_id);
     }
-    return;
-  }
-
-  const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-
-  let app: ReturnType<typeof bootstrapApp>;
-  try {
-    app = bootstrapApp({
-      cwd: ctx.cwd,
-      enableGateway: false,
-      requireAllProviders: false,
-    });
-  } catch (err) {
-    throw new CliError(
-      "BOOTSTRAP_FAILED",
-      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
-      EXIT_RUNTIME,
-    );
-  }
-
-  try {
-    const record = app.runtime.sessionService.createSession(agentId);
-
-    if (ctx.json) {
-      writeJson({
-        ok: true,
-        command: "session create",
-        mode,
-        data: {
-          session_id: record.sessionId,
-          agent_id: record.agentId,
-          created_at: record.createdAt,
-        },
-      });
-    } else if (!ctx.quiet) {
-      writeText(record.sessionId);
-    }
   } finally {
-    app.shutdown();
+    runtime.shutdown();
   }
 }
 
@@ -169,11 +131,33 @@ async function handleSessionClose(
   validateFlags(KNOWN_CLOSE_FLAGS, args, "session close");
   const sessionId = requireStringFlag(args, "session", "session close");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
+  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
-  if (mode === "gateway") {
-    const client = new GatewayClient(baseUrl);
-    const closed = await client.closeSession(sessionId);
-    const flushRan = false;
+  try {
+    const session = await runtime.clients.session.getSession(sessionId);
+    if (!session) {
+      throw new CliError(
+        "SESSION_NOT_FOUND",
+        `Session not found: ${sessionId}`,
+        EXIT_RUNTIME,
+      );
+    }
+
+    if (session.closed_at !== undefined) {
+      throw new CliError(
+        "SESSION_ALREADY_CLOSED",
+        `Session already closed: ${sessionId}`,
+        EXIT_RUNTIME,
+      );
+    }
+
+    const closed = await runtime.clients.session.closeSession(sessionId);
+    const flushRan =
+      runtime.mode === "local"
+      && runtime.runtime
+      && typeof session.agent_id === "string"
+        ? await runtime.runtime.turnService.flushOnSessionClose(sessionId, session.agent_id)
+        : false;
 
     if (ctx.json) {
       writeJson({
@@ -189,66 +173,8 @@ async function handleSessionClose(
     } else if (!ctx.quiet) {
       writeText(`Session ${closed.session_id} closed at ${closed.closed_at}`);
     }
-    return;
-  }
-
-  const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-
-  let app: ReturnType<typeof bootstrapApp>;
-  try {
-    app = bootstrapApp({
-      cwd: ctx.cwd,
-      enableGateway: false,
-      requireAllProviders: false,
-    });
-  } catch (err) {
-    throw new CliError(
-      "BOOTSTRAP_FAILED",
-      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
-      EXIT_RUNTIME,
-    );
-  }
-
-  try {
-    const session = app.runtime.sessionService.getSession(sessionId);
-    if (!session) {
-      throw new CliError(
-        "SESSION_NOT_FOUND",
-        `Session not found: ${sessionId}`,
-        EXIT_RUNTIME,
-      );
-    }
-
-    if (session.closedAt !== undefined) {
-      throw new CliError(
-        "SESSION_ALREADY_CLOSED",
-        `Session already closed: ${sessionId}`,
-        EXIT_RUNTIME,
-      );
-    }
-
-		const closed = app.runtime.sessionService.closeSession(sessionId);
-
-		const agentId = session.agentId;
-		const flushRan = await app.runtime.turnService.flushOnSessionClose(sessionId, agentId);
-
-
-    if (ctx.json) {
-      writeJson({
-        ok: true,
-        command: "session close",
-        mode,
-        data: {
-          session_id: closed.sessionId,
-          closed_at: closed.closedAt,
-          flush_ran: flushRan,
-        },
-      });
-    } else if (!ctx.quiet) {
-      writeText(`Session ${closed.sessionId} closed at ${closed.closedAt}`);
-    }
   } finally {
-    app.shutdown();
+    runtime.shutdown();
   }
 }
 
@@ -261,66 +187,10 @@ async function handleSessionRecover(
   validateFlags(KNOWN_RECOVER_FLAGS, args, "session recover");
   const sessionId = requireStringFlag(args, "session", "session recover");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
-
-  if (mode === "gateway") {
-    const client = new GatewayClient(baseUrl);
-    await client.recoverSession(sessionId);
-
-    if (ctx.json) {
-      writeJson({
-        ok: true,
-        command: "session recover",
-        mode,
-        data: {
-          session_id: sessionId,
-          recovered: true,
-          note: "recovery does not canonize partial output",
-        },
-      });
-    } else if (!ctx.quiet) {
-      writeText(`Session ${sessionId} recovered (partial output not canonized)`);
-    }
-    return;
-  }
-
-  const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-
-  let app: ReturnType<typeof bootstrapApp>;
-  try {
-    app = bootstrapApp({
-      cwd: ctx.cwd,
-      enableGateway: false,
-      requireAllProviders: false,
-    });
-  } catch (err) {
-    throw new CliError(
-      "BOOTSTRAP_FAILED",
-      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
-      EXIT_RUNTIME,
-    );
-  }
+  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
   try {
-    const session = app.runtime.sessionService.getSession(sessionId);
-    if (!session) {
-      throw new CliError(
-        "SESSION_NOT_FOUND",
-        `Session not found: ${sessionId}`,
-        EXIT_RUNTIME,
-      );
-    }
-
-    // MUST NOT silently no-op on non-recovery sessions
-    if (!app.runtime.sessionService.requiresRecovery(sessionId)) {
-      throw new CliError(
-        "SESSION_NOT_IN_RECOVERY",
-        `Session ${sessionId} is not in recovery state. Recovery is only valid for sessions that encountered an error during turn execution.`,
-        EXIT_RUNTIME,
-      );
-    }
-
-    // Clear recovery flag — note: recovery does not canonize partial output
-    app.runtime.sessionService.clearRecoveryRequired(sessionId);
+    await runtime.clients.session.recoverSession(sessionId);
 
     if (ctx.json) {
       writeJson({
@@ -337,7 +207,23 @@ async function handleSessionRecover(
       writeText(`Session ${sessionId} recovered (partial output not canonized)`);
     }
   } finally {
-    app.shutdown();
+    runtime.shutdown();
+  }
+}
+
+function bootstrapClients(params: {
+  mode: "local" | "gateway";
+  baseUrl: string;
+  cwd: string;
+}): AppClientRuntime {
+  try {
+    return createAppClientRuntime(params);
+  } catch (err) {
+    throw new CliError(
+      "BOOTSTRAP_FAILED",
+      `Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
+      EXIT_RUNTIME,
+    );
   }
 }
 

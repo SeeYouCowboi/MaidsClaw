@@ -2,3 +2,4 @@
 - 2026-03-19 08:28:37Z Added REQUEST_ID_AMBIGUOUS as a first-class MaidsClawError code; duplicate requestId across sessions is treated as explicit contract violation instead of first-hit fallback.
 - 2026-03-19: Kept `src/cli/inspect/view-models.ts` and `src/cli/diagnostic-catalog.ts` as thin re-export compatibility facades while moving concrete inspect/diagnose logic into `src/app` to keep CLI command imports stable.
 - 2026-03-19: Centralized top-level user-turn business validation in `src/app/turn/user-turn-service.ts` and mapped recovery-required to `INVALID_ACTION` + `details.reason="SESSION_RECOVERY_REQUIRED"`, letting gateway preserve SSE error code semantics without pushing transport rules into runtime.
+- 2026-03-19: Kept `src/cli/gateway-client.ts` as a compatibility facade but moved HTTP/SSE transport behavior into `src/app/clients/gateway/*` so terminal code can migrate incrementally without reintroducing transport-specific contracts in app interfaces.

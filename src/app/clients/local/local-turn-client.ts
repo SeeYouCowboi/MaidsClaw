@@ -12,6 +12,7 @@ import type {
 } from "../../contracts/execution.js";
 import type { PrivateCommitSummary } from "../../contracts/inspect.js";
 import type { SessionService } from "../../../session/service.js";
+import type { TurnClient, TurnRequest } from "../turn-client.js";
 
 // ── Public param / dep types ─────────────────────────────────────────
 
@@ -29,6 +30,39 @@ export type LocalTurnDeps = {
   traceStore?: TraceStore;
 };
 
+export class LocalTurnClient implements TurnClient {
+  constructor(private readonly deps: LocalTurnDeps) {}
+
+  async *streamTurn(params: TurnRequest): AsyncIterable<ObservationEvent> {
+    const perTurnTraceStore = params.saveTrace
+      ? (this.deps.traceStore ?? new TraceStore())
+      : undefined;
+
+    const stream = executeUserTurn(
+      {
+        sessionId: params.sessionId,
+        agentId: params.agentId,
+        userText: params.text,
+        requestId: params.requestId,
+        metadata: {
+          traceStore: perTurnTraceStore,
+        },
+      },
+      {
+        sessionService: this.deps.sessionService,
+        turnService: this.deps.turnService,
+      },
+    );
+
+    for await (const chunk of stream) {
+      const normalized = normalizeChunk(chunk, Date.now());
+      if (normalized !== null) {
+        yield normalized;
+      }
+    }
+  }
+}
+
 // ── Entry point ──────────────────────────────────────────────────────
 
 export async function executeLocalTurn(
@@ -36,42 +70,25 @@ export async function executeLocalTurn(
   deps: LocalTurnDeps,
 ): Promise<TurnExecutionResult> {
   const requestId = crypto.randomUUID();
-
-  const perTurnTraceStore = params.saveTrace
-    ? (deps.traceStore ?? new TraceStore())
-    : undefined;
-
-  const stream = executeUserTurn(
-    {
-      sessionId: params.sessionId,
-      agentId: params.agentId,
-      userText: params.text,
-      requestId,
-      metadata: {
-        traceStore: perTurnTraceStore,
-      },
-    },
-    {
-      sessionService: deps.sessionService,
-      turnService: deps.turnService,
-    },
-  );
+  const turnClient = new LocalTurnClient(deps);
 
   let assistantText = "";
   const publicChunks: ObservationEvent[] = [];
   const toolEvents: ObservationEvent[] = [];
 
-  for await (const chunk of stream) {
-    if (chunk.type === "text_delta") {
-      assistantText += chunk.text;
+  for await (const event of turnClient.streamTurn({
+    sessionId: params.sessionId,
+    agentId: params.agentId,
+    text: params.text,
+    requestId,
+    saveTrace: params.saveTrace,
+  })) {
+    if (event.type === "text_delta") {
+      assistantText += event.text;
     }
-
-    const normalized = normalizeChunk(chunk, Date.now());
-    if (normalized !== null) {
-      publicChunks.push(normalized);
-      if (isToolEvent(normalized)) {
-        toolEvents.push(normalized);
-      }
+    publicChunks.push(event);
+    if (isToolEvent(event)) {
+      toolEvents.push(event);
     }
   }
 
