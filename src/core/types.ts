@@ -71,6 +71,6 @@ export type MemoryFlushRequest = {
   idempotencyKey: string;
 };
 
-// Viewer context — auto-injected by ToolExecutor, never passed by agents
-// Canonical shape lives in src/memory/types.ts; re-exported here for src/core/ consumers.
-export type { ViewerContext, ViewerRole } from "../memory/types.js";
+// Viewer context — auto-injected by ToolExecutor, never passed by agents.
+export { VIEWER_ROLES } from "./contracts/viewer-context.js";
+export type { ViewerContext, ViewerRole } from "./contracts/viewer-context.js";

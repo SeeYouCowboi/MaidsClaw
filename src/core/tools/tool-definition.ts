@@ -1,4 +1,4 @@
-import type { ViewerContext } from "../../memory/types.js";
+import type { ViewerContext } from "../contracts/viewer-context.js";
 
 export type JsonSchema = {
   type?: string;

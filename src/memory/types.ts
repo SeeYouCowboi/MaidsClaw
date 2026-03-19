@@ -1,3 +1,9 @@
+import { VIEWER_ROLES } from "../core/contracts/viewer-context.js";
+import type { ViewerContext, ViewerRole } from "../core/contracts/viewer-context.js";
+
+export { VIEWER_ROLES };
+export type { ViewerContext, ViewerRole };
+
 export const MAX_INTEGER = Number.MAX_SAFE_INTEGER;
 
 export const VISIBILITY_SCOPES = ["system_only", "owner_private", "area_visible", "world_public"] as const;
@@ -56,9 +62,6 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
 export const EPISTEMIC_STATUSES = ["confirmed", "suspected", "hypothetical", "retracted"] as const;
 export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 
-export const VIEWER_ROLES = ["maiden", "rp_agent", "task_agent"] as const;
-export type ViewerRole = (typeof VIEWER_ROLES)[number];
-
 export const CORE_MEMORY_LABELS = ["character", "user", "index"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
@@ -68,13 +71,6 @@ export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
 export type NodeRef = Brand<NodeRefLiteral, "NodeRef">;
-
-export type ViewerContext = {
-  viewer_agent_id: string;
-  viewer_role: ViewerRole;
-  current_area_id?: number | undefined;
-  session_id: string;
-};
 
 export type MemoryMigration = {
   migration_id: string;

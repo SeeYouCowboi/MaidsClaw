@@ -27,7 +27,7 @@ import type {
 	MemoryFlushRequest,
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
-import type { ViewerContext } from "../memory/types.js";
+import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { SessionService } from "../session/service.js";
 import type {
 	AssertionRecord,

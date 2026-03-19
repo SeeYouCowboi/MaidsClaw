@@ -1,6 +1,6 @@
 import type { Blackboard } from "../state/blackboard.js";
 import { getAgentLocation } from "../state/location-helpers.js";
-import type { ViewerContext, ViewerRole } from "../memory/types.js";
+import type { ViewerContext, ViewerRole } from "../core/contracts/viewer-context.js";
 
 // Settlement translation contract:
 // `current_area_id` is the live runtime field (numeric area entity ID from the blackboard).

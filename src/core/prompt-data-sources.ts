@@ -1,4 +1,4 @@
-import type { ViewerContext } from "../memory/types.js";
+import type { ViewerContext } from "./contracts/viewer-context.js";
 
 export type PersonaDataSource = {
   getSystemPrompt(personaId: string): string | undefined;
@@ -22,4 +22,4 @@ export type OperationalDataSource = {
   getExcerpt(keys: string[]): Record<string, unknown>;
 };
 
-export type { ViewerContext } from "../memory/types.js";
+export type { ViewerContext } from "./contracts/viewer-context.js";

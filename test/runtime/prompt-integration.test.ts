@@ -8,7 +8,7 @@ import type { PromptBuilder } from "../../src/core/prompt-builder.js";
 import type { PromptRenderer } from "../../src/core/prompt-renderer.js";
 import { PromptSectionSlot } from "../../src/core/prompt-template.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
-import type { ViewerContext } from "../../src/memory/types.js";
+import type { ViewerContext } from "../../src/core/contracts/viewer-context.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
