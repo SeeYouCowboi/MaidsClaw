@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
-import { diagnose } from "../../src/cli/diagnostic-catalog.js";
+import { diagnose } from "../../src/app/diagnostics/diagnose-service.js";
 import {
 	loadSummaryView,
 	loadTranscriptView,
-} from "../../src/cli/inspect/view-models.js";
+} from "../../src/app/inspect/view-models.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";

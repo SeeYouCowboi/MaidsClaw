@@ -1,3 +1,9 @@
+export type InspectContext = {
+  requestId?: string;
+  sessionId?: string;
+  agentId?: string;
+};
+
 export type RedactedSettlement = {
   type: string;
   op_count?: number;

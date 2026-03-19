@@ -1,2 +1,3 @@
 - 2026-03-19: Kept `TraceStore.readTrace(requestId)` as class API and moved low-level JSON read to standalone `readTrace(tracePath)` in `src/app/diagnostics/trace-reader.ts` to satisfy split without introducing a wrapper service layer.
 - 2026-03-19 08:28:37Z Added REQUEST_ID_AMBIGUOUS as a first-class MaidsClawError code; duplicate requestId across sessions is treated as explicit contract violation instead of first-hit fallback.
+- 2026-03-19: Kept `src/cli/inspect/view-models.ts` and `src/cli/diagnostic-catalog.ts` as thin re-export compatibility facades while moving concrete inspect/diagnose logic into `src/app` to keep CLI command imports stable.

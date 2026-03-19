@@ -1,11 +1,8 @@
 import type { CliContext } from "../context.js";
 import type { ParsedArgs } from "../parser.js";
+import type { InspectContext } from "../../app/contracts/inspect.js";
 
-export type InspectContext = {
-	requestId?: string;
-	sessionId?: string;
-	agentId?: string;
-};
+export type { InspectContext };
 
 type ShellContextCarrier = {
 	currentRequestId?: string;

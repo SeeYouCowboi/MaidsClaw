@@ -3,7 +3,7 @@ import { MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
 import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
-import { diagnose } from "../cli/diagnostic-catalog.js";
+import { diagnose } from "../app/diagnostics/diagnose-service.js";
 import {
   loadChunksView,
   loadLogsView,
@@ -12,7 +12,7 @@ import {
   loadSummaryView,
   loadTraceView,
   loadTranscriptView,
-} from "../cli/inspect/view-models.js";
+} from "../app/inspect/view-models.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import { createSseStream } from "./sse.js";
