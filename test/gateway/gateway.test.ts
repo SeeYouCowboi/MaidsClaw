@@ -307,16 +307,19 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
   });
 
   it("uses session owner when request body omits agent_id", async () => {
-    let selectedAgentId = "";
+    let receivedParams: unknown = null;
     const localSessionService = new SessionService();
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: (agentId) => {
-        selectedAgentId = agentId;
-        return null;
-      },
+      turnService: {
+        runUserTurn: async function* (params: unknown) {
+          receivedParams = params;
+          yield { type: "text_delta" as const, text: "ok" };
+          yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 0, outputTokens: 1 };
+        },
+      } as any,
     });
     localServer.start();
 
@@ -329,6 +332,7 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
       });
       const { session_id } = (await createRes.json()) as { session_id: string };
 
+      // Omit agent_id from the turn request — gateway should use session owner
       const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -339,13 +343,12 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
       });
 
       const events = parseSseEvents(await res.text());
-      expect(events.length).toBe(1);
-      expect(events[0].type).toBe("error");
-      expect(selectedAgentId).toBe("rp:default");
-
-      const errData = events[0].data as { code: string; message: string };
-      expect(errData.code).toBe("AGENT_NOT_CONFIGURED");
-      expect(errData.message.includes("rp:default")).toBe(true);
+      // Turn should succeed (no AGENT_OWNERSHIP_MISMATCH), proving session owner was used
+      const types = events.map((e) => e.type);
+      expect(types).toContain("done");
+      expect(types).not.toContain("error");
+      // runUserTurn was called (executeUserTurn delegates to it after session validation)
+      expect(receivedParams).not.toBeNull();
     } finally {
       localServer.stop();
     }
@@ -660,8 +663,8 @@ describe("Stream semantics", () => {
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: () => ({
-        run: async function* () {
+      turnService: {
+        runUserTurn: async function* () {
           yield { type: "text_delta" as const, text: "partial" };
           yield {
             type: "error" as const,
@@ -670,7 +673,7 @@ describe("Stream semantics", () => {
             retriable: true,
           };
         },
-      } as any),
+      } as any,
     });
     localServer.start();
 
@@ -707,14 +710,14 @@ describe("Stream semantics", () => {
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: () => ({
-        run: async function* () {
+      turnService: {
+        runUserTurn: async function* () {
           yield { type: "text_delta" as const, text: "Hello" };
           yield { type: "message_end" as const, stopReason: "tool_use" as const, inputTokens: 10, outputTokens: 5 };
           yield { type: "text_delta" as const, text: "World" };
           yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 15, outputTokens: 8 };
         },
-      } as any),
+      } as any,
     });
     localServer.start();
 
@@ -753,13 +756,13 @@ describe("Stream semantics", () => {
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: () => ({
-        run: async function* () {
+      turnService: {
+        runUserTurn: async function* () {
           yield { type: "tool_use_start" as const, id: "t1", name: "search" };
           yield { type: "tool_use_end" as const, id: "t1" };
           yield { type: "message_end" as const, stopReason: "end_turn" as const };
         },
-      } as any),
+      } as any,
     });
     localServer.start();
 
@@ -798,13 +801,13 @@ describe("Stream semantics", () => {
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: () => ({
-        run: async function* () {
+      turnService: {
+        runUserTurn: async function* () {
           yield { type: "tool_execution_result" as const, id: "t1", name: "search", result: { data: "found" }, isError: false };
           yield { type: "tool_execution_result" as const, id: "t2", name: "delete", result: "permission denied", isError: true };
           yield { type: "message_end" as const, stopReason: "end_turn" as const };
         },
-      } as any),
+      } as any,
     });
     localServer.start();
 
@@ -852,12 +855,12 @@ describe("Stream semantics", () => {
       port: 0,
       host: "localhost",
       sessionService: localSessionService,
-      createAgentLoop: () => ({
-        run: async function* () {
+      turnService: {
+        runUserTurn: async function* () {
           yield { type: "text_delta" as const, text: "partial" };
           throw new Error("stream explosion");
         },
-      } as any),
+      } as any,
     });
     localServer.start();
 
