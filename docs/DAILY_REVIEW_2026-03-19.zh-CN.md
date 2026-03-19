@@ -37,6 +37,16 @@
 - **问题**: `request.messages.find(m => m.role === "system")?.content` 如果 `content` 是 `ContentBlock[]`（非字符串），直接传给 Anthropic API 的 `system` 字段会被拒绝。
 - **建议**: 添加类型收窄，确保 `system` 字段始终为字符串。
 
+### 1.5 rp-turn-contract.ts — 输入对象被静默修改
+- **文件**: `src/runtime/rp-turn-contract.ts:88, 119-121`
+- **问题**: `validateRpTurnOutcome` 直接修改调用者传入的对象（`obj.schemaVersion = "rp_turn_outcome_v3"`，`proposition.object = { kind: "entity", ref: object }`）。调用者可能不期望传入数据被修改。最后通过 `as unknown as RpTurnOutcomeSubmission` 双重强转返回。
+- **建议**: 创建新对象而非修改输入，或在文档中明确标注此函数会修改输入。
+
+### 1.6 openai-provider.ts — tool_result content block 类型不兼容
+- **文件**: `src/core/models/openai-provider.ts:349-369`
+- **问题**: `toOpenAIContentBlocks` 将 `tool_result` 映射为 `{ type: "tool_result", ... }` content block，但 OpenAI API 不识别此类型。Tool results 在 OpenAI 中应作为独立的 `role: "tool"` 消息发送，而非作为 content block。
+- **建议**: 修复映射逻辑或确认此路径不会被触发。
+
 ---
 
 ## 二、潜在隐患
@@ -64,6 +74,24 @@
 ### 2.5 anthropic-provider.ts — 不读取错误响应体
 - **文件**: `src/core/models/anthropic-provider.ts:97-103`
 - **问题**: 与 openai-provider 不同，Anthropic provider 不读取错误响应体就直接抛异常，丢失了有价值的诊断信息（如 `overloaded_error` 详情）。
+
+### 2.6 persona-adapter.ts — XML 注入风险
+- **文件**: `src/core/prompt-data-adapters/persona-adapter.ts:15-22`
+- **问题**: `hiddenTasks` 和 `privatePersona` 直接注入系统 prompt 的 `<hidden_objectives>` XML 标签内，无转义。如果内容含 `</hidden_objectives>` 可破坏 XML 结构或实现 prompt 注入。
+- **同样问题**: `src/memory/prompt-data.ts:19` — `block.label` 和 `block.value` 直接插入 XML 标签。
+
+### 2.7 anti-drift.ts — CJK 文本分词失效
+- **文件**: `src/persona/anti-drift.ts:59-60`
+- **问题**: `split(" ")` 按空格分词，对中文文本无效（中文词语间无空格）。`word.length > 1` 过滤器会丢弃所有单字符词，但中文单字本身就是有意义的词。漂移检测器对中文文本准确度很低。
+
+### 2.8 rp-private-thoughts-test.ts — LLM-as-Judge 偏差
+- **文件**: `scripts/rp-private-thoughts-test.ts:711-713, 930`
+- **问题**: LLM 评审使用**同一个 RP 角色**（`rp:eveline`）作为 judge。角色的系统 prompt、隐藏任务、私人人格都会影响评审结果，严重偏置。
+- **建议**: 使用独立的评审 agent（如无角色设定的通用 LLM 实例）。
+
+### 2.9 openai-provider.ts — stopReason 默认值不一致
+- **文件**: `src/core/models/openai-provider.ts:384`
+- **问题**: 未知停止原因默认为 `"stop_sequence"`，而 Anthropic provider 默认为 `"end_turn"`。两个 provider 对同一逻辑场景返回不同值，可能导致下游行为差异。
 
 ---
 
@@ -141,6 +169,11 @@ terminal-cli/ → CLI 表面（commands、parser、output、shell）
 | 🟡 中 | 统一 `isToolEvent` 实现 | 功能正确性 |
 | 🟡 中 | 修复 12 个失败测试 | CI 健康 |
 | 🟡 中 | 优化 CJK token 估算 | 上下文管理 |
+| 🟡 中 | 修复 rp-turn-contract 输入对象静默修改 | 数据完整性 |
+| 🟡 中 | persona-adapter / prompt-data XML 注入防护 | 安全性 |
+| 🟡 中 | 修复 anti-drift CJK 分词 | 功能正确性 |
+| 🟡 中 | 修复 LLM-as-Judge 使用独立评审 agent | 测试可靠性 |
+| 🟡 中 | 统一 stopReason 默认值 | 一致性 |
 | 🟢 低 | 提取共享 SSE 解析器 | 可维护性 |
 | 🟢 低 | 清理死代码和重复函数 | 代码整洁 |
 | 🟢 低 | 抽取 agent-loop run/runBuffered 共享逻辑 | 可维护性 |
