@@ -3,17 +3,11 @@ import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { Chunk } from "../core/chunk.js";
 import type { AgentLoop, AgentRunRequest } from "../core/agent-loop.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
+import type { ObservationEvent } from "../app/contracts/execution.js";
+import { LocalHealthClient } from "../app/clients/local/local-health-client.js";
+import { LocalInspectClient } from "../app/clients/local/local-inspect-client.js";
+import { LocalSessionClient } from "../app/clients/local/local-session-client.js";
 import { executeUserTurn } from "../app/turn/user-turn-service.js";
-import { diagnose } from "../app/diagnostics/diagnose-service.js";
-import {
-  loadChunksView,
-  loadLogsView,
-  loadMemoryView,
-  loadPromptView,
-  loadSummaryView,
-  loadTraceView,
-  loadTranscriptView,
-} from "../app/inspect/view-models.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import { createSseStream } from "./sse.js";
@@ -68,41 +62,119 @@ function makeEvent(
 function chunkToGatewayEvent(
   sessionId: string,
   requestId: string,
-  chunk: Chunk
+  event: ObservationEvent
 ): GatewayEvent | null {
-  switch (chunk.type) {
+  switch (event.type) {
     case "text_delta":
-      return makeEvent(sessionId, requestId, "delta", { text: chunk.text });
+      return makeEvent(sessionId, requestId, "delta", { text: event.text });
     case "tool_use_start":
+    case "tool_call":
       return makeEvent(sessionId, requestId, "tool_call", {
-        id: chunk.id,
-        name: chunk.name,
+        id: event.id,
+        name: event.tool,
         status: "started",
       });
     case "tool_use_end":
       return makeEvent(sessionId, requestId, "tool_call", {
-        id: chunk.id,
+        id: event.id,
         status: "arguments_complete",
       });
     case "error":
       return makeEvent(sessionId, requestId, "error", {
-        code: chunk.code,
-        message: chunk.message,
-        retriable: chunk.retriable,
+        code: event.code,
+        message: event.message,
+        retriable: event.retriable,
       });
     case "tool_use_delta":
     case "message_end":
       return null;
     case "tool_execution_result":
+    case "tool_result":
       return makeEvent(sessionId, requestId, "tool_result", {
-        id: chunk.id,
-        name: chunk.name,
-        status: chunk.isError ? "failed" : "completed",
-        result: chunk.result,
+        id: event.id,
+        name: event.tool,
+        status: event.is_error ? "failed" : "completed",
+        result: event.output,
       });
     default:
       return null;
   }
+}
+
+function chunkToObservationEvent(chunk: Chunk): ObservationEvent | null {
+  switch (chunk.type) {
+    case "text_delta":
+      return { type: "text_delta", text: chunk.text };
+    case "tool_use_start":
+      return {
+        type: "tool_use_start",
+        id: chunk.id,
+        tool: chunk.name,
+        input: { id: chunk.id, status: "started" },
+      };
+    case "tool_use_delta":
+      return {
+        type: "tool_use_delta",
+        id: chunk.id,
+        input_delta: chunk.partialJson,
+      };
+    case "tool_use_end":
+      return { type: "tool_use_end", id: chunk.id };
+    case "tool_execution_result":
+      return {
+        type: "tool_execution_result",
+        id: chunk.id,
+        tool: chunk.name,
+        output: chunk.result,
+        is_error: chunk.isError,
+      };
+    case "error":
+      return {
+        type: "error",
+        code: chunk.code,
+        message: chunk.message,
+        retriable: chunk.retriable,
+      };
+    case "message_end":
+      return {
+        type: "message_end",
+        stop_reason: chunk.stopReason,
+        usage: {
+          input_tokens: chunk.inputTokens,
+          output_tokens: chunk.outputTokens,
+        },
+      };
+    default:
+      return null;
+  }
+}
+
+async function* mapChunkStreamToObservations(
+  stream: AsyncIterable<Chunk>,
+): AsyncGenerator<ObservationEvent> {
+  for await (const chunk of stream) {
+    const mapped = chunkToObservationEvent(chunk);
+    if (mapped) {
+      yield mapped;
+    }
+  }
+}
+
+function sessionClient(ctx: ControllerContext): LocalSessionClient {
+  return new LocalSessionClient(ctx.sessionService);
+}
+
+function inspectClient(ctx: ControllerContext): LocalInspectClient | Response {
+  const runtime = requireRuntime(ctx);
+  if (runtime instanceof Response) {
+    return runtime;
+  }
+  return new LocalInspectClient(runtime);
+}
+
+function usesUnsafeRaw(url: URL): boolean {
+  const values = [url.searchParams.get("unsafe_raw"), url.searchParams.get("unsafeRaw")];
+  return values.some((value) => value === "1" || value === "true");
 }
 
 function extractSessionId(url: URL): string | undefined {
@@ -164,7 +236,13 @@ export function handleHealthz(): Response {
 }
 
 /** GET /readyz */
-export function handleReadyz(_req: Request, ctx: ControllerContext): Response {
+export async function handleReadyz(_req: Request, ctx: ControllerContext): Promise<Response> {
+  if (ctx.runtime) {
+    const health = await new LocalHealthClient(ctx.runtime).checkHealth();
+    const httpStatus = health.readyz.status === "ok" ? 200 : 503;
+    return jsonResponse(health.readyz, httpStatus);
+  }
+
   const checks = ctx.healthChecks ?? {};
   const results: Record<string, SubsystemStatus> = {};
   let allOk = true;
@@ -172,7 +250,9 @@ export function handleReadyz(_req: Request, ctx: ControllerContext): Response {
   for (const [name, check] of Object.entries(checks)) {
     const status = check();
     results[name] = status;
-    if (status !== "ok") allOk = false;
+    if (status !== "ok") {
+      allOk = false;
+    }
   }
 
   if (Object.keys(results).length === 0) {
@@ -182,7 +262,6 @@ export function handleReadyz(_req: Request, ctx: ControllerContext): Response {
 
   const overallStatus = allOk ? "ok" : "degraded";
   const httpStatus = allOk ? 200 : 503;
-
   return jsonResponse({ status: overallStatus, ...results }, httpStatus);
 }
 
@@ -222,9 +301,9 @@ export async function handleCreateSession(
     return errorResponse(err, 400);
   }
 
-  const session = ctx.sessionService.createSession(body.agent_id);
+  const session = await sessionClient(ctx).createSession(body.agent_id);
   return jsonResponse(
-    { session_id: session.sessionId, created_at: session.createdAt },
+    { session_id: session.session_id, created_at: session.created_at },
     201
   );
 }
@@ -271,11 +350,11 @@ export async function handleTurnStream(
 
   const userText = body.user_message?.text ?? "";
 
-  let runLoop: AsyncIterable<Chunk>;
+  let observationStream: AsyncIterable<ObservationEvent>;
 
   if (ctx.turnService) {
     try {
-      runLoop = executeUserTurn(
+      observationStream = mapChunkStreamToObservations(executeUserTurn(
         {
           sessionId,
           agentId: body.agent_id,
@@ -289,7 +368,7 @@ export async function handleTurnStream(
           sessionService: ctx.sessionService,
           turnService: ctx.turnService,
         },
-      );
+      ));
     } catch (error) {
       const mappedCode = mapTurnValidationErrorCode(error);
       const message = isMaidsClawError(error)
@@ -307,12 +386,45 @@ export async function handleTurnStream(
       return createSseStream(sessionId, requestId, errorStream());
     }
   } else if (!ctx.createAgentLoop) {
-    async function* stubStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(sessionId!, requestId, "status", { message: "processing" });
-      yield makeEvent(sessionId!, requestId, "delta", { text: "Hello from MaidsClaw." });
-      yield makeEvent(sessionId!, requestId, "done", { total_tokens: 10 });
+    try {
+      observationStream = mapChunkStreamToObservations(executeUserTurn(
+        {
+          sessionId,
+          agentId: body.agent_id,
+          userText,
+          requestId,
+        },
+        {
+          sessionService: ctx.sessionService,
+          turnService: {
+            runUserTurn: async function* () {
+              yield { type: "text_delta", text: "Hello from MaidsClaw." };
+              yield {
+                type: "message_end",
+                stopReason: "end_turn",
+                inputTokens: 0,
+                outputTokens: 10,
+              };
+            },
+          },
+        },
+      ));
+    } catch (error) {
+      const mappedCode = mapTurnValidationErrorCode(error);
+      const message = isMaidsClawError(error)
+        ? error.message
+        : (error instanceof Error ? error.message : String(error));
+      const retriable = isMaidsClawError(error) ? error.retriable : false;
+
+      async function* errorStream(): AsyncGenerator<GatewayEvent> {
+        yield makeEvent(sessionId!, requestId, "error", {
+          code: mappedCode,
+          message,
+          retriable,
+        });
+      }
+      return createSseStream(sessionId, requestId, errorStream());
     }
-    return createSseStream(sessionId, requestId, stubStream());
   } else {
     if (!canonicalAgentId) {
       async function* errorStream(): AsyncGenerator<GatewayEvent> {
@@ -352,7 +464,7 @@ export async function handleTurnStream(
       metadata: body.metadata,
     };
 
-    runLoop = agentLoop.run(runRequest);
+    observationStream = mapChunkStreamToObservations(agentLoop.run(runRequest));
   }
 
   async function* agentStream(): AsyncGenerator<GatewayEvent> {
@@ -363,17 +475,16 @@ export async function handleTurnStream(
     let hadError = false;
 
     try {
-      for await (const chunk of runLoop) {
-        // Accumulate tokens from message_end chunks before gateway mapping
-        if (chunk.type === "message_end") {
-          inputTokens += chunk.inputTokens ?? 0;
-          outputTokens += chunk.outputTokens ?? 0;
+      for await (const observation of observationStream) {
+        if (observation.type === "message_end") {
+          inputTokens += observation.usage?.input_tokens ?? 0;
+          outputTokens += observation.usage?.output_tokens ?? 0;
         }
-        if (chunk.type === "error") {
+        if (observation.type === "error") {
           hadError = true;
         }
 
-        const event = chunkToGatewayEvent(sessionId!, requestId, chunk);
+        const event = chunkToGatewayEvent(sessionId!, requestId, observation);
         if (event) {
           yield event;
         }
@@ -434,16 +545,16 @@ export async function handleCloseSession(
     return errorResponse(err, 400);
   }
 
-  const session = ctx.sessionService.getSession(sessionId);
-  if (ctx.turnService && session) {
-    await ctx.turnService.flushOnSessionClose(sessionId, session.agentId);
+  const session = await sessionClient(ctx).getSession(sessionId);
+  if (ctx.turnService && session?.agent_id) {
+    await ctx.turnService.flushOnSessionClose(sessionId, session.agent_id);
   }
 
   try {
-    const record = ctx.sessionService.closeSession(sessionId);
+    const record = await sessionClient(ctx).closeSession(sessionId);
     return jsonResponse({
-      session_id: record.sessionId,
-      closed_at: record.closedAt,
+      session_id: record.session_id,
+      closed_at: record.closed_at,
     });
   } catch (thrown) {
     if (thrown instanceof MaidsClawError) {
@@ -490,29 +601,25 @@ export async function handleRecoverSession(
     );
   }
 
-  const session = ctx.sessionService.getSession(sessionId);
-  if (!session) {
+  try {
+    const recovered = await sessionClient(ctx).recoverSession(sessionId);
+    return jsonResponse(recovered);
+  } catch (thrown) {
+    if (thrown instanceof MaidsClawError) {
+      const status = thrown.code === "SESSION_NOT_FOUND" ? 404 : 400;
+      return errorResponse(thrown, status);
+    }
     return errorResponse(
-      new MaidsClawError({ code: "SESSION_NOT_FOUND", message: `Session not found: ${sessionId}`, retriable: false }),
-      404
+      new MaidsClawError({ code: "INTERNAL_ERROR", message: "Unexpected error recovering session", retriable: false }),
+      500,
     );
   }
-
-  if (!ctx.sessionService.isRecoveryRequired(sessionId)) {
-    return errorResponse(
-      new MaidsClawError({ code: "SESSION_NOT_IN_RECOVERY", message: `Session '${sessionId}' is not in recovery_required state`, retriable: false }),
-      400
-    );
-  }
-
-  ctx.sessionService.clearRecoveryRequired(sessionId);
-  return jsonResponse({ session_id: sessionId, recovered: true });
 }
 
-export function handleRequestSummary(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleRequestSummary(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const requestId = extractRequestId(new URL(req.url));
@@ -520,20 +627,13 @@ export function handleRequestSummary(req: Request, ctx: ControllerContext): Resp
     return badRequest("Missing request_id in path");
   }
 
-  return jsonResponse(
-    loadSummaryView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: { requestId },
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getSummary(requestId));
 }
 
-export function handleRequestPrompt(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleRequestPrompt(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const requestId = extractRequestId(new URL(req.url));
@@ -541,20 +641,13 @@ export function handleRequestPrompt(req: Request, ctx: ControllerContext): Respo
     return badRequest("Missing request_id in path");
   }
 
-  return jsonResponse(
-    loadPromptView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: { requestId },
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getPrompt(requestId));
 }
 
-export function handleRequestChunks(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleRequestChunks(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const requestId = extractRequestId(new URL(req.url));
@@ -562,20 +655,13 @@ export function handleRequestChunks(req: Request, ctx: ControllerContext): Respo
     return badRequest("Missing request_id in path");
   }
 
-  return jsonResponse(
-    loadChunksView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: { requestId },
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getChunks(requestId));
 }
 
-export function handleRequestDiagnose(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleRequestDiagnose(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const requestId = extractRequestId(new URL(req.url));
@@ -583,43 +669,32 @@ export function handleRequestDiagnose(req: Request, ctx: ControllerContext): Res
     return badRequest("Missing request_id in path");
   }
 
-  return jsonResponse(
-    diagnose({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: { requestId },
-    }),
-  );
+  return jsonResponse(await client.diagnose(requestId));
 }
 
-export function handleRequestTrace(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleRequestTrace(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
-  const requestId = extractRequestId(new URL(req.url));
+  const url = new URL(req.url);
+  const requestId = extractRequestId(url);
   if (!requestId) {
     return badRequest("Missing request_id in path");
   }
 
-  return jsonResponse(
-    loadTraceView(
-      {
-        runtime,
-        traceStore: runtime.traceStore,
-        context: { requestId },
-        mode: "gateway",
-      },
-      false,
-    ),
-  );
+  if (usesUnsafeRaw(url)) {
+    return badRequest("INSPECT_UNSAFE_RAW_LOCAL_ONLY");
+  }
+
+  return jsonResponse(await client.getTrace(requestId, { unsafeRaw: false }));
 }
 
-export function handleSessionTranscript(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleSessionTranscript(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const url = new URL(req.url);
@@ -628,21 +703,13 @@ export function handleSessionTranscript(req: Request, ctx: ControllerContext): R
     return badRequest("Missing session_id in path");
   }
 
-  return jsonResponse(
-    loadTranscriptView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: { sessionId },
-      raw: url.searchParams.get("raw") === "true",
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getTranscript(sessionId, url.searchParams.get("raw") === "true"));
 }
 
-export function handleSessionMemory(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleSessionMemory(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const url = new URL(req.url);
@@ -651,36 +718,19 @@ export function handleSessionMemory(req: Request, ctx: ControllerContext): Respo
     return badRequest("Missing session_id in path");
   }
 
-  return jsonResponse(
-    loadMemoryView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: {
-        sessionId,
-        agentId: extractOptionalQueryParam(url, "agent_id"),
-      },
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getMemory(sessionId, extractOptionalQueryParam(url, "agent_id")));
 }
 
-export function handleLogs(req: Request, ctx: ControllerContext): Response {
-  const runtime = requireRuntime(ctx);
-  if (runtime instanceof Response) {
-    return runtime;
+export async function handleLogs(req: Request, ctx: ControllerContext): Promise<Response> {
+  const client = inspectClient(ctx);
+  if (client instanceof Response) {
+    return client;
   }
 
   const url = new URL(req.url);
-  return jsonResponse(
-    loadLogsView({
-      runtime,
-      traceStore: runtime.traceStore,
-      context: {
-        requestId: extractOptionalQueryParam(url, "request_id"),
-        sessionId: extractOptionalQueryParam(url, "session_id"),
-        agentId: extractOptionalQueryParam(url, "agent_id"),
-      },
-      mode: "gateway",
-    }),
-  );
+  return jsonResponse(await client.getLogs({
+    requestId: extractOptionalQueryParam(url, "request_id"),
+    sessionId: extractOptionalQueryParam(url, "session_id"),
+    agentId: extractOptionalQueryParam(url, "agent_id"),
+  }));
 }
