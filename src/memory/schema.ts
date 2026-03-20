@@ -84,6 +84,16 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent ON search_docs_cognition(agent_id, kind, stance)`,
   `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent_updated ON search_docs_cognition(agent_id, updated_at DESC)`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_cognition_fts USING fts5(content, tokenize='trigram')`,
+
+  // ── Shared Blocks V1 ──
+  `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_admins (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, granted_by_agent_id TEXT NOT NULL, granted_at INTEGER NOT NULL, UNIQUE(block_id, agent_id))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_attachments (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, target_kind TEXT NOT NULL DEFAULT 'agent' CHECK (target_kind = 'agent'), target_id TEXT NOT NULL, attached_by_agent_id TEXT NOT NULL, attached_at INTEGER NOT NULL, UNIQUE(block_id, target_kind, target_id))`,
+  `CREATE INDEX IF NOT EXISTS idx_shared_block_attachments_target ON shared_block_attachments(target_kind, target_id)`,
+  `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
+  `CREATE INDEX IF NOT EXISTS idx_shared_block_patch_log_block_seq ON shared_block_patch_log(block_id, patch_seq)`,
+  `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
 ];
 
 const MEMORY_MIGRATIONS: MigrationStep[] = [
@@ -221,6 +231,36 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_cognition_fts USING fts5(content, tokenize='trigram')`,
+      );
+    },
+  },
+  {
+    id: "memory:008:add-shared-block-schema",
+    description: "Add shared block tables for V1 collaborative memory blocks",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
+      );
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_block_admins (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, granted_by_agent_id TEXT NOT NULL, granted_at INTEGER NOT NULL, UNIQUE(block_id, agent_id))`,
+      );
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_block_attachments (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, target_kind TEXT NOT NULL DEFAULT 'agent' CHECK (target_kind = 'agent'), target_id TEXT NOT NULL, attached_by_agent_id TEXT NOT NULL, attached_at INTEGER NOT NULL, UNIQUE(block_id, target_kind, target_id))`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_shared_block_attachments_target ON shared_block_attachments(target_kind, target_id)`,
+      );
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_shared_block_patch_log_block_seq ON shared_block_patch_log(block_id, patch_seq)`,
+      );
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
       );
     },
   },

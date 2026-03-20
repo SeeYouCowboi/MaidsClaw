@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(21);
+		expect(nonFtsCount?.count).toBe(27);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -62,6 +62,8 @@ describe("memory schema", () => {
 		expect(indexNames.includes("ux_memory_relations_pair_type")).toBe(true);
 		expect(indexNames.includes("idx_search_docs_cognition_agent")).toBe(true);
 		expect(indexNames.includes("idx_search_docs_cognition_agent_updated")).toBe(true);
+		expect(indexNames.includes("idx_shared_block_attachments_target")).toBe(true);
+		expect(indexNames.includes("idx_shared_block_patch_log_block_seq")).toBe(true);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -487,7 +489,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(7);
+		expect(migrationCount?.count).toBe(8);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -519,5 +521,112 @@ describe("memory schema", () => {
 		expect(typeof GraphNavigator).toBe("function");
 		expect(String(makeNodeRef("private_belief", 1))).toBe("private_belief:1");
 		expect(String(makeNodeRef("private_event", 1))).toBe("private_event:1");
+	});
+
+	it("creates all 6 shared_blocks tables", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const sharedBlockTables = db
+			.query<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'shared_block%' ORDER BY name",
+			)
+			.map((r) => r.name);
+
+		expect(sharedBlockTables).toEqual([
+			"shared_block_admins",
+			"shared_block_attachments",
+			"shared_block_patch_log",
+			"shared_block_sections",
+			"shared_block_snapshots",
+			"shared_blocks",
+		]);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("rejects shared_block_attachments with target_kind != 'agent'", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const now = Date.now();
+		db.run("INSERT INTO shared_blocks (title, created_by_agent_id, created_at, updated_at) VALUES (?, ?, ?, ?)", [
+			"test block",
+			"agent-1",
+			now,
+			now,
+		]);
+
+		let invalidKindFailed = false;
+		try {
+			db.run(
+				"INSERT INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at) VALUES (?, ?, ?, ?, ?)",
+				[1, "area", "area-1", "agent-1", now],
+			);
+		} catch {
+			invalidKindFailed = true;
+		}
+		expect(invalidKindFailed).toBe(true);
+
+		let validKindFailed = false;
+		try {
+			db.run(
+				"INSERT INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at) VALUES (?, ?, ?, ?, ?)",
+				[1, "agent", "agent-2", "agent-1", now],
+			);
+		} catch {
+			validKindFailed = true;
+		}
+		expect(validKindFailed).toBe(false);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("enforces UNIQUE(block_id, patch_seq) on shared_block_patch_log", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const now = Date.now();
+		db.run("INSERT INTO shared_blocks (title, created_by_agent_id, created_at, updated_at) VALUES (?, ?, ?, ?)", [
+			"test block",
+			"agent-1",
+			now,
+			now,
+		]);
+
+		db.run(
+			"INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, content, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			[1, 1, "set_section", "profile", "hello", "agent-1", now],
+		);
+
+		let duplicateSeqFailed = false;
+		try {
+			db.run(
+				"INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, content, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				[1, 1, "set_section", "profile", "world", "agent-1", now],
+			);
+		} catch {
+			duplicateSeqFailed = true;
+		}
+		expect(duplicateSeqFailed).toBe(true);
+
+		let nextSeqFailed = false;
+		try {
+			db.run(
+				"INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, content, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				[1, 2, "set_section", "profile", "world", "agent-1", now],
+			);
+		} catch {
+			nextSeqFailed = true;
+		}
+		expect(nextSeqFailed).toBe(false);
+
+		db.close();
+		cleanupDb(dbPath);
 	});
 });
