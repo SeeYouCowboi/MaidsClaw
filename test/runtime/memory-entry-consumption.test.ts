@@ -137,7 +137,7 @@ function commitPendingSettlementRange(params: {
 }
 
 describe("memory-entry-consumption: live runtime integration", () => {
-  it("bootstrapped runtime registers all 5 memory tools via registerRuntimeTools", () => {
+  it("bootstrapped runtime registers all 7 memory tools via registerRuntimeTools", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
@@ -146,6 +146,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(schemaNames).toContain("core_memory_append");
       expect(schemaNames).toContain("core_memory_replace");
       expect(schemaNames).toContain("memory_read");
+      expect(schemaNames).toContain("narrative_search");
+      expect(schemaNames).toContain("cognition_search");
       expect(schemaNames).toContain("memory_search");
       expect(schemaNames).toContain("memory_explore");
     } finally {
@@ -153,16 +155,16 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
-  it("all 5 memory tool schemas have name, description, and parameters", () => {
+  it("all 7 memory tool schemas have name, description, and parameters", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
       const schemas = runtime.toolExecutor.getSchemas();
       const memorySchemas = schemas.filter((s) =>
-        ["core_memory_append", "core_memory_replace", "memory_read", "memory_search", "memory_explore"].includes(s.name),
+        ["core_memory_append", "core_memory_replace", "memory_read", "narrative_search", "cognition_search", "memory_search", "memory_explore"].includes(s.name),
       );
 
-      expect(memorySchemas).toHaveLength(5);
+      expect(memorySchemas).toHaveLength(7);
       for (const schema of memorySchemas) {
         expect(typeof schema.name).toBe("string");
         expect(schema.name.length > 0).toBe(true);
@@ -378,7 +380,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(profileIds).toContain(TASK_AGENT_PROFILE.id);
 
       const schemas = runtime.toolExecutor.getSchemas();
-      expect(schemas.length).toBeGreaterThanOrEqual(5);
+      expect(schemas.length).toBeGreaterThanOrEqual(7);
 
       expect(maidenProfile?.toolPermissions).toBeDefined();
     } finally {

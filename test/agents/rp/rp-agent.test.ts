@@ -27,7 +27,7 @@ describe("RpToolPolicy", () => {
     const policy = new RpToolPolicy();
     const permissions = policy.toToolPermissions();
 
-    expect(permissions.length).toBe(5);
+    expect(permissions.length).toBe(7);
     expect(permissions.every((entry) => entry.allowed)).toBe(true);
   });
 });

@@ -32,6 +32,20 @@ export type MemoryToolServices = {
   coreMemory: CoreMemoryService;
   retrieval: RetrievalService;
   navigator?: GraphNavigatorLike;
+  narrativeSearch?: {
+    searchNarrative(query: string, viewerContext: ViewerContext): Promise<unknown>;
+  };
+  cognitionSearch?: {
+    searchCognition(params: {
+      agentId: string;
+      query?: string;
+      kind?: string;
+      stance?: string;
+      basis?: string;
+      activeOnly?: boolean;
+      limit?: number;
+    }): unknown;
+  };
 };
 
 export type ToolExecutorLike = {
@@ -210,12 +224,30 @@ function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// Tool: memory_search
+// Shared narrative search handler (used by narrative_search + memory_search alias)
 // ---------------------------------------------------------------------------
 
-function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
+async function narrativeSearchHandler(
+  services: MemoryToolServices,
+  args: Record<string, unknown>,
+  viewerContext: ViewerContext,
+) {
+  const query = args.query as string;
+  if (services.narrativeSearch) {
+    const results = await services.narrativeSearch.searchNarrative(query, viewerContext);
+    return { results };
+  }
+  const results = await services.retrieval.searchVisibleNarrative(query, viewerContext);
+  return { results };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: narrative_search
+// ---------------------------------------------------------------------------
+
+function makeNarrativeSearch(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "memory_search",
+    name: "narrative_search",
     description:
       `Search visible narrative memory using full-text search. Returns matching events and facts scoped to your visibility. ` +
       POINTER_GUIDE,
@@ -232,11 +264,92 @@ function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
       required: ["query"],
       additionalProperties: false,
     },
-    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
-      const query = args.query as string;
-      const results = await services.retrieval.searchVisibleNarrative(query, viewerContext);
-      return { results };
+    handler: (args, viewerContext) => narrativeSearchHandler(services, args, viewerContext),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: cognition_search
+// ---------------------------------------------------------------------------
+
+function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition {
+  return {
+    name: "cognition_search",
+    description:
+      `Search private cognition (assertions, evaluations, commitments) for the current agent. ` +
+      `Returns matching cognition hits scoped to the viewer agent. ` +
+      POINTER_GUIDE,
+    effectClass: "read_only",
+    traceVisibility: "public",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query (natural language or keywords, min 3 chars).",
+        },
+        kind: {
+          type: "string",
+          enum: ["assertion", "evaluation", "commitment"],
+          description: "Filter by cognition kind.",
+        },
+        stance: {
+          type: "string",
+          description: "Filter by stance (e.g. accepted, tentative, contested, rejected).",
+        },
+        basis: {
+          type: "string",
+          description: "Filter by basis (e.g. first_hand, inference, introspection).",
+        },
+        active_only: {
+          type: "boolean",
+          description: "If true, return only active cognition (default for commitments).",
+        },
+      },
+      additionalProperties: false,
     },
+    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+      if (!services.cognitionSearch) {
+        return { success: false, error: "CognitionSearch not available" };
+      }
+
+      return services.cognitionSearch.searchCognition({
+        agentId: viewerContext.viewer_agent_id,
+        query: typeof args.query === "string" ? args.query : undefined,
+        kind: typeof args.kind === "string" ? args.kind : undefined,
+        stance: typeof args.stance === "string" ? args.stance : undefined,
+        basis: typeof args.basis === "string" ? args.basis : undefined,
+        activeOnly: typeof args.active_only === "boolean" ? args.active_only : undefined,
+      });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool: memory_search (compatibility alias → narrative_search behavior)
+// ---------------------------------------------------------------------------
+
+function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
+  return {
+    name: "memory_search",
+    description:
+      `Search visible narrative memory (compatibility alias for narrative_search). ` +
+      `Returns matching events and facts scoped to your visibility. ` +
+      POINTER_GUIDE,
+    effectClass: "read_only",
+    traceVisibility: "public",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query (natural language or keywords, min 3 chars).",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    handler: (args, viewerContext) => narrativeSearchHandler(services, args, viewerContext),
   };
 }
 
@@ -283,6 +396,8 @@ const TOOL_FACTORIES = [
   makeCoreMemoryAppend,
   makeCoreMemoryReplace,
   makeMemoryRead,
+  makeNarrativeSearch,
+  makeCognitionSearch,
   makeMemorySearch,
   makeMemoryExplore,
 ] as const;

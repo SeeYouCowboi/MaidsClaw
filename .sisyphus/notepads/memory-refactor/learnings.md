@@ -156,3 +156,15 @@
 - `resolveTemplate()` and `resolveWriteTemplate()` merge profile override on top of role defaults (partial override, not full replacement)
 - `viewer_role` NOT used in any new code — template defaults keyed on `agentProfile.role`, visibility still via `viewer_agent_id` + `current_area_id`
 - Test count: 1217 pass, 0 fail across 84 files (+3 new tests: 2 agent-loader template roundtrip, 1 bootstrap preset merge)
+
+## [T14 Complete] Task: T14 — Migrate Search Tool Facade
+- `narrative_search` tool added: same schema/behavior as old `memory_search`, delegates to `NarrativeSearchService.searchNarrative()` when available, falls back to `RetrievalService.searchVisibleNarrative()`
+- `cognition_search` tool added: params `{ query?, kind?, stance?, basis?, active_only? }`, delegates to `CognitionSearchService.searchCognition()`, returns error object when service unavailable
+- `memory_search` preserved as compatibility alias: calls identical `narrativeSearchHandler()` as `narrative_search`, schema unchanged (no cognition params)
+- `MemoryToolServices` extended with optional `narrativeSearch` and `cognitionSearch` service interfaces (structural typing, no concrete class imports in tools.ts)
+- `src/bootstrap/tools.ts` instantiates `NarrativeSearchService(services.db)` and `CognitionSearchService(services.db)` and passes to `buildMemoryTools`
+- `RP_AUTHORIZED_TOOLS` now 7 entries: added `narrative_search` and `cognition_search`
+- `tool-access-policy.ts` unchanged — generic allowlist pattern, no hardcoded tool names; new tools pass through automatically via `RpToolPolicy.toToolPermissions()`
+- `tool-adapter.ts` unchanged — generic adapter pattern, no tool-name awareness needed
+- Tool count: 5 → 7 (narrative_search, cognition_search added)
+- Test count: 1223 pass, 0 fail across 84 files (+6 new tests: 3 narrative_search, 2 cognition_search, 1 alias behavior verification)

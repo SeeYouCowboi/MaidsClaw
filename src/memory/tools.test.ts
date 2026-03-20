@@ -65,8 +65,8 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("tool definitions", () => {
-    it("defines exactly 5 tools", () => {
-      expect(tools).toHaveLength(5);
+    it("defines exactly 7 tools", () => {
+      expect(tools).toHaveLength(7);
     });
 
     it("all tools have valid JSON Schema parameter definitions", () => {
@@ -74,6 +74,8 @@ describe("Memory Tools", () => {
         "core_memory_append",
         "core_memory_replace",
         "memory_read",
+        "narrative_search",
+        "cognition_search",
         "memory_search",
         "memory_explore",
       ];
@@ -282,6 +284,113 @@ describe("Memory Tools", () => {
   });
 
   // -------------------------------------------------------------------------
+  // narrative_search
+  // -------------------------------------------------------------------------
+
+  describe("narrative_search", () => {
+    it("dispatches to RetrievalService.searchVisibleNarrative (fallback path)", async () => {
+      const tool = toolByName(tools, "narrative_search");
+      const result = (await tool.handler({ query: "coffee" }, ctx)) as {
+        results: unknown[];
+      };
+
+      expect(result.results).toBeDefined();
+      expect(Array.isArray(result.results)).toBe(true);
+    });
+
+    it("dispatches to narrativeSearch service when available", async () => {
+      let capturedQuery = "";
+      const mockNarrativeSearch = {
+        async searchNarrative(query: string, _ctx: ViewerContext) {
+          capturedQuery = query;
+          return [{ source_ref: "e:1", content: "mock result" }];
+        },
+      };
+
+      const toolsWithNarrative = buildMemoryTools({ ...services, narrativeSearch: mockNarrativeSearch });
+      const tool = toolByName(toolsWithNarrative, "narrative_search");
+      const result = (await tool.handler({ query: "test query" }, ctx)) as {
+        results: unknown[];
+      };
+
+      expect(capturedQuery).toBe("test query");
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // cognition_search
+  // -------------------------------------------------------------------------
+
+  describe("cognition_search", () => {
+    it("returns error when cognitionSearch service is not available", () => {
+      const tool = toolByName(tools, "cognition_search");
+      const result = tool.handler({ query: "trust" }, ctx) as {
+        success: boolean;
+        error: string;
+      };
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("CognitionSearch not available");
+    });
+
+    it("dispatches to cognitionSearch service when available", () => {
+      let capturedParams: Record<string, unknown> = {};
+      const mockCognitionSearch = {
+        searchCognition(params: Record<string, unknown>) {
+          capturedParams = params;
+          return [{ kind: "assertion", content: "mock cognition" }];
+        },
+      };
+
+      const toolsWithCognition = buildMemoryTools({ ...services, cognitionSearch: mockCognitionSearch });
+      const tool = toolByName(toolsWithCognition, "cognition_search");
+      const result = tool.handler(
+        { query: "trust", kind: "assertion", active_only: true },
+        ctx,
+      ) as unknown[];
+
+      expect(capturedParams.agentId).toBe("agent-1");
+      expect(capturedParams.query).toBe("trust");
+      expect(capturedParams.kind).toBe("assertion");
+      expect(capturedParams.activeOnly).toBe(true);
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // memory_search alias behavior
+  // -------------------------------------------------------------------------
+
+  describe("memory_search alias", () => {
+    it("produces identical output to narrative_search for same query", async () => {
+      const narrativeTool = toolByName(tools, "narrative_search");
+      const aliasTool = toolByName(tools, "memory_search");
+
+      const narrativeResult = await narrativeTool.handler({ query: "coffee" }, ctx);
+      const aliasResult = await aliasTool.handler({ query: "coffee" }, ctx);
+
+      expect(aliasResult).toEqual(narrativeResult);
+    });
+
+    it("delegates to narrativeSearch service when available (same as narrative_search)", async () => {
+      let callCount = 0;
+      const mockNarrativeSearch = {
+        async searchNarrative(_query: string, _ctx: ViewerContext) {
+          callCount++;
+          return [{ source_ref: "e:1", content: "mock" }];
+        },
+      };
+
+      const toolsWithNarrative = buildMemoryTools({ ...services, narrativeSearch: mockNarrativeSearch });
+      const aliasTool = toolByName(toolsWithNarrative, "memory_search");
+      await aliasTool.handler({ query: "test" }, ctx);
+
+      expect(callCount).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // memory_explore
   // -------------------------------------------------------------------------
 
@@ -323,7 +432,7 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("registerMemoryTools", () => {
-    it("successfully registers all 5 tools", () => {
+    it("successfully registers all 7 tools", () => {
       const registered: MemoryToolDefinition[] = [];
       const executor: ToolExecutorLike = {
         registerLocal(tool: MemoryToolDefinition) {
@@ -333,11 +442,13 @@ describe("Memory Tools", () => {
 
       registerMemoryTools(executor, services);
 
-      expect(registered).toHaveLength(5);
+      expect(registered).toHaveLength(7);
       const names = registered.map((t) => t.name);
       expect(names).toContain("core_memory_append");
       expect(names).toContain("core_memory_replace");
       expect(names).toContain("memory_read");
+      expect(names).toContain("narrative_search");
+      expect(names).toContain("cognition_search");
       expect(names).toContain("memory_search");
       expect(names).toContain("memory_explore");
     });

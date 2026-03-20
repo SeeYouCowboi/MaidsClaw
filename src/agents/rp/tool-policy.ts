@@ -3,6 +3,8 @@ import type { ToolPermission } from "../profile.js";
 export const RP_AUTHORIZED_TOOLS: readonly string[] = [
   "memory_read",
   "memory_search",
+  "narrative_search",
+  "cognition_search",
   "memory_explore",
   "persona_check_drift",
   "submit_rp_turn",

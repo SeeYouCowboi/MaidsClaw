@@ -14,6 +14,8 @@ describe("runtime tool registration", () => {
       expect(schemaNames).toContain("core_memory_append");
       expect(schemaNames).toContain("core_memory_replace");
       expect(schemaNames).toContain("memory_read");
+      expect(schemaNames).toContain("narrative_search");
+      expect(schemaNames).toContain("cognition_search");
       expect(schemaNames).toContain("memory_search");
       expect(schemaNames).toContain("memory_explore");
 
