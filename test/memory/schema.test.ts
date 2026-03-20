@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { GraphNavigator } from "../../src/memory/navigator.js";
 import {
 	MAX_INTEGER,
 	makeNodeRef,
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
+import { NODE_REF_KINDS } from "../../src/memory/types.js";
 import { openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
@@ -38,12 +40,12 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(19);
+		expect(nonFtsCount?.count).toBe(21);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
 		);
-		expect(ftsCount?.count).toBe(3);
+		expect(ftsCount?.count).toBe(4);
 
 		const indexNames = db
 			.query<{ name: string }>(
@@ -55,6 +57,11 @@ describe("memory schema", () => {
 		expect(indexNames.includes("ux_entity_private_pointer")).toBe(true);
 		expect(indexNames.includes("ux_core_memory_agent_label")).toBe(true);
 		expect(indexNames.includes("ux_node_embeddings_ref_view_model")).toBe(true);
+		expect(indexNames.includes("idx_memory_relations_source")).toBe(true);
+		expect(indexNames.includes("idx_memory_relations_target")).toBe(true);
+		expect(indexNames.includes("ux_memory_relations_pair_type")).toBe(true);
+		expect(indexNames.includes("idx_search_docs_cognition_agent")).toBe(true);
+		expect(indexNames.includes("idx_search_docs_cognition_agent_updated")).toBe(true);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -292,6 +299,30 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
+	it("creates memory_relations and cognition search tables", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const relationsTable = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='memory_relations'",
+		);
+		expect(relationsTable?.name).toBe("memory_relations");
+
+		const cognitionTable = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='search_docs_cognition'",
+		);
+		expect(cognitionTable?.name).toBe("search_docs_cognition");
+
+		const cognitionFtsTable = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='search_docs_cognition_fts'",
+		);
+		expect(cognitionFtsTable?.name).toBe("search_docs_cognition_fts");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
 	it("adds canonical overlay and publication provenance columns", () => {
 		const { dbPath, db } = createTempDb();
 
@@ -317,6 +348,82 @@ describe("memory schema", () => {
 			"SELECT name FROM sqlite_master WHERE type='index' AND name='ux_event_nodes_publication_scope'",
 		);
 		expect(publicationIndex?.name).toBe("ux_event_nodes_publication_scope");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("enforces memory_relations self-ref and dedupe constraints", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		let selfRefInsertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_belief:1", "supports", 0.9, "direct", "turn", "turn:t-1", Date.now()],
+			);
+		} catch {
+			selfRefInsertFailed = true;
+		}
+		expect(selfRefInsertFailed).toBe(true);
+
+		let validInsertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_event:2", "supports", 0.8, "inferred", "job", "job:j-1", Date.now()],
+			);
+		} catch {
+			validInsertFailed = true;
+		}
+		expect(validInsertFailed).toBe(false);
+
+		let duplicateInsertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_event:2", "supports", 0.5, "direct", "system", "system", Date.now()],
+			);
+		} catch {
+			duplicateInsertFailed = true;
+		}
+		expect(duplicateInsertFailed).toBe(true);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("supports trigram FTS on search_docs_cognition_fts", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const insert = db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"cognition",
+				"private_belief:1",
+				"agent-1",
+				"assertion",
+				"belief",
+				"tentative",
+				"I suspect Bob is hiding evidence",
+				Date.now(),
+				Date.now(),
+			],
+		);
+		db.run("INSERT INTO search_docs_cognition_fts (rowid, content) VALUES (?, ?)", [
+			Number(insert.lastInsertRowid),
+			"I suspect Bob is hiding evidence",
+		]);
+
+		const matchRows = db.query<{ rowid: number }>(
+			"SELECT rowid FROM search_docs_cognition_fts WHERE search_docs_cognition_fts MATCH ?",
+			["hiding"],
+		);
+		expect(matchRows.length).toBe(1);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -380,7 +487,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(6);
+		expect(migrationCount?.count).toBe(7);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -405,5 +512,12 @@ describe("memory schema", () => {
 
 		db.close();
 		cleanupDb(dbPath);
+	});
+
+	it("keeps V1 node ref kinds unchanged and navigator importable", () => {
+		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "private_event", "private_belief"]);
+		expect(typeof GraphNavigator).toBe("function");
+		expect(String(makeNodeRef("private_belief", 1))).toBe("private_belief:1");
+		expect(String(makeNodeRef("private_event", 1))).toBe("private_event:1");
 	});
 });

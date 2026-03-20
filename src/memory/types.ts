@@ -1,5 +1,4 @@
-import { VIEWER_ROLES } from "../core/contracts/viewer-context.js";
-import type { ViewerContext, ViewerRole } from "../core/contracts/viewer-context.js";
+import { VIEWER_ROLES, type ViewerContext, type ViewerRole } from "../core/contracts/viewer-context.js";
 
 export { VIEWER_ROLES };
 export type { ViewerContext, ViewerRole };
@@ -65,6 +64,10 @@ export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 export const CORE_MEMORY_LABELS = ["character", "user", "index"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
+// V1 Node-Ref Strategy (DO NOT EXTEND without plan approval):
+// - assertion -> private_belief:{id}
+// - evaluation / commitment -> private_event:{id}
+// - No new NodeRefKind values in V1
 export const NODE_REF_KINDS = ["event", "entity", "fact", "private_event", "private_belief"] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 

@@ -67,6 +67,10 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
   `CREATE TABLE IF NOT EXISTS semantic_edges (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')), weight REAL NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_edges_pair_type ON semantic_edges(source_node_ref, target_node_ref, relation_type)`,
+  `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'conflicts_with', 'derived_from', 'supersedes')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, CHECK (source_node_ref != target_node_ref))`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_node_ref, relation_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_node_ref, relation_type)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type)`,
   `CREATE TABLE IF NOT EXISTS node_scores (node_ref TEXT PRIMARY KEY, salience REAL NOT NULL, centrality REAL NOT NULL, bridge_score REAL NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS search_docs_private (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, agent_id TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_search_docs_private_agent ON search_docs_private(agent_id)`,
@@ -76,6 +80,10 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_area_fts USING fts5(content, tokenize='trigram')`,
   `CREATE TABLE IF NOT EXISTS search_docs_world (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_world_fts USING fts5(content, tokenize='trigram')`,
+  `CREATE TABLE IF NOT EXISTS search_docs_cognition (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, agent_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), content TEXT NOT NULL, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent ON search_docs_cognition(agent_id, kind, stance)`,
+  `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent_updated ON search_docs_cognition(agent_id, updated_at DESC)`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_cognition_fts USING fts5(content, tokenize='trigram')`,
 ];
 
 const MEMORY_MIGRATIONS: MigrationStep[] = [
@@ -182,6 +190,37 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
 
       db.get<{ count: number }>(
         `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
+      );
+    },
+  },
+  {
+    id: "memory:007:add-relation-and-cognition-index",
+    description: "Add relation graph and cognition search index tables",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'conflicts_with', 'derived_from', 'supersedes')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, CHECK (source_node_ref != target_node_ref))`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_node_ref, relation_type)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_node_ref, relation_type)`,
+      );
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type)`,
+      );
+
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS search_docs_cognition (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, agent_id TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), content TEXT NOT NULL, updated_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent ON search_docs_cognition(agent_id, kind, stance)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent_updated ON search_docs_cognition(agent_id, updated_at DESC)`,
+      );
+      db.exec(
+        `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_cognition_fts USING fts5(content, tokenize='trigram')`,
       );
     },
   },
