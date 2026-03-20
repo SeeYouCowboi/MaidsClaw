@@ -30,6 +30,7 @@ import type {
 import type { SessionService } from "../session/service.js";
 import type {
 	AssertionRecord,
+	CanonicalRpTurnOutcome,
 	CognitionEntityRef,
 	CognitionKind,
 	CognitionOp,
@@ -297,17 +298,44 @@ export class TurnService {
 			return;
 		}
 
-		const outcome = bufferedResult.outcome;
-		const canonicalOutcome = (() => {
-			try {
-				return normalizeRpTurnOutcome(structuredClone(outcome));
-			} catch {
-				return undefined;
-			}
-		})();
-		const publications = canonicalOutcome?.publications ?? [];
-		const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
-		const hasPublicReply = outcome.publicReply.length > 0;
+		// Single normalization point: normalizeRpTurnOutcome handles v3→v4
+		// conversion, validation, and publications extraction. Failures here
+		// abort the turn — no silent fallback.
+		let canonicalOutcome: CanonicalRpTurnOutcome;
+		try {
+			canonicalOutcome = normalizeRpTurnOutcome(
+				structuredClone(bufferedResult.outcome),
+			);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP outcome normalization failed");
+			const errorChunk = {
+				code: "RP_OUTCOME_NORMALIZATION_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText:
+					typeof bufferedResult.outcome?.publicReply === "string"
+						? bufferedResult.outcome.publicReply
+						: "",
+				hasAssistantVisibleActivity: false,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const publications = canonicalOutcome.publications;
+		const hasPrivateOps =
+			(canonicalOutcome.privateCommit?.ops.length ?? 0) > 0;
+		const hasPublicReply = canonicalOutcome.publicReply.length > 0;
 		const hasPublications = publications.length > 0;
 		const hasAssistantVisibleActivity = hasPublicReply;
 
@@ -328,7 +356,7 @@ export class TurnService {
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
-				assistantText: outcome.publicReply,
+				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
 			this.traceStore?.finalizeTrace(requestId);
@@ -389,11 +417,13 @@ export class TurnService {
 					sessionId: effectiveRequest.sessionId,
 					ownerAgentId:
 						this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					publicReply: outcome.publicReply,
+					publicReply: canonicalOutcome.publicReply,
 					hasPublicReply,
 					viewerSnapshot: resolvedViewerSnapshot,
 					schemaVersion: "turn_settlement_v4",
-					privateCommit: hasPrivateOps ? outcome.privateCommit : undefined,
+					privateCommit: hasPrivateOps
+						? canonicalOutcome.privateCommit
+						: undefined,
 					publications,
 				};
 
@@ -409,7 +439,7 @@ export class TurnService {
 				if (hasPublicReply) {
 					const assistantPayload: AssistantMessagePayloadV3 = {
 						role: "assistant",
-						content: outcome.publicReply,
+						content: canonicalOutcome.publicReply,
 						settlementId,
 					};
 
@@ -423,7 +453,7 @@ export class TurnService {
 				}
 
 				const slotEntries = buildCognitionSlotPayload(
-					outcome.privateCommit?.ops ?? [],
+					canonicalOutcome.privateCommit?.ops ?? [],
 					settlementId,
 				);
 				this.interactionStore.upsertRecentCognitionSlot(
@@ -450,7 +480,7 @@ export class TurnService {
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
-				assistantText: outcome.publicReply,
+				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
 			this.traceStore?.finalizeTrace(requestId);
@@ -474,7 +504,7 @@ export class TurnService {
 			this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "unknown";
 		this.projectionSink?.onProjectionEligible(
 			createProjectionAppendix({
-				publicReply: outcome.publicReply,
+				publicReply: canonicalOutcome.publicReply,
 				agentId: queueOwnerAgentId,
 				settlementId,
 				locationEntityId: String(
@@ -487,7 +517,7 @@ export class TurnService {
 		if (hasPublicReply) {
 			const textChunk: Chunk = {
 				type: "text_delta",
-				text: outcome.publicReply,
+				text: canonicalOutcome.publicReply,
 			};
 			this.traceChunk(requestId, textChunk);
 			yield textChunk;

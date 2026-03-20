@@ -1850,4 +1850,260 @@ describe("memory-entry-consumption: live runtime integration", () => {
       runtime.shutdown();
     }
   });
+
+  it("v3 RP output is normalized to v4 settlement with publications[]", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) yield chunk;
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v3",
+              publicReply: "Hello from v3.",
+              privateCommit: {
+                schemaVersion: "rp_private_cognition_v3",
+                ops: [
+                  {
+                    op: "upsert",
+                    record: {
+                      kind: "assertion",
+                      key: "belief:v3_test",
+                      proposition: {
+                        subject: { kind: "special", value: "self" },
+                        predicate: "trusts",
+                        object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                      },
+                      stance: "accepted",
+                      basis: "observation",
+                    },
+                  },
+                ],
+              },
+            },
+          };
+        },
+      } as unknown as AgentLoop;
+
+      const turnService = new TurnService(
+        mockLoop,
+        commitService,
+        interactionStore,
+        flushSelector,
+        null,
+        runtime.sessionService,
+      );
+
+      const chunks = await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-v3-normalize",
+          messages: [{ role: "user", content: "v3 test" }],
+        }),
+      );
+
+      const textChunks = chunks.filter((c) => c.type === "text_delta");
+      expect(textChunks).toHaveLength(1);
+      expect((textChunks[0] as { text: string }).text).toBe("Hello from v3.");
+
+      const records = interactionStore.getBySession(session.sessionId);
+      const settlements = records.filter((r) => r.recordType === "turn_settlement");
+      expect(settlements).toHaveLength(1);
+
+      const payload = settlements[0]!.payload as TurnSettlementPayload;
+      expect(payload.schemaVersion).toBe("turn_settlement_v4");
+      expect(payload.publications).toEqual([]);
+      expect(payload.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
+
+      const upsertOp = payload.privateCommit?.ops[0];
+      expect(upsertOp?.op).toBe("upsert");
+      if (upsertOp?.op === "upsert" && upsertOp.record.kind === "assertion") {
+        expect(upsertOp.record.stance).toBe("accepted");
+        expect(upsertOp.record.basis).toBe("first_hand");
+      }
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("v4 RP output with publications commits v4 settlement preserving publications", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) yield chunk;
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v4",
+              publicReply: "Hello from v4.",
+              privateCommit: {
+                schemaVersion: "rp_private_cognition_v4",
+                ops: [
+                  {
+                    op: "upsert",
+                    record: {
+                      kind: "assertion",
+                      key: "belief:v4_test",
+                      proposition: {
+                        subject: { kind: "special", value: "self" },
+                        predicate: "likes",
+                        object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                      },
+                      stance: "confirmed",
+                      basis: "first_hand",
+                    },
+                  },
+                ],
+              },
+              publications: [
+                {
+                  kind: "speech",
+                  targetScope: "current_area",
+                  summary: "Alice greeted the user warmly.",
+                },
+              ],
+            },
+          };
+        },
+      } as unknown as AgentLoop;
+
+      const turnService = new TurnService(
+        mockLoop,
+        commitService,
+        interactionStore,
+        flushSelector,
+        null,
+        runtime.sessionService,
+      );
+
+      const chunks = await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-v4-publications",
+          messages: [{ role: "user", content: "v4 test" }],
+        }),
+      );
+
+      const textChunks = chunks.filter((c) => c.type === "text_delta");
+      expect(textChunks).toHaveLength(1);
+      expect((textChunks[0] as { text: string }).text).toBe("Hello from v4.");
+
+      const records = interactionStore.getBySession(session.sessionId);
+      const settlements = records.filter((r) => r.recordType === "turn_settlement");
+      expect(settlements).toHaveLength(1);
+
+      const payload = settlements[0]!.payload as TurnSettlementPayload;
+      expect(payload.schemaVersion).toBe("turn_settlement_v4");
+      expect(payload.publications).toHaveLength(1);
+      expect(payload.publications![0]).toEqual({
+        kind: "speech",
+        targetScope: "current_area",
+        summary: "Alice greeted the user warmly.",
+      });
+
+      const messages = records.filter((r) => r.recordType === "message" && r.actorType === "rp_agent");
+      expect(messages).toHaveLength(1);
+      expect((messages[0]!.payload as { content: string }).content).toBe("Hello from v4.");
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("malformed v4 RP outcome causes full transaction rollback — no settlement, message, or cognition committed", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) yield chunk;
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v4",
+              publicReply: "Should not be stored.",
+              privateCommit: {
+                schemaVersion: "rp_private_cognition_v4",
+                ops: [
+                  {
+                    op: "upsert",
+                    record: {
+                      kind: "assertion",
+                      key: "belief:bad_stance",
+                      proposition: {
+                        subject: { kind: "special", value: "self" },
+                        predicate: "trusts",
+                        object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                      },
+                      stance: "INVALID_STANCE_VALUE",
+                    },
+                  },
+                ],
+              },
+            },
+          };
+        },
+      } as unknown as AgentLoop;
+
+      const turnService = new TurnService(
+        mockLoop,
+        commitService,
+        interactionStore,
+        flushSelector,
+        null,
+        runtime.sessionService,
+      );
+
+      const chunks = await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-malformed-v4",
+          messages: [{ role: "user", content: "malformed test" }],
+        }),
+      );
+
+      const errorChunks = chunks.filter((c) => c.type === "error");
+      expect(errorChunks).toHaveLength(1);
+      expect((errorChunks[0] as { code: string }).code).toBe("RP_OUTCOME_NORMALIZATION_FAILED");
+
+      const records = interactionStore.getBySession(session.sessionId);
+      const settlements = records.filter((r) => r.recordType === "turn_settlement");
+      expect(settlements).toHaveLength(0);
+
+      const assistantMessages = records.filter(
+        (r) => r.recordType === "message" && r.actorType === "rp_agent",
+      );
+      expect(assistantMessages).toHaveLength(0);
+
+      const recentSlot = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM interaction_records
+         WHERE session_id = ? AND record_type = 'turn_settlement'`,
+        [session.sessionId],
+      );
+      expect(recentSlot?.cnt).toBe(0);
+    } finally {
+      runtime.shutdown();
+    }
+  });
 });

@@ -1,10 +1,20 @@
 import type { Database } from "bun:sqlite";
-import type { CognitionOp } from "../runtime/rp-turn-contract.js";
+import { MaidsClawError } from "../core/errors.js";
+import type {
+  AssertionBasis,
+  AssertionRecordV4,
+  CognitionEntityRef,
+  CognitionOp,
+  CognitionRecord,
+  CognitionSelector,
+  CommitmentRecord,
+  EvaluationRecord,
+} from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
-import { CognitionOpCommitter } from "./cognition-op-committer.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import type { NodeRef } from "./types.js";
 import type {
   ChatToolDefinition,
   CreatedState,
@@ -16,6 +26,14 @@ import type {
 
 type ExistingContextLoader = (agentId: string) => { entities: unknown[]; privateBeliefs: unknown[] };
 type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => void;
+
+const V3_BASIS_TO_V4: Record<string, AssertionBasis> = {
+  observation: "first_hand",
+  inference: "inference",
+  suspicion: "inference",
+  introspection: "introspection",
+  communication: "hearsay",
+};
 
 export class ExplicitSettlementProcessor {
   private readonly cognitionRepo: CognitionRepository;
@@ -65,13 +83,214 @@ export class ExplicitSettlementProcessor {
 
       const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
       const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
-      const commitRefs = new CognitionOpCommitter(this.storage, explicitMeta.ownerAgentId, currentLocationEntityId).commit(
+      const commitRefs = this.commitCognitionOps(
+        explicitMeta.ownerAgentId,
         explicitMeta.privateCommit.ops,
         explicitMeta.settlementId,
+        currentLocationEntityId,
       );
       created.changedNodeRefs.push(...commitRefs);
       this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCommit.ops, created);
     }
+  }
+
+  private commitCognitionOps(
+    agentId: string,
+    ops: CognitionOp[],
+    settlementId: string,
+    currentLocationEntityId?: number,
+  ): NodeRef[] {
+    const refs: NodeRef[] = [];
+    const unresolvedKeys: string[] = [];
+
+    for (let opIndex = 0; opIndex < ops.length; opIndex += 1) {
+      const op = ops[opIndex] as CognitionOp;
+      if (op.op === "upsert") {
+        try {
+          refs.push(this.commitUpsert(op.record, agentId, settlementId, opIndex, currentLocationEntityId));
+        } catch (err) {
+          if (err instanceof MaidsClawError && err.code === "COGNITION_UNRESOLVED_REFS") {
+            unresolvedKeys.push(op.record.key);
+          } else {
+            throw err;
+          }
+        }
+        continue;
+      }
+
+      if (op.op === "retract") {
+        this.cognitionRepo.retractCognition(agentId, op.target.key, op.target.kind);
+      }
+    }
+
+    if (unresolvedKeys.length > 0) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Explicit settlement ${settlementId} has ${unresolvedKeys.length} unresolved cognition key(s): ${unresolvedKeys.join(", ")}`,
+        retriable: true,
+        details: { settlementId, unresolvedKeys },
+      });
+    }
+
+    return refs;
+  }
+
+  private commitUpsert(
+    record: CognitionRecord,
+    agentId: string,
+    settlementId: string,
+    opIndex: number,
+    currentLocationEntityId?: number,
+  ): NodeRef {
+    if (record.kind === "assertion") {
+      const sourcePointerKey = this.resolvePointerKey(record.proposition.subject, currentLocationEntityId, agentId);
+      const targetPointerKey = this.resolvePointerKey(record.proposition.object.ref, currentLocationEntityId, agentId);
+      const basis = this.normalizeAssertionBasis(record.basis);
+      const preContestedStance = "preContestedStance" in record
+        ? (record as AssertionRecordV4).preContestedStance
+        : undefined;
+
+      const result = this.cognitionRepo.upsertAssertion({
+        agentId,
+        cognitionKey: record.key,
+        settlementId,
+        opIndex,
+        sourcePointerKey,
+        predicate: record.proposition.predicate,
+        targetPointerKey,
+        stance: record.stance,
+        basis,
+        preContestedStance,
+        provenance: record.provenance,
+      });
+      return makeNodeRef("private_belief", result.id);
+    }
+
+    if (record.kind === "evaluation") {
+      const targetEntityId = this.resolveTargetEntityId(record, agentId, currentLocationEntityId);
+      const result = this.cognitionRepo.upsertEvaluation({
+        agentId,
+        cognitionKey: record.key,
+        settlementId,
+        opIndex,
+        targetEntityId,
+        salience: record.salience,
+        dimensions: record.dimensions,
+        emotionTags: record.emotionTags,
+        notes: record.notes,
+      });
+      return makeNodeRef("private_event", result.id);
+    }
+
+    const commitmentRecord = record as CommitmentRecord;
+    const targetEntityId = this.resolveCommitmentTargetEntityId(commitmentRecord, agentId, currentLocationEntityId);
+    const result = this.cognitionRepo.upsertCommitment({
+      agentId,
+      cognitionKey: record.key,
+      settlementId,
+      opIndex,
+      targetEntityId,
+      salience: record.salience,
+      mode: commitmentRecord.mode,
+      target: commitmentRecord.target,
+      status: commitmentRecord.status,
+      priority: commitmentRecord.priority,
+      horizon: commitmentRecord.horizon,
+    });
+    return makeNodeRef("private_event", result.id);
+  }
+
+  private resolvePointerKey(
+    ref: CognitionEntityRef,
+    currentLocationEntityId: number | undefined,
+    agentId: string,
+  ): string {
+    if (ref.kind === "pointer_key") return ref.value;
+    if (ref.value === "self") return "__self__";
+    if (ref.value === "user") return "__user__";
+
+    if (currentLocationEntityId !== undefined) {
+      const entity = this.storage.getEntityById(currentLocationEntityId);
+      if (entity) return entity.pointerKey;
+    }
+
+    const pointerKey = "__current_location__";
+    if (this.storage.resolveEntityByPointerKey(pointerKey, agentId) === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for current_location: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
+    }
+    return pointerKey;
+  }
+
+  private resolveTargetEntityId(
+    record: EvaluationRecord,
+    agentId: string,
+    currentLocationEntityId?: number,
+  ): number | undefined {
+    if (this.isCognitionSelector(record.target)) return undefined;
+
+    const pointerKey = this.resolvePointerKey(record.target, currentLocationEntityId, agentId);
+    const entityId = this.storage.resolveEntityByPointerKey(pointerKey, agentId);
+    if (entityId === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for evaluation target: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
+    }
+    return entityId;
+  }
+
+  private resolveCommitmentTargetEntityId(
+    record: CommitmentRecord,
+    agentId: string,
+    currentLocationEntityId?: number,
+  ): number | undefined {
+    if ("action" in record.target) {
+      if (!record.target.target) return undefined;
+      const pointerKey = this.resolvePointerKey(record.target.target, currentLocationEntityId, agentId);
+      const entityId = this.storage.resolveEntityByPointerKey(pointerKey, agentId);
+      if (entityId === null) {
+        throw new MaidsClawError({
+          code: "COGNITION_UNRESOLVED_REFS",
+          message: `Unresolved entity ref for commitment action target: ${pointerKey}`,
+          retriable: true,
+          details: { unresolvedPointerKeys: [pointerKey] },
+        });
+      }
+      return entityId;
+    }
+
+    const pointerKey = this.resolvePointerKey(record.target.subject, currentLocationEntityId, agentId);
+    const entityId = this.storage.resolveEntityByPointerKey(pointerKey, agentId);
+    if (entityId === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved entity ref for commitment subject: ${pointerKey}`,
+        retriable: true,
+        details: { unresolvedPointerKeys: [pointerKey] },
+      });
+    }
+    return entityId;
+  }
+
+  private normalizeAssertionBasis(value: unknown): AssertionBasis | undefined {
+    if (value === undefined || value === null) return undefined;
+    const str = String(value);
+    if (str in V3_BASIS_TO_V4) return V3_BASIS_TO_V4[str];
+    if (str === "first_hand" || str === "hearsay" || str === "inference" || str === "introspection" || str === "belief") {
+      return str;
+    }
+    return undefined;
+  }
+
+  private isCognitionSelector(value: CognitionEntityRef | CognitionSelector): value is CognitionSelector {
+    return value.kind === "assertion" || value.kind === "evaluation" || value.kind === "commitment";
   }
 
   private buildExplicitIngest(ingest: IngestionInput, requestId: string): IngestionInput {

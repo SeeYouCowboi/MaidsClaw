@@ -183,7 +183,7 @@ describe("TurnService", () => {
     expect(runChunks).toEqual([
       {
         type: "error",
-        code: "RP_EMPTY_TURN",
+        code: "RP_OUTCOME_NORMALIZATION_FAILED",
         message: "empty turn: publicReply is empty and privateCommit has no ops",
         retriable: false,
       },
@@ -402,7 +402,7 @@ describe("TurnService", () => {
     expect(payload.ownerAgentId).toBe("rp:alice");
 
     const commit = payload.privateCommit as { schemaVersion: string; summary: string; ops: Array<Record<string, unknown>> };
-    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v4");
     expect(commit.summary).toBe("mixed ops");
     expect(commit.ops).toHaveLength(3);
     expect(commit.ops[0]).toEqual({
@@ -416,7 +416,6 @@ describe("TurnService", () => {
           object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
         },
         stance: "accepted",
-        confidence: 0.9,
         salience: 5,
       },
     });
@@ -512,7 +511,7 @@ describe("TurnService", () => {
     const payload = settlement!.payload as Record<string, unknown>;
     expect(payload.ownerAgentId).toBe("rp:alice");
     const commit = payload.privateCommit as { schemaVersion: string; ops: Array<Record<string, unknown>> };
-    expect(commit.schemaVersion).toBe("rp_private_cognition_v3");
+    expect(commit.schemaVersion).toBe("rp_private_cognition_v4");
     expect(commit.ops).toHaveLength(1);
     expect(commit.ops[0]).toEqual({
       op: "upsert",
@@ -808,7 +807,7 @@ describe("TurnService", () => {
     expect(row).toBeUndefined();
   });
 
-  it("touch op is stored verbatim in settlement without processing errors", async () => {
+  it("touch op is rejected by normalizer — no settlement committed", async () => {
     const session = sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
@@ -839,14 +838,12 @@ describe("TurnService", () => {
       }),
     );
 
-    // Settlement succeeds — ops are persisted verbatim, not processed at settlement
-    expect(runChunks).toEqual([{ type: "message_end", stopReason: "end_turn" }]);
+    const errorChunks = runChunks.filter((c) => c.type === "error");
+    expect(errorChunks).toHaveLength(1);
+    expect((errorChunks[0] as { code: string }).code).toBe("RP_OUTCOME_NORMALIZATION_FAILED");
+
     const records = store.getBySession(session.sessionId);
-    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(1);
-    const payload = records.find((r) => r.recordType === "turn_settlement")!.payload as Record<string, unknown>;
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
-    expect(commit.ops).toHaveLength(1);
-    expect(commit.ops[0]).toEqual({ op: "touch" });
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
   });
 
   it("latentScratchpad from outcome is not persisted in settlement payload", async () => {
