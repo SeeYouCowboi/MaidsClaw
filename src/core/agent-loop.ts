@@ -1,12 +1,13 @@
 import type { AgentProfile } from "../agents/profile.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
-import type { ViewerContext } from "./contracts/viewer-context.js";
-import type {
-	RpBufferedExecutionResult,
-	RpTurnOutcomeSubmission,
+import {
+	type CanonicalRpTurnOutcome,
+	normalizeRpTurnOutcome,
+	type RpBufferedExecutionResult,
 } from "../runtime/rp-turn-contract.js";
 import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
 import type { Chunk, TextDeltaChunk } from "./chunk.js";
+import type { ViewerContext } from "./contracts/viewer-context.js";
 import { MaidsClawError, wrapError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type {
@@ -18,8 +19,10 @@ import type {
 import type { PromptBuilder } from "./prompt-builder.js";
 import type { PromptRenderer } from "./prompt-renderer.js";
 import { createRunContext } from "./run-context.js";
-import type { RuntimeProjectionSink } from "./runtime-projection.js";
-import { NoopRuntimeProjectionSink } from "./runtime-projection.js";
+import {
+	NoopRuntimeProjectionSink,
+	type RuntimeProjectionSink,
+} from "./runtime-projection.js";
 import { calculateTokenBudget } from "./token-budget.js";
 import {
 	canExecuteTool,
@@ -567,22 +570,28 @@ export class AgentLoop {
 
 			if (normalizedToolCalls.length === 0) {
 				if (assistantText.length > 0) {
-					loopLogger?.info("Text fallback: model returned text without tool call", {
-						turn: turnIndex,
-						textLen: assistantText.length,
-					});
-					return {
-						outcome: {
-							schemaVersion: "rp_turn_outcome_v3",
-							publicReply: assistantText,
+					loopLogger?.info(
+						"Text fallback: model returned text without tool call",
+						{
+							turn: turnIndex,
+							textLen: assistantText.length,
 						},
+					);
+					return {
+						outcome: normalizeRpTurnOutcome({
+							schemaVersion: "rp_turn_outcome_v4",
+							publicReply: assistantText,
+						}),
 					};
 				}
-				loopLogger?.warn("Empty result: model returned no text and no tool calls", {
-					turn: turnIndex,
-					elapsedMs: modelCallMs,
-					conversationMessages: workingMessages.length,
-				});
+				loopLogger?.warn(
+					"Empty result: model returned no text and no tool calls",
+					{
+						turn: turnIndex,
+						elapsedMs: modelCallMs,
+						conversationMessages: workingMessages.length,
+					},
+				);
 				request.traceStore?.addLogEntry(requestId, {
 					level: "warn",
 					message: `empty result (turn ${turnIndex}): no text, no tools, ${modelCallMs}ms, ${workingMessages.length} msgs`,
@@ -595,10 +604,13 @@ export class AgentLoop {
 				for (const toolCall of normalizedToolCalls) {
 					if (!canExecuteTool(this.profile, toolCall.name)) {
 						// Skip non-permitted tools gracefully instead of aborting
-						loopLogger?.warn("Skipping non-permitted tool in buffered RP mode", {
-							tool: toolCall.name,
-							turn: turnIndex,
-						});
+						loopLogger?.warn(
+							"Skipping non-permitted tool in buffered RP mode",
+							{
+								tool: toolCall.name,
+								turn: turnIndex,
+							},
+						);
 						continue;
 					}
 
@@ -628,7 +640,7 @@ export class AgentLoop {
 					);
 
 					if (toolCall.name === "submit_rp_turn") {
-						return { outcome: result as RpTurnOutcomeSubmission };
+						return { outcome: result as CanonicalRpTurnOutcome };
 					}
 
 					workingMessages.push({
@@ -657,10 +669,10 @@ export class AgentLoop {
 			// If we have assistant text, use the text fallback instead of looping.
 			if (assistantText.length > 0) {
 				return {
-					outcome: {
-						schemaVersion: "rp_turn_outcome_v3",
+					outcome: normalizeRpTurnOutcome({
+						schemaVersion: "rp_turn_outcome_v4",
 						publicReply: assistantText,
-					},
+					}),
 				};
 			}
 		}

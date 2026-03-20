@@ -48,7 +48,10 @@ const STANCE_EPISTEMIC_STATUS: Record<AssertionStance, NonNullable<AgentFactOver
   accepted: "confirmed",
   tentative: "suspected",
   hypothetical: "hypothetical",
+  confirmed: "confirmed",
+  contested: "suspected",
   rejected: "retracted",
+  abandoned: "retracted",
 };
 
 type CreateProjectedEventInput = {
@@ -113,7 +116,14 @@ type CreatePrivateBeliefInput = {
   sourceEventRef?: AgentFactOverlay["source_event_ref"];
 };
 
-type AssertionStance = "accepted" | "tentative" | "hypothetical" | "rejected";
+type AssertionStance =
+  | "accepted"
+  | "tentative"
+  | "hypothetical"
+  | "confirmed"
+  | "contested"
+  | "rejected"
+  | "abandoned";
 
 type UpsertExplicitAssertionInput = {
   agentId: string;

@@ -1,6 +1,6 @@
-import type { ToolDefinition } from "../core/tools/tool-definition.js";
 import { MaidsClawError } from "../core/errors.js";
-import { validateRpTurnOutcome } from "./rp-turn-contract.js";
+import type { ToolDefinition } from "../core/tools/tool-definition.js";
+import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
 
 export function makeSubmitRpTurnTool(): ToolDefinition {
   return {
@@ -14,8 +14,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
       properties: {
         schemaVersion: {
           type: "string",
-          enum: ["rp_turn_outcome_v3"],
-          description: "Must be rp_turn_outcome_v3",
+          enum: ["rp_turn_outcome_v3", "rp_turn_outcome_v4"],
+          description: "Must be rp_turn_outcome_v3 or rp_turn_outcome_v4",
         },
         publicReply: {
           type: "string",
@@ -41,12 +41,31 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
           },
           required: ["schemaVersion", "ops"],
         },
+        publications: {
+          type: "array",
+          description: "Optional public publication declarations",
+          items: {
+            type: "object",
+            properties: {
+              kind: {
+                type: "string",
+                enum: ["speech", "record", "display", "broadcast"],
+              },
+              targetScope: {
+                type: "string",
+                enum: ["current_area", "world_public"],
+              },
+              summary: { type: "string" },
+            },
+            required: ["kind", "targetScope", "summary"],
+          },
+        },
       },
       required: ["schemaVersion", "publicReply"],
     },
     async execute(params: unknown): Promise<unknown> {
       try {
-        return validateRpTurnOutcome(params);
+        return normalizeRpTurnOutcome(params);
       } catch (err) {
         throw new MaidsClawError({
           code: "RP_TURN_OUTCOME_INVALID",

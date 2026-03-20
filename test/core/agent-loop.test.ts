@@ -339,8 +339,9 @@ describe("AgentLoop.runBuffered", () => {
 
     expect(result).toEqual({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v4",
         publicReply: "Your tea is ready.",
+        publications: [],
       },
     });
     if ("outcome" in result) {
