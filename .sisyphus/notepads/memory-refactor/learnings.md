@@ -181,3 +181,32 @@
 - `src/bootstrap/tools.ts` now passes `narrativeSearch` and `cognitionSearch` to `GraphNavigator` (reordered declarations so services are created before navigator)
 - Graceful degradation: all three enhancement paths (narrative seeds, cognition seeds, relation expansion) use try/catch with empty-result fallback
 - Test count: 1229 pass, 0 fail across 84 files (+6 new tests: 2 narrative/cognition seed merge, 1 empty relations graceful degradation, 1 relation-based beam expansion, 1 existing query types backward compat, 1 tools.test memory_explore with full services)
+
+## [T16 Complete] Task: T16 — Render Contested Evidence
+- `RelationBuilder` (`src/memory/cognition/relation-builder.ts`): new class with `writeContestRelation()` and `getConflictEvidence()` — writes/reads `conflicts_with` rows in `memory_relations`
+- `writeContestRelation()` uses `source_node_ref = "private_belief:{id}"`, `target_node_ref = "cognition_key:{cognitionKey}"` (virtual ref to avoid self-ref CHECK constraint), `relation_type = "conflicts_with"`, `strength = 0.8`, `directness = "direct"`, `source_kind = "agent_op"`, `source_ref = settlementId`
+- `source_kind` must be one of CHECK-allowed values: `'turn' | 'job' | 'agent_op' | 'system'` — used `'agent_op'` for assertion transitions
+- `CognitionRepository.upsertAssertion()`: calls `writeContestRelation()` after UPDATE and INSERT paths when `params.stance === "contested"` and cognition key is present
+- No-key INSERT path skips relation (no cognition key means no virtual target ref to write)
+- `CognitionSearchService.searchCognition()`: new `enrichContestedHits()` step — for contested hits, queries `getConflictEvidence(source_ref, 3)` and populates `conflictEvidence?: string[]` field
+- `CognitionHit` type extended with optional `conflictEvidence?: string[]`
+- `prompt-data.ts`: `RecentCognitionEntry` extended with optional `stance?`, `preContestedStance?`, `conflictEvidence?: string[]`
+- `formatContestedEntry()` exported helper: renders `• [kind:key] [CONTESTED: was {preContestedStance}] {summary} | Conflicts: {evidence1}; {evidence2}`
+- `getRecentCognition()` render loop: checks `stance === "contested"` before rendering, delegates to `formatContestedEntry()`
+- `logic_edges` untouched — only `memory_relations` used for cognition relations
+- `INSERT OR REPLACE` handles re-contests of same source+target+type triple (UNIQUE constraint)
+- Test count: 1237 pass, 0 fail across 84 files (+8 new tests: 2 cognition-commit contest relation, 2 retrieval-search contested evidence inline, 4 prompt-data contested rendering)
+
+## [T17 Complete] Task: T17 — Shared Block Services V1
+- 4 service files: `shared-block-repo.ts`, `shared-block-permissions.ts`, `shared-block-attach-service.ts`, `shared-block-patch-service.ts`
+- `SharedBlockRepo`: createBlock (with baseline snapshot seq=0), getBlock, getSections, getSection, plus low-level upsertSection/deleteSection/renameSection/setTitle/writeSnapshot
+- `SharedBlockPermissions`: isOwner (created_by_agent_id), isAdmin (owner OR shared_block_admins), canEdit (isAdmin), canRead (isAdmin OR attached)
+- `SharedBlockAttachService`: attachBlock (admin-only, agent-only target_kind, idempotent via INSERT OR IGNORE), detachBlock (admin-only), getAttachments
+- `SharedBlockPatchService`: applyPatch wraps entire op+log+auto-snapshot in a single transaction; patch_seq monotonic via `COALESCE(MAX(patch_seq), 0) + 1`
+- `MoveTargetConflictError` custom error with `retryable = true` for move_section target collision
+- Auto-snapshot interval: every 25 patches (`patch_seq % 25 === 0`); snapshot_seq = patch_seq value
+- Path validation: uses `assertSectionPath()` from section-path-validator.ts before set_section and move_section (both source and target)
+- DbLike duck-type pattern: each service defines its own minimal `DbLike` (prepare/get/all/run/transaction as needed), avoiding import of full `Db` type
+- Test wrapper `wrapDb()` bridges `bun:sqlite` `Database` to `DbLike` interface for in-memory testing
+- `bun:test` lacks `toMatchObject` — use individual field assertions instead
+- Test count: 1267 pass, 0 fail across 85 files (+30 new tests: 7 repo, 4 permissions, 7 attach, 12 patch including auto-snapshot-at-25)
