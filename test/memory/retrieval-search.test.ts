@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
+import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -405,6 +407,240 @@ describe("RetrievalService", () => {
 			expect(results).toHaveLength(1);
 			expect(results[0].scope).toBe("world");
 			expect(results[0].content).toContain("served tea");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	// ── Scenario 6: CognitionSearchService ────────────────────────────
+
+	describe("CognitionSearchService", () => {
+		function seedCognitionEntities(storage: GraphStorageService) {
+			storage.upsertEntity({
+				pointerKey: "__self__",
+				displayName: "Alice",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "__user__",
+				displayName: "User",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "bob",
+				displayName: "Bob",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+		}
+
+		it("returns filtered assertion/evaluation/commitment hits from canonical index", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:a1",
+				settlementId: "stl:s1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "search:e1",
+				settlementId: "stl:s1",
+				opIndex: 1,
+				dimensions: [{ name: "trust", value: 0.8 }],
+				notes: "Bob seems trustworthy",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "search:c1",
+				settlementId: "stl:s1",
+				opIndex: 2,
+				mode: "goal",
+				target: { action: "help Bob" },
+				status: "active",
+				priority: 5,
+				horizon: "near",
+			});
+
+			const search = new CognitionSearchService(db);
+
+			const allHits = search.searchCognition({ agentId: "rp:alice" });
+			expect(allHits.length).toBe(3);
+
+			const assertionHits = search.searchCognition({ agentId: "rp:alice", kind: "assertion" });
+			expect(assertionHits.length).toBe(1);
+			expect(assertionHits[0].kind).toBe("assertion");
+			expect(assertionHits[0].stance).toBe("accepted");
+			expect(assertionHits[0].basis).toBe("first_hand");
+
+			const evalHits = search.searchCognition({ agentId: "rp:alice", kind: "evaluation" });
+			expect(evalHits.length).toBe(1);
+			expect(evalHits[0].kind).toBe("evaluation");
+
+			const commitHits = search.searchCognition({ agentId: "rp:alice", kind: "commitment" });
+			expect(commitHits.length).toBe(1);
+			expect(commitHits[0].kind).toBe("commitment");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("commitment sorting follows priority + horizon + updated_at", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "sort:c-low-prio",
+				settlementId: "stl:s1",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "low priority task" },
+				status: "active",
+				priority: 10,
+				horizon: "immediate",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "sort:c-high-prio",
+				settlementId: "stl:s1",
+				opIndex: 1,
+				mode: "goal",
+				target: { action: "high priority task" },
+				status: "active",
+				priority: 1,
+				horizon: "long",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "sort:c-mid-prio",
+				settlementId: "stl:s1",
+				opIndex: 2,
+				mode: "intent",
+				target: { action: "mid priority near" },
+				status: "active",
+				priority: 5,
+				horizon: "near",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "sort:c-mid-prio-imm",
+				settlementId: "stl:s1",
+				opIndex: 3,
+				mode: "plan",
+				target: { action: "mid priority immediate" },
+				status: "active",
+				priority: 5,
+				horizon: "immediate",
+			});
+
+			const search = new CognitionSearchService(db);
+			const hits = search.searchCognition({ agentId: "rp:alice", kind: "commitment" });
+
+			expect(hits.length).toBe(4);
+			expect(hits[0].content).toContain("high priority");
+			expect(hits[1].content).toContain("mid priority immediate");
+			expect(hits[2].content).toContain("mid priority near");
+			expect(hits[3].content).toContain("low priority");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("cognition hits do NOT appear in narrative search results", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "isolation:a1",
+				settlementId: "stl:s1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "distrusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+
+			storage.syncSearchDoc("world", "event:99" as any, "Bob arrived at the mansion distrusts nobody");
+
+			const cognitionSearch = new CognitionSearchService(db);
+			const cognitionHits = cognitionSearch.searchCognition({
+				agentId: "rp:alice",
+				query: "distrusts",
+			});
+			expect(cognitionHits.length).toBe(1);
+			expect(cognitionHits[0].kind).toBe("assertion");
+
+			const narrativeSearch = new NarrativeSearchService(db);
+			const narrativeResults = await narrativeSearch.searchNarrative(
+				"distrusts",
+				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
+			);
+			expect(narrativeResults.length).toBe(1);
+			expect(narrativeResults[0].scope).toBe("world");
+			expect(narrativeResults[0].content).toContain("mansion");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("FTS text search finds matching cognition docs", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "fts:a1",
+				settlementId: "stl:s1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "suspects",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "fts:e1",
+				settlementId: "stl:s1",
+				opIndex: 1,
+				dimensions: [{ name: "mood", value: 0.3 }],
+				notes: "feeling uneasy about the situation",
+			});
+
+			const search = new CognitionSearchService(db);
+
+			const suspectHits = search.searchCognition({ agentId: "rp:alice", query: "suspects" });
+			expect(suspectHits.length).toBe(1);
+			expect(suspectHits[0].kind).toBe("assertion");
+
+			const uneasyHits = search.searchCognition({ agentId: "rp:alice", query: "uneasy" });
+			expect(uneasyHits.length).toBe(1);
+			expect(uneasyHits[0].kind).toBe("evaluation");
 
 			db.close();
 			cleanupDb(dbPath);

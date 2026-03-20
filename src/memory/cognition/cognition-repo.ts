@@ -5,6 +5,7 @@ import {
   type AssertionBasis,
   type AssertionStance,
 } from "../../runtime/rp-turn-contract.js";
+import type { CognitionKind } from "../../runtime/rp-turn-contract.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -289,6 +290,16 @@ export class CognitionRepository {
             now,
             existing.id,
           );
+        this.syncCognitionSearchDoc({
+          overlayId: existing.id,
+          agentId: params.agentId,
+          kind: "assertion",
+          content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+          stance: params.stance,
+          basis: params.basis ?? null,
+          sourceRefKind: "private_belief",
+          now,
+        });
         return { id: existing.id };
       }
 
@@ -331,7 +342,18 @@ export class CognitionRepository {
           now,
           now,
         );
-      return { id: Number(result.lastInsertRowid) };
+      const insertedId = Number(result.lastInsertRowid);
+      this.syncCognitionSearchDoc({
+        overlayId: insertedId,
+        agentId: params.agentId,
+        kind: "assertion",
+        content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+        stance: params.stance,
+        basis: params.basis ?? null,
+        sourceRefKind: "private_belief",
+        now,
+      });
+      return { id: insertedId };
     }
 
     const result = this.db
@@ -371,7 +393,18 @@ export class CognitionRepository {
         now,
         now,
       );
-    return { id: Number(result.lastInsertRowid) };
+    const insertedId = Number(result.lastInsertRowid);
+    this.syncCognitionSearchDoc({
+      overlayId: insertedId,
+      agentId: params.agentId,
+      kind: "assertion",
+      content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+      stance: params.stance,
+      basis: params.basis ?? null,
+      sourceRefKind: "private_belief",
+      now,
+    });
+    return { id: insertedId };
   }
 
   private assertLegalStanceTransition(
@@ -482,6 +515,16 @@ export class CognitionRepository {
             now,
             existing.id,
           );
+        this.syncCognitionSearchDoc({
+          overlayId: existing.id,
+          agentId: params.agentId,
+          kind: "evaluation",
+          content: `evaluation: ${params.notes ?? ""}`,
+          stance: null,
+          basis: null,
+          sourceRefKind: "private_event",
+          now,
+        });
         return { id: existing.id };
       }
     }
@@ -534,7 +577,18 @@ export class CognitionRepository {
         now,
         now,
       );
-    return { id: Number(result.lastInsertRowid) };
+    const evalId = Number(result.lastInsertRowid);
+    this.syncCognitionSearchDoc({
+      overlayId: evalId,
+      agentId: params.agentId,
+      kind: "evaluation",
+      content: `evaluation: ${params.notes ?? ""}`,
+      stance: null,
+      basis: null,
+      sourceRefKind: "private_event",
+      now,
+    });
+    return { id: evalId };
   }
 
   upsertCommitment(params: UpsertCommitmentParams): { id: number } {
@@ -578,6 +632,16 @@ export class CognitionRepository {
             now,
             existing.id,
           );
+        this.syncCognitionSearchDoc({
+          overlayId: existing.id,
+          agentId: params.agentId,
+          kind: "commitment",
+          content: `${params.mode}: ${JSON.stringify(params.target)}`,
+          stance: null,
+          basis: null,
+          sourceRefKind: "private_event",
+          now,
+        });
         return { id: existing.id };
       }
     }
@@ -630,7 +694,18 @@ export class CognitionRepository {
         now,
         now,
       );
-    return { id: Number(result.lastInsertRowid) };
+    const commitId = Number(result.lastInsertRowid);
+    this.syncCognitionSearchDoc({
+      overlayId: commitId,
+      agentId: params.agentId,
+      kind: "commitment",
+      content: `${params.mode}: ${JSON.stringify(params.target)}`,
+      stance: null,
+      basis: null,
+      sourceRefKind: "private_event",
+      now,
+    });
+    return { id: commitId };
   }
 
   retractCognition(
@@ -651,6 +726,7 @@ export class CognitionRepository {
            WHERE agent_id = ? AND cognition_key = ?`,
         )
         .run(now, agentId, normalizedKey);
+      this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
       return;
     }
 
@@ -663,6 +739,7 @@ export class CognitionRepository {
            WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
         )
         .run(now, agentId, normalizedKey, kind);
+      this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
       return;
     }
 
@@ -683,9 +760,14 @@ export class CognitionRepository {
          WHERE agent_id = ? AND cognition_key = ?`,
       )
       .run(now, agentId, normalizedKey);
+    this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
+    this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
   }
 
-  getAssertions(agentId: string, options?: { activeOnly?: boolean }): CanonicalAssertionRow[] {
+  getAssertions(
+    agentId: string,
+    options?: { activeOnly?: boolean; stance?: AssertionStance; basis?: AssertionBasis },
+  ): CanonicalAssertionRow[] {
     const rows = this.db
       .prepare(
         `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
@@ -699,14 +781,20 @@ export class CognitionRepository {
       )
       .all(agentId) as FactOverlayRow[];
 
-    const mapped = rows
+    let mapped = rows
       .map((row) => this.toCanonicalAssertion(row))
       .filter((row): row is CanonicalAssertionRow => row !== null);
 
-    if (!options?.activeOnly) {
-      return mapped;
+    if (options?.activeOnly) {
+      mapped = mapped.filter((row) => row.stance !== "rejected" && row.stance !== "abandoned");
     }
-    return mapped.filter((row) => row.stance !== "rejected" && row.stance !== "abandoned");
+    if (options?.stance) {
+      mapped = mapped.filter((row) => row.stance === options.stance);
+    }
+    if (options?.basis) {
+      mapped = mapped.filter((row) => row.basis === options.basis);
+    }
+    return mapped;
   }
 
   getEvaluations(agentId: string, options?: { activeOnly?: boolean }): CanonicalEvaluationRow[] {
@@ -729,7 +817,10 @@ export class CognitionRepository {
     return mapped.filter((row) => row.status === "active");
   }
 
-  getCommitments(agentId: string, options?: { activeOnly?: boolean }): CanonicalCommitmentRow[] {
+  getCommitments(
+    agentId: string,
+    options?: { activeOnly?: boolean; mode?: string },
+  ): CanonicalCommitmentRow[] {
     const rows = this.db
       .prepare(
         `SELECT id, agent_id, cognition_key, explicit_kind, settlement_id, op_index,
@@ -742,11 +833,14 @@ export class CognitionRepository {
       )
       .all(agentId) as EventOverlayRow[];
 
-    const mapped = rows.map((row) => this.toCanonicalCommitment(row));
-    if (!options?.activeOnly) {
-      return mapped;
+    let mapped = rows.map((row) => this.toCanonicalCommitment(row));
+    if (options?.activeOnly) {
+      mapped = mapped.filter((row) => row.status === "active");
     }
-    return mapped.filter((row) => row.status === "active");
+    if (options?.mode) {
+      mapped = mapped.filter((row) => row.mode === options.mode);
+    }
+    return mapped;
   }
 
   getAssertionByKey(agentId: string, cognitionKey: string): CanonicalAssertionRow | null {
@@ -901,6 +995,95 @@ export class CognitionRepository {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  // ── Search doc sync ──────────────────────────────────────────────────
+
+  private updateCognitionSearchDocStance(
+    agentId: string,
+    refKind: "private_belief" | "private_event",
+    cognitionKey: string,
+    newStance: AssertionStance,
+    now: number,
+  ): void {
+    const rows = this.db
+      .prepare(
+        `SELECT f.id FROM agent_fact_overlay f
+         WHERE f.agent_id = ? AND f.cognition_key = ?`,
+      )
+      .all(agentId, cognitionKey) as { id: number }[];
+
+    if (refKind === "private_event") {
+      const eventRows = this.db
+        .prepare(
+          `SELECT e.id FROM agent_event_overlay e
+           WHERE e.agent_id = ? AND e.cognition_key = ?`,
+        )
+        .all(agentId, cognitionKey) as { id: number }[];
+
+      for (const row of eventRows) {
+        const sourceRef = `private_event:${row.id}`;
+        this.db
+          .prepare(
+            `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
+          )
+          .run(newStance, now, sourceRef, agentId);
+      }
+    }
+
+    if (refKind === "private_belief") {
+      for (const row of rows) {
+        const sourceRef = `private_belief:${row.id}`;
+        this.db
+          .prepare(
+            `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
+          )
+          .run(newStance, now, sourceRef, agentId);
+      }
+    }
+  }
+
+  private syncCognitionSearchDoc(params: {
+    overlayId: number;
+    agentId: string;
+    kind: CognitionKind;
+    content: string;
+    stance: AssertionStance | null;
+    basis: AssertionBasis | null;
+    sourceRefKind: "private_belief" | "private_event";
+    now: number;
+  }): void {
+    const sourceRef = `${params.sourceRefKind}:${params.overlayId}`;
+    const docType = params.sourceRefKind;
+
+    const existing = this.db
+      .prepare(`SELECT id FROM search_docs_cognition WHERE source_ref = ? AND agent_id = ?`)
+      .get(sourceRef, params.agentId) as { id: number } | null;
+
+    const result = this.db
+      .prepare(
+        `INSERT OR REPLACE INTO search_docs_cognition
+         (id, doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        existing?.id ?? null,
+        docType,
+        sourceRef,
+        params.agentId,
+        params.kind,
+        params.basis ?? null,
+        params.stance ?? null,
+        params.content,
+        params.now,
+        params.now,
+      );
+
+    const docId = existing?.id ?? Number(result.lastInsertRowid);
+    this.db.prepare(`DELETE FROM search_docs_cognition_fts WHERE rowid = ?`).run(docId);
+    this.db
+      .prepare(`INSERT INTO search_docs_cognition_fts(rowid, content) VALUES (?, ?)`)
+      .run(docId, params.content);
   }
 }
 

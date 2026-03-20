@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MaidsClawError } from "../../src/core/errors.js";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
+import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -1221,6 +1222,180 @@ describe("CognitionOpCommitter", () => {
 			expect(assertion!.basis).toBe("first_hand");
 			expect(Object.prototype.hasOwnProperty.call(assertion!, "epistemic_status")).toBe(false);
 			expect(Object.prototype.hasOwnProperty.call(assertion!, "confidence")).toBe(false);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Cognition search by kind/stance/basis", () => {
+		it("filters assertions by stance", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:stance-accepted",
+				settlementId: "stl:search-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:stance-tentative",
+				settlementId: "stl:search-1",
+				opIndex: 1,
+				sourcePointerKey: "__self__",
+				predicate: "suspects",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+
+			const search = new CognitionSearchService(db);
+			const accepted = search.searchCognition({ agentId: "rp:alice", kind: "assertion", stance: "accepted" });
+			expect(accepted.length).toBe(1);
+			expect(accepted[0].stance).toBe("accepted");
+
+			const tentative = search.searchCognition({ agentId: "rp:alice", kind: "assertion", stance: "tentative" });
+			expect(tentative.length).toBe(1);
+			expect(tentative[0].stance).toBe("tentative");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("filters assertions by basis", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:basis-fh",
+				settlementId: "stl:search-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "knows",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:basis-inf",
+				settlementId: "stl:search-2",
+				opIndex: 1,
+				sourcePointerKey: "__self__",
+				predicate: "assumes",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+
+			const search = new CognitionSearchService(db);
+			const firstHand = search.searchCognition({ agentId: "rp:alice", kind: "assertion", basis: "first_hand" });
+			expect(firstHand.length).toBe(1);
+			expect(firstHand[0].basis).toBe("first_hand");
+
+			const inference = search.searchCognition({ agentId: "rp:alice", kind: "assertion", basis: "inference" });
+			expect(inference.length).toBe(1);
+			expect(inference[0].basis).toBe("inference");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("activeOnly excludes rejected/abandoned assertions", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:active-yes",
+				settlementId: "stl:search-3",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "likes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:active-no",
+				settlementId: "stl:search-3",
+				opIndex: 1,
+				sourcePointerKey: "__self__",
+				predicate: "hates",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.retractCognition("rp:alice", "search:active-no", "assertion");
+
+			const search = new CognitionSearchService(db);
+			const active = search.searchCognition({ agentId: "rp:alice", kind: "assertion", activeOnly: true });
+			expect(active.length).toBe(1);
+			expect(active[0].content).toContain("likes");
+
+			const all = search.searchCognition({ agentId: "rp:alice", kind: "assertion", activeOnly: false });
+			expect(all.length).toBe(2);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("searches across all cognition kinds without kind filter", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "search:mixed-a",
+				settlementId: "stl:search-4",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "observes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "search:mixed-e",
+				settlementId: "stl:search-4",
+				opIndex: 1,
+				dimensions: [{ name: "trust", value: 0.5 }],
+				notes: "neutral feeling",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "search:mixed-c",
+				settlementId: "stl:search-4",
+				opIndex: 2,
+				mode: "intent",
+				target: { action: "watch Bob" },
+				status: "active",
+			});
+
+			const search = new CognitionSearchService(db);
+			const allKinds = search.searchCognition({ agentId: "rp:alice" });
+			expect(allKinds.length).toBe(3);
+			const kinds = allKinds.map((h) => h.kind).sort();
+			expect(kinds).toEqual(["assertion", "commitment", "evaluation"]);
 
 			db.close();
 			cleanupDb(dbPath);
