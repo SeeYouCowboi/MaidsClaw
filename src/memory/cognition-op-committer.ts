@@ -8,7 +8,7 @@ import type {
   CommitmentRecord,
   EvaluationRecord,
 } from "../runtime/rp-turn-contract.js";
-import { GraphStorageService } from "./storage.js";
+import type { GraphStorageService } from "./storage.js";
 import type { NodeRef } from "./types.js";
 
 export class CognitionOpCommitter {
@@ -45,6 +45,9 @@ export class CognitionOpCommitter {
       }
 
       if (op.op === "retract" && op.target) {
+        if (this.isAlreadyRetracted(op.target)) {
+          continue;
+        }
         this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind);
       }
     }
@@ -77,7 +80,6 @@ export class CognitionOpCommitter {
         stance: record.stance,
         basis: this.normalizeAssertionBasis(record.basis),
         preContestedStance: "preContestedStance" in record ? record.preContestedStance : undefined,
-        confidence: record.confidence,
         provenance: record.provenance,
       });
       return result.ref;
@@ -211,5 +213,29 @@ export class CognitionOpCommitter {
       return "inference";
     }
     return undefined;
+  }
+
+  private isAlreadyRetracted(target: CognitionSelector): boolean {
+    const cognitionRepo = (this.storage as unknown as {
+      cognitionRepo?: {
+        getAssertionByKey(agentId: string, cognitionKey: string): { stance: string } | null;
+        getEvaluationByKey(agentId: string, cognitionKey: string): { status: string } | null;
+        getCommitmentByKey(agentId: string, cognitionKey: string): { status: string } | null;
+      };
+    }).cognitionRepo;
+    if (!cognitionRepo) {
+      return false;
+    }
+
+    if (target.kind === "assertion") {
+      const row = cognitionRepo.getAssertionByKey(this.agentId, target.key);
+      return row !== null && (row.stance === "rejected" || row.stance === "abandoned");
+    }
+
+    const row =
+      target.kind === "evaluation"
+        ? cognitionRepo.getEvaluationByKey(this.agentId, target.key)
+        : cognitionRepo.getCommitmentByKey(this.agentId, target.key);
+    return row?.status === "retracted";
   }
 }

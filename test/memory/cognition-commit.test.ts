@@ -167,6 +167,442 @@ describe("CognitionOpCommitter", () => {
 		});
 	});
 
+	describe("Assertion state machine enforcement", () => {
+		it("allows legal stance transitions and preserves contested pre-state", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:legal",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "tentative",
+						},
+					},
+				],
+				"stl:sm-1",
+			);
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:legal",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "accepted",
+						},
+					},
+				],
+				"stl:sm-2",
+			);
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:legal",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "confirmed",
+						},
+					},
+				],
+				"stl:sm-3",
+			);
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:legal",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "contested",
+							preContestedStance: "confirmed",
+						},
+					},
+				],
+				"stl:sm-4",
+			);
+
+			const contestedRow = db.get<{ stance: string | null; pre_contested_stance: string | null; confidence: number | null }>(
+				"SELECT stance, pre_contested_stance, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "state:legal"],
+			);
+			expect(contestedRow).toBeDefined();
+			expect(contestedRow!.stance).toBe("contested");
+			expect(contestedRow!.pre_contested_stance).toBe("confirmed");
+			expect(contestedRow!.confidence).toBeNull();
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:legal",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "rejected",
+						},
+					},
+				],
+				"stl:sm-5",
+			);
+
+			const row = db.get<{ stance: string | null; pre_contested_stance: string | null; confidence: number | null }>(
+				"SELECT stance, pre_contested_stance, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "state:legal"],
+			);
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("rejected");
+			expect(row!.confidence).toBeNull();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("rejects hypothetical -> confirmed skip transition", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:illegal-skip",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "hypothetical",
+						},
+					},
+				],
+				"stl:sm-illegal-1",
+			);
+
+			let thrown: MaidsClawError | null = null;
+			try {
+				committer.commit(
+					[
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "state:illegal-skip",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+								},
+								stance: "confirmed",
+							},
+						},
+					],
+					"stl:sm-illegal-2",
+				);
+			} catch (error) {
+				thrown = error as MaidsClawError;
+			}
+			expect(thrown).not.toBeNull();
+			expect(thrown!.code).toBe("COGNITION_ILLEGAL_STANCE_TRANSITION");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("rejects confirmed -> rejected without contested", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:illegal-confirmed-rejected",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "confirmed",
+						},
+					},
+				],
+				"stl:sm-illegal-3",
+			);
+
+			let thrown: MaidsClawError | null = null;
+			try {
+				committer.commit(
+					[
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "state:illegal-confirmed-rejected",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+								},
+								stance: "rejected",
+							},
+						},
+					],
+					"stl:sm-illegal-4",
+				);
+			} catch (error) {
+				thrown = error as MaidsClawError;
+			}
+			expect(thrown).not.toBeNull();
+			expect(thrown!.code).toBe("COGNITION_ILLEGAL_STANCE_TRANSITION");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("rejects terminal-state key reuse", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:terminal-reuse",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "accepted",
+						},
+					},
+				],
+				"stl:sm-terminal-1",
+			);
+			committer.commit(
+				[{ op: "retract", target: { kind: "assertion", key: "state:terminal-reuse" } }],
+				"stl:sm-terminal-2",
+			);
+
+			let thrown: MaidsClawError | null = null;
+			try {
+				committer.commit(
+					[
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "state:terminal-reuse",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+								},
+								stance: "tentative",
+							},
+						},
+					],
+					"stl:sm-terminal-3",
+				);
+			} catch (error) {
+				thrown = error as MaidsClawError;
+			}
+			expect(thrown).not.toBeNull();
+			expect(thrown!.code).toBe("COGNITION_TERMINAL_KEY_REUSE");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("rejects contested writes without preContestedStance", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			let thrown: MaidsClawError | null = null;
+			try {
+				committer.commit(
+					[
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "state:missing-pre",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+								},
+								stance: "contested",
+							},
+						},
+					],
+					"stl:sm-pre-1",
+				);
+			} catch (error) {
+				thrown = error as MaidsClawError;
+			}
+			expect(thrown).not.toBeNull();
+			expect(thrown!.code).toBe("COGNITION_MISSING_PRE_CONTESTED_STANCE");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("rejects basis downgrade first_hand -> inference", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:basis-downgrade",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "accepted",
+							basis: "first_hand",
+						},
+					},
+				],
+				"stl:sm-basis-1",
+			);
+
+			let thrown: MaidsClawError | null = null;
+			try {
+				committer.commit(
+					[
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "state:basis-downgrade",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+								},
+								stance: "accepted",
+								basis: "inference",
+							},
+						},
+					],
+					"stl:sm-basis-2",
+				);
+			} catch (error) {
+				thrown = error as MaidsClawError;
+			}
+			expect(thrown).not.toBeNull();
+			expect(thrown!.code).toBe("COGNITION_ILLEGAL_BASIS_DOWNGRADE");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("allows idempotent double retract for already-retracted key", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const committer = new CognitionOpCommitter(storage, "rp:alice");
+
+			committer.commit(
+				[
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "state:double-retract",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "accepted",
+						},
+					},
+				],
+				"stl:sm-retract-1",
+			);
+			committer.commit(
+				[{ op: "retract", target: { kind: "assertion", key: "state:double-retract" } }],
+				"stl:sm-retract-2",
+			);
+
+			committer.commit(
+				[{ op: "retract", target: { kind: "assertion", key: "state:double-retract" } }],
+				"stl:sm-retract-3",
+			);
+
+			const row = db.get<{ stance: string | null }>(
+				"SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "state:double-retract"],
+			);
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("rejected");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
 	// ── Scenario 2: Evaluation with entity targets ───────────────────
 
 	describe("Evaluation operations", () => {
