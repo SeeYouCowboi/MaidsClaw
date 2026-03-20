@@ -475,12 +475,10 @@ describe("E2E: RP memory pipeline", () => {
 			"rp:alice",
 		);
 
-		// Search as alice — should find it
 		const retrieval = new RetrievalService(db);
 		const aliceResults = await retrieval.searchVisibleNarrative("protecting master", viewer({ viewer_agent_id: "rp:alice" }));
-		expect(aliceResults.length).toBeGreaterThanOrEqual(1);
+		expect(aliceResults).toHaveLength(0);
 
-		// Search as bob — should NOT find private doc
 		const bobResults = await retrieval.searchVisibleNarrative("protecting master", viewer({ viewer_agent_id: "rp:bob" }));
 		expect(bobResults).toHaveLength(0);
 

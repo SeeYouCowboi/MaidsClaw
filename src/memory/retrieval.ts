@@ -1,5 +1,6 @@
 import type { Db } from "../storage/database.js";
 import { EmbeddingService } from "./embeddings.js";
+import { NarrativeSearchService } from "./narrative/narrative-search.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
@@ -14,12 +15,6 @@ import type {
   Topic,
   ViewerContext,
 } from "./types.js";
-
-type SearchRow = {
-  source_ref: string;
-  doc_type: string;
-  content: string;
-};
 
 type SearchResult = {
   source_ref: NodeRef;
@@ -44,10 +39,12 @@ type TopicReadResult = {
 
 export class RetrievalService {
   private readonly embeddingService: EmbeddingService;
+  private readonly narrativeSearch: NarrativeSearchService;
 
   constructor(private readonly db: Db) {
     const batcher = new TransactionBatcher(db);
     this.embeddingService = new EmbeddingService(db, batcher);
+    this.narrativeSearch = new NarrativeSearchService(db);
   }
 
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
@@ -176,59 +173,14 @@ export class RetrievalService {
   }
 
   async searchVisibleNarrative(query: string, viewerContext: ViewerContext): Promise<SearchResult[]> {
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      return [];
-    }
-
-    const safeQuery = this.escapeFtsQuery(trimmed);
-    const rawResults: SearchResult[] = [];
-
-    if (viewerContext.viewer_role === "rp_agent") {
-      const privateRows = this.db
-        .prepare(
-          `SELECT d.source_ref, d.doc_type, d.content
-           FROM search_docs_private d
-           JOIN search_docs_private_fts f ON f.rowid = d.id
-           WHERE f.content MATCH ? AND d.agent_id=?`,
-        )
-        .all(safeQuery, viewerContext.viewer_agent_id) as SearchRow[];
-      rawResults.push(...privateRows.map((row) => this.mapSearchRow(row, "private", 1.0)));
-    }
-
-    if (viewerContext.viewer_role !== "task_agent") {
-      if (viewerContext.current_area_id != null) {
-        const areaRows = this.db
-          .prepare(
-            `SELECT d.source_ref, d.doc_type, d.content
-             FROM search_docs_area d
-             JOIN search_docs_area_fts f ON f.rowid = d.id
-             WHERE f.content MATCH ? AND d.location_entity_id=?`,
-          )
-          .all(safeQuery, viewerContext.current_area_id) as SearchRow[];
-        rawResults.push(...areaRows.map((row) => this.mapSearchRow(row, "area", 0.9)));
-      }
-      const worldRows = this.db
-        .prepare(
-          `SELECT d.source_ref, d.doc_type, d.content
-           FROM search_docs_world d
-           JOIN search_docs_world_fts f ON f.rowid = d.id
-           WHERE f.content MATCH ?`,
-        )
-        .all(safeQuery) as SearchRow[];
-      rawResults.push(...worldRows.map((row) => this.mapSearchRow(row, "world", 0.8)));
-    }
-
-    const deduped = new Map<string, SearchResult>();
-    for (const result of rawResults) {
-      const key = `${result.source_ref}|${result.doc_type}`;
-      const existing = deduped.get(key);
-      if (!existing || result.score > existing.score) {
-        deduped.set(key, result);
-      }
-    }
-
-    return Array.from(deduped.values()).sort((a, b) => b.score - a.score);
+    const narrativeResults = await this.narrativeSearch.searchNarrative(query, viewerContext);
+    return narrativeResults.map((r) => ({
+      source_ref: r.source_ref,
+      doc_type: r.doc_type,
+      content: r.content,
+      scope: r.scope,
+      score: r.score,
+    }));
   }
 
   async generateMemoryHints(
@@ -236,18 +188,7 @@ export class RetrievalService {
     viewerContext: ViewerContext,
     limit = 5,
   ): Promise<MemoryHint[]> {
-    if (userMessage.trim().length < 3) {
-      return [];
-    }
-
-    const results = await this.searchVisibleNarrative(userMessage, viewerContext);
-    return results.slice(0, limit).map((result) => ({
-      source_ref: result.source_ref,
-      scope: result.scope,
-      doc_type: result.doc_type,
-      content: result.content,
-      score: result.score,
-    }));
+    return this.narrativeSearch.generateMemoryHints(userMessage, viewerContext, limit);
   }
 
   async localizeSeedsHybrid(
@@ -396,34 +337,6 @@ export class RetrievalService {
       .prepare("SELECT * FROM entity_nodes WHERE id=? AND memory_scope='shared_public'")
       .get(alias.canonical_id) as EntityNode | undefined;
     return aliasedShared ?? null;
-  }
-
-  private escapeFtsQuery(input: string): string {
-    const tokens = input
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3)
-      .map((token) => token.replaceAll('"', '""'));
-
-    if (tokens.length === 0) {
-      return `"${input.replaceAll('"', '""')}"`;
-    }
-
-    if (tokens.length === 1) {
-      return `"${tokens[0]}"`;
-    }
-
-    return tokens.map((token) => `"${token}"`).join(" OR ");
-  }
-
-  private mapSearchRow(row: SearchRow, scope: "private" | "area" | "world", score: number): SearchResult {
-    return {
-      source_ref: row.source_ref as NodeRef,
-      doc_type: row.doc_type,
-      content: row.content,
-      scope,
-      score,
-    };
   }
 
   private rrf(rank: number): number {

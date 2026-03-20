@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
@@ -178,7 +179,7 @@ describe("RetrievalService", () => {
 	// ── Scenario 2: FTS5 scope isolation ─────────────────────────────
 
 	describe("FTS5 scope isolation", () => {
-		it("private scope only returns docs matching viewer agent_id", async () => {
+		it("narrative search excludes private docs entirely", async () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -189,8 +190,7 @@ describe("RetrievalService", () => {
 			const retrieval = new RetrievalService(db);
 			const results = await retrieval.searchVisibleNarrative("suspicious", viewer({ viewer_agent_id: "rp:alice" }));
 
-			expect(results.length).toBe(1);
-			expect(results[0].content).toContain("suspicious");
+			expect(results).toHaveLength(0);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -232,7 +232,7 @@ describe("RetrievalService", () => {
 			cleanupDb(dbPath);
 		});
 
-		it("search across all 3 scopes returns combined results", async () => {
+		it("narrative search returns only area + world results (not private)", async () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -244,7 +244,11 @@ describe("RetrievalService", () => {
 			const retrieval = new RetrievalService(db);
 			const results = await retrieval.searchVisibleNarrative("moonlit", viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }));
 
-			expect(results.length).toBeGreaterThanOrEqual(2);
+			expect(results).toHaveLength(2);
+			const scopes = results.map((r) => r.scope);
+			expect(scopes).toContain("area");
+			expect(scopes).toContain("world");
+			expect(scopes).not.toContain("private");
 
 			db.close();
 			cleanupDb(dbPath);
@@ -334,6 +338,73 @@ describe("RetrievalService", () => {
 
 			expect(result.topic).toBeNull();
 			expect(result.events).toHaveLength(0);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	// ── Scenario 5: Narrative search isolation ──────────────────────
+
+	describe("NarrativeSearchService", () => {
+		it("returns only area and world results", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+
+			storage.syncSearchDoc("area", "event:1" as any, "A dragon appeared in the courtyard", undefined, 5);
+			storage.syncSearchDoc("world", "event:2" as any, "A dragon was spotted near the mountains");
+
+			const service = new NarrativeSearchService(db);
+			const results = await service.searchNarrative("dragon", viewer({ current_area_id: 5 }));
+
+			expect(results).toHaveLength(2);
+			expect(results[0].scope).toBe("area");
+			expect(results[1].scope).toBe("world");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("viewer_role change does not alter narrative visibility", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+
+			storage.syncSearchDoc("area", "event:1" as any, "The garden was blooming with beautiful flowers", undefined, 10);
+			storage.syncSearchDoc("world", "event:2" as any, "The annual flower festival began with beautiful flowers");
+
+			const service = new NarrativeSearchService(db);
+
+			const rpResults = await service.searchNarrative("flowers", viewer({ viewer_role: "rp_agent", current_area_id: 10 }));
+			const taskResults = await service.searchNarrative("flowers", viewer({ viewer_role: "task_agent", current_area_id: 10 }));
+			const maidenResults = await service.searchNarrative("flowers", viewer({ viewer_role: "maiden", current_area_id: 10 }));
+
+			expect(rpResults).toHaveLength(2);
+			expect(taskResults).toHaveLength(2);
+			expect(maidenResults).toHaveLength(2);
+			expect(rpResults.map((r) => r.source_ref)).toEqual(taskResults.map((r) => r.source_ref));
+			expect(rpResults.map((r) => r.source_ref)).toEqual(maidenResults.map((r) => r.source_ref));
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("private cognition docs are never surfaced by narrative search", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+
+			storage.syncSearchDoc("private", "private_belief:1" as any, "Alice suspects betrayal from the butler", "rp:alice");
+			storage.syncSearchDoc("private", "private_event:2" as any, "Alice evaluated the butler as untrustworthy", "rp:alice");
+			storage.syncSearchDoc("world", "event:3" as any, "The butler served tea in the parlor");
+
+			const service = new NarrativeSearchService(db);
+			const results = await service.searchNarrative("butler", viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }));
+
+			expect(results).toHaveLength(1);
+			expect(results[0].scope).toBe("world");
+			expect(results[0].content).toContain("served tea");
 
 			db.close();
 			cleanupDb(dbPath);

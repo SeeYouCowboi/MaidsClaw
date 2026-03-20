@@ -172,4 +172,26 @@ describe("VisibilityPolicy", () => {
       expect(sql).toBe("o.agent_id = 'agent-z'");
     });
   });
+
+  describe("viewer_role irrelevance", () => {
+    it("viewer_role does not affect event visibility", () => {
+      const event = { visibility_scope: "area_visible" as const, location_entity_id: 100 };
+      const rpViewer = makeViewer({ viewer_role: "rp_agent" });
+      const taskViewer = makeViewer({ viewer_role: "task_agent" });
+      const maidenViewer = makeViewer({ viewer_role: "maiden" });
+
+      expect(policy.isEventVisible(rpViewer, event)).toBe(true);
+      expect(policy.isEventVisible(taskViewer, event)).toBe(true);
+      expect(policy.isEventVisible(maidenViewer, event)).toBe(true);
+    });
+
+    it("viewer_role does not affect SQL predicate output", () => {
+      const rpSql = policy.eventVisibilityPredicate(makeViewer({ viewer_role: "rp_agent" }));
+      const taskSql = policy.eventVisibilityPredicate(makeViewer({ viewer_role: "task_agent" }));
+      const maidenSql = policy.eventVisibilityPredicate(makeViewer({ viewer_role: "maiden" }));
+
+      expect(rpSql).toBe(taskSql);
+      expect(rpSql).toBe(maidenSql);
+    });
+  });
 });

@@ -112,3 +112,16 @@
 - Backoff policy for COGNITION_UNRESOLVED_REFS unchanged: 5min base, 6h max, 5 failures → blocked_manual
 - No code changes were needed in sweeper or task-agent — T6 and T8 already handled the canonical read and write paths
 - Test count: 1201 pass, 0 fail across 84 files (+6 new tests: 2 sweeper mixed v3/v4, 4 loadExistingContext canonical/legacy/commitment/backoff)
+
+## [T11 Complete] Task: T11 — Split Narrative Retrieval
+- NarrativeSearchService (`src/memory/narrative/narrative-search.ts`) is the canonical narrative-only search layer
+- Queries ONLY `search_docs_area` + `search_docs_world` FTS5 tables — never `search_docs_private`
+- Visibility gated on `current_area_id` presence (not `viewer_role`): area searched when `current_area_id != null`, world always searched
+- `RetrievalService.searchVisibleNarrative()` now delegates to `NarrativeSearchService.searchNarrative()`
+- `RetrievalService.generateMemoryHints()` now delegates to `NarrativeSearchService.generateMemoryHints()`
+- Removed `escapeFtsQuery()` and `mapSearchRow()` from RetrievalService (now only in NarrativeSearchService)
+- `localizeSeedsHybrid()` unchanged — still calls `searchVisibleNarrative()` which now returns narrative-only
+- 6 existing tests updated to reflect narrative/cognition split: private docs no longer surface via narrative search
+- `getMemoryHints()` in prompt-data.ts unchanged (signature preserved, behavior correctly narrowed to narrative-only)
+- VisibilityPolicy already uses `viewer_agent_id` + `current_area_id` only — confirmed with 2 new tests
+- Test count: 1206 pass, 0 fail across 84 files (+5 new tests: 3 NarrativeSearchService, 2 visibility-policy viewer_role irrelevance)

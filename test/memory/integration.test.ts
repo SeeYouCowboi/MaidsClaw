@@ -440,7 +440,7 @@ describe("Memory integration", () => {
 		expect(hiddenFromOtherAgent.overlays).toHaveLength(0);
 		passed += 1;
 
-		expect(rpSearch.some((row) => row.scope === "private")).toBe(true);
+		expect(rpSearch.some((row) => row.scope === "private")).toBe(false);
 		expect(maidenSearch.some((row) => row.scope === "private")).toBe(false);
 		passed += 1;
 
@@ -616,7 +616,7 @@ describe("Memory integration", () => {
 		expect(privateSearchDocs.some((doc) => doc.content.includes("trusts"))).toBe(true);
 
 		const searchResults = await retrieval.searchVisibleNarrative("trusts", makeViewer());
-		expect(searchResults.some((row) => row.scope === "private")).toBe(true);
+		expect(searchResults.some((row) => row.scope === "private")).toBe(false);
 	});
 
 	it("retracted explicit cognition is removed from private search docs after organizer", async () => {

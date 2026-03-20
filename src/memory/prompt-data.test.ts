@@ -195,7 +195,7 @@ describe("getMemoryHints", () => {
     expect(bulletCount).toBeLessThanOrEqual(5);
   });
 
-  it("rp_agent queries private + area + world FTS5 tables", async () => {
+  it("narrative hints return area + world only (not private)", async () => {
     const rpCtx = makeViewerContext({ viewer_role: "rp_agent", viewer_agent_id: "agent-1" });
 
     insertSearchDocPrivate(db, "agent-1", "Private memory about coffee brewing", "private_event:1");
@@ -204,26 +204,23 @@ describe("getMemoryHints", () => {
 
     const result = await getMemoryHints("coffee", rpCtx, db);
 
-    expect(result).toContain("Private memory about coffee brewing");
+    expect(result).not.toContain("Private memory about coffee brewing");
     expect(result).toContain("Area event about coffee ordering");
     expect(result).toContain("World fact about coffee origins");
   });
 
-  it("maiden queries area + world only (NOT private)", async () => {
-    const maidenCtx = makeViewerContext({
-      viewer_role: "maiden",
-      viewer_agent_id: "maiden-1",
-    });
-
-    insertSearchDocPrivate(db, "maiden-1", "Private memory about coffee brewing", "private_event:1");
+  it("viewer_role does not affect narrative hints visibility", async () => {
     insertSearchDocArea(db, 1, "Area event about coffee ordering", "event:1");
     insertSearchDocWorld(db, "World fact about coffee origins", "entity:1");
 
-    const result = await getMemoryHints("coffee", maidenCtx, db);
+    const rpResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "rp_agent" }), db);
+    const maidenResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "maiden" }), db);
+    const taskResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "task_agent" }), db);
 
-    expect(result).not.toContain("Private memory about coffee brewing");
-    expect(result).toContain("Area event about coffee ordering");
-    expect(result).toContain("World fact about coffee origins");
+    expect(rpResult).toContain("Area event about coffee ordering");
+    expect(rpResult).toContain("World fact about coffee origins");
+    expect(rpResult).toBe(maidenResult);
+    expect(rpResult).toBe(taskResult);
   });
 
   it("uses node kind from source_ref in bullet format", async () => {
