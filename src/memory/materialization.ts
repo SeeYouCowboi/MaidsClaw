@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import type { PublicationDeclaration, PublicationKind } from "../runtime/rp-turn-contract.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AgentEventOverlay, PublicEventCategory } from "./types.js";
@@ -231,4 +232,111 @@ export class MaterializationService {
 
     return null;
   }
+
+  materializePublications(
+    publications: PublicationDeclaration[],
+    settlementId: string,
+    ctx: {
+      sessionId: string;
+      locationEntityId?: number;
+      timestamp?: number;
+    },
+  ): MaterializationResult {
+    return materializePublications(this.storage, publications, settlementId, ctx);
+  }
+}
+
+export function materializePublications(
+  storage: GraphStorageService,
+  publications: PublicationDeclaration[],
+  settlementId: string,
+  ctx: {
+    sessionId: string;
+    locationEntityId?: number;
+    timestamp?: number;
+  },
+): MaterializationResult {
+  const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
+
+  for (let pubIndex = 0; pubIndex < publications.length; pubIndex += 1) {
+    const pub = publications[pubIndex];
+    if (!pub || !pub.summary.trim()) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const visibilityScope = publicationScopeToVisibility(pub.targetScope);
+
+    if (visibilityScope === "area_visible" && ctx.locationEntityId === undefined) {
+      // current_area publication requires a known location; skip when unavailable
+      result.skipped += 1;
+      continue;
+    }
+
+    let locationEntityId: number;
+    if (ctx.locationEntityId !== undefined) {
+      locationEntityId = ctx.locationEntityId;
+    } else {
+      // world_public with no concrete location — use a sentinel entity
+      locationEntityId = storage.upsertEntity({
+        pointerKey: "world",
+        displayName: "The World",
+        entityType: "location",
+        memoryScope: "shared_public",
+      });
+    }
+
+    const eventCategory = publicationKindToCategory(pub.kind);
+    const participants = JSON.stringify([makeNodeRef("entity", locationEntityId)]);
+    const timestamp = ctx.timestamp ?? Date.now();
+
+    try {
+      storage.createProjectedEvent({
+        sessionId: ctx.sessionId,
+        summary: pub.summary.trim(),
+        timestamp,
+        participants,
+        locationEntityId,
+        eventCategory,
+        origin: "runtime_projection",
+        visibilityScope,
+        sourceSettlementId: settlementId,
+        sourcePubIndex: pubIndex,
+      });
+      result.materialized += 1;
+    } catch (error: unknown) {
+      if (isSqliteUniqueConstraintError(error)) {
+        result.reconciled += 1;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  return result;
+}
+
+const PUBLICATION_KIND_TO_CATEGORY: Record<PublicationKind, PublicEventCategory> = {
+  speech: "speech",
+  record: "speech",
+  display: "observation",
+  broadcast: "speech",
+};
+
+function publicationKindToCategory(kind: PublicationKind): PublicEventCategory {
+  return PUBLICATION_KIND_TO_CATEGORY[kind];
+}
+
+function publicationScopeToVisibility(
+  targetScope: PublicationDeclaration["targetScope"],
+): "area_visible" | "world_public" {
+  return targetScope === "world_public" ? "world_public" : "area_visible";
+}
+
+function isSqliteUniqueConstraintError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return msg.includes("unique constraint") || msg.includes("unique_constraint") || msg.includes("constraint failed");
+  }
+  return false;
 }

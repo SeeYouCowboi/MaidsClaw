@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
-import { MaterializationService } from "../../src/memory/materialization.js";
+import { MaterializationService, materializePublications } from "../../src/memory/materialization.js";
 import type { AgentEventOverlay } from "../../src/memory/types.js";
+import type { PublicationDeclaration } from "../../src/runtime/rp-turn-contract.js";
 import { openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
@@ -507,5 +508,305 @@ describe("MaterializationService", () => {
 			db.close();
 			cleanupDb(dbPath);
 		});
+	});
+});
+
+describe("Publication Materialization", () => {
+	it("explicit publication creates event_node with provenance columns", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "tavern",
+			displayName: "Tavern",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "speech", targetScope: "current_area", summary: "Alice announces dinner is ready." },
+		];
+		const settlementId = `stl:req-pub-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-pub-1",
+			locationEntityId: locationId,
+			timestamp: 1000,
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.reconciled).toBe(0);
+		expect(result.skipped).toBe(0);
+
+		const row = db.get<{
+			summary: string;
+			visibility_scope: string;
+			event_origin: string;
+			event_category: string;
+			source_settlement_id: string;
+			source_pub_index: number;
+			location_entity_id: number;
+		}>(
+			"SELECT summary, visibility_scope, event_origin, event_category, source_settlement_id, source_pub_index, location_entity_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row).toBeDefined();
+		expect(row!.summary).toBe("Alice announces dinner is ready.");
+		expect(row!.visibility_scope).toBe("area_visible");
+		expect(row!.event_origin).toBe("runtime_projection");
+		expect(row!.event_category).toBe("speech");
+		expect(row!.source_settlement_id).toBe(settlementId);
+		expect(row!.source_pub_index).toBe(0);
+		expect(row!.location_entity_id).toBe(locationId);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("publicReply alone does NOT create a publication event_node", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "parlor",
+			displayName: "Parlor",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const emptyPublications: PublicationDeclaration[] = [];
+		const settlementId = `stl:req-nopub-${randomUUID()}`;
+
+		const result = materializePublications(storage, emptyPublications, settlementId, {
+			sessionId: "sess-nopub",
+			locationEntityId: locationId,
+			timestamp: 2000,
+		});
+
+		expect(result.materialized).toBe(0);
+		expect(result.reconciled).toBe(0);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>(
+			"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(rows.length).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("publication kind maps correctly: display → observation, broadcast → speech", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "square",
+			displayName: "Town Square",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "display", targetScope: "current_area", summary: "A notice board displays a message." },
+			{ kind: "broadcast", targetScope: "current_area", summary: "A town crier announces the news." },
+			{ kind: "record", targetScope: "current_area", summary: "A record is read aloud." },
+		];
+		const settlementId = `stl:kinds-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-kinds",
+			locationEntityId: locationId,
+			timestamp: 3000,
+		});
+
+		expect(result.materialized).toBe(3);
+
+		const rows = db.query<{ event_category: string; source_pub_index: number }>(
+			"SELECT event_category, source_pub_index FROM event_nodes WHERE source_settlement_id = ? ORDER BY source_pub_index",
+			[settlementId],
+		);
+		expect(rows.length).toBe(3);
+		expect(rows[0]!.event_category).toBe("observation");
+		expect(rows[1]!.event_category).toBe("speech");
+		expect(rows[2]!.event_category).toBe("speech");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("world_public targetScope creates world_public visibility_scope event", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "hall",
+			displayName: "Great Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "broadcast", targetScope: "world_public", summary: "A decree is issued across the land." },
+		];
+		const settlementId = `stl:world-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-world",
+			locationEntityId: locationId,
+			timestamp: 4000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ visibility_scope: string }>(
+			"SELECT visibility_scope FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row!.visibility_scope).toBe("world_public");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("duplicate publication is reconciled via unique index (idempotency)", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "kitchen",
+			displayName: "Kitchen",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "speech", targetScope: "current_area", summary: "First call." },
+		];
+		const settlementId = `stl:idempotent-${randomUUID()}`;
+
+		const result1 = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-idem",
+			locationEntityId: locationId,
+			timestamp: 5000,
+		});
+		expect(result1.materialized).toBe(1);
+
+		const result2 = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-idem",
+			locationEntityId: locationId,
+			timestamp: 5000,
+		});
+		expect(result2.reconciled).toBe(1);
+		expect(result2.materialized).toBe(0);
+
+		const rows = db.query<{ id: number }>(
+			"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("current_area publication is skipped when no locationEntityId is available", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "speech", targetScope: "current_area", summary: "Nobody hears this." },
+		];
+		const settlementId = `stl:noloc-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-noloc",
+			locationEntityId: undefined,
+			timestamp: 6000,
+		});
+
+		expect(result.skipped).toBe(1);
+		expect(result.materialized).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("world_public publication proceeds with sentinel location when no locationEntityId", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "broadcast", targetScope: "world_public", summary: "A global announcement." },
+		];
+		const settlementId = `stl:sentinel-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-sentinel",
+			locationEntityId: undefined,
+			timestamp: 7000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ visibility_scope: string; location_entity_id: number }>(
+			"SELECT visibility_scope, location_entity_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row!.visibility_scope).toBe("world_public");
+		expect(row!.location_entity_id).toBeGreaterThan(0);
+
+		const entity = db.get<{ pointer_key: string }>(
+			"SELECT pointer_key FROM entity_nodes WHERE id = ?",
+			[row!.location_entity_id],
+		);
+		expect(entity!.pointer_key).toBe("world");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("MaterializationService.materializePublications delegates to standalone function", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "foyer",
+			displayName: "Foyer",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "speech", targetScope: "current_area", summary: "Welcome, everyone!" },
+		];
+		const settlementId = `stl:delegate-${randomUUID()}`;
+
+		const matService = new MaterializationService(db as any, storage);
+		const result = matService.materializePublications(publications, settlementId, {
+			sessionId: "sess-delegate",
+			locationEntityId: locationId,
+			timestamp: 8000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ source_settlement_id: string }>(
+			"SELECT source_settlement_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row).toBeDefined();
+
+		db.close();
+		cleanupDb(dbPath);
 	});
 });

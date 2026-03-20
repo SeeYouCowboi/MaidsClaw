@@ -22,6 +22,7 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
+import { materializePublications } from "../memory/materialization.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
 	MemoryFlushRequest,
@@ -71,7 +72,7 @@ export class TurnService {
 			role: AgentProfile["role"];
 		}) => ViewerContext | Promise<ViewerContext>,
 		private readonly projectionSink?: RuntimeProjectionSink,
-		_graphStorage?: GraphStorageService,
+		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
 	) {}
 
@@ -498,6 +499,18 @@ export class TurnService {
 					normalizedSettlementPayload,
 				),
 			);
+		}
+
+		if (hasPublications && this.graphStorage) {
+			try {
+				materializePublications(this.graphStorage, publications, settlementId, {
+					sessionId: effectiveRequest.sessionId,
+					locationEntityId: viewerSnapshot?.currentLocationEntityId,
+					timestamp: Date.now(),
+				});
+			} catch {
+				this.traceLog(requestId, "warn", "Publication materialization failed (non-fatal)");
+			}
 		}
 
 		const queueOwnerAgentId =

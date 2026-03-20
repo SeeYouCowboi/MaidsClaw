@@ -2025,6 +2025,110 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("v4 RP with publications materializes event_nodes with provenance after settlement", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+      const graphStorage = new GraphStorageService(runtime.db);
+
+      const locationId = graphStorage.upsertEntity({
+        pointerKey: "drawing_room",
+        displayName: "Drawing Room",
+        entityType: "location",
+        memoryScope: "shared_public",
+      });
+
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) yield chunk;
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v4",
+              publicReply: "Good evening.",
+              privateCommit: {
+                schemaVersion: "rp_private_cognition_v4",
+                ops: [],
+              },
+              publications: [
+                {
+                  kind: "speech",
+                  targetScope: "current_area",
+                  summary: "Alice greets everyone in the drawing room.",
+                },
+                {
+                  kind: "display",
+                  targetScope: "current_area",
+                  summary: "A tea set is placed on the table.",
+                },
+              ],
+            },
+          };
+        },
+      } as unknown as AgentLoop;
+
+      const turnService = new TurnService(
+        mockLoop,
+        commitService,
+        interactionStore,
+        flushSelector,
+        null,
+        runtime.sessionService,
+        () => ({
+          viewer_agent_id: "rp:alice",
+          viewer_role: "rp_agent" as const,
+          session_id: session.sessionId,
+          current_area_id: locationId,
+        }),
+        undefined,
+        graphStorage,
+      );
+
+      const chunks = await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-pub-mat",
+          messages: [{ role: "user", content: "v4 publication test" }],
+        }),
+      );
+
+      const textChunks = chunks.filter((c) => c.type === "text_delta");
+      expect(textChunks).toHaveLength(1);
+      expect((textChunks[0] as { text: string }).text).toBe("Good evening.");
+
+      const eventRows = runtime.db.query<{
+        summary: string;
+        source_settlement_id: string;
+        source_pub_index: number;
+        visibility_scope: string;
+        event_category: string;
+        event_origin: string;
+      }>(
+        "SELECT summary, source_settlement_id, source_pub_index, visibility_scope, event_category, event_origin FROM event_nodes WHERE source_settlement_id IS NOT NULL ORDER BY source_pub_index",
+      );
+
+      expect(eventRows.length).toBe(2);
+
+      expect(eventRows[0]!.summary).toBe("Alice greets everyone in the drawing room.");
+      expect(eventRows[0]!.source_settlement_id).toBe("stl:req-pub-mat");
+      expect(eventRows[0]!.source_pub_index).toBe(0);
+      expect(eventRows[0]!.visibility_scope).toBe("area_visible");
+      expect(eventRows[0]!.event_category).toBe("speech");
+      expect(eventRows[0]!.event_origin).toBe("runtime_projection");
+
+      expect(eventRows[1]!.summary).toBe("A tea set is placed on the table.");
+      expect(eventRows[1]!.source_pub_index).toBe(1);
+      expect(eventRows[1]!.event_category).toBe("observation");
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it("malformed v4 RP outcome causes full transaction rollback — no settlement, message, or cognition committed", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 

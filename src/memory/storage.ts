@@ -61,6 +61,12 @@ type CreateProjectedEventInput = {
   primaryActorEntityId?: number;
   sourceRecordId?: string;
   origin: "runtime_projection" | "delayed_materialization";
+  /** Publication provenance: settlement that declared this publication */
+  sourceSettlementId?: string;
+  /** Publication provenance: index within the settlement's publications[] */
+  sourcePubIndex?: number;
+  /** Visibility scope override; defaults to 'area_visible' */
+  visibilityScope?: "area_visible" | "world_public";
 };
 
 type CreatePromotedEventInput = {
@@ -150,6 +156,7 @@ export class GraphStorageService {
     }
 
     const createdAt = Date.now();
+    const visibilityScope = params.visibilityScope ?? "area_visible";
     const result = this.db
       .prepare(
         `INSERT INTO event_nodes (
@@ -167,8 +174,10 @@ export class GraphStorageService {
           primary_actor_entity_id,
           promotion_class,
           source_record_id,
-          event_origin
-        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'area_visible', ?, ?, ?, 'none', ?, ?)`,
+          event_origin,
+          source_settlement_id,
+          source_pub_index
+        ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none', ?, ?, ?, ?)`,
       )
       .run(
         params.sessionId,
@@ -178,21 +187,29 @@ export class GraphStorageService {
         params.participants,
         params.emotion ?? null,
         params.topicId ?? null,
+        visibilityScope,
         params.locationEntityId,
         params.eventCategory,
         params.primaryActorEntityId ?? null,
         params.sourceRecordId ?? null,
         params.origin,
+        params.sourceSettlementId ?? null,
+        params.sourcePubIndex ?? null,
       );
 
     const eventId = Number(result.lastInsertRowid);
-    this.syncSearchDoc(
-      "area",
-      makeNodeRef("event", eventId),
-      params.summary,
-      undefined,
-      params.locationEntityId,
-    );
+    const searchScope = visibilityScope === "world_public" ? "world" : "area";
+    if (searchScope === "world") {
+      this.syncSearchDoc("world", makeNodeRef("event", eventId), params.summary);
+    } else {
+      this.syncSearchDoc(
+        "area",
+        makeNodeRef("event", eventId),
+        params.summary,
+        undefined,
+        params.locationEntityId,
+      );
+    }
     return eventId;
   }
 
