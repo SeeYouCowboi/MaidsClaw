@@ -114,6 +114,9 @@ type RecentCognitionEntry = {
   key: string;
   summary: string;
   status?: "active" | "retracted";
+  stance?: string;
+  preContestedStance?: string;
+  conflictEvidence?: string[];
 };
 
 export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
@@ -172,7 +175,19 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
       if (entry.status === "retracted") {
         return `\u2022 [${entry.kind}:${entry.key}] (retracted)`;
       }
+      if (entry.stance === "contested") {
+        return formatContestedEntry(entry);
+      }
       return `\u2022 [${entry.kind}:${entry.key}] ${entry.summary}`;
     })
     .join("\n");
+}
+
+export function formatContestedEntry(entry: RecentCognitionEntry): string {
+  const preStance = entry.preContestedStance ?? "unknown";
+  let line = `\u2022 [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}`;
+  if (entry.conflictEvidence && entry.conflictEvidence.length > 0) {
+    line += ` | Conflicts: ${entry.conflictEvidence.join("; ")}`;
+  }
+  return line;
 }

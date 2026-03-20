@@ -1,6 +1,7 @@
 import type { Db } from "../../storage/database.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import type { NodeRef } from "../types.js";
+import { RelationBuilder } from "./relation-builder.js";
 
 type CognitionSearchParams = {
   agentId: string;
@@ -19,6 +20,7 @@ type CognitionHit = {
   source_ref: NodeRef;
   content: string;
   updated_at: number;
+  conflictEvidence?: string[];
 };
 
 type CognitionSearchDocRow = {
@@ -42,17 +44,37 @@ const HORIZON_RANK: Record<string, number> = {
 const HORIZON_DEFAULT_RANK = 99;
 
 export class CognitionSearchService {
-  constructor(private readonly db: Db) {}
+  private readonly relationBuilder: RelationBuilder;
+
+  constructor(private readonly db: Db) {
+    this.relationBuilder = new RelationBuilder(db);
+  }
 
   searchCognition(params: CognitionSearchParams): CognitionHit[] {
     const effectiveActiveOnly = params.activeOnly ?? (params.kind === "commitment");
     const limit = params.limit ?? 100;
 
+    let hits: CognitionHit[];
     if (params.query && params.query.trim().length >= 3) {
-      return this.searchByFts(params, effectiveActiveOnly, limit);
+      hits = this.searchByFts(params, effectiveActiveOnly, limit);
+    } else {
+      hits = this.searchByIndex(params, effectiveActiveOnly, limit);
     }
 
-    return this.searchByIndex(params, effectiveActiveOnly, limit);
+    return this.enrichContestedHits(hits);
+  }
+
+  private enrichContestedHits(hits: CognitionHit[]): CognitionHit[] {
+    for (const hit of hits) {
+      if (hit.stance !== "contested") continue;
+      const evidence = this.relationBuilder.getConflictEvidence(String(hit.source_ref), 3);
+      if (evidence.length > 0) {
+        hit.conflictEvidence = evidence.map(
+          (e) => `conflicts_with ${e.targetRef} (strength: ${e.strength})`,
+        );
+      }
+    }
+    return hits;
   }
 
   private searchByFts(

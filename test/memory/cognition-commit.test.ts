@@ -1228,6 +1228,105 @@ describe("CognitionOpCommitter", () => {
 		});
 	});
 
+	describe("Contested assertion creates conflicts_with relation", () => {
+		it("writes conflicts_with row to memory_relations on contested transition", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "rel:contest-test",
+				settlementId: "stl:rel-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "rel:contest-test",
+				settlementId: "stl:rel-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				basis: "first_hand",
+				preContestedStance: "accepted",
+			});
+
+			const relRow = db.get<{
+				source_node_ref: string;
+				target_node_ref: string;
+				relation_type: string;
+				strength: number;
+				directness: string;
+				source_kind: string;
+				source_ref: string;
+			}>(
+				"SELECT source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref FROM memory_relations WHERE relation_type = 'conflicts_with' LIMIT 1",
+				[],
+			);
+
+			expect(relRow).toBeDefined();
+			expect(relRow!.relation_type).toBe("conflicts_with");
+			expect(relRow!.target_node_ref).toBe("cognition_key:rel:contest-test");
+			expect(relRow!.strength).toBe(0.8);
+			expect(relRow!.directness).toBe("direct");
+			expect(relRow!.source_kind).toBe("agent_op");
+			expect(relRow!.source_ref).toBe("stl:rel-2");
+			expect(relRow!.source_node_ref).toMatch(/^private_belief:\d+$/);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("does not write relation for non-contested transitions", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "rel:no-contest",
+				settlementId: "stl:rel-3",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+			});
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "rel:no-contest",
+				settlementId: "stl:rel-4",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+
+			const relRow = db.get<{ id: number }>(
+				"SELECT id FROM memory_relations WHERE relation_type = 'conflicts_with' LIMIT 1",
+				[],
+			);
+			expect(relRow).toBeUndefined();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
 	describe("Cognition search by kind/stance/basis", () => {
 		it("filters assertions by stance", () => {
 			const { dbPath, db } = createTempDb();

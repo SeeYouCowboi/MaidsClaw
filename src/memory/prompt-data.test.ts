@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema";
 import { CoreMemoryService } from "./core-memory";
-import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition } from "./prompt-data";
+import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition, formatContestedEntry } from "./prompt-data";
 import { openDatabase, closeDatabaseGracefully, type Db } from "../storage/database.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import type { ViewerContext, NavigatorResult, NodeRef } from "./types";
@@ -682,5 +682,100 @@ describe("getRecentCognition", () => {
     expect(hintsResult).toBe("");
 
     closeDatabaseGracefully(db);
+  });
+
+  it("contested entries render with old belief + conflict evidence", () => {
+    const entries = [
+      {
+        settlementId: "stl:contest-1",
+        committedAt: 1000,
+        kind: "assertion",
+        key: "trust-bob",
+        summary: "self trusts Bob",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "accepted",
+        conflictEvidence: ["Bob lied about the key", "Contradicts earlier observation"],
+      },
+      {
+        settlementId: "stl:normal-1",
+        committedAt: 2000,
+        kind: "assertion",
+        key: "likes-tea",
+        summary: "self likes tea",
+        status: "active" as const,
+      },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("self trusts Bob");
+    expect(result).toContain("Conflicts: Bob lied about the key; Contradicts earlier observation");
+    expect(result).toContain("[assertion:likes-tea] self likes tea");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("contested entry without conflict evidence renders marker only", () => {
+    const entries = [
+      {
+        settlementId: "stl:contest-2",
+        committedAt: 1000,
+        kind: "assertion",
+        key: "mood-happy",
+        summary: "self is happy",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "confirmed",
+      },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was confirmed]");
+    expect(result).toContain("self is happy");
+    expect(result).not.toContain("Conflicts:");
+
+    closeDatabaseGracefully(db);
+  });
+});
+
+describe("formatContestedEntry", () => {
+  it("formats contested entry with preContestedStance and evidence", () => {
+    const entry = {
+      settlementId: "stl:1",
+      committedAt: 1000,
+      kind: "assertion",
+      key: "trust-bob",
+      summary: "self trusts Bob",
+      status: "active" as const,
+      stance: "contested",
+      preContestedStance: "accepted",
+      conflictEvidence: ["evidence A", "evidence B"],
+    };
+
+    const result = formatContestedEntry(entry);
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("self trusts Bob");
+    expect(result).toContain("| Conflicts: evidence A; evidence B");
+  });
+
+  it("formats contested entry without evidence", () => {
+    const entry = {
+      settlementId: "stl:2",
+      committedAt: 1000,
+      kind: "assertion",
+      key: "mood",
+      summary: "self is happy",
+      stance: "contested",
+    };
+
+    const result = formatContestedEntry(entry);
+    expect(result).toContain("[CONTESTED: was unknown]");
+    expect(result).toContain("self is happy");
+    expect(result).not.toContain("Conflicts:");
   });
 });

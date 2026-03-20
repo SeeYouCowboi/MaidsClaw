@@ -6,6 +6,7 @@ import {
   type AssertionStance,
 } from "../../runtime/rp-turn-contract.js";
 import type { CognitionKind } from "../../runtime/rp-turn-contract.js";
+import { RelationBuilder } from "./relation-builder.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -191,7 +192,11 @@ type ExistingAssertionState = {
 };
 
 export class CognitionRepository {
-  constructor(private readonly db: DbLike) {}
+  private readonly relationBuilder: RelationBuilder;
+
+  constructor(private readonly db: DbLike) {
+    this.relationBuilder = new RelationBuilder(db);
+  }
 
   upsertAssertion(params: UpsertAssertionParams): { id: number } {
     const sourceEntityId = this.resolveEntityByPointerKey(params.sourcePointerKey, params.agentId);
@@ -300,6 +305,13 @@ export class CognitionRepository {
           sourceRefKind: "private_belief",
           now,
         });
+        if (params.stance === "contested" && cognitionKey) {
+          this.relationBuilder.writeContestRelation(
+            `private_belief:${existing.id}`,
+            cognitionKey,
+            params.settlementId,
+          );
+        }
         return { id: existing.id };
       }
 
@@ -353,6 +365,13 @@ export class CognitionRepository {
         sourceRefKind: "private_belief",
         now,
       });
+      if (params.stance === "contested" && cognitionKey) {
+        this.relationBuilder.writeContestRelation(
+          `private_belief:${insertedId}`,
+          cognitionKey,
+          params.settlementId,
+        );
+      }
       return { id: insertedId };
     }
 

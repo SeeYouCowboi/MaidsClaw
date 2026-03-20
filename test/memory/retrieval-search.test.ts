@@ -605,6 +605,88 @@ describe("RetrievalService", () => {
 			cleanupDb(dbPath);
 		});
 
+		it("contested cognition_search hits include inline conflict evidence", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "evidence:contested",
+				settlementId: "stl:ev-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "evidence:contested",
+				settlementId: "stl:ev-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				basis: "first_hand",
+				preContestedStance: "accepted",
+			});
+
+			const search = new CognitionSearchService(db);
+			const hits = search.searchCognition({
+				agentId: "rp:alice",
+				kind: "assertion",
+				stance: "contested",
+			});
+
+			expect(hits.length).toBe(1);
+			expect(hits[0].stance).toBe("contested");
+			expect(hits[0].conflictEvidence).toBeDefined();
+			expect(hits[0].conflictEvidence!.length).toBeGreaterThanOrEqual(1);
+			expect(hits[0].conflictEvidence![0]).toContain("conflicts_with");
+			expect(hits[0].conflictEvidence![0]).toContain("cognition_key:evidence:contested");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("non-contested hits do not have conflictEvidence", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "evidence:accepted",
+				settlementId: "stl:ev-3",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "likes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const search = new CognitionSearchService(db);
+			const hits = search.searchCognition({
+				agentId: "rp:alice",
+				kind: "assertion",
+				stance: "accepted",
+			});
+
+			expect(hits.length).toBe(1);
+			expect(hits[0].conflictEvidence).toBeUndefined();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
 		it("FTS text search finds matching cognition docs", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
