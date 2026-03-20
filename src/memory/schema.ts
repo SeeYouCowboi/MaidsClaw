@@ -1,3 +1,7 @@
+import {
+  BELIEF_TYPE_TO_BASIS,
+  EPISTEMIC_STATUS_TO_STANCE,
+} from "../runtime/rp-turn-contract.js";
 import type { Db } from "../storage/database.js";
 import type { MigrationStep } from "../storage/migrations.js";
 import { runMigrations } from "../storage/migrations.js";
@@ -32,8 +36,9 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS _memory_maintenance_jobs (id INTEGER PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL, idempotency_key TEXT, payload TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, next_attempt_at INTEGER)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_maintenance_job_type_key ON _memory_maintenance_jobs(job_type, idempotency_key) WHERE idempotency_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_job_type_next_attempt ON _memory_maintenance_jobs(job_type, next_attempt_at)`,
-  `CREATE TABLE IF NOT EXISTS event_nodes (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, raw_text TEXT, summary TEXT, timestamp INTEGER NOT NULL, created_at INTEGER NOT NULL, participants TEXT, emotion TEXT, topic_id INTEGER, visibility_scope TEXT NOT NULL DEFAULT 'area_visible' CHECK (visibility_scope IN ('area_visible', 'world_public')), location_entity_id INTEGER NOT NULL, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'observation', 'state_change')), primary_actor_entity_id INTEGER, promotion_class TEXT NOT NULL DEFAULT 'none' CHECK (promotion_class IN ('none', 'world_candidate')), source_record_id TEXT, event_origin TEXT NOT NULL CHECK (event_origin IN ('runtime_projection', 'delayed_materialization', 'promotion')))`,
+  `CREATE TABLE IF NOT EXISTS event_nodes (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, raw_text TEXT, summary TEXT, timestamp INTEGER NOT NULL, created_at INTEGER NOT NULL, participants TEXT, emotion TEXT, topic_id INTEGER, visibility_scope TEXT NOT NULL DEFAULT 'area_visible' CHECK (visibility_scope IN ('area_visible', 'world_public')), location_entity_id INTEGER NOT NULL, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'observation', 'state_change')), primary_actor_entity_id INTEGER, promotion_class TEXT NOT NULL DEFAULT 'none' CHECK (promotion_class IN ('none', 'world_candidate')), source_record_id TEXT, source_settlement_id TEXT, source_pub_index INTEGER, event_origin TEXT NOT NULL CHECK (event_origin IN ('runtime_projection', 'delayed_materialization', 'promotion')))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_area_source_record ON event_nodes(source_record_id) WHERE source_record_id IS NOT NULL AND visibility_scope = 'area_visible'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_publication_scope ON event_nodes(source_settlement_id, source_pub_index, visibility_scope) WHERE source_settlement_id IS NOT NULL AND source_pub_index IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_event_nodes_session_timestamp ON event_nodes(session_id, timestamp)`,
   `CREATE INDEX IF NOT EXISTS idx_event_nodes_scope_location ON event_nodes(visibility_scope, location_entity_id)`,
   `CREATE TABLE IF NOT EXISTS logic_edges (id INTEGER PRIMARY KEY, source_event_id INTEGER NOT NULL, target_event_id INTEGER NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('causal', 'temporal_prev', 'temporal_next', 'same_episode')), created_at INTEGER NOT NULL)`,
@@ -50,9 +55,9 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, cognition_key TEXT, explicit_kind TEXT, settlement_id TEXT, op_index INTEGER, metadata_json TEXT, cognition_status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, target_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, cognition_key TEXT, explicit_kind TEXT, settlement_id TEXT, op_index INTEGER, metadata_json TEXT, cognition_status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS idx_agent_event_overlay_agent_event ON agent_event_overlay(agent_id, event_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, belief_type TEXT, confidence REAL, epistemic_status TEXT CHECK (epistemic_status IN ('confirmed', 'suspected', 'hypothetical', 'retracted')), provenance TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, belief_type TEXT, confidence REAL, epistemic_status TEXT CHECK (epistemic_status IN ('confirmed', 'suspected', 'hypothetical', 'retracted')), basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
   `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
@@ -119,7 +124,78 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
     },
   },
+  {
+    id: "memory:004:add-canonical-overlay-columns",
+    description: "Add canonical overlay columns to agent overlays",
+    up: (db: Db) => {
+      addColumnIfMissing(
+        db,
+        "agent_fact_overlay",
+        "basis",
+        "TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief'))",
+      );
+      addColumnIfMissing(
+        db,
+        "agent_fact_overlay",
+        "stance",
+        "TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned'))",
+      );
+      addColumnIfMissing(
+        db,
+        "agent_fact_overlay",
+        "pre_contested_stance",
+        "TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed'))",
+      );
+      addColumnIfMissing(db, "agent_fact_overlay", "source_label_raw", "TEXT");
+      addColumnIfMissing(db, "agent_fact_overlay", "source_event_ref", "TEXT");
+      addColumnIfMissing(db, "agent_fact_overlay", "updated_at", "INTEGER");
+
+      addColumnIfMissing(db, "agent_event_overlay", "target_entity_id", "INTEGER");
+      addColumnIfMissing(db, "agent_event_overlay", "updated_at", "INTEGER");
+    },
+  },
+  {
+    id: "memory:005:add-publication-provenance",
+    description: "Add publication provenance columns and dedupe index",
+    up: (db: Db) => {
+      addColumnIfMissing(db, "event_nodes", "source_settlement_id", "TEXT");
+      addColumnIfMissing(db, "event_nodes", "source_pub_index", "INTEGER");
+
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_publication_scope ON event_nodes(source_settlement_id, source_pub_index, visibility_scope) WHERE source_settlement_id IS NOT NULL AND source_pub_index IS NOT NULL`,
+      );
+    },
+  },
+  {
+    id: "memory:006:backfill-canonical-stances",
+    description: "Backfill canonical stance and basis columns from legacy fields",
+    up: (db: Db) => {
+      const stanceCase = buildCaseExpression(EPISTEMIC_STATUS_TO_STANCE);
+      const basisCase = buildCaseExpression(BELIEF_TYPE_TO_BASIS);
+
+      db.exec(
+        `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+      );
+      db.exec(
+        `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
+      );
+
+      db.get<{ count: number }>(
+        `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
+      );
+    },
+  },
 ];
+
+function escapeSqlLiteral(value: string): string {
+  return value.replaceAll("'", "''");
+}
+
+function buildCaseExpression(mapping: Record<string, string>): string {
+  return Object.entries(mapping)
+    .map(([fromValue, toValue]) => ` WHEN '${escapeSqlLiteral(fromValue)}' THEN '${escapeSqlLiteral(toValue)}'`)
+    .join("");
+}
 
 function hasColumn(db: Db, tableName: string, columnName: string): boolean {
   const rows = db.query<{ name: string }>(`PRAGMA table_info(${tableName})`);

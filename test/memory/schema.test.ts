@@ -25,6 +25,10 @@ function cleanupDb(dbPath: string): void {
 	} catch {}
 }
 
+function listColumns(db: ReturnType<typeof createTempDb>["db"], tableName: string): string[] {
+	return db.query<{ name: string }>(`PRAGMA table_info(${tableName})`).map((row) => row.name);
+}
+
 describe("memory schema", () => {
 	it("creates all required tables, FTS5 virtual tables, and indexes", () => {
 		const { dbPath, db } = createTempDb();
@@ -283,6 +287,121 @@ describe("memory schema", () => {
 			"SELECT count(*) AS count FROM entity_nodes WHERE pointer_key = 'dana'",
 		);
 		expect(danaRow?.count).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("adds canonical overlay and publication provenance columns", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const factColumns = listColumns(db, "agent_fact_overlay");
+		expect(factColumns.includes("basis")).toBe(true);
+		expect(factColumns.includes("stance")).toBe(true);
+		expect(factColumns.includes("pre_contested_stance")).toBe(true);
+		expect(factColumns.includes("source_label_raw")).toBe(true);
+		expect(factColumns.includes("source_event_ref")).toBe(true);
+		expect(factColumns.includes("updated_at")).toBe(true);
+
+		const eventOverlayColumns = listColumns(db, "agent_event_overlay");
+		expect(eventOverlayColumns.includes("target_entity_id")).toBe(true);
+		expect(eventOverlayColumns.includes("updated_at")).toBe(true);
+
+		const eventNodeColumns = listColumns(db, "event_nodes");
+		expect(eventNodeColumns.includes("source_settlement_id")).toBe(true);
+		expect(eventNodeColumns.includes("source_pub_index")).toBe(true);
+
+		const publicationIndex = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='index' AND name='ux_event_nodes_publication_scope'",
+		);
+		expect(publicationIndex?.name).toBe("ux_event_nodes_publication_scope");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("preserves legacy overlay columns for compatibility", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const factColumns = listColumns(db, "agent_fact_overlay");
+		expect(factColumns.includes("belief_type")).toBe(true);
+		expect(factColumns.includes("confidence")).toBe(true);
+		expect(factColumns.includes("epistemic_status")).toBe(true);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("backfills canonical stance and basis from legacy fields", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const insertResult = db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, belief_type, epistemic_status, created_at, updated_at, stance, basis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			[
+				"agent-1",
+				1,
+				2,
+				"knows",
+				"observation",
+				"suspected",
+				Date.now(),
+				Date.now(),
+				null,
+				null,
+			],
+		);
+
+		db.run("DELETE FROM _migrations WHERE migration_id = ?", ["memory:006:backfill-canonical-stances"]);
+		runMemoryMigrations(db);
+
+		const row = db.get<{ stance: string | null; basis: string | null }>(
+			"SELECT stance, basis FROM agent_fact_overlay WHERE id = ?",
+			[Number(insertResult.lastInsertRowid)],
+		);
+		expect(row?.stance).toBe("tentative");
+		expect(row?.basis).toBe("first_hand");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("is idempotent when migrations run multiple times", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+		runMemoryMigrations(db);
+
+		const migrationCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
+		);
+		expect(migrationCount?.count).toBe(6);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("allows contested stance without pre_contested_stance for legacy-table compatibility", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		let insertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, pre_contested_stance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", 1, 2, "knows", "contested", null, Date.now(), Date.now()],
+			);
+		} catch {
+			insertFailed = true;
+		}
+
+		expect(insertFailed).toBe(false);
 
 		db.close();
 		cleanupDb(dbPath);
