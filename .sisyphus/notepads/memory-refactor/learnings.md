@@ -125,3 +125,34 @@
 - `getMemoryHints()` in prompt-data.ts unchanged (signature preserved, behavior correctly narrowed to narrative-only)
 - VisibilityPolicy already uses `viewer_agent_id` + `current_area_id` only — confirmed with 2 new tests
 - Test count: 1206 pass, 0 fail across 84 files (+5 new tests: 3 NarrativeSearchService, 2 visibility-policy viewer_role irrelevance)
+
+## [T12 Complete] Task: T12 — Cognition Search
+- `CognitionSearchService` (`src/memory/cognition/cognition-search.ts`) is the canonical cognition-only search layer
+- Queries ONLY `search_docs_cognition` + `search_docs_cognition_fts` — never narrative tables
+- Accepts `{ agentId, query?, kind?, stance?, basis?, activeOnly?, limit? }`
+- Returns `CognitionHit[]` with `kind`, `basis`, `stance`, `source_ref`, `content`, `updated_at`
+- Commitment default: `activeOnly=true` when `kind === "commitment"`
+- Commitment sorting: `priority ASC → horizon_rank ASC → updated_at DESC` (immediate=1, near=2, long=3, null=99)
+- `CognitionRepository.syncCognitionSearchDoc()` populates `search_docs_cognition` + FTS on every upsert (assertion/evaluation/commitment)
+- `CognitionRepository.retractCognition()` now also updates `search_docs_cognition.stance` to `rejected`/`abandoned`
+- Content format: assertion=`"{predicate}: {source} → {target}"`, commitment=`"{mode}: {JSON target}"`, evaluation=`"evaluation: {notes}"`
+- Source ref: assertion=`private_belief:{id}`, evaluation/commitment=`private_event:{id}`
+- `activeOnly` SQL: `(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))` — NULL stance passes through for commitments, then post-filtered by `cognition_status = 'active'`
+- `getAssertions()` now accepts `{ stance?, basis? }` filters; `getCommitments()` accepts `{ mode? }` filter
+- Cognition hits never appear in `NarrativeSearchService` results — complete scope isolation
+- Test count: 1214 pass, 0 fail across 84 files (+8 new tests: 4 retrieval-search CognitionSearchService, 4 cognition-commit search by kind/stance/basis)
+
+## [T13 Complete] Task: T13 — Retrieval Orchestrator & Contract Types
+- `src/memory/contracts/` directory created with 4 files: retrieval-template.ts, write-template.ts, visibility-policy.ts, agent-permissions.ts
+- `RetrievalTemplate`: narrativeEnabled, cognitionEnabled, maxNarrativeHits, maxCognitionHits — role-based defaults via `getDefaultTemplate(role)`
+- `WriteTemplate`: allowPublications, allowCognitionWrites — role-based defaults via `getDefaultWriteTemplate(role)`
+- `AgentPermissions`: simple type with `canAccessCognition`/`canWriteCognition` booleans, defaults derived from role (`rp_agent` = true for both)
+- `visibility-policy.ts`: re-export only, no duplication of VisibilityPolicy logic
+- `AgentProfile` now has optional `retrievalTemplate?` and `writeTemplate?` fields — fully additive, no existing code breaks
+- `AgentFileEntry` extended with same optional fields; `toAgentProfile()` passes them through
+- `task/profile.ts`: no changes needed — object spread in `createTaskProfile()` and `spawnFromConfig()` naturally preserves optional fields
+- `presets.ts`: no changes needed — optional fields default to `undefined`, orchestrator applies role defaults
+- `RetrievalOrchestrator.search()` resolves effective template via `resolveTemplate(agentProfile.role, agentProfile.retrievalTemplate)` then dispatches to NarrativeSearchService/CognitionSearchService
+- `resolveTemplate()` and `resolveWriteTemplate()` merge profile override on top of role defaults (partial override, not full replacement)
+- `viewer_role` NOT used in any new code — template defaults keyed on `agentProfile.role`, visibility still via `viewer_agent_id` + `current_area_id`
+- Test count: 1217 pass, 0 fail across 84 files (+3 new tests: 2 agent-loader template roundtrip, 1 bootstrap preset merge)

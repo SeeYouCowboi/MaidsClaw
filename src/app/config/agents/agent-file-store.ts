@@ -2,6 +2,8 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { AgentRole, OutputMode, AgentLifecycle } from "../../../agents/profile.js";
+import type { RetrievalTemplate } from "../../../memory/contracts/retrieval-template.js";
+import type { WriteTemplate } from "../../../memory/contracts/write-template.js";
 
 /** Shape of a single agent entry in config/agents.json */
 export type AgentFileEntry = {
@@ -23,6 +25,8 @@ export type AgentFileEntry = {
 		maxTokens: number;
 		reservedForCoordination?: number;
 	};
+	retrievalTemplate?: RetrievalTemplate;
+	writeTemplate?: WriteTemplate;
 };
 
 /**

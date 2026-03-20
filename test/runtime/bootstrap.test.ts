@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
+import type { AgentProfile } from "../../src/agents/profile.js";
 
 describe("bootstrapRuntime", () => {
   it("returns runtime service bundle with health and migration status", () => {
@@ -96,8 +97,30 @@ describe("bootstrapRuntime", () => {
     });
 
     try {
-      // The model won't resolve but the option is accepted and stored
       expect(runtime.effectiveOrganizerEmbeddingModelId).toBe("openai/custom-embed");
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("preset profile merge preserves retrievalTemplate and writeTemplate fields", () => {
+    const rpWithTemplates: AgentProfile = {
+      ...RP_AGENT_PROFILE,
+      id: "rp:with-templates",
+      retrievalTemplate: { cognitionEnabled: false, maxCognitionHits: 0 },
+      writeTemplate: { allowPublications: false },
+    };
+
+    const runtime = bootstrapRuntime({
+      databasePath: ":memory:",
+      agentProfiles: [MAIDEN_PROFILE, rpWithTemplates, TASK_AGENT_PROFILE],
+    });
+
+    try {
+      const profile = runtime.agentRegistry.get("rp:with-templates");
+      expect(profile).toBeDefined();
+      expect(profile!.retrievalTemplate).toEqual({ cognitionEnabled: false, maxCognitionHits: 0 });
+      expect(profile!.writeTemplate).toEqual({ allowPublications: false });
     } finally {
       runtime.shutdown();
     }
