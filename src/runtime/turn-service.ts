@@ -5,6 +5,7 @@ import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
+import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ProjectionAppendix } from "../core/types.js";
@@ -19,13 +20,13 @@ import type {
 } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
+import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
 	MemoryFlushRequest,
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
-import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { SessionService } from "../session/service.js";
 import type {
 	AssertionRecord,
@@ -37,6 +38,7 @@ import type {
 	EvaluationRecord,
 	RpBufferedExecutionResult,
 } from "./rp-turn-contract.js";
+import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
 
 type TurnServiceAgentLoop = {
 	run(request: AgentRunRequest): AsyncIterable<Chunk>;
@@ -268,7 +270,7 @@ export class TurnService {
 			return;
 		}
 
-			if ("error" in bufferedResult) {
+		if ("error" in bufferedResult) {
 			const errorChunk = {
 				code: "RP_BUFFERED_EXECUTION_FAILED",
 				message: bufferedResult.error,
@@ -296,11 +298,20 @@ export class TurnService {
 		}
 
 		const outcome = bufferedResult.outcome;
+		const canonicalOutcome = (() => {
+			try {
+				return normalizeRpTurnOutcome(structuredClone(outcome));
+			} catch {
+				return undefined;
+			}
+		})();
+		const publications = canonicalOutcome?.publications ?? [];
 		const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
 		const hasPublicReply = outcome.publicReply.length > 0;
+		const hasPublications = publications.length > 0;
 		const hasAssistantVisibleActivity = hasPublicReply;
 
-		if (!hasPublicReply && !hasPrivateOps) {
+		if (!hasPublicReply && !hasPrivateOps && !hasPublications) {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
@@ -381,7 +392,9 @@ export class TurnService {
 					publicReply: outcome.publicReply,
 					hasPublicReply,
 					viewerSnapshot: resolvedViewerSnapshot,
+					schemaVersion: "turn_settlement_v4",
 					privateCommit: hasPrivateOps ? outcome.privateCommit : undefined,
+					publications,
 				};
 
 				this.commitService.commitWithId({
@@ -445,11 +458,14 @@ export class TurnService {
 		}
 
 		if (settlementPayloadAfterCommit) {
+			const normalizedSettlementPayload = normalizeSettlementPayload(
+				settlementPayloadAfterCommit,
+			);
 			this.traceStore?.addSettlement(
 				requestId,
 				this.toRedactedSettlementSummary(
 					effectiveRequest.sessionId,
-					settlementPayloadAfterCommit,
+					normalizedSettlementPayload,
 				),
 			);
 		}
@@ -575,7 +591,10 @@ export class TurnService {
 		}
 	}
 
-	async flushOnSessionClose(sessionId: string, agentId: string): Promise<boolean> {
+	async flushOnSessionClose(
+		sessionId: string,
+		agentId: string,
+	): Promise<boolean> {
 		if (this.memoryTaskAgent === null) {
 			return false;
 		}

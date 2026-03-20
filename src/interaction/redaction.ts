@@ -1,8 +1,9 @@
 // Interaction redaction utility — sanitizes sensitive fields for external/debug/export use
 // IMPORTANT: This is for EXTERNAL USE ONLY. Flush ingestion must always use raw records.
 
-import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 import type { CognitionOp } from "../runtime/rp-turn-contract.js";
+import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
+import { normalizeSettlementPayload } from "./settlement-adapter.js";
 
 /**
  * Redacts sensitive fields from interaction records for external/debug/export use.
@@ -17,34 +18,37 @@ import type { CognitionOp } from "../runtime/rp-turn-contract.js";
  * IMPORTANT: This function returns a NEW object and does not mutate the original.
  * Flush ingestion must ALWAYS use raw records from InteractionStore, not redacted ones.
  */
-export function redactInteractionRecord(record: InteractionRecord): InteractionRecord {
-  // Non-settlement records pass through unchanged (but still return a copy)
-  if (record.recordType !== "turn_settlement") {
-    return { ...record };
-  }
+export function redactInteractionRecord(
+	record: InteractionRecord,
+): InteractionRecord {
+	// Non-settlement records pass through unchanged (but still return a copy)
+	if (record.recordType !== "turn_settlement") {
+		return { ...record };
+	}
 
-  const payload = record.payload as TurnSettlementPayload;
+	const payload = record.payload as TurnSettlementPayload;
+	const normalizedPayload = normalizeSettlementPayload(payload);
 
-  const redactedPayload = {
-    settlementId: payload.settlementId,
-    requestId: payload.requestId,
-    sessionId: payload.sessionId,
-    publicReply: payload.publicReply,
-    hasPublicReply: payload.hasPublicReply,
-    viewerSnapshot: { redacted: true as const },
-    privateCommit: payload.privateCommit
-      ? {
-          redacted: true as const,
-          opCount: payload.privateCommit.ops.length,
-          kinds: extractUniqueKinds(payload.privateCommit.ops),
-        }
-      : undefined,
-  };
+	const redactedPayload = {
+		settlementId: payload.settlementId,
+		requestId: payload.requestId,
+		sessionId: payload.sessionId,
+		publicReply: payload.publicReply,
+		hasPublicReply: payload.hasPublicReply,
+		viewerSnapshot: { redacted: true as const },
+		privateCommit: normalizedPayload.privateCommit
+			? {
+					redacted: true as const,
+					opCount: normalizedPayload.privateCommit.ops.length,
+					kinds: extractUniqueKinds(normalizedPayload.privateCommit.ops),
+				}
+			: undefined,
+	};
 
-  return {
-    ...record,
-    payload: redactedPayload as unknown,
-  };
+	return {
+		...record,
+		payload: redactedPayload as unknown,
+	};
 }
 
 /**
@@ -52,24 +56,26 @@ export function redactInteractionRecord(record: InteractionRecord): InteractionR
  * Preserves order of first appearance.
  */
 function extractUniqueKinds(ops: CognitionOp[]): string[] {
-  const seen = new Set<string>();
-  const kinds: string[] = [];
+	const seen = new Set<string>();
+	const kinds: string[] = [];
 
-  for (const op of ops) {
-    const kind = op.op === "upsert" ? op.record.kind : op.target.kind;
-    if (!seen.has(kind)) {
-      seen.add(kind);
-      kinds.push(kind);
-    }
-  }
+	for (const op of ops) {
+		const kind = op.op === "upsert" ? op.record.kind : op.target.kind;
+		if (!seen.has(kind)) {
+			seen.add(kind);
+			kinds.push(kind);
+		}
+	}
 
-  return kinds;
+	return kinds;
 }
 
 /**
  * Redacts an array of interaction records.
  * Convenience wrapper for batch operations.
  */
-export function redactInteractionRecords(records: InteractionRecord[]): InteractionRecord[] {
-  return records.map(redactInteractionRecord);
+export function redactInteractionRecords(
+	records: InteractionRecord[],
+): InteractionRecord[] {
+	return records.map(redactInteractionRecord);
 }

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import type { InteractionRecord, TurnSettlementPayload } from "../../src/interaction/contracts.js";
-import type { PrivateCognitionCommit, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
+import type {
+  CognitionOp,
+  PrivateCognitionCommit,
+  PrivateCognitionCommitV4,
+  PublicationDeclaration,
+} from "../../src/runtime/rp-turn-contract.js";
+import {
+  detectSettlementVersion,
+  normalizeSettlementPayload,
+} from "../../src/interaction/settlement-adapter.js";
 import { redactInteractionRecord, redactInteractionRecords } from "../../src/interaction/redaction.js";
 
 // Helper to create a minimal upsert op for testing
@@ -36,7 +45,183 @@ function makePrivateCommit(ops: CognitionOp[]): PrivateCognitionCommit {
   };
 }
 
+function makePrivateCommitV4(ops: CognitionOp[]): PrivateCognitionCommitV4 {
+  return {
+    schemaVersion: "rp_private_cognition_v4",
+    ops,
+  };
+}
+
+function makePublications(): PublicationDeclaration[] {
+  return [
+    {
+      kind: "speech",
+      targetScope: "current_area",
+      summary: "brief spoken update",
+    },
+  ];
+}
+
+describe("settlement adapter", () => {
+  it("normalizes v3 settlement payload to v4 schema with empty publications", () => {
+    const v3Payload: TurnSettlementPayload = {
+      settlementId: "stl-v3",
+      requestId: "req-v3",
+      sessionId: "sess-v3",
+      ownerAgentId: "rp:alice",
+      publicReply: "hello",
+      hasPublicReply: true,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+      privateCommit: makePrivateCommit([makeUpsertOp("belief:v3", "assertion")]),
+    };
+
+    const normalized = normalizeSettlementPayload(v3Payload);
+
+    expect(normalized.schemaVersion).toBe("turn_settlement_v4");
+    expect(normalized.publications).toEqual([]);
+    expect(normalized.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
+    expect(normalized.privateCommit?.ops).toHaveLength(1);
+  });
+
+  it("normalizes v4 settlement payload and preserves publications", () => {
+    const publications = makePublications();
+    const v4Payload: TurnSettlementPayload = {
+      settlementId: "stl-v4",
+      requestId: "req-v4",
+      sessionId: "sess-v4",
+      ownerAgentId: "rp:alice",
+      publicReply: "hello",
+      hasPublicReply: true,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+      schemaVersion: "turn_settlement_v4",
+      privateCommit: makePrivateCommitV4([makeUpsertOp("belief:v4", "assertion")]),
+      publications,
+    };
+
+    const normalized = normalizeSettlementPayload(v4Payload);
+
+    expect(normalized.schemaVersion).toBe("turn_settlement_v4");
+    expect(normalized.publications).toEqual(publications);
+    expect(normalized.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
+  });
+
+  it("normalizes both undefined and empty publications to empty array", () => {
+    const basePayload: Omit<TurnSettlementPayload, "settlementId" | "requestId"> = {
+      sessionId: "sess-publications",
+      ownerAgentId: "rp:alice",
+      publicReply: "",
+      hasPublicReply: false,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+    };
+
+    const undefinedPublications = normalizeSettlementPayload({
+      ...basePayload,
+      settlementId: "stl-pub-1",
+      requestId: "req-pub-1",
+      publications: undefined,
+    });
+
+    const emptyPublications = normalizeSettlementPayload({
+      ...basePayload,
+      settlementId: "stl-pub-2",
+      requestId: "req-pub-2",
+      publications: [],
+    });
+
+    expect(undefinedPublications.publications).toEqual([]);
+    expect(emptyPublications.publications).toEqual([]);
+  });
+
+  it("detectSettlementVersion returns v3 by default and v4 when explicitly marked", () => {
+    const v3Payload: TurnSettlementPayload = {
+      settlementId: "stl-detect-v3",
+      requestId: "req-detect-v3",
+      sessionId: "sess-detect",
+      ownerAgentId: "rp:alice",
+      publicReply: "",
+      hasPublicReply: false,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+    };
+
+    const v4Payload: TurnSettlementPayload = {
+      ...v3Payload,
+      settlementId: "stl-detect-v4",
+      requestId: "req-detect-v4",
+      schemaVersion: "turn_settlement_v4",
+    };
+
+    expect(detectSettlementVersion(v3Payload)).toBe("v3");
+    expect(detectSettlementVersion(v4Payload)).toBe("v4");
+  });
+});
+
 describe("redactInteractionRecord", () => {
+  it("produces identical redaction for equivalent v3 and v4 settlement payloads", () => {
+    const basePayload = {
+      settlementId: "stl-eq",
+      requestId: "req-eq",
+      sessionId: "sess-eq",
+      ownerAgentId: "rp:alice",
+      publicReply: "",
+      hasPublicReply: false,
+      viewerSnapshot: {
+        selfPointerKey: "__self__",
+        userPointerKey: "__user__",
+      },
+    } satisfies Omit<TurnSettlementPayload, "privateCommit">;
+
+    const ops: CognitionOp[] = [makeUpsertOp("belief:eq", "assertion")];
+
+    const v3Record: InteractionRecord = {
+      sessionId: "sess-eq",
+      recordId: "stl-eq-v3",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        ...basePayload,
+        privateCommit: makePrivateCommit(ops),
+      } satisfies TurnSettlementPayload,
+      committedAt: 1000,
+    };
+
+    const v4Record: InteractionRecord = {
+      sessionId: "sess-eq",
+      recordId: "stl-eq-v4",
+      recordIndex: 1,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        ...basePayload,
+        schemaVersion: "turn_settlement_v4",
+        privateCommit: makePrivateCommitV4(ops),
+        publications: makePublications(),
+      } satisfies TurnSettlementPayload,
+      committedAt: 1001,
+    };
+
+    const v3Redacted = redactInteractionRecord(v3Record).payload as {
+      privateCommit?: { redacted: true; opCount: number; kinds: string[] };
+    };
+    const v4Redacted = redactInteractionRecord(v4Record).payload as {
+      privateCommit?: { redacted: true; opCount: number; kinds: string[] };
+    };
+
+    expect(v3Redacted.privateCommit).toEqual(v4Redacted.privateCommit);
+  });
+
   it("redacts viewerSnapshot from turn_settlement records", () => {
     const record: InteractionRecord = {
       sessionId: "sess-1",
