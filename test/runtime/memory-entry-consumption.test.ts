@@ -1851,6 +1851,302 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("sweeper processes mixed v3/v4 pending settlements and advances range monotonically", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      // Commit a v3 settlement (positions 0-1)
+      interactionStore.commit({
+        sessionId: "sess-mixed",
+        recordId: "usr:req-v3",
+        recordIndex: 0,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "v3 hello" },
+        correlatedTurnId: "req-v3",
+        committedAt: Date.now() - 200_000,
+      });
+      interactionStore.commit({
+        sessionId: "sess-mixed",
+        recordId: "stl:req-v3",
+        recordIndex: 1,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:req-v3",
+          requestId: "req-v3",
+          sessionId: "sess-mixed",
+          ownerAgentId: "rp:alice",
+          publicReply: "",
+          hasPublicReply: false,
+          viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:v3-mixed",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                },
+              },
+            ],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-v3",
+        committedAt: Date.now() - 200_000 + 1,
+      });
+
+      // Commit a v4 settlement (positions 2-3)
+      interactionStore.commit({
+        sessionId: "sess-mixed",
+        recordId: "usr:req-v4",
+        recordIndex: 2,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "v4 hello" },
+        correlatedTurnId: "req-v4",
+        committedAt: Date.now() - 190_000,
+      });
+      interactionStore.commit({
+        sessionId: "sess-mixed",
+        recordId: "stl:req-v4",
+        recordIndex: 3,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:req-v4",
+          requestId: "req-v4",
+          sessionId: "sess-mixed",
+          ownerAgentId: "rp:alice",
+          publicReply: "v4 reply",
+          hasPublicReply: true,
+          schemaVersion: "turn_settlement_v4",
+          publications: [],
+          viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v4",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:v4-mixed",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "likes",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "confirmed",
+                  basis: "first_hand",
+                },
+              },
+            ],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-v4",
+        committedAt: Date.now() - 190_000 + 1,
+      });
+
+      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
+        intervalMs: 10_000,
+      });
+      sweeper.start();
+
+      await waitFor(() => migrateCalls.length === 1);
+
+      // Sweeper should process the whole session in one flush
+      expect(migrateCalls[0]?.sessionId).toBe("sess-mixed");
+      expect(migrateCalls[0]?.rangeStart).toBe(0);
+      expect(migrateCalls[0]?.rangeEnd).toBe(3);
+
+      // Both v3 and v4 settlements should be present in the interaction records
+      const settlementRecords = (migrateCalls[0]?.interactionRecords ?? []).filter(
+        (r) => r.recordType === "turn_settlement",
+      );
+      expect(settlementRecords).toHaveLength(2);
+
+      // Verify both schema versions are present
+      const payloads = settlementRecords.map((r) => r.payload as TurnSettlementPayload);
+      const v3 = payloads.find((p) => p.settlementId === "stl:req-v3");
+      const v4 = payloads.find((p) => p.settlementId === "stl:req-v4");
+      expect(v3).toBeDefined();
+      expect(v4).toBeDefined();
+      expect(v4?.schemaVersion).toBe("turn_settlement_v4");
+      expect(v4?.publications).toEqual([]);
+
+      // Range should be fully processed — monotonic advance past all records
+      expect(interactionStore.getUnprocessedRangeForSession("sess-mixed")).toBeNull();
+
+      sweeper.stop();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("sweeper does not skip v4 settlements when interleaved with v3 in same session", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const flushSelector = new FlushSelector(interactionStore);
+      const migrateCalls: MemoryFlushRequest[] = [];
+      const memoryTaskAgent = makeMockMemoryTaskAgent(async (request) => {
+        migrateCalls.push(request);
+        return {
+          batch_id: request.idempotencyKey,
+          private_event_ids: [],
+          private_belief_ids: [],
+          entity_ids: [],
+          fact_ids: [],
+        };
+      });
+
+      const commitService = new CommitService(interactionStore);
+
+      // v3 turn
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "first turn" },
+        correlatedTurnId: "req-interleaved-v3",
+      });
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: "stl:interleaved-v3",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:interleaved-v3",
+          requestId: "req-interleaved-v3",
+          sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
+          publicReply: "v3 reply",
+          hasPublicReply: true,
+          viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v3",
+            ops: [{
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "assert:interleaved-v3",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "notices",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "tentative",
+              },
+            }],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-interleaved-v3",
+      });
+
+      // v4 turn
+      commitService.commit({
+        sessionId: session.sessionId,
+        actorType: "user",
+        recordType: "message",
+        payload: { role: "user", content: "second turn" },
+        correlatedTurnId: "req-interleaved-v4",
+      });
+      commitService.commitWithId({
+        sessionId: session.sessionId,
+        actorType: "rp_agent",
+        recordId: "stl:interleaved-v4",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "stl:interleaved-v4",
+          requestId: "req-interleaved-v4",
+          sessionId: session.sessionId,
+          ownerAgentId: "rp:alice",
+          publicReply: "v4 reply",
+          hasPublicReply: true,
+          schemaVersion: "turn_settlement_v4",
+          publications: [],
+          viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+          privateCommit: {
+            schemaVersion: "rp_private_cognition_v4",
+            ops: [{
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "assert:interleaved-v4",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "appreciates",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+                basis: "first_hand",
+              },
+            }],
+          },
+        } satisfies TurnSettlementPayload,
+        correlatedTurnId: "req-interleaved-v4",
+      });
+
+      // Use session close flush to trigger migrate
+      const turnService = new TurnService(
+        makeMockAgentLoop([]),
+        commitService,
+        interactionStore,
+        flushSelector,
+        memoryTaskAgent,
+        runtime.sessionService,
+      );
+
+      await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
+
+      expect(migrateCalls).toHaveLength(1);
+
+      // Both settlements should be in interaction records
+      const settlementRecords = (migrateCalls[0]?.interactionRecords ?? []).filter(
+        (r) => r.recordType === "turn_settlement",
+      );
+      expect(settlementRecords).toHaveLength(2);
+
+      // The MemoryIngestionPolicy should find both as explicit settlements
+      const policy = new MemoryIngestionPolicy();
+      const input = policy.buildMigrateInput(migrateCalls[0]!);
+      expect(input.explicitSettlements).toHaveLength(2);
+      expect(input.explicitSettlements.map((s) => s.settlementId).sort()).toEqual([
+        "stl:interleaved-v3",
+        "stl:interleaved-v4",
+      ]);
+
+      // Range fully processed
+      const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
+      expect(unprocessedRange).toBeUndefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it("v3 RP output is normalized to v4 settlement with publications[]", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 

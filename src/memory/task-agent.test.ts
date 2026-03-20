@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { MaidsClawError } from "../core/errors.js";
+import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryService } from "./core-memory.js";
 import { EmbeddingService } from "./embeddings.js";
 import { MaterializationService } from "./materialization.js";
@@ -869,5 +870,273 @@ describe("MemoryTaskAgent", () => {
 
     expect("onTurn" in (agent as unknown as Record<string, unknown>)).toBe(false);
     expect("onSessionEnd" in (agent as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it("loadExistingContext passes canonical stance/basis to model provider, not confidence/epistemic_status", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const cognitionRepo = new CognitionRepository(db);
+    cognitionRepo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "assert:canonical-test",
+      settlementId: "stl-canonical",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "__user__",
+      stance: "confirmed",
+      basis: "first_hand",
+    });
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-canonical-read" }));
+
+    expect(provider.chatCalls).toBeGreaterThanOrEqual(1);
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          stance?: string;
+          basis?: string;
+          confidence?: unknown;
+          epistemic_status?: unknown;
+          cognition_key?: string;
+        }>;
+      };
+    };
+
+    const canonicalBelief = parsed.existingContext.privateBeliefs.find(
+      (b) => b.cognition_key === "assert:canonical-test",
+    );
+    expect(canonicalBelief).toBeDefined();
+    expect(canonicalBelief?.stance).toBe("confirmed");
+    expect(canonicalBelief?.basis).toBe("first_hand");
+    expect(canonicalBelief?.confidence).toBeUndefined();
+    expect(canonicalBelief?.epistemic_status).toBeUndefined();
+  });
+
+  it("loadExistingContext maps legacy epistemic_status/belief_type to canonical stance/basis", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const selfId = db
+      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = '__self__' AND owner_agent_id = 'agent-1'`)
+      .get() as { id: number };
+    const userId = db
+      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = '__user__' AND owner_agent_id = 'agent-1'`)
+      .get() as { id: number };
+
+    db.prepare(
+      `INSERT INTO agent_fact_overlay
+       (agent_id, source_entity_id, target_entity_id, predicate,
+        belief_type, confidence, epistemic_status, stance, basis,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+    ).run(
+      "agent-1",
+      selfId.id,
+      userId.id,
+      "legacy_trusts",
+      "observation",
+      0.8,
+      "confirmed",
+      Date.now(),
+      Date.now(),
+    );
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-legacy-read" }));
+
+    expect(provider.chatCalls).toBeGreaterThanOrEqual(1);
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          predicate?: string;
+          stance?: string;
+          basis?: string;
+          confidence?: unknown;
+          epistemic_status?: unknown;
+        }>;
+      };
+    };
+
+    const legacyBelief = parsed.existingContext.privateBeliefs.find(
+      (b) => b.predicate === "legacy_trusts",
+    );
+    expect(legacyBelief).toBeDefined();
+    expect(legacyBelief?.stance).toBe("confirmed");
+    expect(legacyBelief?.basis).toBe("first_hand");
+    expect(legacyBelief?.confidence).toBeUndefined();
+    expect(legacyBelief?.epistemic_status).toBeUndefined();
+  });
+
+  it("loadExistingContext includes commitments with canonical representation", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const cognitionRepo = new CognitionRepository(db);
+    cognitionRepo.upsertCommitment({
+      agentId: "agent-1",
+      cognitionKey: "goal:test-commitment",
+      settlementId: "stl-commit",
+      opIndex: 0,
+      targetEntityId: undefined,
+      salience: 0.8,
+      mode: "goal",
+      target: { action: "help_user" },
+      status: "active",
+      priority: 1,
+      horizon: "immediate",
+    });
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-commitment-read" }));
+
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          kind?: string;
+          cognition_key?: string;
+          stance?: string;
+          status?: string;
+        }>;
+      };
+    };
+
+    const commitment = parsed.existingContext.privateBeliefs.find(
+      (b) => b.cognition_key === "goal:test-commitment",
+    );
+    expect(commitment).toBeDefined();
+    expect(commitment?.kind).toBe("commitment");
+    expect(commitment?.stance).toBe("accepted");
+    expect(commitment?.status).toBe("active");
+  });
+
+  it("unresolved refs backoff preserves escalating schedule after loadExistingContext upgrade", async () => {
+    const provider = new MockModelProvider([[]]);
+
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-backoff-verify",
+      dialogueRecords: [
+        { role: "user", content: "Test", timestamp: 1000, recordId: "u-backoff", recordIndex: 1 },
+        { role: "assistant", content: "OK", timestamp: 1100, recordId: "a-backoff", recordIndex: 2 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-backoff",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Test" },
+          correlatedTurnId: "req-backoff-verify",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-backoff-verify",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-backoff-verify",
+            requestId: "req-backoff-verify",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "OK",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCommit: {
+              schemaVersion: "rp_private_cognition_v4",
+              ops: [{
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:backoff-verify",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                  basis: "first_hand",
+                },
+              }],
+            },
+          },
+          correlatedTurnId: "req-backoff-verify",
+          committedAt: 1150,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let caughtError: unknown;
+    try {
+      await agent.runMigrate(flushRequest);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeDefined();
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_UNRESOLVED_REFS");
+    expect(mce.retriable).toBe(true);
+
+    const overlayCount = db
+      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:backoff-verify'`)
+      .get() as { cnt: number };
+    expect(overlayCount.cnt).toBe(0);
   });
 });

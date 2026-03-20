@@ -88,3 +88,27 @@
 - InteractionStore.runInTransaction() wraps SQLite BEGIN IMMEDIATE/COMMIT/ROLLBACK — ensures atomic settlement writes
 - Double-retract idempotency (T7) means CognitionOpCommitter.isAlreadyRetracted optimization not needed in direct repo calls
 - Tests feeding v3 schemas via `as unknown as` show LSP type errors — intentional test-level bypasses, not runtime issues
+
+## [T9 Complete] Task: T9 — Publication Hot-Path Materialization
+- materializePublications() is a standalone exported function in materialization.ts (not a class method) — avoids needing Database from bun:sqlite in TurnService
+- MaterializationService.materializePublications() delegates to the standalone function for backward compat
+- createProjectedEvent() now accepts optional sourceSettlementId, sourcePubIndex, visibilityScope; defaults visibilityScope to 'area_visible'
+- Search doc sync routes world_public events to search_docs_world (not search_docs_area)
+- Publication kind mapping: speech/record/broadcast -> speech, display -> observation
+- Publication scope mapping: current_area -> area_visible, world_public -> world_public
+- current_area publications without locationEntityId are skipped; world_public can use sentinel 'world' entity
+- Idempotency via ux_event_nodes_publication_scope unique index: duplicate inserts caught as SQLite constraint errors and counted as reconciled
+- TurnService._graphStorage renamed to graphStorage (removed underscore prefix); publication materialization happens AFTER settlement transaction (non-fatal on failure)
+- publicReply alone never triggers publication materialization — only explicit publications[] array
+- Test count: 1195 pass, 0 fail across 84 files (+9 new tests)
+
+## [T10 Complete] Task: T10 — Mixed-History Flush Support
+- PendingSettlementSweeper already handles v3/v4 transparently: it does NOT inspect schema version, just forwards records to MemoryTaskAgent → MemoryIngestionPolicy → ExplicitSettlementProcessor
+- loadExistingContext() was already upgraded in T6 to read canonical stance/basis via CognitionRepository.getAssertions() and getCommitments()
+- Legacy rows (with only epistemic_status/belief_type, no stance/basis) are canonicalized by CognitionRepository.toCanonicalAssertion() via EPISTEMIC_STATUS_TO_STANCE and BELIEF_TYPE_TO_BASIS fallback maps
+- No confidence or epistemic_status fields leak into the model provider context — only stance/basis are exposed
+- Commitments are included in loadExistingContext with synthetic stance: status="active" → "accepted", else → "rejected"
+- The sweeper's range advancement is monotonic: markProcessed(sessionId, rangeEnd) covers all records ≤ rangeEnd regardless of settlement schema version
+- Backoff policy for COGNITION_UNRESOLVED_REFS unchanged: 5min base, 6h max, 5 failures → blocked_manual
+- No code changes were needed in sweeper or task-agent — T6 and T8 already handled the canonical read and write paths
+- Test count: 1201 pass, 0 fail across 84 files (+6 new tests: 2 sweeper mixed v3/v4, 4 loadExistingContext canonical/legacy/commitment/backoff)
