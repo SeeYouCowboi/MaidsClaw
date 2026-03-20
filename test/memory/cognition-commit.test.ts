@@ -4,9 +4,11 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MaidsClawError } from "../../src/core/errors.js";
+import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
+import { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import { openDatabase } from "../../src/storage/database.js";
 import type { CognitionOp } from "../../src/runtime/rp-turn-contract.js";
 
@@ -152,13 +154,13 @@ describe("CognitionOpCommitter", () => {
 				"stl:turn-2",
 			);
 
-			// Verify retracted: the overlay should have cognition_status = 'retracted'
-			const rows = db.query<{ cognition_status: string }>(
-				"SELECT cognition_status FROM agent_event_overlay WHERE agent_id = 'rp:alice' AND cognition_key = 'alice-likes-bob'",
+			const row = db.get<{ stance: string | null; epistemic_status: string | null }>(
+				"SELECT stance, epistemic_status FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "alice-likes-bob"],
 			);
-			// After retraction, active row should be gone or status changed
-			const activeRows = rows.filter((r) => r.cognition_status === "active");
-			expect(activeRows.length).toBe(0);
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("rejected");
+			expect(row!.epistemic_status).toBe("retracted");
 
 			db.close();
 			cleanupDb(dbPath);
@@ -556,6 +558,233 @@ describe("CognitionOpCommitter", () => {
 			// Verify each ref type
 			const refKinds = refs.map((r) => r.split(":")[0]);
 			expect(refKinds).toContain("private_event");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("CognitionRepository canonical operations", () => {
+		it("dual-writes canonical and compat columns for assertions", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:dual-write",
+				settlementId: "stl:repo-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+
+			const row = db.get<{
+				stance: string | null;
+				basis: string | null;
+				epistemic_status: string | null;
+				belief_type: string | null;
+				confidence: number | null;
+			}>(
+				"SELECT stance, basis, epistemic_status, belief_type, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "assert:dual-write"],
+			);
+
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("tentative");
+			expect(row!.basis).toBe("inference");
+			expect(row!.epistemic_status).toBe("suspected");
+			expect(row!.belief_type).toBe("inference");
+			expect(row!.confidence).toBeNull();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("reads canonical stance/basis for both new and legacy rows", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			const entities = seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:new",
+				settlementId: "stl:repo-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "likes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "hearsay",
+			});
+
+			db.run(
+				`INSERT INTO agent_fact_overlay (
+				  agent_id,
+				  source_entity_id,
+				  target_entity_id,
+				  predicate,
+				  belief_type,
+				  confidence,
+				  epistemic_status,
+				  basis,
+				  stance,
+				  provenance,
+				  cognition_key,
+				  settlement_id,
+				  op_index,
+				  created_at,
+				  updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				[
+					"rp:alice",
+					entities.selfId,
+					entities.bobId,
+					"knows",
+					"observation",
+					0.8,
+					"confirmed",
+					null,
+					null,
+					null,
+					"assert:legacy",
+					"stl:legacy",
+					1,
+					Date.now(),
+					Date.now(),
+				],
+			);
+
+			const assertions = repo.getAssertions("rp:alice", { activeOnly: false });
+			const newRow = assertions.find((row) => row.cognitionKey === "assert:new");
+			const legacyRow = assertions.find((row) => row.cognitionKey === "assert:legacy");
+
+			expect(newRow).toBeDefined();
+			expect(newRow!.stance).toBe("accepted");
+			expect(newRow!.basis).toBe("hearsay");
+
+			expect(legacyRow).toBeDefined();
+			expect(legacyRow!.stance).toBe("confirmed");
+			expect(legacyRow!.basis).toBe("first_hand");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("upsert by same cognition_key is idempotent", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:idem",
+				settlementId: "stl:repo-3",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "protects",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:idem",
+				settlementId: "stl:repo-4",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "protects",
+				targetPointerKey: "bob",
+				stance: "tentative",
+			});
+
+			const count = db.get<{ cnt: number }>(
+				"SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "assert:idem"],
+			);
+			expect(count!.cnt).toBe(1);
+
+			const row = repo.getAssertionByKey("rp:alice", "assert:idem");
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("tentative");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("retract by cognition key marks assertion as rejected", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:retract",
+				settlementId: "stl:repo-5",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "dislikes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.retractCognition("rp:alice", "assert:retract", "assertion");
+
+			const row = repo.getAssertionByKey("rp:alice", "assert:retract");
+			expect(row).toBeDefined();
+			expect(row!.stance).toBe("rejected");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("loadExistingContext returns canonical stance/basis fields", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "assert:context",
+				settlementId: "stl:repo-6",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "supports",
+				targetPointerKey: "bob",
+				stance: "confirmed",
+				basis: "first_hand",
+			});
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "commit:context",
+				settlementId: "stl:repo-6",
+				opIndex: 1,
+				mode: "goal",
+				target: { action: "help" },
+				status: "active",
+			});
+
+			const taskAgent = new MemoryTaskAgent(db.raw, storage, {} as any, {} as any, {} as any);
+			const ctx = (taskAgent as any).loadExistingContext("rp:alice") as { privateBeliefs: Array<Record<string, unknown>> };
+
+			const assertion = ctx.privateBeliefs.find((item) => item.kind === "assertion" && item.cognition_key === "assert:context");
+			expect(assertion).toBeDefined();
+			expect(assertion!.stance).toBe("confirmed");
+			expect(assertion!.basis).toBe("first_hand");
+			expect(Object.prototype.hasOwnProperty.call(assertion!, "epistemic_status")).toBe(false);
+			expect(Object.prototype.hasOwnProperty.call(assertion!, "confidence")).toBe(false);
 
 			db.close();
 			cleanupDb(dbPath);

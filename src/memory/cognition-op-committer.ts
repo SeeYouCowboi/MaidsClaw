@@ -1,5 +1,6 @@
 import { MaidsClawError } from "../core/errors.js";
 import type {
+  AssertionBasis,
   CognitionEntityRef,
   CognitionOp,
   CognitionRecord,
@@ -74,6 +75,8 @@ export class CognitionOpCommitter {
         predicate: record.proposition.predicate,
         targetPointerKey,
         stance: record.stance,
+        basis: this.normalizeAssertionBasis(record.basis),
+        preContestedStance: "preContestedStance" in record ? record.preContestedStance : undefined,
         confidence: record.confidence,
         provenance: record.provenance,
       });
@@ -192,5 +195,21 @@ export class CognitionOpCommitter {
 
   private isCognitionSelector(value: CognitionEntityRef | CognitionSelector): value is CognitionSelector {
     return value.kind === "assertion" || value.kind === "evaluation" || value.kind === "commitment";
+  }
+
+  private normalizeAssertionBasis(value: unknown): AssertionBasis | undefined {
+    if (value === "first_hand" || value === "hearsay" || value === "inference" || value === "introspection" || value === "belief") {
+      return value;
+    }
+    if (value === "observation") {
+      return "first_hand";
+    }
+    if (value === "communication") {
+      return "hearsay";
+    }
+    if (value === "suspicion") {
+      return "inference";
+    }
+    return undefined;
   }
 }

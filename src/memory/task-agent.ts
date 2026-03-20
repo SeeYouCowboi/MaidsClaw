@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
-import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
+import type { PrivateCognitionCommit, PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
 import { GraphOrganizer } from "./graph-organizer.js";
@@ -48,7 +49,7 @@ export type ExplicitSettlementMeta = {
   settlementId: string;
   requestId: string;
   ownerAgentId: string;
-  privateCommit: PrivateCognitionCommit;
+  privateCommit: PrivateCognitionCommit | PrivateCognitionCommitV4;
 };
 
 export type IngestionAttachment = {
@@ -483,15 +484,31 @@ export class MemoryTaskAgent {
       )
       .all(agentId);
 
-    const privateBeliefs = this.db
-      .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, confidence, epistemic_status
-         FROM agent_fact_overlay
-         WHERE agent_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 200`,
-      )
-      .all(agentId);
+    const cognitionRepo = new CognitionRepository(this.db);
+    const assertions = cognitionRepo.getAssertions(agentId, { activeOnly: false }).slice(0, 150);
+    const commitments = cognitionRepo.getCommitments(agentId, { activeOnly: false }).slice(0, 50);
+
+    const privateBeliefs = [
+      ...assertions.map((row) => ({
+        kind: "assertion" as const,
+        id: row.id,
+        source_entity_id: row.sourceEntityId,
+        target_entity_id: row.targetEntityId,
+        predicate: row.predicate,
+        stance: row.stance,
+        basis: row.basis,
+        cognition_key: row.cognitionKey,
+      })),
+      ...commitments.map((row) => ({
+        kind: "commitment" as const,
+        id: row.id,
+        target_entity_id: row.targetEntityId,
+        status: row.commitmentStatus,
+        stance: row.status === "active" ? "accepted" : "rejected",
+        basis: null,
+        cognition_key: row.cognitionKey,
+      })),
+    ];
 
     return { entities, privateBeliefs };
   }

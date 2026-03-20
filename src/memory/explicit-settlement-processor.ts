@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { CognitionOp } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
+import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CognitionOpCommitter } from "./cognition-op-committer.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
@@ -17,13 +18,17 @@ type ExistingContextLoader = (agentId: string) => { entities: unknown[]; private
 type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => void;
 
 export class ExplicitSettlementProcessor {
+  private readonly cognitionRepo: CognitionRepository;
+
   constructor(
-    private readonly db: Database,
+    db: Database,
     private readonly storage: GraphStorageService,
     private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
     private readonly loadExistingContext: ExistingContextLoader,
     private readonly applyCallOneToolCalls: CallOneApplier,
-  ) {}
+  ) {
+    this.cognitionRepo = new CognitionRepository(db);
+  }
 
   async process(
     flushRequest: MemoryFlushRequest,
@@ -96,24 +101,26 @@ export class ExplicitSettlementProcessor {
   }
 
   private collectExplicitSettlementRefs(agentId: string, settlementId: string, ops: CognitionOp[], created: CreatedState): void {
-    const eventRows = this.db
-      .prepare(
-        `SELECT id FROM agent_event_overlay
-         WHERE agent_id = ? AND settlement_id = ?`,
-      )
-      .all(agentId, settlementId) as Array<{ id: number }>;
-    for (const row of eventRows) {
+    const evaluations = this.cognitionRepo
+      .getEvaluations(agentId, { activeOnly: false })
+      .filter((row) => row.settlementId === settlementId);
+    for (const row of evaluations) {
       created.privateEventIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
     }
 
-    const beliefRows = this.db
-      .prepare(
-        `SELECT id FROM agent_fact_overlay
-         WHERE agent_id = ? AND settlement_id = ?`,
-      )
-      .all(agentId, settlementId) as Array<{ id: number }>;
-    for (const row of beliefRows) {
+    const commitments = this.cognitionRepo
+      .getCommitments(agentId, { activeOnly: false })
+      .filter((row) => row.settlementId === settlementId);
+    for (const row of commitments) {
+      created.privateEventIds.push(row.id);
+      created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+    }
+
+    const assertions = this.cognitionRepo
+      .getAssertions(agentId, { activeOnly: false })
+      .filter((row) => row.settlementId === settlementId);
+    for (const row of assertions) {
       created.privateBeliefIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
     }
@@ -123,12 +130,7 @@ export class ExplicitSettlementProcessor {
         continue;
       }
       if (op.target.kind === "assertion") {
-        const row = this.db
-          .prepare(
-            `SELECT id FROM agent_fact_overlay
-             WHERE agent_id = ? AND cognition_key = ?`,
-          )
-          .get(agentId, op.target.key) as { id: number } | null;
+        const row = this.cognitionRepo.getAssertionByKey(agentId, op.target.key);
         if (row) {
           created.privateBeliefIds.push(row.id);
           created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
@@ -136,12 +138,10 @@ export class ExplicitSettlementProcessor {
         continue;
       }
 
-      const row = this.db
-        .prepare(
-          `SELECT id FROM agent_event_overlay
-           WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
-        )
-        .get(agentId, op.target.key, op.target.kind) as { id: number } | null;
+      const row =
+        op.target.kind === "evaluation"
+          ? this.cognitionRepo.getEvaluationByKey(agentId, op.target.key)
+          : this.cognitionRepo.getCommitmentByKey(agentId, op.target.key);
       if (row) {
         created.privateEventIds.push(row.id);
         created.changedNodeRefs.push(makeNodeRef("private_event", row.id));

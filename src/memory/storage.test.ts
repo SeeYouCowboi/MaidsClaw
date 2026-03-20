@@ -457,9 +457,9 @@ describe("GraphStorageService", () => {
     // Verify content was updated
     const updatedRow = db
       .prepare(`SELECT epistemic_status, confidence FROM agent_fact_overlay WHERE id = ?`)
-      .get(a1!.id) as { epistemic_status: string; confidence: number };
+      .get(a1!.id) as { epistemic_status: string; confidence: number | null };
     expect(updatedRow.epistemic_status).toBe("suspected");
-    expect(updatedRow.confidence).toBe(0.9);
+    expect(updatedRow.confidence).toBeNull();
 
     // Only one row exists for this cognition_key
     const factCount = db
