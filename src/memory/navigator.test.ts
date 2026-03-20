@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { AliasService } from "./alias.js";
-import { GraphNavigator } from "./navigator.js";
+import { GraphNavigator, type NarrativeSearchServiceLike, type CognitionSearchServiceLike } from "./navigator.js";
 import { RetrievalService } from "./retrieval.js";
 import { createMemorySchema, MAX_INTEGER } from "./schema.js";
 import type { EvidencePath, NodeRef, SeedCandidate, ViewerContext } from "./types.js";
@@ -391,5 +391,137 @@ describe("GraphNavigator", () => {
     expect(safe?.path.nodes).toEqual(["entity:1"]);
     expect(safe?.path.edges).toEqual([]);
     expect(safe?.supporting_nodes).toEqual([]);
+  });
+
+  it("merges narrative search seeds when narrativeSearch is provided", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "garden event");
+    insertEvent(db, 2, "world_public", 1, "[]", "storm event");
+
+    const stubRetrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const mockNarrative: NarrativeSearchServiceLike = {
+      async searchNarrative() {
+        return [{ source_ref: "event:2" }];
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+    );
+
+    const result = await navigator.explore("garden storm", viewerA());
+    const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
+    expect(allNodes).toContain("event:1");
+    expect(allNodes).toContain("event:2");
+  });
+
+  it("merges cognition search seeds when cognitionSearch is provided", async () => {
+    insertPrivateEvent(db, 80, "agent-a", null);
+
+    const stubRetrieval = new StubRetrieval([seed("entity:1" as NodeRef, "entity")]);
+    const mockCognition: CognitionSearchServiceLike = {
+      searchCognition() {
+        return [{ source_ref: "private_event:80" }];
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      undefined,
+      mockCognition,
+    );
+
+    const result = await navigator.explore("what happened", viewerA());
+    const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
+    expect(allNodes).toContain("private_event:80");
+  });
+
+  it("returns results without crash when memory_relations table has no rows", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]");
+    insertEvent(db, 2, "world_public", 1, "[]");
+    insertLogic(db, 1, 2, "causal");
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("why chain", viewerA());
+    expect(result.evidence_paths.length).toBeGreaterThan(0);
+    expect(result.query_type).toBe("why");
+  });
+
+  it("expands beam via memory_relations when relation rows exist", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "event one");
+    insertEvent(db, 2, "world_public", 1, "[]", "event two");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:2", "supports", 0.8, "direct", "system", "test", now);
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
+    const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
+    expect(allNodes).toContain("event:2");
+  });
+
+  it("existing query types still work with new optional constructor params", async () => {
+    insertEvent(db, 1, "world_public", 1, JSON.stringify(["entity:1"]), "Alice leaves");
+    insertEvent(db, 2, "world_public", 1, "[]", "Storm comes");
+    insertLogic(db, 2, 1, "causal");
+    insertFact(db, 1, 1, 2, "knows", 1);
+
+    const mockNarrative: NarrativeSearchServiceLike = {
+      async searchNarrative() { return []; },
+    };
+    const mockCognition: CognitionSearchServiceLike = {
+      searchCognition() { return []; },
+    };
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(
+      db,
+      retrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+      mockCognition,
+    );
+
+    const whyResult = await navigator.explore("why did Alice leave", viewerA());
+    expect(whyResult.query_type).toBe("why");
+    expect(whyResult.evidence_paths.length).toBeGreaterThan(0);
+
+    const retrieval2 = new StubRetrieval([seed("entity:1" as NodeRef, "entity")]);
+    const navigator2 = new GraphNavigator(
+      db,
+      retrieval2 as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+      mockCognition,
+    );
+    const relResult = await navigator2.explore("relationship between alice and bob", viewerA());
+    expect(relResult.query_type).toBe("relationship");
+
+    const retrieval3 = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator3 = new GraphNavigator(
+      db,
+      retrieval3 as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+      mockCognition,
+    );
+    const timelineResult = await navigator3.explore("timeline of events", viewerA());
+    expect(timelineResult.query_type).toBe("timeline");
   });
 });

@@ -425,6 +425,32 @@ describe("Memory Tools", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("GraphNavigator not available");
     });
+
+    it("dispatches correctly when services include narrative and cognition search", () => {
+      const mockNavigator = {
+        explore(query: string, _ctx: ViewerContext) {
+          return { query, query_type: "event", evidence_paths: [{ path: { seed: "event:1" } }] };
+        },
+      };
+      const mockNarrative = { async searchNarrative() { return []; } };
+      const mockCognition = { searchCognition() { return []; } };
+
+      const fullServices: MemoryToolServices = {
+        ...services,
+        navigator: mockNavigator,
+        narrativeSearch: mockNarrative,
+        cognitionSearch: mockCognition,
+      };
+      const fullTools = buildMemoryTools(fullServices);
+      const tool = toolByName(fullTools, "memory_explore");
+      const result = tool.handler({ query: "what happened" }, ctx) as {
+        query: string;
+        evidence_paths: unknown[];
+      };
+
+      expect(result.query).toBe("what happened");
+      expect(result.evidence_paths).toHaveLength(1);
+    });
   });
 
   // -------------------------------------------------------------------------

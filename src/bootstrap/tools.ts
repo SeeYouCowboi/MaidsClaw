@@ -13,9 +13,9 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
   const coreMemory = new CoreMemoryService(services.db);
   const retrieval = new RetrievalService(services.db);
   const alias = new AliasService(services.rawDb);
-  const navigator = new GraphNavigator(services.rawDb, retrieval, alias);
   const narrativeSearch = new NarrativeSearchService(services.db);
   const cognitionSearch = new CognitionSearchService(services.db);
+  const navigator = new GraphNavigator(services.rawDb, retrieval, alias, undefined, narrativeSearch, cognitionSearch);
 
   const memoryTools = buildMemoryTools({
     coreMemory,

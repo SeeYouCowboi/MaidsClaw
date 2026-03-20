@@ -168,3 +168,16 @@
 - `tool-adapter.ts` unchanged — generic adapter pattern, no tool-name awareness needed
 - Tool count: 5 → 7 (narrative_search, cognition_search added)
 - Test count: 1223 pass, 0 fail across 84 files (+6 new tests: 3 narrative_search, 2 cognition_search, 1 alias behavior verification)
+
+## [T15 Complete] Task: T15 — Migrate Memory Explore
+- `GraphNavigator` constructor now accepts optional `narrativeSearch?: NarrativeSearchServiceLike` and `cognitionSearch?: CognitionSearchServiceLike` (positions 5 and 6, after `_modelProvider`)
+- Duck-type interfaces exported from `navigator.ts`: `NarrativeSearchServiceLike` (requires `searchNarrative(query, viewerContext) → Promise<Array<{source_ref}>>`) and `CognitionSearchServiceLike` (requires `searchCognition(params) → Array<{source_ref}>`)
+- Seed enhancement: after `localizeSeedsHybrid()`, `collectSupplementalSeeds()` queries narrative (score 0.7, scope "world") and cognition (score 0.6, scope "private") services, deduplicates against existing seeds by node_ref
+- `mergeSeeds()` ensures no duplicate node_refs between primary and supplemental seed sets
+- `getRelatedNodeRefs(nodeRef)` queries `memory_relations` table for both source/target directions; returns `[]` on any error (table missing, no rows)
+- `expandRelationEdges()` called in `fetchNeighborsByFrontier()` after all existing expand calls; adds edges with kind="fact_relation", weight=0.6, summary="memory_relation"
+- Beam expansion algorithm, query type routing, edge scoring, and all 6 query types (entity/event/why/relationship/timeline/state) unchanged
+- `memory_explore` tool name unchanged; `GraphNavigatorLike` duck-type in tools.ts unchanged
+- `src/bootstrap/tools.ts` now passes `narrativeSearch` and `cognitionSearch` to `GraphNavigator` (reordered declarations so services are created before navigator)
+- Graceful degradation: all three enhancement paths (narrative seeds, cognition seeds, relation expansion) use try/catch with empty-result fallback
+- Test count: 1229 pass, 0 fail across 84 files (+6 new tests: 2 narrative/cognition seed merge, 1 empty relations graceful degradation, 1 relation-based beam expansion, 1 existing query types backward compat, 1 tools.test memory_explore with full services)

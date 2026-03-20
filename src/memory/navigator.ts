@@ -21,6 +21,19 @@ type ModelProviderClientLike = {
   tieBreak?: (query: string, candidateA: string, candidateB: string) => number;
 };
 
+export type NarrativeSearchServiceLike = {
+  searchNarrative(query: string, viewerContext: ViewerContext): Promise<Array<{ source_ref: string }>>;
+};
+
+export type CognitionSearchServiceLike = {
+  searchCognition(params: {
+    agentId: string;
+    query?: string;
+    activeOnly?: boolean;
+    limit?: number;
+  }): Array<{ source_ref: string }> | Promise<Array<{ source_ref: string }>>;
+};
+
 type QueryAnalysis = {
   normalized_query: string;
   query_type: QueryType;
@@ -99,6 +112,8 @@ export class GraphNavigator {
     private readonly retrieval: RetrievalService,
     private readonly alias: AliasService,
     _modelProvider?: ModelProviderClientLike,
+    private readonly narrativeSearch?: NarrativeSearchServiceLike,
+    private readonly cognitionSearch?: CognitionSearchServiceLike,
   ) {}
 
   async explore(
@@ -114,7 +129,9 @@ export class GraphNavigator {
     const analysis = this.analyzeQuery(query, viewerContext);
 
     const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount);
-    const fallbackSeeds = this.fallbackSeedsFromAnalysis(rawSeeds, analysis);
+    const supplementalSeeds = await this.collectSupplementalSeeds(query, viewerContext, rawSeeds);
+    const mergedSeeds = this.mergeSeeds(rawSeeds, supplementalSeeds);
+    const fallbackSeeds = this.fallbackSeedsFromAnalysis(mergedSeeds, analysis);
     const visibleSeeds = fallbackSeeds.filter((seed) => this.isNodeVisible(seed.node_ref, viewerContext));
 
     if (visibleSeeds.length === 0) {
@@ -214,6 +231,79 @@ export class GraphNavigator {
       });
     }
     return fallback;
+  }
+
+  private async collectSupplementalSeeds(
+    query: string,
+    viewerContext: ViewerContext,
+    existingSeeds: SeedCandidate[],
+  ): Promise<SeedCandidate[]> {
+    const existingRefs = new Set(existingSeeds.map((s) => s.node_ref as string));
+    const supplemental: SeedCandidate[] = [];
+
+    if (this.narrativeSearch) {
+      try {
+        const hits = await this.narrativeSearch.searchNarrative(query, viewerContext);
+        for (const hit of hits) {
+          if (existingRefs.has(hit.source_ref)) continue;
+          const parsed = this.parseNodeRef(hit.source_ref as NodeRef);
+          if (!parsed) continue;
+          existingRefs.add(hit.source_ref);
+          supplemental.push({
+            node_ref: hit.source_ref as NodeRef,
+            node_kind: parsed.kind,
+            lexical_score: 0.7,
+            semantic_score: 0,
+            fused_score: 0.7,
+            source_scope: "world",
+          });
+        }
+      } catch {
+        // narrative search unavailable — continue with existing seeds
+      }
+    }
+
+    if (this.cognitionSearch) {
+      try {
+        const hits = await this.cognitionSearch.searchCognition({
+          agentId: viewerContext.viewer_agent_id,
+          query,
+          activeOnly: true,
+          limit: 10,
+        });
+        for (const hit of hits) {
+          if (existingRefs.has(hit.source_ref)) continue;
+          const parsed = this.parseNodeRef(hit.source_ref as NodeRef);
+          if (!parsed) continue;
+          existingRefs.add(hit.source_ref);
+          supplemental.push({
+            node_ref: hit.source_ref as NodeRef,
+            node_kind: parsed.kind,
+            lexical_score: 0.6,
+            semantic_score: 0,
+            fused_score: 0.6,
+            source_scope: "private",
+          });
+        }
+      } catch {
+        // cognition search unavailable — continue with existing seeds
+      }
+    }
+
+    return supplemental;
+  }
+
+  private mergeSeeds(primary: SeedCandidate[], supplemental: SeedCandidate[]): SeedCandidate[] {
+    if (supplemental.length === 0) return primary;
+    const seen = new Set(primary.map((s) => s.node_ref as string));
+    const merged = [...primary];
+    for (const seed of supplemental) {
+      if (!seen.has(seed.node_ref as string)) {
+        seen.add(seed.node_ref as string);
+        merged.push(seed);
+      }
+    }
+    return merged;
   }
 
   private computeSeedScores(seeds: SeedCandidate[], analysis: QueryAnalysis): Map<NodeRef, number> {
@@ -366,6 +456,7 @@ export class GraphNavigator {
     this.expandFactFrontier(frontier.get("fact"), viewerContext, map);
     this.expandPrivateEventFrontier(frontier.get("private_event"), viewerContext, map);
     this.expandPrivateBeliefFrontier(frontier.get("private_belief"), viewerContext, map);
+    this.expandRelationEdges(frontier, viewerContext, map);
 
     return map;
   }
@@ -930,6 +1021,35 @@ export class GraphNavigator {
     this.expandSemanticEdges(frontier, viewerContext, map, true);
   }
 
+  private expandRelationEdges(
+    frontier: Map<NodeRefKind, Set<NodeRef>>,
+    viewerContext: ViewerContext,
+    map: Map<NodeRef, InternalBeamEdge[]>,
+  ): void {
+    const allRefs: NodeRef[] = [];
+    for (const refs of frontier.values()) {
+      for (const ref of refs) allRefs.push(ref);
+    }
+    if (allRefs.length === 0) return;
+
+    for (const fromRef of allRefs) {
+      const related = this.getRelatedNodeRefs(fromRef);
+      for (const toRef of related) {
+        if (!this.isNodeVisible(toRef, viewerContext)) continue;
+        this.pushEdge(map, fromRef, {
+          from: fromRef,
+          to: toRef,
+          kind: "fact_relation",
+          weight: 0.6,
+          timestamp: null,
+          summary: "memory_relation",
+          canonical_fact_id: null,
+          canonical_evidence: false,
+        });
+      }
+    }
+  }
+
   private expandSemanticEdges(
     frontier: Set<NodeRef>,
     viewerContext: ViewerContext,
@@ -1389,6 +1509,24 @@ export class GraphNavigator {
     }
 
     return false;
+  }
+
+  private getRelatedNodeRefs(nodeRef: string): NodeRef[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT source_node_ref, target_node_ref
+           FROM memory_relations
+           WHERE source_node_ref = ? OR target_node_ref = ?`,
+        )
+        .all(nodeRef, nodeRef) as Array<{ source_node_ref: string; target_node_ref: string }>;
+      return rows.map((r) =>
+        (r.source_node_ref === nodeRef ? r.target_node_ref : r.source_node_ref) as NodeRef,
+      );
+    } catch {
+      // table might not exist in some test environments
+      return [];
+    }
   }
 
   private pushEdge(map: Map<NodeRef, InternalBeamEdge[]>, from: NodeRef, edge: InternalBeamEdge): void {
