@@ -1,5 +1,6 @@
 import type { Db } from "../../storage/database.js";
 import {
+  getAttachedSharedBlocks,
   getCoreMemoryBlocks,
   getMemoryHints,
   getRecentCognition,
@@ -22,5 +23,9 @@ export class MemoryAdapter implements MemoryDataSource {
     viewerContext: ViewerContext,
   ): Promise<string> {
     return getMemoryHints(userMessage, viewerContext, this.db);
+  }
+
+  getAttachedSharedBlocks(agentId: string): string {
+    return getAttachedSharedBlocks(agentId, this.db);
   }
 }

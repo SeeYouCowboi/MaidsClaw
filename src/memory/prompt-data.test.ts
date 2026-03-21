@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema";
 import { CoreMemoryService } from "./core-memory";
-import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition, formatContestedEntry } from "./prompt-data";
+import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition, formatContestedEntry, getAttachedSharedBlocks } from "./prompt-data";
 import { openDatabase, closeDatabaseGracefully, type Db } from "../storage/database.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import type { ViewerContext, NavigatorResult, NodeRef } from "./types";
@@ -777,5 +777,120 @@ describe("formatContestedEntry", () => {
     expect(result).toContain("[CONTESTED: was unknown]");
     expect(result).toContain("self is happy");
     expect(result).not.toContain("Conflicts:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAttachedSharedBlocks
+// ---------------------------------------------------------------------------
+
+describe("getAttachedSharedBlocks", () => {
+  let db: Db;
+
+  function seedSharedBlock(title: string, createdBy: string): number {
+    const now = Date.now();
+    const result = db.run(
+      `INSERT INTO shared_blocks (title, created_by_agent_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      [title, createdBy, now, now],
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  function addSection(blockId: number, sectionPath: string, content: string): void {
+    const now = Date.now();
+    db.run(
+      `INSERT INTO shared_block_sections (block_id, section_path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      [blockId, sectionPath, content, now, now],
+    );
+  }
+
+  function attachToAgent(blockId: number, agentId: string, attachedBy: string): void {
+    const now = Date.now();
+    db.run(
+      `INSERT INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at) VALUES (?, 'agent', ?, ?, ?)`,
+      [blockId, agentId, attachedBy, now],
+    );
+  }
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    createMemorySchema(db.raw);
+  });
+
+  it("returns empty string when no attachments exist", () => {
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("returns formatted shared block with sections for attached agent", () => {
+    const blockId = seedSharedBlock("Household Rules", "agent-owner");
+    addSection(blockId, "etiquette/greeting", "Always bow when greeting");
+    addSection(blockId, "etiquette/service", "Serve tea promptly");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+
+    expect(result).toContain('<shared_block title="Household Rules">');
+    expect(result).toContain("etiquette/greeting: Always bow when greeting");
+    expect(result).toContain("etiquette/service: Serve tea promptly");
+    expect(result).toContain("</shared_block>");
+  });
+
+  it("returns multiple blocks when agent has multiple attachments", () => {
+    const block1 = seedSharedBlock("Rules", "agent-owner");
+    addSection(block1, "rule-1", "Be polite");
+    attachToAgent(block1, "agent-1", "agent-owner");
+
+    const block2 = seedSharedBlock("Lore", "agent-owner");
+    addSection(block2, "world/setting", "Victorian mansion");
+    attachToAgent(block2, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+
+    expect(result).toContain('<shared_block title="Rules">');
+    expect(result).toContain('<shared_block title="Lore">');
+    expect(result).toContain("rule-1: Be polite");
+    expect(result).toContain("world/setting: Victorian mansion");
+  });
+
+  it("skips blocks with no sections", () => {
+    const blockId = seedSharedBlock("Empty Block", "agent-owner");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("does not return blocks attached to a different agent", () => {
+    const blockId = seedSharedBlock("Private Rules", "agent-owner");
+    addSection(blockId, "rule", "Secret rule");
+    attachToAgent(blockId, "agent-2", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("shared blocks coexist with core memory blocks without overwriting", () => {
+    createMemorySchema(db.raw);
+    const coreMemory = new CoreMemoryService(db.raw);
+    coreMemory.initializeBlocks("agent-1");
+    coreMemory.appendBlock("agent-1", "character", "A cheerful maid");
+
+    const blockId = seedSharedBlock("Shared Etiquette", "agent-owner");
+    addSection(blockId, "greeting", "Always curtsy");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const coreResult = getCoreMemoryBlocks("agent-1", db.raw);
+    const sharedResult = getAttachedSharedBlocks("agent-1", db);
+
+    expect(coreResult).toContain("A cheerful maid");
+    expect(coreResult).toContain('<core_memory label="character"');
+    expect(coreResult).not.toContain("Always curtsy");
+
+    expect(sharedResult).toContain('<shared_block title="Shared Etiquette">');
+    expect(sharedResult).toContain("greeting: Always curtsy");
+    expect(sharedResult).not.toContain("A cheerful maid");
+
+    closeDatabaseGracefully(db);
   });
 });

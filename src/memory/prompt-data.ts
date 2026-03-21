@@ -1,6 +1,7 @@
 import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
+import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
 import type { NavigatorResult, ViewerContext } from "./types";
 
@@ -185,9 +186,50 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
 
 export function formatContestedEntry(entry: RecentCognitionEntry): string {
   const preStance = entry.preContestedStance ?? "unknown";
-  let line = `\u2022 [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}`;
+  let line = `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}`;
   if (entry.conflictEvidence && entry.conflictEvidence.length > 0) {
     line += ` | Conflicts: ${entry.conflictEvidence.join("; ")}`;
   }
   return line;
+}
+
+type AttachmentRow = {
+  block_id: number;
+};
+
+/**
+ * Get formatted shared blocks attached to an agent for prompt injection.
+ * Queries shared_block_attachments for the agent, fetches block title and sections,
+ * and formats as XML-like <shared_block> elements.
+ * Returns empty string if no attachments exist.
+ * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
+ */
+export function getAttachedSharedBlocks(agentId: string, db: Db): string {
+  const attachments = db.query<AttachmentRow>(
+    `SELECT block_id FROM shared_block_attachments WHERE target_kind = 'agent' AND target_id = ?`,
+    [agentId],
+  );
+
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  const repo = new SharedBlockRepo(db);
+  const blocks: string[] = [];
+
+  for (const attachment of attachments) {
+    const block = repo.getBlock(attachment.block_id);
+    if (!block) continue;
+
+    const sections = repo.getSections(attachment.block_id);
+    if (sections.length === 0) continue;
+
+    const sectionLines = sections
+      .map((s) => `${s.sectionPath}: ${s.content}`)
+      .join("\n");
+
+    blocks.push(`<shared_block title="${block.title}">\n${sectionLines}\n</shared_block>`);
+  }
+
+  return blocks.join("\n");
 }
