@@ -210,3 +210,14 @@
 - Test wrapper `wrapDb()` bridges `bun:sqlite` `Database` to `DbLike` interface for in-memory testing
 - `bun:test` lacks `toMatchObject` — use individual field assertions instead
 - Test count: 1267 pass, 0 fail across 85 files (+30 new tests: 7 repo, 4 permissions, 7 attach, 12 patch including auto-snapshot-at-25)
+
+## [T19 Complete] Task: T19 — Canonical-Read Audit
+- Only `graph-organizer.ts` had actual canonical-read violations (SQL SELECTs reading `epistemic_status` as primary column)
+- Fix pattern: SELECT both `stance` and `epistemic_status`, use `row.stance ?? row.epistemic_status` for display (fallback for legacy rows with NULL stance)
+- Retraction check upgraded: `row.stance === "rejected" || row.stance === "abandoned" || row.epistemic_status === "retracted"` covers both old and new rows
+- `task-agent.ts` input schema (`epistemic_status: { type: ["string", "null"] }`) and call arg parsing are compat input paths, NOT DB reads — kept as-is
+- `task-agent.ts` `loadExistingContext()` already uses CognitionRepository (T6/T10) — no changes needed
+- `storage.ts` write path (`epistemic_status` in INSERT) is intentional dual-write compat — kept as-is
+- `viewer_role` usages confirmed clean: type definition, context construction, comments only — no SQL predicates
+- Remaining `epistemic_status` in src/*.ts (excluding tests/schema/cognition-repo): only fallback reads in graph-organizer, type def in storage, input schema in task-agent, and write-path in storage — all acceptable
+- Test count: 1273 pass, 0 fail across 85 files (no new tests needed — existing tests cover the read paths)

@@ -149,12 +149,13 @@ export class GraphOrganizer {
     }
 
     const row = this.db
-      .prepare(`SELECT predicate, provenance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-      .get(parsed.id) as { predicate: string; provenance: string | null; epistemic_status: string | null } | null;
+      .prepare(`SELECT predicate, provenance, stance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
+      .get(parsed.id) as { predicate: string; provenance: string | null; stance: string | null; epistemic_status: string | null } | null;
     if (!row) {
       return undefined;
     }
-    return `${row.predicate} ${row.provenance ?? ""} ${row.epistemic_status ?? ""}`.trim();
+    const displayStance = row.stance ?? row.epistemic_status ?? "";
+    return `${row.predicate} ${row.provenance ?? ""} ${displayStance}`.trim();
   }
 
   private selectSemanticRelation(
@@ -430,12 +431,12 @@ export class GraphOrganizer {
 
     if (parsed.kind === "private_belief") {
       const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; epistemic_status: string | null } | null;
+        .prepare(`SELECT predicate, provenance, agent_id, stance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
+        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null; epistemic_status: string | null } | null;
       if (!row) {
         return;
       }
-      if (row.epistemic_status === "retracted") {
+      if (row.stance === "rejected" || row.stance === "abandoned" || row.epistemic_status === "retracted") {
         this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
