@@ -57,11 +57,13 @@ export class RelationBuilder {
     const now = Date.now();
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO memory_relations
-         (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
-         VALUES (?, ?, 'conflicts_with', ?, 'direct', 'agent_op', ?, ?)`,
+        `INSERT INTO memory_relations
+         (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+         VALUES (?, ?, 'conflicts_with', ?, 'direct', 'agent_op', ?, ?, ?)
+         ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
+         DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
       )
-      .run(sourceNodeRef, targetNodeRef, strength, sourceRef, now);
+      .run(sourceNodeRef, targetNodeRef, strength, sourceRef, now, now);
   }
 
   /**

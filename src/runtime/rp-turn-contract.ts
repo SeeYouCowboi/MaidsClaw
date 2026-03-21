@@ -150,6 +150,14 @@ const V4_ASSERTION_STANCES: ReadonlySet<AssertionStance> = new Set([
   "abandoned",
 ]);
 
+/** Stances that can appear as preContestedStance — only forward-progress stances. */
+const V4_PRE_CONTESTABLE_STANCES: ReadonlySet<AssertionStance> = new Set([
+  "hypothetical",
+  "tentative",
+  "accepted",
+  "confirmed",
+]);
+
 const V4_ASSERTION_BASES: ReadonlySet<AssertionBasis> = new Set([
   "first_hand",
   "hearsay",
@@ -340,8 +348,8 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
   }
 
   if (record.stance === "contested") {
-    if (typeof record.preContestedStance !== "string" || !V4_ASSERTION_STANCES.has(record.preContestedStance as AssertionStance)) {
-      throw new Error("assertion preContestedStance must be a valid stance when stance is 'contested'");
+    if (typeof record.preContestedStance !== "string" || !V4_PRE_CONTESTABLE_STANCES.has(record.preContestedStance as AssertionStance)) {
+      throw new Error("assertion preContestedStance must be a forward-progress stance (hypothetical|tentative|accepted|confirmed) when stance is 'contested'");
     }
   }
 

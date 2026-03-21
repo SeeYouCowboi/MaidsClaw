@@ -363,8 +363,8 @@ describe("memory schema", () => {
 		let selfRefInsertFailed = false;
 		try {
 			db.run(
-				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				["private_belief:1", "private_belief:1", "supports", 0.9, "direct", "turn", "turn:t-1", Date.now()],
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_belief:1", "supports", 0.9, "direct", "turn", "turn:t-1", Date.now(), 0],
 			);
 		} catch {
 			selfRefInsertFailed = true;
@@ -374,19 +374,30 @@ describe("memory schema", () => {
 		let validInsertFailed = false;
 		try {
 			db.run(
-				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				["private_belief:1", "private_event:2", "supports", 0.8, "inferred", "job", "job:j-1", Date.now()],
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_event:2", "supports", 0.8, "inferred", "job", "job:j-1", Date.now(), 0],
 			);
 		} catch {
 			validInsertFailed = true;
 		}
 		expect(validInsertFailed).toBe(false);
 
+		let differentSourceInsertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_event:2", "supports", 0.5, "direct", "system", "system", Date.now(), 0],
+			);
+		} catch {
+			differentSourceInsertFailed = true;
+		}
+		expect(differentSourceInsertFailed).toBe(false);
+
 		let duplicateInsertFailed = false;
 		try {
 			db.run(
-				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				["private_belief:1", "private_event:2", "supports", 0.5, "direct", "system", "system", Date.now()],
+				"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				["private_belief:1", "private_event:2", "supports", 0.9, "direct", "job", "job:j-1", Date.now(), 0],
 			);
 		} catch {
 			duplicateInsertFailed = true;
@@ -489,7 +500,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(8);
+		expect(migrationCount?.count).toBe(10);
 
 		db.close();
 		cleanupDb(dbPath);

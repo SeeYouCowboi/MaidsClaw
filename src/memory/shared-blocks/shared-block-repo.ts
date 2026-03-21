@@ -19,6 +19,7 @@ export type SharedBlockSection = {
   id: number;
   blockId: number;
   sectionPath: string;
+  title: string;
   content: string;
   createdAt: number;
   updatedAt: number;
@@ -80,12 +81,13 @@ export class SharedBlockRepo {
   getSections(blockId: number): SharedBlockSection[] {
     const rows = this.db
       .prepare(
-        `SELECT id, block_id, section_path, content, created_at, updated_at FROM shared_block_sections WHERE block_id = ? ORDER BY section_path`,
+        `SELECT id, block_id, section_path, title, content, created_at, updated_at FROM shared_block_sections WHERE block_id = ? ORDER BY section_path`,
       )
       .all(blockId) as Array<{
       id: number;
       block_id: number;
       section_path: string;
+      title: string;
       content: string;
       created_at: number;
       updated_at: number;
@@ -94,6 +96,7 @@ export class SharedBlockRepo {
       id: r.id,
       blockId: r.block_id,
       sectionPath: r.section_path,
+      title: r.title,
       content: r.content,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -103,13 +106,14 @@ export class SharedBlockRepo {
   getSection(blockId: number, sectionPath: string): SharedBlockSection | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, block_id, section_path, content, created_at, updated_at FROM shared_block_sections WHERE block_id = ? AND section_path = ?`,
+        `SELECT id, block_id, section_path, title, content, created_at, updated_at FROM shared_block_sections WHERE block_id = ? AND section_path = ?`,
       )
       .get(blockId, sectionPath) as
       | {
           id: number;
           block_id: number;
           section_path: string;
+          title: string;
           content: string;
           created_at: number;
           updated_at: number;
@@ -120,13 +124,14 @@ export class SharedBlockRepo {
       id: row.id,
       blockId: row.block_id,
       sectionPath: row.section_path,
+      title: row.title,
       content: row.content,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
-  upsertSection(blockId: number, sectionPath: string, content: string): void {
+  upsertSection(blockId: number, sectionPath: string, content: string, title = ""): void {
     const now = Date.now();
     const existing = this.db
       .prepare(`SELECT id FROM shared_block_sections WHERE block_id = ? AND section_path = ?`)
@@ -134,14 +139,14 @@ export class SharedBlockRepo {
 
     if (existing) {
       this.db
-        .prepare(`UPDATE shared_block_sections SET content = ?, updated_at = ? WHERE id = ?`)
-        .run(content, now, existing.id);
+        .prepare(`UPDATE shared_block_sections SET content = ?, title = ?, updated_at = ? WHERE id = ?`)
+        .run(content, title, now, existing.id);
     } else {
       this.db
         .prepare(
-          `INSERT INTO shared_block_sections (block_id, section_path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO shared_block_sections (block_id, section_path, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(blockId, sectionPath, content, now, now);
+        .run(blockId, sectionPath, title, content, now, now);
     }
     this.touchBlock(blockId, now);
   }

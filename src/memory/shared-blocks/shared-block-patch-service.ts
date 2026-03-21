@@ -44,19 +44,51 @@ export class SharedBlockPatchService {
     this.permissions = new SharedBlockPermissions(db);
   }
 
-  applyPatch(blockId: number, op: PatchOp, params: PatchParams, appliedByAgentId: string): PatchResult {
+  applyPatch(
+    blockId: number,
+    op: PatchOp,
+    params: PatchParams,
+    appliedByAgentId: string,
+    sourceRef = "system",
+  ): PatchResult {
     if (!this.permissions.canEdit(blockId, appliedByAgentId)) {
       throw new Error(`Agent ${appliedByAgentId} cannot edit block ${blockId}`);
     }
 
     return this.db.transaction(() => {
+      let beforeValue: string | null = null;
+      let afterValue: string | null = null;
+
+      if (op === "set_section" && params.sectionPath) {
+        const existing = this.repo.getSection(blockId, params.sectionPath);
+        beforeValue = existing?.content ?? null;
+      } else if (op === "delete_section" && params.sectionPath) {
+        const existing = this.repo.getSection(blockId, params.sectionPath);
+        beforeValue = existing?.content ?? null;
+      } else if (op === "move_section" && params.sectionPath) {
+        beforeValue = params.sectionPath;
+      } else if (op === "set_title") {
+        const block = this.repo.getBlock(blockId);
+        beforeValue = block?.title ?? null;
+      }
+
       this.applyOp(blockId, op, params);
+
+      if (op === "set_section") {
+        afterValue = params.content ?? "";
+      } else if (op === "delete_section") {
+        afterValue = null;
+      } else if (op === "move_section") {
+        afterValue = params.targetPath ?? null;
+      } else if (op === "set_title") {
+        afterValue = params.title ?? null;
+      }
 
       const nextSeq = this.getNextPatchSeq(blockId);
 
       this.db
         .prepare(
-          `INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, target_path, content, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, target_path, content, before_value, after_value, source_ref, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           blockId,
@@ -65,6 +97,9 @@ export class SharedBlockPatchService {
           params.sectionPath ?? null,
           params.targetPath ?? null,
           op === "set_title" ? (params.title ?? null) : (params.content ?? null),
+          beforeValue,
+          afterValue,
+          sourceRef,
           appliedByAgentId,
           Date.now(),
         );

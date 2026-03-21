@@ -508,8 +508,8 @@ export class TurnService {
 					locationEntityId: viewerSnapshot?.currentLocationEntityId,
 					timestamp: Date.now(),
 				});
-			} catch {
-				this.traceLog(requestId, "warn", "Publication materialization failed (non-fatal)");
+			} catch (err) {
+				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
 

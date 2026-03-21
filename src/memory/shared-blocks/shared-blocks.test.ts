@@ -104,6 +104,34 @@ describe("SharedBlockRepo", () => {
     expect(repo.getSections(block.id)).toHaveLength(1);
   });
 
+  it("upsertSection supports title field", () => {
+    const repo = new SharedBlockRepo(db);
+    const block = repo.createBlock("B", OWNER);
+
+    repo.upsertSection(block.id, "profile", "content-1", "Profile Title");
+    const section = repo.getSection(block.id, "profile");
+    expect(section?.title).toBe("Profile Title");
+    expect(section?.content).toBe("content-1");
+
+    repo.upsertSection(block.id, "profile", "content-2", "Updated Title");
+    expect(repo.getSection(block.id, "profile")?.title).toBe("Updated Title");
+
+    repo.upsertSection(block.id, "no-title", "data");
+    expect(repo.getSection(block.id, "no-title")?.title).toBe("");
+  });
+
+  it("getSections returns title for each section", () => {
+    const repo = new SharedBlockRepo(db);
+    const block = repo.createBlock("B", OWNER);
+
+    repo.upsertSection(block.id, "a", "aaa", "Section A");
+    repo.upsertSection(block.id, "b", "bbb");
+    const sections = repo.getSections(block.id);
+    expect(sections).toHaveLength(2);
+    expect(sections[0].title).toBe("Section A");
+    expect(sections[1].title).toBe("");
+  });
+
   it("deleteSection removes section", () => {
     const repo = new SharedBlockRepo(db);
     const block = repo.createBlock("B", OWNER);
@@ -253,26 +281,37 @@ describe("SharedBlockAttachService", () => {
 // ── SharedBlockPatchService ──
 
 describe("SharedBlockPatchService", () => {
-  it("set_section upserts content and logs patch", () => {
+  it("set_section upserts content and logs patch with audit columns", () => {
     const repo = new SharedBlockRepo(db);
     const patchService = new SharedBlockPatchService(db);
     const block = repo.createBlock("B", OWNER);
 
-    const result = patchService.applyPatch(block.id, "set_section", { sectionPath: "profile", content: "hello" }, OWNER);
+    const result = patchService.applyPatch(block.id, "set_section", { sectionPath: "profile", content: "hello" }, OWNER, "turn:t-1");
     expect(result.patchSeq).toBe(1);
     expect(result.snapshotTaken).toBe(false);
     expect(repo.getSection(block.id, "profile")?.content).toBe("hello");
 
     const log = rawDb
-      .prepare(`SELECT op, section_path, content, applied_by_agent_id FROM shared_block_patch_log WHERE block_id = ?`)
-      .get(block.id) as { op: string; section_path: string; content: string; applied_by_agent_id: string };
+      .prepare(`SELECT op, section_path, content, before_value, after_value, source_ref, applied_by_agent_id FROM shared_block_patch_log WHERE block_id = ?`)
+      .get(block.id) as { op: string; section_path: string; content: string; before_value: string | null; after_value: string | null; source_ref: string; applied_by_agent_id: string };
     expect(log.op).toBe("set_section");
     expect(log.section_path).toBe("profile");
     expect(log.content).toBe("hello");
+    expect(log.before_value).toBeNull();
+    expect(log.after_value).toBe("hello");
+    expect(log.source_ref).toBe("turn:t-1");
     expect(log.applied_by_agent_id).toBe(OWNER);
+
+    patchService.applyPatch(block.id, "set_section", { sectionPath: "profile", content: "updated" }, OWNER);
+    const log2 = rawDb
+      .prepare(`SELECT before_value, after_value, source_ref FROM shared_block_patch_log WHERE block_id = ? AND patch_seq = 2`)
+      .get(block.id) as { before_value: string | null; after_value: string | null; source_ref: string };
+    expect(log2.before_value).toBe("hello");
+    expect(log2.after_value).toBe("updated");
+    expect(log2.source_ref).toBe("system");
   });
 
-  it("delete_section removes section and logs", () => {
+  it("delete_section removes section and logs with before_value", () => {
     const repo = new SharedBlockRepo(db);
     const patchService = new SharedBlockPatchService(db);
     const block = repo.createBlock("B", OWNER);
@@ -283,12 +322,14 @@ describe("SharedBlockPatchService", () => {
     expect(repo.getSection(block.id, "temp")).toBeUndefined();
 
     const logs = rawDb
-      .prepare(`SELECT op FROM shared_block_patch_log WHERE block_id = ? ORDER BY patch_seq`)
-      .all(block.id) as Array<{ op: string }>;
+      .prepare(`SELECT op, before_value, after_value FROM shared_block_patch_log WHERE block_id = ? ORDER BY patch_seq`)
+      .all(block.id) as Array<{ op: string; before_value: string | null; after_value: string | null }>;
     expect(logs.map((l) => l.op)).toEqual(["set_section", "delete_section"]);
+    expect(logs[1].before_value).toBe("data");
+    expect(logs[1].after_value).toBeNull();
   });
 
-  it("move_section renames path", () => {
+  it("move_section renames path and logs before/after", () => {
     const repo = new SharedBlockRepo(db);
     const patchService = new SharedBlockPatchService(db);
     const block = repo.createBlock("B", OWNER);
@@ -298,6 +339,12 @@ describe("SharedBlockPatchService", () => {
 
     expect(repo.getSection(block.id, "old")).toBeUndefined();
     expect(repo.getSection(block.id, "new-path")?.content).toBe("data");
+
+    const log = rawDb
+      .prepare(`SELECT before_value, after_value FROM shared_block_patch_log WHERE block_id = ? AND op = 'move_section'`)
+      .get(block.id) as { before_value: string | null; after_value: string | null };
+    expect(log.before_value).toBe("old");
+    expect(log.after_value).toBe("new-path");
   });
 
   it("move_section throws MoveTargetConflictError on collision", () => {
@@ -319,13 +366,19 @@ describe("SharedBlockPatchService", () => {
     expect((caught as MoveTargetConflictError).name).toBe("MoveTargetConflictError");
   });
 
-  it("set_title updates block title", () => {
+  it("set_title updates block title and logs before/after", () => {
     const repo = new SharedBlockRepo(db);
     const patchService = new SharedBlockPatchService(db);
     const block = repo.createBlock("Old Title", OWNER);
 
     patchService.applyPatch(block.id, "set_title", { title: "New Title" }, OWNER);
     expect(repo.getBlock(block.id)?.title).toBe("New Title");
+
+    const log = rawDb
+      .prepare(`SELECT before_value, after_value FROM shared_block_patch_log WHERE block_id = ? AND op = 'set_title'`)
+      .get(block.id) as { before_value: string | null; after_value: string | null };
+    expect(log.before_value).toBe("Old Title");
+    expect(log.after_value).toBe("New Title");
   });
 
   it("set_section rejects invalid path", () => {

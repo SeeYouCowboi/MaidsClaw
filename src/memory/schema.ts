@@ -67,10 +67,10 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
   `CREATE TABLE IF NOT EXISTS semantic_edges (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')), weight REAL NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_edges_pair_type ON semantic_edges(source_node_ref, target_node_ref, relation_type)`,
-  `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'conflicts_with', 'derived_from', 'supersedes')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, CHECK (source_node_ref != target_node_ref))`,
+  `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'conflicts_with', 'derived_from', 'supersedes')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, CHECK (source_node_ref != target_node_ref))`,
   `CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_node_ref, relation_type)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_node_ref, relation_type)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)`,
   `CREATE TABLE IF NOT EXISTS node_scores (node_ref TEXT PRIMARY KEY, salience REAL NOT NULL, centrality REAL NOT NULL, bridge_score REAL NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS search_docs_private (id INTEGER PRIMARY KEY, doc_type TEXT NOT NULL, source_ref TEXT NOT NULL, agent_id TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_search_docs_private_agent ON search_docs_private(agent_id)`,
@@ -87,11 +87,11 @@ export const MEMORY_DDL: readonly string[] = [
 
   // ── Shared Blocks V1 ──
   `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
   `CREATE TABLE IF NOT EXISTS shared_block_admins (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, granted_by_agent_id TEXT NOT NULL, granted_at INTEGER NOT NULL, UNIQUE(block_id, agent_id))`,
   `CREATE TABLE IF NOT EXISTS shared_block_attachments (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, target_kind TEXT NOT NULL DEFAULT 'agent' CHECK (target_kind = 'agent'), target_id TEXT NOT NULL, attached_by_agent_id TEXT NOT NULL, attached_at INTEGER NOT NULL, UNIQUE(block_id, target_kind, target_id))`,
   `CREATE INDEX IF NOT EXISTS idx_shared_block_attachments_target ON shared_block_attachments(target_kind, target_id)`,
-  `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, before_value TEXT, after_value TEXT, source_ref TEXT NOT NULL DEFAULT 'system', applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
   `CREATE INDEX IF NOT EXISTS idx_shared_block_patch_log_block_seq ON shared_block_patch_log(block_id, patch_seq)`,
   `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
 ];
@@ -242,7 +242,7 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
         `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
       );
       db.exec(
-        `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
       );
       db.exec(
         `CREATE TABLE IF NOT EXISTS shared_block_admins (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, granted_by_agent_id TEXT NOT NULL, granted_at INTEGER NOT NULL, UNIQUE(block_id, agent_id))`,
@@ -254,7 +254,7 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
         `CREATE INDEX IF NOT EXISTS idx_shared_block_attachments_target ON shared_block_attachments(target_kind, target_id)`,
       );
       db.exec(
-        `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
+  `CREATE TABLE IF NOT EXISTS shared_block_patch_log (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, patch_seq INTEGER NOT NULL, op TEXT NOT NULL CHECK (op IN ('set_section', 'delete_section', 'move_section', 'set_title')), section_path TEXT, target_path TEXT, content TEXT, before_value TEXT, after_value TEXT, source_ref TEXT NOT NULL DEFAULT 'system', applied_by_agent_id TEXT NOT NULL, applied_at INTEGER NOT NULL, UNIQUE(block_id, patch_seq))`,
       );
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_shared_block_patch_log_block_seq ON shared_block_patch_log(block_id, patch_seq)`,
@@ -262,6 +262,27 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(
         `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
       );
+    },
+  },
+  {
+    id: "memory:009:widen-memory-relations-unique",
+    description: "Widen memory_relations unique constraint to 5-column and add updated_at",
+    up: (db: Db) => {
+      db.exec(`DROP INDEX IF EXISTS ux_memory_relations_pair_type`);
+      addColumnIfMissing(db, "memory_relations", "updated_at", "INTEGER NOT NULL DEFAULT 0");
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)`,
+      );
+    },
+  },
+  {
+    id: "memory:010:shared-block-audit-columns",
+    description: "Add title to shared_block_sections and audit columns to shared_block_patch_log",
+    up: (db: Db) => {
+      addColumnIfMissing(db, "shared_block_sections", "title", "TEXT NOT NULL DEFAULT ''");
+      addColumnIfMissing(db, "shared_block_patch_log", "before_value", "TEXT");
+      addColumnIfMissing(db, "shared_block_patch_log", "after_value", "TEXT");
+      addColumnIfMissing(db, "shared_block_patch_log", "source_ref", "TEXT NOT NULL DEFAULT 'system'");
     },
   },
 ];
