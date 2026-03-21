@@ -1,5 +1,6 @@
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { InteractionStore } from "../../interaction/store.js";
+import type { TraceStore } from "../diagnostics/trace-store.js";
 import type { HealthClient } from "./health-client.js";
 import type { InspectClient } from "./inspect-client.js";
 import type { SessionClient } from "./session-client.js";
@@ -20,7 +21,10 @@ export type AppClients = {
   health: HealthClient;
 };
 
-export function createLocalAppClients(runtime: RuntimeBootstrapResult): AppClients {
+export function createLocalAppClients(
+  runtime: RuntimeBootstrapResult,
+  options?: { inspectTraceStore?: TraceStore },
+): AppClients {
   const interactionStore = new InteractionStore(runtime.db);
   return {
     session: new LocalSessionClient(runtime.sessionService),
@@ -30,7 +34,7 @@ export function createLocalAppClients(runtime: RuntimeBootstrapResult): AppClien
       interactionStore,
       traceStore: runtime.traceStore,
     }),
-    inspect: new LocalInspectClient(runtime),
+    inspect: new LocalInspectClient(runtime, options?.inspectTraceStore),
     health: new LocalHealthClient(runtime),
   };
 }

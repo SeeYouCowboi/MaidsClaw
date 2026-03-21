@@ -1,6 +1,7 @@
 import type { RuntimeBootstrapResult } from "../../../bootstrap/types.js";
 import type { InspectClient, InspectLogsFilter } from "../inspect-client.js";
 import { diagnose, type DiagnosticEntry } from "../../diagnostics/diagnose-service.js";
+import type { TraceStore } from "../../diagnostics/trace-store.js";
 import {
   loadChunksView,
   loadLogsView,
@@ -19,12 +20,15 @@ import {
 } from "../../inspect/view-models.js";
 
 export class LocalInspectClient implements InspectClient {
-  constructor(private readonly runtime: RuntimeBootstrapResult) {}
+  constructor(
+    private readonly runtime: RuntimeBootstrapResult,
+    private readonly traceStore: TraceStore | undefined = runtime.traceStore,
+  ) {}
 
   async getSummary(requestId: string): Promise<SummaryView> {
     return loadSummaryView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { requestId },
       mode: "local",
     });
@@ -33,7 +37,7 @@ export class LocalInspectClient implements InspectClient {
   async getTranscript(sessionId: string, raw = false): Promise<TranscriptView> {
     return loadTranscriptView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { sessionId },
       raw,
       mode: "local",
@@ -43,7 +47,7 @@ export class LocalInspectClient implements InspectClient {
   async getPrompt(requestId: string): Promise<PromptView> {
     return loadPromptView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { requestId },
       mode: "local",
     });
@@ -52,7 +56,7 @@ export class LocalInspectClient implements InspectClient {
   async getChunks(requestId: string): Promise<ChunksView> {
     return loadChunksView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { requestId },
       mode: "local",
     });
@@ -61,7 +65,7 @@ export class LocalInspectClient implements InspectClient {
   async getLogs(filters: InspectLogsFilter): Promise<LogsView> {
     return loadLogsView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: {
         ...(filters.requestId ? { requestId: filters.requestId } : {}),
         ...(filters.sessionId ? { sessionId: filters.sessionId } : {}),
@@ -74,7 +78,7 @@ export class LocalInspectClient implements InspectClient {
   async getMemory(sessionId: string, agentId?: string): Promise<MemoryView> {
     return loadMemoryView({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { sessionId, ...(agentId ? { agentId } : {}) },
       mode: "local",
     });
@@ -84,7 +88,7 @@ export class LocalInspectClient implements InspectClient {
     return loadTraceView(
       {
         runtime: this.runtime,
-        traceStore: this.runtime.traceStore,
+        traceStore: this.traceStore,
         context: { requestId },
         mode: "local",
       },
@@ -95,7 +99,7 @@ export class LocalInspectClient implements InspectClient {
   async diagnose(requestId: string): Promise<DiagnosticEntry> {
     return diagnose({
       runtime: this.runtime,
-      traceStore: this.runtime.traceStore,
+      traceStore: this.traceStore,
       context: { requestId },
     });
   }

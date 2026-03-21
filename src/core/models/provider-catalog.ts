@@ -150,10 +150,10 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
   {
     id: "moonshot",
     displayName: "Moonshot (Metered API)",
-    transportFamily: "anthropic-native",
-    apiKind: "anthropic",
+    transportFamily: "openai-compatible",
+    apiKind: "openai",
     riskTier: "compatible",
-    baseUrl: "https://api.moonshot.cn/anthropic",
+    baseUrl: "https://api.moonshot.cn",
     authModes: ["api-key"],
     selectionPolicy: {
       enabledByDefault: true,

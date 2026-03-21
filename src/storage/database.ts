@@ -23,7 +23,7 @@ export interface Db {
 export function openDatabase(options: DbOptions): Db {
   const db = new Database(options.path, { create: true });
 
-  db.exec("PRAGMA journal_mode=WAL");
+  configureJournalMode(db);
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(`PRAGMA busy_timeout=${options.busyTimeoutMs ?? 5000}`);
 
@@ -75,6 +75,39 @@ export function openDatabase(options: DbOptions): Db {
       };
     },
   };
+}
+
+function configureJournalMode(db: Database): void {
+  try {
+    db.exec("PRAGMA journal_mode=WAL");
+  } catch (error) {
+    if (!isWalFallbackCandidate(error)) {
+      throw error;
+    }
+
+    // Some Windows workspaces fail WAL setup with SQLITE_IOERR_DELETE; TRUNCATE keeps
+    // rollback journaling available without requiring the delete path that failed.
+    db.exec("PRAGMA journal_mode=TRUNCATE");
+  }
+}
+
+function isWalFallbackCandidate(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as { code?: unknown; message?: unknown };
+  if (
+    candidate.code === "SQLITE_IOERR_DELETE"
+    || candidate.code === "SQLITE_IOERR"
+  ) {
+    return true;
+  }
+
+  return (
+    typeof candidate.message === "string"
+    && candidate.message.toLowerCase().includes("disk i/o error")
+  );
 }
 
 export function closeDatabaseGracefully(db: Db): void {

@@ -221,3 +221,11 @@
 - `viewer_role` usages confirmed clean: type definition, context construction, comments only — no SQL predicates
 - Remaining `epistemic_status` in src/*.ts (excluding tests/schema/cognition-repo): only fallback reads in graph-organizer, type def in storage, input schema in task-agent, and write-path in storage — all acceptable
 - Test count: 1273 pass, 0 fail across 85 files (no new tests needed — existing tests cover the read paths)
+
+## [T20 Complete] Task: T20
+- Created `docs/MEMORY_ARCHITECTURE_2026.md` (~350 lines): covers v4 contract/normalizer, schema migrations 001-008, CognitionRepository state machine, retrieval split (narrative/cognition/orchestrator), all 4 memory tools, Shared Blocks V1, compat guarantees, and viewer_role allowed vs. forbidden uses
+- Created `docs/MEMORY_REGRESSION_MATRIX.md` (~200 lines): 15 scenarios with test file references, each documenting what is proven and the key assertions validated
+- Regression matrix maps all 17 test files to their respective scenarios for traceability
+- bun test confirmed: 1273 pass, 0 fail — docs have zero runtime impact
+- Architecture doc includes a key file map section for quick navigation
+- Both docs stay focused (no implementation detail that's better left in source comments)
