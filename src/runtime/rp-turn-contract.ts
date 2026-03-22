@@ -90,6 +90,7 @@ export type PrivateCognitionCommit = {
 
 export type PrivateCognitionCommitV4 = {
   schemaVersion: "rp_private_cognition_v4";
+  localRef?: LocalRef;
   summary?: string;
   ops: CognitionOp[];
 };
@@ -102,10 +103,49 @@ export type RpTurnOutcomeSubmission = {
 };
 
 export type PublicationKind = "speech" | "record" | "display" | "broadcast";
+export type PublicationKindV2 = "spoken" | "written" | "visual";
 export type PublicationTargetScope = "current_area" | "world_public";
 
+export const PUBLICATION_KIND_COMPAT_MAP: Record<string, PublicationKindV2> = {
+  speech: "spoken",
+  record: "written",
+  display: "visual",
+  broadcast: "spoken",
+};
+
+export const FORBIDDEN_CANONICAL_PUBLICATION_KINDS: ReadonlySet<string> = new Set(["broadcast"]);
+
+export type LocalRef = string;
+
+export type RelationIntent = {
+  sourceRef: LocalRef;
+  targetRef: LocalRef;
+  intent: "supports" | "triggered";
+};
+
+export type ConflictFactor = {
+  kind: string;
+  ref: string;
+  note?: string;
+};
+
+export type PinnedSummaryProposal = {
+  proposedText: string;
+  rationale?: string;
+};
+
+export type PrivateEpisodeArtifact = {
+  localRef?: LocalRef;
+  category: "speech" | "action" | "observation" | "state_change";
+  summary: string;
+  privateNotes?: string;
+  locationText?: string;
+  validTime?: number;
+};
+
 export type PublicationDeclaration = {
-  kind: PublicationKind;
+  localRef?: LocalRef;
+  kind: PublicationKind | PublicationKindV2;
   targetScope: PublicationTargetScope;
   summary: string;
 };
@@ -118,12 +158,28 @@ export type RpTurnOutcomeSubmissionV4 = {
   publications?: PublicationDeclaration[];
 };
 
-export type CanonicalRpTurnOutcome = {
-  schemaVersion: "rp_turn_outcome_v4";
+export type RpTurnOutcomeSubmissionV5 = {
+  schemaVersion: "rp_turn_outcome_v5";
   publicReply: string;
   latentScratchpad?: string;
-  privateCommit?: PrivateCognitionCommitV4;
+  privateCognition?: PrivateCognitionCommitV4;
+  privateEpisodes?: PrivateEpisodeArtifact[];
+  publications?: PublicationDeclaration[];
+  pinnedSummaryProposal?: PinnedSummaryProposal;
+  relationIntents?: RelationIntent[];
+  conflictFactors?: ConflictFactor[];
+};
+
+export type CanonicalRpTurnOutcome = {
+  schemaVersion: "rp_turn_outcome_v5";
+  publicReply: string;
+  latentScratchpad?: string;
+  privateCognition?: PrivateCognitionCommitV4;
+  privateEpisodes: PrivateEpisodeArtifact[];
   publications: PublicationDeclaration[];
+  pinnedSummaryProposal?: PinnedSummaryProposal;
+  relationIntents: RelationIntent[];
+  conflictFactors: ConflictFactor[];
 };
 
 export const EPISTEMIC_STATUS_TO_STANCE: Record<string, AssertionStance> = {
@@ -197,7 +253,7 @@ export type RpBufferedExecutionResult =
   | { outcome: CanonicalRpTurnOutcome }
   | { error: string };
 
-export function detectOutcomeVersion(raw: unknown): "v3" | "v4" | "unknown" {
+export function detectOutcomeVersion(raw: unknown): "v3" | "v4" | "v5" | "unknown" {
   if (!raw || typeof raw !== "object") {
     return "unknown";
   }
@@ -208,6 +264,9 @@ export function detectOutcomeVersion(raw: unknown): "v3" | "v4" | "unknown" {
   }
   if (schemaVersion === "rp_turn_outcome_v4") {
     return "v4";
+  }
+  if (schemaVersion === "rp_turn_outcome_v5") {
+    return "v5";
   }
   return "unknown";
 }
@@ -235,30 +294,324 @@ export function normalizeRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
     );
   }
 
+  if (version === "v5") {
+    return normalizeV5Submission(obj);
+  }
+
+  // V3/V4 path
   const publicReply = obj.publicReply;
   const latentScratchpad = typeof obj.latentScratchpad === "string"
     ? obj.latentScratchpad
     : undefined;
-  const privateCommit = normalizePrivateCommit(obj.privateCommit);
+  const privateCognition = normalizePrivateCommit(obj.privateCommit ?? obj.privateCognition);
   const publications = normalizePublications(obj.publications);
+  const privateEpisodes: PrivateEpisodeArtifact[] = [];
+  const relationIntents: RelationIntent[] = [];
+  const conflictFactors: ConflictFactor[] = [];
 
-  if (publicReply === "" && (!privateCommit || privateCommit.ops.length === 0) && publications.length === 0) {
+  if (publicReply === "" && (!privateCognition || privateCognition.ops.length === 0) && publications.length === 0) {
     throw new Error(
       "empty turn: publicReply is empty and privateCommit has no ops"
     );
   }
 
   return {
-    schemaVersion: "rp_turn_outcome_v4",
+    schemaVersion: "rp_turn_outcome_v5",
     publicReply,
     ...(latentScratchpad !== undefined ? { latentScratchpad } : {}),
-    ...(privateCommit ? { privateCommit } : {}),
+    ...(privateCognition ? { privateCognition } : {}),
+    privateEpisodes,
     publications,
+    relationIntents,
+    conflictFactors,
   };
 }
 
 export function validateRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
   return normalizeRpTurnOutcome(raw);
+}
+
+function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOutcome {
+  const publicReply = obj.publicReply as string;
+  const latentScratchpad = typeof obj.latentScratchpad === "string"
+    ? obj.latentScratchpad
+    : undefined;
+
+  const privateCognition = normalizePrivateCommit(obj.privateCognition ?? obj.privateCommit);
+  const publications = normalizePublicationsV5(obj.publications);
+  const privateEpisodes = normalizePrivateEpisodes(obj.privateEpisodes);
+  const pinnedSummaryProposal = normalizePinnedSummaryProposal(obj.pinnedSummaryProposal);
+  const relationIntents = normalizeRelationIntents(obj.relationIntents);
+  const conflictFactors = normalizeConflictFactors(obj.conflictFactors);
+
+  const hasContent = publicReply !== ""
+    || (privateCognition && privateCognition.ops.length > 0)
+    || publications.length > 0
+    || privateEpisodes.length > 0;
+
+  if (!hasContent) {
+    throw new Error(
+      "empty turn: publicReply is empty and privateCommit has no ops"
+    );
+  }
+
+  return {
+    schemaVersion: "rp_turn_outcome_v5",
+    publicReply,
+    ...(latentScratchpad !== undefined ? { latentScratchpad } : {}),
+    ...(privateCognition ? { privateCognition } : {}),
+    privateEpisodes,
+    publications,
+    ...(pinnedSummaryProposal ? { pinnedSummaryProposal } : {}),
+    relationIntents,
+    conflictFactors,
+  };
+}
+
+/** Single validator for V5 payloads — all shape checks centralized here. */
+export function validateRpTurnOutcomeV5(payload: unknown): RpTurnOutcomeSubmissionV5 {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("payload must be a non-null object");
+  }
+  const obj = payload as Record<string, unknown>;
+  if (obj.schemaVersion !== "rp_turn_outcome_v5") {
+    throw new Error(`expected schemaVersion rp_turn_outcome_v5, got ${JSON.stringify(obj.schemaVersion)}`);
+  }
+  if (typeof obj.publicReply !== "string") {
+    throw new Error(`publicReply must be a string, got ${typeof obj.publicReply}`);
+  }
+
+  if (obj.publications !== undefined) {
+    if (!Array.isArray(obj.publications)) {
+      throw new Error("publications must be an array when present");
+    }
+    for (const pub of obj.publications) {
+      if (!pub || typeof pub !== "object") throw new Error("publication must be an object");
+      const p = pub as Record<string, unknown>;
+      if (FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has(p.kind as string)) {
+        throw new Error(`"${p.kind}" is not a valid canonical publication kind`);
+      }
+    }
+  }
+
+  if (obj.relationIntents !== undefined) {
+    if (!Array.isArray(obj.relationIntents)) {
+      throw new Error("relationIntents must be an array when present");
+    }
+    const ALLOWED_INTENTS = new Set(["supports", "triggered"]);
+    for (const ri of obj.relationIntents) {
+      if (!ri || typeof ri !== "object") throw new Error("relationIntent must be an object");
+      const r = ri as Record<string, unknown>;
+      if (!ALLOWED_INTENTS.has(r.intent as string)) {
+        throw new Error(`invalid relationIntent intent: ${JSON.stringify(r.intent)}, allowed: supports, triggered`);
+      }
+    }
+  }
+
+  if (obj.conflictFactors !== undefined) {
+    if (!Array.isArray(obj.conflictFactors)) {
+      throw new Error("conflictFactors must be an array when present");
+    }
+    for (const cf of obj.conflictFactors) {
+      if (!cf || typeof cf !== "object") throw new Error("conflictFactor must be an object");
+      const c = cf as Record<string, unknown>;
+      if (typeof c.note === "string" && c.note.length > 120) {
+        throw new Error(`conflictFactor note exceeds 120 chars (got ${c.note.length})`);
+      }
+    }
+  }
+
+  if (obj.pinnedSummaryProposal !== undefined) {
+    if (Array.isArray(obj.pinnedSummaryProposal)) {
+      throw new Error("pinnedSummaryProposal must be a single object, not an array");
+    }
+    if (typeof obj.pinnedSummaryProposal !== "object") {
+      throw new Error("pinnedSummaryProposal must be an object");
+    }
+  }
+
+  if (obj.privateEpisodes !== undefined) {
+    if (!Array.isArray(obj.privateEpisodes)) {
+      throw new Error("privateEpisodes must be an array when present");
+    }
+    for (const ep of obj.privateEpisodes) {
+      if (!ep || typeof ep !== "object") throw new Error("privateEpisode must be an object");
+      const e = ep as Record<string, unknown>;
+      if (e.category === "thought") {
+        throw new Error(`privateEpisode category "thought" is not allowed`);
+      }
+    }
+  }
+
+  return obj as unknown as RpTurnOutcomeSubmissionV5;
+}
+
+/**
+ * Multi-version normalizer: accepts V3, V4, or V5 submissions and produces CanonicalRpTurnOutcome.
+ */
+export function normalizeToCanonicalOutcome(
+  submission: RpTurnOutcomeSubmissionV5 | RpTurnOutcomeSubmissionV4 | RpTurnOutcomeSubmission,
+): CanonicalRpTurnOutcome {
+  return normalizeRpTurnOutcome(submission);
+}
+
+const V5_PUBLICATION_KINDS: ReadonlySet<string> = new Set(["spoken", "written", "visual"]);
+
+function normalizePublicationsV5(raw: unknown): PublicationDeclaration[] {
+  if (raw === undefined) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error("publications must be an array when present");
+  }
+  const publications: PublicationDeclaration[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("publication must be an object");
+    }
+    const publication = entry as Record<string, unknown>;
+    if (FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has(publication.kind as string)) {
+      throw new Error(`"${publication.kind}" is not a valid canonical publication kind`);
+    }
+    let kind = publication.kind as string;
+    if (kind in PUBLICATION_KIND_COMPAT_MAP) {
+      kind = PUBLICATION_KIND_COMPAT_MAP[kind]!;
+    }
+    if (!V5_PUBLICATION_KINDS.has(kind)) {
+      throw new Error(`invalid publication kind: ${JSON.stringify(publication.kind)}`);
+    }
+    if (!V4_PUBLICATION_TARGET_SCOPES.has(publication.targetScope as PublicationTargetScope)) {
+      throw new Error(`invalid publication targetScope: ${JSON.stringify(publication.targetScope)}`);
+    }
+    if (typeof publication.summary !== "string") {
+      throw new Error("publication summary must be a string");
+    }
+    publications.push({
+      ...(typeof publication.localRef === "string" ? { localRef: publication.localRef } : {}),
+      kind: kind as PublicationKindV2,
+      targetScope: publication.targetScope as PublicationTargetScope,
+      summary: publication.summary,
+    });
+  }
+  return publications;
+}
+
+function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
+  if (raw === undefined) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error("privateEpisodes must be an array when present");
+  }
+  const VALID_CATEGORIES = new Set(["speech", "action", "observation", "state_change"]);
+  const episodes: PrivateEpisodeArtifact[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("privateEpisode must be an object");
+    }
+    const ep = entry as Record<string, unknown>;
+    if (ep.category === "thought") {
+      throw new Error(`privateEpisode category "thought" is not allowed`);
+    }
+    if (!VALID_CATEGORIES.has(ep.category as string)) {
+      throw new Error(`invalid privateEpisode category: ${JSON.stringify(ep.category)}`);
+    }
+    if (typeof ep.summary !== "string") {
+      throw new Error("privateEpisode summary must be a string");
+    }
+    episodes.push({
+      ...(typeof ep.localRef === "string" ? { localRef: ep.localRef } : {}),
+      category: ep.category as PrivateEpisodeArtifact["category"],
+      summary: ep.summary,
+      ...(typeof ep.privateNotes === "string" ? { privateNotes: ep.privateNotes } : {}),
+      ...(typeof ep.locationText === "string" ? { locationText: ep.locationText } : {}),
+      ...(typeof ep.validTime === "number" ? { validTime: ep.validTime } : {}),
+    });
+  }
+  return episodes;
+}
+
+function normalizePinnedSummaryProposal(raw: unknown): PinnedSummaryProposal | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(raw)) {
+    throw new Error("pinnedSummaryProposal must be a single object, not an array");
+  }
+  if (!raw || typeof raw !== "object") {
+    throw new Error("pinnedSummaryProposal must be an object");
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.proposedText !== "string") {
+    throw new Error("pinnedSummaryProposal.proposedText must be a string");
+  }
+  return {
+    proposedText: obj.proposedText,
+    ...(typeof obj.rationale === "string" ? { rationale: obj.rationale } : {}),
+  };
+}
+
+function normalizeRelationIntents(raw: unknown): RelationIntent[] {
+  if (raw === undefined) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error("relationIntents must be an array when present");
+  }
+  const ALLOWED_INTENTS = new Set(["supports", "triggered"]);
+  const intents: RelationIntent[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("relationIntent must be an object");
+    }
+    const ri = entry as Record<string, unknown>;
+    if (!ALLOWED_INTENTS.has(ri.intent as string)) {
+      throw new Error(`invalid relationIntent intent: ${JSON.stringify(ri.intent)}, allowed: supports, triggered`);
+    }
+    if (typeof ri.sourceRef !== "string") {
+      throw new Error("relationIntent sourceRef must be a string");
+    }
+    if (typeof ri.targetRef !== "string") {
+      throw new Error("relationIntent targetRef must be a string");
+    }
+    intents.push({
+      sourceRef: ri.sourceRef,
+      targetRef: ri.targetRef,
+      intent: ri.intent as RelationIntent["intent"],
+    });
+  }
+  return intents;
+}
+
+function normalizeConflictFactors(raw: unknown): ConflictFactor[] {
+  if (raw === undefined) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error("conflictFactors must be an array when present");
+  }
+  const factors: ConflictFactor[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("conflictFactor must be an object");
+    }
+    const cf = entry as Record<string, unknown>;
+    if (typeof cf.kind !== "string") {
+      throw new Error("conflictFactor kind must be a string");
+    }
+    if (typeof cf.ref !== "string") {
+      throw new Error("conflictFactor ref must be a string");
+    }
+    if (typeof cf.note === "string" && cf.note.length > 120) {
+      throw new Error(`conflictFactor note exceeds 120 chars (got ${cf.note.length})`);
+    }
+    factors.push({
+      kind: cf.kind,
+      ref: cf.ref,
+      ...(typeof cf.note === "string" ? { note: cf.note } : {}),
+    });
+  }
+  return factors;
 }
 
 function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefined {

@@ -2217,11 +2217,11 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(settlements).toHaveLength(1);
 
       const payload = settlements[0]!.payload as TurnSettlementPayload;
-      expect(payload.schemaVersion).toBe("turn_settlement_v4");
+      expect(payload.schemaVersion).toBe("turn_settlement_v5");
       expect(payload.publications).toEqual([]);
-      expect(payload.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
+      expect((payload.privateCognition ?? payload.privateCommit)?.schemaVersion).toBe("rp_private_cognition_v4");
 
-      const upsertOp = payload.privateCommit?.ops[0];
+      const upsertOp = (payload.privateCognition ?? payload.privateCommit)?.ops[0];
       expect(upsertOp?.op).toBe("upsert");
       if (upsertOp?.op === "upsert" && upsertOp.record.kind === "assertion") {
         expect(upsertOp.record.stance).toBe("accepted");
@@ -2307,7 +2307,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(settlements).toHaveLength(1);
 
       const payload = settlements[0]!.payload as TurnSettlementPayload;
-      expect(payload.schemaVersion).toBe("turn_settlement_v4");
+      expect(payload.schemaVersion).toBe("turn_settlement_v5");
       expect(payload.publications).toHaveLength(1);
       expect(payload.publications![0]).toEqual({
         kind: "speech",

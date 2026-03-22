@@ -335,12 +335,13 @@ export class TurnService {
 
 		const publications = canonicalOutcome.publications;
 		const hasPrivateOps =
-			(canonicalOutcome.privateCommit?.ops.length ?? 0) > 0;
+			(canonicalOutcome.privateCognition?.ops.length ?? 0) > 0;
 		const hasPublicReply = canonicalOutcome.publicReply.length > 0;
 		const hasPublications = publications.length > 0;
 		const hasAssistantVisibleActivity = hasPublicReply;
 
-		if (!hasPublicReply && !hasPrivateOps && !hasPublications) {
+		const hasPrivateEpisodes = canonicalOutcome.privateEpisodes.length > 0;
+		if (!hasPublicReply && !hasPrivateOps && !hasPublications && !hasPrivateEpisodes) {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
@@ -421,11 +422,26 @@ export class TurnService {
 					publicReply: canonicalOutcome.publicReply,
 					hasPublicReply,
 					viewerSnapshot: resolvedViewerSnapshot,
-					schemaVersion: "turn_settlement_v4",
+					schemaVersion: "turn_settlement_v5",
+					privateCognition: hasPrivateOps
+						? canonicalOutcome.privateCognition
+						: undefined,
 					privateCommit: hasPrivateOps
-						? canonicalOutcome.privateCommit
+						? canonicalOutcome.privateCognition
+						: undefined,
+					privateEpisodes: canonicalOutcome.privateEpisodes.length > 0
+						? canonicalOutcome.privateEpisodes
 						: undefined,
 					publications,
+					...(canonicalOutcome.pinnedSummaryProposal
+						? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+						: {}),
+					relationIntents: canonicalOutcome.relationIntents.length > 0
+						? canonicalOutcome.relationIntents
+						: undefined,
+					conflictFactors: canonicalOutcome.conflictFactors.length > 0
+						? canonicalOutcome.conflictFactors
+						: undefined,
 				};
 
 				this.commitService.commitWithId({
@@ -454,7 +470,7 @@ export class TurnService {
 				}
 
 				const slotEntries = buildCognitionSlotPayload(
-					canonicalOutcome.privateCommit?.ops ?? [],
+					canonicalOutcome.privateCognition?.ops ?? [],
 					settlementId,
 				);
 				this.interactionStore.upsertRecentCognitionSlot(

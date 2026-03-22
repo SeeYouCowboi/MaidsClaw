@@ -200,9 +200,9 @@ function normalizeChunk(
 }
 
 function summarizePrivateCommit(
-	settlementPayload: TurnSettlementPayload | undefined,
+	settlementPayload: { privateCognition?: { ops: unknown[] }; privateCommit?: { ops: unknown[] } } | undefined,
 ): PrivateCommitSummary {
-	const ops = settlementPayload?.privateCommit?.ops ?? [];
+	const ops = (settlementPayload?.privateCognition?.ops ?? settlementPayload?.privateCommit?.ops ?? []) as Array<{ op: string; record?: { kind: string }; target?: { kind: string } }>;
 	if (ops.length === 0) {
 		return {
 			present: false,
@@ -215,9 +215,9 @@ function summarizePrivateCommit(
 	for (const op of ops) {
 		const kind =
 			op.op === "upsert"
-				? op.record.kind
+				? op.record?.kind
 				: op.op === "retract"
-					? op.target.kind
+					? op.target?.kind
 					: undefined;
 		if (kind && !kinds.includes(kind)) {
 			kinds.push(kind);

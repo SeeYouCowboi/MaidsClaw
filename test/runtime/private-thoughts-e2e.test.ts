@@ -494,7 +494,7 @@ describe("private thoughts e2e", () => {
       const validated = validateRpTurnOutcome(rawOutcome);
       expect(validated.latentScratchpad).toBe("");
 
-      const slotEntries = summarizeOps(validated.privateCommit?.ops ?? [], "stl:scratch", 9000);
+      const slotEntries = summarizeOps(validated.privateCognition?.ops ?? [], "stl:scratch", 9000);
       store.upsertRecentCognitionSlot(sessionId, agentId, "stl:scratch", JSON.stringify(slotEntries));
 
       const row = db.get<{ slot_payload: string }>(

@@ -14,8 +14,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
       properties: {
         schemaVersion: {
           type: "string",
-          enum: ["rp_turn_outcome_v3", "rp_turn_outcome_v4"],
-          description: "Must be rp_turn_outcome_v3 or rp_turn_outcome_v4",
+          enum: ["rp_turn_outcome_v3", "rp_turn_outcome_v4", "rp_turn_outcome_v5"],
+          description: "Must be rp_turn_outcome_v3, rp_turn_outcome_v4, or rp_turn_outcome_v5",
         },
         publicReply: {
           type: "string",
@@ -23,15 +23,15 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         },
         latentScratchpad: {
           type: "string",
-          description: "Optional internal reasoning scratchpad (not shown to user)",
+          description: "Optional internal reasoning scratchpad (trace-only, not a durable artifact)",
         },
         privateCommit: {
           type: "object",
-          description: "Optional private cognition state mutations",
+          description: "Optional private cognition state mutations (V3/V4 compat)",
           properties: {
             schemaVersion: {
               type: "string",
-              enum: ["rp_private_cognition_v3"],
+              enum: ["rp_private_cognition_v3", "rp_private_cognition_v4"],
             },
             summary: { type: "string" },
             ops: {
@@ -41,15 +41,52 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
           },
           required: ["schemaVersion", "ops"],
         },
+        privateCognition: {
+          type: "object",
+          description: "Private cognition state mutations (V5 canonical name)",
+          properties: {
+            schemaVersion: {
+              type: "string",
+              enum: ["rp_private_cognition_v4"],
+            },
+            localRef: { type: "string" },
+            summary: { type: "string" },
+            ops: {
+              type: "array",
+              items: { type: "object" },
+            },
+          },
+          required: ["schemaVersion", "ops"],
+        },
+        privateEpisodes: {
+          type: "array",
+          description: "Private episode artifacts (speech, action, observation, state_change)",
+          items: {
+            type: "object",
+            properties: {
+              localRef: { type: "string" },
+              category: {
+                type: "string",
+                enum: ["speech", "action", "observation", "state_change"],
+              },
+              summary: { type: "string" },
+              privateNotes: { type: "string" },
+              locationText: { type: "string" },
+              validTime: { type: "number" },
+            },
+            required: ["category", "summary"],
+          },
+        },
         publications: {
           type: "array",
           description: "Optional public publication declarations",
           items: {
             type: "object",
             properties: {
+              localRef: { type: "string" },
               kind: {
                 type: "string",
-                enum: ["speech", "record", "display", "broadcast"],
+                enum: ["spoken", "written", "visual", "speech", "record", "display"],
               },
               targetScope: {
                 type: "string",
@@ -58,6 +95,44 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               summary: { type: "string" },
             },
             required: ["kind", "targetScope", "summary"],
+          },
+        },
+        pinnedSummaryProposal: {
+          type: "object",
+          description: "Optional proposal for pinned summary text",
+          properties: {
+            proposedText: { type: "string" },
+            rationale: { type: "string" },
+          },
+          required: ["proposedText"],
+        },
+        relationIntents: {
+          type: "array",
+          description: "Optional inter-artifact relation intents (supports, triggered)",
+          items: {
+            type: "object",
+            properties: {
+              sourceRef: { type: "string" },
+              targetRef: { type: "string" },
+              intent: {
+                type: "string",
+                enum: ["supports", "triggered"],
+              },
+            },
+            required: ["sourceRef", "targetRef", "intent"],
+          },
+        },
+        conflictFactors: {
+          type: "array",
+          description: "Optional conflict factor declarations",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string" },
+              ref: { type: "string" },
+              note: { type: "string" },
+            },
+            required: ["kind", "ref"],
           },
         },
       },

@@ -80,10 +80,10 @@ describe("settlement adapter", () => {
 
     const normalized = normalizeSettlementPayload(v3Payload);
 
-    expect(normalized.schemaVersion).toBe("turn_settlement_v4");
+    expect(normalized.schemaVersion).toBe("turn_settlement_v5");
     expect(normalized.publications).toEqual([]);
-    expect(normalized.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
-    expect(normalized.privateCommit?.ops).toHaveLength(1);
+    expect(normalized.privateCognition?.schemaVersion).toBe("rp_private_cognition_v4");
+    expect(normalized.privateCognition?.ops).toHaveLength(1);
   });
 
   it("normalizes v4 settlement payload and preserves publications", () => {
@@ -106,9 +106,9 @@ describe("settlement adapter", () => {
 
     const normalized = normalizeSettlementPayload(v4Payload);
 
-    expect(normalized.schemaVersion).toBe("turn_settlement_v4");
+    expect(normalized.schemaVersion).toBe("turn_settlement_v5");
     expect(normalized.publications).toEqual(publications);
-    expect(normalized.privateCommit?.schemaVersion).toBe("rp_private_cognition_v4");
+    expect(normalized.privateCognition?.schemaVersion).toBe("rp_private_cognition_v4");
   });
 
   it("normalizes both undefined and empty publications to empty array", () => {
@@ -616,5 +616,91 @@ describe("redactInteractionRecords", () => {
   it("returns empty array for empty input", () => {
     const redacted = redactInteractionRecords([]);
     expect(redacted).toEqual([]);
+  });
+});
+
+describe("redactInteractionRecord — V5 artifact fields", () => {
+  it("redacts privateEpisodes to count-only summary", () => {
+    const record: InteractionRecord = {
+      sessionId: "sess-v5",
+      recordId: "stl-v5-ep",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        settlementId: "stl-v5-ep",
+        requestId: "req-v5-ep",
+        sessionId: "sess-v5",
+        ownerAgentId: "rp:alice",
+        publicReply: "test",
+        hasPublicReply: true,
+        viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+        schemaVersion: "turn_settlement_v5",
+        privateEpisodes: [
+          { category: "observation", summary: "Saw the broken vase", locationText: "living room" },
+          { category: "action", summary: "Picked up the pieces" },
+        ],
+      } satisfies TurnSettlementPayload,
+      committedAt: 1000,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    const payload = redacted.payload as Record<string, unknown>;
+
+    expect(payload.privateEpisodes).toEqual({ redacted: true, count: 2 });
+  });
+
+  it("redacts pinnedSummaryProposal to redacted marker", () => {
+    const record: InteractionRecord = {
+      sessionId: "sess-v5",
+      recordId: "stl-v5-psp",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        settlementId: "stl-v5-psp",
+        requestId: "req-v5-psp",
+        sessionId: "sess-v5",
+        ownerAgentId: "rp:alice",
+        publicReply: "test",
+        hasPublicReply: true,
+        viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+        schemaVersion: "turn_settlement_v5",
+        pinnedSummaryProposal: { proposedText: "Secret summary", rationale: "Important context" },
+      } satisfies TurnSettlementPayload,
+      committedAt: 1000,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    const payload = redacted.payload as Record<string, unknown>;
+
+    expect(payload.pinnedSummaryProposal).toEqual({ redacted: true });
+  });
+
+  it("omits privateEpisodes and pinnedSummaryProposal from redacted output when absent", () => {
+    const record: InteractionRecord = {
+      sessionId: "sess-v5",
+      recordId: "stl-v5-clean",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        settlementId: "stl-v5-clean",
+        requestId: "req-v5-clean",
+        sessionId: "sess-v5",
+        ownerAgentId: "rp:alice",
+        publicReply: "test",
+        hasPublicReply: true,
+        viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+        schemaVersion: "turn_settlement_v5",
+      } satisfies TurnSettlementPayload,
+      committedAt: 1000,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    const payload = redacted.payload as Record<string, unknown>;
+
+    expect(payload.privateEpisodes).toBeUndefined();
+    expect(payload.pinnedSummaryProposal).toBeUndefined();
   });
 });

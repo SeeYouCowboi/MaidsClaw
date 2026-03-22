@@ -339,9 +339,12 @@ describe("AgentLoop.runBuffered", () => {
 
     expect(result).toEqual({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v4",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "Your tea is ready.",
+        privateEpisodes: [],
         publications: [],
+        relationIntents: [],
+        conflictFactors: [],
       },
     });
     if ("outcome" in result) {
@@ -379,7 +382,7 @@ describe("AgentLoop.runBuffered", () => {
     expect("outcome" in result).toBe(true);
     if ("outcome" in result) {
       expect(result.outcome.publicReply).toBe("");
-      expect(result.outcome.privateCommit?.ops.length).toBe(1);
+      expect(result.outcome.privateCognition?.ops.length).toBe(1);
     }
   });
 

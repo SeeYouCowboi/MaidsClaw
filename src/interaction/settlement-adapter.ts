@@ -1,7 +1,11 @@
 import type {
+	ConflictFactor,
+	PinnedSummaryProposal,
 	PrivateCognitionCommit,
 	PrivateCognitionCommitV4,
+	PrivateEpisodeArtifact,
 	PublicationDeclaration,
+	RelationIntent,
 } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "./contracts.js";
 
@@ -13,21 +17,27 @@ export type NormalizedSettlementPayload = {
 	publicReply: string;
 	hasPublicReply: boolean;
 	viewerSnapshot: TurnSettlementPayload["viewerSnapshot"];
-	schemaVersion: "turn_settlement_v4";
-	privateCommit?: PrivateCognitionCommitV4;
+	schemaVersion: "turn_settlement_v5";
+	privateCognition?: PrivateCognitionCommitV4;
+	privateEpisodes: PrivateEpisodeArtifact[];
 	publications: PublicationDeclaration[];
+	pinnedSummaryProposal?: PinnedSummaryProposal;
+	relationIntents: RelationIntent[];
+	conflictFactors: ConflictFactor[];
 };
 
 export function detectSettlementVersion(
 	payload: TurnSettlementPayload,
-): "v3" | "v4" {
-	return payload.schemaVersion === "turn_settlement_v4" ? "v4" : "v3";
+): "v3" | "v4" | "v5" {
+	if (payload.schemaVersion === "turn_settlement_v5") return "v5";
+	if (payload.schemaVersion === "turn_settlement_v4") return "v4";
+	return "v3";
 }
 
 export function normalizeSettlementPayload(
 	payload: TurnSettlementPayload,
 ): NormalizedSettlementPayload {
-	const privateCommit = normalizePrivateCommit(payload.privateCommit);
+	const privateCognition = resolvePrivateCognition(payload);
 
 	return {
 		settlementId: payload.settlementId,
@@ -37,15 +47,34 @@ export function normalizeSettlementPayload(
 		publicReply: payload.publicReply,
 		hasPublicReply: payload.hasPublicReply,
 		viewerSnapshot: payload.viewerSnapshot,
-		schemaVersion: "turn_settlement_v4",
-		...(privateCommit ? { privateCommit } : {}),
+		schemaVersion: "turn_settlement_v5",
+		...(privateCognition ? { privateCognition } : {}),
+		privateEpisodes: Array.isArray(payload.privateEpisodes)
+			? payload.privateEpisodes
+			: [],
 		publications: Array.isArray(payload.publications)
 			? payload.publications
+			: [],
+		...(payload.pinnedSummaryProposal ? { pinnedSummaryProposal: payload.pinnedSummaryProposal } : {}),
+		relationIntents: Array.isArray(payload.relationIntents)
+			? payload.relationIntents
+			: [],
+		conflictFactors: Array.isArray(payload.conflictFactors)
+			? payload.conflictFactors
 			: [],
 	};
 }
 
-function normalizePrivateCommit(
+function resolvePrivateCognition(
+	payload: TurnSettlementPayload,
+): PrivateCognitionCommitV4 | undefined {
+	if (payload.privateCognition) {
+		return payload.privateCognition;
+	}
+	return normalizePrivateCommitCompat(payload.privateCommit);
+}
+
+function normalizePrivateCommitCompat(
 	privateCommit: PrivateCognitionCommit | PrivateCognitionCommitV4 | undefined,
 ): PrivateCognitionCommitV4 | undefined {
 	if (!privateCommit) {

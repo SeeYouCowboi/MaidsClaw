@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { PublicationDeclaration, PublicationKind } from "../runtime/rp-turn-contract.js";
+import type { PublicationDeclaration, PublicationKind, PublicationKindV2 } from "../runtime/rp-turn-contract.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AgentEventOverlay, PublicEventCategory } from "./types.js";
@@ -316,15 +316,18 @@ export function materializePublications(
   return result;
 }
 
-const PUBLICATION_KIND_TO_CATEGORY: Record<PublicationKind, PublicEventCategory> = {
+const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {
   speech: "speech",
   record: "speech",
   display: "observation",
   broadcast: "speech",
+  spoken: "speech",
+  written: "speech",
+  visual: "observation",
 };
 
-function publicationKindToCategory(kind: PublicationKind): PublicEventCategory {
-  return PUBLICATION_KIND_TO_CATEGORY[kind];
+function publicationKindToCategory(kind: PublicationKind | PublicationKindV2): PublicEventCategory {
+  return PUBLICATION_KIND_TO_CATEGORY[kind] ?? "speech";
 }
 
 function publicationScopeToVisibility(

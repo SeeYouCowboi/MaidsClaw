@@ -36,13 +36,19 @@ export function redactInteractionRecord(
 		publicReply: payload.publicReply,
 		hasPublicReply: payload.hasPublicReply,
 		viewerSnapshot: { redacted: true as const },
-		privateCommit: normalizedPayload.privateCommit
+		privateCommit: normalizedPayload.privateCognition
 			? {
 					redacted: true as const,
-					opCount: normalizedPayload.privateCommit.ops.length,
-					kinds: extractUniqueKinds(normalizedPayload.privateCommit.ops),
+					opCount: normalizedPayload.privateCognition.ops.length,
+					kinds: extractUniqueKinds(normalizedPayload.privateCognition.ops),
 				}
 			: undefined,
+		...(normalizedPayload.privateEpisodes.length > 0
+			? { privateEpisodes: { redacted: true as const, count: normalizedPayload.privateEpisodes.length } }
+			: {}),
+		...(normalizedPayload.pinnedSummaryProposal
+			? { pinnedSummaryProposal: { redacted: true as const } }
+			: {}),
 	};
 
 	return {

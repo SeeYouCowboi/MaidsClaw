@@ -181,16 +181,16 @@ describe("debug commands", () => {
 		const envelope = parseJsonOutput(raw);
 		const data = envelope.data as {
 			interaction_settlement?: {
-				privateCommit?: { ops?: unknown[]; redacted?: boolean };
+				privateCognition?: { ops?: unknown[]; redacted?: boolean };
 			};
 		};
 
 		expect(envelope.ok).toBe(true);
-		expect(Array.isArray(data.interaction_settlement?.privateCommit?.ops)).toBe(
+		expect(Array.isArray(data.interaction_settlement?.privateCognition?.ops)).toBe(
 			true,
 		);
 		expect(
-			data.interaction_settlement?.privateCommit?.redacted,
+			data.interaction_settlement?.privateCognition?.redacted,
 		).toBeUndefined();
 	});
 
