@@ -1,4 +1,4 @@
-import type { EffectClass, TraceVisibility } from "../core/tools/tool-definition.js";
+import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
 import type { ViewerContext } from "./types";
@@ -13,6 +13,7 @@ export type MemoryToolDefinition = {
   parameters: Record<string, unknown>;
   effectClass?: EffectClass;
   traceVisibility?: TraceVisibility;
+  executionContract?: ToolExecutionContract;
   handler: (args: Record<string, unknown>, viewerContext: ViewerContext) => unknown | Promise<unknown>;
 };
 
@@ -82,6 +83,12 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
       POINTER_GUIDE,
     effectClass: "immediate_write",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "write_private",
+      turn_phase: "in_turn",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -129,6 +136,12 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
       POINTER_GUIDE,
     effectClass: "immediate_write",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "write_private",
+      turn_phase: "in_turn",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -181,6 +194,12 @@ function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "read_only",
+      turn_phase: "any",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -253,6 +272,12 @@ function makeNarrativeSearch(services: MemoryToolServices): MemoryToolDefinition
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "read_only",
+      turn_phase: "any",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -281,6 +306,13 @@ function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "read_only",
+      turn_phase: "any",
+      cardinality: "multiple",
+      capability_requirements: ["cognition_read"],
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -338,6 +370,12 @@ function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "read_only",
+      turn_phase: "any",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {
@@ -365,6 +403,12 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
+    executionContract: {
+      effect_type: "read_only",
+      turn_phase: "any",
+      cardinality: "multiple",
+      trace_visibility: "public",
+    },
     parameters: {
       type: "object",
       properties: {

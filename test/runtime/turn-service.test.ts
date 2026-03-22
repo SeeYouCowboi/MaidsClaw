@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
+import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
+import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
@@ -982,6 +984,62 @@ describe("TurnService", () => {
       role: "assistant",
       content: "Good day",
     });
+  });
+
+  it("submit_rp_turn has executionContract with settlement effect_type", () => {
+    const tool = makeSubmitRpTurnTool();
+    expect(tool.executionContract).toBeDefined();
+    expect(tool.executionContract!.effect_type).toBe("settlement");
+    expect(tool.executionContract!.turn_phase).toBe("post_turn");
+    expect(tool.executionContract!.cardinality).toBe("once");
+    expect(tool.executionContract!.trace_visibility).toBe("private_runtime");
+    expect(tool.executionContract!.capability_requirements).toEqual(["rp_settlement"]);
+  });
+
+  it("submit_rp_turn has 5 artifact contracts with correct scope/policy", () => {
+    const tool = makeSubmitRpTurnTool();
+    expect(tool.artifactContracts).toBeDefined();
+    const contracts = tool.artifactContracts!;
+    expect(Object.keys(contracts).sort()).toEqual([
+      "pinnedSummaryProposal",
+      "privateCognition",
+      "privateEpisodes",
+      "publicReply",
+      "publications",
+    ]);
+
+    expect(contracts.publicReply).toEqual({
+      authority_level: "agent",
+      artifact_scope: "world",
+      ledger_policy: "current_state",
+    });
+    expect(contracts.privateCognition).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "append_only",
+    });
+    expect(contracts.privateEpisodes).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "append_only",
+    });
+    expect(contracts.publications).toEqual({
+      authority_level: "agent",
+      artifact_scope: "area",
+      ledger_policy: "append_only",
+    });
+    expect(contracts.pinnedSummaryProposal).toEqual({
+      authority_level: "agent",
+      artifact_scope: "session",
+      ledger_policy: "current_state",
+    });
+  });
+
+  it("settlement effect_type derives to read_only EffectClass (backward-compatible)", () => {
+    const tool = makeSubmitRpTurnTool();
+    const derived = deriveEffectClass(tool.executionContract!.effect_type);
+    expect(derived).toBe("read_only");
+    expect(tool.effectClass).toBe("read_only");
   });
 });
 

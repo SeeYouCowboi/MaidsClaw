@@ -1,6 +1,34 @@
 import { MaidsClawError } from "../core/errors.js";
-import type { ToolDefinition } from "../core/tools/tool-definition.js";
+import type { ArtifactContract, ToolDefinition } from "../core/tools/tool-definition.js";
 import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+
+const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract> = {
+  publicReply: {
+    authority_level: "agent",
+    artifact_scope: "world",
+    ledger_policy: "current_state",
+  },
+  privateCognition: {
+    authority_level: "agent",
+    artifact_scope: "private",
+    ledger_policy: "append_only",
+  },
+  privateEpisodes: {
+    authority_level: "agent",
+    artifact_scope: "private",
+    ledger_policy: "append_only",
+  },
+  publications: {
+    authority_level: "agent",
+    artifact_scope: "area",
+    ledger_policy: "append_only",
+  },
+  pinnedSummaryProposal: {
+    authority_level: "agent",
+    artifact_scope: "session",
+    ledger_policy: "current_state",
+  },
+};
 
 export function makeSubmitRpTurnTool(): ToolDefinition {
   return {
@@ -9,6 +37,14 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
       "Terminal tool for RP buffered turns. Captures the final outcome of an RP turn including the public reply, optional latent scratchpad, and optional private cognition commit. Must be the last tool call in an RP turn.",
     effectClass: "read_only",
     traceVisibility: "private_runtime",
+    executionContract: {
+      effect_type: "settlement",
+      turn_phase: "post_turn",
+      cardinality: "once",
+      capability_requirements: ["rp_settlement"],
+      trace_visibility: "private_runtime",
+    },
+    artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
     parameters: {
       type: "object",
       properties: {

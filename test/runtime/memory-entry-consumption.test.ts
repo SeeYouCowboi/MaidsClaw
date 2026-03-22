@@ -2,6 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { MaidsClawError } from "../../src/core/errors.js";
 import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
+import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";
+import type { ToolExecutionContract, ArtifactContract } from "../../src/core/tools/tool-definition.js";
+import { buildMemoryTools } from "../../src/memory/tools.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
 import { EmbeddingService } from "../../src/memory/embeddings.js";
@@ -2581,6 +2584,79 @@ describe("memory-entry-consumption: live runtime integration", () => {
     } finally {
       runtime.shutdown();
     }
+  });
+
+  it("all 7 memory tools have executionContract metadata after build", () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as never,
+      retrieval: {} as never,
+    });
+    expect(tools).toHaveLength(7);
+    for (const tool of tools) {
+      expect(tool.executionContract).toBeDefined();
+      expect(tool.executionContract!.effect_type).toBeDefined();
+      expect(tool.executionContract!.turn_phase).toBeDefined();
+      expect(tool.executionContract!.cardinality).toBeDefined();
+      expect(tool.executionContract!.trace_visibility).toBeDefined();
+    }
+  });
+
+  it("memory write tools have write_private effect_type, read tools have read_only", () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as never,
+      retrieval: {} as never,
+    });
+    const writeTools = tools.filter((t) =>
+      ["core_memory_append", "core_memory_replace"].includes(t.name),
+    );
+    const readTools = tools.filter((t) =>
+      ["memory_read", "narrative_search", "cognition_search", "memory_search", "memory_explore"].includes(t.name),
+    );
+
+    for (const t of writeTools) {
+      expect(t.executionContract!.effect_type).toBe("write_private");
+    }
+    for (const t of readTools) {
+      expect(t.executionContract!.effect_type).toBe("read_only");
+    }
+  });
+
+  it("deriveEffectClass maps effect_type to EffectClass correctly", () => {
+    expect(deriveEffectClass("read_only")).toBe("read_only");
+    expect(deriveEffectClass("write_private")).toBe("immediate_write");
+    expect(deriveEffectClass("write_shared")).toBe("immediate_write");
+    expect(deriveEffectClass("write_world")).toBe("immediate_write");
+    expect(deriveEffectClass("settlement")).toBe("read_only");
+  });
+
+  it("bootstrapped runtime memory tool schemas include executionContract", () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const schemas = runtime.toolExecutor.getSchemas();
+      const memorySchemaNames = [
+        "core_memory_append", "core_memory_replace", "memory_read",
+        "narrative_search", "cognition_search", "memory_search", "memory_explore",
+      ];
+
+      for (const name of memorySchemaNames) {
+        const schema = schemas.find((s) => s.name === name);
+        expect(schema).toBeDefined();
+        expect(schema!.executionContract).toBeDefined();
+        expect(schema!.executionContract!.trace_visibility).toBe("public");
+      }
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("cognition_search has capability_requirements in its contract", () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as never,
+      retrieval: {} as never,
+    });
+    const cogSearch = tools.find((t) => t.name === "cognition_search");
+    expect(cogSearch!.executionContract!.capability_requirements).toEqual(["cognition_read"]);
   });
 
   it("next-turn visibility: cognition current projection visible without async flush", async () => {

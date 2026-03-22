@@ -25,6 +25,9 @@ import { dispatchSlashCommand } from "../../src/terminal-cli/shell/slash-dispatc
 import type { SlashDispatchContext } from "../../src/terminal-cli/shell/slash-dispatcher.js";
 import { GatewayClient } from "../../src/terminal-cli/gateway-client.js";
 import { bootstrapApp } from "../../src/bootstrap/app-bootstrap.js";
+import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";
+import type { ToolExecutionContract } from "../../src/core/tools/tool-definition.js";
+import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
@@ -804,5 +807,62 @@ describe("CLI Acceptance Runbook", () => {
 			// next_commands must include maidsclaw prefix
 			expect(data.next_commands.every(c => c.includes("maidsclaw "))).toBe(true);
 		});
+	});
+
+	// ── Contract 13: Tool execution contracts on bootstrapped tools ──
+
+	describe("Contract 13: Tool execution contracts", () => {
+		it("bootstrapped runtime exposes executionContract on memory tool schemas", () => {
+			const app = bootstrapApp({ cwd: createTempDir("contract"), enableGateway: false, requireAllProviders: false });
+			try {
+				const schemas = app.runtime.toolExecutor.getSchemas();
+				const memoryNames = [
+					"core_memory_append", "core_memory_replace", "memory_read",
+					"narrative_search", "cognition_search", "memory_search", "memory_explore",
+				];
+				for (const name of memoryNames) {
+					const schema = schemas.find((s) => s.name === name);
+					expect(schema).toBeDefined();
+					expect(schema!.executionContract).toBeDefined();
+					const contract = schema!.executionContract as ToolExecutionContract;
+					expect(typeof contract.effect_type).toBe("string");
+					expect(typeof contract.turn_phase).toBe("string");
+					expect(typeof contract.cardinality).toBe("string");
+					expect(typeof contract.trace_visibility).toBe("string");
+				}
+			} finally {
+				app.shutdown();
+			}
+		});
+
+		it("submit_rp_turn tool definition has executionContract and 5 artifactContracts", () => {
+			const tool = makeSubmitRpTurnTool();
+			expect(tool.executionContract).toBeDefined();
+			expect(tool.executionContract!.effect_type).toBe("settlement");
+			expect(tool.artifactContracts).toBeDefined();
+			expect(Object.keys(tool.artifactContracts!)).toHaveLength(5);
+			expect(deriveEffectClass(tool.executionContract!.effect_type)).toBe("read_only");
+			expect(tool.effectClass).toBe("read_only");
+		});
+
+		it("non-memory tools do NOT have executionContract yet", () => {
+			const app = bootstrapApp({ cwd: createTempDir("contract-non-mem"), enableGateway: false, requireAllProviders: false });
+			try {
+				const schemas = app.runtime.toolExecutor.getSchemas();
+				const memoryAndSettlementNames = new Set([
+					"core_memory_append", "core_memory_replace", "memory_read",
+					"narrative_search", "cognition_search", "memory_search", "memory_explore",
+					"submit_rp_turn",
+				]);
+				const nonMemorySchemas = schemas.filter((s) => !memoryAndSettlementNames.has(s.name));
+				for (const schema of nonMemorySchemas) {
+					expect(schema.executionContract).toBeUndefined();
+				}
+			} finally {
+				app.shutdown();
+			}
+		});
+
+		afterEach(() => { cleanupTempDirs(); });
 	});
 });

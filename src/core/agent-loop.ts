@@ -29,6 +29,7 @@ import {
 	getFilteredSchemas,
 } from "./tools/tool-access-policy.js";
 import { ToolExecutor } from "./tools/tool-executor.js";
+import { deriveEffectClass } from "./tools/tool-definition.js";
 import type { ProjectionAppendix } from "./types.js";
 
 type PendingToolCall = {
@@ -614,14 +615,20 @@ export class AgentLoop {
 						continue;
 					}
 
-					const toolSchema = bufferedToolExecutor
-						.getSchemas()
-						.find((schema) => schema.name === toolCall.name);
-					if (
-						!toolSchema ||
-						(toolSchema.effectClass !== "read_only" &&
-							toolSchema.traceVisibility !== "private_runtime")
-					) {
+				const toolSchema = bufferedToolExecutor
+					.getSchemas()
+					.find((schema) => schema.name === toolCall.name);
+				const resolvedEffectClass = toolSchema?.executionContract
+					? deriveEffectClass(toolSchema.executionContract.effect_type)
+					: toolSchema?.effectClass;
+				const resolvedTraceVisibility = toolSchema?.executionContract
+					? toolSchema.executionContract.trace_visibility
+					: toolSchema?.traceVisibility;
+				if (
+					!toolSchema ||
+					(resolvedEffectClass !== "read_only" &&
+						resolvedTraceVisibility !== "private_runtime")
+				) {
 						// Skip non-allowed tools gracefully instead of aborting
 						loopLogger?.warn("Skipping non-allowed tool in buffered RP mode", {
 							tool: toolCall.name,

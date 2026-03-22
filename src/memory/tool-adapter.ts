@@ -73,5 +73,6 @@ export function adaptMemoryTool(memTool: MemoryToolDefinition, services: Runtime
   };
   if (memTool.effectClass) adapted.effectClass = memTool.effectClass;
   if (memTool.traceVisibility) adapted.traceVisibility = memTool.traceVisibility;
+  if (memTool.executionContract) adapted.executionContract = memTool.executionContract;
   return adapted;
 }
