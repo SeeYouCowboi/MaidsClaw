@@ -85,6 +85,11 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent_updated ON search_docs_cognition(agent_id, updated_at DESC)`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_cognition_fts USING fts5(content, tokenize='trigram')`,
 
+  // ── Private Episode Events (append-only ledger) ──
+  `CREATE TABLE IF NOT EXISTS private_episode_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, session_id TEXT NOT NULL, settlement_id TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('speech', 'action', 'observation', 'state_change')), summary TEXT NOT NULL, private_notes TEXT, location_entity_id INTEGER, location_text TEXT, valid_time INTEGER, committed_time INTEGER NOT NULL, source_local_ref TEXT, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_private_episode_events_settlement ON private_episode_events(settlement_id, agent_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent ON private_episode_events(agent_id, created_at DESC)`,
+
   // ── Shared Blocks V1 ──
   `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
@@ -283,6 +288,21 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       addColumnIfMissing(db, "shared_block_patch_log", "before_value", "TEXT");
       addColumnIfMissing(db, "shared_block_patch_log", "after_value", "TEXT");
       addColumnIfMissing(db, "shared_block_patch_log", "source_ref", "TEXT NOT NULL DEFAULT 'system'");
+    },
+  },
+  {
+    id: "memory:011:add-private-episode-events",
+    description: "Add private_episode_events append-only ledger",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS private_episode_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, session_id TEXT NOT NULL, settlement_id TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('speech', 'action', 'observation', 'state_change')), summary TEXT NOT NULL, private_notes TEXT, location_entity_id INTEGER, location_text TEXT, valid_time INTEGER, committed_time INTEGER NOT NULL, source_local_ref TEXT, created_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_private_episode_events_settlement ON private_episode_events(settlement_id, agent_id)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent ON private_episode_events(agent_id, created_at DESC)`,
+      );
     },
   },
 ];

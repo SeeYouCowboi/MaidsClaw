@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
+import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
@@ -419,7 +420,67 @@ describe("E2E: RP memory pipeline", () => {
 		cleanupDb(dbPath);
 	});
 
-	// ── Scenario 8: Full cognition + search integration ──────────────
+	// ── Scenario 8: Episode append-only ledger ──────────────────────
+
+	it("episode ledger stores private episodes without touching agent_event_overlay", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const repo = new EpisodeRepository(db);
+
+		const now = Date.now();
+		const settlementId = "stl:ep-test-1";
+
+		repo.append({
+			agentId: "rp:alice",
+			sessionId: "session-1",
+			settlementId,
+			category: "speech",
+			summary: "Alice spoke to the user about their day",
+			privateNotes: "She noticed the user seemed tired",
+			locationText: "Living Room",
+			committedTime: now,
+			sourceLocalRef: "ep:local-1",
+		});
+
+		repo.append({
+			agentId: "rp:alice",
+			sessionId: "session-1",
+			settlementId,
+			category: "observation",
+			summary: "The user's tea was getting cold",
+			committedTime: now,
+		});
+
+		const episodes = repo.readBySettlement(settlementId, "rp:alice");
+		expect(episodes).toHaveLength(2);
+		expect(episodes[0].category).toBe("speech");
+		expect(episodes[1].category).toBe("observation");
+
+		const overlayCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM agent_event_overlay WHERE agent_id = 'rp:alice'",
+		);
+		expect(overlayCount?.count).toBe(0);
+
+		let thoughtFailed = false;
+		try {
+			repo.append({
+				agentId: "rp:alice",
+				sessionId: "session-1",
+				settlementId,
+				category: "thought",
+				summary: "Internal monologue should be rejected",
+				committedTime: now,
+			});
+		} catch {
+			thoughtFailed = true;
+		}
+		expect(thoughtFailed).toBe(true);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	// ── Scenario 9: Full cognition + search integration ──────────────
 
 	it("private cognition creates overlays searchable via private FTS5", async () => {
 		const { dbPath, db } = createTempDb();

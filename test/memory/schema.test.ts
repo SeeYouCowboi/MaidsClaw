@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(27);
+		expect(nonFtsCount?.count).toBe(28);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -500,7 +500,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(10);
+		expect(migrationCount?.count).toBe(11);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -636,6 +636,102 @@ describe("memory schema", () => {
 			nextSeqFailed = true;
 		}
 		expect(nextSeqFailed).toBe(false);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("creates private_episode_events table with correct schema", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const table = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='private_episode_events'",
+		);
+		expect(table?.name).toBe("private_episode_events");
+
+		const columns = listColumns(db, "private_episode_events");
+		expect(columns).toContain("id");
+		expect(columns).toContain("agent_id");
+		expect(columns).toContain("session_id");
+		expect(columns).toContain("settlement_id");
+		expect(columns).toContain("category");
+		expect(columns).toContain("summary");
+		expect(columns).toContain("private_notes");
+		expect(columns).toContain("location_entity_id");
+		expect(columns).toContain("location_text");
+		expect(columns).toContain("valid_time");
+		expect(columns).toContain("committed_time");
+		expect(columns).toContain("source_local_ref");
+		expect(columns).toContain("created_at");
+
+		const indexNames = db
+			.query<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%private_episode%' ORDER BY name",
+			)
+			.map((row) => row.name);
+
+		expect(indexNames).toContain("idx_private_episode_events_settlement");
+		expect(indexNames).toContain("idx_private_episode_events_agent");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("enforces private_episode_events category CHECK constraint", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const now = Date.now();
+		let validInsertFailed = false;
+		try {
+			db.run(
+				"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "s1", "stl:1", "speech", "test", now, now],
+			);
+		} catch {
+			validInsertFailed = true;
+		}
+		expect(validInsertFailed).toBe(false);
+
+		let thoughtFailed = false;
+		try {
+			db.run(
+				"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "s1", "stl:2", "thought", "internal", now, now],
+			);
+		} catch {
+			thoughtFailed = true;
+		}
+		expect(thoughtFailed).toBe(true);
+
+		let invalidCatFailed = false;
+		try {
+			db.run(
+				"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "s1", "stl:3", "feeling", "warm", now, now],
+			);
+		} catch {
+			invalidCatFailed = true;
+		}
+		expect(invalidCatFailed).toBe(true);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("private_episode_events migration is idempotent", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+		runMemoryMigrations(db);
+
+		const table = db.get<{ name: string }>(
+			"SELECT name FROM sqlite_master WHERE type='table' AND name='private_episode_events'",
+		);
+		expect(table?.name).toBe("private_episode_events");
 
 		db.close();
 		cleanupDb(dbPath);
