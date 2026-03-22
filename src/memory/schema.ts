@@ -61,7 +61,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
-  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
   `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'private_event', 'private_belief')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
@@ -338,6 +338,28 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_cognition_current_agent_key ON private_cognition_current(agent_id, cognition_key)`,
+      );
+    },
+  },
+  {
+    id: "memory:014:add-pinned-labels",
+    description: "Widen core_memory_blocks label CHECK to include pinned_summary and pinned_index",
+    up: (db: Db) => {
+      // SQLite cannot ALTER CHECK constraints in-place. Since the DDL uses
+      // CREATE TABLE IF NOT EXISTS (idempotent), new databases already have the
+      // widened constraint. For existing databases the CHECK is enforced at
+      // INSERT/UPDATE time; we recreate the table to match the widened DDL.
+      db.exec(`CREATE TABLE IF NOT EXISTS _cmb_backup AS SELECT * FROM core_memory_blocks`);
+      db.exec(`DROP TABLE IF EXISTS core_memory_blocks`);
+      db.exec(
+        `CREATE TABLE core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `INSERT INTO core_memory_blocks SELECT * FROM _cmb_backup`,
+      );
+      db.exec(`DROP TABLE _cmb_backup`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
       );
     },
   },

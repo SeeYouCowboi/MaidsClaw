@@ -1,0 +1,54 @@
+Task T10: Error/Edge Case Evidence
+====================================
+
+## server start — flag validation errors
+
+### Unknown flags rejected (exit 2)
+$ maidsclaw server start --bogus
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "server start": --bogus
+
+### --port without value (exit 2)
+$ maidsclaw server start --json --port
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--port requires a numeric value","exitCode":2}}
+
+### Invalid port range (exit 2)
+$ maidsclaw server start --json --port 99999
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: 99999. Must be 1-65535.","exitCode":2}}
+
+### Non-numeric port (exit 2)
+$ maidsclaw server start --json --port abc
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: abc. Must be 1-65535.","exitCode":2}}
+
+### --host without value (exit 2)
+$ maidsclaw server start --json --host
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--host requires a value","exitCode":2}}
+
+## health — connection failure errors
+
+### Unreachable server (exit 4)
+$ maidsclaw health --json --base-url http://127.0.0.1:19999
+{"ok":false,"command":"health","error":{"code":"CONNECTION_FAILED","message":"Failed to connect to server at http://127.0.0.1:19999: Unable to connect. Is the computer able to access the url?","exitCode":4}}
+
+### Unknown flags rejected (exit 2)
+$ maidsclaw health --bogus
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "health": --bogus
+
+### --base-url without value (exit 2)
+$ maidsclaw health --json --base-url
+{"ok":false,"command":"health","error":{"code":"MISSING_FLAG_VALUE","message":"--base-url requires a URL value","exitCode":2}}
+
+## health — successful responses (mock server tests)
+
+### Text mode with degraded memory_pipeline
+healthz: ok
+readyz: degraded
+  storage: ok
+  models: ok
+  tools: ok
+  memory_pipeline: degraded
+
+### JSON mode preserves raw responses
+{"ok":true,"command":"health","data":{"healthz":{"status":"ok"},"readyz":{"status":"ok","storage":"ok","models":"ok","tools":"ok","memory_pipeline":"ok"}}}
+
+### JSON mode preserves degraded status
+{"ok":true,"command":"health","data":{"healthz":{"status":"degraded"},"readyz":{"status":"degraded","storage":"ok","models":"ok","tools":"ok","memory_pipeline":"degraded"}}}

@@ -1,0 +1,45 @@
+Task T9: config show and config write-runtime — Evidence
+========================================================
+
+Date: 2026-03-17
+
+## Files Modified
+- src/cli/commands/config.ts — Added handleConfigShow and handleConfigWriteRuntime, replaced stubs
+
+## Files Created
+- test/cli/config-show-write-runtime.test.ts — 16 tests covering both commands
+
+## Implementation Summary
+
+### config show
+- Selectors: server, storage, memory, runtime, providers, agents, personas, auth, all (default)
+- Flags: --json, --show-secrets
+- Secret redaction: deep-walks object, redacts values whose keys match
+  apikey, api_key, secret, token, password, auth, accesstoken patterns
+- --show-secrets bypasses redaction (prints WARNING in text mode)
+- Loads data from:
+  - loadConfig({ cwd, requireAllProviders: false }) for server/storage/memory/providers
+  - loadRuntimeConfig() for runtime section
+  - loadAuthConfig() for auth section
+  - Direct JSON parse for agents.json and personas.json
+- Runtime section includes effectiveOrganizerEmbeddingModelId
+- JSON envelope: { ok: true, command: "config show", data: { selector, sections } }
+
+### config write-runtime
+- Required: --migration-chat-model, --embedding-model
+- Optional: --organizer-embedding-model (defaults to embedding model)
+- Reads existing runtime.json and merges only memory section
+- Preserves all unrelated keys in existing file
+- --force overwrites malformed existing file
+- Creates config/ directory if missing
+- JSON envelope: { ok: true, command: "config write-runtime", data: { written, effectiveOrganizerEmbeddingModelId } }
+
+## Test Results
+- 16 tests pass (config show: 7, config write-runtime: 9)
+- Full suite: 913 pass, 0 fail
+- Build: 0 new errors (pre-existing agent.ts:370 unrelated error)
+
+## Verification Commands
+- bun run build → only pre-existing agent.ts error
+- bun test → 913 pass, 0 fail
+- bun test test/cli/config-show-write-runtime.test.ts → 16 pass, 0 fail

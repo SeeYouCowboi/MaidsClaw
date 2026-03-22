@@ -1,0 +1,25 @@
+Task 5: Gateway Contract Hardening — Test Evidence
+===================================================
+Date: 2026-03-11
+Full suite: 723 pass, 0 fail, 1997 expect() calls across 55 files
+
+Key test files validated:
+- test/core/agent-loop.test.ts: 7 pass (includes tool_execution_result emission tests)
+- test/gateway/gateway.test.ts: 27 pass (includes recovery, error/done exclusivity, token accumulation, tool mapping tests)
+- test/core/models/model-services.test.ts: 10 pass (includes stream_options and usage-only chunk tests)
+- test/core/models/bootstrap.test.ts: 10 pass
+- test/runtime/turn-service.test.ts: 8 pass
+- test/runtime/prompt-integration.test.ts: 2 pass (updated for tool_execution_result chunk)
+
+Changes made:
+1. Added ToolExecutionResultChunk to src/core/chunk.ts
+2. Emit tool_execution_result after toolExecutor.execute() in agent-loop.ts
+3. Fixed chunkToGatewayEvent: tool_use_end -> tool_call{arguments_complete}, tool_execution_result -> tool_result{completed|failed}
+4. Fixed token accumulation: handle message_end BEFORE chunkToGatewayEvent (was dead code)
+5. Fixed error/done exclusivity: track hadError flag, only emit done when no error
+6. Added recovery_required session blocking in handleTurnStream
+7. Added handleRecoverSession controller + /recover route
+8. Added supportsStreamingUsage to ProviderCatalogEntry (openai only)
+9. OpenAI provider sends stream_options.include_usage when capability set
+10. OpenAI provider normalizes usage-only final chunks into message_end token fields
+11. When supportsStreamingUsage=true, defers message_end to [DONE] to capture late usage data

@@ -1,0 +1,24 @@
+T6 Error Case Evidence — Tool Execution Contract
+=================================================
+
+Test: deriveEffectClass maps effect_type to EffectClass correctly
+- read_only → read_only ✓
+- write_private → immediate_write ✓
+- write_shared → immediate_write ✓
+- write_world → immediate_write ✓
+- settlement → read_only ✓
+
+Test: non-memory tools do NOT have executionContract yet
+- All non-memory/settlement tool schemas have executionContract === undefined ✓
+
+Test: settlement effect_type derives to read_only EffectClass (backward-compatible)
+- submit_rp_turn.executionContract.effect_type = "settlement"
+- deriveEffectClass("settlement") = "read_only"
+- submit_rp_turn.effectClass = "read_only" (legacy field preserved)
+- Backward compatibility: existing effectClass checks in agent-loop continue to work ✓
+
+Test: cognition_search has capability_requirements in its contract
+- cognition_search.executionContract.capability_requirements = ["cognition_read"] ✓
+
+All 96 tests pass across 3 target files.
+Full suite: 1361 pass, 0 fail (baseline was 1350).

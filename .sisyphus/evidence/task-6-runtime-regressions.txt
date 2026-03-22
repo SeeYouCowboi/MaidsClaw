@@ -1,0 +1,51 @@
+Task 6 — Real Gateway Contract Regression Coverage
+Date: 2026-03-11
+
+== Test Run Output ==
+
+bun test test/gateway/gateway.test.ts
+  31 pass, 0 fail, 145 expect() calls
+  Ran 31 tests across 1 file. [228.00ms]
+
+bun test (full suite)
+  727 pass, 0 fail, 2020 expect() calls
+  Ran 727 tests across 55 files. [1349.00ms]
+
+== New Tests Added (describe "Real TurnService-backed gateway path") ==
+
+1. "real-path turn completes with done event"
+   - bootstrapRuntime({ databasePath: ":memory:", modelRegistry }) with mock yielding text_delta + message_end
+   - Verified: status + delta + done events, no error
+   - total_tokens = inputTokens(5) + outputTokens(3) = 8 ✓
+
+2. "real-path failed turn sets recovery_required and blocks next turn"
+   - Mock yields: text_delta (partial) + error chunk
+   - First turn: verified error event, no done event
+   - Second turn (same session): verified SESSION_RECOVERY_REQUIRED error code + retriable=false ✓
+
+3. "real-path recovery clears blocked state"
+   - Same error mock triggers recovery_required
+   - Verified runtime.sessionService.isRecoveryRequired(session_id) === true after failure
+   - POST /recover with { action: "discard_partial_turn" } returns 200 + { recovered: true }
+   - Switched mock to success chunks (text_delta + message_end)
+   - Next turn succeeds: done event, no error ✓
+
+4. "real-path unknown agent_id is rejected at session creation"
+   - hasAgent: (id) => runtime.agentRegistry.has(id) wired to real AgentRegistry
+   - POST /v1/sessions with { agent_id: "unknown:agent" } → 400 AGENT_NOT_FOUND
+   - Error message contains "unknown:agent" ✓
+
+== Contracts Verified ==
+
+- Real TurnService (not stub) path exercises full DB commit path via CommitService + InteractionStore
+- recovery_required is set ONLY when hasAssistantVisibleActivity=true (partial text before error)
+- Recovery endpoint resets blocked state, allowing next turn
+- hasAgent hook backed by real AgentRegistry.has() rejects unknown IDs at session creation
+- error/done exclusivity: when error chunk yielded, done is suppressed
+- Token accumulation: message_end inputTokens + outputTokens are summed in done event
+
+== Delta from Prior Tests ==
+
+Previous: 723 tests (stub-only path in gateway suite)
+Added: 4 real-path regression tests
+Final: 727 tests, all passing

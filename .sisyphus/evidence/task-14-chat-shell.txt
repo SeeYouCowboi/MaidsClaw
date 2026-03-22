@@ -1,0 +1,48 @@
+Task T14: maidsclaw chat — Local Mode REPL + Inspect Session Shell
+==================================================================
+
+Files created:
+  src/cli/shell/state.ts           — ShellState interface + createShellState() factory
+  src/cli/shell/slash-dispatcher.ts — Slash command routing (15 commands)
+  src/cli/shell/session-shell.ts   — SessionShell class with readline REPL loop
+  src/cli/commands/chat.ts         — registerChatCommand() entry point
+
+Files modified:
+  scripts/cli.ts                   — Replaced chat stub with registerChatCommand() import
+
+Tests:
+  test/cli/chat-shell.test.ts      — 20 tests, all passing
+
+Slash commands implemented:
+  /inspect, /summary  — Summary view for lastRequestId
+  /transcript         — Transcript view for sessionId
+  /prompt             — Prompt view for lastRequestId
+  /chunks             — Chunks view for lastRequestId
+  /logs               — Logs view with request/session filters
+  /memory             — Memory view for sessionId
+  /diagnose           — Diagnostic catalog for lastRequestId
+  /trace              — Trace export for lastRequestId
+  /raw on|off         — Toggle raw observation mode
+  /recover            — Session recovery
+  /close              — Session close + exit
+  /mode local|gateway — Switch operating mode
+  /exit, /quit        — Exit shell
+  /help               — Print help
+
+Key design decisions:
+  - Slash commands delegate to view models from T16, NOT shell-only data models
+  - Missing context (no lastRequestId) → explicit error, NOT silent guessing
+  - chat --json → rejected with EXIT_USAGE (exit code 2)
+  - Auto-session creation when --session not provided
+  - Compact post-turn status: [req:X | settle:Y | reply:yes|no | recovery:yes|no]
+  - Gateway mode accepted in flags but not implemented (errors at runtime)
+
+Test evidence:
+  - ShellState initializes correctly with defaults and overrides
+  - Slash dispatcher routes /help, /exit, /quit correctly
+  - /raw on|off toggles state properly
+  - /mode local|gateway switches mode properly
+  - Missing lastRequestId → error message (not crash)
+  - chat --json → CliError with INVALID_FLAG code, exit 2
+  - chat without --agent → CliError with MISSING_ARGUMENT code, exit 2
+  - chat with --bogus → CliError with UNKNOWN_FLAGS code, exit 2

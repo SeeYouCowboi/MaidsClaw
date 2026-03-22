@@ -1,0 +1,42 @@
+Task T5: CLI Core Scaffold — Error Path Evidence
+=================================================
+
+Date: 2026-03-17
+
+Error Path 1: Unknown command
+  Input:  bun run cli badcommand --json
+  Output: {"ok":false,"command":"badcommand","error":{"code":"UNKNOWN_COMMAND","message":"Unknown command: \"badcommand\". Available: config, server, health, agent, session, turn, chat, debug","exitCode":2}}
+  Exit:   2
+
+Error Path 2: chat --json rejection
+  Input:  bun run cli chat --json
+  Output: {"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat command does not support --json mode","exitCode":2}}
+  Exit:   2
+
+Error Path 3: Unknown subcommand (text mode)
+  Input:  bun run cli config bad
+  Output: Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "bad" for "config". Available: init, validate, doctor, show, write-runtime
+  Exit:   2
+
+Error Path 4: Missing subcommand
+  Input:  bun run cli config
+  Output: Error [UNKNOWN_SUBCOMMAND]: "config" requires a subcommand. Available: init, validate, doctor, show, write-runtime
+  Exit:   2
+
+Error Path 5: No command provided
+  Input:  bun run cli
+  Output: (usage text to stderr)
+  Exit:   2
+
+Error Path 6: --cwd without value
+  Input:  bun run cli --cwd
+  Output: Error [MISSING_CWD_VALUE]: --cwd requires a path argument
+  Exit:   2
+
+Error Path 7: Unknown flags on stub command
+  Input:  bun run cli health --verbose
+  Output: Error [UNKNOWN_FLAGS]: Unknown flag(s) for "health": --verbose
+  Exit:   2
+
+All error paths produce deterministic JSON error envelopes when --json is active,
+or human-readable stderr messages in text mode.

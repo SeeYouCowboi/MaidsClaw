@@ -1,0 +1,71 @@
+Task T6: config init — Evidence
+================================
+
+## Files Created/Modified
+
+1. NEW: src/cli/commands/config.ts
+   - registerConfigCommands() function
+   - handleConfigInit handler (--force, --with-runtime, --json)
+   - 7 source→target file mappings (INIT_FILES)
+   - configStub() for validate, doctor, show, write-runtime
+   - Exported types: InitFileAction, InitFileResult, ConfigInitData
+
+2. MODIFIED: scripts/cli.ts
+   - Added import for registerConfigCommands from src/cli/commands/config.js
+   - Replaced manual config stub loop with registerConfigCommands() call
+
+3. NEW: test/cli/config-init.test.ts
+   - 10 tests covering all required scenarios
+
+## Test Results
+
+bun test test/cli/config-init.test.ts
+  10 pass, 0 fail, 86 expect() calls
+
+Full suite:
+  852 pass, 0 fail across 60 files
+
+## Build
+
+bun run build (tsc --noEmit): PASS — 0 errors
+
+## Test Coverage Matrix
+
+| Test | Scenario | Assertions |
+|------|----------|------------|
+| 1 | Fresh init JSON — 7 files created | ok, command, 7 files, all "created", targets match, files exist |
+| 2 | Fresh init text — output mentions targets | Contains target paths and "created" |
+| 3 | Re-run without --force — all skipped | 7 files, all "skipped" |
+| 4 | Re-run with --force — all overwritten | 7 files, all "overwritten" |
+| 5 | --with-runtime includes runtime.json | runtime.json in result, action "created" |
+| 6 | Mixed actions (some pre-exist) | .env skipped, others created, content preserved |
+| 7 | --force overwrites pre-existing | .env overwritten, content matches example |
+| 8 | Creates config/ directory | Directory created, files exist |
+| 9 | Copied files match source | runtime.json content === runtime.example.json |
+| 10 | --quiet produces no stdout | Empty stdout, files still created |
+
+## JSON Envelope Shape
+
+{
+  "ok": true,
+  "command": "config init",
+  "data": {
+    "files": [
+      { "source": ".env.example", "target": ".env", "action": "created" },
+      { "source": "config/providers.example.json", "target": "config/providers.json", "action": "created" },
+      { "source": "config/auth.example.json", "target": "config/auth.json", "action": "created" },
+      { "source": "config/agents.example.json", "target": "config/agents.json", "action": "created" },
+      { "source": "config/personas.example.json", "target": "config/personas.json", "action": "created" },
+      { "source": "config/lore.example.json", "target": "config/lore.json", "action": "created" },
+      { "source": "config/runtime.example.json", "target": "config/runtime.json", "action": "created" }
+    ]
+  }
+}
+
+## Flags
+
+- --force: overwrites existing files (action="overwritten")
+- --with-runtime: accepted, runtime.json always included (forward-compat)
+- --json: JSON envelope output
+- --quiet: suppresses text output
+- Unknown flags: rejected with CliError UNKNOWN_FLAGS exit 2

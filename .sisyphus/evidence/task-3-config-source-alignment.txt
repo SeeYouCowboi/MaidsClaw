@@ -1,0 +1,24 @@
+Task T3 evidence: Phase 1 config source alignment
+
+Changed files:
+- config/runtime.example.json
+- src/core/config.ts
+- src/persona/loader.ts
+- src/lore/loader.ts
+- src/lore/service.ts
+- src/bootstrap/runtime.ts
+- src/bootstrap/types.ts
+- src/bootstrap/app-bootstrap.ts
+
+Runtime loading behavior after change:
+1) bootstrapRuntime({ cwd }) resolves config roots from cwd or process.cwd().
+2) PersonaLoader reads <cwd>/config/personas.json first when present.
+3) loadLoreEntries reads <cwd>/config/lore.json first when present.
+4) If config personas/lore files are absent, runtime falls back to data/personas/*.json and data/lore/*.json.
+5) loadConfig/loadRuntimeConfig now resolve config/runtime.json and storage paths relative to cwd.
+
+Canonical Phase 1 files used by runtime:
+- config/agents.json (existing CLI/runtime config surface)
+- config/personas.json (now read by PersonaLoader)
+- config/lore.json (now read by lore loader)
+- config/runtime.json (already used by loadRuntimeConfig)

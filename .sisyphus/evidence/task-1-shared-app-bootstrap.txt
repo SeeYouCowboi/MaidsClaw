@@ -1,0 +1,18 @@
+Task: T1 shared app bootstrap delegation evidence
+Date: 2026-03-17
+
+grep "bootstrapRuntime\(" src/index.ts
+- no matches
+
+grep "bootstrapRuntime\(" scripts/start-dev.ts
+- no matches
+
+grep "bootstrapApp\(" src/index.ts
+- src/index.ts:10: const app = bootstrapApp({
+
+grep "bootstrapApp\(" scripts/start-dev.ts
+- scripts/start-dev.ts:24: const app = bootstrapApp({
+
+Result:
+- src/index.ts and scripts/start-dev.ts no longer call bootstrapRuntime() directly.
+- both entrypoints delegate startup assembly through bootstrapApp().

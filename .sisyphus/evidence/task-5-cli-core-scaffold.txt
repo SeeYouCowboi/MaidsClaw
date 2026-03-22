@@ -1,0 +1,70 @@
+Task T5: CLI Core Scaffold — Evidence of Completion
+====================================================
+
+Date: 2026-03-17
+Task: Build zero-dependency CLI core scaffold, parser, output contracts, and exit codes
+
+Files Created:
+  - src/cli/types.ts      — CliMode, CliDiagnostic, JsonEnvelope types
+  - src/cli/errors.ts     — EXIT_OK/USAGE/CONFIG/RUNTIME/PARTIAL constants, CliError class
+  - src/cli/context.ts    — CliContext interface, parseGlobalFlags(argv)
+  - src/cli/output.ts     — writeJson, writeText, writeError helpers
+  - src/cli/parser.ts     — registerCommand, dispatch, resetCommands, ParsedArgs, CommandRoute
+  - scripts/cli.ts        — CLI entry point with stub command registrations
+  - test/cli/parser.test.ts — 18 parser tests
+
+Files Modified:
+  - package.json          — Added "cli": "bun run scripts/cli.ts" script
+
+Build Verification:
+  $ bun run build   → tsc --noEmit exits 0 (clean)
+  $ bun test        → 842 pass, 0 fail, 2446 expect() calls
+
+CLI Verification:
+  $ bun run cli --help
+  → Shows usage with all 8 namespaces: config, server, health, agent, session, turn, chat, debug
+
+  $ bun run cli config validate --json
+  → {"ok":true,"command":"config validate","mode":"local","data":{"status":"not_implemented"}}
+
+  $ bun run cli chat --json
+  → {"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat command does not support --json mode","exitCode":2}}
+  → Exit code: 2
+
+  $ bun run cli badcommand --json
+  → {"ok":false,"command":"badcommand","error":{"code":"UNKNOWN_COMMAND","message":"...","exitCode":2}}
+  → Exit code: 2
+
+Registered Command Namespaces (all stubs):
+  config:   init, validate, doctor, show, write-runtime
+  server:   start
+  health:   (namespace-only)
+  agent:    list, show, create-rp, create-task, enable, disable, remove, validate
+  session:  create, close, recover
+  turn:     send
+  chat:     (namespace-only, rejects --json)
+  debug:    summary, transcript, prompt, chunks, logs, memory, trace, diagnose
+
+Exit Code Mapping:
+  0 = EXIT_OK      (success)
+  2 = EXIT_USAGE   (bad flags, unknown command, invalid args)
+  3 = EXIT_CONFIG  (configuration error)
+  4 = EXIT_RUNTIME (runtime/service error)
+  5 = EXIT_PARTIAL (partial result, degraded diagnostics)
+
+JSON Envelope Contract:
+  { ok: boolean, command: string, mode?: string, data?: T, diagnostics?: [], error?: { code, message, exitCode } }
+
+Zero Runtime Dependencies:
+  - No commander, yargs, minimist, or any CLI framework added
+  - Pure process.argv parsing with table-driven routing
+
+Design Decisions:
+  - dispatch() throws CliError for all error conditions (testable)
+  - dispatch() calls writeError() before throwing (correct output in both JSON and text modes)
+  - Entry point (scripts/cli.ts) catches CliError and calls process.exit(exitCode)
+  - Handlers write success output themselves; throw CliError for errors
+  - Global flags (--json, --quiet, --cwd) extracted from anywhere in argv
+  - chat handler explicitly rejects --json as per spec (only interactive command)
+  - Stub handlers reject ALL unknown flags (no silent ignore)
+  - resetCommands() exported for test isolation

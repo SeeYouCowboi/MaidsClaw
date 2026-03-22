@@ -1,0 +1,25 @@
+Task: T12 - Define normalized Local Mode turn/result contract and transport abstraction
+Date: 2026-03-17
+
+Implemented:
+- Added src/cli/local-runtime.ts with LocalRuntime.executeTurn(LocalTurnParams) -> TurnExecutionResult.
+- Added createLocalRuntime(runtime: RuntimeBootstrapResult).
+- Extended src/cli/types.ts with PublicChunkRecord, PrivateCommitSummary, TurnExecutionResult.
+- Added test/cli/local-runtime.test.ts covering:
+  - silent-private RP success normalization
+  - public RP success normalization
+
+Verification:
+1) bun test "test/cli/local-runtime.test.ts"
+   Result: PASS
+   Output:
+   - 2 pass
+   - 0 fail
+   - Ran 2 tests across 1 file.
+
+2) bun test
+   Result: PASS
+   Output:
+   - 930 pass
+   - 0 fail
+   - Ran 930 tests across 66 files.

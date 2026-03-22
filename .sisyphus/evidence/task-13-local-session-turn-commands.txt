@@ -1,0 +1,63 @@
+Task T13: Local Mode session * and turn send — Evidence
+
+## Files Created/Modified
+
+### New Files
+- src/cli/commands/session.ts (267 lines) — session create, close, recover commands
+- src/cli/commands/turn.ts (239 lines) — turn send command
+- test/cli/session-turn.test.ts (510 lines) — 14 tests covering all commands
+
+### Modified Files
+- scripts/cli.ts — replaced session/turn stub registrations with real imports:
+  - `import { registerSessionCommands } from "../src/cli/commands/session.js"`
+  - `import { registerTurnCommands } from "../src/cli/commands/turn.js"`
+  - Calls `registerSessionCommands()` and `registerTurnCommands()`
+
+## Command Implementations
+
+### session create
+- `session create --agent <agent_id> [--json]`
+- Bootstraps via `bootstrapApp({ cwd, enableGateway: false, requireAllProviders: false })`
+- Calls `runtime.sessionService.createSession(agentId)`
+- Returns `{ ok: true, data: { session_id, agent_id, created_at } }`
+- Text mode: prints session_id
+
+### session close
+- `session close --session <session_id> [--json]`
+- Validates session exists and is not already closed
+- Calls `runtime.sessionService.closeSession(sessionId)`
+- Returns `{ ok: true, data: { session_id, closed_at, flush_ran } }`
+- Error codes: SESSION_NOT_FOUND, SESSION_ALREADY_CLOSED
+
+### session recover
+- `session recover --session <session_id> [--json]`
+- Validates session exists
+- EXPLICITLY errors if session is NOT in recovery state (NOT_IN_RECOVERY error)
+- Calls `clearRecoveryRequired(sessionId)` on success
+- Returns `{ ok: true, data: { session_id, recovered: true, note: "recovery does not canonize partial output" } }`
+- Error codes: SESSION_NOT_FOUND, NOT_IN_RECOVERY
+
+### turn send
+- `turn send --session <session_id> --text <text> [--agent <agent_id>] [--mode local|gateway] [--raw] [--save-trace] [--json]`
+- Validates session exists and is open
+- Resolves agent_id: explicit --agent > session's agent_id
+- Creates `LocalRuntime` via `createLocalRuntime(app.runtime)`
+- Returns TurnExecutionResult fields: session_id, request_id, settlement_id?, assistant_text, has_public_reply, private_commit, recovery_required
+- --raw: includes public_chunks and tool_events (does NOT expose submit_rp_turn payloads)
+- --save-trace: passes saveTrace flag to executeTurn
+- Silent-private turns: ok: true, assistant_text: "", has_public_reply: false, private_commit.present: true
+- --mode gateway: throws NOT_IMPLEMENTED (reserved for T19)
+- Error codes: SESSION_NOT_FOUND, SESSION_CLOSED, BOOTSTRAP_FAILED, NOT_IMPLEMENTED, INVALID_FLAG_VALUE
+
+## Invariants Maintained
+- Silent-private turns are NOT treated as failures
+- session recover throws NOT_IN_RECOVERY for non-recovery sessions (not silent no-op)
+- --raw does NOT expose internal submit_rp_turn payloads
+- All commands use bootstrapApp() — no new bootstrap path
+- Transport boundary clean for T19 gateway mode addition
+- All commands properly shut down runtime in finally blocks
+
+## Test Results
+- 14 new tests in test/cli/session-turn.test.ts
+- Full suite: 947 pass, 0 fail
+- Build: clean (pre-existing errors in src/cli/inspect/view-models.ts only)

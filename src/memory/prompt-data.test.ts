@@ -108,10 +108,10 @@ describe("getCoreMemoryBlocks", () => {
     expect(xml).toContain('chars_limit="1500"');
   });
 
-  it("returns all 3 blocks", () => {
+  it("returns all 5 blocks", () => {
     const xml = getCoreMemoryBlocks("agent-1", db);
     const blockCount = (xml.match(/<core_memory /g) || []).length;
-    expect(blockCount).toBe(3);
+    expect(blockCount).toBe(5);
   });
 
   it("includes chars_current and chars_limit attributes", () => {

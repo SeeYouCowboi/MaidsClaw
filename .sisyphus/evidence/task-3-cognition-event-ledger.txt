@@ -1,0 +1,48 @@
+Task 3: Cognition Event Ledger — Test Evidence
+================================================
+
+Date: 2026-03-22
+Test command: bun test test/memory/cognition-commit.test.ts test/runtime/turn-service.test.ts test/runtime/memory-entry-consumption.test.ts
+
+Result: 92 pass, 0 fail, 465 expect() calls across 3 files
+
+Full suite: bun test → 1324 pass, 0 fail, 4119 expect() calls across 86 files (16.40s)
+Baseline was 1311 tests. T3 adds 13 new tests.
+
+New tests added (10 in cognition-commit.test.ts):
+- upsert assertion writes event to private_cognition_events
+- upsert evaluation writes event to private_cognition_events
+- upsert commitment writes event to private_cognition_events
+- retract assertion writes retract event to ledger
+- retract evaluation writes retract event to ledger
+- preserves assertion/evaluation/commitment kind boundaries in event ledger
+- multiple upserts to same key accumulate events in ledger
+- replay returns all events ordered by committed_time ASC
+- dual-write is atomic: overlay and event ledger both succeed or both fail
+
+New tests added (2 in turn-service.test.ts):
+- memory migration creates private_cognition_events table
+- settlement transaction atomicity: private_cognition_events has correct schema
+
+New tests added (2 in memory-entry-consumption.test.ts):
+- dual-write: CognitionRepository writes to both overlay and event ledger via bootstrapped DB
+- dual-write: retract in bootstrapped runtime writes retract event
+
+Updated schema count tests (3 files):
+- test/memory/schema.test.ts: 28→29 non-FTS tables, 11→12 migrations
+- src/memory/schema.test.ts: 48→49 non-FTS tables
+
+Files created:
+- src/memory/cognition/cognition-event-repo.ts (CognitionEventRepo)
+
+Files modified:
+- src/memory/schema.ts (DDL + migration:012)
+- src/memory/cognition/cognition-repo.ts (dual-write in upsert*/retract*)
+- src/memory/explicit-settlement-processor.ts (settlementId propagation)
+- src/memory/cognition-op-committer.ts (settlementId propagation)
+- src/memory/storage.ts (settlementId parameter)
+- test/memory/cognition-commit.test.ts (+10 tests)
+- test/runtime/turn-service.test.ts (+2 tests)
+- test/runtime/memory-entry-consumption.test.ts (+2 tests)
+- test/memory/schema.test.ts (count bump)
+- src/memory/schema.test.ts (count bump)

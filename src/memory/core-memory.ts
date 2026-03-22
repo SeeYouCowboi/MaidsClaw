@@ -1,5 +1,6 @@
 import type { Db } from "../storage/database.js";
 import type { CoreMemoryBlock, CoreMemoryLabel, AppendResult, ReplaceResult } from "./types.js";
+import { COMPAT_ALIAS_MAP, READ_ONLY_LABELS } from "./types.js";
 
 const BLOCK_DEFAULTS: ReadonlyArray<{
   label: CoreMemoryLabel;
@@ -10,12 +11,21 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
   { label: "character", description: "Agent persona and identity", char_limit: 4000, read_only: 0 },
   { label: "user", description: "Information about the user", char_limit: 3000, read_only: 0 },
   { label: "index", description: "Memory index with pointer addresses", char_limit: 1500, read_only: 1 },
+  { label: "pinned_summary", description: "Pinned character summary (canonical)", char_limit: 4000, read_only: 0 },
+  { label: "pinned_index", description: "Pinned memory index (canonical, no RP direct-write)", char_limit: 1500, read_only: 1 },
 ];
+
+function isReadOnlyForRp(label: CoreMemoryLabel): boolean {
+  return READ_ONLY_LABELS.includes(label);
+}
+
+export function resolveCanonicalLabel(label: CoreMemoryLabel): CoreMemoryLabel {
+  return (COMPAT_ALIAS_MAP as Record<string, CoreMemoryLabel>)[label] ?? label;
+}
 
 export class CoreMemoryService {
   constructor(private readonly db: Db) {}
 
-  /** Create 3 default blocks: character (4000), user (3000), index (1500) */
   initializeBlocks(agentId: string): void {
     const stmt = this.db.prepare(
       `INSERT OR IGNORE INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at)
@@ -27,7 +37,6 @@ export class CoreMemoryService {
     }
   }
 
-  /** Get block with chars_current and chars_limit metadata */
   getBlock(
     agentId: string,
     label: CoreMemoryLabel,
@@ -47,7 +56,6 @@ export class CoreMemoryService {
     };
   }
 
-  /** Get all 3 blocks for system prompt injection */
   getAllBlocks(agentId: string): Array<CoreMemoryBlock & { chars_current: number }> {
     const rows = this.db
       .prepare(`SELECT * FROM core_memory_blocks WHERE agent_id = ? ORDER BY label`)
@@ -59,7 +67,6 @@ export class CoreMemoryService {
     }));
   }
 
-  /** Append to block value. Enforces char limit. */
   appendBlock(
     agentId: string,
     label: CoreMemoryLabel,
@@ -68,8 +75,7 @@ export class CoreMemoryService {
   ): AppendResult {
     const block = this.getBlock(agentId, label);
 
-    // Index block is read-only except for task-agent
-    if (label === "index" && callerRole !== "task-agent") {
+    if (isReadOnlyForRp(label) && callerRole !== "task-agent") {
       return {
         success: false,
         remaining: 0,
@@ -102,7 +108,6 @@ export class CoreMemoryService {
     };
   }
 
-  /** String-match replace in block value. Enforces char limit. */
   replaceBlock(
     agentId: string,
     label: CoreMemoryLabel,
@@ -112,9 +117,8 @@ export class CoreMemoryService {
   ): ReplaceResult {
     const block = this.getBlock(agentId, label);
 
-    // Index block is read-only except for task-agent
-    if (label === "index" && callerRole !== "task-agent") {
-      return { success: false, reason: "index block is read-only for RP Agent" };
+    if (isReadOnlyForRp(label) && callerRole !== "task-agent") {
+      return { success: false, reason: `${label} block is read-only for RP Agent` };
     }
 
     if (!block.value.includes(oldText)) {

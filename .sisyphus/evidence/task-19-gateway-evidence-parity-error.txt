@@ -1,0 +1,10 @@
+Task: T19 gateway evidence parity
+Date: 2026-03-17
+
+Observed issues during implementation:
+- Initial TypeScript error in src/cli/shell/session-shell.ts due runtime optionality mismatch with slash dispatcher context.
+  - Fixed by making slash dispatcher async + runtime optional in context and updating session shell call site.
+
+Final state:
+- No remaining TypeScript build errors.
+- Test suite passes.

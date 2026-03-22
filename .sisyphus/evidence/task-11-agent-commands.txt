@@ -1,0 +1,101 @@
+Task T11: Agent Commands — Full Implementation Evidence
+=========================================================
+
+Date: 2026-03-17
+Build: bun run build → 0 errors
+Tests: 913 pass, 0 fail (28 new agent command tests)
+
+## Files Created/Modified
+
+1. src/cli/commands/agent.ts — NEW (770 lines)
+   - registerAgentCommands() registers all 8 subcommands
+   - agent list [--source file|runtime] [--json]
+   - agent show <agent_id> [--source file|runtime] [--json]
+   - agent create-rp <agent_id> --persona <persona_id> [--model <model_id>] [--json]
+   - agent create-task <agent_id> [--model <model_id>] [--json]
+   - agent enable <agent_id> [--json]
+   - agent disable <agent_id> [--json]
+   - agent remove <agent_id> --force [--json]
+   - agent validate [<agent_id>] [--json]
+
+2. scripts/cli.ts — MODIFIED
+   - Replaced inline agent stub loop with registerAgentCommands() import
+   - Reduced from 158 to 144 lines
+
+3. test/cli/agent-commands.test.ts — NEW (842 lines, 28 tests)
+
+## Key Design Decisions
+
+### File vs Runtime Source
+- File source (default): reads/writes config/agents.json via readAgentFile/writeAgentFile
+- Runtime source: lazy-imports bootstrapApp(), inspects agentRegistry.getAll(), always calls shutdown()
+- These are distinct code paths — no conflation
+
+### create-rp
+- Always includes submit_rp_turn in toolPermissions
+- Validates persona exists in config/personas.json before creating
+- Clone of RP preset defaults (persistent, userFacing, freeform, maxOutputTokens: 4096)
+- Default model: claude-3-5-sonnet-20241022
+
+### create-task
+- Clone of task preset defaults (ephemeral, not userFacing, structured, maxOutputTokens: 2048)
+- Default model: claude-3-5-haiku-20241022
+
+### enable / disable
+- Only mutates the `enabled` field — all other fields preserved
+- Direct mutation on the found entry, then writeAgentFile() writes the full array
+
+### remove
+- Requires --force flag — throws FORCE_REQUIRED error code if missing
+- Splices the entry from the array, writes back
+
+### validate
+- Reuses validateAgentFile() from src/cli/agent-loader.ts (T4)
+- Passes persona IDs for cross-reference validation
+- Can validate a single agent by ID or all agents
+
+## Test Coverage (28 tests)
+
+agent list:
+  ✓ lists file-backed agents in JSON mode
+  ✓ returns empty list when no agents.json
+  ✓ shows enabled status correctly
+  ✓ rejects invalid --source value
+
+agent show:
+  ✓ shows agent details in JSON mode
+  ✓ fails if agent not found
+  ✓ requires agent_id argument
+
+agent create-rp:
+  ✓ creates valid RP agent with submit_rp_turn
+  ✓ rejects duplicate agent_id
+  ✓ rejects missing persona
+  ✓ requires --persona flag
+  ✓ uses custom model when provided
+
+agent create-task:
+  ✓ creates task agent with defaults
+  ✓ rejects duplicate agent_id
+
+agent enable:
+  ✓ enables a disabled agent
+  ✓ preserves other fields when enabling
+  ✓ fails if agent not found
+
+agent disable:
+  ✓ disables an enabled agent
+  ✓ preserves other fields when disabling
+
+agent remove:
+  ✓ removes agent with --force
+  ✓ rejects without --force
+  ✓ fails if agent not found
+
+agent validate:
+  ✓ validates all agents successfully
+  ✓ surfaces RP tool-policy violation
+  ✓ validates a specific agent by id
+  ✓ fails if specific agent not found
+  ✓ detects invalid role
+  ✓ detects missing persona reference

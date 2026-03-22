@@ -61,8 +61,27 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
 export const EPISTEMIC_STATUSES = ["confirmed", "suspected", "hypothetical", "retracted"] as const;
 export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 
-export const CORE_MEMORY_LABELS = ["character", "user", "index"] as const;
+/**
+ * All valid core memory block labels.
+ * - `pinned_summary` / `pinned_index`: canonical labels (T7 forward)
+ * - `character` / `index`: compat aliases kept for backward-compatible reads
+ * - `user`: shared block (always on)
+ */
+export const CORE_MEMORY_LABELS = ["character", "user", "index", "pinned_summary", "pinned_index"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
+
+/** Canonical labels introduced by T7 — the preferred write targets. */
+export const CANONICAL_PINNED_LABELS = ["pinned_summary", "pinned_index"] as const;
+export type CanonicalPinnedLabel = (typeof CANONICAL_PINNED_LABELS)[number];
+
+/** Compat aliases — still readable, map to canonical counterparts. */
+export const COMPAT_ALIAS_MAP: Readonly<Record<string, CanonicalPinnedLabel>> = {
+  character: "pinned_summary",
+  index: "pinned_index",
+} as const;
+
+/** Labels that have no RP direct-write path. */
+export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index"] as const;
 
 // V1 Node-Ref Strategy (DO NOT EXTEND without plan approval):
 // - assertion -> private_belief:{id}
@@ -337,12 +356,12 @@ export type MemoryHint = {
 };
 
 export type CoreMemoryAppendInput = {
-  label: "character" | "user";
+  label: "character" | "user" | "pinned_summary";
   content: string;
 };
 
 export type CoreMemoryReplaceInput = {
-  label: "character" | "user";
+  label: "character" | "user" | "pinned_summary";
   old_content: string;
   new_content: string;
 };

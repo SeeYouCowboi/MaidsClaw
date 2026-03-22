@@ -3,7 +3,7 @@ import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
 import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
-import type { NavigatorResult, ViewerContext } from "./types";
+import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
 /**
  * Get all core memory blocks formatted as XML for system prompt injection.
@@ -18,6 +18,39 @@ export function getCoreMemoryBlocks(agentId: string, db: Db): string {
     .map(
       (block) =>
         `<core_memory label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</core_memory>`,
+    )
+    .join("\n");
+}
+
+const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "character"];
+const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
+
+export function getPinnedBlocks(agentId: string, db: Db): string {
+  const service = new CoreMemoryService(db);
+  const blocks = service.getAllBlocks(agentId);
+
+  const pinned = blocks.filter((b) => PINNED_LABELS.includes(b.label));
+  if (pinned.length === 0) return "";
+
+  return pinned
+    .map(
+      (block) =>
+        `<pinned_block label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</pinned_block>`,
+    )
+    .join("\n");
+}
+
+export function getSharedBlocks(agentId: string, db: Db): string {
+  const service = new CoreMemoryService(db);
+  const blocks = service.getAllBlocks(agentId);
+
+  const shared = blocks.filter((b) => SHARED_LABELS.includes(b.label));
+  if (shared.length === 0) return "";
+
+  return shared
+    .map(
+      (block) =>
+        `<shared_block label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</shared_block>`,
     )
     .join("\n");
 }

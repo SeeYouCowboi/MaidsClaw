@@ -1,0 +1,24 @@
+Task 3: Cognition Event Ledger — Error Evidence
+=================================================
+
+Date: 2026-03-22
+
+Error case tested: dual-write atomicity failure
+Test: "dual-write is atomic: overlay and event ledger both succeed or both fail"
+
+Scenario:
+1. Drop private_cognition_events table after migrations
+2. Attempt to upsertAssertion
+3. Event append fails (table missing)
+4. Transaction rolls back overlay write too
+5. Verify overlay row does NOT exist
+
+Result: PASS — overlay row is undefined (rolled back), threw is true
+
+Pre-existing LSP errors (NOT introduced by T3):
+- scripts/test-embedding.ts: cosineSimilarity missing on OpenAIProvider
+- src/memory/core-memory.test.ts: Database/Db type mismatch
+- test/runtime/turn-service.test.ts: rp_turn_outcome_v3 vs v5 (12 occurrences)
+- test/cli/acceptance.test.ts: rp_turn_outcome_v3 vs v5 (2 occurrences)
+
+Build check: bun run build → clean (tsc --noEmit succeeds)

@@ -1,0 +1,22 @@
+Task: T8 config doctor runtime-readiness diagnosis
+Date: 2026-03-17
+
+Changed files:
+- src/cli/commands/config.ts
+- test/cli/config-doctor.test.ts
+- .sisyphus/notepads/cli-implementation-full-coverage/learnings.md
+
+Verification commands:
+1) bun run build
+Output:
+$ tsc --noEmit
+
+2) bun test
+Output (key lines):
+- 916 pass
+- 0 fail
+- Ran 916 tests across 64 files.
+
+Notes:
+- config doctor now returns status, primary cause, fix locator, and memory_pipeline_status.
+- doctor uses bootstrapApp in no-gateway mode and always shuts runtime down.

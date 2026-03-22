@@ -34,9 +34,9 @@ function makeMinimalInput(): RenderInput {
 // --- Tests ---
 
 describe("PromptSectionSlot enum", () => {
-  it("has exactly 8 slots", () => {
+  it("has exactly 9 slots", () => {
     const values = Object.values(PromptSectionSlot);
-    expect(values.length).toBe(8);
+    expect(values.length).toBe(9);
   });
 
   it("canonical order matches enum values", () => {
@@ -44,6 +44,7 @@ describe("PromptSectionSlot enum", () => {
       PromptSectionSlot.SYSTEM_PREAMBLE,
       PromptSectionSlot.WORLD_RULES,
       PromptSectionSlot.CORE_MEMORY,
+      PromptSectionSlot.PINNED_SHARED,
       PromptSectionSlot.RECENT_COGNITION,
       PromptSectionSlot.LORE_ENTRIES,
       PromptSectionSlot.OPERATIONAL_STATE,

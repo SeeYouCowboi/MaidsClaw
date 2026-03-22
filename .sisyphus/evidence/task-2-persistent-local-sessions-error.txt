@@ -1,0 +1,13 @@
+Task: T2 session error-code compatibility evidence
+Date: 2026-03-17
+
+Service-level check output:
+{"SESSION_NOT_FOUND":"SESSION_NOT_FOUND","SESSION_CLOSED":"SESSION_CLOSED_PATH_OK","SESSION_NOT_IN_RECOVERY":"SESSION_NOT_IN_RECOVERY_PATH_OK"}
+
+Gateway contract check (source grep):
+- src/gateway/controllers.ts:218 -> closed-session path still emits `SESSION_CLOSED`
+- src/gateway/controllers.ts:452 -> recover path still emits `SESSION_NOT_IN_RECOVERY`
+
+Build/test status during task:
+- `bun run build`: pass (`tsc --noEmit`)
+- `bun test`: pass (810 pass, 0 fail)

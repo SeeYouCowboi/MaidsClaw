@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema.js";
-import { CoreMemoryService } from "./core-memory.js";
+import { CoreMemoryService, resolveCanonicalLabel } from "./core-memory.js";
+import { COMPAT_ALIAS_MAP, READ_ONLY_LABELS } from "./types.js";
+import { PinnedSummaryProposalService } from "./pinned-summary-proposal.js";
 
 function freshDb() {
   const db = new Database(":memory:");
@@ -19,14 +21,16 @@ describe("CoreMemoryService", () => {
   });
 
   describe("initializeBlocks", () => {
-    it("creates 3 blocks with correct limits", () => {
+    it("creates 5 blocks with correct limits", () => {
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(3);
+      expect(blocks).toHaveLength(5);
 
       const character = blocks.find((b) => b.label === "character")!;
       const user = blocks.find((b) => b.label === "user")!;
       const index = blocks.find((b) => b.label === "index")!;
+      const pinnedSummary = blocks.find((b) => b.label === "pinned_summary")!;
+      const pinnedIndex = blocks.find((b) => b.label === "pinned_index")!;
 
       expect(character.char_limit).toBe(4000);
       expect(character.read_only).toBe(0);
@@ -40,13 +44,21 @@ describe("CoreMemoryService", () => {
       expect(index.char_limit).toBe(1500);
       expect(index.read_only).toBe(1);
       expect(index.description).toBe("Memory index with pointer addresses");
+
+      expect(pinnedSummary.char_limit).toBe(4000);
+      expect(pinnedSummary.read_only).toBe(0);
+      expect(pinnedSummary.description).toBe("Pinned character summary (canonical)");
+
+      expect(pinnedIndex.char_limit).toBe(1500);
+      expect(pinnedIndex.read_only).toBe(1);
+      expect(pinnedIndex.description).toBe("Pinned memory index (canonical, no RP direct-write)");
     });
 
     it("is idempotent — calling twice does not error or duplicate", () => {
       svc.initializeBlocks("agent-1");
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(3);
+      expect(blocks).toHaveLength(5);
     });
   });
 
@@ -98,7 +110,6 @@ describe("CoreMemoryService", () => {
     });
 
     it("returns failure with remaining when over char limit", () => {
-      // user block has 3000 char limit
       const bigContent = "x".repeat(2900);
       svc.appendBlock("agent-1", "user", bigContent);
 
@@ -165,7 +176,6 @@ describe("CoreMemoryService", () => {
       }
 
       const block = svc.getBlock("agent-1", "user");
-      // Only first occurrence replaced
       expect(block.value).toBe("The user likes dogs and cats are great");
     });
 
@@ -178,11 +188,9 @@ describe("CoreMemoryService", () => {
     });
 
     it("returns failure when replacement would exceed char_limit", () => {
-      // Fill user block near limit
       const big = "x".repeat(2990);
       svc.replaceBlock("agent-1", "user", "The user likes cats and cats are great", big);
 
-      // Try to replace with something that exceeds the limit
       const result = svc.replaceBlock("agent-1", "user", "x", "y".repeat(100));
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -195,7 +203,7 @@ describe("CoreMemoryService", () => {
       const result = svc.replaceBlock("agent-1", "index", "old", "new", "rp-agent");
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.reason).toBe("index block is read-only for RP Agent");
+        expect(result.reason).toContain("read-only");
       }
     });
 
@@ -204,7 +212,7 @@ describe("CoreMemoryService", () => {
       const result = svc.replaceBlock("agent-1", "index", "old", "new");
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.reason).toBe("index block is read-only for RP Agent");
+        expect(result.reason).toContain("read-only");
       }
     });
 
@@ -230,12 +238,12 @@ describe("CoreMemoryService", () => {
   });
 
   describe("getAllBlocks", () => {
-    it("returns all 3 blocks with chars_current", () => {
+    it("returns all 5 blocks with chars_current", () => {
       svc.initializeBlocks("agent-1");
       svc.appendBlock("agent-1", "character", "Alice the maid");
 
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(3);
+      expect(blocks).toHaveLength(5);
 
       const character = blocks.find((b) => b.label === "character")!;
       expect(character.chars_current).toBe(14);
@@ -251,6 +259,95 @@ describe("CoreMemoryService", () => {
     it("returns empty array for uninitialized agent", () => {
       const blocks = svc.getAllBlocks("unknown-agent");
       expect(blocks).toHaveLength(0);
+    });
+  });
+
+  describe("canonical pinned labels (T7)", () => {
+    beforeEach(() => { svc.initializeBlocks("agent-1"); });
+
+    it("pinned_summary block is writable by RP agent", () => {
+      const result = svc.appendBlock("agent-1", "pinned_summary", "Summary text");
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.chars_current).toBe(12);
+      expect(svc.getBlock("agent-1", "pinned_summary").value).toBe("Summary text");
+    });
+
+    it("pinned_index block is read-only for RP agent", () => {
+      expect(svc.appendBlock("agent-1", "pinned_index", "data").success).toBe(false);
+      expect(svc.appendBlock("agent-1", "pinned_index", "data", "rp-agent").success).toBe(false);
+    });
+
+    it("pinned_index block is writable by task-agent", () => {
+      const result = svc.appendBlock("agent-1", "pinned_index", "ptr:42", "task-agent");
+      expect(result.success).toBe(true);
+      expect(svc.getBlock("agent-1", "pinned_index").value).toBe("ptr:42");
+    });
+
+    it("replaceBlock rejects pinned_index writes from RP agent", () => {
+      svc.appendBlock("agent-1", "pinned_index", "old data", "task-agent");
+      const result = svc.replaceBlock("agent-1", "pinned_index", "old", "new", "rp-agent");
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.reason).toContain("read-only");
+    });
+
+    it("replaceBlock allows pinned_index writes from task-agent", () => {
+      svc.appendBlock("agent-1", "pinned_index", "old data", "task-agent");
+      expect(svc.replaceBlock("agent-1", "pinned_index", "old", "new", "task-agent").success).toBe(true);
+    });
+  });
+
+  describe("compat aliases", () => {
+    it("resolveCanonicalLabel maps character to pinned_summary", () => {
+      expect(resolveCanonicalLabel("character")).toBe("pinned_summary");
+    });
+    it("resolveCanonicalLabel maps index to pinned_index", () => {
+      expect(resolveCanonicalLabel("index")).toBe("pinned_index");
+    });
+    it("resolveCanonicalLabel returns canonical labels unchanged", () => {
+      expect(resolveCanonicalLabel("pinned_summary")).toBe("pinned_summary");
+      expect(resolveCanonicalLabel("user")).toBe("user");
+    });
+    it("COMPAT_ALIAS_MAP has exactly character and index", () => {
+      expect(Object.keys(COMPAT_ALIAS_MAP)).toEqual(["character", "index"]);
+    });
+    it("READ_ONLY_LABELS includes index and pinned_index", () => {
+      expect(READ_ONLY_LABELS).toContain("index");
+      expect(READ_ONLY_LABELS).toContain("pinned_index");
+      expect(READ_ONLY_LABELS).not.toContain("pinned_summary");
+    });
+    it("character block is still readable as compat alias", () => {
+      svc.initializeBlocks("agent-1");
+      svc.appendBlock("agent-1", "character", "Legacy content");
+      expect(svc.getBlock("agent-1", "character").value).toBe("Legacy content");
+    });
+  });
+
+  describe("PinnedSummaryProposalService", () => {
+    it("stores proposal without auto-applying to pinned_summary", () => {
+      svc.initializeBlocks("agent-1");
+      const ps = new PinnedSummaryProposalService();
+      ps.storeProposal("stl:1", "agent-1", { proposedText: "New summary", rationale: "Better" });
+      expect(ps.getPendingProposals("agent-1")).toHaveLength(1);
+      expect(ps.getPendingProposals("agent-1")[0]!.applied).toBe(false);
+      expect(svc.getBlock("agent-1", "pinned_summary").value).toBe("");
+    });
+    it("markApplied transitions proposal to applied", () => {
+      const ps = new PinnedSummaryProposalService();
+      ps.storeProposal("stl:1", "agent-1", { proposedText: "New" });
+      expect(ps.markApplied("agent-1", "stl:1")).toBe(true);
+      expect(ps.getPendingProposals("agent-1")).toHaveLength(0);
+    });
+    it("getLatestPending returns most recent pending", () => {
+      const ps = new PinnedSummaryProposalService();
+      ps.storeProposal("stl:1", "agent-1", { proposedText: "First" });
+      ps.storeProposal("stl:2", "agent-1", { proposedText: "Second" });
+      expect(ps.getLatestPending("agent-1")?.proposal.proposedText).toBe("Second");
+    });
+    it("clearAll removes all proposals", () => {
+      const ps = new PinnedSummaryProposalService();
+      ps.storeProposal("stl:1", "agent-1", { proposedText: "Content" });
+      ps.clearAll("agent-1");
+      expect(ps.getPendingProposals("agent-1")).toHaveLength(0);
     });
   });
 });

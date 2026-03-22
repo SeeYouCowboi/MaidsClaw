@@ -6,14 +6,15 @@
  * SYSTEM_PREAMBLE is always first; CONVERSATION is always last.
  */
 export enum PromptSectionSlot {
-  SYSTEM_PREAMBLE = "system_preamble",    // Required: agent identity/role
-  WORLD_RULES = "world_rules",            // Optional: lore canon world rules
-  CORE_MEMORY = "core_memory",            // Optional: agent's core memory blocks
-  RECENT_COGNITION = "recent_cognition",  // Optional: recent private cognition entries
-  LORE_ENTRIES = "lore_entries",           // Optional: triggered lore entries
-  OPERATIONAL_STATE = "operational_state", // Optional: blackboard excerpts
-  MEMORY_HINTS = "memory_hints",          // Optional: memory search results
-  CONVERSATION = "conversation",          // Required: the actual messages
+  SYSTEM_PREAMBLE = "system_preamble",
+  WORLD_RULES = "world_rules",
+  CORE_MEMORY = "core_memory",
+  PINNED_SHARED = "pinned_shared",
+  RECENT_COGNITION = "recent_cognition",
+  LORE_ENTRIES = "lore_entries",
+  OPERATIONAL_STATE = "operational_state",
+  MEMORY_HINTS = "memory_hints",
+  CONVERSATION = "conversation",
 }
 
 /**
@@ -24,6 +25,7 @@ export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
   PromptSectionSlot.CORE_MEMORY,
+  PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,

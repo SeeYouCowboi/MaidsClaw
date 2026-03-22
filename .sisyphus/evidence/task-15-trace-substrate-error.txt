@@ -1,0 +1,15 @@
+Task: T15 trace/log capture substrate
+Date: 2026-03-17
+
+Encountered issues:
+1) Type breakage in src/cli/local-runtime.ts after tightening PublicChunkRecord
+   - Cause: New trace-oriented chunk type removed legacy tool_call/tool_result and required timestamp
+   - Fix: Restored backward compatibility in src/cli/types.ts by allowing tool_call/tool_result and making timestamp optional
+
+2) LSP warnings about unsorted imports
+   - Impact: Informational only (no build/test failure)
+   - Status: Build and tests remain green
+
+Final status:
+- bun run build: PASS
+- bun test: PASS (933 pass, 0 fail)

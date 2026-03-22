@@ -1,0 +1,60 @@
+Task T10: server start + health commands
+=========================================
+
+Date: 2026-03-17
+Session: cli-implementation-full-coverage
+
+## Files Created/Modified
+
+NEW: src/cli/commands/server.ts
+  - registerServerCommands() with handleServerStart handler
+  - Flags: --host, --port, --debug-capture, --json, --quiet, --cwd
+  - Uses bootstrapApp({ cwd, enableGateway: true, port, host })
+  - Prints bound address, health summary, memory pipeline status, sweeper enabled
+  - Registers SIGINT/SIGTERM for graceful shutdown
+  - --debug-capture accepted as stub (T15)
+
+NEW: src/cli/commands/health.ts
+  - registerHealthCommand() with handleHealth handler
+  - Flags: --base-url (default: http://localhost:3000), --json, --quiet, --cwd
+  - Fetches /healthz and /readyz separately
+  - JSON mode: returns raw { healthz, readyz } response bodies
+  - Text mode: prints each subsystem status separately (storage, models, tools, memory_pipeline)
+  - Connection failure exits with code 4 (EXIT_RUNTIME)
+
+MODIFIED: scripts/cli.ts
+  - Replaced server start and health stubs with registerServerCommands() and registerHealthCommand()
+  - Imported from src/cli/commands/server.js and src/cli/commands/health.js
+
+NEW: test/cli/server-health.test.ts
+  - 12 tests: 5 server start validation + 7 health tests
+  - Covers: unknown flags, missing flag values, invalid port, connection refused, live mock server
+  - Mock Bun.serve servers for health endpoint testing
+  - Verifies /healthz and /readyz remain separate in JSON output
+  - Verifies degraded memory_pipeline is preserved (not hidden)
+
+## Build Verification
+
+$ bun run build
+tsc --noEmit
+(clean — 0 errors)
+
+## Test Verification
+
+$ bun test test/cli/server-health.test.ts
+12 pass, 0 fail, 44 expect() calls
+
+$ bun test
+928 pass, 0 fail, 2775 expect() calls
+Ran 928 tests across 65 files. [3.25s]
+
+## Design Decisions
+
+1. No second server bootstrap: handleServerStart lazy-imports bootstrapApp() and calls it
+   with enableGateway: true — same path as src/index.ts and scripts/start-dev.ts.
+2. /healthz and /readyz kept separate: JSON mode returns { healthz: {...}, readyz: {...} }
+   as distinct objects, not merged.
+3. Memory pipeline status not hidden: text mode prints memory_pipeline per-subsystem;
+   JSON mode preserves raw readyz response including degraded values.
+4. Bun native fetch() used for health command — no external HTTP libraries.
+5. --debug-capture flag accepted but currently a stub; trace capture deferred to T15.

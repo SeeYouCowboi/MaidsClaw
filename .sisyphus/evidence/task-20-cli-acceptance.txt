@@ -1,0 +1,79 @@
+Task T20: CLI Test Matrix, Docs/Examples, and Acceptance Runbook
+================================================================
+
+Completed: 2026-03-17
+
+## Summary
+- README.md updated with CLI section (commands, quick start, mode support)
+- docs/README.zh-CN.md updated with equivalent Chinese CLI section
+- test/cli/acceptance.test.ts created with 12 normative contract test groups
+
+## Test Results
+- bun run build: PASS (tsc --noEmit exits 0)
+- bun test: 1012 tests pass across 73 files (0 failures)
+- Previous baseline: 984 tests → gained 28 new acceptance tests
+
+## Acceptance Contracts Covered (test/cli/acceptance.test.ts)
+
+1. Parser routes unknown commands to exit 2
+   - Unknown namespace → UNKNOWN_COMMAND, exit 2
+   - Unknown subcommand → UNKNOWN_SUBCOMMAND, exit 2
+   - Empty argv → NO_COMMAND, exit 2
+
+2. config init creates all 7 config files with 'created' action
+   - .env, config/providers.json, config/auth.json, config/agents.json,
+     config/personas.json, config/lore.json, config/runtime.json
+
+3. config validate catches all 9 diagnostic code categories
+   - config.missing_required_file, config.missing_required_env,
+     config.parse_error, config.rp_missing_submit_rp_turn_permission,
+     config.duplicate_persona_id, config.invalid_runtime_memory_shape,
+     config.invalid_agent_role, config.duplicate_agent_id,
+     config.agent_persona_not_found
+   - Multi-error test triggers ≥4 simultaneously
+   - Full coverage in config-validate.test.ts (cross-referenced)
+
+4. config doctor returns one of ready/degraded/blocked
+   - blocked: no API key
+   - ready: valid runtime config
+   - degraded: missing embedding model
+
+5. agent list shows file-backed agents (source='file')
+   - Lists agents from agents.json
+   - Returns empty list when no agents.json
+
+6. turn send JSON returns settlement-aware envelope
+   - All TurnExecutionResult fields present
+   - settlement_id = stl:<request_id>
+
+7. Session persistence across contexts
+   - Session created in one dispatch is visible in subsequent dispatch
+
+8. Silent-private RP turns are ok:true with has_public_reply:false
+   - assistant_text empty, private_commit.present=true, recovery_required=false
+
+9. JSON envelope stability: { ok, command, mode?, data?, diagnostics?, error? }
+   - All keys within allowed set
+   - Successful commands have ok=true and command string
+
+10. Raw/unsafe-raw boundaries enforced
+    - GatewayClient.rejectUnsafeRaw throws INSPECT_UNSAFE_RAW_LOCAL_ONLY
+    - --unsafe-raw rejected in gateway mode dispatch
+
+11. Shell context requires explicit identifier for inspect commands
+    - /summary, /inspect, /prompt, /chunks, /diagnose, /trace all handle
+      missing lastRequestId gracefully (no crash, exit=false)
+    - /exit and /quit signal exit
+
+12. debug diagnose returns concrete subsystem, locator, evidence, next_commands
+    - subsystem is from allowed set of 12 values
+    - locator is a string
+    - next_commands contains maidsclaw-prefixed suggestions
+
+## Files Modified
+- README.md — added CLI section before "Common Commands"
+- docs/README.zh-CN.md — added Chinese CLI section before "常用命令"
+
+## Files Created
+- test/cli/acceptance.test.ts (796 lines, 12 contract groups)
+- .sisyphus/evidence/task-20-cli-acceptance.txt (this file)

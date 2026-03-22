@@ -1,0 +1,37 @@
+Task T13: Local Mode session * and turn send — Error Evidence (stderr/diagnostics)
+
+## Build Output
+$ bun run build
+Pre-existing errors only in src/cli/inspect/view-models.ts (not from T13):
+  - getInteractionStore references (TS2552) — 5 occurrences
+  - implicit 'any' types (TS7006) — 4 occurrences
+  - unknown not assignable to string (TS2345) — 1 occurrence
+
+No errors in new files:
+  - src/cli/commands/session.ts — 0 errors
+  - src/cli/commands/turn.ts — 0 errors
+  - test/cli/session-turn.test.ts — 0 errors
+
+## Test Output
+$ bun test test/cli/session-turn.test.ts
+14 pass, 0 fail, 57 expect() calls
+
+## Full Suite
+$ bun test
+947 pass, 0 fail, 2874 expect() calls
+Ran 947 tests across 68 files. [4.03s]
+
+## Error Handling Verification (via test stderr)
+- UNKNOWN_FLAGS for --bogus on session create ✓
+- MISSING_ARGUMENT for missing --agent on session create ✓
+- MISSING_ARGUMENT for missing --session on session close ✓
+- SESSION_NOT_FOUND for non-existent session on close ✓
+- NOT_IN_RECOVERY for non-recovery session on recover ✓
+- SESSION_NOT_FOUND for non-existent session on recover ✓
+- UNKNOWN_FLAGS for --bogus on turn send ✓
+- MISSING_ARGUMENT for missing --session on turn send ✓
+- MISSING_ARGUMENT for missing --text on turn send ✓
+- INVALID_FLAG_VALUE for bad --mode on turn send ✓
+
+## Type Fix Applied
+- `args.flags[key]` returns `string | boolean` — used `typeof value !== "string"` instead of `=== true` for proper TS narrowing

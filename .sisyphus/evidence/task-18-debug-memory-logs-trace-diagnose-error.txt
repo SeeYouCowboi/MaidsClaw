@@ -1,0 +1,21 @@
+Task: T18 - error log / recovery notes
+Date: 2026-03-17
+
+Observed during implementation:
+1) Parse error in src/cli/commands/debug.ts
+   - Error: "Unexpected }"
+   - Cause: malformed import block after concurrent edits/formatting
+   - Fix: corrected imports and removed stray unused inspect imports/constants.
+
+2) debug diagnose test initially asserted pending_settlement but got memory_pipeline
+   - Cause: test environment default memory pipeline status can be non-ready depending on local config/models.
+   - Fix: adjusted assertion to require valid subsystem taxonomy + concrete next commands.
+
+3) debug trace export default redaction initially threw:
+   - Error: "undefined is not an object (evaluating 'payload.privateCommit.ops.length')"
+   - Cause: loadTraceView double-redacted settlement payload.
+   - Fix: updated src/cli/inspect/view-models.ts loadTraceView() to use settlement.payload directly (already redacted by getSettlementRecord when unsafeRaw=false).
+
+Final state:
+- bun run build: PASS
+- bun test: PASS

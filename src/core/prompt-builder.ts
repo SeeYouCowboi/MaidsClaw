@@ -90,6 +90,10 @@ export class PromptBuilder {
 				this.getCoreMemoryBlocks(input.viewerContext.viewer_agent_id),
 			);
 			slotContent.set(
+				PromptSectionSlot.PINNED_SHARED,
+				this.getPinnedSharedBlocks(input.viewerContext.viewer_agent_id),
+			);
+			slotContent.set(
 				PromptSectionSlot.RECENT_COGNITION,
 				this.getRecentCognition(input.viewerContext),
 			);
@@ -224,6 +228,36 @@ export class PromptBuilder {
 				this.getMemoryDataSource().getCoreMemoryBlocks(agentId),
 			) ?? ""
 		);
+	}
+
+	private getPinnedSharedBlocks(agentId: string): string {
+		const memDs = this.getMemoryDataSource();
+		const parts: string[] = [];
+
+		if (memDs.getPinnedBlocks) {
+			const pinned = this.readDataSource("memory.getPinnedBlocks", () =>
+				memDs.getPinnedBlocks!(agentId),
+			);
+			if (pinned) parts.push(pinned);
+		}
+
+		if (memDs.getSharedBlocks) {
+			const shared = this.readDataSource("memory.getSharedBlocks", () =>
+				memDs.getSharedBlocks!(agentId),
+			);
+			if (shared) parts.push(shared);
+		}
+
+		if (memDs.getAttachedSharedBlocks) {
+			const attached = this.readDataSource("memory.getAttachedSharedBlocks", () => {
+				const result = memDs.getAttachedSharedBlocks!(agentId);
+				if (result instanceof Promise) return "";
+				return result;
+			});
+			if (attached) parts.push(attached);
+		}
+
+		return parts.join("\n");
 	}
 
 	private getRecentCognition(viewerContext: ViewerContext): string {

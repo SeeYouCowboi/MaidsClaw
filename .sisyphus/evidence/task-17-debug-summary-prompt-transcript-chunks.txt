@@ -1,0 +1,72 @@
+Task T17: debug summary, transcript, prompt, chunks — standalone wrapper commands
+=================================================================================
+
+Date: 2026-03-17
+Status: PASS
+
+## Files Modified
+
+1. src/cli/commands/debug.ts
+   - Added imports: loadSummaryView, loadTranscriptView, loadPromptView, loadChunksView
+   - Added known flag sets: KNOWN_SUMMARY_FLAGS, KNOWN_TRANSCRIPT_FLAGS, KNOWN_PROMPT_FLAGS, KNOWN_CHUNKS_FLAGS
+   - Added 4 handler functions: handleDebugSummary, handleDebugTranscript, handleDebugPrompt, handleDebugChunks
+   - Replaced stub loop for summary/transcript/prompt/chunks with real handler registrations using toCliError wrapper
+   - Preserved existing T18 handlers (logs, memory, trace, diagnose) untouched
+
+2. scripts/cli.ts
+   - Already imports registerDebugCommands (done in prior session)
+   - No changes needed
+
+3. test/cli/debug-commands.test.ts
+   - Added 5 new T17 tests:
+     * "debug summary returns required fields from view model"
+     * "debug transcript --raw shows tool records but NOT settlement payload"
+     * "debug prompt --sections includes section breakdown"
+     * "debug prompt without --sections strips sections from JSON output"
+     * "debug chunks preserves ordering"
+   - Added 4 seed helpers: seedSummaryCase, seedTranscriptCase, seedPromptCase, seedChunksCase
+
+## Command Contracts Implemented
+
+### debug summary --request <request_id> [--json]
+- Bootstraps runtime via withRuntime() helper (same as T18 commands)
+- Calls loadSummaryView({ runtime, traceStore, context: { requestId } })
+- Returns { ok: true, data: summaryView } in JSON mode
+- Text mode renders via renderText()
+
+### debug transcript --session <session_id> [--raw] [--json]
+- Calls loadTranscriptView({ runtime, traceStore, context: { sessionId }, raw })
+- --raw shows tool/status records (tool_call, tool_result, status, delegation, task_result, schedule_trigger)
+- --raw does NOT expose raw settlement payload (unsafeRaw is never set)
+- Settlement entries are always redacted (privateCommit.redacted=true, viewerSnapshot.redacted=true)
+
+### debug prompt --request <request_id> [--sections] [--json]
+- Calls loadPromptView({ runtime, traceStore, context: { requestId } })
+- --sections includes section slot breakdown (PERSONA, LORE, RECENT_COGNITION, etc.)
+- Without --sections, sections field is stripped from JSON output (set to undefined)
+- Text mode always renders full prompt view
+
+### debug chunks --request <request_id> [--json]
+- Calls loadChunksView({ runtime, traceStore, context: { requestId } })
+- Returns ordered public chunk types with index, type, timestamp, preview
+- Chunk ordering preserved (index matches insertion order)
+- public_only: true always set
+
+## Design Decisions
+
+- All 4 commands reuse the withRuntime() helper from T18 for bootstrap/shutdown lifecycle
+- All 4 commands use toCliError() wrapper for consistent error mapping (INSPECT_REQUEST_ID_REQUIRED → MISSING_ARGUMENT, etc.)
+- TraceStore fallback: app.runtime.traceStore ?? new TraceStore(resolve(cwd, "data", "debug", "traces"))
+- No separate fetch/render path — all commands delegate to T16 view-model loaders
+
+## Verification
+
+$ bun run build
+tsc --noEmit
+(exit 0 — no errors)
+
+$ bun test test/cli/debug-commands.test.ts
+9 pass, 0 fail, 54 expect() calls
+
+$ bun test
+980 pass, 0 fail, 2977 expect() calls across 71 files

@@ -1,0 +1,31 @@
+Task 4: Cognition Current Projection - Error Case Evidence
+===========================================================
+
+Error cases verified via existing tests + new projection tests:
+
+1. Retract on non-existent projection row → no-op (graceful skip)
+   - Verified in: PrivateCognitionProjectionRepo > applyRetract
+   - If the cognition_key does not exist in private_cognition_current, retract is silently ignored
+
+2. Assertion retract sets status='retracted' AND stance='rejected'
+   - Verified in: Retract handling > retract assertion marks projection row as retracted with rejected stance
+
+3. Evaluation retract sets status='retracted' (stance remains null)
+   - Verified in: Retract handling > retract evaluation marks projection row as retracted
+
+4. Commitment retract sets status='retracted'
+   - Verified in: Retract handling > retract commitment marks projection row as retracted
+
+5. Rebuild determinism invariant: sequential upsertFromEvent == rebuild from scratch
+   - Verified in: Rebuild determinism > rebuild produces identical rows to sequential upsertFromEvent
+   - Also verified in behavioral: incremental upsertFromEvent matches rebuild for complex event stream
+
+6. Schema migration is additive-only
+   - memory:013:add-private-cognition-current creates table + unique index
+   - Verified: full suite passes (1342 tests, 0 fail)
+   - Verified: bun run build passes (tsc --noEmit clean)
+
+7. Table count expectations updated:
+   - test/memory/schema.test.ts: 29 → 30 non-FTS tables
+   - test/memory/schema.test.ts: 12 → 13 migrations
+   - src/memory/schema.test.ts: 49 → 50 non-FTS entries
