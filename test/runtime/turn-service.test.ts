@@ -5,6 +5,10 @@ import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { InteractionStore } from "../../src/interaction/store.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
+import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
@@ -978,5 +982,392 @@ describe("TurnService", () => {
       role: "assistant",
       content: "Good day",
     });
+  });
+});
+
+describe("TurnService with ProjectionManager", () => {
+  let db: Db;
+  let store: InteractionStore;
+  let commitService: CommitService;
+  let flushSelector: FlushSelector;
+  let sessionService: SessionService;
+  let graphStorage: GraphStorageService;
+  let projectionManager: ProjectionManager;
+  let episodeRepo: EpisodeRepository;
+  let cognitionEventRepo: CognitionEventRepo;
+  let cognitionProjectionRepo: PrivateCognitionProjectionRepo;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runInteractionMigrations(db);
+    runMemoryMigrations(db);
+    store = new InteractionStore(db);
+    commitService = new CommitService(store);
+    flushSelector = new FlushSelector(store);
+    sessionService = new SessionService();
+    graphStorage = new GraphStorageService(db);
+    episodeRepo = new EpisodeRepository(db);
+    cognitionEventRepo = new CognitionEventRepo(db.raw);
+    cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+    projectionManager = new ProjectionManager(
+      episodeRepo,
+      cognitionEventRepo,
+      cognitionProjectionRepo,
+      graphStorage,
+    );
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  function makeTurnServiceWithProjection(result: RpBufferedExecutionResult): TurnService {
+    return new TurnService(
+      makeRpBufferedLoop(result),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+      undefined,
+      projectionManager,
+    );
+  }
+
+  it("episodes go to private_episode_events ledger, not agent_event_overlay", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = makeTurnServiceWithProjection({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "I noticed something.",
+        privateEpisodes: [
+          {
+            category: "observation",
+            summary: "The garden gate was open",
+            privateNotes: "Might be a security concern",
+          },
+          {
+            category: "speech",
+            summary: "Alice mentioned the weather to the user",
+          },
+        ],
+        publications: [],
+        relationIntents: [],
+        conflictFactors: [],
+      },
+    });
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-ep-projection",
+        messages: [{ role: "user", content: "what do you see?" }],
+      }),
+    );
+
+    const episodes = episodeRepo.readBySettlement("stl:req-ep-projection", "rp:alice");
+    expect(episodes).toHaveLength(2);
+    expect(episodes[0].category).toBe("observation");
+    expect(episodes[0].summary).toBe("The garden gate was open");
+    expect(episodes[0].private_notes).toBe("Might be a security concern");
+    expect(episodes[1].category).toBe("speech");
+    expect(episodes[1].summary).toBe("Alice mentioned the weather to the user");
+
+    const overlayCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(overlayCount!.cnt).toBe(0);
+  });
+
+  it("cognition ops write to event log and update current projection synchronously", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = makeTurnServiceWithProjection({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "",
+        privateCommit: {
+          schemaVersion: "rp_private_cognition_v3",
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "trust-user",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "trusts",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+              },
+            },
+            {
+              op: "upsert",
+              record: {
+                kind: "commitment",
+                key: "protect-master",
+                mode: "goal",
+                target: { action: "protect the household" },
+                status: "active",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-cog-projection",
+        messages: [{ role: "user", content: "think" }],
+      }),
+    );
+
+    const events = cognitionEventRepo.readByAgent("rp:alice");
+    expect(events).toHaveLength(2);
+    expect(events[0].cognition_key).toBe("trust-user");
+    expect(events[0].kind).toBe("assertion");
+    expect(events[0].op).toBe("upsert");
+    expect(events[1].cognition_key).toBe("protect-master");
+    expect(events[1].kind).toBe("commitment");
+
+    const currentAssertion = cognitionProjectionRepo.getCurrent("rp:alice", "trust-user");
+    expect(currentAssertion).not.toBeNull();
+    expect(currentAssertion!.kind).toBe("assertion");
+    expect(currentAssertion!.status).toBe("active");
+
+    const currentCommitment = cognitionProjectionRepo.getCurrent("rp:alice", "protect-master");
+    expect(currentCommitment).not.toBeNull();
+    expect(currentCommitment!.kind).toBe("commitment");
+
+    const overlayFactCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(overlayFactCount!.cnt).toBe(0);
+
+    const overlayEventCount = db.get<{ cnt: number }>(
+      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      ["rp:alice"],
+    );
+    expect(overlayEventCount!.cnt).toBe(0);
+  });
+
+  it("retract op updates current projection to retracted status", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    const turnService1 = makeTurnServiceWithProjection({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "",
+        privateCommit: {
+          schemaVersion: "rp_private_cognition_v3",
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "old-belief",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "likes",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    await collectChunks(
+      turnService1.run({
+        sessionId: session.sessionId,
+        requestId: "req-setup-belief",
+        messages: [{ role: "user", content: "first" }],
+      }),
+    );
+
+    const beforeRetract = cognitionProjectionRepo.getCurrent("rp:alice", "old-belief");
+    expect(beforeRetract).not.toBeNull();
+    expect(beforeRetract!.status).toBe("active");
+
+    const turnService2 = makeTurnServiceWithProjection({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "",
+        privateCommit: {
+          schemaVersion: "rp_private_cognition_v3",
+          ops: [
+            { op: "retract", target: { kind: "assertion", key: "old-belief" } },
+          ],
+        },
+      },
+    });
+
+    await collectChunks(
+      turnService2.run({
+        sessionId: session.sessionId,
+        requestId: "req-retract-belief",
+        messages: [{ role: "user", content: "second" }],
+      }),
+    );
+
+    const afterRetract = cognitionProjectionRepo.getCurrent("rp:alice", "old-belief");
+    expect(afterRetract).not.toBeNull();
+    expect(afterRetract!.status).toBe("retracted");
+  });
+
+  it("settlement transaction rolls back all projections on failure", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = makeTurnServiceWithProjection({
+      outcome: {
+        schemaVersion: "rp_turn_outcome_v3",
+        publicReply: "Hello",
+        privateCommit: {
+          schemaVersion: "rp_private_cognition_v3",
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "should-rollback",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "knows",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+              },
+            },
+          ],
+        },
+        privateEpisodes: [
+          { category: "speech", summary: "should also rollback" },
+        ],
+      },
+    });
+
+    const originalUpsert = store.upsertRecentCognitionSlot.bind(store);
+    store.upsertRecentCognitionSlot = () => {
+      throw new Error("forced slot failure for rollback test");
+    };
+
+    const chunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-rollback-test",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    store.upsertRecentCognitionSlot = originalUpsert;
+
+    expect(chunks[0]).toEqual({
+      type: "error",
+      code: "TURN_SETTLEMENT_FAILED",
+      message: "forced slot failure for rollback test",
+      retriable: false,
+    });
+
+    const events = cognitionEventRepo.readByAgent("rp:alice");
+    expect(events).toHaveLength(0);
+
+    const current = cognitionProjectionRepo.getCurrent("rp:alice", "should-rollback");
+    expect(current).toBeNull();
+
+    const episodes = episodeRepo.readBySettlement("stl:req-rollback-test", "rp:alice");
+    expect(episodes).toHaveLength(0);
+  });
+
+  it("combined episodes + cognition + publications all commit in one transaction", async () => {
+    const session = sessionService.createSession("rp:alice");
+
+    const locationEntityId = graphStorage.upsertEntity({
+      pointerKey: "location:garden",
+      displayName: "Garden",
+      entityType: "location",
+      memoryScope: "shared_public",
+    });
+
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v5",
+          publicReply: "Good morning from the garden.",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval-garden-mood",
+                  target: { kind: "special", value: "self" },
+                  dimensions: [{ name: "peace", value: 0.9 }],
+                  notes: "The garden is peaceful today",
+                },
+              },
+            ],
+          },
+          privateEpisodes: [
+            { category: "observation", summary: "Morning dew on the roses" },
+          ],
+          publications: [
+            { kind: "spoken", targetScope: "current_area", summary: "Good morning from the garden." },
+          ],
+          relationIntents: [],
+          conflictFactors: [],
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      () => ({
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        session_id: session.sessionId,
+        current_area_id: locationEntityId,
+      }),
+      undefined,
+      graphStorage,
+      undefined,
+      projectionManager,
+    );
+
+    await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-combined",
+        messages: [{ role: "user", content: "good morning" }],
+      }),
+    );
+
+    const episodes = episodeRepo.readBySettlement("stl:req-combined", "rp:alice");
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].summary).toBe("Morning dew on the roses");
+
+    const events = cognitionEventRepo.readByAgent("rp:alice");
+    expect(events).toHaveLength(1);
+    expect(events[0].cognition_key).toBe("eval-garden-mood");
+
+    const currentEval = cognitionProjectionRepo.getCurrent("rp:alice", "eval-garden-mood");
+    expect(currentEval).not.toBeNull();
+    expect(currentEval!.kind).toBe("evaluation");
+
+    const publicEvents = db.query<{ summary: string }>(
+      `SELECT summary FROM event_nodes WHERE source_settlement_id = ?`,
+      ["stl:req-combined"],
+    );
+    expect(publicEvents).toHaveLength(1);
+    expect(publicEvents[0].summary).toBe("Good morning from the garden.");
   });
 });

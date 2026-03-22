@@ -2582,4 +2582,124 @@ describe("memory-entry-consumption: live runtime integration", () => {
       runtime.shutdown();
     }
   });
+
+  it("next-turn visibility: cognition current projection visible without async flush", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const session = runtime.sessionService.createSession("rp:alice");
+      const interactionStore = new InteractionStore(runtime.db);
+      const commitService = new CommitService(interactionStore);
+      const flushSelector = new FlushSelector(interactionStore);
+
+      const { CognitionEventRepo } = require("../../src/memory/cognition/cognition-event-repo.js");
+      const { PrivateCognitionProjectionRepo } = require("../../src/memory/cognition/private-cognition-current.js");
+      const { EpisodeRepository } = require("../../src/memory/episode/episode-repo.js");
+      const { ProjectionManager } = require("../../src/memory/projection/projection-manager.js");
+
+      const graphStorage = new GraphStorageService(runtime.db);
+      const episodeRepo = new EpisodeRepository(runtime.db);
+      const cognitionEventRepo = new CognitionEventRepo(runtime.db.raw);
+      const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(runtime.db.raw);
+      const projectionManager = new ProjectionManager(
+        episodeRepo,
+        cognitionEventRepo,
+        cognitionProjectionRepo,
+        graphStorage,
+      );
+
+      const mockLoop = {
+        async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
+          for (const chunk of [] as Chunk[]) yield chunk;
+        },
+        async runBuffered(_request: AgentRunRequest) {
+          return {
+            outcome: {
+              schemaVersion: "rp_turn_outcome_v5",
+              publicReply: "I trust you.",
+              privateCognition: {
+                schemaVersion: "rp_private_cognition_v4",
+                ops: [
+                  {
+                    op: "upsert",
+                    record: {
+                      kind: "assertion",
+                      key: "nextvis:trust",
+                      proposition: {
+                        subject: { kind: "special", value: "self" },
+                        predicate: "trusts",
+                        object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                      },
+                      stance: "accepted",
+                    },
+                  },
+                ],
+              },
+              privateEpisodes: [
+                { category: "speech", summary: "Expressed trust" },
+              ],
+              publications: [],
+              relationIntents: [],
+              conflictFactors: [],
+            },
+          };
+        },
+      } as unknown as AgentLoop;
+
+      const turnService = new TurnService(
+        mockLoop,
+        commitService,
+        interactionStore,
+        flushSelector,
+        null,
+        runtime.sessionService,
+        undefined,
+        undefined,
+        graphStorage,
+        undefined,
+        projectionManager,
+      );
+
+      await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-nextvis",
+          messages: [{ role: "user", content: "do you trust me?" }],
+        }),
+      );
+
+      const currentProjection = cognitionProjectionRepo.getCurrent("rp:alice", "nextvis:trust");
+      expect(currentProjection).not.toBeNull();
+      expect(currentProjection.kind).toBe("assertion");
+      expect(currentProjection.status).toBe("active");
+
+      const episodes = episodeRepo.readBySettlement("stl:req-nextvis", "rp:alice");
+      expect(episodes).toHaveLength(1);
+      expect(episodes[0].summary).toBe("Expressed trust");
+
+      const overlayFacts = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+        ["rp:alice", "nextvis:trust"],
+      );
+      expect(overlayFacts?.cnt).toBe(0);
+
+      const overlayEvents = runtime.db.get<{ cnt: number }>(
+        `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+        ["rp:alice"],
+      );
+      expect(overlayEvents?.cnt).toBe(0);
+
+      const slotRow = runtime.db.get<{ slot_payload: string }>(
+        `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
+        [session.sessionId, "rp:alice"],
+      );
+      expect(slotRow).toBeDefined();
+      const slotEntries = JSON.parse(slotRow!.slot_payload);
+      expect(slotEntries).toHaveLength(1);
+      expect(slotEntries[0].kind).toBe("assertion");
+      expect(slotEntries[0].key).toBe("nextvis:trust");
+    } finally {
+      runtime.shutdown();
+    }
+  });
 });

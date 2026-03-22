@@ -23,6 +23,7 @@ import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
 import { materializePublications } from "../memory/materialization.js";
+import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
 	MemoryFlushRequest,
@@ -74,6 +75,7 @@ export class TurnService {
 		private readonly projectionSink?: RuntimeProjectionSink,
 		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
+		private readonly projectionManager?: ProjectionManager,
 	) {}
 
 	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
@@ -469,17 +471,32 @@ export class TurnService {
 					});
 				}
 
-				const slotEntries = buildCognitionSlotPayload(
-					canonicalOutcome.privateCognition?.ops ?? [],
+			const slotEntries = buildCognitionSlotPayload(
+				canonicalOutcome.privateCognition?.ops ?? [],
+				settlementId,
+			);
+
+			if (this.projectionManager) {
+				this.projectionManager.commitSettlement({
 					settlementId,
-				);
+					sessionId: effectiveRequest.sessionId,
+					agentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
+					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+					privateEpisodes: canonicalOutcome.privateEpisodes,
+					publications,
+					viewerSnapshot: resolvedViewerSnapshot,
+					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
+					recentCognitionSlotJson: JSON.stringify(slotEntries),
+				});
+			} else {
 				this.interactionStore.upsertRecentCognitionSlot(
 					effectiveRequest.sessionId,
 					this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
 					settlementId,
 					JSON.stringify(slotEntries),
 				);
-				settlementPayloadAfterCommit = settlementPayload;
+			}
+			settlementPayloadAfterCommit = settlementPayload;
 			});
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "Turn settlement transaction failed");
@@ -517,7 +534,7 @@ export class TurnService {
 			);
 		}
 
-		if (hasPublications && this.graphStorage) {
+		if (hasPublications && this.graphStorage && !this.projectionManager) {
 			try {
 				materializePublications(this.graphStorage, publications, settlementId, {
 					sessionId: effectiveRequest.sessionId,

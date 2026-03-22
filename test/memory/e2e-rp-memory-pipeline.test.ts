@@ -4,8 +4,11 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
 import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
@@ -480,7 +483,171 @@ describe("E2E: RP memory pipeline", () => {
 		cleanupDb(dbPath);
 	});
 
-	// ── Scenario 9: Full cognition + search integration ──────────────
+	// ── Scenario 9: ProjectionManager full pipeline ─────────────────
+
+	it("ProjectionManager commits episodes + cognition + current projection atomically", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		runInteractionMigrations(db);
+
+		const graphStorage = new GraphStorageService(db);
+		const episodeRepo = new EpisodeRepository(db);
+		const cognitionEventRepo = new CognitionEventRepo(db.raw);
+		const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+		const projectionManager = new ProjectionManager(
+			episodeRepo,
+			cognitionEventRepo,
+			cognitionProjectionRepo,
+			graphStorage,
+		);
+
+		const interactionStore = new InteractionStore(db);
+		const ops: CognitionOp[] = [
+			{
+				op: "upsert",
+				record: {
+					kind: "assertion",
+					key: "pm-e2e-trust",
+					proposition: {
+						subject: { kind: "special", value: "self" },
+						predicate: "trusts",
+						object: { kind: "entity", ref: { kind: "special", value: "user" } },
+					},
+					stance: "accepted",
+				},
+			},
+			{
+				op: "upsert",
+				record: {
+					kind: "commitment",
+					key: "pm-e2e-goal",
+					mode: "goal",
+					target: { action: "serve tea" },
+					status: "active",
+				},
+			},
+		];
+
+		interactionStore.runInTransaction(() => {
+			projectionManager.commitSettlement({
+				settlementId: "stl:pm-e2e",
+				sessionId: "session-pm-e2e",
+				agentId: "rp:alice",
+				cognitionOps: ops,
+				privateEpisodes: [
+					{ category: "speech", summary: "Alice offered tea to the guest" },
+					{ category: "observation", summary: "The kettle was already hot" },
+				],
+				publications: [],
+				upsertRecentCognitionSlot: interactionStore.upsertRecentCognitionSlot.bind(interactionStore),
+				recentCognitionSlotJson: JSON.stringify([
+					{ settlementId: "stl:pm-e2e", committedAt: Date.now(), kind: "assertion", key: "pm-e2e-trust", summary: "trusts user", status: "active" },
+				]),
+			});
+		});
+
+		const episodes = episodeRepo.readBySettlement("stl:pm-e2e", "rp:alice");
+		expect(episodes).toHaveLength(2);
+		expect(episodes[0].summary).toBe("Alice offered tea to the guest");
+		expect(episodes[1].summary).toBe("The kettle was already hot");
+
+		const events = cognitionEventRepo.readByAgent("rp:alice");
+		expect(events).toHaveLength(2);
+		expect(events[0].cognition_key).toBe("pm-e2e-trust");
+		expect(events[1].cognition_key).toBe("pm-e2e-goal");
+
+		const currentTrust = cognitionProjectionRepo.getCurrent("rp:alice", "pm-e2e-trust");
+		expect(currentTrust).not.toBeNull();
+		expect(currentTrust!.kind).toBe("assertion");
+		expect(currentTrust!.status).toBe("active");
+
+		const currentGoal = cognitionProjectionRepo.getCurrent("rp:alice", "pm-e2e-goal");
+		expect(currentGoal).not.toBeNull();
+		expect(currentGoal!.kind).toBe("commitment");
+
+		const overlayFact = db.get<{ cnt: number }>(
+			"SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'rp:alice'",
+		);
+		expect(overlayFact?.cnt).toBe(0);
+
+		const overlayEvent = db.get<{ cnt: number }>(
+			"SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = 'rp:alice'",
+		);
+		expect(overlayEvent?.cnt).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("ProjectionManager transaction rollback leaves no partial state", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		runInteractionMigrations(db);
+
+		const graphStorage = new GraphStorageService(db);
+		const episodeRepo = new EpisodeRepository(db);
+		const cognitionEventRepo = new CognitionEventRepo(db.raw);
+		const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+		const projectionManager = new ProjectionManager(
+			episodeRepo,
+			cognitionEventRepo,
+			cognitionProjectionRepo,
+			graphStorage,
+		);
+
+		const interactionStore = new InteractionStore(db);
+		let threw = false;
+		try {
+			interactionStore.runInTransaction(() => {
+				projectionManager.commitSettlement({
+					settlementId: "stl:rollback-test",
+					sessionId: "session-rollback",
+					agentId: "rp:alice",
+					cognitionOps: [
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "rollback-belief",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "special", value: "user" } },
+								},
+								stance: "accepted",
+							},
+						},
+					],
+					privateEpisodes: [
+						{ category: "speech", summary: "should be rolled back" },
+					],
+					publications: [],
+					upsertRecentCognitionSlot: () => {
+						throw new Error("forced rollback");
+					},
+					recentCognitionSlotJson: "[]",
+				});
+			});
+		} catch {
+			threw = true;
+		}
+
+		expect(threw).toBe(true);
+
+		const events = cognitionEventRepo.readByAgent("rp:alice");
+		expect(events).toHaveLength(0);
+
+		const current = cognitionProjectionRepo.getCurrent("rp:alice", "rollback-belief");
+		expect(current).toBeNull();
+
+		const episodes = episodeRepo.readBySettlement("stl:rollback-test", "rp:alice");
+		expect(episodes).toHaveLength(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	// ── Scenario 10: Full cognition + search integration ──────────────
 
 	it("private cognition creates overlays searchable via private FTS5", async () => {
 		const { dbPath, db } = createTempDb();
