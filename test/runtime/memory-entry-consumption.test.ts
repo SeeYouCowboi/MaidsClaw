@@ -2508,4 +2508,78 @@ describe("memory-entry-consumption: live runtime integration", () => {
       runtime.shutdown();
     }
   });
+
+  it("dual-write: CognitionRepository writes to both overlay and event ledger via bootstrapped DB", () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+    try {
+      const { CognitionRepository } = require("../../src/memory/cognition/cognition-repo.js");
+      const { CognitionEventRepo } = require("../../src/memory/cognition/cognition-event-repo.js");
+
+      const storage = new GraphStorageService(runtime.db);
+      storage.upsertEntity({ pointerKey: "__self__", displayName: "Alice", entityType: "person", memoryScope: "shared_public" });
+      storage.upsertEntity({ pointerKey: "__user__", displayName: "User", entityType: "person", memoryScope: "shared_public" });
+      storage.upsertEntity({ pointerKey: "bob", displayName: "Bob", entityType: "person", memoryScope: "shared_public" });
+
+      const repo = new CognitionRepository(runtime.db);
+      repo.upsertAssertion({
+        agentId: "rp:alice",
+        cognitionKey: "live:dw-test",
+        settlementId: "stl:live-1",
+        opIndex: 0,
+        sourcePointerKey: "__self__",
+        predicate: "trusts",
+        targetPointerKey: "bob",
+        stance: "accepted",
+        basis: "first_hand",
+      });
+
+      const eventRepo = new CognitionEventRepo(runtime.db);
+      const events = eventRepo.readByCognitionKey("rp:alice", "live:dw-test");
+      expect(events).toHaveLength(1);
+      expect(events[0].kind).toBe("assertion");
+      expect(events[0].op).toBe("upsert");
+
+      const overlayRow = runtime.db.get<{ id: number }>(
+        "SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+        ["rp:alice", "live:dw-test"],
+      );
+      expect(overlayRow).toBeDefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("dual-write: retract in bootstrapped runtime writes retract event", () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+    try {
+      const { CognitionRepository } = require("../../src/memory/cognition/cognition-repo.js");
+      const { CognitionEventRepo } = require("../../src/memory/cognition/cognition-event-repo.js");
+
+      const storage = new GraphStorageService(runtime.db);
+      storage.upsertEntity({ pointerKey: "__self__", displayName: "Alice", entityType: "person", memoryScope: "shared_public" });
+      storage.upsertEntity({ pointerKey: "bob", displayName: "Bob", entityType: "person", memoryScope: "shared_public" });
+
+      const repo = new CognitionRepository(runtime.db);
+      repo.upsertAssertion({
+        agentId: "rp:alice",
+        cognitionKey: "live:retract-test",
+        settlementId: "stl:live-2a",
+        opIndex: 0,
+        sourcePointerKey: "__self__",
+        predicate: "trusts",
+        targetPointerKey: "bob",
+        stance: "accepted",
+      });
+      repo.retractCognition("rp:alice", "live:retract-test", "assertion", "stl:live-2b");
+
+      const eventRepo = new CognitionEventRepo(runtime.db);
+      const events = eventRepo.readByCognitionKey("rp:alice", "live:retract-test");
+      expect(events).toHaveLength(2);
+      expect(events[0].op).toBe("upsert");
+      expect(events[1].op).toBe("retract");
+      expect(events[1].settlement_id).toBe("stl:live-2b");
+    } finally {
+      runtime.shutdown();
+    }
+  });
 });

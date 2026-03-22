@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MaidsClawError } from "../../src/core/errors.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
@@ -1321,6 +1322,316 @@ describe("CognitionOpCommitter", () => {
 				[],
 			);
 			expect(relRow).toBeUndefined();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Cognition event ledger dual-write", () => {
+		it("upsert assertion writes event to private_cognition_events", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:assertion-1",
+				settlementId: "stl:dw-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:assertion-1");
+			expect(events).toHaveLength(1);
+			expect(events[0].kind).toBe("assertion");
+			expect(events[0].op).toBe("upsert");
+			expect(events[0].settlement_id).toBe("stl:dw-1");
+			expect(events[0].record_json).not.toBeNull();
+			const parsed = JSON.parse(events[0].record_json!);
+			expect(parsed.predicate).toBe("trusts");
+			expect(parsed.stance).toBe("accepted");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("upsert evaluation writes event to private_cognition_events", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "dw:eval-1",
+				settlementId: "stl:dw-2",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.8 }],
+				notes: "reliable",
+			});
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:eval-1");
+			expect(events).toHaveLength(1);
+			expect(events[0].kind).toBe("evaluation");
+			expect(events[0].op).toBe("upsert");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("upsert commitment writes event to private_cognition_events", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "dw:commit-1",
+				settlementId: "stl:dw-3",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "protect Bob" },
+				status: "active",
+			});
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:commit-1");
+			expect(events).toHaveLength(1);
+			expect(events[0].kind).toBe("commitment");
+			expect(events[0].op).toBe("upsert");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("retract assertion writes retract event to ledger", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:retract-1",
+				settlementId: "stl:dw-4a",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.retractCognition("rp:alice", "dw:retract-1", "assertion", "stl:dw-4b");
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:retract-1");
+			expect(events).toHaveLength(2);
+			expect(events[0].op).toBe("upsert");
+			expect(events[1].op).toBe("retract");
+			expect(events[1].kind).toBe("assertion");
+			expect(events[1].settlement_id).toBe("stl:dw-4b");
+			expect(events[1].record_json).toBeNull();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("retract evaluation writes retract event to ledger", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "dw:retract-eval",
+				settlementId: "stl:dw-5a",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.5 }],
+			});
+			repo.retractCognition("rp:alice", "dw:retract-eval", "evaluation", "stl:dw-5b");
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:retract-eval");
+			expect(events).toHaveLength(2);
+			expect(events[1].op).toBe("retract");
+			expect(events[1].kind).toBe("evaluation");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("preserves assertion/evaluation/commitment kind boundaries in event ledger", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:kind-a",
+				settlementId: "stl:dw-6",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "likes",
+				targetPointerKey: "bob",
+				stance: "tentative",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "dw:kind-e",
+				settlementId: "stl:dw-6",
+				opIndex: 1,
+				dimensions: [{ name: "warmth", value: 0.6 }],
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "dw:kind-c",
+				settlementId: "stl:dw-6",
+				opIndex: 2,
+				mode: "intent",
+				target: { action: "help" },
+				status: "active",
+			});
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByAgent("rp:alice");
+			const kinds = events.map((e) => e.kind);
+			expect(kinds).toContain("assertion");
+			expect(kinds).toContain("evaluation");
+			expect(kinds).toContain("commitment");
+			expect(events.length).toBe(3);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("multiple upserts to same key accumulate events in ledger", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:multi-upsert",
+				settlementId: "stl:dw-7a",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:multi-upsert",
+				settlementId: "stl:dw-7b",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.readByCognitionKey("rp:alice", "dw:multi-upsert");
+			expect(events).toHaveLength(2);
+			expect(events[0].settlement_id).toBe("stl:dw-7a");
+			expect(events[1].settlement_id).toBe("stl:dw-7b");
+
+			const overlayCount = db.get<{ cnt: number }>(
+				"SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "dw:multi-upsert"],
+			);
+			expect(overlayCount!.cnt).toBe(1);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("replay returns all events ordered by committed_time ASC", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "dw:replay-1",
+				settlementId: "stl:dw-8",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "dw:replay-2",
+				settlementId: "stl:dw-8",
+				opIndex: 1,
+				dimensions: [{ name: "trust", value: 0.8 }],
+			});
+			repo.retractCognition("rp:alice", "dw:replay-1", "assertion", "stl:dw-8b");
+
+			const eventRepo = repo.getEventRepo();
+			const all = eventRepo.replay("rp:alice");
+			expect(all.length).toBe(3);
+			expect(all[0].op).toBe("upsert");
+			expect(all[1].op).toBe("upsert");
+			expect(all[2].op).toBe("retract");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("dual-write is atomic: overlay and event ledger both succeed or both fail", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+
+			db.exec("DROP TABLE IF EXISTS private_cognition_events");
+
+			const repo = new CognitionRepository(db);
+			let threw = false;
+			try {
+				repo.upsertAssertion({
+					agentId: "rp:alice",
+					cognitionKey: "dw:atomic-fail",
+					settlementId: "stl:dw-9",
+					opIndex: 0,
+					sourcePointerKey: "__self__",
+					predicate: "trusts",
+					targetPointerKey: "bob",
+					stance: "accepted",
+				});
+			} catch {
+				threw = true;
+			}
+			expect(threw).toBe(true);
+
+			const overlayRow = db.get<{ id: number }>(
+				"SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", "dw:atomic-fail"],
+			);
+			expect(overlayRow).toBeUndefined();
 
 			db.close();
 			cleanupDb(dbPath);

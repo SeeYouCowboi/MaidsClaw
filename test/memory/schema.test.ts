@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(28);
+		expect(nonFtsCount?.count).toBe(29);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -500,7 +500,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(11);
+		expect(migrationCount?.count).toBe(12);
 
 		db.close();
 		cleanupDb(dbPath);

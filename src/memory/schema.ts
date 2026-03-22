@@ -90,6 +90,11 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_private_episode_events_settlement ON private_episode_events(settlement_id, agent_id)`,
   `CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent ON private_episode_events(agent_id, created_at DESC)`,
 
+  // ── Private Cognition Events (append-only ledger) ──
+  `CREATE TABLE IF NOT EXISTS private_cognition_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), op TEXT NOT NULL CHECK (op IN ('upsert', 'retract')), record_json TEXT, settlement_id TEXT NOT NULL, committed_time INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_agent_key_time ON private_cognition_events(agent_id, cognition_key, committed_time)`,
+  `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_settlement ON private_cognition_events(settlement_id)`,
+
   // ── Shared Blocks V1 ──
   `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
@@ -302,6 +307,21 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent ON private_episode_events(agent_id, created_at DESC)`,
+      );
+    },
+  },
+  {
+    id: "memory:012:add-private-cognition-events",
+    description: "Add private_cognition_events append-only ledger",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS private_cognition_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), op TEXT NOT NULL CHECK (op IN ('upsert', 'retract')), record_json TEXT, settlement_id TEXT NOT NULL, committed_time INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_agent_key_time ON private_cognition_events(agent_id, cognition_key, committed_time)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_settlement ON private_cognition_events(settlement_id)`,
       );
     },
   },

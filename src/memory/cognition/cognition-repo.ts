@@ -6,6 +6,7 @@ import {
   type AssertionStance,
 } from "../../runtime/rp-turn-contract.js";
 import type { CognitionKind } from "../../runtime/rp-turn-contract.js";
+import { CognitionEventRepo } from "./cognition-event-repo.js";
 import { RelationBuilder } from "./relation-builder.js";
 
 type DbLike = {
@@ -193,9 +194,27 @@ type ExistingAssertionState = {
 
 export class CognitionRepository {
   private readonly relationBuilder: RelationBuilder;
+  private readonly eventRepo: CognitionEventRepo;
 
   constructor(private readonly db: DbLike) {
     this.relationBuilder = new RelationBuilder(db);
+    this.eventRepo = new CognitionEventRepo(db);
+  }
+
+  getEventRepo(): CognitionEventRepo {
+    return this.eventRepo;
+  }
+
+  private runInTransaction<T>(fn: () => T): T {
+    const db = this.db as unknown as { transaction?: (f: () => T) => T | (() => T) };
+    if (typeof db.transaction !== "function") {
+      return fn();
+    }
+    const result = db.transaction(fn);
+    if (typeof result === "function") {
+      return (result as () => T)();
+    }
+    return result;
   }
 
   upsertAssertion(params: UpsertAssertionParams): { id: number } {
@@ -232,6 +251,16 @@ export class CognitionRepository {
     const legacyStatus = STANCE_TO_EPISTEMIC_STATUS[params.stance];
     const legacyBeliefType = params.basis ? BASIS_TO_BELIEF_TYPE[params.basis] : null;
 
+    const recordJson = JSON.stringify({
+      sourcePointerKey: params.sourcePointerKey,
+      predicate: params.predicate,
+      targetPointerKey: params.targetPointerKey,
+      stance: params.stance,
+      basis: params.basis ?? null,
+      preContestedStance: params.preContestedStance ?? null,
+      provenance: params.provenance ?? null,
+    });
+
     if (cognitionKey) {
       const existing = this.db
         .prepare(
@@ -262,41 +291,113 @@ export class CognitionRepository {
       }
 
       if (existing) {
-        this.db
+        return this.runInTransaction(() => {
+          this.db
+            .prepare(
+              `UPDATE agent_fact_overlay
+               SET source_entity_id = ?,
+                   target_entity_id = ?,
+                   predicate = ?,
+                   confidence = NULL,
+                   epistemic_status = ?,
+                   belief_type = ?,
+                   basis = ?,
+                   stance = ?,
+                    pre_contested_stance = ?,
+                   provenance = ?,
+                   settlement_id = ?,
+                   op_index = ?,
+                   updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(
+              sourceEntityId,
+              targetEntityId,
+              params.predicate,
+              legacyStatus,
+               legacyBeliefType,
+               params.basis ?? null,
+               params.stance,
+               params.preContestedStance ?? null,
+               params.provenance ?? null,
+              params.settlementId,
+              params.opIndex,
+              now,
+              existing.id,
+            );
+          this.syncCognitionSearchDoc({
+            overlayId: existing.id,
+            agentId: params.agentId,
+            kind: "assertion",
+            content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+            stance: params.stance,
+            basis: params.basis ?? null,
+            sourceRefKind: "private_belief",
+            now,
+          });
+          if (params.stance === "contested" && cognitionKey) {
+            this.relationBuilder.writeContestRelation(
+              `private_belief:${existing.id}`,
+              cognitionKey,
+              params.settlementId,
+            );
+          }
+          this.eventRepo.append({
+            agentId: params.agentId,
+            cognitionKey,
+            kind: "assertion",
+            op: "upsert",
+            recordJson,
+            settlementId: params.settlementId,
+            committedTime: now,
+          });
+          return { id: existing.id };
+        });
+      }
+
+      return this.runInTransaction(() => {
+        const result = this.db
           .prepare(
-            `UPDATE agent_fact_overlay
-             SET source_entity_id = ?,
-                 target_entity_id = ?,
-                 predicate = ?,
-                 confidence = NULL,
-                 epistemic_status = ?,
-                 belief_type = ?,
-                 basis = ?,
-                 stance = ?,
-                  pre_contested_stance = ?,
-                 provenance = ?,
-                 settlement_id = ?,
-                 op_index = ?,
-                 updated_at = ?
-             WHERE id = ?`,
+            `INSERT INTO agent_fact_overlay (
+               agent_id,
+               source_entity_id,
+               target_entity_id,
+               predicate,
+               belief_type,
+               confidence,
+               epistemic_status,
+               basis,
+               stance,
+               pre_contested_stance,
+               provenance,
+               source_event_ref,
+               cognition_key,
+               settlement_id,
+               op_index,
+               created_at,
+               updated_at
+             ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
           )
           .run(
+            params.agentId,
             sourceEntityId,
             targetEntityId,
             params.predicate,
+            legacyBeliefType,
             legacyStatus,
-             legacyBeliefType,
-             params.basis ?? null,
-             params.stance,
-             params.preContestedStance ?? null,
-             params.provenance ?? null,
+            params.basis ?? null,
+            params.stance,
+            params.preContestedStance ?? null,
+            params.provenance ?? null,
+            cognitionKey,
             params.settlementId,
             params.opIndex,
             now,
-            existing.id,
+            now,
           );
+        const insertedId = Number(result.lastInsertRowid);
         this.syncCognitionSearchDoc({
-          overlayId: existing.id,
+          overlayId: insertedId,
           agentId: params.agentId,
           kind: "assertion",
           content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
@@ -307,14 +408,25 @@ export class CognitionRepository {
         });
         if (params.stance === "contested" && cognitionKey) {
           this.relationBuilder.writeContestRelation(
-            `private_belief:${existing.id}`,
+            `private_belief:${insertedId}`,
             cognitionKey,
             params.settlementId,
           );
         }
-        return { id: existing.id };
-      }
+        this.eventRepo.append({
+          agentId: params.agentId,
+          cognitionKey,
+          kind: "assertion",
+          op: "upsert",
+          recordJson,
+          settlementId: params.settlementId,
+          committedTime: now,
+        });
+        return { id: insertedId };
+      });
+    }
 
+    return this.runInTransaction(() => {
       const result = this.db
         .prepare(
           `INSERT INTO agent_fact_overlay (
@@ -330,12 +442,11 @@ export class CognitionRepository {
              pre_contested_stance,
              provenance,
              source_event_ref,
-             cognition_key,
              settlement_id,
              op_index,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
         )
         .run(
           params.agentId,
@@ -348,7 +459,6 @@ export class CognitionRepository {
           params.stance,
           params.preContestedStance ?? null,
           params.provenance ?? null,
-          cognitionKey,
           params.settlementId,
           params.opIndex,
           now,
@@ -365,65 +475,17 @@ export class CognitionRepository {
         sourceRefKind: "private_belief",
         now,
       });
-      if (params.stance === "contested" && cognitionKey) {
-        this.relationBuilder.writeContestRelation(
-          `private_belief:${insertedId}`,
-          cognitionKey,
-          params.settlementId,
-        );
-      }
+      this.eventRepo.append({
+        agentId: params.agentId,
+        cognitionKey: `__anon_assertion_${insertedId}`,
+        kind: "assertion",
+        op: "upsert",
+        recordJson,
+        settlementId: params.settlementId,
+        committedTime: now,
+      });
       return { id: insertedId };
-    }
-
-    const result = this.db
-      .prepare(
-        `INSERT INTO agent_fact_overlay (
-           agent_id,
-           source_entity_id,
-           target_entity_id,
-           predicate,
-           belief_type,
-           confidence,
-           epistemic_status,
-           basis,
-           stance,
-           pre_contested_stance,
-           provenance,
-           source_event_ref,
-           settlement_id,
-           op_index,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
-      )
-      .run(
-        params.agentId,
-        sourceEntityId,
-        targetEntityId,
-        params.predicate,
-        legacyBeliefType,
-        legacyStatus,
-        params.basis ?? null,
-        params.stance,
-        params.preContestedStance ?? null,
-        params.provenance ?? null,
-        params.settlementId,
-        params.opIndex,
-        now,
-        now,
-      );
-    const insertedId = Number(result.lastInsertRowid);
-    this.syncCognitionSearchDoc({
-      overlayId: insertedId,
-      agentId: params.agentId,
-      kind: "assertion",
-      content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
-      stance: params.stance,
-      basis: params.basis ?? null,
-      sourceRefKind: "private_belief",
-      now,
     });
-    return { id: insertedId };
   }
 
   private assertLegalStanceTransition(
@@ -504,6 +566,14 @@ export class CognitionRepository {
       notes: params.notes ?? null,
     });
 
+    const eventRecordJson = JSON.stringify({
+      dimensions: params.dimensions,
+      emotionTags: params.emotionTags ?? [],
+      notes: params.notes ?? null,
+      salience: params.salience ?? null,
+      targetEntityId: params.targetEntityId ?? null,
+    });
+
     if (cognitionKey) {
       const existing = this.db
         .prepare(
@@ -512,102 +582,125 @@ export class CognitionRepository {
         )
         .get(params.agentId, cognitionKey) as { id: number } | null;
       if (existing) {
-        this.db
-          .prepare(
-            `UPDATE agent_event_overlay
-             SET salience = ?,
-                 primary_actor_entity_id = ?,
-                 target_entity_id = ?,
-                 metadata_json = ?,
-                 settlement_id = ?,
-                 op_index = ?,
-                 updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            params.salience ?? null,
-            params.targetEntityId ?? null,
-            params.targetEntityId ?? null,
-            metadataJson,
-            params.settlementId,
-            params.opIndex,
+        return this.runInTransaction(() => {
+          this.db
+            .prepare(
+              `UPDATE agent_event_overlay
+               SET salience = ?,
+                   primary_actor_entity_id = ?,
+                   target_entity_id = ?,
+                   metadata_json = ?,
+                   settlement_id = ?,
+                   op_index = ?,
+                   updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(
+              params.salience ?? null,
+              params.targetEntityId ?? null,
+              params.targetEntityId ?? null,
+              metadataJson,
+              params.settlementId,
+              params.opIndex,
+              now,
+              existing.id,
+            );
+          this.syncCognitionSearchDoc({
+            overlayId: existing.id,
+            agentId: params.agentId,
+            kind: "evaluation",
+            content: `evaluation: ${params.notes ?? ""}`,
+            stance: null,
+            basis: null,
+            sourceRefKind: "private_event",
             now,
-            existing.id,
-          );
-        this.syncCognitionSearchDoc({
-          overlayId: existing.id,
-          agentId: params.agentId,
-          kind: "evaluation",
-          content: `evaluation: ${params.notes ?? ""}`,
-          stance: null,
-          basis: null,
-          sourceRefKind: "private_event",
-          now,
+          });
+          this.eventRepo.append({
+            agentId: params.agentId,
+            cognitionKey,
+            kind: "evaluation",
+            op: "upsert",
+            recordJson: eventRecordJson,
+            settlementId: params.settlementId,
+            committedTime: now,
+          });
+          return { id: existing.id };
         });
-        return { id: existing.id };
       }
     }
 
-    const result = this.db
-      .prepare(
-        `INSERT INTO agent_event_overlay (
-           event_id,
-           agent_id,
-           role,
-           private_notes,
-           salience,
-           emotion,
-           event_category,
-           primary_actor_entity_id,
-           projection_class,
-           location_entity_id,
-           target_entity_id,
-           projectable_summary,
-           source_record_id,
-           cognition_key,
-           explicit_kind,
-           settlement_id,
-           op_index,
-           metadata_json,
-           cognition_status,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-      )
-      .run(
-        null,
-        params.agentId,
-        null,
-        null,
-        params.salience ?? null,
-        null,
-        "thought",
-        params.targetEntityId ?? null,
-        "none",
-        null,
-        params.targetEntityId ?? null,
-        null,
-        null,
-        cognitionKey ?? null,
-        "evaluation",
-        params.settlementId,
-        params.opIndex,
-        metadataJson,
+    return this.runInTransaction(() => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO agent_event_overlay (
+             event_id,
+             agent_id,
+             role,
+             private_notes,
+             salience,
+             emotion,
+             event_category,
+             primary_actor_entity_id,
+             projection_class,
+             location_entity_id,
+             target_entity_id,
+             projectable_summary,
+             source_record_id,
+             cognition_key,
+             explicit_kind,
+             settlement_id,
+             op_index,
+             metadata_json,
+             cognition_status,
+             created_at,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .run(
+          null,
+          params.agentId,
+          null,
+          null,
+          params.salience ?? null,
+          null,
+          "thought",
+          params.targetEntityId ?? null,
+          "none",
+          null,
+          params.targetEntityId ?? null,
+          null,
+          null,
+          cognitionKey ?? null,
+          "evaluation",
+          params.settlementId,
+          params.opIndex,
+          metadataJson,
+          now,
+          now,
+        );
+      const evalId = Number(result.lastInsertRowid);
+      this.syncCognitionSearchDoc({
+        overlayId: evalId,
+        agentId: params.agentId,
+        kind: "evaluation",
+        content: `evaluation: ${params.notes ?? ""}`,
+        stance: null,
+        basis: null,
+        sourceRefKind: "private_event",
         now,
-        now,
-      );
-    const evalId = Number(result.lastInsertRowid);
-    this.syncCognitionSearchDoc({
-      overlayId: evalId,
-      agentId: params.agentId,
-      kind: "evaluation",
-      content: `evaluation: ${params.notes ?? ""}`,
-      stance: null,
-      basis: null,
-      sourceRefKind: "private_event",
-      now,
+      });
+      const effectiveKey = cognitionKey ?? `__anon_evaluation_${evalId}`;
+      this.eventRepo.append({
+        agentId: params.agentId,
+        cognitionKey: effectiveKey,
+        kind: "evaluation",
+        op: "upsert",
+        recordJson: eventRecordJson,
+        settlementId: params.settlementId,
+        committedTime: now,
+      });
+      return { id: evalId };
     });
-    return { id: evalId };
   }
 
   upsertCommitment(params: UpsertCommitmentParams): { id: number } {
@@ -621,6 +714,16 @@ export class CognitionRepository {
       horizon: params.horizon ?? null,
     });
 
+    const eventRecordJson = JSON.stringify({
+      mode: params.mode,
+      target: params.target,
+      status: params.status,
+      priority: params.priority ?? null,
+      horizon: params.horizon ?? null,
+      salience: params.salience ?? null,
+      targetEntityId: params.targetEntityId ?? null,
+    });
+
     if (cognitionKey) {
       const existing = this.db
         .prepare(
@@ -629,113 +732,187 @@ export class CognitionRepository {
         )
         .get(params.agentId, cognitionKey) as { id: number } | null;
       if (existing) {
-        this.db
-          .prepare(
-            `UPDATE agent_event_overlay
-             SET salience = ?,
-                 primary_actor_entity_id = ?,
-                 target_entity_id = ?,
-                 metadata_json = ?,
-                 settlement_id = ?,
-                 op_index = ?,
-                 updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            params.salience ?? null,
-            params.targetEntityId ?? null,
-            params.targetEntityId ?? null,
-            metadataJson,
-            params.settlementId,
-            params.opIndex,
+        return this.runInTransaction(() => {
+          this.db
+            .prepare(
+              `UPDATE agent_event_overlay
+               SET salience = ?,
+                   primary_actor_entity_id = ?,
+                   target_entity_id = ?,
+                   metadata_json = ?,
+                   settlement_id = ?,
+                   op_index = ?,
+                   updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(
+              params.salience ?? null,
+              params.targetEntityId ?? null,
+              params.targetEntityId ?? null,
+              metadataJson,
+              params.settlementId,
+              params.opIndex,
+              now,
+              existing.id,
+            );
+          this.syncCognitionSearchDoc({
+            overlayId: existing.id,
+            agentId: params.agentId,
+            kind: "commitment",
+            content: `${params.mode}: ${JSON.stringify(params.target)}`,
+            stance: null,
+            basis: null,
+            sourceRefKind: "private_event",
             now,
-            existing.id,
-          );
-        this.syncCognitionSearchDoc({
-          overlayId: existing.id,
-          agentId: params.agentId,
-          kind: "commitment",
-          content: `${params.mode}: ${JSON.stringify(params.target)}`,
-          stance: null,
-          basis: null,
-          sourceRefKind: "private_event",
-          now,
+          });
+          this.eventRepo.append({
+            agentId: params.agentId,
+            cognitionKey,
+            kind: "commitment",
+            op: "upsert",
+            recordJson: eventRecordJson,
+            settlementId: params.settlementId,
+            committedTime: now,
+          });
+          return { id: existing.id };
         });
-        return { id: existing.id };
       }
     }
 
-    const result = this.db
-      .prepare(
-        `INSERT INTO agent_event_overlay (
-           event_id,
-           agent_id,
-           role,
-           private_notes,
-           salience,
-           emotion,
-           event_category,
-           primary_actor_entity_id,
-           projection_class,
-           location_entity_id,
-           target_entity_id,
-           projectable_summary,
-           source_record_id,
-           cognition_key,
-           explicit_kind,
-           settlement_id,
-           op_index,
-           metadata_json,
-           cognition_status,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-      )
-      .run(
-        null,
-        params.agentId,
-        null,
-        null,
-        params.salience ?? null,
-        null,
-        "thought",
-        params.targetEntityId ?? null,
-        "none",
-        null,
-        params.targetEntityId ?? null,
-        null,
-        null,
-        cognitionKey ?? null,
-        "commitment",
-        params.settlementId,
-        params.opIndex,
-        metadataJson,
+    return this.runInTransaction(() => {
+      const result = this.db
+        .prepare(
+          `INSERT INTO agent_event_overlay (
+             event_id,
+             agent_id,
+             role,
+             private_notes,
+             salience,
+             emotion,
+             event_category,
+             primary_actor_entity_id,
+             projection_class,
+             location_entity_id,
+             target_entity_id,
+             projectable_summary,
+             source_record_id,
+             cognition_key,
+             explicit_kind,
+             settlement_id,
+             op_index,
+             metadata_json,
+             cognition_status,
+             created_at,
+             updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .run(
+          null,
+          params.agentId,
+          null,
+          null,
+          params.salience ?? null,
+          null,
+          "thought",
+          params.targetEntityId ?? null,
+          "none",
+          null,
+          params.targetEntityId ?? null,
+          null,
+          null,
+          cognitionKey ?? null,
+          "commitment",
+          params.settlementId,
+          params.opIndex,
+          metadataJson,
+          now,
+          now,
+        );
+      const commitId = Number(result.lastInsertRowid);
+      this.syncCognitionSearchDoc({
+        overlayId: commitId,
+        agentId: params.agentId,
+        kind: "commitment",
+        content: `${params.mode}: ${JSON.stringify(params.target)}`,
+        stance: null,
+        basis: null,
+        sourceRefKind: "private_event",
         now,
-        now,
-      );
-    const commitId = Number(result.lastInsertRowid);
-    this.syncCognitionSearchDoc({
-      overlayId: commitId,
-      agentId: params.agentId,
-      kind: "commitment",
-      content: `${params.mode}: ${JSON.stringify(params.target)}`,
-      stance: null,
-      basis: null,
-      sourceRefKind: "private_event",
-      now,
+      });
+      const effectiveKey = cognitionKey ?? `__anon_commitment_${commitId}`;
+      this.eventRepo.append({
+        agentId: params.agentId,
+        cognitionKey: effectiveKey,
+        kind: "commitment",
+        op: "upsert",
+        recordJson: eventRecordJson,
+        settlementId: params.settlementId,
+        committedTime: now,
+      });
+      return { id: commitId };
     });
-    return { id: commitId };
   }
 
   retractCognition(
     agentId: string,
     cognitionKey: string,
     kind?: "assertion" | "evaluation" | "commitment",
+    settlementId?: string,
   ): void {
     const normalizedKey = cognitionKey.normalize("NFC");
     const now = Date.now();
+    const effectiveSettlementId = settlementId ?? "__retract__";
 
     if (kind === "assertion") {
+      this.runInTransaction(() => {
+        this.db
+          .prepare(
+            `UPDATE agent_fact_overlay
+             SET stance = 'rejected',
+                 epistemic_status = 'retracted',
+                 updated_at = ?
+             WHERE agent_id = ? AND cognition_key = ?`,
+          )
+          .run(now, agentId, normalizedKey);
+        this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
+        this.eventRepo.append({
+          agentId,
+          cognitionKey: normalizedKey,
+          kind: "assertion",
+          op: "retract",
+          recordJson: null,
+          settlementId: effectiveSettlementId,
+          committedTime: now,
+        });
+      });
+      return;
+    }
+
+    if (kind === "evaluation" || kind === "commitment") {
+      this.runInTransaction(() => {
+        this.db
+          .prepare(
+            `UPDATE agent_event_overlay
+             SET cognition_status = 'retracted',
+                 updated_at = ?
+             WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
+          )
+          .run(now, agentId, normalizedKey, kind);
+        this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
+        this.eventRepo.append({
+          agentId,
+          cognitionKey: normalizedKey,
+          kind,
+          op: "retract",
+          recordJson: null,
+          settlementId: effectiveSettlementId,
+          committedTime: now,
+        });
+      });
+      return;
+    }
+
+    this.runInTransaction(() => {
       this.db
         .prepare(
           `UPDATE agent_fact_overlay
@@ -745,42 +922,26 @@ export class CognitionRepository {
            WHERE agent_id = ? AND cognition_key = ?`,
         )
         .run(now, agentId, normalizedKey);
-      this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
-      return;
-    }
-
-    if (kind === "evaluation" || kind === "commitment") {
       this.db
         .prepare(
           `UPDATE agent_event_overlay
            SET cognition_status = 'retracted',
                updated_at = ?
-           WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
+           WHERE agent_id = ? AND cognition_key = ?`,
         )
-        .run(now, agentId, normalizedKey, kind);
+        .run(now, agentId, normalizedKey);
+      this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
       this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
-      return;
-    }
-
-    this.db
-      .prepare(
-        `UPDATE agent_fact_overlay
-         SET stance = 'rejected',
-             epistemic_status = 'retracted',
-             updated_at = ?
-         WHERE agent_id = ? AND cognition_key = ?`,
-      )
-      .run(now, agentId, normalizedKey);
-    this.db
-      .prepare(
-        `UPDATE agent_event_overlay
-         SET cognition_status = 'retracted',
-             updated_at = ?
-         WHERE agent_id = ? AND cognition_key = ?`,
-      )
-      .run(now, agentId, normalizedKey);
-    this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
-    this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
+      this.eventRepo.append({
+        agentId,
+        cognitionKey: normalizedKey,
+        kind: kind ?? "assertion",
+        op: "retract",
+        recordJson: null,
+        settlementId: effectiveSettlementId,
+        committedTime: now,
+      });
+    });
   }
 
   getAssertions(

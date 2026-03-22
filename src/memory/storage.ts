@@ -421,8 +421,8 @@ export class GraphStorageService {
     return { id: result.id, ref: makeNodeRef("private_event", result.id) };
   }
 
-  retractExplicitCognition(agentId: string, cognitionKey: string, kind: "assertion" | "evaluation" | "commitment"): void {
-    this.cognitionRepo.retractCognition(agentId, cognitionKey, kind);
+  retractExplicitCognition(agentId: string, cognitionKey: string, kind: "assertion" | "evaluation" | "commitment", settlementId?: string): void {
+    this.cognitionRepo.retractCognition(agentId, cognitionKey, kind, settlementId);
   }
 
   createEntityAlias(canonicalId: number, alias: string, aliasType?: string, ownerAgentId?: string): number {

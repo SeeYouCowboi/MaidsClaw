@@ -914,6 +914,33 @@ describe("TurnService", () => {
     expect(rawRow!.payload).not.toContain("SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST");
   });
 
+  it("memory migration creates private_cognition_events table", () => {
+    const tableInfo = db.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='private_cognition_events'",
+    );
+    expect(tableInfo).toHaveLength(1);
+
+    const indexInfo = db.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_private_cognition_events%'",
+    );
+    expect(indexInfo.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("settlement transaction atomicity: private_cognition_events has correct schema", () => {
+    const columns = db.query<{ name: string; type: string }>(
+      "PRAGMA table_info(private_cognition_events)",
+    );
+    const columnNames = columns.map((c) => c.name);
+    expect(columnNames).toContain("agent_id");
+    expect(columnNames).toContain("cognition_key");
+    expect(columnNames).toContain("kind");
+    expect(columnNames).toContain("op");
+    expect(columnNames).toContain("record_json");
+    expect(columnNames).toContain("settlement_id");
+    expect(columnNames).toContain("committed_time");
+    expect(columnNames).toContain("created_at");
+  });
+
   it("non-RP maiden session preserves streaming path behavior", async () => {
     const session = sessionService.createSession("maid:violet");
     const streamChunks: Chunk[] = [

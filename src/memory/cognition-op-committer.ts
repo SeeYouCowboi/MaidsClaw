@@ -48,7 +48,7 @@ export class CognitionOpCommitter {
         if (this.isAlreadyRetracted(op.target)) {
           continue;
         }
-        this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind);
+        this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind, settlementId);
       }
     }
 

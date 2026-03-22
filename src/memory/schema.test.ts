@@ -28,7 +28,7 @@ describe("createMemorySchema", () => {
 				"SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND sql NOT LIKE '%fts5%'",
 			)
 			.get() as { cnt: number };
-		expect(result.cnt).toBe(48);
+		expect(result.cnt).toBe(49);
 		db.close();
 	});
 

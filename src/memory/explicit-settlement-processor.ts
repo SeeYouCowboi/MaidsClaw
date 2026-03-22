@@ -119,7 +119,7 @@ export class ExplicitSettlementProcessor {
       }
 
       if (op.op === "retract") {
-        this.cognitionRepo.retractCognition(agentId, op.target.key, op.target.kind);
+        this.cognitionRepo.retractCognition(agentId, op.target.key, op.target.kind, settlementId);
       }
     }
 
