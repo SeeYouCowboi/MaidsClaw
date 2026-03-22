@@ -2,7 +2,7 @@ import type { AgentProfile } from "../../agents/profile.js";
 import type { ViewerContext } from "../../core/contracts/viewer-context.js";
 import type { MemoryHint } from "../types.js";
 import type { NarrativeSearchService } from "../narrative/narrative-search.js";
-import type { CognitionSearchService, CognitionHit } from "../cognition/cognition-search.js";
+import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } from "../cognition/cognition-search.js";
 import { resolveTemplate } from "../contracts/retrieval-template.js";
 
 export type RetrievalResult = {
@@ -11,10 +11,15 @@ export type RetrievalResult = {
 };
 
 export class RetrievalOrchestrator {
+  private readonly currentProjectionReader: CurrentProjectionReader | null;
+
   constructor(
     private readonly narrativeService: NarrativeSearchService,
     private readonly cognitionService: CognitionSearchService,
-  ) {}
+    currentProjectionReader?: CurrentProjectionReader,
+  ) {
+    this.currentProjectionReader = currentProjectionReader ?? null;
+  }
 
   async search(
     query: string,

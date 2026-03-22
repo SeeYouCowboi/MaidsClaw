@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -723,6 +724,205 @@ describe("RetrievalService", () => {
 			const uneasyHits = search.searchCognition({ agentId: "rp:alice", query: "uneasy" });
 			expect(uneasyHits.length).toBe(1);
 			expect(uneasyHits[0].kind).toBe("evaluation");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("CurrentProjectionReader via cognition-search", () => {
+		function seedCognitionEntities(storage: GraphStorageService) {
+			storage.upsertEntity({
+				pointerKey: "__self__",
+				displayName: "Alice",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "__user__",
+				displayName: "User",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "bob",
+				displayName: "Bob",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+		}
+
+		it("currentProjectionReader reads from private_cognition_current after rebuild", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:a1",
+				settlementId: "stl:pr-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:e1",
+				settlementId: "stl:pr-1",
+				opIndex: 1,
+				dimensions: [{ name: "trust", value: 0.9 }],
+				notes: "very trustworthy",
+			});
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+			projection.rebuild("rp:alice");
+
+			const search = new CognitionSearchService(db);
+			const reader = search.createCurrentProjectionReader();
+
+			const all = reader.getAllCurrent("rp:alice");
+			expect(all.length).toBe(2);
+
+			const assertion = reader.getCurrent("rp:alice", "proj-read:a1");
+			expect(assertion).not.toBeNull();
+			expect(assertion!.kind).toBe("assertion");
+			expect(assertion!.stance).toBe("accepted");
+
+			const evaluation = reader.getCurrent("rp:alice", "proj-read:e1");
+			expect(evaluation).not.toBeNull();
+			expect(evaluation!.kind).toBe("evaluation");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("getActiveCurrent excludes retracted rows", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:active",
+				settlementId: "stl:pr-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "likes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:retracted",
+				settlementId: "stl:pr-2",
+				opIndex: 1,
+				sourcePointerKey: "__self__",
+				predicate: "dislikes",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.retractCognition("rp:alice", "proj-read:retracted", "assertion", "stl:pr-3");
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+			projection.rebuild("rp:alice");
+
+			const search = new CognitionSearchService(db);
+			const reader = search.createCurrentProjectionReader();
+
+			const active = reader.getActiveCurrent("rp:alice");
+			expect(active.length).toBe(1);
+			expect(active[0].cognition_key).toBe("proj-read:active");
+
+			const all = reader.getAllCurrent("rp:alice");
+			expect(all.length).toBe(2);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("getAllCurrentByKind filters by kind", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:kind-a",
+				settlementId: "stl:pr-4",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "knows",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:kind-c",
+				settlementId: "stl:pr-4",
+				opIndex: 1,
+				mode: "goal",
+				target: { action: "help" },
+				status: "active",
+			});
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+			projection.rebuild("rp:alice");
+
+			const search = new CognitionSearchService(db);
+			const reader = search.createCurrentProjectionReader();
+
+			const assertions = reader.getAllCurrentByKind("rp:alice", "assertion");
+			expect(assertions.length).toBe(1);
+			expect(assertions[0].kind).toBe("assertion");
+
+			const commitments = reader.getAllCurrentByKind("rp:alice", "commitment");
+			expect(commitments.length).toBe(1);
+			expect(commitments[0].kind).toBe("commitment");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("toHit converts projection row to CognitionHit format", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedCognitionEntities(storage);
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj-read:hit",
+				settlementId: "stl:pr-5",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+			projection.rebuild("rp:alice");
+
+			const search = new CognitionSearchService(db);
+			const reader = search.createCurrentProjectionReader();
+			const row = reader.getCurrent("rp:alice", "proj-read:hit")!;
+			const hit = reader.toHit(row);
+
+			expect(hit.kind).toBe("assertion");
+			expect(hit.stance).toBe("accepted");
+			expect(hit.basis).toBe("first_hand");
+			expect(hit.content).toContain("trusts");
 
 			db.close();
 			cleanupDb(dbPath);

@@ -95,6 +95,10 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_agent_key_time ON private_cognition_events(agent_id, cognition_key, committed_time)`,
   `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_settlement ON private_cognition_events(settlement_id)`,
 
+  // ── Private Cognition Current (rebuildable projection) ──
+  `CREATE TABLE IF NOT EXISTS private_cognition_current (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), stance TEXT, basis TEXT, status TEXT NOT NULL DEFAULT 'active', pre_contested_stance TEXT, conflict_summary TEXT, conflict_factor_refs_json TEXT, summary_text TEXT, record_json TEXT NOT NULL, source_event_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_cognition_current_agent_key ON private_cognition_current(agent_id, cognition_key)`,
+
   // ── Shared Blocks V1 ──
   `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
@@ -322,6 +326,18 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_private_cognition_events_settlement ON private_cognition_events(settlement_id)`,
+      );
+    },
+  },
+  {
+    id: "memory:013:add-private-cognition-current",
+    description: "Add private_cognition_current rebuildable projection table",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS private_cognition_current (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), stance TEXT, basis TEXT, status TEXT NOT NULL DEFAULT 'active', pre_contested_stance TEXT, conflict_summary TEXT, conflict_factor_refs_json TEXT, summary_text TEXT, record_json TEXT NOT NULL, source_event_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+      );
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_cognition_current_agent_key ON private_cognition_current(agent_id, cognition_key)`,
       );
     },
   },

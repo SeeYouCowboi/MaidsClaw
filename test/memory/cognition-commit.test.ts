@@ -7,6 +7,7 @@ import { MaidsClawError } from "../../src/core/errors.js";
 import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { CognitionOpCommitter } from "../../src/memory/cognition-op-committer.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -1805,6 +1806,476 @@ describe("CognitionOpCommitter", () => {
 			const allKinds = search.searchCognition({ agentId: "rp:alice" });
 			expect(allKinds.length).toBe(3);
 			const kinds = allKinds.map((h) => h.kind).sort();
+			expect(kinds).toEqual(["assertion", "commitment", "evaluation"]);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+});
+
+describe("PrivateCognitionProjectionRepo", () => {
+	describe("Rebuild determinism", () => {
+		it("rebuild produces identical rows to sequential upsertFromEvent", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:rebuild-1",
+				settlementId: "stl:proj-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:rebuild-1",
+				settlementId: "stl:proj-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:rebuild-eval",
+				settlementId: "stl:proj-3",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.8 }],
+				notes: "reliable",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:rebuild-commit",
+				settlementId: "stl:proj-4",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "help Bob" },
+				status: "active",
+				priority: 5,
+			});
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			const eventRepo = new CognitionEventRepo(db);
+			const events = eventRepo.replay("rp:alice");
+			for (const event of events) {
+				projection.upsertFromEvent(event);
+			}
+			const incrementalRows = projection.getAllCurrent("rp:alice");
+
+			projection.rebuild("rp:alice");
+			const rebuildRows = projection.getAllCurrent("rp:alice");
+
+			expect(incrementalRows.length).toBe(rebuildRows.length);
+			for (let i = 0; i < incrementalRows.length; i++) {
+				const inc = incrementalRows.find((r) => r.cognition_key === rebuildRows[i].cognition_key);
+				expect(inc).toBeDefined();
+				expect(inc!.kind).toBe(rebuildRows[i].kind);
+				expect(inc!.stance).toBe(rebuildRows[i].stance);
+				expect(inc!.basis).toBe(rebuildRows[i].basis);
+				expect(inc!.status).toBe(rebuildRows[i].status);
+				expect(inc!.record_json).toBe(rebuildRows[i].record_json);
+			}
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Incremental assertion updates", () => {
+		it("tracks stance and basis progression through events", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:stance-track",
+				settlementId: "stl:st-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "tentative",
+				basis: "inference",
+			});
+
+			let events = new CognitionEventRepo(db).readByCognitionKey("rp:alice", "proj:stance-track");
+			projection.upsertFromEvent(events[0]);
+
+			let current = projection.getCurrent("rp:alice", "proj:stance-track");
+			expect(current).not.toBeNull();
+			expect(current!.kind).toBe("assertion");
+			expect(current!.stance).toBe("tentative");
+			expect(current!.basis).toBe("inference");
+			expect(current!.status).toBe("active");
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:stance-track",
+				settlementId: "stl:st-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			events = new CognitionEventRepo(db).readByCognitionKey("rp:alice", "proj:stance-track");
+			projection.upsertFromEvent(events[1]);
+
+			current = projection.getCurrent("rp:alice", "proj:stance-track");
+			expect(current!.stance).toBe("accepted");
+			expect(current!.basis).toBe("first_hand");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("preserves pre_contested_stance for contested assertions", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:contested",
+				settlementId: "stl:ct-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:contested",
+				settlementId: "stl:ct-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				preContestedStance: "accepted",
+			});
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:contested");
+			expect(current!.stance).toBe("contested");
+			expect(current!.pre_contested_stance).toBe("accepted");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Evaluation current rules", () => {
+		it("evaluation projection tracks latest record_json", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:eval-1",
+				settlementId: "stl:ev-1",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.3 }],
+				notes: "initial",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:eval-1",
+				settlementId: "stl:ev-2",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.8 }],
+				notes: "updated impression",
+			});
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:eval-1");
+			expect(current).not.toBeNull();
+			expect(current!.kind).toBe("evaluation");
+			expect(current!.status).toBe("active");
+
+			const parsed = JSON.parse(current!.record_json);
+			expect(parsed.notes).toBe("updated impression");
+			expect(parsed.dimensions[0].value).toBe(0.8);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Commitment current rules", () => {
+		it("commitment projection tracks status from record", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:commit-1",
+				settlementId: "stl:cm-1",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "investigate" },
+				status: "active",
+			});
+
+			projection.rebuild("rp:alice");
+			let current = projection.getCurrent("rp:alice", "proj:commit-1");
+			expect(current!.kind).toBe("commitment");
+			expect(current!.status).toBe("active");
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:commit-1",
+				settlementId: "stl:cm-2",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "investigate" },
+				status: "paused",
+			});
+
+			const events = new CognitionEventRepo(db).readByCognitionKey("rp:alice", "proj:commit-1");
+			projection.upsertFromEvent(events[events.length - 1]);
+
+			current = projection.getCurrent("rp:alice", "proj:commit-1");
+			expect(current!.status).toBe("paused");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("commitment fulfilled status is tracked", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:commit-ful",
+				settlementId: "stl:cm-3",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "deliver report" },
+				status: "active",
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:commit-ful",
+				settlementId: "stl:cm-4",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "deliver report" },
+				status: "fulfilled",
+			});
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:commit-ful");
+			expect(current!.status).toBe("fulfilled");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Retract handling", () => {
+		it("retract assertion marks projection row as retracted with rejected stance", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:retract-a",
+				settlementId: "stl:ra-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.retractCognition("rp:alice", "proj:retract-a", "assertion", "stl:ra-2");
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:retract-a");
+			expect(current).not.toBeNull();
+			expect(current!.status).toBe("retracted");
+			expect(current!.stance).toBe("rejected");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("retract evaluation marks projection row as retracted", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:retract-e",
+				settlementId: "stl:re-1",
+				opIndex: 0,
+				dimensions: [{ name: "trust", value: 0.5 }],
+			});
+			repo.retractCognition("rp:alice", "proj:retract-e", "evaluation", "stl:re-2");
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:retract-e");
+			expect(current).not.toBeNull();
+			expect(current!.status).toBe("retracted");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("retract commitment marks projection row as retracted", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:retract-c",
+				settlementId: "stl:rc-1",
+				opIndex: 0,
+				mode: "goal",
+				target: { action: "help" },
+				status: "active",
+			});
+			repo.retractCognition("rp:alice", "proj:retract-c", "commitment", "stl:rc-2");
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:retract-c");
+			expect(current).not.toBeNull();
+			expect(current!.status).toBe("retracted");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Assertion vs evaluation separation", () => {
+		it("assertion and evaluation with different keys are separate projection rows", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:sep-assert",
+				settlementId: "stl:sep-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:sep-eval",
+				settlementId: "stl:sep-1",
+				opIndex: 1,
+				dimensions: [{ name: "trust", value: 0.9 }],
+				notes: "high trust",
+			});
+
+			projection.rebuild("rp:alice");
+			const all = projection.getAllCurrent("rp:alice");
+			expect(all.length).toBe(2);
+
+			const assertion = projection.getCurrent("rp:alice", "proj:sep-assert");
+			const evaluation = projection.getCurrent("rp:alice", "proj:sep-eval");
+			expect(assertion!.kind).toBe("assertion");
+			expect(evaluation!.kind).toBe("evaluation");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+	});
+
+	describe("getAllCurrent returns all rows for agent", () => {
+		it("returns assertion, evaluation, and commitment rows together", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:all-a",
+				settlementId: "stl:all-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "knows",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertEvaluation({
+				agentId: "rp:alice",
+				cognitionKey: "proj:all-e",
+				settlementId: "stl:all-1",
+				opIndex: 1,
+				dimensions: [{ name: "mood", value: 0.5 }],
+			});
+			repo.upsertCommitment({
+				agentId: "rp:alice",
+				cognitionKey: "proj:all-c",
+				settlementId: "stl:all-1",
+				opIndex: 2,
+				mode: "intent",
+				target: { action: "observe" },
+				status: "active",
+			});
+
+			projection.rebuild("rp:alice");
+			const all = projection.getAllCurrent("rp:alice");
+			expect(all.length).toBe(3);
+			const kinds = all.map((r) => r.kind).sort();
 			expect(kinds).toEqual(["assertion", "commitment", "evaluation"]);
 
 			db.close();

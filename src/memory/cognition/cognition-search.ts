@@ -2,6 +2,8 @@ import type { Db } from "../../storage/database.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import type { NodeRef } from "../types.js";
 import { RelationBuilder } from "./relation-builder.js";
+import type { CognitionCurrentRow } from "./private-cognition-current.js";
+import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
 
 type CognitionSearchParams = {
   agentId: string;
@@ -265,6 +267,41 @@ export class CognitionSearchService {
 
     return tokens.map((token) => `"${token}"`).join(" OR ");
   }
+
+  createCurrentProjectionReader(): CurrentProjectionReader {
+    return new CurrentProjectionReader(new PrivateCognitionProjectionRepo(this.db));
+  }
 }
 
-export type { CognitionHit, CognitionSearchParams };
+export class CurrentProjectionReader {
+  constructor(private readonly repo: PrivateCognitionProjectionRepo) {}
+
+  getCurrent(agentId: string, cognitionKey: string): CognitionCurrentRow | null {
+    return this.repo.getCurrent(agentId, cognitionKey);
+  }
+
+  getAllCurrent(agentId: string): CognitionCurrentRow[] {
+    return this.repo.getAllCurrent(agentId);
+  }
+
+  getAllCurrentByKind(agentId: string, kind: CognitionKind): CognitionCurrentRow[] {
+    return this.repo.getAllCurrent(agentId).filter((row) => row.kind === kind);
+  }
+
+  getActiveCurrent(agentId: string): CognitionCurrentRow[] {
+    return this.repo.getAllCurrent(agentId).filter((row) => row.status !== "retracted");
+  }
+
+  toHit(row: CognitionCurrentRow): CognitionHit {
+    return {
+      kind: row.kind as CognitionKind,
+      basis: (row.basis as AssertionBasis) ?? null,
+      stance: (row.stance as AssertionStance) ?? null,
+      source_ref: `projection:${row.id}` as NodeRef,
+      content: row.summary_text ?? "",
+      updated_at: row.updated_at,
+    };
+  }
+}
+
+export type { CognitionHit, CognitionSearchParams, CognitionCurrentRow };

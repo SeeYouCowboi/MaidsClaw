@@ -2,9 +2,12 @@ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PersonaAdapter } from "../../src/core/prompt-data-adapters/persona-adapter.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
 import { getRecentCognition } from "../../src/memory/prompt-data.js";
+import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { PersonaLoader } from "../../src/persona/loader.js";
 import { PersonaService } from "../../src/persona/service.js";
 import { closeDatabaseGracefully, type Db, openDatabase } from "../../src/storage/database.js";
@@ -330,5 +333,175 @@ describe("Behavioral: Scoring framework (doc §6)", () => {
 
   it("mixed: checkpoints avg 4, consistency 5, separation 4, repair 3, third-party 4 → 82", () => {
     expect(calculateScore({ checkpoints: [4, 4, 4, 4, 4, 4, 4], consistency: 5, separation: 4, repair: 3, thirdParty: 4 })).toBe(82);
+  });
+});
+
+describe("Behavioral: Cognition current projection lifecycle", () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runMemoryMigrations(db);
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  it("projection rebuild from events produces correct current state for multi-kind scenario", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "butler-accounts",
+      kind: "assertion",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        sourcePointerKey: "__self__",
+        predicate: "suspects",
+        targetPointerKey: "butler",
+        stance: "tentative",
+        basis: "inference",
+      }),
+      settlementId: "stl:r2",
+      committedTime: 200,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "investigate-butler",
+      kind: "commitment",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        mode: "goal",
+        target: { action: "investigate butler account anomalies" },
+        status: "active",
+        priority: 8,
+      }),
+      settlementId: "stl:r2",
+      committedTime: 201,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "eval-butler-trust",
+      kind: "evaluation",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        dimensions: [{ name: "trust", value: 0.3 }, { name: "suspicion", value: 0.7 }],
+        notes: "low trust in butler",
+      }),
+      settlementId: "stl:r11",
+      committedTime: 1100,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "butler-accounts",
+      kind: "assertion",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        sourcePointerKey: "__self__",
+        predicate: "suspects",
+        targetPointerKey: "butler",
+        stance: "accepted",
+        basis: "first_hand",
+      }),
+      settlementId: "stl:r28",
+      committedTime: 2800,
+    });
+
+    projection.rebuild("rp:eveline");
+
+    const all = projection.getAllCurrent("rp:eveline");
+    expect(all.length).toBe(3);
+
+    const assertion = projection.getCurrent("rp:eveline", "butler-accounts");
+    expect(assertion!.kind).toBe("assertion");
+    expect(assertion!.stance).toBe("accepted");
+    expect(assertion!.basis).toBe("first_hand");
+    expect(assertion!.status).toBe("active");
+
+    const commitment = projection.getCurrent("rp:eveline", "investigate-butler");
+    expect(commitment!.kind).toBe("commitment");
+    expect(commitment!.status).toBe("active");
+
+    const evaluation = projection.getCurrent("rp:eveline", "eval-butler-trust");
+    expect(evaluation!.kind).toBe("evaluation");
+    expect(evaluation!.status).toBe("active");
+    const evalParsed = JSON.parse(evaluation!.record_json);
+    expect(evalParsed.dimensions[0].value).toBe(0.3);
+  });
+
+  it("retracted commitment shows retracted status in projection", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "acknowledge-dual-motive",
+      kind: "commitment",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        mode: "intent",
+        target: { action: "acknowledge both care and control motivations" },
+        status: "active",
+      }),
+      settlementId: "stl:r23",
+      committedTime: 2300,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "acknowledge-dual-motive",
+      kind: "commitment",
+      op: "retract",
+      recordJson: null,
+      settlementId: "stl:r30",
+      committedTime: 3000,
+    });
+
+    projection.rebuild("rp:eveline");
+
+    const current = projection.getCurrent("rp:eveline", "acknowledge-dual-motive");
+    expect(current).not.toBeNull();
+    expect(current!.status).toBe("retracted");
+  });
+
+  it("incremental upsertFromEvent matches rebuild for complex event stream", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    const events = [
+      { cognitionKey: "a1", kind: "assertion" as const, op: "upsert" as const, recordJson: JSON.stringify({ stance: "tentative", basis: "inference", predicate: "suspects", sourcePointerKey: "__self__", targetPointerKey: "butler" }), settlementId: "s1", committedTime: 100 },
+      { cognitionKey: "e1", kind: "evaluation" as const, op: "upsert" as const, recordJson: JSON.stringify({ dimensions: [{ name: "trust", value: 0.5 }], notes: "neutral" }), settlementId: "s2", committedTime: 200 },
+      { cognitionKey: "c1", kind: "commitment" as const, op: "upsert" as const, recordJson: JSON.stringify({ mode: "goal", target: { action: "watch" }, status: "active" }), settlementId: "s3", committedTime: 300 },
+      { cognitionKey: "a1", kind: "assertion" as const, op: "upsert" as const, recordJson: JSON.stringify({ stance: "accepted", basis: "first_hand", predicate: "suspects", sourcePointerKey: "__self__", targetPointerKey: "butler" }), settlementId: "s4", committedTime: 400 },
+      { cognitionKey: "c1", kind: "commitment" as const, op: "retract" as const, recordJson: null, settlementId: "s5", committedTime: 500 },
+    ];
+
+    for (const e of events) {
+      eventRepo.append({ agentId: "rp:eveline", ...e });
+    }
+
+    const allEvents = eventRepo.replay("rp:eveline");
+    for (const event of allEvents) {
+      projection.upsertFromEvent(event);
+    }
+    const incrementalRows = projection.getAllCurrent("rp:eveline");
+
+    projection.rebuild("rp:eveline");
+    const rebuildRows = projection.getAllCurrent("rp:eveline");
+
+    expect(incrementalRows.length).toBe(rebuildRows.length);
+    for (const rebuilt of rebuildRows) {
+      const inc = incrementalRows.find((r) => r.cognition_key === rebuilt.cognition_key);
+      expect(inc).toBeDefined();
+      expect(inc!.status).toBe(rebuilt.status);
+      expect(inc!.stance).toBe(rebuilt.stance);
+      expect(inc!.basis).toBe(rebuilt.basis);
+      expect(inc!.kind).toBe(rebuilt.kind);
+    }
   });
 });
