@@ -12,6 +12,15 @@ import type {
 } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
+import { RelationBuilder } from "./cognition/relation-builder.js";
+import {
+  materializeRelationIntents,
+  resolveConflictFactors,
+  resolveLocalRefs,
+  validateRelationIntents,
+  type ResolvedLocalRefs,
+  type SettledArtifacts,
+} from "./cognition/relation-intent-resolver.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { NodeRef } from "./types.js";
@@ -37,15 +46,17 @@ const V3_BASIS_TO_V4: Record<string, AssertionBasis> = {
 
 export class ExplicitSettlementProcessor {
   private readonly cognitionRepo: CognitionRepository;
+  private readonly relationBuilder: RelationBuilder;
 
   constructor(
-    db: Database,
+    private readonly db: Database,
     private readonly storage: GraphStorageService,
     private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
     private readonly loadExistingContext: ExistingContextLoader,
     private readonly applyCallOneToolCalls: CallOneApplier,
   ) {
     this.cognitionRepo = new CognitionRepository(db);
+    this.relationBuilder = new RelationBuilder(db);
   }
 
   async process(
@@ -83,13 +94,45 @@ export class ExplicitSettlementProcessor {
 
       const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
       const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
-      const commitRefs = this.commitCognitionOps(
+      const commitResult = this.commitCognitionOps(
         explicitMeta.ownerAgentId,
         explicitMeta.privateCommit.ops,
         explicitMeta.settlementId,
         currentLocationEntityId,
       );
-      created.changedNodeRefs.push(...commitRefs);
+      created.changedNodeRefs.push(...commitResult.refs);
+
+      if (settlementPayload) {
+        const settledArtifacts = this.buildSettledArtifacts(
+          settlementPayload,
+          explicitMeta.ownerAgentId,
+          explicitMeta.settlementId,
+          commitResult,
+        );
+        const resolvedRefs = resolveLocalRefs(settlementPayload, settledArtifacts);
+        const relationIntents = settlementPayload.relationIntents ?? [];
+        validateRelationIntents(relationIntents, resolvedRefs);
+        materializeRelationIntents(relationIntents, resolvedRefs, this.db);
+
+        const conflictResult = resolveConflictFactors(
+          settlementPayload.conflictFactors ?? [],
+          this.db,
+          {
+            settledRefs: resolvedRefs,
+            settlementId: explicitMeta.settlementId,
+            agentId: explicitMeta.ownerAgentId,
+          },
+        );
+
+        this.applyContestConflictFactors(
+          explicitMeta.ownerAgentId,
+          explicitMeta.settlementId,
+          commitResult.contestedAssertions,
+          conflictResult.resolved.map((factor) => factor.nodeRef),
+          conflictResult.unresolved.length,
+        );
+      }
+
       this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCommit.ops, created);
     }
   }
@@ -99,15 +142,26 @@ export class ExplicitSettlementProcessor {
     ops: CognitionOp[],
     settlementId: string,
     currentLocationEntityId?: number,
-  ): NodeRef[] {
+  ): {
+    refs: NodeRef[];
+    cognitionByKey: Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>;
+    contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }>;
+  } {
     const refs: NodeRef[] = [];
+    const cognitionByKey = new Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>();
+    const contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }> = [];
     const unresolvedKeys: string[] = [];
 
     for (let opIndex = 0; opIndex < ops.length; opIndex += 1) {
       const op = ops[opIndex] as CognitionOp;
       if (op.op === "upsert") {
         try {
-          refs.push(this.commitUpsert(op.record, agentId, settlementId, opIndex, currentLocationEntityId));
+          const committed = this.commitUpsert(op.record, agentId, settlementId, opIndex, currentLocationEntityId);
+          refs.push(committed.nodeRef);
+          cognitionByKey.set(op.record.key, { kind: op.record.kind, nodeRef: committed.nodeRef });
+          if (op.record.kind === "assertion" && op.record.stance === "contested") {
+            contestedAssertions.push({ cognitionKey: op.record.key, nodeRef: committed.nodeRef });
+          }
         } catch (err) {
           if (err instanceof MaidsClawError && err.code === "COGNITION_UNRESOLVED_REFS") {
             unresolvedKeys.push(op.record.key);
@@ -132,7 +186,7 @@ export class ExplicitSettlementProcessor {
       });
     }
 
-    return refs;
+    return { refs, cognitionByKey, contestedAssertions };
   }
 
   private commitUpsert(
@@ -141,7 +195,7 @@ export class ExplicitSettlementProcessor {
     settlementId: string,
     opIndex: number,
     currentLocationEntityId?: number,
-  ): NodeRef {
+  ): { nodeRef: NodeRef } {
     if (record.kind === "assertion") {
       const sourcePointerKey = this.resolvePointerKey(record.proposition.subject, currentLocationEntityId, agentId);
       const targetPointerKey = this.resolvePointerKey(record.proposition.object.ref, currentLocationEntityId, agentId);
@@ -163,7 +217,7 @@ export class ExplicitSettlementProcessor {
         preContestedStance,
         provenance: record.provenance,
       });
-      return makeNodeRef("private_belief", result.id);
+      return { nodeRef: makeNodeRef("private_belief", result.id) };
     }
 
     if (record.kind === "evaluation") {
@@ -179,7 +233,7 @@ export class ExplicitSettlementProcessor {
         emotionTags: record.emotionTags,
         notes: record.notes,
       });
-      return makeNodeRef("private_event", result.id);
+      return { nodeRef: makeNodeRef("private_event", result.id) };
     }
 
     const commitmentRecord = record as CommitmentRecord;
@@ -197,7 +251,106 @@ export class ExplicitSettlementProcessor {
       priority: commitmentRecord.priority,
       horizon: commitmentRecord.horizon,
     });
-    return makeNodeRef("private_event", result.id);
+    return { nodeRef: makeNodeRef("private_event", result.id) };
+  }
+
+  private buildSettledArtifacts(
+    payload: TurnSettlementPayload,
+    agentId: string,
+    settlementId: string,
+    commitResult: {
+      cognitionByKey: Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>;
+    },
+  ): SettledArtifacts {
+    const localRefIndex = new Map<string, { kind: "episode" | "publication" | "cognition" | "proposal"; nodeRef: string }>();
+
+    const episodeRows = this.db
+      .prepare(
+        `SELECT id, source_local_ref
+         FROM private_episode_events
+         WHERE settlement_id = ? AND agent_id = ?`,
+      )
+      .all(settlementId, agentId) as Array<{ id: number; source_local_ref: string | null }>;
+    for (const row of episodeRows) {
+      if (!row.source_local_ref) {
+        continue;
+      }
+      localRefIndex.set(row.source_local_ref, {
+        kind: "episode",
+        nodeRef: `private_episode:${row.id}`,
+      });
+    }
+
+    const publications = payload.publications ?? [];
+    if (publications.length > 0) {
+      const publicationRows = this.db
+        .prepare(
+          `SELECT id, source_pub_index
+           FROM event_nodes
+           WHERE source_settlement_id = ?`,
+        )
+        .all(settlementId) as Array<{ id: number; source_pub_index: number | null }>;
+      for (const row of publicationRows) {
+        if (row.source_pub_index === null || row.source_pub_index === undefined) {
+          continue;
+        }
+        const declaration = publications[row.source_pub_index];
+        if (!declaration?.localRef) {
+          continue;
+        }
+        localRefIndex.set(declaration.localRef, {
+          kind: "publication",
+          nodeRef: `event:${row.id}`,
+        });
+      }
+    }
+
+    return {
+      settlementId,
+      agentId,
+      localRefIndex,
+      cognitionByKey: commitResult.cognitionByKey,
+    };
+  }
+
+  private applyContestConflictFactors(
+    agentId: string,
+    settlementId: string,
+    contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }>,
+    resolvedFactorNodeRefs: string[],
+    unresolvedCount: number,
+  ): void {
+    if (contestedAssertions.length === 0) {
+      return;
+    }
+
+    const summary = unresolvedCount > 0
+      ? `contested (${resolvedFactorNodeRefs.length} factors resolved, ${unresolvedCount} dropped)`
+      : `contested (${resolvedFactorNodeRefs.length} factors)`;
+
+    for (const assertion of contestedAssertions) {
+      this.relationBuilder.writeContestRelations(
+        assertion.nodeRef,
+        resolvedFactorNodeRefs,
+        settlementId,
+      );
+
+      this.db
+        .prepare(
+          `UPDATE private_cognition_current
+           SET conflict_summary = ?,
+               conflict_factor_refs_json = ?,
+               updated_at = ?
+           WHERE agent_id = ? AND cognition_key = ?`,
+        )
+        .run(
+          summary,
+          JSON.stringify(resolvedFactorNodeRefs),
+          Date.now(),
+          agentId,
+          assertion.cognitionKey,
+        );
+    }
   }
 
   private resolvePointerKey(

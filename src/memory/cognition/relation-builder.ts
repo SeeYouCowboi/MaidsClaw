@@ -41,29 +41,31 @@ export class RelationBuilder {
    * @param sourceRef     - Provenance ref (e.g. settlement ID)
    * @param strength      - Relation strength (0–1), default 0.8
    */
-  writeContestRelation(
+  writeContestRelations(
     sourceNodeRef: string,
-    cognitionKey: string,
+    factorNodeRefs: string[],
     sourceRef: string,
     strength = 0.8,
   ): void {
-    const targetNodeRef = `cognition_key:${cognitionKey}`;
-
-    // Guard: source_node_ref != target_node_ref (CHECK constraint)
-    if (sourceNodeRef === targetNodeRef) {
+    if (factorNodeRefs.length === 0) {
       return;
     }
 
     const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT INTO memory_relations
-         (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
-         VALUES (?, ?, 'conflicts_with', ?, 'direct', 'agent_op', ?, ?, ?)
-         ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
-         DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
-      )
-      .run(sourceNodeRef, targetNodeRef, strength, sourceRef, now, now);
+    for (const targetNodeRef of factorNodeRefs) {
+      if (sourceNodeRef === targetNodeRef) {
+        continue;
+      }
+      this.db
+        .prepare(
+          `INSERT INTO memory_relations
+           (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+           VALUES (?, ?, 'conflicts_with', ?, 'direct', 'agent_op', ?, ?, ?)
+           ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
+           DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
+        )
+        .run(sourceNodeRef, targetNodeRef, strength, sourceRef, now, now);
+    }
   }
 
   /**

@@ -33,7 +33,7 @@ function makeStreamingLoop(chunks: Chunk[]): TurnServiceLoop {
   };
 }
 
-function makeRpBufferedLoop(result: RpBufferedExecutionResult): TurnServiceLoop {
+function makeRpBufferedLoop(result: unknown): TurnServiceLoop {
   return {
     async *run(_request: AgentRunRequest): AsyncGenerator<Chunk> {
       for (const chunk of [] as Chunk[]) {
@@ -41,7 +41,7 @@ function makeRpBufferedLoop(result: RpBufferedExecutionResult): TurnServiceLoop 
       }
     },
     async runBuffered(_request: AgentRunRequest) {
-      return result;
+      return result as RpBufferedExecutionResult;
     },
   };
 }
@@ -852,6 +852,63 @@ describe("TurnService", () => {
     expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
   });
 
+  it("bad relation localRef/cognitionKey rejects settlement atomically", async () => {
+    const session = sessionService.createSession("rp:alice");
+    const turnService = new TurnService(
+      makeRpBufferedLoop({
+        outcome: {
+          schemaVersion: "rp_turn_outcome_v5",
+          publicReply: "",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
+            ops: [
+              {
+                op: "upsert",
+                record: {
+                  kind: "evaluation",
+                  key: "eval:ok",
+                  target: { kind: "special", value: "self" },
+                  dimensions: [{ name: "trust", value: 0.4 }],
+                },
+              },
+            ],
+          },
+          privateEpisodes: [
+            { localRef: "ep:ok", category: "observation", summary: "saw contradiction" },
+          ],
+          publications: [],
+          relationIntents: [
+            { sourceRef: "ep:missing", targetRef: "eval:missing", intent: "triggered" },
+          ],
+          conflictFactors: [],
+        },
+      }),
+      commitService,
+      store,
+      flushSelector,
+      null,
+      sessionService,
+      undefined,
+      undefined,
+      graphStorage,
+    );
+
+    const runChunks = await collectChunks(
+      turnService.run({
+        sessionId: session.sessionId,
+        requestId: "req-bad-relation-localref",
+        messages: [{ role: "user", content: "internal" }],
+      }),
+    );
+
+    const err = runChunks.find((chunk) => chunk.type === "error") as { type: "error"; code: string; message: string };
+    expect(err.code).toBe("RP_OUTCOME_NORMALIZATION_FAILED");
+    expect(err.message).toContain("invalid relation sourceRef");
+
+    const records = store.getBySession(session.sessionId);
+    expect(records.filter((record) => record.recordType === "turn_settlement")).toHaveLength(0);
+  });
+
   it("latentScratchpad from outcome is not persisted in settlement payload", async () => {
     const session = sessionService.createSession("rp:alice");
     const turnService = new TurnService(
@@ -1079,7 +1136,7 @@ describe("TurnService with ProjectionManager", () => {
     closeDatabaseGracefully(db);
   });
 
-  function makeTurnServiceWithProjection(result: RpBufferedExecutionResult): TurnService {
+  function makeTurnServiceWithProjection(result: unknown): TurnService {
     return new TurnService(
       makeRpBufferedLoop(result),
       commitService,

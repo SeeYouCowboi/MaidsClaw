@@ -335,10 +335,10 @@ export class CognitionRepository {
             sourceRefKind: "private_belief",
             now,
           });
-          if (params.stance === "contested" && cognitionKey) {
-            this.relationBuilder.writeContestRelation(
+          if (params.stance === "contested") {
+            this.relationBuilder.writeContestRelations(
               `private_belief:${existing.id}`,
-              cognitionKey,
+              [],
               params.settlementId,
             );
           }
@@ -406,10 +406,10 @@ export class CognitionRepository {
           sourceRefKind: "private_belief",
           now,
         });
-        if (params.stance === "contested" && cognitionKey) {
-          this.relationBuilder.writeContestRelation(
+        if (params.stance === "contested") {
+          this.relationBuilder.writeContestRelations(
             `private_belief:${insertedId}`,
-            cognitionKey,
+            [],
             params.settlementId,
           );
         }

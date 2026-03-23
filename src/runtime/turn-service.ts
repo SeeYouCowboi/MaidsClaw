@@ -23,6 +23,7 @@ import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
 import { materializePublications } from "../memory/materialization.js";
+import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
@@ -309,6 +310,7 @@ export class TurnService {
 			canonicalOutcome = normalizeRpTurnOutcome(
 				structuredClone(bufferedResult.outcome),
 			);
+			prevalidateRelationIntents(canonicalOutcome);
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "RP outcome normalization failed");
 			const errorChunk = {

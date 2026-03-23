@@ -12,6 +12,7 @@ import { ProjectionManager } from "../../src/memory/projection/projection-manage
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
+import { prevalidateRelationIntents } from "../../src/memory/cognition/relation-intent-resolver.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
@@ -712,5 +713,32 @@ describe("E2E: RP memory pipeline", () => {
 
 		db.close();
 		cleanupDb(dbPath);
+	});
+
+	it("relationIntents prevalidation rejects unresolved localRef/cognitionKey before commit", () => {
+		expect(() =>
+			prevalidateRelationIntents({
+				schemaVersion: "rp_turn_outcome_v5",
+				publicReply: "",
+				privateCognition: {
+					schemaVersion: "rp_private_cognition_v4",
+					ops: [
+						{
+							op: "upsert",
+							record: {
+								kind: "evaluation",
+								key: "eval:ok",
+								target: { kind: "special", value: "self" },
+								dimensions: [{ name: "trust", value: 0.5 }],
+							},
+						},
+					],
+				},
+				privateEpisodes: [{ localRef: "ep:ok", category: "observation", summary: "witnessed" }],
+				publications: [],
+				relationIntents: [{ sourceRef: "ep:bad", targetRef: "eval:missing", intent: "triggered" }],
+				conflictFactors: [],
+			}),
+		).toThrow("invalid relation sourceRef");
 	});
 });
