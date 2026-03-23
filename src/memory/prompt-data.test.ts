@@ -712,7 +712,8 @@ describe("getRecentCognition", () => {
 
     expect(result).toContain("[CONTESTED: was accepted]");
     expect(result).toContain("self trusts Bob");
-    expect(result).toContain("Conflicts: Bob lied about the key; Contradicts earlier observation");
+    expect(result).toContain("Risk:");
+    expect(result).not.toContain("Bob lied about the key");
     expect(result).toContain("[assertion:likes-tea] self likes tea");
 
     closeDatabaseGracefully(db);
@@ -744,7 +745,7 @@ describe("getRecentCognition", () => {
 });
 
 describe("formatContestedEntry", () => {
-  it("formats contested entry with preContestedStance and evidence", () => {
+  it("formats contested entry with preContestedStance and short risk note (section-18 frontstage)", () => {
     const entry = {
       settlementId: "stl:1",
       committedAt: 1000,
@@ -760,7 +761,9 @@ describe("formatContestedEntry", () => {
     const result = formatContestedEntry(entry);
     expect(result).toContain("[CONTESTED: was accepted]");
     expect(result).toContain("self trusts Bob");
-    expect(result).toContain("| Conflicts: evidence A; evidence B");
+    // Section-18: frontstage shows short risk note only; full conflict chain is explain-only
+    expect(result).toContain("Risk:");
+    expect(result).not.toContain("evidence A; evidence B");
   });
 
   it("formats contested entry without evidence", () => {
