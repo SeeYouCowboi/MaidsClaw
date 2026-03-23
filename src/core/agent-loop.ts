@@ -578,12 +578,12 @@ export class AgentLoop {
 							textLen: assistantText.length,
 						},
 					);
-					return {
-						outcome: normalizeRpTurnOutcome({
-							schemaVersion: "rp_turn_outcome_v4",
-							publicReply: assistantText,
-						}),
-					};
+                    return {
+                        outcome: normalizeRpTurnOutcome({
+                            schemaVersion: "rp_turn_outcome_v5",
+                            publicReply: assistantText,
+                        }),
+                    };
 				}
 				loopLogger?.warn(
 					"Empty result: model returned no text and no tool calls",
@@ -677,7 +677,7 @@ export class AgentLoop {
 			if (assistantText.length > 0) {
 				return {
 					outcome: normalizeRpTurnOutcome({
-						schemaVersion: "rp_turn_outcome_v4",
+						schemaVersion: "rp_turn_outcome_v5",
 						publicReply: assistantText,
 					}),
 				};
