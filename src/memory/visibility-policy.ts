@@ -112,7 +112,7 @@ export class VisibilityPolicy {
     if (kind === "fact") {
       return this.isFactVisible(viewerContext) ? "visible" : "hidden";
     }
-    if (kind === "private_event" || kind === "private_belief") {
+    if (kind === "private_event" || kind === "private_belief" || kind === "assertion" || kind === "evaluation" || kind === "commitment") {
       return this.isPrivateNodeVisible(viewerContext, data as { agent_id: string }) ? "visible" : "private";
     }
     return "hidden";

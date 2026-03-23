@@ -148,7 +148,7 @@ describe("GraphStorageService", () => {
   });
 
   it("syncSearchDoc('private') writes to private docs and FTS", () => {
-    const sourceRef = makeNodeRef("private_event", 1);
+    const sourceRef = makeNodeRef("evaluation", 1);
     const docId = storage.syncSearchDoc("private", sourceRef, "secret maid memory", "agent-1");
 
     const doc = db
@@ -372,7 +372,7 @@ describe("GraphStorageService", () => {
     });
     expect(assertionResult).not.toBeNull();
     expect(assertionResult!.id).toBeGreaterThan(0);
-    expect(assertionResult!.ref).toBe(makeNodeRef("private_belief", assertionResult!.id));
+    expect(assertionResult!.ref).toBe(makeNodeRef("assertion", assertionResult!.id));
 
     const evalResult = storage.upsertExplicitEvaluation({
       agentId: "agent-1",
@@ -382,7 +382,7 @@ describe("GraphStorageService", () => {
       dimensions: [{ name: "valence", value: 0.8 }],
     });
     expect(evalResult.id).toBeGreaterThan(0);
-    expect(evalResult.ref).toBe(makeNodeRef("private_event", evalResult.id));
+    expect(evalResult.ref).toBe(makeNodeRef("evaluation", evalResult.id));
 
     const commitResult = storage.upsertExplicitCommitment({
       agentId: "agent-1",
@@ -394,7 +394,7 @@ describe("GraphStorageService", () => {
       status: "active",
     });
     expect(commitResult.id).toBeGreaterThan(0);
-    expect(commitResult.ref).toBe(makeNodeRef("private_event", commitResult.id));
+    expect(commitResult.ref).toBe(makeNodeRef("commitment", commitResult.id));
 
     // Non-keyed assertion also returns ref
     const nonKeyedResult = storage.upsertExplicitAssertion({
@@ -407,7 +407,7 @@ describe("GraphStorageService", () => {
       stance: "tentative",
     });
     expect(nonKeyedResult).not.toBeNull();
-    expect(nonKeyedResult!.ref).toBe(makeNodeRef("private_belief", nonKeyedResult!.id));
+    expect(nonKeyedResult!.ref).toBe(makeNodeRef("assertion", nonKeyedResult!.id));
   });
 
   it("explicit cognition re-upsert preserves stable node refs", () => {

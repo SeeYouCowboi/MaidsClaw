@@ -399,7 +399,10 @@ export class RetrievalService {
       maybeKind === "entity" ||
       maybeKind === "fact" ||
       maybeKind === "private_event" ||
-      maybeKind === "private_belief"
+      maybeKind === "private_belief" ||
+      maybeKind === "assertion" ||
+      maybeKind === "evaluation" ||
+      maybeKind === "commitment"
     ) {
       return maybeKind;
     }
@@ -407,7 +410,7 @@ export class RetrievalService {
   }
 
   private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
-    if (nodeKind === "private_event" || nodeKind === "private_belief") {
+    if (nodeKind === "private_event" || nodeKind === "private_belief" || nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment") {
       return "private";
     }
     return "world";

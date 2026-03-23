@@ -308,7 +308,7 @@ function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
-  if (/^(private_belief|private_event|private_episode|event):\d+$/.test(raw)) {
+  if (/^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(raw)) {
     return raw;
   }
 
@@ -323,16 +323,17 @@ function resolveFactorNodeRef(
     )
     .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number } | null;
   if (fact) {
-    return `private_belief:${fact.id}`;
+    return `assertion:${fact.id}`;
   }
 
   const event = db
     .prepare(
-      `SELECT id FROM agent_event_overlay WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
+      `SELECT id, explicit_kind FROM agent_event_overlay WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
     )
-    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number } | null;
+    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; explicit_kind: string | null } | null;
   if (event) {
-    return `private_event:${event.id}`;
+    const kind = event.explicit_kind === "commitment" ? "commitment" : "evaluation";
+    return `${kind}:${event.id}`;
   }
 
   return null;

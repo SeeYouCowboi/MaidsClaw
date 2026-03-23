@@ -22,7 +22,7 @@ type ConflictEvidenceRow = {
   created_at: number;
 };
 
-const STABLE_FACTOR_REF_PATTERN = /^(private_belief|private_event|private_episode|event):\d+$/;
+const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/;
 
 export type ConflictEvidence = {
   targetRef: string;

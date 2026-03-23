@@ -138,12 +138,12 @@ export class PromotionService implements IPromotionService {
   }
 
   resolveReferences(candidate: PromotionCandidate): ReferenceResolution[] {
-    if (candidate.source_ref.startsWith("private_belief:")) {
+    if (candidate.source_ref.startsWith("private_belief:") || candidate.source_ref.startsWith("assertion:")) {
       return [
         {
           source_ref: candidate.source_ref,
           action: "block",
-          reason: "private_belief cannot be crystallized directly",
+          reason: "assertion cannot be crystallized directly",
         },
       ];
     }
@@ -311,7 +311,7 @@ export class PromotionService implements IPromotionService {
       };
     }
 
-    if (candidate.source_ref.startsWith("private_belief:")) {
+    if (candidate.source_ref.startsWith("private_belief:") || candidate.source_ref.startsWith("assertion:")) {
       return undefined;
     }
 
@@ -413,10 +413,11 @@ export class PromotionService implements IPromotionService {
       return source?.timestamp ?? Date.now();
     }
 
-    if (candidate.source_ref.startsWith("private_event:")) {
+    if (candidate.source_ref.startsWith("private_event:") || candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
+      const id = Number(candidate.source_ref.split(":")[1]);
       const row = this.db
         .prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`)
-        .get(this.parseNodeRefId(candidate.source_ref, "private_event")) as { created_at: number } | null;
+        .get(id) as { created_at: number } | null;
       return row?.created_at ?? Date.now();
     }
 

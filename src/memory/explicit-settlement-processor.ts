@@ -217,7 +217,7 @@ export class ExplicitSettlementProcessor {
         preContestedStance,
         provenance: record.provenance,
       });
-      return { nodeRef: makeNodeRef("private_belief", result.id) };
+      return { nodeRef: makeNodeRef("assertion", result.id) };
     }
 
     if (record.kind === "evaluation") {
@@ -233,7 +233,7 @@ export class ExplicitSettlementProcessor {
         emotionTags: record.emotionTags,
         notes: record.notes,
       });
-      return { nodeRef: makeNodeRef("private_event", result.id) };
+      return { nodeRef: makeNodeRef("evaluation", result.id) };
     }
 
     const commitmentRecord = record as CommitmentRecord;
@@ -251,7 +251,7 @@ export class ExplicitSettlementProcessor {
       priority: commitmentRecord.priority,
       horizon: commitmentRecord.horizon,
     });
-    return { nodeRef: makeNodeRef("private_event", result.id) };
+    return { nodeRef: makeNodeRef("commitment", result.id) };
   }
 
   private buildSettledArtifacts(
@@ -478,7 +478,7 @@ export class ExplicitSettlementProcessor {
       .filter((row) => row.settlementId === settlementId);
     for (const row of evaluations) {
       created.privateEventIds.push(row.id);
-      created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+      created.changedNodeRefs.push(makeNodeRef("evaluation", row.id));
     }
 
     const commitments = this.cognitionRepo
@@ -486,7 +486,7 @@ export class ExplicitSettlementProcessor {
       .filter((row) => row.settlementId === settlementId);
     for (const row of commitments) {
       created.privateEventIds.push(row.id);
-      created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+      created.changedNodeRefs.push(makeNodeRef("commitment", row.id));
     }
 
     const assertions = this.cognitionRepo
@@ -494,7 +494,7 @@ export class ExplicitSettlementProcessor {
       .filter((row) => row.settlementId === settlementId);
     for (const row of assertions) {
       created.privateBeliefIds.push(row.id);
-      created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
+      created.changedNodeRefs.push(makeNodeRef("assertion", row.id));
     }
 
     for (const op of ops) {
@@ -505,7 +505,7 @@ export class ExplicitSettlementProcessor {
         const row = this.cognitionRepo.getAssertionByKey(agentId, op.target.key);
         if (row) {
           created.privateBeliefIds.push(row.id);
-          created.changedNodeRefs.push(makeNodeRef("private_belief", row.id));
+          created.changedNodeRefs.push(makeNodeRef("assertion", row.id));
         }
         continue;
       }
@@ -516,7 +516,7 @@ export class ExplicitSettlementProcessor {
           : this.cognitionRepo.getCommitmentByKey(agentId, op.target.key);
       if (row) {
         created.privateEventIds.push(row.id);
-        created.changedNodeRefs.push(makeNodeRef("private_event", row.id));
+        created.changedNodeRefs.push(makeNodeRef(op.target.kind, row.id));
       }
     }
   }

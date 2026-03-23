@@ -408,17 +408,17 @@ export class GraphStorageService {
 
   upsertExplicitAssertion(params: UpsertExplicitAssertionInput): { id: number; ref: NodeRef } {
     const result = this.cognitionRepo.upsertAssertion(params);
-    return { id: result.id, ref: makeNodeRef("private_belief", result.id) };
+    return { id: result.id, ref: makeNodeRef("assertion", result.id) };
   }
 
   upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput): { id: number; ref: NodeRef } {
     const result = this.cognitionRepo.upsertEvaluation(params);
-    return { id: result.id, ref: makeNodeRef("private_event", result.id) };
+    return { id: result.id, ref: makeNodeRef("evaluation", result.id) };
   }
 
   upsertExplicitCommitment(params: UpsertExplicitCommitmentInput): { id: number; ref: NodeRef } {
     const result = this.cognitionRepo.upsertCommitment(params);
-    return { id: result.id, ref: makeNodeRef("private_event", result.id) };
+    return { id: result.id, ref: makeNodeRef("commitment", result.id) };
   }
 
   retractExplicitCognition(agentId: string, cognitionKey: string, kind: "assertion" | "evaluation" | "commitment", settlementId?: string): void {

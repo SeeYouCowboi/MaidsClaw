@@ -449,7 +449,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): split persona and pinned surfaces` | Files: [`src/memory/schema.ts`, `src/memory/core-memory.ts`, `src/memory/prompt-data.ts`, `src/memory/shared-blocks/shared-block-repo.ts`, `src/core/prompt-builder.ts`, `src/memory/core-memory.test.ts`, `test/runtime/memory-entry-consumption.test.ts`, `test/runtime/private-thoughts-behavioral.test.ts`]
 
-- [ ] 8. 收敛 `PromptBuilder` 到四前台面，并正式退役 narrative-only `MEMORY_HINTS` slot
+- [x] 8. 收敛 `PromptBuilder` 到四前台面，并正式退役 narrative-only `MEMORY_HINTS` slot
 
   **What to do**: 在 `src/core/prompt-template.ts`、`src/core/prompt-builder.ts`、`src/core/prompt-data-adapters/memory-adapter.ts`、`src/memory/prompt-data.ts` 中把 RP prompt frontstage 改成 section `18` 的四面结构：`PERSONA`、`PINNED_SHARED`、`RECENT_COGNITION`、`TYPED_RETRIEVAL`。`PromptBuilder` 不再把 `CORE_MEMORY` 与 `MEMORY_HINTS` 作为 RP canonical slot；`getCoreMemoryBlocks()` 需要拆分为 pinned/shared-facing渲染 helper，而 `Typed Retrieval Surface` 先占位为统一 section 接口（预算与内容排序在 T9 完成）。`privateEpisodes`、latent area/world state、完整 conflict chain 默认不能自动常驻 prompt；contested cognition 只保留短风险提示，深链交给 explain 下钻。
   **Must NOT do**: 不要把旧 slot 名字只是换壳不换义；不要让 episode 或 latent state 默认注入 prompt；不要在本任务中发明多个并列 retrieval sections；不要把 task-agent 或 maiden prompt surface 一并重构成 section-18 目标模型。
@@ -495,7 +495,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): converge prompt frontstage` | Files: [`src/core/prompt-template.ts`, `src/core/prompt-builder.ts`, `src/core/prompt-data-adapters/memory-adapter.ts`, `src/memory/prompt-data.ts`, `test/core/prompt-builder.test.ts`, `test/runtime/private-thoughts-behavioral.test.ts`, `test/runtime/memory-entry-consumption.test.ts`]
 
-- [ ] 9. 用 `Typed Retrieval Surface` 接管 retrieval front door，并落实固定小预算 + 触发加权 + 强去重
+- [x] 9. 用 `Typed Retrieval Surface` 接管 retrieval front door，并落实固定小预算 + 触发加权 + 强去重
 
   **What to do**: 在 `src/memory/contracts/retrieval-template.ts`、`src/memory/retrieval/retrieval-orchestrator.ts`、`src/memory/retrieval.ts`、`src/memory/cognition/cognition-search.ts`、`src/memory/prompt-data.ts` 中把当前 `narrativeHints + cognitionHits` 薄壳升级为统一的 typed retrieval result：至少包含 `cognition`、`narrative`、`conflict_notes`、`episode` 四类子段，预算默认为 `cognition > narrative > conflict notes > episode`，并支持 query/scene-triggered episode 加权。`RetrievalTemplate` 需要从旧 `narrativeEnabled/maxNarrativeHits/maxCognitionHits` 扩展到按类型预算和开关的策略对象，同时对 `Recent Cognition`、当前 conversation、同一 `cognitionKey`、明显已 surfaced 的重复结果做强去重。此任务要让 `TYPED_RETRIEVAL` 作为单一 prompt section 输入，而不是继续生成多个并列 memory sections。
   **Must NOT do**: 不要引入复杂 token allocator；不要默认给 episode 大预算；不要让 `Typed Retrieval Surface` 回退成 narrative-only bullet list；不要绕过 `private_cognition_current` 或 canonical current read adapter。
@@ -541,7 +541,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): add typed retrieval surface` | Files: [`src/memory/contracts/retrieval-template.ts`, `src/memory/retrieval/retrieval-orchestrator.ts`, `src/memory/retrieval.ts`, `src/memory/cognition/cognition-search.ts`, `src/memory/prompt-data.ts`, `test/memory/retrieval-search.test.ts`, `test/runtime/private-thoughts-behavioral.test.ts`, `test/runtime/memory-entry-consumption.test.ts`]
 
-- [ ] 10. 把 `memory_explore` 先收敛为 explain 入口与 redaction shell，深层参数/结果增强延后到 Wave 3
+- [x] 10. 把 `memory_explore` 先收敛为 explain 入口与 redaction shell，深层参数/结果增强延后到 Wave 3
 
   **What to do**: 在 `src/memory/tools.ts`、`src/memory/navigator.ts`、`src/memory/visibility-policy.ts` 以及新增的 `src/memory/redaction-policy.ts`（或同等位置）中，把 `memory_explore` 从“泛 memory 深挖工具”改成显式 explain entrypoint，并先建立 Wave-2 需要的边界壳层：工具定义、入口语义、默认摘要优先结果、hidden placeholder 结构、以及 `VisibilityPolicy + RedactionPolicy + AuthorizationPolicy` 风格组合边界。Wave 2 只要求 explain 入口重收敛与 redaction shell 稳定，不在本任务实现深层 graph/time/conflict drill-down 参数面，也不把 `memory_explore` 扩成完整 explain DSL；更丰富的 `mode` / `focusRef` / `focusCognitionKey` / time-slice 参数与结果增强放到 T14。
   **Must NOT do**: 不要在本任务暴露 `mode` / `focusRef` / time-slice 等深层参数作为稳定公开 API；不要暴露 beam width、depth、edge 白名单等 traversal 内部参数；不要让 `memory_explore` 再兼任泛检索替代品；不要输出原始 SQLite row、内部 JSON 或越权字段。
@@ -587,7 +587,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): narrow memory explore to explain shell` | Files: [`src/memory/tools.ts`, `src/memory/navigator.ts`, `src/memory/visibility-policy.ts`, `src/memory/redaction-policy.ts`, `test/memory/navigator.test.ts`, `test/runtime/memory-entry-consumption.test.ts`, `test/memory/retrieval-search.test.ts`]
 
-- [ ] 11. 实现 `localRef` 解析、受限 `relationIntents` 与 `conflictFactors` 的服务端正规化落边
+- [x] 11. 实现 `localRef` 解析、受限 `relationIntents` 与 `conflictFactors` 的服务端正规化落边
 
   **What to do**: 在 `src/memory/explicit-settlement-processor.ts`、`src/runtime/turn-service.ts`、`src/memory/cognition/relation-builder.ts` 以及新的 relation-intent resolver 中，把 T1 冻结的 payload-local graph 元素真正接上线：同一 settlement payload 内部允许 episode/cognition/publication/proposal 通过 `localRef` 互相引用，但 durable node/edge 一律由服务端正规化生成。通用 `relationIntents[]` 只允许 `supports` 与 `triggered`，端点模式限制为 `episode -> supports -> cognition` 与 `episode -> triggered -> evaluation/commitment`；其余高阶关系继续留给服务端规则生成。`conflictFactors[]` 只作为 contested assertion 的 lightweight factor list 输入，服务端负责把它们解析为 durable refs、生成后续 conflict relation/summary 所需的结构化数据。这里必须严格区分两档失败语义：坏 `localRef`、坏 `cognitionKey`、非法 relation type、非法 endpoint 仍然导致整个 settlement 原子性失败；但 `conflictFactors[]` 通过 T1/T3 的 shape/enum/basic-field 校验后，若其中部分 ref 运行时不可解析或指向非法对象，只允许被丢弃、记录审计/告警并降级冲突解释质量，只要 contested assertion 本体结构与 thread 状态合法，就不得阻止 settlement 主写提交。
   **Must NOT do**: 不要让 payload 直接提交 durable `nodeRef` patch；不要开放任意 relation type；不要把 malformed `conflictFactors` 与 unresolved factor refs 混成同一失败语义；不要因为坏 factor ref 就回滚整单 settlement；不要让 conflict factor 自己直接落成最终 graph edge 文本。
@@ -638,7 +638,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): materialize local refs safely` | Files: [`src/runtime/turn-service.ts`, `src/memory/explicit-settlement-processor.ts`, `src/memory/cognition/relation-builder.ts`, `src/memory/cognition/relation-intent-resolver.ts`, `test/runtime/turn-service.test.ts`, `test/memory/e2e-rp-memory-pipeline.test.ts`, `test/memory/relation-intents.test.ts`]
 
-- [ ] 12. 给 contested current state 增加短摘要面，并把 conflict 因子从虚拟占位迁到真实 typed refs
+- [x] 12. 给 contested current state 增加短摘要面，并把 conflict 因子从虚拟占位迁到真实 typed refs
 
   **What to do**: 在 `src/memory/cognition/relation-builder.ts`、`src/memory/cognition/cognition-search.ts`、`src/memory/prompt-data.ts`、`src/memory/cognition/private-cognition-current.ts` 中升级 contested 处理：`private_cognition_current` 必须为 contested assertion 保存 `pre_contested_stance`、`conflict_summary`、`conflict_factor_refs_json`（或等价字段）；`CognitionSearchService` 和 `Recent Cognition` 渲染只显示短风险提示，并为 Wave-3 explain drill-down 准备稳定的 factor refs/summary handoff。`RelationBuilder` 需要停止把 `cognition_key:*` 当作长期 canonical target 占位，而应消费 T11 的真实 factor refs/stable identifiers，写出可摘要、可时间切片、可 drill-down 的结构。若部分 factor ref 失效，可降级摘要质量并记录审计，但 contested current state 本身仍应可成立。
   **Must NOT do**: 不要把完整 conflict graph 默认塞进 prompt；不要继续把虚拟 `cognition_key:*` 占位当作最终 durable conflict target；不要因为单个坏 factor ref 就丢掉整个 contested 当前态；不要让 `CognitionSearchService` 再直接拼接长解释文本。
@@ -682,7 +682,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): add contested summary surfaces` | Files: [`src/memory/cognition/private-cognition-current.ts`, `src/memory/cognition/relation-builder.ts`, `src/memory/cognition/cognition-search.ts`, `src/memory/prompt-data.ts`, `test/memory/cognition-commit.test.ts`, `test/memory/retrieval-search.test.ts`, `test/memory/navigator.test.ts`, `test/runtime/private-thoughts-behavioral.test.ts`]
 
-- [ ] 13. 以 bounded scope 落地 `area/world` projection 基础层与 surfacing classification
+- [x] 13. 以 bounded scope 落地 `area/world` projection 基础层与 surfacing classification
 
   **What to do**: 在 `src/memory/schema.ts` 中新增最小可用的 `area_state_current`、`area_narrative_current`、`world_state_current`、`world_narrative_current` 表，以及 `surfacing_classification`（`public_manifestation` / `latent_state_update` / `private_only`）相关字段；新增 repo/service（建议 `src/memory/projection/area-world-projection-repo.ts`），只提供 schema、基本 CRUD、current read 与由显式 publication/materialization/promotion 驱动的受控更新。`area_state_current` 允许 latent state，`area_narrative_current` 只表示 surfaced 的前台面；`world_state_current` 与 `world_narrative_current` 明确分开，且 world 进入门槛高于 area。将 `src/memory/materialization.ts` 与 `src/memory/promotion.ts` 的最小写入口接到这些 bounded projections 上，但仅限显式 publication / promotion / surfaced classification 所需的 V2 范围；不实现完整 latent-state engine 或自动 surfacing 规则系统。
   **Must NOT do**: 不要把 area/world state 做成全功能 simulation layer；不要让 area-visible 自动上卷为 world-public；不要把 `area_state_current` 与 `area_narrative_current`、`world_state_current` 与 `world_narrative_current` 混成同一对象；不要实现 `Shared Current State`。
@@ -727,7 +727,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): add bounded area world projections` | Files: [`src/memory/schema.ts`, `src/memory/projection/area-world-projection-repo.ts`, `src/memory/materialization.ts`, `src/memory/promotion.ts`, `test/memory/schema.test.ts`, `test/memory/e2e-rp-memory-pipeline.test.ts`, `test/runtime/memory-entry-consumption.test.ts`]
 
-- [ ] 14. 增加 `GraphEdgeView`、时间切片钩子与 `memory_explore` 深层参数/结果增强，为 explain / timeline / conflict drill-down 提供统一读取层
+- [x] 14. 增加 `GraphEdgeView`、时间切片钩子与 `memory_explore` 深层参数/结果增强，为 explain / timeline / conflict drill-down 提供统一读取层
 
   **What to do**: 在 `src/memory/types.ts`、`src/memory/navigator.ts`、`src/memory/visibility-policy.ts` 以及新增的 graph/time 读取层（建议 `src/memory/graph-edge-view.ts` 与 `src/memory/time-slice-query.ts`）中正式区分三层边语义：`State Layer`、`Symbolic Relation Layer`、`Heuristic Link Layer`。实现只读 `GraphEdgeView` 抽象，统一暴露 `logic_edges`、`memory_relations`、`semantic_edges` 的读取结果，但不改变物理分表。与此同时，把 T10 延后的 explain 深化放到这里：为 `memory_explore` 增加 `mode`（`why` / `timeline` / `relationship` / `state` / `conflict`）、`focusRef`、`focusCognitionKey`、`asOfValidTime?`、`asOfCommittedTime?`，并让 explain 结果支持更完整的摘要化 timeline/conflict/state drill-down。V2 仍只要求“按有效时间/提交时间过滤并返回摘要化路径”，不要求完整 bitemporal query planner。
   **Must NOT do**: 不要物理合并边表；不要让 `GraphEdgeView` 成为写接口；不要在本任务中引入完整 temporal query DSL；不要把 state/symbolic/heuristic 边再混成无类型总表；不要把 `memory_explore` 升级成公开 graph query DSL。
@@ -777,7 +777,7 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 
   **Commit**: YES | Message: `refactor(memory): add graph edge view and time hooks` | Files: [`src/memory/types.ts`, `src/memory/graph-edge-view.ts`, `src/memory/time-slice-query.ts`, `src/memory/navigator.ts`, `src/memory/visibility-policy.ts`, `test/memory/navigator.test.ts`, `test/memory/retrieval-search.test.ts`, `test/memory/time-slice-query.test.ts`]
 
-- [ ] 15. 建立 architecture acceptance matrix，完成 legacy private path 退场审计、文档与最终回归证据
+- [x] 15. 建立 architecture acceptance matrix，完成 legacy private path 退场审计、文档与最终回归证据
 
   **What to do**: 以 section `18.38` 和 `18.22` 为标准，在 `test/runtime/`、`test/memory/`、`test/e2e/` 增加架构级 acceptance suites，至少覆盖五类场景：同步 settlement 可见性、cross-session durable recall、contested summary + explain drill-down、area/world surfacing 边界、explain visibility/redaction；并额外加入 legacy retirement audit：验证新写入不再触达旧私有语义表、prompt/retrieval/tools 不再暴露 `private_event` / `private_belief` 主链节点名、graph traversal / visibility / redaction 不再依赖旧私有节点分支。完成后更新 `docs/MEMORY_REGRESSION_MATRIX.md` 与新的 section-18 迁移说明，并把关键命令输出写入 `.sisyphus/evidence/task-15-architecture-acceptance.txt`。
   **Must NOT do**: 不要只补零散 unit tests；不要把删旧完成定义停留在 schema migration 级别；不要写“人工验证 prompt 看起来正确”一类 acceptance；不要在此任务重新变更业务语义或扩大 wave scope。
@@ -831,10 +831,10 @@ Wave 3: relation/time/state deepening + architecture acceptance + cleanup（T11-
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
-- [ ] F1. Plan Compliance Audit — oracle
-- [ ] F2. Code Quality Review — unspecified-high
-- [ ] F3. Real Manual QA — unspecified-high (+ playwright if UI)
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F1. Plan Compliance Audit — oracle
+- [x] F2. Code Quality Review — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high (+ playwright if UI)
+- [x] F4. Scope Fidelity Check — deep
 
 ## Commit Strategy
 - Follow wave order strictly; no task may skip its blockers even if files appear independent.

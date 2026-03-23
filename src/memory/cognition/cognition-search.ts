@@ -113,7 +113,7 @@ export class CognitionSearchService {
       return parsed
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim())
-        .filter((item) => /^(private_belief|private_event|private_episode|event):\d+$/.test(item)) as NodeRef[];
+        .filter((item) => /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(item)) as NodeRef[];
     } catch {
       return [];
     }
@@ -135,14 +135,14 @@ export class CognitionSearchService {
       return null;
     }
 
-    if (kind === "private_belief") {
+    if (kind === "private_belief" || kind === "assertion") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE id = ? AND agent_id = ?`)
         .get(id, agentId) as { cognition_key: string | null } | null;
       return row?.cognition_key ?? null;
     }
 
-    if (kind === "private_event") {
+    if (kind === "private_event" || kind === "evaluation" || kind === "commitment") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM agent_event_overlay WHERE id = ? AND agent_id = ?`)
         .get(id, agentId) as { cognition_key: string | null } | null;

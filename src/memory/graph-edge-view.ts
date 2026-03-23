@@ -19,6 +19,9 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "event",
   "entity",
   "fact",
+  "assertion",
+  "evaluation",
+  "commitment",
   "private_event",
   "private_belief",
 ]);
@@ -371,14 +374,14 @@ export class GraphEdgeView {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare("SELECT agent_id FROM agent_event_overlay WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row ? { agent_id: row.agent_id } : null;
     }
 
-    if (parsed.kind === "private_belief") {
+    if (parsed.kind === "private_belief" || parsed.kind === "assertion") {
       const row = this.db
         .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;

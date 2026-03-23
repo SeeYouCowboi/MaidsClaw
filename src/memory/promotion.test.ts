@@ -94,7 +94,7 @@ describe("PromotionService", () => {
     const privateHiddenId = seedPrivateEntity("hidden_actor", "Hidden Person");
 
     const candidate: PromotionCandidate = {
-      source_ref: makeNodeRef("private_event", 1),
+      source_ref: makeNodeRef("evaluation", 1),
       target_scope: "world_public",
       summary: "A public summary",
       entity_refs: [
@@ -135,7 +135,7 @@ describe("PromotionService", () => {
   it("resolveReferences returns block for purely private entity and blocks write", () => {
     const privateSecretId = seedPrivateEntity("secret_asset", "Secret Asset", "artifact");
     const candidate: PromotionCandidate = {
-      source_ref: makeNodeRef("private_event", 1),
+      source_ref: makeNodeRef("evaluation", 1),
       target_scope: "world_public",
       summary: "Should never promote",
       entity_refs: [makeNodeRef("entity", privateSecretId)],
@@ -150,18 +150,18 @@ describe("PromotionService", () => {
     expect(write).toBeUndefined();
   });
 
-  it("rejects direct crystallization from private_belief", () => {
+  it("rejects direct crystallization from assertion", () => {
     const candidate: PromotionCandidate = {
-      source_ref: makeNodeRef("private_belief", 1),
+      source_ref: makeNodeRef("assertion", 1),
       target_scope: "world_public",
-      summary: "private_belief says Alice owns tea",
+      summary: "assertion says Alice owns tea",
       entity_refs: [],
     };
 
     const resolutions = service.resolveReferences(candidate);
     expect(resolutions).toHaveLength(1);
     expect(resolutions[0].action).toBe("block");
-    expect(resolutions[0].reason).toContain("private_belief");
+    expect(resolutions[0].reason).toContain("assertion");
     expect(service.executeProjectedWrite(candidate, resolutions, "world_public")).toBeUndefined();
   });
 
@@ -250,7 +250,7 @@ describe("PromotionService", () => {
     const teaId = seedSharedEntity("thing:tea", "Tea", "item");
 
     const candidate: PromotionCandidate = {
-      source_ref: makeNodeRef("private_event", 44),
+      source_ref: makeNodeRef("evaluation", 44),
       target_scope: "world_public",
       summary: "Alice owns tea",
       entity_refs: [makeNodeRef("entity", aliceId), makeNodeRef("entity", teaId)],

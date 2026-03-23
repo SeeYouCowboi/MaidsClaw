@@ -759,13 +759,13 @@ describe("MemoryTaskAgent", () => {
     await agent.runMigrate(flushRequest);
 
     expect(capturedJob).toBeDefined();
-    const beliefRefs = capturedJob!.changedNodeRefs.filter((ref) => ref.startsWith("private_belief:"));
+    const beliefRefs = capturedJob!.changedNodeRefs.filter((ref) => ref.startsWith("assertion:"));
     expect(beliefRefs.length).toBeGreaterThanOrEqual(1);
 
     const assertionRow = db
       .prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:ref-test'`)
       .get() as { id: number };
-    expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("private_belief", assertionRow.id));
+    expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("assertion", assertionRow.id));
   });
 
   it("explicit unresolved refs roll back migrate and keep the range retryable", async () => {

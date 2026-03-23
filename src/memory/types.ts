@@ -98,11 +98,14 @@ export const COMPAT_ALIAS_MAP: Readonly<Record<string, CanonicalPinnedLabel>> = 
 /** Labels that have no RP direct-write path. */
 export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index"] as const;
 
-// V1 Node-Ref Strategy (DO NOT EXTEND without plan approval):
-// - assertion -> private_belief:{id}
-// - evaluation / commitment -> private_event:{id}
-// - No new NodeRefKind values in V1
-export const NODE_REF_KINDS = ["event", "entity", "fact", "private_event", "private_belief"] as const;
+// Node-Ref Strategy (T6 cutoff applied):
+// CANONICAL WRITE (new settlements): assertion:{id} | evaluation:{id} | commitment:{id}
+// COMPAT READ ONLY (existing DB data): private_belief:{id} | private_event:{id}
+export const NODE_REF_KINDS = [
+  "event", "entity", "fact",
+  "assertion", "evaluation", "commitment",
+  "private_event", "private_belief",
+] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 
 type Brand<T, Name extends string> = T & { readonly __brand: Name };

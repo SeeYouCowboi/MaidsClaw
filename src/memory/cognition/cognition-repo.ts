@@ -332,12 +332,12 @@ export class CognitionRepository {
             content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
             stance: params.stance,
             basis: params.basis ?? null,
-            sourceRefKind: "private_belief",
+            sourceRefKind: "assertion",
             now,
           });
           if (params.stance === "contested") {
             this.relationBuilder.writeContestRelations(
-              `private_belief:${existing.id}`,
+              `assertion:${existing.id}`,
               [],
               params.settlementId,
               0.8,
@@ -404,12 +404,12 @@ export class CognitionRepository {
           content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
           stance: params.stance,
           basis: params.basis ?? null,
-          sourceRefKind: "private_belief",
+          sourceRefKind: "assertion",
           now,
         });
         if (params.stance === "contested") {
           this.relationBuilder.writeContestRelations(
-            `private_belief:${insertedId}`,
+            `assertion:${insertedId}`,
             [],
             params.settlementId,
             0.8,
@@ -474,7 +474,7 @@ export class CognitionRepository {
         content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
         stance: params.stance,
         basis: params.basis ?? null,
-        sourceRefKind: "private_belief",
+        sourceRefKind: "assertion",
         now,
       });
       this.eventRepo.append({
@@ -614,7 +614,7 @@ export class CognitionRepository {
             content: `evaluation: ${params.notes ?? ""}`,
             stance: null,
             basis: null,
-            sourceRefKind: "private_event",
+            sourceRefKind: "evaluation",
             now,
           });
           this.eventRepo.append({
@@ -688,7 +688,7 @@ export class CognitionRepository {
         content: `evaluation: ${params.notes ?? ""}`,
         stance: null,
         basis: null,
-        sourceRefKind: "private_event",
+        sourceRefKind: "evaluation",
         now,
       });
       const effectiveKey = cognitionKey ?? `__anon_evaluation_${evalId}`;
@@ -764,7 +764,7 @@ export class CognitionRepository {
             content: `${params.mode}: ${JSON.stringify(params.target)}`,
             stance: null,
             basis: null,
-            sourceRefKind: "private_event",
+            sourceRefKind: "commitment",
             now,
           });
           this.eventRepo.append({
@@ -838,7 +838,7 @@ export class CognitionRepository {
         content: `${params.mode}: ${JSON.stringify(params.target)}`,
         stance: null,
         basis: null,
-        sourceRefKind: "private_event",
+        sourceRefKind: "commitment",
         now,
       });
       const effectiveKey = cognitionKey ?? `__anon_commitment_${commitId}`;
@@ -876,7 +876,7 @@ export class CognitionRepository {
              WHERE agent_id = ? AND cognition_key = ?`,
           )
           .run(now, agentId, normalizedKey);
-        this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
+        this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
         this.eventRepo.append({
           agentId,
           cognitionKey: normalizedKey,
@@ -900,7 +900,7 @@ export class CognitionRepository {
              WHERE agent_id = ? AND cognition_key = ? AND explicit_kind = ?`,
           )
           .run(now, agentId, normalizedKey, kind);
-        this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
+        this.updateCognitionSearchDocStance(agentId, kind, normalizedKey, "abandoned", now);
         this.eventRepo.append({
           agentId,
           cognitionKey: normalizedKey,
@@ -932,8 +932,9 @@ export class CognitionRepository {
            WHERE agent_id = ? AND cognition_key = ?`,
         )
         .run(now, agentId, normalizedKey);
-      this.updateCognitionSearchDocStance(agentId, "private_belief", normalizedKey, "rejected", now);
-      this.updateCognitionSearchDocStance(agentId, "private_event", normalizedKey, "abandoned", now);
+      this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
+      this.updateCognitionSearchDocStance(agentId, "evaluation", normalizedKey, "abandoned", now);
+      this.updateCognitionSearchDocStance(agentId, "commitment", normalizedKey, "abandoned", now);
       this.eventRepo.append({
         agentId,
         cognitionKey: normalizedKey,
@@ -1183,19 +1184,12 @@ export class CognitionRepository {
 
   private updateCognitionSearchDocStance(
     agentId: string,
-    refKind: "private_belief" | "private_event",
+    refKind: "assertion" | "evaluation" | "commitment",
     cognitionKey: string,
     newStance: AssertionStance,
     now: number,
   ): void {
-    const rows = this.db
-      .prepare(
-        `SELECT f.id FROM agent_fact_overlay f
-         WHERE f.agent_id = ? AND f.cognition_key = ?`,
-      )
-      .all(agentId, cognitionKey) as { id: number }[];
-
-    if (refKind === "private_event") {
+    if (refKind === "evaluation" || refKind === "commitment") {
       const eventRows = this.db
         .prepare(
           `SELECT e.id FROM agent_event_overlay e
@@ -1204,23 +1198,34 @@ export class CognitionRepository {
         .all(agentId, cognitionKey) as { id: number }[];
 
       for (const row of eventRows) {
-        const sourceRef = `private_event:${row.id}`;
-        this.db
-          .prepare(
-            `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
-          )
-          .run(newStance, now, sourceRef, agentId);
+        // Try canonical ref first, then legacy compat ref — handles transition period
+        for (const sourceRef of [`${refKind}:${row.id}`, `private_event:${row.id}`]) {
+          this.db
+            .prepare(
+              `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
+            )
+            .run(newStance, now, sourceRef, agentId);
+        }
       }
     }
 
-    if (refKind === "private_belief") {
+    if (refKind === "assertion") {
+      const rows = this.db
+        .prepare(
+          `SELECT f.id FROM agent_fact_overlay f
+           WHERE f.agent_id = ? AND f.cognition_key = ?`,
+        )
+        .all(agentId, cognitionKey) as { id: number }[];
+
       for (const row of rows) {
-        const sourceRef = `private_belief:${row.id}`;
-        this.db
-          .prepare(
-            `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
-          )
-          .run(newStance, now, sourceRef, agentId);
+        // Try canonical ref first, then legacy compat ref — handles transition period
+        for (const sourceRef of [`assertion:${row.id}`, `private_belief:${row.id}`]) {
+          this.db
+            .prepare(
+              `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
+            )
+            .run(newStance, now, sourceRef, agentId);
+        }
       }
     }
   }
@@ -1232,7 +1237,7 @@ export class CognitionRepository {
     content: string;
     stance: AssertionStance | null;
     basis: AssertionBasis | null;
-    sourceRefKind: "private_belief" | "private_event";
+    sourceRefKind: "assertion" | "evaluation" | "commitment";
     now: number;
   }): void {
     const sourceRef = `${params.sourceRefKind}:${params.overlayId}`;

@@ -564,7 +564,7 @@ export class MemoryTaskAgent {
           sourceRecordId: this.asOptionalString(call.arguments.source_record_id) ?? undefined,
         });
         created.privateEventIds.push(privateEventId);
-        created.changedNodeRefs.push(makeNodeRef("private_event", privateEventId));
+        created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
         const row = this.db.prepare(`SELECT * FROM agent_event_overlay WHERE id = ?`).get(privateEventId) as AgentEventOverlay;
         privateEvents.push(row);
         continue;
@@ -588,7 +588,7 @@ export class MemoryTaskAgent {
           sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
         });
         created.privateBeliefIds.push(beliefId);
-        created.changedNodeRefs.push(makeNodeRef("private_belief", beliefId));
+        created.changedNodeRefs.push(makeNodeRef("assertion", beliefId));
         continue;
       }
 
@@ -746,7 +746,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|private_event|private_belief):[1-9]\d*$/.test(value)) {
+    if (!/^(event|entity|fact|private_event|private_belief|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;

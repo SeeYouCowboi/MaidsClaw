@@ -95,7 +95,10 @@ export class GraphOrganizer {
       kindRaw !== "entity" &&
       kindRaw !== "fact" &&
       kindRaw !== "private_event" &&
-      kindRaw !== "private_belief"
+      kindRaw !== "private_belief" &&
+      kindRaw !== "assertion" &&
+      kindRaw !== "evaluation" &&
+      kindRaw !== "commitment"
     ) {
       return undefined;
     }
@@ -138,7 +141,7 @@ export class GraphOrganizer {
       return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(`SELECT private_notes, projectable_summary, event_category FROM agent_event_overlay WHERE id = ?`)
         .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; event_category: string } | null;
@@ -208,10 +211,16 @@ export class GraphOrganizer {
       "entity:event",
       "private_event:entity",
       "entity:private_event",
+      "evaluation:entity",
+      "entity:evaluation",
+      "commitment:entity",
+      "entity:commitment",
       "fact:entity",
       "entity:fact",
       "private_belief:entity",
       "entity:private_belief",
+      "assertion:entity",
+      "entity:assertion",
     ]);
     return allowed.has(key);
   }
@@ -315,7 +324,7 @@ export class GraphOrganizer {
       return row?.t_created;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db.prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`).get(parsed.id) as
         | { created_at: number }
         | null;
@@ -356,7 +365,7 @@ export class GraphOrganizer {
       return row?.topic_id ?? null;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(
           `SELECT e.topic_id
@@ -413,7 +422,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(`SELECT private_notes, projectable_summary, agent_id, cognition_status FROM agent_event_overlay WHERE id = ?`)
         .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; agent_id: string; cognition_status: string | null } | null;
@@ -429,7 +438,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === "private_belief") {
+    if (parsed.kind === "private_belief" || parsed.kind === "assertion") {
       const row = this.db
         .prepare(`SELECT predicate, provenance, agent_id, stance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
         .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null; epistemic_status: string | null } | null;
