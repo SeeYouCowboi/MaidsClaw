@@ -64,17 +64,11 @@ export type NavigatorEdgeKind = (typeof NAVIGATOR_EDGE_KINDS)[number];
 export const PROMOTION_ACTIONS = ["reuse", "promote_full", "promote_placeholder", "block"] as const;
 export type PromotionAction = (typeof PROMOTION_ACTIONS)[number];
 
-export const BELIEF_TYPES = ["observation", "inference", "suspicion", "intention"] as const;
-export type BeliefType = (typeof BELIEF_TYPES)[number];
-
 export const PROJECTION_CLASSES = ["none", "area_candidate"] as const;
 export type ProjectionClass = (typeof PROJECTION_CLASSES)[number];
 
 export const PROMOTION_CLASSES = ["none", "world_candidate"] as const;
 export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
-
-export const EPISTEMIC_STATUSES = ["confirmed", "suspected", "hypothetical", "retracted"] as const;
-export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 
 /**
  * All valid core memory block labels.
@@ -233,9 +227,6 @@ export type AgentFactOverlay = {
   source_entity_id: number;
   target_entity_id: number;
   predicate: string;
-  belief_type: BeliefType | null;
-  confidence: number | null;
-  epistemic_status: EpistemicStatus | null;
   provenance: string | null;
   source_event_ref: NodeRef | null;
   created_at: number;
