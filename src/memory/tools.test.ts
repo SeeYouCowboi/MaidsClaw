@@ -52,8 +52,8 @@ describe("Memory Tools", () => {
 
   beforeEach(() => {
     db = freshDb();
-    coreMemory = new CoreMemoryService(db);
-    retrieval = new RetrievalService(db);
+    coreMemory = new CoreMemoryService(db as any);
+    retrieval = new RetrievalService(db as any);
     services = { coreMemory, retrieval };
     tools = buildMemoryTools(services);
     ctx = makeViewerContext();
@@ -395,29 +395,31 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("memory_explore", () => {
-    it("dispatches to navigator.explore when navigator is available", () => {
+    it("dispatches to navigator.explore when navigator is available", async () => {
       const mockNavigator = {
         explore(query: string, _ctx: ViewerContext) {
-          return { query, query_type: "why", evidence_paths: [] };
+          return { query, query_type: "why" as const, summary: "Explain why: 0 path(s)", evidence_paths: [] };
         },
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
       const tool = toolByName(toolsWithNav, "memory_explore");
-      const result = tool.handler({ query: "why did Alice leave" }, ctx) as {
+      const result = await tool.handler({ query: "why did Alice leave" }, ctx) as {
         query: string;
         query_type: string;
+        summary: string;
         evidence_paths: unknown[];
       };
 
       expect(result.query).toBe("why did Alice leave");
       expect(result.query_type).toBe("why");
+      expect(result.summary).toBe("Explain why: 0 path(s)");
       expect(result.evidence_paths).toEqual([]);
     });
 
-    it("returns error when navigator is not available", () => {
+    it("returns error when navigator is not available", async () => {
       const tool = toolByName(tools, "memory_explore");
-      const result = tool.handler({ query: "why did Alice leave" }, ctx) as {
+      const result = await tool.handler({ query: "why did Alice leave" }, ctx) as {
         success: boolean;
         error: string;
       };
@@ -426,10 +428,30 @@ describe("Memory Tools", () => {
       expect(result.error).toContain("GraphNavigator not available");
     });
 
-    it("dispatches correctly when services include narrative and cognition search", () => {
+    it("dispatches correctly when services include narrative and cognition search", async () => {
       const mockNavigator = {
         explore(query: string, _ctx: ViewerContext) {
-          return { query, query_type: "event", evidence_paths: [{ path: { seed: "event:1" } }] };
+          return {
+            query,
+            query_type: "event" as const,
+            summary: "Explain event: 1 path(s)",
+            evidence_paths: [{
+              path: { seed: "event:1", nodes: ["event:1"], edges: [], depth: 0 },
+              score: {
+                seed_score: 0.8,
+                edge_type_score: 0.8,
+                temporal_consistency: 1,
+                query_intent_match: 1,
+                support_score: 0,
+                recency_score: 0.5,
+                hop_penalty: 0,
+                redundancy_penalty: 0,
+                path_score: 0.8,
+              },
+              supporting_nodes: [],
+              supporting_facts: [],
+            }],
+          } as any;
         },
       };
       const mockNarrative = { async searchNarrative() { return []; } };
@@ -443,12 +465,16 @@ describe("Memory Tools", () => {
       };
       const fullTools = buildMemoryTools(fullServices);
       const tool = toolByName(fullTools, "memory_explore");
-      const result = tool.handler({ query: "what happened" }, ctx) as {
+      const result = await tool.handler({ query: "what happened" }, ctx) as {
         query: string;
+        query_type: string;
+        summary: string;
         evidence_paths: unknown[];
       };
 
       expect(result.query).toBe("what happened");
+      expect(result.query_type).toBe("event");
+      expect(result.summary).toBe("Explain event: 1 path(s)");
       expect(result.evidence_paths).toHaveLength(1);
     });
   });
