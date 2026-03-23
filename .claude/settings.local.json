@@ -11,7 +11,12 @@
       "WebFetch(domain:docs.vllm.ai)",
       "WebFetch(domain:apidog.com)",
       "Bash(MAX_TURNS=5 SKIP_JUDGE=1 TURN_DELAY=1000 bun run:*)",
-      "Bash(TURN_DELAY=1500 bun run:*)"
+      "Bash(TURN_DELAY=1500 bun run:*)",
+      "Bash(find /d/Projects/MaidsClaw -name *migration* -o -name *.sql)",
+      "Bash(find /d/Projects/MaidsClaw/src/storage -type f -name *.ts)",
+      "Bash(xargs grep:*)",
+      "Bash(wc -l /d/Projects/MaidsClaw/src/memory/*.ts)",
+      "Bash(done)"
     ]
   }
 }
