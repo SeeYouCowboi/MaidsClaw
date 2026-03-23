@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { PublicationDeclaration, PublicationKind, PublicationKindV2 } from "../runtime/rp-turn-contract.js";
+import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
@@ -163,8 +163,8 @@ export class MaterializationService {
     return row;
   }
 
-  private linkPrivateToPublic(privateEventId: number, publicEventId: number): void {
-    this.db.prepare(`UPDATE agent_event_overlay SET event_id = ? WHERE id = ?`).run(publicEventId, privateEventId);
+  private linkPrivateToPublic(_privateEventId: number, _publicEventId: number): void {
+    // NOTE: episode→public event linkage is tracked via settlement_id in private_episode_events
   }
 
   private resolveEntityForPublic(entityId: number, timestamp: number, isLocation: boolean): number | null {
@@ -372,7 +372,7 @@ const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {
   visual: "observation",
 };
 
-function publicationKindToCategory(kind: PublicationKind | PublicationKindV2): PublicEventCategory {
+function publicationKindToCategory(kind: string): PublicEventCategory {
   return PUBLICATION_KIND_TO_CATEGORY[kind] ?? "speech";
 }
 
