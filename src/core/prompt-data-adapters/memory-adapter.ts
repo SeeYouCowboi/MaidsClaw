@@ -6,7 +6,7 @@ import {
   getPinnedBlocks,
   getRecentCognition,
   getSharedBlocks,
-  getTypedRetrievalPlaceholder,
+  getTypedRetrievalSurface,
 } from "../../memory/prompt-data.js";
 import type { MemoryDataSource, ViewerContext } from "../prompt-data-sources.js";
 
@@ -40,7 +40,7 @@ export class MemoryAdapter implements MemoryDataSource {
     return getAttachedSharedBlocks(agentId, this.db);
   }
 
-  getTypedRetrievalPlaceholder(agentId: string): string {
-    return getTypedRetrievalPlaceholder(agentId, this.db);
+  async getTypedRetrievalSurface(userMessage: string, viewerContext: ViewerContext): Promise<string> {
+    return getTypedRetrievalSurface(userMessage, viewerContext, this.db);
   }
 }

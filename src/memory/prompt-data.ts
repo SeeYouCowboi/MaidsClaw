@@ -1,6 +1,7 @@
 import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
+import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
 import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
@@ -30,11 +31,36 @@ export function getSharedBlocks(agentId: string, db: Db): string {
   return renderCoreMemoryBlocks(shared, "shared_block");
 }
 
-/**
- * T9 placeholder — returns empty string until typed retrieval is implemented.
- */
-export function getTypedRetrievalPlaceholder(_agentId: string, _db: Db): string {
-  return "";
+export async function getTypedRetrievalSurface(
+  userMessage: string,
+  viewerContext: ViewerContext,
+  db: Db,
+): Promise<string> {
+  if (userMessage.trim().length < 3) {
+    return "";
+  }
+
+  const retrieval = new RetrievalService(db);
+  const recentEntries = getRecentCognitionEntries(
+    viewerContext.viewer_agent_id,
+    viewerContext.session_id,
+    db,
+  );
+  const recentCognitionKeys = new Set(
+    recentEntries
+      .map((entry) => entry.key?.trim())
+      .filter((entry): entry is string => Boolean(entry && entry.length > 0)),
+  );
+  const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
+  const conversationTexts = getConversationMessageContents(viewerContext.session_id, db);
+
+  const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
+    recentCognitionKeys,
+    recentCognitionTexts,
+    conversationTexts,
+  });
+
+  return renderTypedRetrieval(typed);
 }
 
 /**
@@ -124,6 +150,10 @@ type RecentCognitionSlotRow = {
   slot_payload: string;
 };
 
+type InteractionMessageRow = {
+  payload: string;
+};
+
 type RecentCognitionEntry = {
   settlementId: string;
   committedAt: number;
@@ -137,21 +167,7 @@ type RecentCognitionEntry = {
 };
 
 export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
-  const row = db.get<RecentCognitionSlotRow>(
-    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
-    [sessionId, agentId],
-  );
-
-  if (row === undefined) {
-    return "";
-  }
-
-  let entries: RecentCognitionEntry[];
-  try {
-    entries = JSON.parse(row.slot_payload) as RecentCognitionEntry[];
-  } catch {
-    return "";
-  }
+  const entries = getRecentCognitionEntries(agentId, sessionId, db);
 
   if (!Array.isArray(entries) || entries.length === 0) {
     return "";
@@ -190,12 +206,12 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
   return rendered
     .map((entry) => {
       if (entry.status === "retracted") {
-        return `\u2022 [${entry.kind}:${entry.key}] (retracted)`;
+        return `• [${entry.kind}:${entry.key}] (retracted)`;
       }
       if (entry.stance === "contested") {
         return formatContestedEntry(entry);
       }
-      return `\u2022 [${entry.kind}:${entry.key}] ${entry.summary}`;
+      return `• [${entry.kind}:${entry.key}] ${entry.summary}`;
     })
     .join("\n");
 }
@@ -207,6 +223,89 @@ export function formatContestedEntry(entry: RecentCognitionEntry): string {
     ? " | Risk: conflict detected (use explain tools for details)"
     : " | Risk: contested cognition";
   return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
+}
+
+function getRecentCognitionEntries(agentId: string, sessionId: string, db: Db): RecentCognitionEntry[] {
+  const row = db.get<RecentCognitionSlotRow>(
+    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
+    [sessionId, agentId],
+  );
+
+  if (row === undefined) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(row.slot_payload) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RecentCognitionEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function getConversationMessageContents(sessionId: string, db: Db, limit = 12): string[] {
+  const rows = db.query<InteractionMessageRow>(
+    `SELECT payload
+     FROM interaction_records
+     WHERE session_id = ? AND record_type = 'message'
+     ORDER BY record_index DESC
+     LIMIT ?`,
+    [sessionId, limit],
+  );
+
+  const lines: string[] = [];
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload) as { content?: unknown };
+      if (typeof payload.content === "string" && payload.content.trim().length > 0) {
+        lines.push(payload.content);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return lines;
+}
+
+function renderTypedRetrieval(result: TypedRetrievalResult): string {
+  const parts: string[] = [];
+
+  if (result.cognition.length > 0) {
+    parts.push("[cognition]");
+    for (const hit of result.cognition) {
+      const key = hit.cognitionKey ? `:${hit.cognitionKey}` : "";
+      parts.push(`• [${hit.kind}${key}] ${hit.content}`);
+    }
+  }
+
+  if (result.narrative.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[narrative]");
+    for (const hit of result.narrative) {
+      parts.push(`• [${hit.doc_type}] ${hit.content}`);
+    }
+  }
+
+  if (result.conflict_notes.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[conflict_notes]");
+    for (const hit of result.conflict_notes) {
+      parts.push(`• ${hit.content}`);
+    }
+  }
+
+  if (result.episode.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[episode]");
+    for (const hit of result.episode) {
+      parts.push(`• [${hit.doc_type}] ${hit.content}`);
+    }
+  }
+
+  return parts.join("\n").trim();
 }
 
 type CoreMemoryRenderableBlock = {

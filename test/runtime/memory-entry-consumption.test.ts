@@ -443,6 +443,48 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("RP prompt surfaces typed retrieval as a single section when retrieval exists", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const storage = new GraphStorageService(runtime.db);
+      storage.syncSearchDoc("world", "fact:typed-1" as any, "Ledger policy remains strict");
+
+      const output = await runtime.promptBuilder.build({
+        profile: { ...RP_AGENT_PROFILE, id: "rp:typed-retrieval" },
+        viewerContext: {
+          viewer_agent_id: "rp:typed-retrieval",
+          viewer_role: "rp_agent",
+          session_id: "sess-typed-retrieval",
+          current_area_id: 1,
+        },
+        userMessage: "ledger policy",
+        conversationMessages: [{ role: "user", content: "hello" }],
+        budget: {
+          maxContextTokens: 8000,
+          maxOutputTokens: 1000,
+          coordinationReserve: 0,
+          inputBudget: 6000,
+          role: "rp_agent",
+        },
+      });
+
+      const slots = output.sections.map((section) => section.slot);
+      expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(true);
+      expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
+
+      const typedContent = output.sections
+        .filter((section) => section.slot === PromptSectionSlot.TYPED_RETRIEVAL)
+        .map((section) => section.content)
+        .join("\n");
+
+      expect(typedContent).toContain("[narrative]");
+      expect(typedContent).not.toContain("privateEpisodes");
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it("memory pipeline reports degraded when model configuration is incomplete", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 

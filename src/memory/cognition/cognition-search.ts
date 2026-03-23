@@ -19,6 +19,7 @@ type CognitionHit = {
   kind: CognitionKind;
   basis: AssertionBasis | null;
   stance: AssertionStance | null;
+  cognitionKey?: string | null;
   source_ref: NodeRef;
   content: string;
   updated_at: number;
@@ -244,10 +245,20 @@ export class CognitionSearchService {
       kind: row.kind as CognitionKind,
       basis: (row.basis as AssertionBasis) ?? null,
       stance: (row.stance as AssertionStance) ?? null,
+      cognitionKey: this.extractCognitionKey(row.source_ref),
       source_ref: row.source_ref as NodeRef,
       content: row.content,
       updated_at: row.updated_at,
     };
+  }
+
+  private extractCognitionKey(sourceRef: string): string | null {
+    const prefix = "cognition_key:";
+    if (!sourceRef.startsWith(prefix)) {
+      return null;
+    }
+    const key = sourceRef.slice(prefix.length).trim();
+    return key.length > 0 ? key : null;
   }
 
   private escapeFtsQuery(input: string): string {
@@ -297,6 +308,7 @@ export class CurrentProjectionReader {
       kind: row.kind as CognitionKind,
       basis: (row.basis as AssertionBasis) ?? null,
       stance: (row.stance as AssertionStance) ?? null,
+      cognitionKey: row.cognition_key,
       source_ref: `projection:${row.id}` as NodeRef,
       content: row.summary_text ?? "",
       updated_at: row.updated_at,

@@ -97,7 +97,7 @@ export class PromptBuilder {
 			);
 			slotContent.set(
 				PromptSectionSlot.TYPED_RETRIEVAL,
-				this.getTypedRetrievalSurface(input.viewerContext.viewer_agent_id),
+				await this.getTypedRetrievalSurface(input.userMessage, input.viewerContext),
 			);
 			slotContent.set(
 				PromptSectionSlot.LORE_ENTRIES,
@@ -258,17 +258,25 @@ export class PromptBuilder {
 		return parts.join("\n");
 	}
 
-	private getTypedRetrievalSurface(agentId: string): string {
+	private async getTypedRetrievalSurface(
+		userMessage: string,
+		viewerContext: ViewerContext,
+	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
-		if (!memDs.getTypedRetrievalPlaceholder) {
+		if (!memDs.getTypedRetrievalSurface) {
 			return "";
 		}
 
-		return (
-			this.readDataSource("memory.getTypedRetrievalPlaceholder", () =>
-				memDs.getTypedRetrievalPlaceholder!(agentId),
-			) ?? ""
+		const result = this.readDataSource(
+			"memory.getTypedRetrievalSurface",
+			() => memDs.getTypedRetrievalSurface!(userMessage, viewerContext),
 		);
+
+		if (result instanceof Promise) {
+			return (await result) ?? "";
+		}
+
+		return result ?? "";
 	}
 
 	private getRecentCognition(viewerContext: ViewerContext): string {

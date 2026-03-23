@@ -19,7 +19,7 @@ export type MemoryDataSource = {
   getRecentCognition(viewerContext: ViewerContext): string;
   getMemoryHints(userMessage: string, viewerContext: ViewerContext): Promise<string>;
   getAttachedSharedBlocks?(agentId: string): string | Promise<string>;
-  getTypedRetrievalPlaceholder?(agentId: string): string;
+  getTypedRetrievalSurface?(userMessage: string, viewerContext: ViewerContext): string | Promise<string>;
 };
 
 export type OperationalDataSource = {

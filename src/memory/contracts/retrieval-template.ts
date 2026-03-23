@@ -1,28 +1,60 @@
 import type { AgentRole } from "../../agents/profile.js";
 
 export type RetrievalTemplate = {
-  narrativeEnabled?: boolean;      // default: true (except task_agent)
-  cognitionEnabled?: boolean;      // default: depends on role (rp_agent=true, others=false)
-  maxNarrativeHits?: number;       // default: 5 (0 for task_agent)
-  maxCognitionHits?: number;       // default: 5 for rp_agent, 0 for others
+  narrativeEnabled?: boolean;
+  cognitionEnabled?: boolean;
+  conflictNotesEnabled?: boolean;
+  episodeEnabled?: boolean;
+  narrativeBudget?: number;
+  cognitionBudget?: number;
+  conflictNotesBudget?: number;
+  episodeBudget?: number;
+  queryEpisodeBoost?: number;
+  sceneEpisodeBoost?: number;
+  maxNarrativeHits?: number;
+  maxCognitionHits?: number;
 };
 
 const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
   rp_agent: {
     narrativeEnabled: true,
     cognitionEnabled: true,
-    maxNarrativeHits: 5,
+    conflictNotesEnabled: true,
+    episodeEnabled: true,
+    narrativeBudget: 3,
+    cognitionBudget: 5,
+    conflictNotesBudget: 2,
+    episodeBudget: 0,
+    queryEpisodeBoost: 1,
+    sceneEpisodeBoost: 1,
+    maxNarrativeHits: 3,
     maxCognitionHits: 5,
   },
   maiden: {
     narrativeEnabled: true,
     cognitionEnabled: false,
-    maxNarrativeHits: 5,
+    conflictNotesEnabled: false,
+    episodeEnabled: true,
+    narrativeBudget: 3,
+    cognitionBudget: 0,
+    conflictNotesBudget: 0,
+    episodeBudget: 0,
+    queryEpisodeBoost: 1,
+    sceneEpisodeBoost: 1,
+    maxNarrativeHits: 3,
     maxCognitionHits: 0,
   },
   task_agent: {
     narrativeEnabled: false,
     cognitionEnabled: false,
+    conflictNotesEnabled: false,
+    episodeEnabled: false,
+    narrativeBudget: 0,
+    cognitionBudget: 0,
+    conflictNotesBudget: 0,
+    episodeBudget: 0,
+    queryEpisodeBoost: 0,
+    sceneEpisodeBoost: 0,
     maxNarrativeHits: 0,
     maxCognitionHits: 0,
   },
@@ -38,10 +70,20 @@ export function resolveTemplate(
 ): Required<RetrievalTemplate> {
   const base = getDefaultTemplate(role);
   if (!override) return base;
+  const narrativeBudget = override.narrativeBudget ?? override.maxNarrativeHits ?? base.narrativeBudget;
+  const cognitionBudget = override.cognitionBudget ?? override.maxCognitionHits ?? base.cognitionBudget;
   return {
     narrativeEnabled: override.narrativeEnabled ?? base.narrativeEnabled,
     cognitionEnabled: override.cognitionEnabled ?? base.cognitionEnabled,
-    maxNarrativeHits: override.maxNarrativeHits ?? base.maxNarrativeHits,
-    maxCognitionHits: override.maxCognitionHits ?? base.maxCognitionHits,
+    conflictNotesEnabled: override.conflictNotesEnabled ?? base.conflictNotesEnabled,
+    episodeEnabled: override.episodeEnabled ?? base.episodeEnabled,
+    narrativeBudget,
+    cognitionBudget,
+    conflictNotesBudget: override.conflictNotesBudget ?? base.conflictNotesBudget,
+    episodeBudget: override.episodeBudget ?? base.episodeBudget,
+    queryEpisodeBoost: override.queryEpisodeBoost ?? base.queryEpisodeBoost,
+    sceneEpisodeBoost: override.sceneEpisodeBoost ?? base.sceneEpisodeBoost,
+    maxNarrativeHits: narrativeBudget,
+    maxCognitionHits: cognitionBudget,
   };
 }

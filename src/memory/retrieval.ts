@@ -1,6 +1,13 @@
 import type { Db } from "../storage/database.js";
 import { EmbeddingService } from "./embeddings.js";
+import { CognitionSearchService } from "./cognition/cognition-search.js";
+import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
 import { NarrativeSearchService } from "./narrative/narrative-search.js";
+import {
+  RetrievalOrchestrator,
+  type RetrievalDedupContext,
+  type TypedRetrievalResult,
+} from "./retrieval/retrieval-orchestrator.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
@@ -40,11 +47,19 @@ type TopicReadResult = {
 export class RetrievalService {
   private readonly embeddingService: EmbeddingService;
   private readonly narrativeSearch: NarrativeSearchService;
+  private readonly cognitionSearch: CognitionSearchService;
+  private readonly orchestrator: RetrievalOrchestrator;
 
   constructor(private readonly db: Db) {
     const batcher = new TransactionBatcher(db);
     this.embeddingService = new EmbeddingService(db, batcher);
     this.narrativeSearch = new NarrativeSearchService(db);
+    this.cognitionSearch = new CognitionSearchService(db);
+    this.orchestrator = new RetrievalOrchestrator(
+      this.narrativeSearch,
+      this.cognitionSearch,
+      this.cognitionSearch.createCurrentProjectionReader(),
+    );
   }
 
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
@@ -188,7 +203,37 @@ export class RetrievalService {
     viewerContext: ViewerContext,
     limit = 5,
   ): Promise<MemoryHint[]> {
-    return this.narrativeSearch.generateMemoryHints(userMessage, viewerContext, limit);
+    const typed = await this.generateTypedRetrieval(
+      userMessage,
+      viewerContext,
+      undefined,
+      {
+        narrativeBudget: limit,
+      },
+    );
+    return typed.narrative.map((segment) => ({
+      source_ref: segment.source_ref as MemoryHint["source_ref"],
+      doc_type: segment.doc_type,
+      content: segment.content,
+      scope: segment.scope,
+      score: segment.score,
+    }));
+  }
+
+  async generateTypedRetrieval(
+    query: string,
+    viewerContext: ViewerContext,
+    dedupContext?: RetrievalDedupContext,
+    retrievalTemplate?: RetrievalTemplate,
+  ): Promise<TypedRetrievalResult> {
+    const result = await this.orchestrator.search(
+      query,
+      viewerContext,
+      viewerContext.viewer_role,
+      retrievalTemplate,
+      dedupContext,
+    );
+    return result.typed;
   }
 
   async localizeSeedsHybrid(

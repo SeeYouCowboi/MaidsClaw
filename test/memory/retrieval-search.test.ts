@@ -7,6 +7,7 @@ import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.j
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
+import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
@@ -926,6 +927,230 @@ describe("RetrievalService", () => {
 
 			db.close();
 			cleanupDb(dbPath);
+		});
+	});
+
+	describe("Typed Retrieval Surface", () => {
+		it("uses per-type budgets and keeps episode default at zero", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+
+			storage.syncSearchDoc("world", "fact:1" as any, "Ledger protocol remains strict in the manor");
+			storage.syncSearchDoc("world", "event:1" as any, "Yesterday a ledger fell in the hall");
+
+			storage.upsertEntity({
+				pointerKey: "__self__",
+				displayName: "Alice",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "bob",
+				displayName: "Bob",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "typed:budget",
+				settlementId: "stl:typed-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "tracks",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const retrieval = new RetrievalService(db);
+			const typed = await retrieval.generateTypedRetrieval(
+				"ledger",
+				viewer({ viewer_agent_id: "rp:alice" }),
+				undefined,
+				{
+					cognitionBudget: 1,
+					narrativeBudget: 1,
+					conflictNotesBudget: 1,
+					episodeBudget: 0,
+				},
+			);
+
+			expect(typed.cognition.length).toBeLessThanOrEqual(1);
+			expect(typed.narrative.length).toBeLessThanOrEqual(1);
+			expect(typed.episode).toHaveLength(0);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("supports query-triggered episode boost from zero default", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+
+			storage.syncSearchDoc("world", "event:10" as any, "Earlier in the hall, Bob dropped a key");
+
+			const retrieval = new RetrievalService(db);
+			const typed = await retrieval.generateTypedRetrieval(
+				"what happened before in the hall",
+				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
+				undefined,
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 1,
+					sceneEpisodeBoost: 1,
+				},
+			);
+
+			expect(typed.episode.length).toBeGreaterThanOrEqual(1);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("reserves conflict_notes budget independently from cognition budget", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			storage.upsertEntity({
+				pointerKey: "__self__",
+				displayName: "Alice",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+			storage.upsertEntity({
+				pointerKey: "bob",
+				displayName: "Bob",
+				entityType: "person",
+				memoryScope: "shared_public",
+			});
+
+			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "typed:conflict",
+				settlementId: "stl:typed-c1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "typed:conflict",
+				settlementId: "stl:typed-c2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				basis: "first_hand",
+				preContestedStance: "accepted",
+			});
+
+			const retrieval = new RetrievalService(db);
+			const typed = await retrieval.generateTypedRetrieval(
+				"trusts",
+				viewer({ viewer_agent_id: "rp:alice" }),
+				undefined,
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 1,
+					episodeBudget: 0,
+				},
+			);
+
+			expect(typed.cognition).toHaveLength(0);
+			expect(typed.conflict_notes.length).toBeGreaterThanOrEqual(1);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("strongly deduplicates recent cognition, conversation, cognitionKey, and surfaced narrative", async () => {
+			const orchestrator = new RetrievalOrchestrator(
+				{
+					generateMemoryHints: async () => [
+						{
+							source_ref: "event:1" as any,
+							doc_type: "event",
+							scope: "world",
+							content: "same narrative",
+							score: 0.9,
+						},
+						{
+							source_ref: "fact:2" as any,
+							doc_type: "fact",
+							scope: "world",
+							content: "new narrative",
+							score: 0.8,
+						},
+					],
+				} as unknown as NarrativeSearchService,
+				{
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "cognition_key:dup" as any,
+							cognitionKey: "dup",
+							content: "already in recent",
+							updated_at: 10,
+						},
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "cognition_key:dup" as any,
+							cognitionKey: "dup",
+							content: "duplicate key should drop",
+							updated_at: 9,
+						},
+						{
+							kind: "evaluation",
+							basis: null,
+							stance: null,
+							source_ref: "cognition_key:kept" as any,
+							cognitionKey: "kept",
+							content: "unique cognition",
+							updated_at: 8,
+						},
+					],
+				} as unknown as CognitionSearchService,
+			);
+
+			const result = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 3,
+					narrativeBudget: 2,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+				},
+				{
+					recentCognitionKeys: new Set(["dup"]),
+					recentCognitionTexts: ["already in recent"],
+					conversationTexts: ["already in conversation"],
+					surfacedNarrativeTexts: ["same narrative"],
+				},
+			);
+
+			expect(result.typed.cognition).toHaveLength(1);
+			expect(result.typed.cognition[0]?.cognitionKey).toBe("kept");
+			expect(result.typed.narrative).toHaveLength(1);
+			expect(result.typed.narrative[0]?.content).toBe("new narrative");
 		});
 	});
 });

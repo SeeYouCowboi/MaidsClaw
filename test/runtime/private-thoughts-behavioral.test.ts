@@ -6,7 +6,7 @@ import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-r
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
-import { getRecentCognition } from "../../src/memory/prompt-data.js";
+import { getRecentCognition, getTypedRetrievalSurface } from "../../src/memory/prompt-data.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { PersonaLoader } from "../../src/persona/loader.js";
 import { PersonaService } from "../../src/persona/service.js";
@@ -205,6 +205,35 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
     expect(result).toContain("Risk: conflict detected");
     expect(result).not.toContain("Conflicts:");
     expect(result).not.toContain("ev:ledger-gap");
+  });
+});
+
+describe("Behavioral: typed retrieval prompt section", () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runMemoryMigrations(db);
+    runInteractionMigrations(db);
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  it("returns empty typed retrieval for too-short queries", async () => {
+    const output = await getTypedRetrievalSurface(
+      "hi",
+      {
+        viewer_agent_id: "rp:eveline",
+        viewer_role: "rp_agent",
+        current_area_id: 1,
+        session_id: "sess-typed",
+      },
+      db,
+    );
+
+    expect(output).toBe("");
   });
 });
 

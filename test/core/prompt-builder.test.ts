@@ -78,7 +78,7 @@ function makeDataSources(): {
 				`<shared_block label="user">shared relationship facts</shared_block>`,
 			getRecentCognition: () => `\u2022 [assertion] Alice trusts Bob (accepted)\n\u2022 [evaluation] eval Bob [trust:8, warmth:7]`,
 			getMemoryHints: async (userMessage: string) => `hint for ${userMessage}`,
-			getTypedRetrievalPlaceholder: () => "",
+			getTypedRetrievalSurface: async () => "",
 		},
 		operational: {
 			getExcerpt: (_keys: string[]) => ({
