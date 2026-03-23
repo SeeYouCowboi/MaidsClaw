@@ -32,7 +32,7 @@ import type {
 } from "../memory/task-agent.js";
 import type { SessionService } from "../session/service.js";
 import type {
-	AssertionRecord,
+	AssertionRecordV4,
 	CanonicalRpTurnOutcome,
 	CognitionEntityRef,
 	CognitionKind,
@@ -957,7 +957,7 @@ function refValue(ref: CognitionEntityRef | CognitionSelector): string {
 	return (ref as CognitionSelector).key;
 }
 
-function summarizeAssertion(record: AssertionRecord): string {
+function summarizeAssertion(record: AssertionRecordV4): string {
 	return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
 }
 
@@ -995,7 +995,7 @@ function buildCognitionSlotPayload(
 			let summary: string;
 			switch (record.kind) {
 				case "assertion":
-					summary = summarizeAssertion(record as AssertionRecord);
+					summary = summarizeAssertion(record as AssertionRecordV4);
 					break;
 				case "evaluation":
 					summary = summarizeEvaluation(record as EvaluationRecord);
