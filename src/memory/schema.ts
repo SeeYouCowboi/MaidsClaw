@@ -19,6 +19,20 @@ export const EventCategory = {
 } as const;
 export const ProjectionClass = { NONE: "none", AREA_CANDIDATE: "area_candidate" } as const;
 export const PromotionClass = { NONE: "none", WORLD_CANDIDATE: "world_candidate" } as const;
+export const SurfacingClassification = {
+  PUBLIC_MANIFESTATION: "public_manifestation",
+  LATENT_STATE_UPDATE: "latent_state_update",
+  PRIVATE_ONLY: "private_only",
+} as const;
+
+const AREA_WORLD_PROJECTION_DDL: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS area_state_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, PRIMARY KEY(agent_id, area_id, key))`,
+  `CREATE INDEX IF NOT EXISTS idx_area_state_current_agent_area ON area_state_current(agent_id, area_id, updated_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS area_narrative_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(agent_id, area_id))`,
+  `CREATE TABLE IF NOT EXISTS world_state_current (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_world_state_current_updated ON world_state_current(updated_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS world_narrative_current (id INTEGER PRIMARY KEY CHECK (id = 1), summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
+];
 
 export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   if (!NODE_REF_KINDS.includes(kind)) {
@@ -98,6 +112,8 @@ export const MEMORY_DDL: readonly string[] = [
   // ── Private Cognition Current (rebuildable projection) ──
   `CREATE TABLE IF NOT EXISTS private_cognition_current (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), stance TEXT, basis TEXT, status TEXT NOT NULL DEFAULT 'active', pre_contested_stance TEXT, conflict_summary TEXT, conflict_factor_refs_json TEXT, summary_text TEXT, record_json TEXT NOT NULL, source_event_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_cognition_current_agent_key ON private_cognition_current(agent_id, cognition_key)`,
+
+  ...AREA_WORLD_PROJECTION_DDL,
 
   // ── Shared Blocks V1 ──
   `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -361,6 +377,15 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
       );
+    },
+  },
+  {
+    id: "memory:015:add-area-world-current-projections",
+    description: "Add bounded area/world current projection tables and surfacing classification",
+    up: (db: Db) => {
+      for (const ddl of AREA_WORLD_PROJECTION_DDL) {
+        db.exec(ddl);
+      }
     },
   },
 ];

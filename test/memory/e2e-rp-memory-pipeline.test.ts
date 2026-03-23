@@ -9,9 +9,11 @@ import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/priva
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
 import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
 import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
+import { AreaWorldProjectionRepo } from "../../src/memory/projection/area-world-projection-repo.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
+import { materializePublications } from "../../src/memory/materialization.js";
 import { prevalidateRelationIntents } from "../../src/memory/cognition/relation-intent-resolver.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
@@ -740,5 +742,70 @@ describe("E2E: RP memory pipeline", () => {
 				conflictFactors: [],
 			}),
 		).toThrow("invalid relation sourceRef");
+	});
+
+	it("publication projection writes bounded area/world current without area-to-world auto-rollup", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+		const projectionRepo = new AreaWorldProjectionRepo(db.raw);
+
+		const areaId = storage.upsertEntity({
+			pointerKey: "tea_room",
+			displayName: "Tea Room",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const settlementId = `stl:${randomUUID()}`;
+		const result = materializePublications(
+			storage,
+			[
+				{ kind: "spoken", targetScope: "current_area", summary: "Alice serves tea in the tea room." },
+				{ kind: "written", targetScope: "world_public", summary: "A public bulletin is posted." },
+			],
+			settlementId,
+			{
+				sessionId: "sess-projection-bounds",
+				locationEntityId: areaId,
+				timestamp: 42_000,
+			},
+			{
+				projectionRepo,
+				sourceAgentId: "rp:alice",
+			},
+		);
+
+		expect(result.materialized).toBe(2);
+
+		const areaState = projectionRepo.getAreaStateCurrent("rp:alice", areaId, `publication:${settlementId}:0`);
+		expect(areaState).not.toBeNull();
+		expect(areaState!.surfacing_classification).toBe("public_manifestation");
+
+		const areaNarrative = projectionRepo.getAreaNarrativeCurrent("rp:alice", areaId);
+		expect(areaNarrative).not.toBeNull();
+		expect(areaNarrative!.summary_text).toContain("tea room");
+
+		const worldState = projectionRepo.getWorldStateCurrent(`publication:${settlementId}:1`);
+		expect(worldState).not.toBeNull();
+		expect(worldState!.surfacing_classification).toBe("public_manifestation");
+
+		const worldNarrative = projectionRepo.getWorldNarrativeCurrent();
+		expect(worldNarrative).not.toBeNull();
+		expect(worldNarrative!.summary_text).toContain("public bulletin");
+
+		projectionRepo.upsertAreaStateCurrent({
+			agentId: "rp:alice",
+			areaId,
+			key: "latent:drawer-letter",
+			value: { exists: true },
+			surfacingClassification: "latent_state_update",
+		});
+
+		const noWorldRollup = projectionRepo.getWorldStateCurrent("latent:drawer-letter");
+		expect(noWorldRollup).toBeNull();
+
+		db.close();
+		cleanupDb(dbPath);
 	});
 });

@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(30);
+		expect(nonFtsCount?.count).toBe(34);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -500,7 +500,62 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(14);
+		expect(migrationCount?.count).toBe(15);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("adds bounded area/world current projections with surfacing classification constraints", () => {
+		const { dbPath, db } = createTempDb();
+
+		runMemoryMigrations(db);
+
+		const tableNames = db
+			.query<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type='table' AND name IN ('area_state_current', 'area_narrative_current', 'world_state_current', 'world_narrative_current') ORDER BY name",
+			)
+			.map((row) => row.name);
+		expect(tableNames).toEqual([
+			"area_narrative_current",
+			"area_state_current",
+			"world_narrative_current",
+			"world_state_current",
+		]);
+
+		const now = Date.now();
+		db.run(
+			"INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["rp:alice", 1, "door:status", '{"locked":true}', "latent_state_update", now],
+		);
+
+		let invalidClassificationFailed = false;
+		try {
+			db.run(
+				"INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+				["rp:alice", 1, "door:status:invalid", '{"locked":false}', "invalid_class", now],
+			);
+		} catch {
+			invalidClassificationFailed = true;
+		}
+		expect(invalidClassificationFailed).toBe(true);
+
+		db.run(
+			"INSERT INTO world_state_current (key, value_json, surfacing_classification, updated_at) VALUES (?, ?, ?, ?)",
+			["world:decree", '{"active":true}', "public_manifestation", now],
+		);
+
+		const areaRow = db.get<{ surfacing_classification: string }>(
+			"SELECT surfacing_classification FROM area_state_current WHERE agent_id = ? AND area_id = ? AND key = ?",
+			["rp:alice", 1, "door:status"],
+		);
+		expect(areaRow?.surfacing_classification).toBe("latent_state_update");
+
+		const worldRow = db.get<{ surfacing_classification: string }>(
+			"SELECT surfacing_classification FROM world_state_current WHERE key = ?",
+			["world:decree"],
+		);
+		expect(worldRow?.surfacing_classification).toBe("public_manifestation");
 
 		db.close();
 		cleanupDb(dbPath);

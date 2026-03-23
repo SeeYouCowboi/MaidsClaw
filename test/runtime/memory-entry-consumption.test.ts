@@ -634,6 +634,27 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("bootstrapped memory schema includes bounded area/world projection tables", () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const tables = runtime.db
+        .query<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('area_state_current', 'area_narrative_current', 'world_state_current', 'world_narrative_current') ORDER BY name",
+        )
+        .map((row) => row.name);
+
+      expect(tables).toEqual([
+        "area_narrative_current",
+        "area_state_current",
+        "world_narrative_current",
+        "world_state_current",
+      ]);
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
   it("silent-private RP turn (no assistant message, only turn_settlement) survives flush and is marked processed", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 

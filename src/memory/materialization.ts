@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { PublicationDeclaration, PublicationKind, PublicationKindV2 } from "../runtime/rp-turn-contract.js";
+import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AgentEventOverlay, PublicEventCategory } from "./types.js";
@@ -32,10 +33,15 @@ type EntityRow = {
 const HIDDEN_ENTITY_MARKERS = ["unknown", "hidden", "redacted", "anonymous"] as const;
 
 export class MaterializationService {
+  private readonly projectionRepo: AreaWorldProjectionRepo;
+
   constructor(
     private readonly db: Database,
     private readonly storage: GraphStorageService,
-  ) {}
+    projectionRepo?: AreaWorldProjectionRepo,
+  ) {
+    this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
+  }
 
   materializeDelayed(privateEvents: AgentEventOverlay[], agentId: string): MaterializationResult {
     const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
@@ -101,6 +107,20 @@ export class MaterializationService {
           origin: "delayed_materialization",
         });
         this.linkPrivateToPublic(privateEvent.id, publicEventId);
+        this.projectionRepo.applyMaterializationProjection({
+          trigger: "materialization",
+          agentId,
+          areaId: resolvedLocationId,
+          projectionKey: `materialization:${privateEvent.source_record_id ?? privateEvent.id}`,
+          summaryText: summary,
+          payload: {
+            sourcePrivateEventId: privateEvent.id,
+            projectedEventId: publicEventId,
+            sourceRecordId: privateEvent.source_record_id ?? null,
+          },
+          surfacingClassification: "public_manifestation",
+          updatedAt: timestamp,
+        });
         result.materialized += 1;
       } catch (error) {
         if (!privateEvent.source_record_id) {
@@ -240,9 +260,13 @@ export class MaterializationService {
       sessionId: string;
       locationEntityId?: number;
       timestamp?: number;
+      sourceAgentId?: string;
     },
   ): MaterializationResult {
-    return materializePublications(this.storage, publications, settlementId, ctx);
+    return materializePublications(this.storage, publications, settlementId, ctx, {
+      projectionRepo: this.projectionRepo,
+      sourceAgentId: ctx.sourceAgentId,
+    });
   }
 }
 
@@ -254,6 +278,10 @@ export function materializePublications(
     sessionId: string;
     locationEntityId?: number;
     timestamp?: number;
+  },
+  options?: {
+    projectionRepo?: AreaWorldProjectionRepo;
+    sourceAgentId?: string;
   },
 ): MaterializationResult {
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
@@ -303,6 +331,24 @@ export function materializePublications(
         sourceSettlementId: settlementId,
         sourcePubIndex: pubIndex,
       });
+      if (options?.projectionRepo && options.sourceAgentId) {
+        options.projectionRepo.applyPublicationProjection({
+          trigger: "publication",
+          targetScope: pub.targetScope,
+          agentId: options.sourceAgentId,
+          areaId: locationEntityId,
+          projectionKey: `publication:${settlementId}:${pubIndex}`,
+          summaryText: pub.summary.trim(),
+          payload: {
+            settlementId,
+            pubIndex,
+            visibilityScope,
+            kind: pub.kind,
+          },
+          surfacingClassification: "public_manifestation",
+          updatedAt: timestamp,
+        });
+      }
       result.materialized += 1;
     } catch (error: unknown) {
       if (isSqliteUniqueConstraintError(error)) {

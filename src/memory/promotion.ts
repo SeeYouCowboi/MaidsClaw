@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type {
@@ -60,11 +61,16 @@ const STABLE_FACT_PATTERNS = [
 ] as const;
 
 export class PromotionService implements IPromotionService {
+  private readonly projectionRepo: AreaWorldProjectionRepo;
+
   constructor(
     private readonly db: Database,
     private readonly storage: GraphStorageService,
     private readonly modelProvider?: PromotionModelProvider,
-  ) {}
+    projectionRepo?: AreaWorldProjectionRepo,
+  ) {
+    this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
+  }
 
   identifyEventCandidates(criteria: EventCandidateCriteria = {}): EventNode[] {
     const spoken = criteria.spoken ?? true;
@@ -286,6 +292,17 @@ export class PromotionService implements IPromotionService {
         primaryActorEntityId: promotedPrimaryActor ?? undefined,
         sourceEventId,
       });
+      this.projectionRepo.applyPromotionProjection({
+        trigger: "promotion",
+        projectionKey: `promotion:event:${sourceEventId}`,
+        summaryText: summary,
+        payload: {
+          sourceEventId,
+          promotedEventId,
+        },
+        surfacingClassification: "public_manifestation",
+        updatedAt: sourceEvent.timestamp,
+      });
 
       return {
         target_scope: "world_public",
@@ -311,7 +328,19 @@ export class PromotionService implements IPromotionService {
       : undefined;
 
     const factId = this.storage.createFact(resolvedEntities[0], resolvedEntities[1], predicate, sourceEventId);
-    this.storage.syncSearchDoc("world", makeNodeRef("fact", factId), this.normalizeSummary(candidate.summary));
+    const summary = this.normalizeSummary(candidate.summary);
+    this.storage.syncSearchDoc("world", makeNodeRef("fact", factId), summary);
+    this.projectionRepo.applyPromotionProjection({
+      trigger: "promotion",
+      projectionKey: `promotion:fact:${factId}`,
+      summaryText: summary,
+      payload: {
+        sourceRef: candidate.source_ref,
+        factId,
+        predicate,
+      },
+      surfacingClassification: "public_manifestation",
+    });
 
     return {
       target_scope: "world_public",
