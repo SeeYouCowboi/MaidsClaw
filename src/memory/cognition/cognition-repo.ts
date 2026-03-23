@@ -341,7 +341,6 @@ export class CognitionRepository {
               [],
               params.settlementId,
               0.8,
-              cognitionKey,
             );
           }
           this.eventRepo.append({
@@ -414,7 +413,6 @@ export class CognitionRepository {
             [],
             params.settlementId,
             0.8,
-            cognitionKey,
           );
         }
         this.eventRepo.append({

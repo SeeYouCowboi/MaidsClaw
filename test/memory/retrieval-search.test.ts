@@ -608,13 +608,24 @@ describe("RetrievalService", () => {
 			cleanupDb(dbPath);
 		});
 
-		it("contested cognition_search hits include inline conflict evidence", () => {
+		it("contested cognition_search hits expose short risk note plus explain handoff fields", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
 			seedCognitionEntities(storage);
 
 			const repo = new CognitionRepository(db);
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "evidence:factor",
+				settlementId: "stl:ev-0",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "noticed",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
 			repo.upsertAssertion({
 				agentId: "rp:alice",
 				cognitionKey: "evidence:contested",
@@ -639,6 +650,30 @@ describe("RetrievalService", () => {
 				preContestedStance: "accepted",
 			});
 
+			db.run(
+				`UPDATE private_cognition_events
+				 SET record_json = ?
+				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				[
+					JSON.stringify({
+						sourcePointerKey: "__self__",
+						predicate: "trusts",
+						targetPointerKey: "bob",
+						stance: "contested",
+						basis: "first_hand",
+						preContestedStance: "accepted",
+						conflictSummary: "contested (1 factors)",
+						conflictFactorRefs: ["private_belief:1"],
+					}),
+					"rp:alice",
+					"evidence:contested",
+					"stl:ev-2",
+				],
+			);
+
+			const projection = new PrivateCognitionProjectionRepo(db);
+			projection.rebuild("rp:alice");
+
 			const search = new CognitionSearchService(db);
 			const hits = search.searchCognition({
 				agentId: "rp:alice",
@@ -649,9 +684,9 @@ describe("RetrievalService", () => {
 			expect(hits.length).toBe(1);
 			expect(hits[0].stance).toBe("contested");
 			expect(hits[0].conflictEvidence).toBeDefined();
-			expect(hits[0].conflictEvidence!.length).toBeGreaterThanOrEqual(1);
-			expect(hits[0].conflictEvidence![0]).toContain("conflicts_with");
-			expect(hits[0].conflictEvidence![0]).toContain("cognition_key:evidence:contested");
+			expect(hits[0].conflictEvidence).toEqual(["Risk: contested (1 factors)"]);
+			expect(hits[0].conflictSummary).toBe("contested (1 factors)");
+			expect(hits[0].conflictFactorRefs).toEqual(["private_belief:1"]);
 
 			db.close();
 			cleanupDb(dbPath);

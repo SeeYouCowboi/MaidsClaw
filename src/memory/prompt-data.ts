@@ -164,6 +164,8 @@ type RecentCognitionEntry = {
   stance?: string;
   preContestedStance?: string;
   conflictEvidence?: string[];
+  conflictSummary?: string;
+  conflictFactorRefs?: string[];
 };
 
 export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
@@ -218,10 +220,12 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
 
 export function formatContestedEntry(entry: RecentCognitionEntry): string {
   const preStance = entry.preContestedStance ?? "unknown";
-  const hasConflict = (entry.conflictEvidence?.length ?? 0) > 0;
-  const riskNote = hasConflict
-    ? " | Risk: conflict detected (use explain tools for details)"
-    : " | Risk: contested cognition";
+  const summary = entry.conflictSummary?.trim();
+  const hasConflict = (entry.conflictFactorRefs?.length ?? 0) > 0 || (entry.conflictEvidence?.length ?? 0) > 0;
+  const riskDetail = summary && summary.length > 0
+    ? summary
+    : (hasConflict ? "conflict detected" : "contested cognition");
+  const riskNote = ` | Risk: ${riskDetail} (use explain tools for details)`;
   return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
 }
 

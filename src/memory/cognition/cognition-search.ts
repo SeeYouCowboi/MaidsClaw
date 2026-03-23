@@ -24,6 +24,8 @@ type CognitionHit = {
   content: string;
   updated_at: number;
   conflictEvidence?: string[];
+  conflictSummary?: string | null;
+  conflictFactorRefs?: NodeRef[];
 };
 
 type CognitionSearchDocRow = {
@@ -64,20 +66,90 @@ export class CognitionSearchService {
       hits = this.searchByIndex(params, effectiveActiveOnly, limit);
     }
 
-    return this.enrichContestedHits(hits);
+    return this.enrichContestedHits(params.agentId, hits);
   }
 
-  private enrichContestedHits(hits: CognitionHit[]): CognitionHit[] {
+  private enrichContestedHits(agentId: string, hits: CognitionHit[]): CognitionHit[] {
+    const projection = new PrivateCognitionProjectionRepo(this.db);
+
     for (const hit of hits) {
       if (hit.stance !== "contested") continue;
+      const cognitionKey = hit.cognitionKey ?? this.resolveCognitionKey(hit.source_ref, agentId);
+      if (cognitionKey) {
+        hit.cognitionKey = cognitionKey;
+      }
+
+      const current = cognitionKey ? projection.getCurrent(agentId, cognitionKey) : null;
+      const projectionFactorRefs = this.parseFactorRefsJson(current?.conflict_factor_refs_json ?? null);
+      const summaryFromProjection = current?.conflict_summary?.trim() || null;
+
       const evidence = this.relationBuilder.getConflictEvidence(String(hit.source_ref), 3);
-      if (evidence.length > 0) {
-        hit.conflictEvidence = evidence.map(
-          (e) => `conflicts_with ${e.targetRef} (strength: ${e.strength})`,
-        );
+      const evidenceRefs = evidence.map((row) => row.targetRef as NodeRef);
+
+      const factorRefs = projectionFactorRefs.length > 0 ? projectionFactorRefs : evidenceRefs;
+      const summary = summaryFromProjection
+        ?? (factorRefs.length > 0 ? `contested (${factorRefs.length} factors)` : "contested cognition");
+
+      hit.conflictSummary = summary;
+      hit.conflictFactorRefs = factorRefs;
+      hit.conflictEvidence = [`Risk: ${summary}`];
+
+      if (!current && factorRefs.length === 0) {
+        hit.conflictEvidence = ["Risk: contested cognition"];
       }
     }
     return hits;
+  }
+
+  private parseFactorRefsJson(value: string | null): NodeRef[] {
+    if (!value) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter((item) => /^(private_belief|private_event|private_episode|event):\d+$/.test(item)) as NodeRef[];
+    } catch {
+      return [];
+    }
+  }
+
+  private resolveCognitionKey(sourceRef: NodeRef, agentId: string): string | null {
+    const text = String(sourceRef);
+    if (text.startsWith("cognition_key:")) {
+      const key = text.slice("cognition_key:".length).trim();
+      return key.length > 0 ? key : null;
+    }
+
+    const [kind, rawId] = text.split(":");
+    if (!rawId) {
+      return null;
+    }
+    const id = Number(rawId);
+    if (Number.isNaN(id)) {
+      return null;
+    }
+
+    if (kind === "private_belief") {
+      const row = this.db
+        .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE id = ? AND agent_id = ?`)
+        .get(id, agentId) as { cognition_key: string | null } | null;
+      return row?.cognition_key ?? null;
+    }
+
+    if (kind === "private_event") {
+      const row = this.db
+        .prepare(`SELECT cognition_key FROM agent_event_overlay WHERE id = ? AND agent_id = ?`)
+        .get(id, agentId) as { cognition_key: string | null } | null;
+      return row?.cognition_key ?? null;
+    }
+
+    return null;
   }
 
   private searchByFts(

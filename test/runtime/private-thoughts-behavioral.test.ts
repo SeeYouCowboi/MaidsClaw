@@ -26,6 +26,8 @@ type RecentEntry = {
   stance?: string;
   preContestedStance?: string;
   conflictEvidence?: string[];
+  conflictSummary?: string;
+  conflictFactorRefs?: string[];
 };
 
 function insertSlot(db: Db, agentId: string, sessionId: string, entries: RecentEntry[]) {
@@ -193,7 +195,8 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
         status: "active" as const,
         stance: "contested",
         preContestedStance: "accepted",
-        conflictEvidence: ["ev:ledger-gap", "ev:witness-a", "ev:witness-b"],
+        conflictSummary: "contested (3 factors)",
+        conflictFactorRefs: ["private_event:11", "private_event:12", "private_belief:7"],
       },
     ];
 
@@ -202,9 +205,9 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
     const result = getRecentCognition("agent-1", "sess-1", db);
 
     expect(result).toContain("[CONTESTED: was accepted]");
-    expect(result).toContain("Risk: conflict detected");
+    expect(result).toContain("Risk: contested (3 factors)");
     expect(result).not.toContain("Conflicts:");
-    expect(result).not.toContain("ev:ledger-gap");
+    expect(result).not.toContain("private_event:11");
   });
 });
 

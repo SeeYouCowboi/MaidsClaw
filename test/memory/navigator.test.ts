@@ -108,6 +108,7 @@ describe("GraphNavigator explain shell", () => {
     expect(result.query_type).toBe("conflict");
     expect(typeof result.summary).toBe("string");
     expect(result.summary?.length ?? 0).toBeGreaterThan(0);
+    expect(result.summary ?? "").not.toContain("cognition_key:");
   });
 
   it("emits redacted placeholders when path includes hidden/private nodes", () => {

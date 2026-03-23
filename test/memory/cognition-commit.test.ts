@@ -1231,7 +1231,7 @@ describe("CognitionOpCommitter", () => {
 	});
 
 	describe("Contested assertion creates conflicts_with relation", () => {
-		it("writes conflicts_with row to memory_relations on contested transition", () => {
+		it("does not create virtual cognition_key relation when no real factor refs are provided", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -1263,27 +1263,12 @@ describe("CognitionOpCommitter", () => {
 				preContestedStance: "accepted",
 			});
 
-			const relRow = db.get<{
-				source_node_ref: string;
-				target_node_ref: string;
-				relation_type: string;
-				strength: number;
-				directness: string;
-				source_kind: string;
-				source_ref: string;
-			}>(
-				"SELECT source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref FROM memory_relations WHERE relation_type = 'conflicts_with' LIMIT 1",
+			const relRow = db.get<{ id: number }>(
+				"SELECT id FROM memory_relations WHERE relation_type = 'conflicts_with' LIMIT 1",
 				[],
 			);
 
-			expect(relRow).toBeDefined();
-			expect(relRow!.relation_type).toBe("conflicts_with");
-			expect(relRow!.target_node_ref).toBe("cognition_key:rel:contest-test");
-			expect(relRow!.strength).toBe(0.8);
-			expect(relRow!.directness).toBe("direct");
-			expect(relRow!.source_kind).toBe("agent_op");
-			expect(relRow!.source_ref).toBe("stl:rel-2");
-			expect(relRow!.source_node_ref).toMatch(/^private_belief:\d+$/);
+			expect(relRow).toBeUndefined();
 
 			db.close();
 			cleanupDb(dbPath);
@@ -1892,7 +1877,7 @@ describe("PrivateCognitionProjectionRepo", () => {
 		});
 	});
 
-	describe("Incremental assertion updates", () => {
+		describe("Incremental assertion updates", () => {
 		it("tracks stance and basis progression through events", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -1980,6 +1965,117 @@ describe("PrivateCognitionProjectionRepo", () => {
 			const current = projection.getCurrent("rp:alice", "proj:contested");
 			expect(current!.stance).toBe("contested");
 			expect(current!.pre_contested_stance).toBe("accepted");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("stores contested conflict summary and factor refs in current projection", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:contested-metadata",
+				settlementId: "stl:ctm-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+			});
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:contested-metadata",
+				settlementId: "stl:ctm-2",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				preContestedStance: "accepted",
+			});
+
+			db.run(
+				`UPDATE private_cognition_events
+				 SET record_json = ?
+				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				[
+					JSON.stringify({
+						sourcePointerKey: "__self__",
+						predicate: "trusts",
+						targetPointerKey: "bob",
+						stance: "contested",
+						preContestedStance: "accepted",
+						conflictSummary: "contested (1 factors)",
+						conflictFactorRefs: ["private_belief:1"],
+					}),
+					"rp:alice",
+					"proj:contested-metadata",
+					"stl:ctm-2",
+				],
+			);
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:contested-metadata");
+			expect(current).not.toBeNull();
+			expect(current!.pre_contested_stance).toBe("accepted");
+			expect(current!.conflict_summary).toBe("contested (1 factors)");
+			expect(current!.conflict_factor_refs_json).toBe('["private_belief:1"]');
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("keeps contested row when event has bad factor refs by degrading summary", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+			const projection = new PrivateCognitionProjectionRepo(db);
+
+			repo.upsertAssertion({
+				agentId: "rp:alice",
+				cognitionKey: "proj:contested-bad-ref",
+				settlementId: "stl:ctb-1",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "contested",
+				preContestedStance: "accepted",
+			});
+
+			db.run(
+				`UPDATE private_cognition_events
+				 SET record_json = ?
+				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				[
+					JSON.stringify({
+						sourcePointerKey: "__self__",
+						predicate: "trusts",
+						targetPointerKey: "bob",
+						stance: "contested",
+						preContestedStance: "accepted",
+						conflictFactorRefs: ["not-a-ref", "private_event:2"],
+					}),
+					"rp:alice",
+					"proj:contested-bad-ref",
+					"stl:ctb-1",
+				],
+			);
+
+			projection.rebuild("rp:alice");
+			const current = projection.getCurrent("rp:alice", "proj:contested-bad-ref");
+			expect(current).not.toBeNull();
+			expect(current!.stance).toBe("contested");
+			expect(current!.conflict_summary).toBe("contested (1 factors resolved, 1 dropped)");
+			expect(current!.conflict_factor_refs_json).toBe('["private_event:2"]');
 
 			db.close();
 			cleanupDb(dbPath);

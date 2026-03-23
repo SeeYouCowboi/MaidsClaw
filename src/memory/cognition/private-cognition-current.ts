@@ -33,6 +33,8 @@ type ParsedAssertionRecord = {
   stance?: string;
   basis?: string;
   preContestedStance?: string;
+  conflictSummary?: string;
+  conflictFactorRefs?: unknown;
   provenance?: string;
 };
 
@@ -52,6 +54,28 @@ function safeParseJson(value: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function normalizeConflictFactorRefs(value: unknown): { refs: string[]; dropped: number } {
+  if (!Array.isArray(value)) {
+    return { refs: [], dropped: 0 };
+  }
+
+  const refs: string[] = [];
+  let dropped = 0;
+  for (const item of value) {
+    if (typeof item !== "string") {
+      dropped += 1;
+      continue;
+    }
+    const trimmed = item.trim();
+    if (!/^(private_belief|private_event|private_episode|event):\d+$/.test(trimmed)) {
+      dropped += 1;
+      continue;
+    }
+    refs.push(trimmed);
+  }
+  return { refs, dropped };
 }
 
 export class PrivateCognitionProjectionRepo {
@@ -122,6 +146,18 @@ export class PrivateCognitionProjectionRepo {
   }
 
   private applyAssertionUpsert(event: CognitionEventRow, record: ParsedAssertionRecord): void {
+    const isContested = record.stance === "contested";
+    const normalizedFactors = normalizeConflictFactorRefs(record.conflictFactorRefs);
+    const fallbackSummary = normalizedFactors.dropped > 0
+      ? `contested (${normalizedFactors.refs.length} factors resolved, ${normalizedFactors.dropped} dropped)`
+      : `contested (${normalizedFactors.refs.length} factors)`;
+    const conflictSummary = isContested
+      ? (record.conflictSummary?.trim() || fallbackSummary)
+      : null;
+    const conflictFactorRefsJson = isContested
+      ? JSON.stringify(normalizedFactors.refs)
+      : null;
+
     const summaryText = record.predicate
       ? `${record.predicate}: ${record.sourcePointerKey ?? "?"} → ${record.targetPointerKey ?? "?"}`
       : null;
@@ -129,16 +165,18 @@ export class PrivateCognitionProjectionRepo {
     this.db
       .prepare(
         `INSERT INTO private_cognition_current (agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance, conflict_summary, conflict_factor_refs_json, summary_text, record_json, source_event_id, updated_at)
-         VALUES (?, ?, 'assertion', ?, ?, 'active', ?, NULL, NULL, ?, ?, ?, ?)
+         VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(agent_id, cognition_key) DO UPDATE SET
-           stance = excluded.stance,
-           basis = CASE WHEN excluded.basis IS NOT NULL THEN excluded.basis ELSE private_cognition_current.basis END,
-           status = 'active',
-           pre_contested_stance = excluded.pre_contested_stance,
-           summary_text = excluded.summary_text,
-           record_json = excluded.record_json,
-           source_event_id = excluded.source_event_id,
-           updated_at = excluded.updated_at`,
+            stance = excluded.stance,
+            basis = CASE WHEN excluded.basis IS NOT NULL THEN excluded.basis ELSE private_cognition_current.basis END,
+            status = 'active',
+            pre_contested_stance = excluded.pre_contested_stance,
+            conflict_summary = excluded.conflict_summary,
+            conflict_factor_refs_json = excluded.conflict_factor_refs_json,
+            summary_text = excluded.summary_text,
+            record_json = excluded.record_json,
+            source_event_id = excluded.source_event_id,
+            updated_at = excluded.updated_at`,
       )
       .run(
         event.agent_id,
@@ -146,6 +184,8 @@ export class PrivateCognitionProjectionRepo {
         record.stance ?? null,
         record.basis ?? null,
         record.preContestedStance ?? null,
+        conflictSummary,
+        conflictFactorRefsJson,
         summaryText,
         event.record_json ?? "{}",
         event.id,

@@ -22,6 +22,8 @@ type ConflictEvidenceRow = {
   created_at: number;
 };
 
+const STABLE_FACTOR_REF_PATTERN = /^(private_belief|private_event|private_episode|event):\d+$/;
+
 export type ConflictEvidence = {
   targetRef: string;
   strength: number;
@@ -37,7 +39,7 @@ export class RelationBuilder {
    * Write a `conflicts_with` relation when an assertion transitions to `contested`.
    *
    * @param sourceNodeRef - The contested assertion ref, e.g. `"private_belief:{id}"`
-   * @param cognitionKey  - The cognition key of the assertion (used to build virtual target ref)
+   * @param factorNodeRefs - Stable factor refs resolved from settlement artifacts
    * @param sourceRef     - Provenance ref (e.g. settlement ID)
    * @param strength      - Relation strength (0–1), default 0.8
    */
@@ -46,11 +48,25 @@ export class RelationBuilder {
     factorNodeRefs: string[],
     sourceRef: string,
     strength = 0.8,
-    fallbackCognitionKey?: string,
   ): void {
-    const targets = new Set<string>(factorNodeRefs);
-    if (targets.size === 0 && fallbackCognitionKey) {
-      targets.add(`cognition_key:${fallbackCognitionKey}`);
+    const targets = new Set<string>();
+    let droppedInvalidRefs = 0;
+    for (const nodeRef of factorNodeRefs) {
+      const trimmed = nodeRef.trim();
+      if (!STABLE_FACTOR_REF_PATTERN.test(trimmed)) {
+        droppedInvalidRefs += 1;
+        continue;
+      }
+      if (trimmed === sourceNodeRef) {
+        continue;
+      }
+      targets.add(trimmed);
+    }
+
+    if (droppedInvalidRefs > 0) {
+      console.warn(
+        `[relation_builder_conflict_factor_dropped] source=${sourceNodeRef} dropped=${droppedInvalidRefs} source_ref=${sourceRef}`,
+      );
     }
 
     if (targets.size === 0) {
@@ -59,9 +75,6 @@ export class RelationBuilder {
 
     const now = Date.now();
     for (const targetNodeRef of targets) {
-      if (sourceNodeRef === targetNodeRef) {
-        continue;
-      }
       this.db
         .prepare(
           `INSERT INTO memory_relations
