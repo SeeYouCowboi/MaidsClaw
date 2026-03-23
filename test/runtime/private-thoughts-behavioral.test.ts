@@ -23,6 +23,9 @@ type RecentEntry = {
   key: string;
   summary: string;
   status: "active" | "retracted";
+  stance?: string;
+  preContestedStance?: string;
+  conflictEvidence?: string[];
 };
 
 function insertSlot(db: Db, agentId: string, sessionId: string, entries: RecentEntry[]) {
@@ -177,6 +180,31 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
 
     // Retracted items show as retracted
     expect(result).toContain("[commitment:acknowledge-dual-motive] (retracted)");
+  });
+
+  it("contested cognition frontstage only shows short risk note, not full conflict chain", () => {
+    const contestedEntries = [
+      {
+        settlementId: "stl:c1",
+        committedAt: 4100,
+        kind: "assertion" as const,
+        key: "butler-accounts",
+        summary: "butler account claim is under dispute",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "accepted",
+        conflictEvidence: ["ev:ledger-gap", "ev:witness-a", "ev:witness-b"],
+      },
+    ];
+
+    insertSlot(db, "agent-1", "sess-1", contestedEntries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("Risk: conflict detected");
+    expect(result).not.toContain("Conflicts:");
+    expect(result).not.toContain("ev:ledger-gap");
   });
 });
 

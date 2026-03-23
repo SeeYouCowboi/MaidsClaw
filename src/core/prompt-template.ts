@@ -8,6 +8,7 @@
 export enum PromptSectionSlot {
   SYSTEM_PREAMBLE = "system_preamble",
   WORLD_RULES = "world_rules",
+  PERSONA = "persona",
   /** @deprecated Not a canonical RP slot since T8. Kept for maiden/task-agent compat. */
   CORE_MEMORY = "core_memory",
   PINNED_SHARED = "pinned_shared",
@@ -28,6 +29,7 @@ export enum PromptSectionSlot {
 export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
+  PromptSectionSlot.PERSONA,
   PromptSectionSlot.CORE_MEMORY,
   PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,

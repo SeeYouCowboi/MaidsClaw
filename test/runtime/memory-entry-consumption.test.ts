@@ -23,6 +23,7 @@ import { PendingSettlementSweeper } from "../../src/memory/pending-settlement-sw
 import type { PrivateCognitionCommit, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
+import { PromptSectionSlot } from "../../src/core/prompt-template.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 
 function makeMockAgentLoop(chunks: Chunk[]): AgentLoop {
@@ -400,6 +401,43 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       expect(runtime.promptRenderer).toBeDefined();
       expect(typeof runtime.promptRenderer.render).toBe("function");
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("RP prompt frontstage uses persona/pinned-shared surfaces without legacy memory-hints injection", async () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const output = await runtime.promptBuilder.build({
+        profile: { ...RP_AGENT_PROFILE, id: "rp:surface-test" },
+        viewerContext: {
+          viewer_agent_id: "rp:surface-test",
+          viewer_role: "rp_agent",
+          session_id: "sess-surface-test",
+          current_area_id: 1,
+        },
+        userMessage: "what do you remember",
+        conversationMessages: [{ role: "user", content: "hello" }],
+        budget: {
+          maxContextTokens: 8000,
+          maxOutputTokens: 1000,
+          coordinationReserve: 0,
+          inputBudget: 6000,
+          role: "rp_agent",
+        },
+      });
+
+      const slots = output.sections.map((section) => section.slot);
+      expect(slots.includes(PromptSectionSlot.PERSONA)).toBe(true);
+      expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(false);
+      expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
+
+      const allContent = output.sections.map((section) => section.content).join("\n");
+      expect(allContent).not.toContain("privateEpisodes");
+      expect(allContent).not.toContain("latent");
+      expect(allContent).not.toContain("Conflicts:");
     } finally {
       runtime.shutdown();
     }

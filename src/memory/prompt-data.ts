@@ -11,48 +11,23 @@ import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
  * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
  */
 export function getCoreMemoryBlocks(agentId: string, db: Db): string {
-  const service = new CoreMemoryService(db);
-  const blocks = service.getAllBlocks(agentId);
-
-  return blocks
-    .map(
-      (block) =>
-        `<core_memory label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</core_memory>`,
-    )
-    .join("\n");
+  const blocks = getAllCoreMemoryBlocks(agentId, db);
+  return renderCoreMemoryBlocks(blocks, "core_memory");
 }
 
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "character"];
 const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
 
 export function getPinnedBlocks(agentId: string, db: Db): string {
-  const service = new CoreMemoryService(db);
-  const blocks = service.getAllBlocks(agentId);
-
+  const blocks = getAllCoreMemoryBlocks(agentId, db);
   const pinned = blocks.filter((b) => PINNED_LABELS.includes(b.label));
-  if (pinned.length === 0) return "";
-
-  return pinned
-    .map(
-      (block) =>
-        `<pinned_block label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</pinned_block>`,
-    )
-    .join("\n");
+  return renderCoreMemoryBlocks(pinned, "pinned_block");
 }
 
 export function getSharedBlocks(agentId: string, db: Db): string {
-  const service = new CoreMemoryService(db);
-  const blocks = service.getAllBlocks(agentId);
-
+  const blocks = getAllCoreMemoryBlocks(agentId, db);
   const shared = blocks.filter((b) => SHARED_LABELS.includes(b.label));
-  if (shared.length === 0) return "";
-
-  return shared
-    .map(
-      (block) =>
-        `<shared_block label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</shared_block>`,
-    )
-    .join("\n");
+  return renderCoreMemoryBlocks(shared, "shared_block");
 }
 
 /**
@@ -227,11 +202,39 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
 
 export function formatContestedEntry(entry: RecentCognitionEntry): string {
   const preStance = entry.preContestedStance ?? "unknown";
-  let line = `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}`;
-  if (entry.conflictEvidence && entry.conflictEvidence.length > 0) {
-    line += ` | Conflicts: ${entry.conflictEvidence.join("; ")}`;
+  const hasConflict = (entry.conflictEvidence?.length ?? 0) > 0;
+  const riskNote = hasConflict
+    ? " | Risk: conflict detected (use explain tools for details)"
+    : " | Risk: contested cognition";
+  return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
+}
+
+type CoreMemoryRenderableBlock = {
+  label: CoreMemoryLabel;
+  chars_current: number;
+  char_limit: number;
+  value: string;
+};
+
+function getAllCoreMemoryBlocks(agentId: string, db: Db): CoreMemoryRenderableBlock[] {
+  const service = new CoreMemoryService(db);
+  return service.getAllBlocks(agentId);
+}
+
+function renderCoreMemoryBlocks(
+  blocks: CoreMemoryRenderableBlock[],
+  tagName: "core_memory" | "pinned_block" | "shared_block",
+): string {
+  if (blocks.length === 0) {
+    return "";
   }
-  return line;
+
+  return blocks
+    .map(
+      (block) =>
+        `<${tagName} label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</${tagName}>`,
+    )
+    .join("\n");
 }
 
 type AttachmentRow = {

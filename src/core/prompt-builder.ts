@@ -80,15 +80,13 @@ export class PromptBuilder {
 				this.getMaidenOperationalState(),
 			);
 		} else if (input.profile.role === "rp_agent") {
+			const persona = this.getRpAgentSystemPreamble(input.profile);
 			slotContent.set(
 				PromptSectionSlot.SYSTEM_PREAMBLE,
-				this.getRpAgentSystemPreamble(input.profile),
+				persona,
 			);
+			slotContent.set(PromptSectionSlot.PERSONA, persona);
 			slotContent.set(PromptSectionSlot.WORLD_RULES, this.getWorldRules());
-			slotContent.set(
-				PromptSectionSlot.CORE_MEMORY,
-				this.getCoreMemoryBlocks(input.viewerContext.viewer_agent_id),
-			);
 			slotContent.set(
 				PromptSectionSlot.PINNED_SHARED,
 				this.getPinnedSharedBlocks(input.viewerContext.viewer_agent_id),
@@ -98,12 +96,12 @@ export class PromptBuilder {
 				this.getRecentCognition(input.viewerContext),
 			);
 			slotContent.set(
-				PromptSectionSlot.LORE_ENTRIES,
-				this.getLoreEntries(loreQuery),
+				PromptSectionSlot.TYPED_RETRIEVAL,
+				this.getTypedRetrievalSurface(input.viewerContext.viewer_agent_id),
 			);
 			slotContent.set(
-				PromptSectionSlot.MEMORY_HINTS,
-				await this.getMemoryHints(input.userMessage, input.viewerContext),
+				PromptSectionSlot.LORE_ENTRIES,
+				this.getLoreEntries(loreQuery),
 			);
 		} else {
 			slotContent.set(
@@ -222,17 +220,17 @@ export class PromptBuilder {
 			.join("\n");
 	}
 
-	private getCoreMemoryBlocks(agentId: string): string {
-		return (
-			this.readDataSource("memory.getCoreMemoryBlocks", () =>
-				this.getMemoryDataSource().getCoreMemoryBlocks(agentId),
-			) ?? ""
-		);
-	}
-
 	private getPinnedSharedBlocks(agentId: string): string {
 		const memDs = this.getMemoryDataSource();
 		const parts: string[] = [];
+
+		const hasSplitBlocks = Boolean(memDs.getPinnedBlocks || memDs.getSharedBlocks);
+		if (!hasSplitBlocks) {
+			const legacyCore = this.readDataSource("memory.getCoreMemoryBlocks", () =>
+				memDs.getCoreMemoryBlocks(agentId),
+			);
+			if (legacyCore) parts.push(legacyCore);
+		}
 
 		if (memDs.getPinnedBlocks) {
 			const pinned = this.readDataSource("memory.getPinnedBlocks", () =>
@@ -260,22 +258,24 @@ export class PromptBuilder {
 		return parts.join("\n");
 	}
 
+	private getTypedRetrievalSurface(agentId: string): string {
+		const memDs = this.getMemoryDataSource();
+		if (!memDs.getTypedRetrievalPlaceholder) {
+			return "";
+		}
+
+		return (
+			this.readDataSource("memory.getTypedRetrievalPlaceholder", () =>
+				memDs.getTypedRetrievalPlaceholder!(agentId),
+			) ?? ""
+		);
+	}
+
 	private getRecentCognition(viewerContext: ViewerContext): string {
 		return (
 			this.readDataSource("memory.getRecentCognition", () =>
 				this.getMemoryDataSource().getRecentCognition(viewerContext),
 			) ?? ""
-		);
-	}
-
-	private async getMemoryHints(
-		userMessage: string,
-		viewerContext: ViewerContext,
-	): Promise<string> {
-		return (
-			(await this.readDataSourceAsync("memory.getMemoryHints", () =>
-				this.getMemoryDataSource().getMemoryHints(userMessage, viewerContext),
-			)) ?? ""
 		);
 	}
 
@@ -294,25 +294,6 @@ export class PromptBuilder {
 	private readDataSource<T>(name: string, fn: () => T): T {
 		try {
 			return fn();
-		} catch (error) {
-			throw new MaidsClawError({
-				code: "PROMPT_BUILDER_DATA_SOURCE_ERROR",
-				message: `Prompt builder failed while reading data source: ${name}`,
-				retriable: false,
-				details: {
-					source: name,
-					cause: error,
-				},
-			});
-		}
-	}
-
-	private async readDataSourceAsync<T>(
-		name: string,
-		fn: () => Promise<T>,
-	): Promise<T> {
-		try {
-			return await fn();
 		} catch (error) {
 			throw new MaidsClawError({
 				code: "PROMPT_BUILDER_DATA_SOURCE_ERROR",
