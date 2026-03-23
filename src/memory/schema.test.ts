@@ -21,14 +21,14 @@ function freshDb(): Database {
 // ─── 1. Schema creates all 45 tables ────────────────────────────────────────
 
 describe("createMemorySchema", () => {
-	it("creates 48 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
+	it("creates 54 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
 		const db = freshDb();
 		const result = db
 			.prepare(
 				"SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND sql NOT LIKE '%fts5%'",
 			)
 			.get() as { cnt: number };
-		expect(result.cnt).toBe(50);
+		expect(result.cnt).toBe(54);
 		db.close();
 	});
 
