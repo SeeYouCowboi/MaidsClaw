@@ -452,7 +452,14 @@ describe("memory-entry-consumption: live runtime integration", () => {
     expect(exploreTool).toBeDefined();
     expect(exploreTool!.description.includes("Explain evidence paths")).toBe(true);
     const exploreProperties = ((exploreTool!.parameters as { properties?: Record<string, unknown> }).properties ?? {});
-    expect(Object.keys(exploreProperties)).toEqual(["query"]);
+    expect(Object.keys(exploreProperties)).toEqual([
+      "query",
+      "mode",
+      "focusRef",
+      "focusCognitionKey",
+      "asOfValidTime",
+      "asOfCommittedTime",
+    ]);
 
     const result = await exploreTool!.handler(
       { query: "why happened" },
