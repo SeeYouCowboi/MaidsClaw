@@ -146,9 +146,11 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
       );
-      db.exec(
-        `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
-      );
+      if (tableExists(db, "agent_event_overlay")) {
+        db.exec(
+          `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
+        );
+      }
     },
   },
   {
@@ -212,25 +214,31 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:006:backfill-canonical-stances",
     description: "Backfill canonical stance and basis columns from legacy fields",
     up: (db: Db) => {
-      const stanceCase = buildCaseExpression({
-        confirmed: "confirmed",
-        suspected: "tentative",
-        hypothetical: "hypothetical",
-        retracted: "rejected",
-      });
-      const basisCase = buildCaseExpression({
-        observation: "first_hand",
-        inference: "inference",
-        suspicion: "inference",
-        intention: "introspection",
-      });
+      if (hasColumn(db, "agent_fact_overlay", "epistemic_status")) {
+        const stanceCase = buildCaseExpression({
+          confirmed: "confirmed",
+          suspected: "tentative",
+          hypothetical: "hypothetical",
+          retracted: "rejected",
+        });
 
-      db.exec(
-        `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
-      );
-      db.exec(
-        `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
-      );
+        db.exec(
+          `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+        );
+      }
+
+      if (hasColumn(db, "agent_fact_overlay", "belief_type")) {
+        const basisCase = buildCaseExpression({
+          observation: "first_hand",
+          inference: "inference",
+          suspicion: "inference",
+          intention: "introspection",
+        });
+
+        db.exec(
+          `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
+        );
+      }
 
       db.get<{ count: number }>(
         `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
@@ -484,8 +492,16 @@ function hasColumn(db: Db, tableName: string, columnName: string): boolean {
   return rows.some((row) => row.name === columnName);
 }
 
+function tableExists(db: Db, tableName: string): boolean {
+  const rows = db.query<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+    [tableName],
+  );
+  return rows.length > 0;
+}
+
 function addColumnIfMissing(db: Db, tableName: string, columnName: string, columnDefinition: string): void {
-  if (hasColumn(db, tableName, columnName)) {
+  if (!tableExists(db, tableName) || hasColumn(db, tableName, columnName)) {
     return;
   }
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);

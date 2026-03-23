@@ -137,8 +137,8 @@ describe("MemoryTaskAgent", () => {
             source: "person:alice",
             target: "person:alice",
             predicate: "seems_worried",
-            belief_type: "observation",
-            confidence: 0.82,
+            basis: "first_hand",
+            stance: "tentative",
           },
         },
       ],
@@ -163,9 +163,9 @@ describe("MemoryTaskAgent", () => {
     expect(index.value).toContain("#worry");
 
     const privateEvent = db
-      .prepare(`SELECT projection_class FROM agent_event_overlay WHERE id = ?`)
-      .get(result.private_event_ids[0]) as { projection_class: string };
-    expect(privateEvent.projection_class).toBe("area_candidate");
+      .prepare(`SELECT category FROM private_episode_events WHERE id = ?`)
+      .get(result.private_event_ids[0]) as { category: string };
+    expect(privateEvent.category).toBe("observation");
   });
 
   it("explicit settlements are ingested during flush and ordinary turns still extract private beliefs", async () => {
@@ -202,8 +202,8 @@ describe("MemoryTaskAgent", () => {
             source: "person:carol",
             target: "person:carol",
             predicate: "seems_tired",
-            belief_type: "observation",
-            confidence: 0.7,
+            basis: "first_hand",
+            stance: "tentative",
           },
         },
       ],
@@ -262,8 +262,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -385,8 +385,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -460,7 +460,7 @@ describe("MemoryTaskAgent", () => {
     const entityCount = db
       .prepare(`SELECT count(*) as cnt FROM entity_nodes WHERE pointer_key = 'person:bob'`)
       .get() as { cnt: number };
-    const eventCount = db.prepare(`SELECT count(*) as cnt FROM agent_event_overlay`).get() as { cnt: number };
+    const eventCount = db.prepare(`SELECT (SELECT count(*) FROM private_episode_events) + (SELECT count(*) FROM private_cognition_events) as cnt`).get() as { cnt: number };
     const indexBlock = coreMemory.getBlock("agent-1", "index");
 
     expect(entityCount.cnt).toBe(0);
@@ -724,8 +724,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -817,8 +817,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -959,17 +959,16 @@ describe("MemoryTaskAgent", () => {
     db.prepare(
       `INSERT INTO agent_fact_overlay
        (agent_id, source_entity_id, target_entity_id, predicate,
-        belief_type, confidence, epistemic_status, stance, basis,
+        stance, basis,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       "agent-1",
       selfId.id,
       userId.id,
       "legacy_trusts",
-      "observation",
-      0.8,
       "confirmed",
+      "first_hand",
       Date.now(),
       Date.now(),
     );
@@ -1096,7 +1095,7 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
+            privateCognition: {
               schemaVersion: "rp_private_cognition_v4",
               ops: [{
                 op: "upsert",

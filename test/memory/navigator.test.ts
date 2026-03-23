@@ -38,9 +38,9 @@ function insertEntity(
 function insertPrivateEvent(db: Database, id: number, agentId: string): void {
   const now = Date.now();
   db.prepare(
-    `INSERT INTO agent_event_overlay (id, event_id, agent_id, role, private_notes, salience, emotion, event_category, primary_actor_entity_id, projection_class, location_entity_id, projectable_summary, source_record_id, created_at)
-     VALUES (?, NULL, ?, NULL, NULL, 0.5, NULL, 'thought', NULL, 'none', NULL, 'private summary', NULL, ?)`,
-  ).run(id, agentId, now);
+    `INSERT INTO private_episode_events (id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at)
+     VALUES (?, ?, 'sess-1', 'stl:navigator-private', 'observation', 'private summary', NULL, NULL, NULL, NULL, ?, NULL, ?)`,
+  ).run(id, agentId, now, now);
 }
 
 function insertEvent(db: Database, id: number, summary: string): void {

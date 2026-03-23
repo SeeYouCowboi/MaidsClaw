@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(34);
+		expect(nonFtsCount?.count).toBe(33);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -142,8 +142,8 @@ describe("memory schema", () => {
 		expect(thoughtInPublicEventFailed).toBe(true);
 
 		db.run(
-			"INSERT INTO agent_event_overlay (agent_id, event_category, projection_class, created_at) VALUES (?, ?, ?, ?)",
-			["agent-1", "thought", "none", Date.now()],
+			"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			["agent-1", "s1", "settle-1", "observation", "test event", Date.now(), Date.now()],
 		);
 
 		db.run(
@@ -338,9 +338,9 @@ describe("memory schema", () => {
 		expect(factColumns.includes("source_event_ref")).toBe(true);
 		expect(factColumns.includes("updated_at")).toBe(true);
 
-		const eventOverlayColumns = listColumns(db, "agent_event_overlay");
-		expect(eventOverlayColumns.includes("target_entity_id")).toBe(true);
-		expect(eventOverlayColumns.includes("updated_at")).toBe(true);
+		const episodeEventColumns = listColumns(db, "private_episode_events");
+		expect(episodeEventColumns.includes("location_entity_id")).toBe(true);
+		expect(episodeEventColumns.includes("created_at")).toBe(true);
 
 		const eventNodeColumns = listColumns(db, "event_nodes");
 		expect(eventNodeColumns.includes("source_settlement_id")).toBe(true);
@@ -442,43 +442,38 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("preserves legacy overlay columns for compatibility", () => {
+	it("removes legacy overlay columns after rebuild migration", () => {
 		const { dbPath, db } = createTempDb();
 
 		runMemoryMigrations(db);
 
 		const factColumns = listColumns(db, "agent_fact_overlay");
-		expect(factColumns.includes("belief_type")).toBe(true);
-		expect(factColumns.includes("confidence")).toBe(true);
-		expect(factColumns.includes("epistemic_status")).toBe(true);
+		expect(factColumns.includes("belief_type")).toBe(false);
+		expect(factColumns.includes("confidence")).toBe(false);
+		expect(factColumns.includes("epistemic_status")).toBe(false);
 
 		db.close();
 		cleanupDb(dbPath);
 	});
 
-	it("backfills canonical stance and basis from legacy fields", () => {
+	it("stores canonical stance and basis directly after rebuild migration", () => {
 		const { dbPath, db } = createTempDb();
 
 		runMemoryMigrations(db);
 
 		const insertResult = db.run(
-			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, belief_type, epistemic_status, created_at, updated_at, stance, basis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, basis, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			[
 				"agent-1",
 				1,
 				2,
 				"knows",
-				"observation",
-				"suspected",
+				"tentative",
+				"first_hand",
 				Date.now(),
 				Date.now(),
-				null,
-				null,
 			],
 		);
-
-		db.run("DELETE FROM _migrations WHERE migration_id = ?", ["memory:006:backfill-canonical-stances"]);
-		runMemoryMigrations(db);
 
 		const row = db.get<{ stance: string | null; basis: string | null }>(
 			"SELECT stance, basis FROM agent_fact_overlay WHERE id = ?",
@@ -500,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(15);
+		expect(migrationCount?.count).toBe(18);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -583,7 +578,7 @@ describe("memory schema", () => {
 	});
 
 	it("keeps V1 node ref kinds unchanged and navigator importable", () => {
-		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "private_event", "private_belief"]);
+		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment", "private_event", "private_belief"]);
 		expect(typeof GraphNavigator).toBe("function");
 		expect(String(makeNodeRef("private_belief", 1))).toBe("private_belief:1");
 		expect(String(makeNodeRef("private_event", 1))).toBe("private_event:1");

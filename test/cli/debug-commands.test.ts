@@ -150,13 +150,13 @@ describe("debug commands", () => {
 		const envelope = parseJsonOutput(raw);
 		const data = envelope.data as {
 			interaction_settlement?: {
-				privateCommit?: { redacted?: boolean; ops?: unknown[] };
+				privateCognition?: { redacted?: boolean; ops?: unknown[] };
 			};
 		};
 
 		expect(envelope.ok).toBe(true);
-		expect(data.interaction_settlement?.privateCommit?.redacted).toBe(true);
-		expect(data.interaction_settlement?.privateCommit?.ops).toBeUndefined();
+		expect(data.interaction_settlement?.privateCognition?.redacted).toBe(true);
+		expect(data.interaction_settlement?.privateCognition?.ops).toBeUndefined();
 	});
 
 	it("debug trace export --unsafe-raw includes settlement payload", async () => {
@@ -251,7 +251,7 @@ describe("debug commands", () => {
 			session_id?: string;
 			agent_id?: string;
 			has_public_reply: boolean;
-			private_commit_count: number;
+			private_cognition_count: number;
 			memory_flush: { requested: boolean };
 			pending_sweep_state: Record<string, unknown>;
 			trace_available: boolean;
@@ -263,7 +263,7 @@ describe("debug commands", () => {
 		expect(data.session_id).toBe(sessionId);
 		expect(typeof data.has_public_reply).toBe("boolean");
 		expect(data.has_public_reply).toBe(true);
-		expect(typeof data.private_commit_count).toBe("number");
+		expect(typeof data.private_cognition_count).toBe("number");
 		expect(typeof data.memory_flush.requested).toBe("boolean");
 		expect(data.trace_available).toBe(true);
 		expect(typeof data.recovery_required).toBe("boolean");
@@ -298,7 +298,7 @@ describe("debug commands", () => {
 			entries: Array<{
 				record_type: string;
 				payload?: {
-					privateCommit?: { redacted?: boolean; ops?: unknown[] };
+					privateCognition?: { redacted?: boolean; ops?: unknown[] };
 					viewerSnapshot?: { redacted?: boolean };
 				};
 			}>;
@@ -317,8 +317,8 @@ describe("debug commands", () => {
 			(e) => e.record_type === "turn_settlement",
 		);
 		expect(settlement).toBeDefined();
-		expect(settlement?.payload?.privateCommit?.redacted).toBe(true);
-		expect(settlement?.payload?.privateCommit?.ops).toBeUndefined();
+		expect(settlement?.payload?.privateCognition?.redacted).toBe(true);
+		expect(settlement?.payload?.privateCognition?.ops).toBeUndefined();
 	});
 
 	// ── T17: debug prompt ────────────────────────────────────────
@@ -692,9 +692,9 @@ function makeSettlementPayload(
 			selfPointerKey: "__self__",
 			userPointerKey: "__user__",
 		},
-		privateCommit: {
-			schemaVersion: "rp_private_cognition_v3",
+		privateCognition: {
+			schemaVersion: "rp_private_cognition_v4",
 			ops: [{ op: "retract", target: { kind: "assertion", key: "k1" } }],
-		} as unknown as TurnSettlementPayload["privateCommit"],
+		} as unknown as TurnSettlementPayload["privateCognition"],
 	};
 }

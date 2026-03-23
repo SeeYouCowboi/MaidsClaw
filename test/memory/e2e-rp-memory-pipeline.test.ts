@@ -80,19 +80,18 @@ describe("E2E: RP memory pipeline", () => {
 		const ops: CognitionOp[] = [
 			{
 				op: "upsert",
-				record: {
-					kind: "assertion",
-					key: "alice-likes-user",
-					proposition: {
-						subject: { kind: "special", value: "self" },
-						predicate: "likes",
-						object: { kind: "entity", ref: { kind: "special", value: "user" } },
+					record: {
+						kind: "assertion",
+						key: "alice-likes-user",
+						proposition: {
+							subject: { kind: "special", value: "self" },
+							predicate: "likes",
+							object: { kind: "entity", ref: { kind: "special", value: "user" } },
+						},
+						stance: "accepted",
 					},
-					stance: "accepted",
-					confidence: 0.9,
 				},
-			},
-		];
+			];
 		const refs = committer.commit(ops, "stl:turn-1");
 		expect(refs).toHaveLength(1);
 
@@ -428,7 +427,7 @@ describe("E2E: RP memory pipeline", () => {
 
 	// ── Scenario 8: Episode append-only ledger ──────────────────────
 
-	it("episode ledger stores private episodes without touching agent_event_overlay", () => {
+	it("episode ledger stores private episodes in private_episode_events", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 		const repo = new EpisodeRepository(db);
@@ -462,10 +461,10 @@ describe("E2E: RP memory pipeline", () => {
 		expect(episodes[0].category).toBe("speech");
 		expect(episodes[1].category).toBe("observation");
 
-		const overlayCount = db.get<{ count: number }>(
-			"SELECT count(*) AS count FROM agent_event_overlay WHERE agent_id = 'rp:alice'",
+		const episodeLedgerCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events WHERE agent_id = 'rp:alice'",
 		);
-		expect(overlayCount?.count).toBe(0);
+		expect(episodeLedgerCount?.count).toBe(2);
 
 		let thoughtFailed = false;
 		try {
@@ -573,10 +572,10 @@ describe("E2E: RP memory pipeline", () => {
 		);
 		expect(overlayFact?.cnt).toBe(0);
 
-		const overlayEvent = db.get<{ cnt: number }>(
-			"SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = 'rp:alice'",
+		const episodeRows = db.get<{ cnt: number }>(
+			"SELECT COUNT(*) as cnt FROM private_episode_events WHERE agent_id = 'rp:alice'",
 		);
-		expect(overlayEvent?.cnt).toBe(0);
+		expect(episodeRows?.cnt).toBe(2);
 
 		db.close();
 		cleanupDb(dbPath);

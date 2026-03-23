@@ -115,10 +115,10 @@ function makeSettlementPayload(
 		publicReply: hasPublicReply ? "hello" : "",
 		hasPublicReply,
 		viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-		privateCommit: {
-			schemaVersion: "rp_private_cognition_v3",
+		privateCognition: {
+			schemaVersion: "rp_private_cognition_v4",
 			ops: [{ op: "retract", target: { kind: "assertion", key: "k1" } }],
-		} as unknown as TurnSettlementPayload["privateCommit"],
+		} as unknown as TurnSettlementPayload["privateCognition"],
 	};
 }
 
@@ -470,7 +470,7 @@ describe("CLI Acceptance Runbook", () => {
 			const turnService = new TurnService(
 				makeRpBufferedLoop({
 					outcome: {
-						schemaVersion: "rp_turn_outcome_v3",
+						schemaVersion: "rp_turn_outcome_v5",
 						publicReply: "Yes, master.",
 					},
 				}),
@@ -499,9 +499,9 @@ describe("CLI Acceptance Runbook", () => {
 			expect(typeof result.request_id).toBe("string");
 			expect(result.assistant_text).toBe("Yes, master.");
 			expect(result.has_public_reply).toBe(true);
-			expect(typeof result.private_commit.present).toBe("boolean");
-			expect(typeof result.private_commit.op_count).toBe("number");
-			expect(Array.isArray(result.private_commit.kinds)).toBe(true);
+			expect(typeof result.private_cognition.present).toBe("boolean");
+			expect(typeof result.private_cognition.op_count).toBe("number");
+			expect(Array.isArray(result.private_cognition.kinds)).toBe(true);
 			expect(typeof result.recovery_required).toBe("boolean");
 			expect(Array.isArray(result.public_chunks)).toBe(true);
 			expect(Array.isArray(result.tool_events)).toBe(true);
@@ -565,7 +565,7 @@ describe("CLI Acceptance Runbook", () => {
 
 		afterEach(() => { closeDatabaseGracefully(db); });
 
-		it("returns ok with has_public_reply=false and private_commit.present=true", async () => {
+		it("returns ok with has_public_reply=false and private_cognition.present=true", async () => {
 			const store = new InteractionStore(db);
 			const commitService = new CommitService(store);
 			const flushSelector = new FlushSelector(store);
@@ -573,10 +573,10 @@ describe("CLI Acceptance Runbook", () => {
 			const turnService = new TurnService(
 				makeRpBufferedLoop({
 					outcome: {
-						schemaVersion: "rp_turn_outcome_v3",
+						schemaVersion: "rp_turn_outcome_v5",
 						publicReply: "",
-						privateCommit: {
-							schemaVersion: "rp_private_cognition_v3",
+						privateCognition: {
+							schemaVersion: "rp_private_cognition_v4",
 							ops: [{ op: "retract", target: { kind: "assertion", key: "mood" } }],
 						},
 					},
@@ -603,9 +603,9 @@ describe("CLI Acceptance Runbook", () => {
 			// Silent-private is SUCCESS, not failure
 			expect(result.assistant_text).toBe("");
 			expect(result.has_public_reply).toBe(false);
-			expect(result.private_commit.present).toBe(true);
-			expect(result.private_commit.op_count).toBe(1);
-			expect(result.private_commit.kinds).toEqual(["assertion"]);
+			expect(result.private_cognition.present).toBe(true);
+			expect(result.private_cognition.op_count).toBe(1);
+			expect(result.private_cognition.kinds).toEqual(["assertion"]);
 			expect(result.recovery_required).toBe(false);
 		});
 	});

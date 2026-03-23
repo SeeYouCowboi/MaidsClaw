@@ -1,10 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { MaidsClawError } from "../../src/core/errors.js";
 import {
-  BELIEF_TYPE_TO_BASIS,
-  EPISTEMIC_STATUS_TO_STANCE,
-  FORBIDDEN_CANONICAL_PUBLICATION_KINDS,
-  PUBLICATION_KIND_COMPAT_MAP,
   normalizeRpTurnOutcome,
   normalizeToCanonicalOutcome,
   validateRpTurnOutcome,
@@ -17,114 +13,53 @@ import type {
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 
 describe("normalizeRpTurnOutcome", () => {
-  it("normalizes v3 outcome to canonical v4 shape", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v3",
+  it("accepts canonical v5 payload and normalizes optional arrays", () => {
+    const payload: RpTurnOutcomeSubmissionV5 = {
+      schemaVersion: "rp_turn_outcome_v5",
       publicReply: "hello",
-      privateCommit: {
-        schemaVersion: "rp_private_cognition_v3",
-        ops: [
-          {
-            op: "upsert",
-            record: {
-              kind: "assertion",
-              key: "test",
-              proposition: {
-                subject: { kind: "special", value: "self" },
-                predicate: "knows",
-                object: { kind: "entity", ref: { kind: "special", value: "user" } },
-              },
-              stance: "accepted",
-              basis: "observation",
-            },
-          },
-        ],
-      },
-    });
+    };
+    const result = normalizeRpTurnOutcome(payload);
 
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
     expect(result.publicReply).toBe("hello");
     expect(result.publications).toEqual([]);
-    expect(result.privateCognition?.schemaVersion).toBe("rp_private_cognition_v4");
-    expect(result.privateCognition?.ops[0]).toEqual({
-      op: "upsert",
-      record: {
-        kind: "assertion",
-        key: "test",
-        proposition: {
-          subject: { kind: "special", value: "self" },
-          predicate: "knows",
-          object: { kind: "entity", ref: { kind: "special", value: "user" } },
-        },
-        stance: "accepted",
-        basis: "first_hand",
-      },
-    });
+    expect(result.privateEpisodes).toEqual([]);
+    expect(result.relationIntents).toEqual([]);
+    expect(result.conflictFactors).toEqual([]);
   });
 
-  it("normalizes v4 outcome with publications", () => {
+  it("accepts empty publicReply when private artifacts are present", () => {
     const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v4",
+      schemaVersion: "rp_turn_outcome_v5",
       publicReply: "",
-      publications: [
+      privateEpisodes: [
         {
-          kind: "speech",
-          targetScope: "current_area",
-          summary: "Announced tea time",
-        },
-      ],
-    });
-
-    expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
-    expect(result.publicReply).toBe("");
-    expect(result.publications).toHaveLength(1);
-    expect(result.publications[0]?.kind).toBe("speech");
-  });
-
-  it("normalizes publications undefined to empty array", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v4",
-      publicReply: "ok",
-      publications: undefined,
-    });
-
-    expect(result.publications).toEqual([]);
-  });
-
-  it("normalizes publications empty array to empty array", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v4",
-      publicReply: "ok",
-      publications: [],
-    });
-
-    expect(result.publications).toEqual([]);
-  });
-
-  it("accepts empty publicReply when publications are present", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v4",
-      publicReply: "",
-      publications: [
-        {
-          kind: "record",
-          targetScope: "world_public",
+          category: "observation",
           summary: "Registered event log",
         },
       ],
     });
 
     expect(result.publicReply).toBe("");
-    expect(result.publications).toHaveLength(1);
+    expect(result.privateEpisodes).toHaveLength(1);
   });
 
   it("rejects empty publicReply with no ops and no publications", () => {
     expect(() =>
       normalizeRpTurnOutcome({
-        schemaVersion: "rp_turn_outcome_v4",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "",
       })
     ).toThrow("empty turn");
+  });
+
+  it("rejects legacy schema versions", () => {
+    expect(() =>
+      normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v4",
+        publicReply: "legacy",
+      })
+    ).toThrow("Unsupported schemaVersion");
   });
 
   it("accepts all seven v4 assertion stances", () => {
@@ -141,9 +76,9 @@ describe("normalizeRpTurnOutcome", () => {
     for (const stance of stances) {
       expect(() =>
         normalizeRpTurnOutcome({
-          schemaVersion: "rp_turn_outcome_v4",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "ok",
-          privateCommit: {
+          privateCognition: {
             schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
@@ -169,31 +104,11 @@ describe("normalizeRpTurnOutcome", () => {
 
   it("retains validateRpTurnOutcome as an alias to normalizer", () => {
     const result = validateRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v3",
-      publicReply: "legacy",
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "canonical",
     });
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
-    expect(result.publicReply).toBe("legacy");
-  });
-});
-
-describe("mapping constants", () => {
-  it("maps all EpistemicStatus values to AssertionStance", () => {
-    expect(EPISTEMIC_STATUS_TO_STANCE).toEqual({
-      confirmed: "confirmed",
-      suspected: "tentative",
-      hypothetical: "hypothetical",
-      retracted: "rejected",
-    });
-  });
-
-  it("maps all BeliefType values to AssertionBasis", () => {
-    expect(BELIEF_TYPE_TO_BASIS).toEqual({
-      observation: "first_hand",
-      inference: "inference",
-      suspicion: "inference",
-      intention: "introspection",
-    });
+    expect(result.publicReply).toBe("canonical");
   });
 });
 
@@ -208,7 +123,7 @@ describe("makeSubmitRpTurnTool", () => {
 
   it("execute returns normalized canonical outcome on valid input", async () => {
     const result = await tool.execute({
-      schemaVersion: "rp_turn_outcome_v3",
+      schemaVersion: "rp_turn_outcome_v5",
       publicReply: "Hello, Master.",
     });
     expect(result).toEqual({
@@ -308,37 +223,23 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
           summary: "test",
         }],
       }),
-    ).toThrow(`"broadcast" is not a valid canonical publication kind`);
+    ).toThrow("invalid publication kind");
   });
 
-  it("maps old speech/record/display to spoken/written/visual in V5", () => {
+  it("accepts spoken/written/visual publication kinds", () => {
     const result = normalizeRpTurnOutcome({
       schemaVersion: "rp_turn_outcome_v5",
       publicReply: "test",
       publications: [
-        { kind: "speech", targetScope: "current_area", summary: "spoken test" },
-        { kind: "record", targetScope: "world_public", summary: "written test" },
-        { kind: "display", targetScope: "current_area", summary: "visual test" },
+        { kind: "spoken", targetScope: "current_area", summary: "spoken test" },
+        { kind: "written", targetScope: "world_public", summary: "written test" },
+        { kind: "visual", targetScope: "current_area", summary: "visual test" },
       ],
     });
 
     expect(result.publications[0]?.kind).toBe("spoken");
     expect(result.publications[1]?.kind).toBe("written");
     expect(result.publications[2]?.kind).toBe("visual");
-  });
-
-  it("PUBLICATION_KIND_COMPAT_MAP maps deterministically", () => {
-    expect(PUBLICATION_KIND_COMPAT_MAP).toEqual({
-      speech: "spoken",
-      record: "written",
-      display: "visual",
-      broadcast: "spoken",
-    });
-  });
-
-  it("FORBIDDEN_CANONICAL_PUBLICATION_KINDS contains broadcast", () => {
-    expect(FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has("broadcast")).toBe(true);
-    expect(FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has("spoken")).toBe(false);
   });
 
   it("rejects relationIntents with forbidden type (e.g. conflicts_with)", () => {
@@ -419,26 +320,6 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
     expect(result.conflictFactors).toEqual([]);
   });
 
-  it("normalizeToCanonicalOutcome handles V3 input", () => {
-    const result = normalizeToCanonicalOutcome({
-      schemaVersion: "rp_turn_outcome_v3",
-      publicReply: "v3 test",
-    });
-    expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
-    expect(result.publicReply).toBe("v3 test");
-    expect(result.privateEpisodes).toEqual([]);
-  });
-
-  it("normalizeToCanonicalOutcome handles V4 input", () => {
-    const result = normalizeToCanonicalOutcome({
-      schemaVersion: "rp_turn_outcome_v4",
-      publicReply: "v4 test",
-      publications: [{ kind: "speech", targetScope: "current_area", summary: "hello" }],
-    });
-    expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
-    expect(result.publications).toHaveLength(1);
-  });
-
   it("normalizeToCanonicalOutcome handles V5 input", () => {
     const result = normalizeToCanonicalOutcome({
       schemaVersion: "rp_turn_outcome_v5",
@@ -447,26 +328,6 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
     });
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
     expect(result.privateEpisodes).toHaveLength(1);
-  });
-
-  it("V5 with privateCommit compat field maps to privateCognition", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v5",
-      publicReply: "compat test",
-      privateCommit: {
-        schemaVersion: "rp_private_cognition_v4",
-        ops: [{
-          op: "upsert",
-          record: {
-            kind: "evaluation",
-            key: "eval-compat",
-            target: { kind: "special", value: "user" },
-            dimensions: [{ name: "trust", value: 0.7 }],
-          },
-        }],
-      },
-    });
-    expect(result.privateCognition?.ops).toHaveLength(1);
   });
 });
 

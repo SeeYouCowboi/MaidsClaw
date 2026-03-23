@@ -218,10 +218,10 @@ describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
       async runBuffered(): Promise<RpBufferedExecutionResult> {
         return {
           outcome: {
-            schemaVersion: "rp_turn_outcome_v3",
+            schemaVersion: "rp_turn_outcome_v5",
             publicReply: "I see.",
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert" as const,

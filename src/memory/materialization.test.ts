@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { MaterializationService } from "./materialization.js";
 import { createMemorySchema, makeNodeRef } from "./schema.js";
 import { GraphStorageService } from "./storage.js";
-import type { AgentEventOverlay } from "./types.js";
 
 function freshDb(): Database {
   const db = new Database(":memory:");
@@ -18,12 +17,39 @@ describe("MaterializationService", () => {
 
   beforeEach(() => {
     db = freshDb();
-    storage = new GraphStorageService(db);
+    storage = new GraphStorageService(db as any);
     service = new MaterializationService(db, storage);
   });
 
-  function getPrivateEvent(id: number): AgentEventOverlay {
-    return db.prepare(`SELECT * FROM agent_event_overlay WHERE id = ?`).get(id) as AgentEventOverlay;
+  type MaterializablePrivateEvent = {
+    id: number;
+    event_id: number | null;
+    agent_id: string;
+    projection_class: "none" | "area_candidate";
+    event_category: "speech" | "action" | "thought" | "observation" | "state_change";
+    projectable_summary: string | null;
+    location_entity_id: number | null;
+    source_record_id: string | null;
+    primary_actor_entity_id: number | null;
+    created_at: number;
+    emotion: string | null;
+  };
+
+  function makePrivateEvent(overrides: Partial<MaterializablePrivateEvent>): MaterializablePrivateEvent {
+    return {
+      id: 1,
+      event_id: null,
+      agent_id: "maid-alice",
+      projection_class: "area_candidate",
+      event_category: "observation",
+      projectable_summary: "private event",
+      location_entity_id: null,
+      source_record_id: null,
+      primary_actor_entity_id: null,
+      created_at: Date.now(),
+      emotion: null,
+      ...overrides,
+    };
   }
 
   it("materializes area_candidate event when no runtime projection match exists", () => {
@@ -40,18 +66,17 @@ describe("MaterializationService", () => {
       memoryScope: "private_overlay",
       ownerAgentId: "maid-alice",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "action",
-      projectionClass: "area_candidate",
-      projectableSummary: "Alice leaves tea near the window",
-      privateNotes: "raw secret reasoning should never leak",
-      locationEntityId: locationId,
-      primaryActorEntityId: privateActorId,
-      sourceRecordId: "record-1",
+    const privateEvent = makePrivateEvent({
+      id: 1,
+      event_category: "action",
+      projection_class: "area_candidate",
+      projectable_summary: "Alice leaves tea near the window",
+      location_entity_id: locationId,
+      primary_actor_entity_id: privateActorId,
+      source_record_id: "record-1",
     });
 
-    const result = service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    const result = service.materializeDelayed([privateEvent], "maid-alice");
     expect(result).toEqual({ materialized: 1, reconciled: 0, skipped: 0 });
 
     const event = db
@@ -76,11 +101,6 @@ describe("MaterializationService", () => {
     expect(event.visibility_scope).toBe("area_visible");
     expect(event.source_record_id).toBe("record-1");
     expect(JSON.parse(event.participants)).toContain(makeNodeRef("entity", locationId));
-
-    const linkedPrivate = db
-      .prepare(`SELECT event_id FROM agent_event_overlay WHERE id = ?`)
-      .get(privateEventId) as { event_id: number };
-    expect(linkedPrivate.event_id).toBe(event.id);
 
     const areaDoc = db
       .prepare(`SELECT content FROM search_docs_area WHERE source_ref = ?`)
@@ -111,27 +131,22 @@ describe("MaterializationService", () => {
       sourceRecordId: "record-2",
       origin: "runtime_projection",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "observation",
-      projectionClass: "area_candidate",
-      projectableSummary: "Public-safe summary from overlay",
-      locationEntityId: locationId,
-      sourceRecordId: "record-2",
+    const privateEvent = makePrivateEvent({
+      id: 2,
+      event_category: "observation",
+      projection_class: "area_candidate",
+      projectable_summary: "Public-safe summary from overlay",
+      location_entity_id: locationId,
+      source_record_id: "record-2",
     });
 
-    const result = service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    const result = service.materializeDelayed([privateEvent], "maid-alice");
     expect(result).toEqual({ materialized: 0, reconciled: 1, skipped: 0 });
 
     const count = db
       .prepare(`SELECT count(*) as cnt FROM event_nodes WHERE source_record_id = ?`)
       .get("record-2") as { cnt: number };
     expect(count.cnt).toBe(1);
-
-    const linked = db
-      .prepare(`SELECT event_id FROM agent_event_overlay WHERE id = ?`)
-      .get(privateEventId) as { event_id: number };
-    expect(linked.event_id).toBe(runtimeEventId);
 
     const existing = db
       .prepare(`SELECT event_origin FROM event_nodes WHERE id = ?`)
@@ -146,15 +161,15 @@ describe("MaterializationService", () => {
       entityType: "area",
       memoryScope: "shared_public",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "thought",
-      projectionClass: "area_candidate",
-      projectableSummary: "should not be public",
-      locationEntityId: locationId,
+    const privateEvent = makePrivateEvent({
+      id: 3,
+      event_category: "thought",
+      projection_class: "area_candidate",
+      projectable_summary: "should not be public",
+      location_entity_id: locationId,
     });
 
-    const result = service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    const result = service.materializeDelayed([privateEvent], "maid-alice");
     expect(result).toEqual({ materialized: 0, reconciled: 0, skipped: 1 });
 
     const eventCount = db.prepare(`SELECT count(*) as cnt FROM event_nodes`).get() as { cnt: number };
@@ -168,15 +183,15 @@ describe("MaterializationService", () => {
       entityType: "area",
       memoryScope: "shared_public",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "speech",
-      projectionClass: "none",
-      projectableSummary: "should remain private",
-      locationEntityId: locationId,
+    const privateEvent = makePrivateEvent({
+      id: 4,
+      event_category: "speech",
+      projection_class: "none",
+      projectable_summary: "should remain private",
+      location_entity_id: locationId,
     });
 
-    const result = service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    const result = service.materializeDelayed([privateEvent], "maid-alice");
     expect(result).toEqual({ materialized: 0, reconciled: 0, skipped: 1 });
 
     const eventCount = db.prepare(`SELECT count(*) as cnt FROM event_nodes`).get() as { cnt: number };
@@ -197,17 +212,17 @@ describe("MaterializationService", () => {
       memoryScope: "private_overlay",
       ownerAgentId: "maid-alice",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "speech",
-      projectionClass: "area_candidate",
-      projectableSummary: "Bob says hello",
-      locationEntityId: locationId,
-      primaryActorEntityId: privateActorId,
-      sourceRecordId: "record-3",
+    const privateEvent = makePrivateEvent({
+      id: 5,
+      event_category: "speech",
+      projection_class: "area_candidate",
+      projectable_summary: "Bob says hello",
+      location_entity_id: locationId,
+      primary_actor_entity_id: privateActorId,
+      source_record_id: "record-3",
     });
 
-    service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    service.materializeDelayed([privateEvent], "maid-alice");
 
     const event = db
       .prepare(`SELECT participants, primary_actor_entity_id, location_entity_id FROM event_nodes WHERE source_record_id = ?`)
@@ -243,16 +258,15 @@ describe("MaterializationService", () => {
       memoryScope: "private_overlay",
       ownerAgentId: "maid-alice",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "observation",
-      projectionClass: "area_candidate",
-      projectableSummary: "Someone moves behind the hedges",
-      locationEntityId: locationId,
-      primaryActorEntityId: hiddenPrivateActorId,
-      sourceRecordId: "record-4",
+    const privateEvent = makePrivateEvent({
+      id: 6,
+      event_category: "observation",
+      projection_class: "area_candidate",
+      projectable_summary: "Someone moves behind the hedges",
+      location_entity_id: locationId,
+      primary_actor_entity_id: hiddenPrivateActorId,
+      source_record_id: "record-4",
     });
-    const privateEvent = getPrivateEvent(privateEventId);
 
     service.materializeDelayed([privateEvent], "maid-alice");
 
@@ -279,17 +293,16 @@ describe("MaterializationService", () => {
       entityType: "area",
       memoryScope: "shared_public",
     });
-    const privateEventId = storage.createPrivateEvent({
-      agentId: "maid-alice",
-      eventCategory: "action",
-      projectionClass: "area_candidate",
-      projectableSummary: "Public summary text",
-      privateNotes: "ULTRA_SECRET_NOTE",
-      locationEntityId: locationId,
-      sourceRecordId: "record-5",
+    const privateEvent = makePrivateEvent({
+      id: 7,
+      event_category: "action",
+      projection_class: "area_candidate",
+      projectable_summary: "Public summary text",
+      location_entity_id: locationId,
+      source_record_id: "record-5",
     });
 
-    service.materializeDelayed([getPrivateEvent(privateEventId)], "maid-alice");
+    service.materializeDelayed([privateEvent], "maid-alice");
 
     const areaDoc = db
       .prepare(`SELECT content FROM search_docs_area WHERE source_ref = (SELECT 'event:' || id FROM event_nodes WHERE source_record_id = ?)`)

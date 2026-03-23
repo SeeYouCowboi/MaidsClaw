@@ -75,12 +75,12 @@ function insertFact(
   ).run(id, sourceEntityId, targetEntityId, predicate, now, MAX_INTEGER, now, MAX_INTEGER, sourceEventId);
 }
 
-function insertPrivateEvent(db: Database, id: number, agentId: string, linkedEventId: number | null): void {
+function insertPrivateEvent(db: Database, id: number, agentId: string, _linkedEventId: number | null): void {
   const now = Date.now();
   db.prepare(
-    `INSERT INTO agent_event_overlay (id, event_id, agent_id, role, private_notes, salience, emotion, event_category, primary_actor_entity_id, projection_class, location_entity_id, projectable_summary, source_record_id, created_at)
-     VALUES (?, ?, ?, NULL, NULL, 0.5, NULL, 'thought', NULL, 'none', NULL, 'private summary', NULL, ?)`,
-  ).run(id, linkedEventId, agentId, now);
+    `INSERT INTO private_episode_events (id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at)
+     VALUES (?, ?, 'sess-1', 'stl:test', 'observation', 'private summary', NULL, NULL, NULL, ?, ?, NULL, ?)`,
+  ).run(id, agentId, now, now, now);
 }
 
 function insertPrivateBelief(
@@ -93,8 +93,8 @@ function insertPrivateBelief(
 ): void {
   const now = Date.now();
   db.prepare(
-    `INSERT INTO agent_fact_overlay (id, agent_id, source_entity_id, target_entity_id, predicate, belief_type, confidence, epistemic_status, provenance, source_event_ref, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'suspects', 'suspicion', 0.6, 'suspected', NULL, ?, ?, ?)`,
+    `INSERT INTO agent_fact_overlay (id, agent_id, source_entity_id, target_entity_id, predicate, basis, stance, provenance, source_event_ref, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'suspects', 'inference', 'tentative', NULL, ?, ?, ?)`,
   ).run(id, agentId, sourceEntityId, targetEntityId, sourceEventRef, now, now);
 }
 

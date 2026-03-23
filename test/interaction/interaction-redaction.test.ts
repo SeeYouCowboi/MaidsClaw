@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import type { InteractionRecord, TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import type {
   CognitionOp,
-  PrivateCognitionCommit,
   PrivateCognitionCommitV4,
   PublicationDeclaration,
 } from "../../src/runtime/rp-turn-contract.js";
@@ -37,10 +36,10 @@ function makeRetractOp(key: string, kind: "assertion" | "evaluation" | "commitme
   };
 }
 
-// Helper to create a PrivateCognitionCommit with proper schemaVersion
-function makePrivateCommit(ops: CognitionOp[]): PrivateCognitionCommit {
+// Helper to create a PrivateCognitionCommitV4 with proper schemaVersion
+function makePrivateCommit(ops: CognitionOp[]): PrivateCognitionCommitV4 {
   return {
-    schemaVersion: "rp_private_cognition_v3",
+    schemaVersion: "rp_private_cognition_v4",
     ops,
   };
 }
@@ -75,7 +74,7 @@ describe("settlement adapter", () => {
         selfPointerKey: "__self__",
         userPointerKey: "__user__",
       },
-      privateCommit: makePrivateCommit([makeUpsertOp("belief:v3", "assertion")]),
+      privateCognition: makePrivateCommit([makeUpsertOp("belief:v3", "assertion")]),
     };
 
     const normalized = normalizeSettlementPayload(v3Payload);
@@ -100,7 +99,7 @@ describe("settlement adapter", () => {
         userPointerKey: "__user__",
       },
       schemaVersion: "turn_settlement_v4",
-      privateCommit: makePrivateCommitV4([makeUpsertOp("belief:v4", "assertion")]),
+      privateCognition: makePrivateCommitV4([makeUpsertOp("belief:v4", "assertion")]),
       publications,
     };
 
@@ -180,7 +179,7 @@ describe("redactInteractionRecord", () => {
         selfPointerKey: "__self__",
         userPointerKey: "__user__",
       },
-    } satisfies Omit<TurnSettlementPayload, "privateCommit">;
+    } satisfies Omit<TurnSettlementPayload, "privateCognition">;
 
     const ops: CognitionOp[] = [makeUpsertOp("belief:eq", "assertion")];
 
@@ -192,7 +191,7 @@ describe("redactInteractionRecord", () => {
       recordType: "turn_settlement",
       payload: {
         ...basePayload,
-        privateCommit: makePrivateCommit(ops),
+        privateCognition: makePrivateCommit(ops),
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -206,20 +205,20 @@ describe("redactInteractionRecord", () => {
       payload: {
         ...basePayload,
         schemaVersion: "turn_settlement_v4",
-        privateCommit: makePrivateCommitV4(ops),
+        privateCognition: makePrivateCommitV4(ops),
         publications: makePublications(),
       } satisfies TurnSettlementPayload,
       committedAt: 1001,
     };
 
     const v3Redacted = redactInteractionRecord(v3Record).payload as {
-      privateCommit?: { redacted: true; opCount: number; kinds: string[] };
+      privateCognition?: { redacted: true; opCount: number; kinds: string[] };
     };
     const v4Redacted = redactInteractionRecord(v4Record).payload as {
-      privateCommit?: { redacted: true; opCount: number; kinds: string[] };
+      privateCognition?: { redacted: true; opCount: number; kinds: string[] };
     };
 
-    expect(v3Redacted.privateCommit).toEqual(v4Redacted.privateCommit);
+    expect(v3Redacted.privateCognition).toEqual(v4Redacted.privateCognition);
   });
 
   it("redacts viewerSnapshot from turn_settlement records", () => {
@@ -241,7 +240,7 @@ describe("redactInteractionRecord", () => {
           userPointerKey: "__user__",
           currentLocationEntityId: 42,
         },
-        privateCommit: makePrivateCommit([makeUpsertOp("belief:test", "assertion")]),
+        privateCognition: makePrivateCommit([makeUpsertOp("belief:test", "assertion")]),
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -254,7 +253,7 @@ describe("redactInteractionRecord", () => {
     expect((payload.viewerSnapshot as { selfPointerKey?: string }).selfPointerKey).toBeUndefined();
   });
 
-  it("redacts privateCommit ops but preserves opCount and kinds", () => {
+  it("redacts privateCognition ops but preserves opCount and kinds", () => {
     const record: InteractionRecord = {
       sessionId: "sess-1",
       recordId: "stl-req-2",
@@ -272,7 +271,7 @@ describe("redactInteractionRecord", () => {
           selfPointerKey: "__self__",
           userPointerKey: "__user__",
         },
-        privateCommit: makePrivateCommit([
+        privateCognition: makePrivateCommit([
           makeUpsertOp("belief:alice_is_kind", "assertion"),
           makeUpsertOp("belief:bob_is_brave", "assertion"),
           makeUpsertOp("eval:mood_happy", "evaluation"),
@@ -284,13 +283,13 @@ describe("redactInteractionRecord", () => {
     const redacted = redactInteractionRecord(record);
     const payload = redacted.payload as TurnSettlementPayload;
 
-    expect(payload.privateCommit).toBeDefined();
-    expect((payload.privateCommit as { redacted?: boolean }).redacted).toBe(true);
-    expect((payload.privateCommit as { opCount?: number }).opCount).toBe(3);
-    expect((payload.privateCommit as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
+    expect(payload.privateCognition).toBeDefined();
+    expect((payload.privateCognition as { redacted?: boolean }).redacted).toBe(true);
+    expect((payload.privateCognition as { opCount?: number }).opCount).toBe(3);
+    expect((payload.privateCognition as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
 
     // Raw ops should NOT be exposed
-    expect((payload.privateCommit as { ops?: unknown[] }).ops).toBeUndefined();
+    expect((payload.privateCognition as { ops?: unknown[] }).ops).toBeUndefined();
   });
 
   it("preserves routing metadata (settlementId, requestId, sessionId, publicReply, hasPublicReply) but NOT ownerAgentId", () => {
@@ -312,7 +311,7 @@ describe("redactInteractionRecord", () => {
           userPointerKey: "__user__",
           currentLocationEntityId: 100,
         },
-        privateCommit: makePrivateCommit([makeUpsertOp("belief:x", "assertion")]),
+        privateCognition: makePrivateCommit([makeUpsertOp("belief:x", "assertion")]),
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -351,7 +350,7 @@ describe("redactInteractionRecord", () => {
         publicReply: "Reply",
         hasPublicReply: true,
         viewerSnapshot: originalSnapshot,
-        privateCommit: originalPrivateCommit,
+        privateCognition: originalPrivateCommit,
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -363,7 +362,7 @@ describe("redactInteractionRecord", () => {
     const originalPayload = record.payload as TurnSettlementPayload;
     expect(originalPayload.viewerSnapshot).toBe(originalSnapshot);
     expect(originalPayload.viewerSnapshot.currentLocationEntityId).toBe(999);
-    expect(originalPayload.privateCommit?.ops).toBe(originalOps);
+    expect(originalPayload.privateCognition?.ops).toBe(originalOps);
 
     // Redacted record should have different payload
     expect(redacted.payload).not.toBe(record.payload);
@@ -409,7 +408,7 @@ describe("redactInteractionRecord", () => {
     expect(redactedStatus.payload).toEqual(statusRecord.payload);
   });
 
-  it("handles turn_settlement without privateCommit", () => {
+  it("handles turn_settlement without privateCognition", () => {
     const record: InteractionRecord = {
       sessionId: "sess-1",
       recordId: "stl-req-5",
@@ -427,7 +426,7 @@ describe("redactInteractionRecord", () => {
           selfPointerKey: "__self__",
           userPointerKey: "__user__",
         },
-        // No privateCommit
+        // No privateCognition
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -436,10 +435,10 @@ describe("redactInteractionRecord", () => {
     const payload = redacted.payload as TurnSettlementPayload;
 
     expect(payload.viewerSnapshot).toEqual({ redacted: true });
-    expect(payload.privateCommit).toBeUndefined();
+    expect(payload.privateCognition).toBeUndefined();
   });
 
-  it("deduplicates kinds in privateCommit", () => {
+  it("deduplicates kinds in privateCognition", () => {
     const record: InteractionRecord = {
       sessionId: "sess-1",
       recordId: "stl-req-6",
@@ -457,7 +456,7 @@ describe("redactInteractionRecord", () => {
           selfPointerKey: "__self__",
           userPointerKey: "__user__",
         },
-        privateCommit: makePrivateCommit([
+        privateCognition: makePrivateCommit([
           makeUpsertOp("a", "assertion"),
           makeUpsertOp("b", "assertion"),
           makeUpsertOp("c", "assertion"),
@@ -471,11 +470,11 @@ describe("redactInteractionRecord", () => {
     const redacted = redactInteractionRecord(record);
     const payload = redacted.payload as TurnSettlementPayload;
 
-    expect((payload.privateCommit as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
-    expect((payload.privateCommit as { opCount?: number }).opCount).toBe(5);
+    expect((payload.privateCognition as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
+    expect((payload.privateCognition as { opCount?: number }).opCount).toBe(5);
   });
 
-  it("handles empty privateCommit.ops array", () => {
+  it("handles empty privateCognition.ops array", () => {
     const record: InteractionRecord = {
       sessionId: "sess-1",
       recordId: "stl-req-7",
@@ -493,7 +492,7 @@ describe("redactInteractionRecord", () => {
           selfPointerKey: "__self__",
           userPointerKey: "__user__",
         },
-        privateCommit: makePrivateCommit([]),
+        privateCognition: makePrivateCommit([]),
       } satisfies TurnSettlementPayload,
       committedAt: 1000,
     };
@@ -501,8 +500,8 @@ describe("redactInteractionRecord", () => {
     const redacted = redactInteractionRecord(record);
     const payload = redacted.payload as TurnSettlementPayload;
 
-    expect((payload.privateCommit as { opCount?: number }).opCount).toBe(0);
-    expect((payload.privateCommit as { kinds?: string[] }).kinds).toEqual([]);
+    expect((payload.privateCognition as { opCount?: number }).opCount).toBe(0);
+    expect((payload.privateCognition as { kinds?: string[] }).kinds).toEqual([]);
   });
 
   it("preserves all top-level record fields except payload", () => {
@@ -551,7 +550,7 @@ describe("redactInteractionRecord", () => {
         publicReply: "Reply",
         hasPublicReply: true,
         viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-        privateCommit: makePrivateCommit([
+        privateCognition: makePrivateCommit([
           makeUpsertOp("belief:upserted", "assertion"),
           makeRetractOp("belief:retracted", "assertion"),
           makeUpsertOp("eval:upserted", "evaluation"),
@@ -563,8 +562,8 @@ describe("redactInteractionRecord", () => {
     const redacted = redactInteractionRecord(record);
     const payload = redacted.payload as TurnSettlementPayload;
 
-    expect((payload.privateCommit as { opCount?: number }).opCount).toBe(3);
-    expect((payload.privateCommit as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
+    expect((payload.privateCognition as { opCount?: number }).opCount).toBe(3);
+    expect((payload.privateCognition as { kinds?: string[] }).kinds).toEqual(["assertion", "evaluation"]);
   });
 });
 
@@ -594,7 +593,7 @@ describe("redactInteractionRecords", () => {
           publicReply: "Hi",
           hasPublicReply: true,
           viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__", currentLocationEntityId: 5 },
-          privateCommit: makePrivateCommit([makeUpsertOp("belief:test", "assertion")]),
+          privateCognition: makePrivateCommit([makeUpsertOp("belief:test", "assertion")]),
         } satisfies TurnSettlementPayload,
         committedAt: 1001,
       },
@@ -610,7 +609,7 @@ describe("redactInteractionRecords", () => {
     // Settlement should be redacted
     const settlementPayload = redacted[1].payload as TurnSettlementPayload;
     expect(settlementPayload.viewerSnapshot).toEqual({ redacted: true });
-    expect((settlementPayload.privateCommit as { redacted?: boolean }).redacted).toBe(true);
+    expect((settlementPayload.privateCognition as { redacted?: boolean }).redacted).toBe(true);
   });
 
   it("returns empty array for empty input", () => {

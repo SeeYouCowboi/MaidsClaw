@@ -317,7 +317,7 @@ describe("AgentLoop.runBuffered", () => {
         {
           type: "tool_use_delta",
           id: "call_1",
-          partialJson: '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"Your tea is ready."}',
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Your tea is ready."}',
         },
         { type: "tool_use_end", id: "call_1" },
         { type: "message_end", stopReason: "tool_use" },
@@ -360,7 +360,7 @@ describe("AgentLoop.runBuffered", () => {
           type: "tool_use_delta",
           id: "call_2",
           partialJson:
-            '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"","privateCommit":{"schemaVersion":"rp_private_cognition_v3","ops":[{"op":"upsert","record":{"kind":"commitment","key":"k1","mode":"intent","target":{"action":"observe"},"status":"active"}}]}}',
+            '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"","privateCognition":{"schemaVersion":"rp_private_cognition_v4","ops":[{"op":"upsert","record":{"kind":"commitment","key":"k1","mode":"intent","target":{"action":"observe"},"status":"active"}}]}}',
         },
         { type: "tool_use_end", id: "call_2" },
         { type: "message_end", stopReason: "tool_use" },

@@ -332,8 +332,7 @@ function resolveFactorNodeRef(
     )
     .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; kind: string | null } | null;
   if (event) {
-    const kind = event.kind === "commitment" ? "commitment" : "evaluation";
-    return `${kind}:${event.id}`;
+    return `private_event:${event.id}`;
   }
 
   return null;

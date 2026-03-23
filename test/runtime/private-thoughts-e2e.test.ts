@@ -13,7 +13,7 @@ import { GraphStorageService } from "../../src/memory/storage.js";
 import { PersonaService } from "../../src/persona/service.js";
 import {
   type CognitionOp,
-  type RpTurnOutcomeSubmission,
+  type RpTurnOutcomeSubmissionV5,
   validateRpTurnOutcome,
 } from "../../src/runtime/rp-turn-contract.js";
 import { closeDatabaseGracefully, type Db, openDatabase } from "../../src/storage/database.js";
@@ -470,12 +470,12 @@ describe("private thoughts e2e", () => {
     });
 
     it("keeps latentScratchpad in validated outcome but never writes it into recent cognition slots", () => {
-      const rawOutcome: RpTurnOutcomeSubmission = {
-        schemaVersion: "rp_turn_outcome_v3",
+      const rawOutcome: RpTurnOutcomeSubmissionV5 = {
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "",
         latentScratchpad: "",
-        privateCommit: {
-          schemaVersion: "rp_private_cognition_v3",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
           ops: [
             {
               op: "upsert",
@@ -511,10 +511,10 @@ describe("private thoughts e2e", () => {
     it("throws when an upsert record key is missing", () => {
       expect(() =>
         validateRpTurnOutcome({
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "ok",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -537,10 +537,10 @@ describe("private thoughts e2e", () => {
     it("throws when an upsert record key is empty", () => {
       expect(() =>
         validateRpTurnOutcome({
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "ok",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -561,10 +561,10 @@ describe("private thoughts e2e", () => {
     it("throws when retract target key is missing", () => {
       expect(() =>
         validateRpTurnOutcome({
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "ok",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "retract",

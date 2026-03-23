@@ -82,7 +82,7 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Good evening, master.",
         },
       }),
@@ -126,10 +126,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{ op: "retract", target: { kind: "assertion", key: "quiet-step" } }],
           },
         },
@@ -164,7 +164,7 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
         },
       }),
@@ -190,7 +190,7 @@ describe("TurnService", () => {
       {
         type: "error",
         code: "RP_OUTCOME_NORMALIZATION_FAILED",
-        message: "empty turn: publicReply is empty and privateCommit has no ops",
+        message: "empty turn: publicReply is empty and privateCognition has no ops",
         retriable: false,
       },
     ]);
@@ -205,7 +205,7 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "I started replying",
         },
       }),
@@ -262,7 +262,7 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Replay-safe reply",
         },
       }),
@@ -341,10 +341,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Hello",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             summary: "mixed ops",
             ops: [
               {
@@ -407,7 +407,7 @@ describe("TurnService", () => {
     const payload = settlement!.payload as Record<string, unknown>;
     expect(payload.ownerAgentId).toBe("rp:alice");
 
-    const commit = payload.privateCommit as { schemaVersion: string; summary: string; ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { schemaVersion: string; summary: string; ops: Array<Record<string, unknown>> };
     expect(commit.schemaVersion).toBe("rp_private_cognition_v4");
     expect(commit.summary).toBe("mixed ops");
     expect(commit.ops).toHaveLength(3);
@@ -422,6 +422,7 @@ describe("TurnService", () => {
           object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
         },
         stance: "accepted",
+        confidence: 0.9,
         salience: 5,
       },
     });
@@ -445,7 +446,7 @@ describe("TurnService", () => {
     );
     expect(factCount!.cnt).toBe(0);
     const eventCount = db.get<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      `SELECT COUNT(*) as cnt FROM private_cognition_events WHERE agent_id = ?`,
       ["rp:alice"],
     );
     expect(eventCount!.cnt).toBe(0);
@@ -471,10 +472,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -516,7 +517,7 @@ describe("TurnService", () => {
     expect(settlement).toBeDefined();
     const payload = settlement!.payload as Record<string, unknown>;
     expect(payload.ownerAgentId).toBe("rp:alice");
-    const commit = payload.privateCommit as { schemaVersion: string; ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { schemaVersion: string; ops: Array<Record<string, unknown>> };
     expect(commit.schemaVersion).toBe("rp_private_cognition_v4");
     expect(commit.ops).toHaveLength(1);
     expect(commit.ops[0]).toEqual({
@@ -553,10 +554,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -591,12 +592,12 @@ describe("TurnService", () => {
 
     const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
     const payload = settlement!.payload as Record<string, unknown>;
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { ops: Array<Record<string, unknown>> };
     expect(commit.ops).toHaveLength(1);
     expect((commit.ops[0] as { record: { kind: string; dimensions: unknown[] } }).record.dimensions).toEqual([{ name: "trust", value: 0.8 }]);
 
-    const row = db.get<{ explicit_kind: string }>(
-      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
+    const row = db.get<{ kind: string }>(
+      `SELECT kind FROM private_cognition_events WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "eval-1"],
     );
     expect(row).toBeUndefined();
@@ -608,10 +609,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -647,12 +648,12 @@ describe("TurnService", () => {
 
     const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
     const payload = settlement!.payload as Record<string, unknown>;
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { ops: Array<Record<string, unknown>> };
     expect(commit.ops).toHaveLength(1);
     expect((commit.ops[0] as { record: { kind: string } }).record.kind).toBe("commitment");
 
-    const row = db.get<{ explicit_kind: string }>(
-      `SELECT explicit_kind FROM agent_event_overlay WHERE agent_id = ? AND cognition_key = ?`,
+    const row = db.get<{ kind: string }>(
+      `SELECT kind FROM private_cognition_events WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "commit-1"],
     );
     expect(row).toBeUndefined();
@@ -688,10 +689,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{ op: "retract", target: { kind: "assertion", key: "assert-retract" } }],
           },
         },
@@ -716,15 +717,15 @@ describe("TurnService", () => {
 
     const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
     const payload = settlement!.payload as Record<string, unknown>;
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { ops: Array<Record<string, unknown>> };
     expect(commit.ops).toHaveLength(1);
     expect(commit.ops[0]).toEqual({ op: "retract", target: { kind: "assertion", key: "assert-retract" } });
 
-    const row = db.get<{ epistemic_status: string }>(
-      `SELECT epistemic_status FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+    const row = db.get<{ stance: string }>(
+      `SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
       ["rp:alice", "assert-retract"],
     );
-    expect(row?.epistemic_status).toBe("confirmed");
+    expect(row?.stance).toBe("accepted");
   });
 
   it("current_location assertion persists full op in settlement without overlay write", async () => {
@@ -749,10 +750,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -797,7 +798,7 @@ describe("TurnService", () => {
 
     const settlement = store.getBySession(session.sessionId).find((r) => r.recordType === "turn_settlement");
     const payload = settlement!.payload as Record<string, unknown>;
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    const commit = payload.privateCognition as { ops: Array<Record<string, unknown>> };
     expect(commit.ops).toHaveLength(1);
     expect((commit.ops[0] as { record: { key: string } }).record.key).toBe("location-assert-1");
     expect(payload.viewerSnapshot).toEqual({
@@ -818,10 +819,10 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{ op: "touch" } as unknown as never],
           },
         },
@@ -914,11 +915,11 @@ describe("TurnService", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Hello with scratchpad",
           latentScratchpad: "SECRET_INTERNAL_REASONING_SHOULD_NOT_PERSIST",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -963,8 +964,8 @@ describe("TurnService", () => {
 
     // Verify the rest of the settlement is well-formed
     expect(payload.publicReply).toBe("Hello with scratchpad");
-    expect(payload.privateCommit).toBeDefined();
-    const commit = payload.privateCommit as { ops: Array<Record<string, unknown>> };
+    expect(payload.privateCognition).toBeDefined();
+    const commit = payload.privateCognition as { ops: Array<Record<string, unknown>> };
     expect(commit.ops).toHaveLength(1);
 
     // Also verify raw DB content doesn't contain it
@@ -1192,7 +1193,7 @@ describe("TurnService with ProjectionManager", () => {
     expect(episodes[1].summary).toBe("Alice mentioned the weather to the user");
 
     const overlayCount = db.get<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      `SELECT COUNT(*) as cnt FROM private_cognition_events WHERE agent_id = ?`,
       ["rp:alice"],
     );
     expect(overlayCount!.cnt).toBe(0);
@@ -1202,10 +1203,10 @@ describe("TurnService with ProjectionManager", () => {
     const session = sessionService.createSession("rp:alice");
     const turnService = makeTurnServiceWithProjection({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "",
-        privateCommit: {
-          schemaVersion: "rp_private_cognition_v3",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
           ops: [
             {
               op: "upsert",
@@ -1267,10 +1268,10 @@ describe("TurnService with ProjectionManager", () => {
     expect(overlayFactCount!.cnt).toBe(0);
 
     const overlayEventCount = db.get<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+      `SELECT COUNT(*) as cnt FROM private_cognition_events WHERE agent_id = ?`,
       ["rp:alice"],
     );
-    expect(overlayEventCount!.cnt).toBe(0);
+    expect(overlayEventCount!.cnt).toBe(2);
   });
 
   it("retract op updates current projection to retracted status", async () => {
@@ -1278,10 +1279,10 @@ describe("TurnService with ProjectionManager", () => {
 
     const turnService1 = makeTurnServiceWithProjection({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "",
-        privateCommit: {
-          schemaVersion: "rp_private_cognition_v3",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
           ops: [
             {
               op: "upsert",
@@ -1315,10 +1316,10 @@ describe("TurnService with ProjectionManager", () => {
 
     const turnService2 = makeTurnServiceWithProjection({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "",
-        privateCommit: {
-          schemaVersion: "rp_private_cognition_v3",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
           ops: [
             { op: "retract", target: { kind: "assertion", key: "old-belief" } },
           ],
@@ -1343,10 +1344,10 @@ describe("TurnService with ProjectionManager", () => {
     const session = sessionService.createSession("rp:alice");
     const turnService = makeTurnServiceWithProjection({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "Hello",
-        privateCommit: {
-          schemaVersion: "rp_private_cognition_v3",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
           ops: [
             {
               op: "upsert",
