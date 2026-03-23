@@ -2,8 +2,10 @@ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PersonaAdapter } from "../../src/core/prompt-data-adapters/persona-adapter.js";
+import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
 import { getRecentCognition, getTypedRetrievalSurface } from "../../src/memory/prompt-data.js";
@@ -237,6 +239,78 @@ describe("Behavioral: typed retrieval prompt section", () => {
     );
 
     expect(output).toBe("");
+  });
+
+  it("cross-session durable recall keeps cognition searchable for same agent", async () => {
+    const storage = new GraphStorageService(db);
+    const selfId = storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Eveline",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:eveline",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "Master",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:eveline",
+    });
+
+    const repo = new CognitionRepository(db);
+    repo.upsertAssertion({
+      agentId: "rp:eveline",
+      cognitionKey: "assert:durable-recall",
+      settlementId: "stl:session-a",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "remembers",
+      targetPointerKey: "__user__",
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "session-a",
+    });
+
+    const output = await getTypedRetrievalSurface(
+      "what do you remember about master",
+      {
+        viewer_agent_id: "rp:eveline",
+        viewer_role: "rp_agent",
+        current_area_id: selfId,
+        session_id: "sess-b",
+      },
+      db,
+    );
+
+    expect(output).toContain("[cognition]");
+    expect(output).toContain("[assertion]");
+    expect(output).toContain("remembers: __self__ → __user__");
+  });
+
+  it("assertion and evaluation remain separated in recent cognition rendering", () => {
+    insertSlot(db, "rp:eveline", "sess-separation", [
+      {
+        settlementId: "stl:sep-1",
+        committedAt: 10,
+        kind: "assertion",
+        key: "assert:butler-present",
+        summary: "butler is present in hall",
+        status: "active",
+      },
+      {
+        settlementId: "stl:sep-2",
+        committedAt: 11,
+        kind: "evaluation",
+        key: "eval:butler-trust",
+        summary: "eval trust:0.4",
+        status: "active",
+      },
+    ]);
+
+    const rendered = getRecentCognition("rp:eveline", "sess-separation", db);
+    expect(rendered).toContain("[assertion:assert:butler-present]");
+    expect(rendered).toContain("[evaluation:eval:butler-trust]");
   });
 });
 

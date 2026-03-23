@@ -105,4 +105,46 @@ describe("time-slice-query", () => {
     expect(summaries[0]?.has_valid_cut).toBe(true);
     expect(summaries[0]?.has_committed_cut).toBe(true);
   });
+
+  it("time slicing keeps redacted placeholders visible for explain output", () => {
+    const input: EvidencePath[] = [
+      {
+        path: {
+          seed: "private_episode:1" as NodeRef,
+          nodes: ["private_episode:1" as NodeRef, "event:2" as NodeRef],
+          edges: [
+            {
+              from: "private_episode:1" as NodeRef,
+              to: "event:2" as NodeRef,
+              kind: "same_episode",
+              layer: "symbolic",
+              weight: 1,
+              timestamp: 200,
+              summary: "bridge",
+            },
+          ],
+          depth: 1,
+        },
+        score: {
+          seed_score: 0.5,
+          edge_type_score: 0.5,
+          temporal_consistency: 1,
+          query_intent_match: 0.5,
+          support_score: 0,
+          recency_score: 0.5,
+          hop_penalty: 0,
+          redundancy_penalty: 0,
+          path_score: 0.4,
+        },
+        supporting_nodes: ["event:2" as NodeRef],
+        supporting_facts: [],
+        redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:9" }],
+      },
+    ];
+
+    const filtered = filterEvidencePathsByTimeSlice(input, { asOfCommittedTime: 300 });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.redacted_placeholders).toEqual([{ type: "redacted", reason: "private", node_ref: "private_event:9" }]);
+    expect(filtered[0]?.path.nodes).toEqual(["private_episode:1", "event:2"]);
+  });
 });

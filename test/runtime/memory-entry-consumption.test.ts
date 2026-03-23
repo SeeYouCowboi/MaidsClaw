@@ -10,6 +10,10 @@ import { CoreMemoryService } from "../../src/memory/core-memory.js";
 import { EmbeddingService } from "../../src/memory/embeddings.js";
 import { MaterializationService } from "../../src/memory/materialization.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
+import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
@@ -751,6 +755,105 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       const unprocessedRange = interactionStore.getMinMaxUnprocessedIndex(session.sessionId);
       expect(unprocessedRange).toBeUndefined();
+    } finally {
+      runtime.shutdown();
+    }
+  });
+
+  it("synchronous settlement writes cognition/episode/publication visible in same turn", () => {
+    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+
+    try {
+      const graphStorage = new GraphStorageService(runtime.db);
+      const episodeRepo = new EpisodeRepository(runtime.db);
+      const cognitionEventRepo = new CognitionEventRepo(runtime.db.raw);
+      const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(runtime.db.raw);
+      const projectionManager = new ProjectionManager(
+        episodeRepo,
+        cognitionEventRepo,
+        cognitionProjectionRepo,
+        graphStorage,
+      );
+      const interactionStore = new InteractionStore(runtime.db);
+
+      const locationEntityId = graphStorage.upsertEntity({
+        pointerKey: "tea_room",
+        displayName: "Tea Room",
+        entityType: "location",
+        memoryScope: "shared_public",
+      });
+      graphStorage.upsertEntity({
+        pointerKey: "__self__",
+        displayName: "Alice",
+        entityType: "person",
+        memoryScope: "private_overlay",
+        ownerAgentId: "rp:alice",
+      });
+      graphStorage.upsertEntity({
+        pointerKey: "__user__",
+        displayName: "User",
+        entityType: "person",
+        memoryScope: "private_overlay",
+        ownerAgentId: "rp:alice",
+      });
+
+      interactionStore.runInTransaction(() => {
+        projectionManager.commitSettlement({
+          settlementId: "stl:sync-visible",
+          sessionId: "sess-sync-visible",
+          agentId: "rp:alice",
+          cognitionOps: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "assert:sync-visible",
+                proposition: {
+                  subject: { kind: "special", value: "self" },
+                  predicate: "trusts",
+                  object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                },
+                stance: "accepted",
+                basis: "first_hand",
+              },
+            },
+          ],
+          privateEpisodes: [{ category: "speech", summary: "Alice reassures the user." }],
+          publications: [{ kind: "spoken", targetScope: "current_area", summary: "Alice speaks calmly in tea room." }],
+          viewerSnapshot: { currentLocationEntityId: locationEntityId },
+          upsertRecentCognitionSlot: interactionStore.upsertRecentCognitionSlot.bind(interactionStore),
+          recentCognitionSlotJson: JSON.stringify([
+            {
+              settlementId: "stl:sync-visible",
+              committedAt: Date.now(),
+              kind: "assertion",
+              key: "assert:sync-visible",
+              summary: "self trusts user",
+              status: "active",
+            },
+          ]),
+        });
+      });
+
+      const episodeRows = episodeRepo.readBySettlement("stl:sync-visible", "rp:alice");
+      expect(episodeRows).toHaveLength(1);
+
+      const cognitionCurrent = cognitionProjectionRepo.getCurrent("rp:alice", "assert:sync-visible");
+      expect(cognitionCurrent).not.toBeNull();
+      expect(cognitionCurrent?.stance).toBe("accepted");
+
+      const publicationRows = runtime.db.query<{ count: number }>(
+        "SELECT count(*) as count FROM event_nodes WHERE source_settlement_id = ?",
+        ["stl:sync-visible"],
+      );
+      expect(publicationRows[0]?.count).toBe(1);
+
+      const recentSlot = runtime.db.get<{ slot_payload: string }>(
+        "SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?",
+        ["sess-sync-visible", "rp:alice"],
+      );
+      expect(recentSlot).toBeDefined();
+      expect(recentSlot?.slot_payload).toContain("assert:sync-visible");
     } finally {
       runtime.shutdown();
     }

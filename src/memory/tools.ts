@@ -464,7 +464,7 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
         },
         focusRef: {
           type: "string",
-          description: "Optional focus node_ref (e.g. event:12, private_belief:8).",
+          description: "Optional focus node_ref (e.g. event:12, fact:3).",
         },
         focusCognitionKey: {
           type: "string",

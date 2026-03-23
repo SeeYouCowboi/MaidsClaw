@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DecisionPolicy } from "../../src/agents/maiden/decision-policy.js";
 import { DelegationCoordinator } from "../../src/agents/maiden/delegation.js";
@@ -18,6 +19,7 @@ import { JobQueue } from "../../src/jobs/queue.js";
 import { JobDedupEngine } from "../../src/jobs/dedup.js";
 import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobScheduler } from "../../src/jobs/scheduler.js";
+import { buildMemoryTools } from "../../src/memory/tools.js";
 
 function createInteractionHarness(): {
   db: Db;
@@ -211,5 +213,90 @@ describe("E2E demo scenario", () => {
     const secondSubmit = scheduler.submit(jobSpec);
     expect(secondSubmit).toBeNull();
     expect(queue.size()).toBe(1);
+  });
+
+  it("contested summary explain returns drilldown with redaction placeholders", async () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as any,
+      retrieval: {} as any,
+      navigator: {
+        async explore() {
+          return {
+            query: "why butler claim changed",
+            query_type: "conflict",
+            summary: "Explain conflict: 1 evidence path (1 redacted)",
+            drilldown: {
+              mode: "conflict",
+              focus_cognition_key: "assert:butler-accounts",
+              time_sliced_paths: [
+                {
+                  seed: "private_belief:1",
+                  depth: 1,
+                  edge_count: 1,
+                  omitted_edges: 0,
+                  has_valid_cut: false,
+                  has_committed_cut: false,
+                },
+              ],
+            },
+            evidence_paths: [
+              {
+                path: {
+                  seed: "private_belief:1",
+                  nodes: ["private_belief:1"],
+                  edges: [],
+                  depth: 0,
+                },
+                score: {
+                  seed_score: 0.9,
+                  edge_type_score: 0.8,
+                  temporal_consistency: 1,
+                  query_intent_match: 1,
+                  support_score: 0.7,
+                  recency_score: 0.6,
+                  hop_penalty: 0,
+                  redundancy_penalty: 0,
+                  path_score: 0.88,
+                },
+                supporting_nodes: [],
+                supporting_facts: [3],
+                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:7" }],
+                summary: "1 visible step, 1 supporting fact",
+              },
+            ],
+          } as any;
+        },
+      },
+    });
+
+    const tool = tools.find((candidate) => candidate.name === "memory_explore");
+    expect(tool).toBeDefined();
+
+    const result = await tool!.handler(
+      { query: "why butler claim changed", mode: "conflict", focusCognitionKey: "assert:butler-accounts" },
+      {
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        current_area_id: 1,
+        session_id: "sess-demo-conflict",
+      },
+    ) as Record<string, unknown>;
+
+    expect(result.summary).toBe("Explain conflict: 1 evidence path (1 redacted)");
+    expect(result.drilldown).toBeDefined();
+    const drilldown = result.drilldown as Record<string, unknown>;
+    expect(drilldown.focus_cognition_key).toBe("assert:butler-accounts");
+    const evidence = result.evidence_paths as Array<Record<string, unknown>>;
+    expect(evidence[0]?.redacted).toEqual([{ type: "redacted", reason: "private", node_ref: "private_event:7" }]);
+  });
+
+  it("legacy retirement audit keeps prompt/tool canonical surfaces free of private_event/private_belief names", () => {
+    const promptTemplate = readFileSync("src/core/prompt-template.ts", "utf8");
+    const toolSurface = readFileSync("src/memory/tools.ts", "utf8");
+
+    expect(promptTemplate.includes("private_event")).toBe(false);
+    expect(promptTemplate.includes("private_belief")).toBe(false);
+    expect(toolSurface.includes("private_event")).toBe(false);
+    expect(toolSurface.includes("private_belief")).toBe(false);
   });
 });

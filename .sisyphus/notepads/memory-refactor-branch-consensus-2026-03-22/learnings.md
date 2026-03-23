@@ -66,3 +66,9 @@
 - `GraphNavigator` now consumes `GraphEdgeView` for logic/relation/semantic traversal reads while keeping physical tables separated and preserving no-write abstraction.
 - Added lightweight `TimeSliceQuery` hooks (`src/memory/time-slice-query.ts`) for `asOfValidTime`/`asOfCommittedTime` filtering and summarized path metadata rather than full bitemporal planning.
 - Extended `memory_explore` params with `mode`, `focusRef`, `focusCognitionKey`, `asOfValidTime`, `asOfCommittedTime`, and surfaced drilldown metadata in explain shell output.
+
+## [2026-03-23] T15 section-18 architecture acceptance + legacy retirement audit
+- Added architecture-level acceptance coverage across runtime/memory/e2e for section-18 scenarios: synchronous settlement visibility, cross-session durable recall, contested summary + explain drill-down, area/world boundary, and explain redaction continuity.
+- Hard-fail tier is now explicitly regression-guarded for malformed `relationIntents` (unsupported intent and invalid `triggered` target), while soft-fail tier is guarded by `resolveConflictFactors` resolved/dropped behavior.
+- Legacy retirement audit is codified as automated source-surface checks: prompt/tool canonical language no longer exposes `private_event` / `private_belief` as user-facing names; `memory_explore` focusRef examples now use neutral refs.
+- Final regression evidence is recorded in `.sisyphus/evidence/task-15-architecture-acceptance.txt` and `.sisyphus/evidence/task-15-architecture-acceptance-error.txt` with full `bun run build && bun test` output (current run: 1408 pass / 5 pre-existing fail).

@@ -14,7 +14,7 @@ import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
 import { materializePublications } from "../../src/memory/materialization.js";
-import { prevalidateRelationIntents } from "../../src/memory/cognition/relation-intent-resolver.js";
+import { prevalidateRelationIntents, resolveConflictFactors } from "../../src/memory/cognition/relation-intent-resolver.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
@@ -742,6 +742,161 @@ describe("E2E: RP memory pipeline", () => {
 				conflictFactors: [],
 			}),
 		).toThrow("invalid relation sourceRef");
+	});
+
+	it("relationIntents prevalidation hard-fails unsupported intent and invalid triggered target", () => {
+		expect(() =>
+			prevalidateRelationIntents({
+				schemaVersion: "rp_turn_outcome_v5",
+				publicReply: "",
+				privateCognition: {
+					schemaVersion: "rp_private_cognition_v4",
+					ops: [
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "assert:core",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "trusts",
+									object: { kind: "entity", ref: { kind: "special", value: "user" } },
+								},
+								stance: "accepted",
+							},
+						},
+					],
+				},
+				privateEpisodes: [{ localRef: "ep:ok", category: "observation", summary: "witnessed" }],
+				publications: [],
+				relationIntents: [{ sourceRef: "ep:ok", targetRef: "assert:core", intent: "causal" as any }],
+				conflictFactors: [],
+			}),
+		).toThrow("invalid relation intent");
+
+		expect(() =>
+			prevalidateRelationIntents({
+				schemaVersion: "rp_turn_outcome_v5",
+				publicReply: "",
+				privateCognition: {
+					schemaVersion: "rp_private_cognition_v4",
+					ops: [
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "assert:not-triggerable",
+								proposition: {
+									subject: { kind: "special", value: "self" },
+									predicate: "notes",
+									object: { kind: "entity", ref: { kind: "special", value: "user" } },
+								},
+								stance: "accepted",
+							},
+						},
+					],
+				},
+				privateEpisodes: [{ localRef: "ep:ok", category: "observation", summary: "witnessed" }],
+				publications: [],
+				relationIntents: [{ sourceRef: "ep:ok", targetRef: "assert:not-triggerable", intent: "triggered" }],
+				conflictFactors: [],
+			}),
+		).toThrow("invalid triggered endpoint");
+	});
+
+	it("shape-valid unresolved conflictFactors soft-fail with degradation instead of abort", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		storage.upsertEntity({
+			pointerKey: "__self__",
+			displayName: "Alice",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "rp:alice",
+		});
+		storage.upsertEntity({
+			pointerKey: "__user__",
+			displayName: "User",
+			entityType: "person",
+			memoryScope: "private_overlay",
+			ownerAgentId: "rp:alice",
+		});
+
+		const committer = new CognitionOpCommitter(storage, "rp:alice", 1);
+		const refs = committer.commit(
+			[
+				{
+					op: "upsert",
+					record: {
+						kind: "assertion",
+						key: "assert:conflict-factor-resolved",
+						proposition: {
+							subject: { kind: "special", value: "self" },
+							predicate: "trusts",
+							object: { kind: "entity", ref: { kind: "special", value: "user" } },
+						},
+						stance: "accepted",
+					},
+				},
+			],
+			"stl:factor-soft-fail",
+		);
+
+		const result = resolveConflictFactors(
+			[
+				{ kind: "fact", ref: "assert:conflict-factor-resolved" },
+				{ kind: "fact", ref: "assert:missing-factor" },
+			],
+			db.raw,
+			{ agentId: "rp:alice", settlementId: "stl:factor-soft-fail" },
+		);
+
+		expect(result.resolved).toHaveLength(1);
+		expect(result.resolved[0]?.nodeRef).toBe(refs[0]);
+		expect(result.unresolved).toHaveLength(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("contested current row preserves summary + factor refs for explain drill-down handoff", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+
+		const eventRepo = new CognitionEventRepo(db.raw);
+		const projectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+
+		eventRepo.append({
+			agentId: "rp:alice",
+			cognitionKey: "assert:contested-thread",
+			kind: "assertion",
+			op: "upsert",
+			recordJson: JSON.stringify({
+				sourcePointerKey: "__self__",
+				predicate: "claims",
+				targetPointerKey: "__user__",
+				stance: "contested",
+				basis: "inference",
+				preContestedStance: "accepted",
+				conflictSummary: "contested (2 factors)",
+				conflictFactorRefs: ["private_event:11", "private_belief:7"],
+			}),
+			settlementId: "stl:contested-drilldown",
+			committedTime: 10_000,
+		});
+
+		projectionRepo.rebuild("rp:alice");
+		const current = projectionRepo.getCurrent("rp:alice", "assert:contested-thread");
+
+		expect(current).not.toBeNull();
+		expect(current?.pre_contested_stance).toBe("accepted");
+		expect(current?.conflict_summary).toBe("contested (2 factors)");
+		expect(current?.conflict_factor_refs_json).toBe(JSON.stringify(["private_event:11", "private_belief:7"]));
+
+		db.close();
+		cleanupDb(dbPath);
 	});
 
 	it("publication projection writes bounded area/world current without area-to-world auto-rollup", () => {

@@ -237,6 +237,42 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ---
 
+## Scenario 16 — Section-18 Architecture Acceptance (Runtime + Memory + E2E)
+
+**What it proves:** Section-18 architecture outcomes are covered as acceptance tests across runtime/memory/e2e suites, including synchronous settlement visibility, cross-session durable recall, contested explain drill-down handoff, area/world surfacing boundary, and explain redaction visibility.
+
+**Test files:**
+- `test/runtime/memory-entry-consumption.test.ts` — synchronous settlement visibility in same turn transaction
+- `test/runtime/private-thoughts-behavioral.test.ts` — cross-session durable recall + assertion/evaluation separation
+- `test/memory/e2e-rp-memory-pipeline.test.ts` — hard-fail (`relationIntents/localRef`) + soft-fail (`conflictFactors[]`) tiers + contested handoff
+- `test/e2e/demo-scenario.test.ts` — contested explain shell drill-down + redaction placeholder output
+- `test/memory/time-slice-query.test.ts` — time-sliced explain output preserves redacted placeholders
+
+**Key assertions:**
+- Synchronous settlement writes cognition/episode/publication and next-turn surfaces without sweeper dependency
+- Same-agent cognition remains retrievable across session boundaries
+- Contested current rows carry `pre_contested_stance` + `conflict_summary` + normalized factor refs; explain returns drill-down metadata
+- `area_visible` projection updates do not auto-roll up into `world_public`
+- Explain output keeps hidden hops as redacted placeholders rather than leaking private chain content
+
+---
+
+## Scenario 17 — Legacy Private Path Retirement Audit (Section-18 Follow-up)
+
+**What it proves:** Canonical prompt/tool surface and migration acceptance no longer treat `private_event` / `private_belief` labels as frontstage naming, and new synchronous projection writes do not require legacy private overlays.
+
+**Test files:**
+- `test/e2e/demo-scenario.test.ts` — prompt/tool source audit for legacy private names
+- `test/runtime/memory-entry-consumption.test.ts` — synchronous projection path visibility checks
+- `test/memory/e2e-rp-memory-pipeline.test.ts` — conflict factor soft-fail behavior with stable refs
+
+**Key assertions:**
+- Prompt slot definitions and tool descriptions avoid exposing `private_event` / `private_belief` as canonical user-facing surface names
+- Synchronous projection path materializes section-18 artifacts without waiting for legacy migration loops
+- Shape-valid but unresolved conflict factors degrade quality (`resolved/dropped`) instead of aborting settlement
+
+---
+
 ## Quick Reference: Test File to Scenario Map
 
 | Test file | Scenarios covered |
@@ -248,6 +284,7 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 | `test/memory/e2e-rp-memory-pipeline.test.ts` | 1 (end-to-end pipeline) |
 | `test/memory/visibility-isolation.test.ts` | 5, 12 (scope isolation, viewer_role) |
 | `test/runtime/memory-entry-consumption.test.ts` | 1, 2 (settlement write, mixed-history sweeper) |
+| `test/runtime/private-thoughts-behavioral.test.ts` | 16 (cross-session durable recall, assertion/evaluation separation) |
 | `test/runtime/turn-service.test.ts` | 1 (settlement atomicity) |
 | `test/runtime/rp-turn-contract.test.ts` | 3 (normalizer, mapping constants) |
 | `test/runtime/bootstrap.test.ts` | 15 (service wiring, tool count) |
@@ -258,3 +295,5 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 | `src/memory/visibility-policy.test.ts` | 12 (viewer_role irrelevance) |
 | `src/memory/shared-blocks/shared-blocks.test.ts` | 10 (CRUD, auto-snapshot) |
 | `src/memory/shared-blocks/section-path-validator.test.ts` | 10 (path validation) |
+| `test/memory/time-slice-query.test.ts` | 16 (time-slice explain redaction continuity) |
+| `test/e2e/demo-scenario.test.ts` | 16, 17 (drill-down shell + legacy naming audit) |
