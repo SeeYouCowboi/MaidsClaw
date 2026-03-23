@@ -340,6 +340,8 @@ export class CognitionRepository {
               `private_belief:${existing.id}`,
               [],
               params.settlementId,
+              0.8,
+              cognitionKey,
             );
           }
           this.eventRepo.append({
@@ -411,6 +413,8 @@ export class CognitionRepository {
             `private_belief:${insertedId}`,
             [],
             params.settlementId,
+            0.8,
+            cognitionKey,
           );
         }
         this.eventRepo.append({

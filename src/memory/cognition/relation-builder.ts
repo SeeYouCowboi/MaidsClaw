@@ -46,13 +46,19 @@ export class RelationBuilder {
     factorNodeRefs: string[],
     sourceRef: string,
     strength = 0.8,
+    fallbackCognitionKey?: string,
   ): void {
-    if (factorNodeRefs.length === 0) {
+    const targets = new Set<string>(factorNodeRefs);
+    if (targets.size === 0 && fallbackCognitionKey) {
+      targets.add(`cognition_key:${fallbackCognitionKey}`);
+    }
+
+    if (targets.size === 0) {
       return;
     }
 
     const now = Date.now();
-    for (const targetNodeRef of factorNodeRefs) {
+    for (const targetNodeRef of targets) {
       if (sourceNodeRef === targetNodeRef) {
         continue;
       }

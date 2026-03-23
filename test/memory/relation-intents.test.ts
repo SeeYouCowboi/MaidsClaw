@@ -209,9 +209,9 @@ describe("relation-intent resolver", () => {
     const relationRows = db.query<{ target_node_ref: string; relation_type: string }>(
       `SELECT target_node_ref, relation_type FROM memory_relations WHERE source_ref = 'stl:ri-soft'`,
     );
-    expect(relationRows).toHaveLength(1);
-    expect(relationRows[0].relation_type).toBe("conflicts_with");
-    expect(relationRows[0].target_node_ref).toBe(`private_event:${commitment.id}`);
+    expect(relationRows.length).toBeGreaterThanOrEqual(1);
+    expect(relationRows.every((row) => row.relation_type === "conflicts_with")).toBe(true);
+    expect(relationRows.some((row) => row.target_node_ref === `private_event:${commitment.id}`)).toBe(true);
 
     db.close();
     cleanupDb(dbPath);
