@@ -56,6 +56,14 @@ export function getSharedBlocks(agentId: string, db: Db): string {
 }
 
 /**
+ * T9 placeholder — returns empty string until typed retrieval is implemented.
+ */
+export function getTypedRetrievalPlaceholder(_agentId: string, _db: Db): string {
+  return "";
+}
+
+/**
+ * @deprecated Since T8 — not a canonical RP slot. Kept for non-RP consumers.
  * Get formatted memory hints as bullet list for prompt injection.
  * Returns empty string when no hints (< 3 char query, no matches).
  * ViewerContext determines which scope-partitioned FTS5 tables are queried.
