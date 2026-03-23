@@ -208,6 +208,10 @@ export class RetrievalService {
       viewerContext,
       undefined,
       {
+        narrativeEnabled: true,
+        cognitionEnabled: false,
+        conflictNotesEnabled: false,
+        episodeEnabled: false,
         narrativeBudget: limit,
       },
     );

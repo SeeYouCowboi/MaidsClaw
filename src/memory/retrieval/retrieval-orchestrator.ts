@@ -175,7 +175,7 @@ export class RetrievalOrchestrator {
         if (typed.narrative.length >= template.narrativeBudget) {
           break;
         }
-        if (this.isEpisodeCandidate(hint)) {
+        if (effectiveEpisodeBudget > 0 && this.isEpisodeCandidate(hint)) {
           continue;
         }
         const normalized = this.normalizeText(hint.content);
