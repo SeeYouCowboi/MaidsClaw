@@ -141,23 +141,33 @@ export class GraphOrganizer {
       return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare(`SELECT private_notes, projectable_summary, event_category FROM agent_event_overlay WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; event_category: string } | null;
+        .prepare(`SELECT private_notes, summary, category FROM private_episode_events WHERE id = ?`)
+        .get(parsed.id) as { private_notes: string | null; summary: string | null; category: string } | null;
       if (!row) {
         return undefined;
       }
-      return `${row.private_notes ?? ""} ${row.projectable_summary ?? ""} ${row.event_category}`.trim();
+      return `${row.private_notes ?? ""} ${row.summary ?? ""} ${row.category}`.trim();
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db
+        .prepare(`SELECT json_extract(record_json, '$.privateNotes') as private_notes, summary_text, kind FROM private_cognition_current WHERE id = ?`)
+        .get(parsed.id) as { private_notes: string | null; summary_text: string | null; kind: string } | null;
+      if (!row) {
+        return undefined;
+      }
+      return `${row.private_notes ?? ""} ${row.summary_text ?? ""} ${row.kind}`.trim();
     }
 
     const row = this.db
-      .prepare(`SELECT predicate, provenance, stance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-      .get(parsed.id) as { predicate: string; provenance: string | null; stance: string | null; epistemic_status: string | null } | null;
+      .prepare(`SELECT predicate, provenance, stance FROM agent_fact_overlay WHERE id = ?`)
+      .get(parsed.id) as { predicate: string; provenance: string | null; stance: string | null } | null;
     if (!row) {
       return undefined;
     }
-    const displayStance = row.stance ?? row.epistemic_status ?? "";
+    const displayStance = row.stance ?? "";
     return `${row.predicate} ${row.provenance ?? ""} ${displayStance}`.trim();
   }
 
@@ -324,11 +334,18 @@ export class GraphOrganizer {
       return row?.t_created;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
-      const row = this.db.prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`).get(parsed.id) as
+    if (parsed.kind === "private_event") {
+      const row = this.db.prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`).get(parsed.id) as
         | { created_at: number }
         | null;
       return row?.created_at;
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db.prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`).get(parsed.id) as
+        | { updated_at: number }
+        | null;
+      return row?.updated_at;
     }
 
     const row = this.db.prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`).get(parsed.id) as
@@ -365,13 +382,17 @@ export class GraphOrganizer {
       return row?.topic_id ?? null;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
+      return null;
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(
           `SELECT e.topic_id
-           FROM agent_event_overlay a
-           JOIN event_nodes e ON e.id = a.event_id
-           WHERE a.id = ?`,
+           FROM private_cognition_current c
+           JOIN event_nodes e ON e.id = c.source_event_id
+           WHERE c.id = ?`,
         )
         .get(parsed.id) as { topic_id: number | null } | null;
       return row?.topic_id ?? null;
@@ -422,30 +443,42 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare(`SELECT private_notes, projectable_summary, agent_id, cognition_status FROM agent_event_overlay WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; projectable_summary: string | null; agent_id: string; cognition_status: string | null } | null;
+        .prepare(`SELECT private_notes, summary, agent_id FROM private_episode_events WHERE id = ?`)
+        .get(parsed.id) as { private_notes: string | null; summary: string | null; agent_id: string } | null;
       if (!row) {
         return;
       }
-      if (row.cognition_status === "retracted") {
+      const content = `${row.private_notes ?? ""} ${row.summary ?? ""}`.trim();
+      this.storage.syncSearchDoc("private", nodeRef, content, row.agent_id);
+      return;
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db
+        .prepare(`SELECT json_extract(record_json, '$.privateNotes') as private_notes, summary_text, agent_id, status FROM private_cognition_current WHERE id = ?`)
+        .get(parsed.id) as { private_notes: string | null; summary_text: string | null; agent_id: string; status: string | null } | null;
+      if (!row) {
+        return;
+      }
+      if (row.status === "retracted") {
         this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
-      const content = `${row.private_notes ?? ""} ${row.projectable_summary ?? ""}`.trim();
+      const content = `${row.private_notes ?? ""} ${row.summary_text ?? ""}`.trim();
       this.storage.syncSearchDoc("private", nodeRef, content, row.agent_id);
       return;
     }
 
     if (parsed.kind === "private_belief" || parsed.kind === "assertion") {
       const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id, stance, epistemic_status FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null; epistemic_status: string | null } | null;
+        .prepare(`SELECT predicate, provenance, agent_id, stance FROM agent_fact_overlay WHERE id = ?`)
+        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null } | null;
       if (!row) {
         return;
       }
-      if (row.stance === "rejected" || row.stance === "abandoned" || row.epistemic_status === "retracted") {
+      if (row.stance === "rejected" || row.stance === "abandoned") {
         this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
