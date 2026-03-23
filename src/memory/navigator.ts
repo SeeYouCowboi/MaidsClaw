@@ -2,12 +2,21 @@ import type { Database } from "bun:sqlite";
 import type { AliasService } from "./alias.js";
 import type { RetrievalService } from "./retrieval.js";
 import { MAX_INTEGER } from "./schema.js";
+import { GraphEdgeView } from "./graph-edge-view.js";
 import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
+import {
+  filterEvidencePathsByTimeSlice,
+  hasTimeSlice,
+  summarizeTimeSlicedPaths,
+  type TimeSliceQuery,
+} from "./time-slice-query.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
   BeamEdge,
   BeamPath,
   EvidencePath,
+  ExploreMode,
+  MemoryExploreInput,
   NavigatorEdgeKind,
   NavigatorResult,
   NodeRef,
@@ -114,6 +123,7 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
 export class GraphNavigator {
   private readonly visibilityPolicy: VisibilityPolicy;
   private readonly redactionPolicy: RedactionPolicy;
+  private readonly edgeView: GraphEdgeView;
 
   constructor(
     private readonly db: Database,
@@ -129,25 +139,28 @@ export class GraphNavigator {
     const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
     this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
     this.redactionPolicy = redactionPolicy ?? new RedactionPolicy();
+    this.edgeView = new GraphEdgeView(this.db, this.visibilityPolicy);
   }
 
   async explore(
     query: string,
     viewerContext: ViewerContext,
-    options?: NavigatorOptions,
+    optionsOrInput?: NavigatorOptions | MemoryExploreInput,
   ): Promise<NavigatorResult> {
     if (!viewerContext || !viewerContext.viewer_agent_id) {
       throw new Error("viewerContext is required");
     }
 
-    const opts = this.normalizeOptions(options);
-    const analysis = this.analyzeQuery(query, viewerContext);
+    const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
+    const input = this.asExploreInput(query, optionsOrInput);
+    const analysis = this.analyzeQuery(query, viewerContext, input.mode);
 
     const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount);
     const supplementalSeeds = await this.collectSupplementalSeeds(query, viewerContext, rawSeeds);
     const mergedSeeds = this.mergeSeeds(rawSeeds, supplementalSeeds);
     const fallbackSeeds = this.fallbackSeedsFromAnalysis(mergedSeeds, analysis);
-    const visibleSeeds = fallbackSeeds.filter((seed) => this.isNodeVisible(seed.node_ref, viewerContext));
+    const focusedSeeds = this.injectFocusSeed(fallbackSeeds, input.focusRef);
+    const visibleSeeds = focusedSeeds.filter((seed) => this.isNodeVisible(seed.node_ref, viewerContext));
 
     if (visibleSeeds.length === 0) {
       return {
@@ -159,16 +172,57 @@ export class GraphNavigator {
     }
 
     const seedScores = this.computeSeedScores(visibleSeeds, analysis);
-    const expandedPaths = this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts);
+    const expandedPaths = this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input);
     const rerankedPaths = this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth);
     const assembled = this.assembleEvidence(rerankedPaths, viewerContext, opts.maxCandidates);
+    const sliced = filterEvidencePathsByTimeSlice(assembled, input);
+    const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
 
     return {
       query,
       query_type: analysis.query_type,
-      summary: this.summarizeResult(query, analysis.query_type, assembled),
-      evidence_paths: assembled,
+      summary: this.summarizeResult(query, analysis.query_type, sliced),
+      drilldown: {
+        mode: input.mode,
+        focus_ref: input.focusRef,
+        focus_cognition_key: input.focusCognitionKey,
+        as_of_valid_time: input.asOfValidTime,
+        as_of_committed_time: input.asOfCommittedTime,
+        time_sliced_paths: pathSummaries,
+      },
+      evidence_paths: sliced,
     };
+  }
+
+  private asNavigatorOptions(optionsOrInput?: NavigatorOptions | MemoryExploreInput): NavigatorOptions | undefined {
+    if (!optionsOrInput) {
+      return undefined;
+    }
+    const maybeOptions = optionsOrInput as NavigatorOptions;
+    const hasOptionKeys =
+      maybeOptions.seedCount != null ||
+      maybeOptions.beamWidth != null ||
+      maybeOptions.maxDepth != null ||
+      maybeOptions.maxCandidates != null;
+    return hasOptionKeys ? maybeOptions : undefined;
+  }
+
+  private asExploreInput(query: string, optionsOrInput?: NavigatorOptions | MemoryExploreInput): MemoryExploreInput {
+    const maybeInput = optionsOrInput as MemoryExploreInput | undefined;
+    if (!maybeInput) {
+      return { query };
+    }
+    if (maybeInput.query != null || maybeInput.mode != null || maybeInput.focusRef != null || maybeInput.focusCognitionKey != null || maybeInput.asOfValidTime != null || maybeInput.asOfCommittedTime != null) {
+      return {
+        query,
+        mode: maybeInput.mode,
+        focusRef: maybeInput.focusRef,
+        focusCognitionKey: maybeInput.focusCognitionKey,
+        asOfValidTime: maybeInput.asOfValidTime,
+        asOfCommittedTime: maybeInput.asOfCommittedTime,
+      };
+    }
+    return { query };
   }
 
   private normalizeOptions(options?: NavigatorOptions): Required<NavigatorOptions> {
@@ -180,7 +234,7 @@ export class GraphNavigator {
     };
   }
 
-  private analyzeQuery(query: string, viewerContext: ViewerContext): QueryAnalysis {
+  private analyzeQuery(query: string, viewerContext: ViewerContext, mode?: ExploreMode): QueryAnalysis {
     const normalized = query.trim().toLowerCase();
     const tokens = query
       .split(/[^a-zA-Z0-9_@:-]+/)
@@ -202,7 +256,9 @@ export class GraphNavigator {
     }
 
     let queryType: QueryType = "event";
-    if (this.includesAny(normalized, WHY_KEYWORDS)) {
+    if (mode) {
+      queryType = mode;
+    } else if (this.includesAny(normalized, WHY_KEYWORDS)) {
       queryType = "why";
     } else if (this.includesAny(normalized, CONFLICT_KEYWORDS)) {
       queryType = "conflict";
@@ -227,6 +283,31 @@ export class GraphNavigator {
 
   private includesAny(haystack: string, needles: readonly string[]): boolean {
     return needles.some((needle) => haystack.includes(needle));
+  }
+
+  private injectFocusSeed(seeds: SeedCandidate[], focusRef?: NodeRef): SeedCandidate[] {
+    if (!focusRef) {
+      return seeds;
+    }
+    const hasFocus = seeds.some((seed) => seed.node_ref === focusRef);
+    if (hasFocus) {
+      return seeds;
+    }
+    const parsed = this.parseNodeRef(focusRef);
+    if (!parsed) {
+      return seeds;
+    }
+    return [
+      {
+        node_ref: focusRef,
+        node_kind: parsed.kind,
+        lexical_score: 0.98,
+        semantic_score: 0,
+        fused_score: 0.98,
+        source_scope: "world",
+      },
+      ...seeds,
+    ];
   }
 
   private fallbackSeedsFromAnalysis(seeds: SeedCandidate[], analysis: QueryAnalysis): SeedCandidate[] {
@@ -394,6 +475,7 @@ export class GraphNavigator {
     queryType: QueryType,
     viewerContext: ViewerContext,
     options: Required<NavigatorOptions>,
+    input: TimeSliceQuery,
   ): InternalBeamPath[] {
     const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
     let currentLayer: InternalBeamPath[] = sortedSeeds.slice(0, options.beamWidth).map((seed) => ({
@@ -411,7 +493,7 @@ export class GraphNavigator {
 
     for (let depth = 1; depth <= options.maxDepth; depth += 1) {
       const frontier = this.groupFrontierByKind(currentLayer);
-      const neighborMap = this.fetchNeighborsByFrontier(frontier, viewerContext);
+      const neighborMap = this.fetchNeighborsByFrontier(frontier, viewerContext, input);
 
       const nextCandidates: InternalBeamPath[] = [];
       for (const pathItem of currentLayer) {
@@ -468,20 +550,26 @@ export class GraphNavigator {
   private fetchNeighborsByFrontier(
     frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
+    timeSlice: TimeSliceQuery,
   ): Map<NodeRef, InternalBeamEdge[]> {
     const map = new Map<NodeRef, InternalBeamEdge[]>();
 
-    this.expandEventFrontier(frontier.get("event"), viewerContext, map);
-    this.expandEntityFrontier(frontier.get("entity"), viewerContext, map);
-    this.expandFactFrontier(frontier.get("fact"), viewerContext, map);
-    this.expandPrivateEventFrontier(frontier.get("private_event"), viewerContext, map);
-    this.expandPrivateBeliefFrontier(frontier.get("private_belief"), viewerContext, map);
-    this.expandRelationEdges(frontier, viewerContext, map);
+    this.expandEventFrontier(frontier.get("event"), viewerContext, map, timeSlice);
+    this.expandEntityFrontier(frontier.get("entity"), viewerContext, map, timeSlice);
+    this.expandFactFrontier(frontier.get("fact"), viewerContext, map, timeSlice);
+    this.expandPrivateEventFrontier(frontier.get("private_event"), viewerContext, map, timeSlice);
+    this.expandPrivateBeliefFrontier(frontier.get("private_belief"), viewerContext, map, timeSlice);
+    this.expandRelationEdges(frontier, viewerContext, map, timeSlice);
 
     return map;
   }
 
-  private expandEventFrontier(frontier: Set<NodeRef> | undefined, viewerContext: ViewerContext, map: Map<NodeRef, InternalBeamEdge[]>): void {
+  private expandEventFrontier(
+    frontier: Set<NodeRef> | undefined,
+    viewerContext: ViewerContext,
+    map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
+  ): void {
     if (!frontier || frontier.size === 0) {
       return;
     }
@@ -492,72 +580,33 @@ export class GraphNavigator {
     }
     const placeholders = ids.map(() => "?").join(",");
 
-    const logicRows = this.db
-      .prepare(
-        `SELECT source_event_id, target_event_id, relation_type, created_at
-         FROM logic_edges
-         WHERE source_event_id IN (${placeholders}) OR target_event_id IN (${placeholders})`,
-      )
-      .all(...ids, ...ids) as Array<{
-      source_event_id: number;
-      target_event_id: number;
-      relation_type: NavigatorEdgeKind;
-      created_at: number;
-    }>;
-
-    for (const row of logicRows) {
-      const srcRef = `event:${row.source_event_id}` as NodeRef;
-      const dstRef = `event:${row.target_event_id}` as NodeRef;
-      if (frontier.has(srcRef) && this.isNodeVisible(dstRef, viewerContext)) {
-        this.pushEdge(map, srcRef, {
-          from: srcRef,
-          to: dstRef,
-          kind: row.relation_type,
-          weight: 1,
-          timestamp: row.created_at,
-          summary: row.relation_type,
-          canonical_fact_id: null,
-          canonical_evidence: true,
-        });
-      }
-
-      if (frontier.has(dstRef) && this.isNodeVisible(srcRef, viewerContext)) {
-        const reverseKind = this.reverseTemporalKind(row.relation_type);
-        this.pushEdge(map, dstRef, {
-          from: dstRef,
-          to: srcRef,
-          kind: reverseKind,
-          weight: 1,
-          timestamp: row.created_at,
-          summary: reverseKind,
-          canonical_fact_id: null,
-          canonical_evidence: true,
-        });
-      }
+    const logicEdges = this.edgeView.readLogicEdges(frontier, viewerContext, timeSlice);
+    for (const edge of logicEdges) {
+      this.pushEdge(map, edge.source_ref, {
+        from: edge.source_ref,
+        to: edge.target_ref,
+        kind: edge.relation_type as NavigatorEdgeKind,
+        layer: edge.layer,
+        weight: edge.weight,
+        timestamp: edge.timestamp,
+        summary: edge.relation_type,
+        canonical_fact_id: null,
+        canonical_evidence: edge.truth_bearing,
+      });
     }
 
-    const factRows = this.db
-      .prepare(
-        `SELECT id, source_event_id, predicate, t_valid
-         FROM fact_edges
-         WHERE t_invalid = ? AND source_event_id IN (${placeholders})`,
-      )
-      .all(MAX_INTEGER, ...ids) as Array<{ id: number; source_event_id: number; predicate: string; t_valid: number }>;
-
-    for (const row of factRows) {
-      const srcRef = `event:${row.source_event_id}` as NodeRef;
-      const factRef = `fact:${row.id}` as NodeRef;
-      if (!this.isNodeVisible(factRef, viewerContext)) {
-        continue;
-      }
-      this.pushEdge(map, srcRef, {
-        from: srcRef,
-        to: factRef,
+    const stateSupportEdges = this.edgeView.readStateFactEdges(frontier, viewerContext, timeSlice);
+    for (const edge of stateSupportEdges) {
+      const parsedFact = this.parseNodeRef(edge.target_ref);
+      this.pushEdge(map, edge.source_ref, {
+        from: edge.source_ref,
+        to: edge.target_ref,
         kind: "fact_support",
-        weight: 0.95,
-        timestamp: row.t_valid,
-        summary: row.predicate,
-        canonical_fact_id: row.id,
+        layer: edge.layer,
+        weight: edge.weight,
+        timestamp: edge.timestamp,
+        summary: edge.relation_type,
+        canonical_fact_id: parsedFact?.kind === "fact" ? parsedFact.id : null,
         canonical_evidence: true,
       });
     }
@@ -626,10 +675,15 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map);
+    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
-  private expandEntityFrontier(frontier: Set<NodeRef> | undefined, viewerContext: ViewerContext, map: Map<NodeRef, InternalBeamEdge[]>): void {
+  private expandEntityFrontier(
+    frontier: Set<NodeRef> | undefined,
+    viewerContext: ViewerContext,
+    map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
+  ): void {
     if (!frontier || frontier.size === 0) {
       return;
     }
@@ -800,10 +854,15 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map);
+    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
-  private expandFactFrontier(frontier: Set<NodeRef> | undefined, viewerContext: ViewerContext, map: Map<NodeRef, InternalBeamEdge[]>): void {
+  private expandFactFrontier(
+    frontier: Set<NodeRef> | undefined,
+    viewerContext: ViewerContext,
+    map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
+  ): void {
     if (!frontier || frontier.size === 0) {
       return;
     }
@@ -876,13 +935,14 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map);
+    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
   private expandPrivateEventFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
   ): void {
     if (!frontier || frontier.size === 0) {
       return;
@@ -960,13 +1020,14 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, true);
+    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
   private expandPrivateBeliefFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
   ): void {
     if (!frontier || frontier.size === 0) {
       return;
@@ -1038,13 +1099,14 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, true);
+    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
   private expandRelationEdges(
     frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
   ): void {
     const allRefs: NodeRef[] = [];
     for (const refs of frontier.values()) {
@@ -1052,21 +1114,19 @@ export class GraphNavigator {
     }
     if (allRefs.length === 0) return;
 
-    for (const fromRef of allRefs) {
-      const related = this.getRelatedNodeRefs(fromRef);
-      for (const toRef of related) {
-        if (!this.isNodeVisible(toRef, viewerContext)) continue;
-        this.pushEdge(map, fromRef, {
-          from: fromRef,
-          to: toRef,
-          kind: "fact_relation",
-          weight: 0.6,
-          timestamp: null,
-          summary: "memory_relation",
-          canonical_fact_id: null,
-          canonical_evidence: false,
-        });
-      }
+    const edges = this.edgeView.readMemoryRelations(new Set(allRefs), viewerContext, timeSlice);
+    for (const edge of edges) {
+      this.pushEdge(map, edge.source_ref, {
+        from: edge.source_ref,
+        to: edge.target_ref,
+        kind: "fact_relation",
+        layer: edge.layer,
+        weight: edge.weight,
+        timestamp: edge.timestamp,
+        summary: edge.relation_type,
+        canonical_fact_id: null,
+        canonical_evidence: edge.truth_bearing,
+      });
     }
   }
 
@@ -1074,56 +1134,25 @@ export class GraphNavigator {
     frontier: Set<NodeRef>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
+    timeSlice: TimeSliceQuery,
     privateFrontier = false,
   ): void {
-    const refs = Array.from(frontier);
-    if (refs.length === 0) {
-      return;
-    }
-    const placeholders = refs.map(() => "?").join(",");
-
-    const rows = this.db
-      .prepare(
-        `SELECT source_node_ref, target_node_ref, relation_type, weight, created_at
-         FROM semantic_edges
-         WHERE source_node_ref IN (${placeholders}) OR target_node_ref IN (${placeholders})`,
-      )
-      .all(...refs, ...refs) as Array<{
-      source_node_ref: NodeRef;
-      target_node_ref: NodeRef;
-      relation_type: NavigatorEdgeKind;
-      weight: number;
-      created_at: number;
-    }>;
-
-    for (const row of rows) {
-      const directionPairs: Array<{ from: NodeRef; to: NodeRef }> = [];
-      if (frontier.has(row.source_node_ref)) {
-        directionPairs.push({ from: row.source_node_ref, to: row.target_node_ref });
+    const edges = this.edgeView.readSemanticEdges(frontier, viewerContext, timeSlice);
+    for (const edge of edges) {
+      if (privateFrontier && !this.isSameAgentPrivateCompatibility(edge.source_ref, edge.target_ref, viewerContext.viewer_agent_id)) {
+        continue;
       }
-      if (frontier.has(row.target_node_ref)) {
-        directionPairs.push({ from: row.target_node_ref, to: row.source_node_ref });
-      }
-
-      for (const pair of directionPairs) {
-        if (!this.isNodeVisible(pair.from, viewerContext) || !this.isNodeVisible(pair.to, viewerContext)) {
-          continue;
-        }
-        if (privateFrontier && !this.isSameAgentPrivateCompatibility(pair.from, pair.to, viewerContext.viewer_agent_id)) {
-          continue;
-        }
-
-        this.pushEdge(map, pair.from, {
-          from: pair.from,
-          to: pair.to,
-          kind: row.relation_type,
-          weight: this.clamp01(row.weight),
-          timestamp: row.created_at,
-          summary: row.relation_type,
-          canonical_fact_id: null,
-          canonical_evidence: false,
-        });
-      }
+      this.pushEdge(map, edge.source_ref, {
+        from: edge.source_ref,
+        to: edge.target_ref,
+        kind: edge.relation_type as NavigatorEdgeKind,
+        layer: edge.layer,
+        weight: this.clamp01(edge.weight),
+        timestamp: edge.timestamp,
+        summary: edge.relation_type,
+        canonical_fact_id: null,
+        canonical_evidence: false,
+      });
     }
   }
 
@@ -1584,10 +1613,27 @@ export class GraphNavigator {
     }
   }
 
-  private pushEdge(map: Map<NodeRef, InternalBeamEdge[]>, from: NodeRef, edge: InternalBeamEdge): void {
+  private pushEdge(
+    map: Map<NodeRef, InternalBeamEdge[]>,
+    from: NodeRef,
+    edge: Omit<InternalBeamEdge, "layer"> & { layer?: InternalBeamEdge["layer"] },
+  ): void {
     const list = map.get(from) ?? [];
-    list.push(edge);
+    list.push({
+      ...edge,
+      layer: edge.layer ?? this.inferEdgeLayer(edge.kind),
+    });
     map.set(from, list);
+  }
+
+  private inferEdgeLayer(kind: NavigatorEdgeKind): InternalBeamEdge["layer"] {
+    if (kind === "semantic_similar" || kind === "entity_bridge" || kind === "conflict_or_update") {
+      return "heuristic";
+    }
+    if (kind === "causal" || kind === "temporal_prev" || kind === "temporal_next" || kind === "same_episode") {
+      return "symbolic";
+    }
+    return "state";
   }
 
   private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {

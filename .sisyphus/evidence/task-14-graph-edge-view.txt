@@ -1,0 +1,29 @@
+Task: T14 GraphEdgeView + time-slice hooks + memory_explore deep params
+Date: 2026-03-23
+
+Implemented:
+- Added read-only graph edge abstraction: src/memory/graph-edge-view.ts
+  - Unified reads for logic_edges, memory_relations, semantic_edges
+  - Layered semantics exposed (state/symbolic/heuristic)
+  - Relation endpoint contracts + truth/heuristic flags included
+  - VisibilityPolicy-enforced edge visibility (source and target)
+- Added time-slice query hooks: src/memory/time-slice-query.ts
+  - TimeSliceQuery(asOfValidTime?, asOfCommittedTime?)
+  - Edge/path time-slice filtering helpers
+  - Summarized path metadata for drill-down
+- Updated memory explore surface
+  - src/memory/types.ts: EdgeLayer, ExploreMode, MemoryExploreInput extension, drilldown fields
+  - src/memory/tools.ts: memory_explore params now support mode/focus/time-slice fields
+  - src/memory/navigator.ts: accepts deep input, mode override, focus seeding, time-slice drilldown summary
+  - src/memory/visibility-policy.ts: added isEdgeVisible helper for unified edge-level checks
+- Navigator now reads logic/memory/semantic edges via GraphEdgeView (no physical table merge, read-only abstraction)
+
+Tests:
+- Added: test/memory/time-slice-query.test.ts
+- Updated: test/memory/navigator.test.ts
+- Updated: test/memory/retrieval-search.test.ts
+- Verification command passed:
+  bun test test/memory/navigator.test.ts test/memory/retrieval-search.test.ts test/memory/time-slice-query.test.ts
+
+Result:
+- 37 pass, 0 fail

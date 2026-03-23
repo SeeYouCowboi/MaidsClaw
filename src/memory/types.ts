@@ -32,6 +32,12 @@ export type EmbeddingViewType = (typeof EMBEDDING_VIEW_TYPES)[number];
 export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state", "conflict"] as const;
 export type QueryType = (typeof QUERY_TYPES)[number];
 
+export const EDGE_LAYERS = ["state", "symbolic", "heuristic"] as const;
+export type EdgeLayer = (typeof EDGE_LAYERS)[number];
+
+export const EXPLORE_MODES = ["why", "timeline", "relationship", "state", "conflict"] as const;
+export type ExploreMode = (typeof EXPLORE_MODES)[number];
+
 export const REDACTION_REASONS = ["hidden", "private", "admin_only"] as const;
 export type RedactionReason = (typeof REDACTION_REASONS)[number];
 
@@ -319,6 +325,7 @@ export type BeamEdge = {
   from: NodeRef;
   to: NodeRef;
   kind: NavigatorEdgeKind;
+  layer: EdgeLayer;
   weight: number;
   timestamp: number | null;
   summary: string | null;
@@ -356,6 +363,21 @@ export type NavigatorResult = {
   query: string;
   query_type: QueryType;
   summary?: string;
+  drilldown?: {
+    mode?: ExploreMode;
+    focus_ref?: NodeRef;
+    focus_cognition_key?: string;
+    as_of_valid_time?: number;
+    as_of_committed_time?: number;
+    time_sliced_paths?: Array<{
+      seed: NodeRef;
+      depth: number;
+      edge_count: number;
+      omitted_edges: number;
+      has_valid_cut: boolean;
+      has_committed_cut: boolean;
+    }>;
+  };
   evidence_paths: EvidencePath[];
 };
 
@@ -391,6 +413,11 @@ export type MemorySearchInput = {
 
 export type MemoryExploreInput = {
   query: string;
+  mode?: ExploreMode;
+  focusRef?: NodeRef;
+  focusCognitionKey?: string;
+  asOfValidTime?: number;
+  asOfCommittedTime?: number;
 };
 
 export type ExtractionBatch = {

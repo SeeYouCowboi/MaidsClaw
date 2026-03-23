@@ -1,7 +1,7 @@
 import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
-import type { NavigatorResult, ViewerContext } from "./types.js";
+import type { MemoryExploreInput, NavigatorResult, ViewerContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tool definition shape
@@ -22,7 +22,7 @@ export type MemoryToolDefinition = {
 // ---------------------------------------------------------------------------
 
 type GraphNavigatorLike = {
-  explore(query: string, ctx: ViewerContext): NavigatorResult | Promise<NavigatorResult>;
+  explore(query: string, ctx: ViewerContext, input?: MemoryExploreInput): NavigatorResult | Promise<NavigatorResult>;
 };
 
 // ---------------------------------------------------------------------------
@@ -264,6 +264,7 @@ function toExplainShell(result: NavigatorResult): {
   query: string;
   query_type: string;
   summary: string;
+  drilldown?: NavigatorResult["drilldown"];
   evidence_paths: Array<{
     rank: number;
     summary: string;
@@ -279,6 +280,13 @@ function toExplainShell(result: NavigatorResult): {
     query: result.query,
     query_type: result.query_type,
     summary: result.summary ?? `Explain ${result.query_type}: ${result.evidence_paths.length} path(s)`,
+    ...(result.drilldown
+      ? {
+        drilldown: {
+          ...result.drilldown,
+        },
+      }
+      : {}),
     evidence_paths: result.evidence_paths.map((path, index) => ({
       rank: index + 1,
       summary: path.summary ?? `${path.path.nodes.length} visible steps`,
@@ -449,6 +457,27 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
           type: "string",
           description: "Exploration query (e.g. 'why did Alice leave the garden').",
         },
+        mode: {
+          type: "string",
+          enum: ["why", "timeline", "relationship", "state", "conflict"],
+          description: "Optional explicit explain mode. Overrides query intent guess when set.",
+        },
+        focusRef: {
+          type: "string",
+          description: "Optional focus node_ref (e.g. event:12, private_belief:8).",
+        },
+        focusCognitionKey: {
+          type: "string",
+          description: "Optional cognition thread key to anchor conflict/state explain.",
+        },
+        asOfValidTime: {
+          type: "number",
+          description: "Optional valid-time cutoff for summarized path filtering.",
+        },
+        asOfCommittedTime: {
+          type: "number",
+          description: "Optional committed-time cutoff for summarized path filtering.",
+        },
       },
       required: ["query"],
       additionalProperties: false,
@@ -463,7 +492,14 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
         return { success: false, error: "GraphNavigator not available" };
       }
 
-      const result = await services.navigator.explore(query.trim(), viewerContext);
+      const result = await services.navigator.explore(query.trim(), viewerContext, {
+        query: query.trim(),
+        mode: typeof args.mode === "string" ? args.mode as MemoryExploreInput["mode"] : undefined,
+        focusRef: typeof args.focusRef === "string" ? args.focusRef as MemoryExploreInput["focusRef"] : undefined,
+        focusCognitionKey: typeof args.focusCognitionKey === "string" ? args.focusCognitionKey : undefined,
+        asOfValidTime: typeof args.asOfValidTime === "number" ? args.asOfValidTime : undefined,
+        asOfCommittedTime: typeof args.asOfCommittedTime === "number" ? args.asOfCommittedTime : undefined,
+      });
       return toExplainShell(result);
     },
   };

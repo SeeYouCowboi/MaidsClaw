@@ -125,6 +125,7 @@ describe("GraphNavigator explain shell", () => {
             from: "entity:1" as NodeRef,
             to: "private_event:70" as NodeRef,
             kind: "semantic_similar",
+            layer: "heuristic",
             weight: 0.8,
             timestamp: Date.now(),
             summary: "private hop",
@@ -157,5 +158,63 @@ describe("GraphNavigator explain shell", () => {
         node_ref: "private_event:70",
       },
     ]);
+  });
+
+  it("accepts explicit explore mode/focus and emits drilldown summary", async () => {
+    insertEvent(db, 1, "Alice trusted Bob");
+    insertEvent(db, 2, "Alice contested Bob");
+    insertLogic(db, 1, 2);
+
+    const retrieval = new StubRetrieval([
+      {
+        node_ref: "event:1" as NodeRef,
+        node_kind: "event",
+        lexical_score: 0.9,
+        semantic_score: 0,
+        fused_score: 0.9,
+        source_scope: "world",
+      },
+    ]);
+    const navigator = new GraphNavigator(db, retrieval as any, alias);
+
+    const result = await navigator.explore("ignored mode by explicit flag", viewer(), {
+      query: "ignored mode by explicit flag",
+      mode: "timeline",
+      focusRef: "event:2" as NodeRef,
+      focusCognitionKey: "cog:alice:bob",
+    });
+
+    expect(result.query_type).toBe("timeline");
+    expect(result.drilldown?.mode).toBe("timeline");
+    expect(result.drilldown?.focus_ref).toBe("event:2" as NodeRef);
+    expect(result.drilldown?.focus_cognition_key).toBe("cog:alice:bob");
+  });
+
+  it("applies as-of time slice filter and returns summarized path metadata", async () => {
+    insertEvent(db, 1, "older");
+    insertEvent(db, 2, "newer");
+    insertLogic(db, 1, 2);
+
+    const retrieval = new StubRetrieval([
+      {
+        node_ref: "event:1" as NodeRef,
+        node_kind: "event",
+        lexical_score: 0.9,
+        semantic_score: 0,
+        fused_score: 0.9,
+        source_scope: "world",
+      },
+    ]);
+    const navigator = new GraphNavigator(db, retrieval as any, alias);
+
+    const now = Date.now();
+    const result = await navigator.explore("timeline", viewer(), {
+      query: "timeline",
+      mode: "timeline",
+      asOfCommittedTime: now - 24 * 60 * 60 * 1000,
+    });
+
+    expect(result.drilldown?.as_of_committed_time).toBe(now - 24 * 60 * 60 * 1000);
+    expect(Array.isArray(result.drilldown?.time_sliced_paths)).toBe(true);
   });
 });

@@ -989,15 +989,25 @@ describe("RetrievalService", () => {
 			expect((typed as Record<string, unknown>).evidence_paths).toBeUndefined();
 			expect((typed as Record<string, unknown>).query_type).toBeUndefined();
 
+			let capturedExploreInput: Record<string, unknown> | undefined;
 			const tools = buildMemoryTools({
 				coreMemory: {} as any,
 				retrieval,
-				navigator: {
-					async explore() {
+					navigator: {
+					async explore(_query: string, _ctx: ViewerContext, input?: any) {
+						capturedExploreInput = input;
 						return {
 							query: "ledger dispute",
 							query_type: "conflict",
 							summary: "Explain conflict: 1 evidence path",
+							drilldown: {
+								mode: "conflict",
+								focus_ref: "event:1" as any,
+								focus_cognition_key: "conf:1",
+								as_of_valid_time: 100,
+								as_of_committed_time: 200,
+								time_sliced_paths: [],
+							},
 							evidence_paths: [],
 						};
 					},
@@ -1007,12 +1017,28 @@ describe("RetrievalService", () => {
 			const exploreTool = tools.find((tool) => tool.name === "memory_explore");
 			expect(exploreTool).toBeDefined();
 			const exploreResult = await exploreTool!.handler(
-				{ query: "ledger dispute" },
+				{
+					query: "ledger dispute",
+					mode: "conflict",
+					focusRef: "event:1",
+					focusCognitionKey: "conf:1",
+					asOfValidTime: 100,
+					asOfCommittedTime: 200,
+				},
 				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
 			) as Record<string, unknown>;
 
 			expect(exploreResult.summary).toBe("Explain conflict: 1 evidence path");
+			expect((exploreResult.drilldown as Record<string, unknown>).mode).toBe("conflict");
 			expect(exploreResult.evidence_paths).toBeDefined();
+			expect(capturedExploreInput).toEqual({
+				query: "ledger dispute",
+				mode: "conflict",
+				focusRef: "event:1",
+				focusCognitionKey: "conf:1",
+				asOfValidTime: 100,
+				asOfCommittedTime: 200,
+			});
 
 			db.close();
 			cleanupDb(dbPath);

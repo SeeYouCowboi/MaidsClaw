@@ -68,6 +68,17 @@ export class VisibilityPolicy {
     return this.getNodeDisposition(viewerContext, nodeRef, nodeData) === "visible";
   }
 
+  isEdgeVisible(
+    viewerContext: ViewerContext,
+    sourceNodeRef: string,
+    sourceNodeData: unknown,
+    targetNodeRef: string,
+    targetNodeData: unknown,
+  ): boolean {
+    return this.isNodeVisible(viewerContext, sourceNodeRef, sourceNodeData) &&
+      this.isNodeVisible(viewerContext, targetNodeRef, targetNodeData);
+  }
+
   getNodeDisposition(
     viewerContext: ViewerContext,
     nodeRef: string,
