@@ -11,9 +11,6 @@ type DbLike = {
   };
 };
 
-type LegacyEpistemicStatus = "confirmed" | "suspected" | "hypothetical" | "retracted";
-type LegacyBeliefType = "observation" | "inference" | "suspicion" | "intention";
-
 type UpsertAssertionParams = {
   agentId: string;
   cognitionKey?: string;
@@ -112,8 +109,6 @@ type FactOverlayRow = {
   source_entity_id: number;
   target_entity_id: number;
   predicate: string;
-  belief_type: LegacyBeliefType | null;
-  epistemic_status: LegacyEpistemicStatus | null;
   basis: AssertionBasis | null;
   stance: AssertionStance | null;
   pre_contested_stance: AssertionStance | null;
@@ -139,24 +134,6 @@ type CognitionCurrentRow = {
   record_json: string;
   source_event_id: number;
   updated_at: number;
-};
-
-const STANCE_TO_EPISTEMIC_STATUS: Record<AssertionStance, LegacyEpistemicStatus> = {
-  confirmed: "confirmed",
-  tentative: "suspected",
-  hypothetical: "hypothetical",
-  rejected: "retracted",
-  accepted: "confirmed",
-  contested: "suspected",
-  abandoned: "retracted",
-};
-
-const BASIS_TO_BELIEF_TYPE: Record<AssertionBasis, LegacyBeliefType> = {
-  first_hand: "observation",
-  inference: "inference",
-  introspection: "intention",
-  hearsay: "observation",
-  belief: "observation",
 };
 
 const TERMINAL_STANCES: ReadonlySet<AssertionStance> = new Set(["rejected", "abandoned"]);
@@ -241,9 +218,6 @@ export class CognitionRepository {
       });
     }
 
-    const legacyStatus = STANCE_TO_EPISTEMIC_STATUS[params.stance];
-    const legacyBeliefType = params.basis ? BASIS_TO_BELIEF_TYPE[params.basis] : null;
-
     const recordJson = JSON.stringify({
       sourcePointerKey: params.sourcePointerKey,
       predicate: params.predicate,
@@ -291,12 +265,9 @@ export class CognitionRepository {
                SET source_entity_id = ?,
                    target_entity_id = ?,
                    predicate = ?,
-                   confidence = NULL,
-                   epistemic_status = ?,
-                   belief_type = ?,
                    basis = ?,
                    stance = ?,
-                    pre_contested_stance = ?,
+                   pre_contested_stance = ?,
                    provenance = ?,
                    settlement_id = ?,
                    op_index = ?,
@@ -307,12 +278,10 @@ export class CognitionRepository {
               sourceEntityId,
               targetEntityId,
               params.predicate,
-              legacyStatus,
-               legacyBeliefType,
-               params.basis ?? null,
-               params.stance,
-               params.preContestedStance ?? null,
-               params.provenance ?? null,
+              params.basis ?? null,
+              params.stance,
+              params.preContestedStance ?? null,
+              params.provenance ?? null,
               params.settlementId,
               params.opIndex,
               now,
@@ -357,9 +326,6 @@ export class CognitionRepository {
                source_entity_id,
                target_entity_id,
                predicate,
-               belief_type,
-               confidence,
-               epistemic_status,
                basis,
                stance,
                pre_contested_stance,
@@ -370,15 +336,13 @@ export class CognitionRepository {
                op_index,
                created_at,
                updated_at
-             ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
           )
           .run(
             params.agentId,
             sourceEntityId,
             targetEntityId,
             params.predicate,
-            legacyBeliefType,
-            legacyStatus,
             params.basis ?? null,
             params.stance,
             params.preContestedStance ?? null,
@@ -429,9 +393,6 @@ export class CognitionRepository {
              source_entity_id,
              target_entity_id,
              predicate,
-             belief_type,
-             confidence,
-             epistemic_status,
              basis,
              stance,
              pre_contested_stance,
@@ -441,15 +402,13 @@ export class CognitionRepository {
              op_index,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
         )
         .run(
           params.agentId,
           sourceEntityId,
           targetEntityId,
           params.predicate,
-          legacyBeliefType,
-          legacyStatus,
           params.basis ?? null,
           params.stance,
           params.preContestedStance ?? null,
@@ -806,7 +765,6 @@ export class CognitionRepository {
           .prepare(
             `UPDATE agent_fact_overlay
              SET stance = 'rejected',
-                 epistemic_status = 'retracted',
                  updated_at = ?
              WHERE agent_id = ? AND cognition_key = ?`,
           )
@@ -854,7 +812,6 @@ export class CognitionRepository {
         .prepare(
           `UPDATE agent_fact_overlay
            SET stance = 'rejected',
-               epistemic_status = 'retracted',
                updated_at = ?
            WHERE agent_id = ? AND cognition_key = ?`,
         )
@@ -889,7 +846,7 @@ export class CognitionRepository {
     const rows = this.db
       .prepare(
         `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
-                belief_type, epistemic_status, basis, stance, pre_contested_stance,
+                basis, stance, pre_contested_stance,
                 provenance, source_event_ref, cognition_key, settlement_id, op_index,
                 created_at, updated_at
          FROM agent_fact_overlay
@@ -963,7 +920,7 @@ export class CognitionRepository {
     const row = this.db
       .prepare(
         `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
-                belief_type, epistemic_status, basis, stance, pre_contested_stance,
+                basis, stance, pre_contested_stance,
                 provenance, source_event_ref, cognition_key, settlement_id, op_index,
                 created_at, updated_at
          FROM agent_fact_overlay
