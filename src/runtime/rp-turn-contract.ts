@@ -14,7 +14,6 @@ export type CognitionRecordBase = {
   kind: CognitionKind;
   key: string;
   salience?: number;
-  confidence?: number;
   provenance?: string;
   ttlTurns?: number;
 };
@@ -22,13 +21,6 @@ export type CognitionRecordBase = {
 export type CognitionSelector = {
   kind: CognitionKind;
   key: string;
-};
-
-export type AssertionRecord = CognitionRecordBase & {
-  kind: "assertion";
-  proposition: EntityProposition;
-  stance: "accepted" | "tentative" | "hypothetical" | "rejected";
-  basis?: "observation" | "inference" | "suspicion" | "introspection" | "communication";
 };
 
 export type AssertionStance =
@@ -73,7 +65,6 @@ export type CommitmentRecord = CognitionRecordBase & {
 };
 
 export type CognitionRecord =
-  | AssertionRecord
   | AssertionRecordV4
   | EvaluationRecord
   | CommitmentRecord;
@@ -82,38 +73,14 @@ export type CognitionOp =
   | { op: "upsert"; record: CognitionRecord }
   | { op: "retract"; target: CognitionSelector };
 
-export type PrivateCognitionCommit = {
-  schemaVersion: "rp_private_cognition_v3";
-  summary?: string;
-  ops: CognitionOp[];
-};
-
 export type PrivateCognitionCommitV4 = {
   schemaVersion: "rp_private_cognition_v4";
   localRef?: LocalRef;
   summary?: string;
   ops: CognitionOp[];
 };
-
-export type RpTurnOutcomeSubmission = {
-  schemaVersion: "rp_turn_outcome_v3";
-  publicReply: string;
-  latentScratchpad?: string;
-  privateCommit?: PrivateCognitionCommit;
-};
-
-export type PublicationKind = "speech" | "record" | "display" | "broadcast";
 export type PublicationKindV2 = "spoken" | "written" | "visual";
 export type PublicationTargetScope = "current_area" | "world_public";
-
-export const PUBLICATION_KIND_COMPAT_MAP: Record<string, PublicationKindV2> = {
-  speech: "spoken",
-  record: "written",
-  display: "visual",
-  broadcast: "spoken",
-};
-
-export const FORBIDDEN_CANONICAL_PUBLICATION_KINDS: ReadonlySet<string> = new Set(["broadcast"]);
 
 export type LocalRef = string;
 
@@ -145,17 +112,9 @@ export type PrivateEpisodeArtifact = {
 
 export type PublicationDeclaration = {
   localRef?: LocalRef;
-  kind: PublicationKind | PublicationKindV2;
+  kind: PublicationKindV2;
   targetScope: PublicationTargetScope;
   summary: string;
-};
-
-export type RpTurnOutcomeSubmissionV4 = {
-  schemaVersion: "rp_turn_outcome_v4";
-  publicReply: string;
-  latentScratchpad?: string;
-  privateCommit?: PrivateCognitionCommit | PrivateCognitionCommitV4;
-  publications?: PublicationDeclaration[];
 };
 
 export type RpTurnOutcomeSubmissionV5 = {
@@ -180,20 +139,6 @@ export type CanonicalRpTurnOutcome = {
   pinnedSummaryProposal?: PinnedSummaryProposal;
   relationIntents: RelationIntent[];
   conflictFactors: ConflictFactor[];
-};
-
-export const EPISTEMIC_STATUS_TO_STANCE: Record<string, AssertionStance> = {
-  confirmed: "confirmed",
-  suspected: "tentative",
-  hypothetical: "hypothetical",
-  retracted: "rejected",
-};
-
-export const BELIEF_TYPE_TO_BASIS: Record<string, AssertionBasis> = {
-  observation: "first_hand",
-  inference: "inference",
-  suspicion: "inference",
-  intention: "introspection",
 };
 
 const V4_ASSERTION_STANCES: ReadonlySet<AssertionStance> = new Set([
@@ -222,51 +167,18 @@ const V4_ASSERTION_BASES: ReadonlySet<AssertionBasis> = new Set([
   "belief",
 ]);
 
-const V4_PUBLICATION_KINDS: ReadonlySet<PublicationKind> = new Set([
-  "speech",
-  "record",
-  "display",
-  "broadcast",
-]);
-
-const V4_PUBLICATION_TARGET_SCOPES: ReadonlySet<PublicationTargetScope> = new Set([
-  "current_area",
-  "world_public",
-]);
-
-const V3_STANCE_TO_V4_STANCE: Record<AssertionRecord["stance"], AssertionStance> = {
-  accepted: "accepted",
-  tentative: "tentative",
-  hypothetical: "hypothetical",
-  rejected: "rejected",
-};
-
-const V3_BASIS_TO_V4_BASIS: Record<NonNullable<AssertionRecord["basis"]>, AssertionBasis> = {
-  observation: "first_hand",
-  inference: "inference",
-  suspicion: "inference",
-  introspection: "introspection",
-  communication: "hearsay",
-};
-
 export type RpBufferedExecutionResult =
   | { outcome: CanonicalRpTurnOutcome }
   | { error: string };
 
-export function detectOutcomeVersion(raw: unknown): "v3" | "v4" | "v5" | "unknown" {
-  if (!raw || typeof raw !== "object") {
-    return "unknown";
-  }
-
+export function detectOutcomeVersion(raw: unknown): "v5" | "unknown" {
+  if (!raw || typeof raw !== "object") return "unknown";
   const schemaVersion = (raw as Record<string, unknown>).schemaVersion;
-  if (schemaVersion === "rp_turn_outcome_v3") {
-    return "v3";
-  }
-  if (schemaVersion === "rp_turn_outcome_v4") {
-    return "v4";
-  }
   if (schemaVersion === "rp_turn_outcome_v5") {
     return "v5";
+  }
+  if (schemaVersion === "rp_turn_outcome_v3" || schemaVersion === "rp_turn_outcome_v4") {
+    throw new Error(`Unsupported schemaVersion: ${JSON.stringify(schemaVersion)} — only rp_turn_outcome_v5 is supported`);
   }
   return "unknown";
 }
@@ -283,9 +195,8 @@ export function normalizeRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
     );
   }
 
-  const version = detectOutcomeVersion(obj);
-  if (version === "unknown") {
-    throw new Error(`Unsupported schemaVersion: ${JSON.stringify(obj.schemaVersion)}`);
+  if (obj.schemaVersion !== "rp_turn_outcome_v5") {
+    throw new Error(`Unsupported schemaVersion: ${JSON.stringify(obj.schemaVersion)} — only rp_turn_outcome_v5 is supported`);
   }
 
   if (typeof obj.publicReply !== "string") {
@@ -294,37 +205,7 @@ export function normalizeRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
     );
   }
 
-  if (version === "v5") {
-    return normalizeV5Submission(obj);
-  }
-
-  // V3/V4 path
-  const publicReply = obj.publicReply;
-  const latentScratchpad = typeof obj.latentScratchpad === "string"
-    ? obj.latentScratchpad
-    : undefined;
-  const privateCognition = normalizePrivateCommit(obj.privateCommit ?? obj.privateCognition);
-  const publications = normalizePublications(obj.publications);
-  const privateEpisodes: PrivateEpisodeArtifact[] = [];
-  const relationIntents: RelationIntent[] = [];
-  const conflictFactors: ConflictFactor[] = [];
-
-  if (publicReply === "" && (!privateCognition || privateCognition.ops.length === 0) && publications.length === 0) {
-    throw new Error(
-      "empty turn: publicReply is empty and privateCommit has no ops"
-    );
-  }
-
-  return {
-    schemaVersion: "rp_turn_outcome_v5",
-    publicReply,
-    ...(latentScratchpad !== undefined ? { latentScratchpad } : {}),
-    ...(privateCognition ? { privateCognition } : {}),
-    privateEpisodes,
-    publications,
-    relationIntents,
-    conflictFactors,
-  };
+  return normalizeV5Submission(obj);
 }
 
 export function validateRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
@@ -337,7 +218,7 @@ function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOut
     ? obj.latentScratchpad
     : undefined;
 
-  const privateCognition = normalizePrivateCommit(obj.privateCognition ?? obj.privateCommit);
+  const privateCognition = normalizePrivateCommit(obj.privateCognition);
   const publications = normalizePublicationsV5(obj.publications);
   const privateEpisodes = normalizePrivateEpisodes(obj.privateEpisodes);
   const pinnedSummaryProposal = normalizePinnedSummaryProposal(obj.pinnedSummaryProposal);
@@ -388,7 +269,7 @@ export function validateRpTurnOutcomeV5(payload: unknown): RpTurnOutcomeSubmissi
     for (const pub of obj.publications) {
       if (!pub || typeof pub !== "object") throw new Error("publication must be an object");
       const p = pub as Record<string, unknown>;
-      if (FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has(p.kind as string)) {
+      if (!["spoken", "written", "visual"].includes(p.kind as string)) {
         throw new Error(`"${p.kind}" is not a valid canonical publication kind`);
       }
     }
@@ -446,11 +327,8 @@ export function validateRpTurnOutcomeV5(payload: unknown): RpTurnOutcomeSubmissi
   return obj as unknown as RpTurnOutcomeSubmissionV5;
 }
 
-/**
- * Multi-version normalizer: accepts V3, V4, or V5 submissions and produces CanonicalRpTurnOutcome.
- */
 export function normalizeToCanonicalOutcome(
-  submission: RpTurnOutcomeSubmissionV5 | RpTurnOutcomeSubmissionV4 | RpTurnOutcomeSubmission,
+  submission: RpTurnOutcomeSubmissionV5,
 ): CanonicalRpTurnOutcome {
   return normalizeRpTurnOutcome(submission);
 }
@@ -464,23 +342,18 @@ function normalizePublicationsV5(raw: unknown): PublicationDeclaration[] {
   if (!Array.isArray(raw)) {
     throw new Error("publications must be an array when present");
   }
+  const VALID_TARGET_SCOPES = new Set<PublicationTargetScope>(["current_area", "world_public"]);
   const publications: PublicationDeclaration[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") {
       throw new Error("publication must be an object");
     }
     const publication = entry as Record<string, unknown>;
-    if (FORBIDDEN_CANONICAL_PUBLICATION_KINDS.has(publication.kind as string)) {
-      throw new Error(`"${publication.kind}" is not a valid canonical publication kind`);
-    }
-    let kind = publication.kind as string;
-    if (kind in PUBLICATION_KIND_COMPAT_MAP) {
-      kind = PUBLICATION_KIND_COMPAT_MAP[kind]!;
-    }
+    const kind = publication.kind as string;
     if (!V5_PUBLICATION_KINDS.has(kind)) {
       throw new Error(`invalid publication kind: ${JSON.stringify(publication.kind)}`);
     }
-    if (!V4_PUBLICATION_TARGET_SCOPES.has(publication.targetScope as PublicationTargetScope)) {
+    if (!VALID_TARGET_SCOPES.has(publication.targetScope as PublicationTargetScope)) {
       throw new Error(`invalid publication targetScope: ${JSON.stringify(publication.targetScope)}`);
     }
     if (typeof publication.summary !== "string") {
@@ -682,9 +555,7 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
     throw new Error("assertion stance must be a string");
   }
 
-  if (stance in V3_STANCE_TO_V4_STANCE) {
-    record.stance = V3_STANCE_TO_V4_STANCE[stance as AssertionRecord["stance"]];
-  } else if (!V4_ASSERTION_STANCES.has(stance as AssertionStance)) {
+  if (!V4_ASSERTION_STANCES.has(stance as AssertionStance)) {
     throw new Error(`invalid assertion stance: ${stance}`);
   }
 
@@ -693,9 +564,7 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
       throw new Error("assertion basis must be a string when present");
     }
     const rawBasis = record.basis as string;
-    if (rawBasis in V3_BASIS_TO_V4_BASIS) {
-      record.basis = V3_BASIS_TO_V4_BASIS[rawBasis as NonNullable<AssertionRecord["basis"]>];
-    } else if (!V4_ASSERTION_BASES.has(rawBasis as AssertionBasis)) {
+    if (!V4_ASSERTION_BASES.has(rawBasis as AssertionBasis)) {
       throw new Error(`invalid assertion basis: ${rawBasis}`);
     }
   }
@@ -705,42 +574,6 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
       throw new Error("assertion preContestedStance must be a forward-progress stance (hypothetical|tentative|accepted|confirmed) when stance is 'contested'");
     }
   }
-
-  delete record.confidence;
-}
-
-function normalizePublications(raw: unknown): PublicationDeclaration[] {
-  if (raw === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(raw)) {
-    throw new Error("publications must be an array when present");
-  }
-
-  const publications: PublicationDeclaration[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") {
-      throw new Error("publication must be an object");
-    }
-    const publication = entry as Record<string, unknown>;
-    if (!V4_PUBLICATION_KINDS.has(publication.kind as PublicationKind)) {
-      throw new Error(`invalid publication kind: ${JSON.stringify(publication.kind)}`);
-    }
-    if (!V4_PUBLICATION_TARGET_SCOPES.has(publication.targetScope as PublicationTargetScope)) {
-      throw new Error(`invalid publication targetScope: ${JSON.stringify(publication.targetScope)}`);
-    }
-    if (typeof publication.summary !== "string") {
-      throw new Error("publication summary must be a string");
-    }
-    publications.push({
-      kind: publication.kind as PublicationKind,
-      targetScope: publication.targetScope as PublicationTargetScope,
-      summary: publication.summary,
-    });
-  }
-
-  return publications;
 }
 
 function isCognitionEntityRef(value: unknown): value is CognitionEntityRef {
