@@ -159,20 +159,6 @@ const BASIS_TO_BELIEF_TYPE: Record<AssertionBasis, LegacyBeliefType> = {
   belief: "observation",
 };
 
-const LEGACY_EPISTEMIC_STATUS_TO_STANCE: Record<LegacyEpistemicStatus, AssertionStance> = {
-  confirmed: "confirmed",
-  suspected: "tentative",
-  hypothetical: "hypothetical",
-  retracted: "rejected",
-};
-
-const LEGACY_BELIEF_TYPE_TO_BASIS: Record<LegacyBeliefType, AssertionBasis> = {
-  observation: "first_hand",
-  inference: "inference",
-  suspicion: "inference",
-  intention: "introspection",
-};
-
 const TERMINAL_STANCES: ReadonlySet<AssertionStance> = new Set(["rejected", "abandoned"]);
 
 const ALLOWED_STANCE_TRANSITIONS: ReadonlyMap<AssertionStance, ReadonlySet<AssertionStance>> = new Map([
@@ -1019,28 +1005,6 @@ export class CognitionRepository {
     return this.toCanonicalCommitment(row);
   }
 
-  backfillLegacyRows(agentId: string): void {
-    this.db
-      .prepare(
-        `UPDATE agent_fact_overlay
-         SET stance = CASE epistemic_status
-             WHEN 'confirmed' THEN 'confirmed'
-             WHEN 'suspected' THEN 'tentative'
-             WHEN 'hypothetical' THEN 'hypothetical'
-             WHEN 'retracted' THEN 'rejected'
-             ELSE stance END,
-             basis = CASE belief_type
-             WHEN 'observation' THEN 'first_hand'
-             WHEN 'inference' THEN 'inference'
-             WHEN 'suspicion' THEN 'inference'
-             WHEN 'intention' THEN 'introspection'
-             ELSE basis END,
-             updated_at = ?
-         WHERE agent_id = ? AND (stance IS NULL OR basis IS NULL)`,
-      )
-      .run(Date.now(), agentId);
-  }
-
   private resolveEntityByPointerKey(pointerKey: string, agentId: string): number | null {
     const normalizedPointerKey = pointerKey.normalize("NFC");
     const row = this.db
@@ -1061,11 +1025,9 @@ export class CognitionRepository {
   }
 
   private toCanonicalAssertion(row: FactOverlayRow): CanonicalAssertionRow | null {
-    const stance = row.stance ?? (row.epistemic_status ? LEGACY_EPISTEMIC_STATUS_TO_STANCE[row.epistemic_status] : undefined);
-    if (!stance) {
+    if (!row.stance) {
       return null;
     }
-    const basis = row.basis ?? (row.belief_type ? LEGACY_BELIEF_TYPE_TO_BASIS[row.belief_type] : undefined) ?? null;
     return {
       id: row.id,
       agentId: row.agent_id,
@@ -1077,8 +1039,8 @@ export class CognitionRepository {
       opIndex: row.op_index,
       provenance: row.provenance,
       sourceEventRef: row.source_event_ref,
-      stance,
-      basis,
+      stance: row.stance,
+      basis: row.basis ?? null,
       preContestedStance: row.pre_contested_stance,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
