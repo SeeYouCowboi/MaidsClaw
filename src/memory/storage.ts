@@ -110,9 +110,8 @@ type CreatePrivateBeliefInput = {
   sourceEntityId: number;
   targetEntityId: number;
   predicate: string;
-  beliefType?: AgentFactOverlay["belief_type"];
-  confidence?: number;
-  epistemicStatus?: AgentFactOverlay["epistemic_status"];
+  basis: AssertionBasis;
+  stance: AssertionStance;
   provenance?: string;
   sourceEventRef?: AgentFactOverlay["source_event_ref"];
 };
@@ -608,23 +607,21 @@ export class GraphStorageService {
           source_entity_id,
           target_entity_id,
           predicate,
-          belief_type,
-          confidence,
-          epistemic_status,
+          basis,
+          stance,
           provenance,
           source_event_ref,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         params.agentId,
         params.sourceEntityId,
         params.targetEntityId,
         params.predicate,
-        params.beliefType ?? null,
-        params.confidence ?? null,
-        params.epistemicStatus ?? null,
+        params.basis,
+        params.stance,
         params.provenance ?? null,
         params.sourceEventRef ?? null,
         now,

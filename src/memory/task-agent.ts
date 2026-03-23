@@ -11,10 +11,9 @@ import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
+import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type {
   AgentEventOverlay,
-  BeliefType,
-  EpistemicStatus,
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
@@ -143,14 +142,13 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     description: "Create private belief overlay edges between entities.",
     inputSchema: {
       type: "object",
-      required: ["source", "target", "predicate", "belief_type", "confidence"],
+      required: ["source", "target", "predicate", "basis", "stance"],
       properties: {
         source: { type: ["number", "string"] },
         target: { type: ["number", "string"] },
         predicate: { type: "string" },
-        belief_type: { type: ["string", "null"] },
-        confidence: { type: ["number", "null"] },
-        epistemic_status: { type: ["string", "null"] },
+        basis: { type: "string", enum: ["first_hand", "hearsay", "inference", "introspection", "belief"] },
+        stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "contested", "rejected", "abandoned"] },
         provenance: { type: ["string", "null"] },
         source_event_ref: { type: ["string", "null"] },
       },
@@ -581,9 +579,8 @@ export class MemoryTaskAgent {
           sourceEntityId: source,
           targetEntityId: target,
           predicate: this.asString(call.arguments.predicate),
-          beliefType: this.asOptionalString(call.arguments.belief_type) as BeliefType | undefined,
-          confidence: this.asOptionalNumber(call.arguments.confidence) ?? undefined,
-          epistemicStatus: this.asOptionalString(call.arguments.epistemic_status) as EpistemicStatus | undefined,
+          basis: this.asString(call.arguments.basis) as AssertionBasis,
+          stance: this.asString(call.arguments.stance) as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
           sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
         });
