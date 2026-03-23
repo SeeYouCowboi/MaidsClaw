@@ -66,7 +66,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, belief_type TEXT, confidence REAL, epistemic_status TEXT CHECK (epistemic_status IN ('confirmed', 'suspected', 'hypothetical', 'retracted')), basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
+  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
   `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
@@ -412,6 +412,59 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     description: "Drop agent_event_overlay table (replaced by private_cognition_events + private_episode_events)",
     up: (db: Db) => {
       db.exec(`DROP TABLE IF EXISTS agent_event_overlay`);
+    },
+  },
+  {
+    id: "memory:018:rebuild-agent-fact-overlay-drop-legacy-columns",
+    description:
+      "Rebuild agent_fact_overlay without legacy columns: belief_type, confidence, epistemic_status",
+    up: (db: Db) => {
+      // Check if old columns still exist (idempotency)
+      const hasBelief = db
+        .query<{ name: string }>(`PRAGMA table_info(agent_fact_overlay)`)
+        .some((col) => col.name === "belief_type");
+      if (!hasBelief) return; // already clean
+
+      // Create new table without legacy columns
+      db.exec(`CREATE TABLE agent_fact_overlay_new (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        source_entity_id INTEGER NOT NULL,
+        target_entity_id INTEGER NOT NULL,
+        predicate TEXT NOT NULL,
+        basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')),
+        stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')),
+        pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')),
+        provenance TEXT,
+        source_label_raw TEXT,
+        source_event_ref TEXT,
+        cognition_key TEXT,
+        settlement_id TEXT,
+        op_index INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (pre_contested_stance IS NULL OR stance = 'contested')
+      )`);
+
+      // Copy canonical data only
+      db.exec(`INSERT INTO agent_fact_overlay_new
+        SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
+               basis, stance, pre_contested_stance, provenance,
+               source_label_raw, source_event_ref, cognition_key,
+               settlement_id, op_index, created_at, updated_at
+        FROM agent_fact_overlay`);
+
+      // Drop old, rename new
+      db.exec(`DROP TABLE agent_fact_overlay`);
+      db.exec(`ALTER TABLE agent_fact_overlay_new RENAME TO agent_fact_overlay`);
+
+      // Recreate indexes
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
+      );
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
+      );
     },
   },
 ];
