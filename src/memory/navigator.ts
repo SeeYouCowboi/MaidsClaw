@@ -964,65 +964,32 @@ export class GraphNavigator {
     const idToRef = new Map<number, NodeRef>();
     for (const ref of frontier) {
       const parsed = this.parseNodeRef(ref);
-      if (parsed) {
+      if (parsed?.kind === "private_event") {
         idToRef.set(parsed.id, ref);
       }
     }
     const ids = [...idToRef.keys()];
     if (ids.length === 0) {
+      this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
       return;
     }
     const placeholders = ids.map(() => "?").join(",");
 
     const rows = this.db
       .prepare(
-        `SELECT id, event_id, primary_actor_entity_id, location_entity_id, projectable_summary, created_at
-         FROM agent_event_overlay
+        `SELECT id, location_entity_id, summary, created_at
+         FROM private_episode_events
          WHERE agent_id=? AND id IN (${placeholders})`,
       )
       .all(viewerContext.viewer_agent_id, ...ids) as Array<{
       id: number;
-      event_id: number | null;
-      primary_actor_entity_id: number | null;
       location_entity_id: number | null;
-      projectable_summary: string | null;
+      summary: string | null;
       created_at: number;
     }>;
 
     for (const row of rows) {
       const privateRef = (idToRef.get(row.id) ?? `private_event:${row.id}`) as NodeRef;
-      if (row.event_id !== null) {
-        const eventRef = `event:${row.event_id}` as NodeRef;
-        if (this.isNodeVisible(eventRef, viewerContext)) {
-          this.pushEdge(map, privateRef, {
-            from: privateRef,
-            to: eventRef,
-            kind: "same_episode",
-            weight: 0.85,
-            timestamp: row.created_at,
-            summary: row.projectable_summary,
-            canonical_fact_id: null,
-            canonical_evidence: false,
-          });
-        }
-      }
-
-      if (row.primary_actor_entity_id !== null) {
-        const actorRef = `entity:${row.primary_actor_entity_id}` as NodeRef;
-        if (this.isNodeVisible(actorRef, viewerContext)) {
-          this.pushEdge(map, privateRef, {
-            from: privateRef,
-            to: actorRef,
-            kind: "participant",
-            weight: 0.8,
-            timestamp: row.created_at,
-            summary: row.projectable_summary,
-            canonical_fact_id: null,
-            canonical_evidence: false,
-          });
-        }
-      }
-
       if (row.location_entity_id !== null) {
         const locationRef = `entity:${row.location_entity_id}` as NodeRef;
         if (this.isNodeVisible(locationRef, viewerContext)) {
@@ -1032,7 +999,7 @@ export class GraphNavigator {
             kind: "entity_bridge",
             weight: 0.65,
             timestamp: row.created_at,
-            summary: row.projectable_summary,
+            summary: row.summary,
             canonical_fact_id: null,
             canonical_evidence: false,
           });
@@ -1212,9 +1179,15 @@ export class GraphNavigator {
     if (!parsed) {
       return null;
     }
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_event_overlay WHERE id=?")
+        .prepare("SELECT agent_id FROM private_episode_events WHERE id=?")
+        .get(parsed.id) as { agent_id: string } | undefined;
+      return row?.agent_id ?? null;
+    }
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id=?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row?.agent_id ?? null;
     }
@@ -1334,9 +1307,9 @@ export class GraphNavigator {
     this.populateSnapshots(map, "event", byKind.get("event"), "event_nodes", "summary", "timestamp");
     this.populateSnapshots(map, "entity", byKind.get("entity"), "entity_nodes", "summary", "updated_at");
     this.populateSnapshots(map, "fact", byKind.get("fact"), "fact_edges", "predicate", "t_valid");
-    this.populateSnapshots(map, "private_event", byKind.get("private_event"), "agent_event_overlay", "projectable_summary", "created_at");
-    this.populateSnapshots(map, "evaluation",    byKind.get("evaluation"),    "agent_event_overlay", "projectable_summary", "created_at");
-    this.populateSnapshots(map, "commitment",    byKind.get("commitment"),    "agent_event_overlay", "projectable_summary", "created_at");
+    this.populateSnapshots(map, "private_event", byKind.get("private_event"), "private_episode_events", "summary", "created_at");
+    this.populateSnapshots(map, "evaluation",    byKind.get("evaluation"),    "private_cognition_current", "summary_text", "updated_at");
+    this.populateSnapshots(map, "commitment",    byKind.get("commitment"),    "private_cognition_current", "summary_text", "updated_at");
     this.populateSnapshots(map, "private_belief", byKind.get("private_belief"), "agent_fact_overlay", "predicate", "created_at");
     this.populateSnapshots(map, "assertion",     byKind.get("assertion"),     "agent_fact_overlay", "predicate", "created_at");
 
@@ -1558,9 +1531,16 @@ export class GraphNavigator {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_event_overlay WHERE id = ?")
+        .prepare("SELECT agent_id FROM private_episode_events WHERE id = ?")
+        .get(parsed.id) as { agent_id: string } | undefined;
+      return row ? { agent_id: row.agent_id } : null;
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row ? { agent_id: row.agent_id } : null;
     }
@@ -1611,24 +1591,6 @@ export class GraphNavigator {
     return `Explain ${queryType}: ${evidencePaths.length} evidence path${evidencePaths.length === 1 ? "" : "s"}${redacted > 0 ? ` (${redacted} redacted placeholder${redacted === 1 ? "" : "s"})` : ""}`;
   }
 
-  private getRelatedNodeRefs(nodeRef: string): NodeRef[] {
-    try {
-      const rows = this.db
-        .prepare(
-          `SELECT source_node_ref, target_node_ref
-           FROM memory_relations
-           WHERE source_node_ref = ? OR target_node_ref = ?`,
-        )
-        .all(nodeRef, nodeRef) as Array<{ source_node_ref: string; target_node_ref: string }>;
-      return rows.map((r) =>
-        (r.source_node_ref === nodeRef ? r.target_node_ref : r.source_node_ref) as NodeRef,
-      );
-    } catch {
-      // table might not exist in some test environments
-      return [];
-    }
-  }
-
   private pushEdge(
     map: Map<NodeRef, InternalBeamEdge[]>,
     from: NodeRef,
@@ -1676,16 +1638,6 @@ export class GraphNavigator {
       }
     }
     return ids;
-  }
-
-  private reverseTemporalKind(kind: NavigatorEdgeKind): NavigatorEdgeKind {
-    if (kind === "temporal_prev") {
-      return "temporal_next";
-    }
-    if (kind === "temporal_next") {
-      return "temporal_prev";
-    }
-    return kind;
   }
 
   private clamp01(value: number): number {
