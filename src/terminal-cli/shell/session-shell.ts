@@ -106,8 +106,8 @@ export class SessionShell {
 
 				if (streamed.assistantText) {
 					writeText(streamed.assistantText);
-				} else if (summary.private_commit_count > 0) {
-					writeText("[silent turn — private commit only]");
+			} else if (summary.private_cognition_count > 0) {
+				writeText("[silent turn — private cognition only]");
 				} else {
 					writeText("[no output]");
 				}
@@ -140,8 +140,8 @@ export class SessionShell {
 			// Print assistant response
 			if (result.assistant_text) {
 				writeText(result.assistant_text);
-			} else if (result.private_commit.present) {
-				writeText("[silent turn — private commit only]");
+			} else if (result.private_cognition.present) {
+				writeText("[silent turn — private cognition only]");
 			} else {
 				writeText("[no output]");
 			}

@@ -96,7 +96,7 @@ export class ExplicitSettlementProcessor {
       const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
       const commitResult = this.commitCognitionOps(
         explicitMeta.ownerAgentId,
-        explicitMeta.privateCommit.ops,
+        explicitMeta.privateCognition.ops,
         explicitMeta.settlementId,
         currentLocationEntityId,
       );
@@ -133,7 +133,7 @@ export class ExplicitSettlementProcessor {
         );
       }
 
-      this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCommit.ops, created);
+      this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCognition.ops, created);
     }
   }
 

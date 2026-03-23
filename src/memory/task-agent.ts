@@ -13,7 +13,6 @@ import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type {
-  AgentEventOverlay,
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
@@ -519,9 +518,39 @@ export class MemoryTaskAgent {
     flushRequest: MemoryFlushRequest,
     toolCalls: ToolCallResult[],
     created: CreatedState,
-  ): AgentEventOverlay[] {
+  ): Array<{
+    id: number;
+    event_id: number | null;
+    agent_id: string;
+    role: string | null;
+    private_notes: string | null;
+    salience: number | null;
+    emotion: string | null;
+    event_category: PrivateEventCategory;
+    primary_actor_entity_id: number | null;
+    projection_class: ProjectionClass;
+    location_entity_id: number | null;
+    projectable_summary: string | null;
+    source_record_id: string | null;
+    created_at: number;
+  }> {
     const pointerToEntityId = new Map<string, number>();
-    const privateEvents: AgentEventOverlay[] = [];
+    const privateEvents: Array<{
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      role: string | null;
+      private_notes: string | null;
+      salience: number | null;
+      emotion: string | null;
+      event_category: PrivateEventCategory;
+      primary_actor_entity_id: number | null;
+      projection_class: ProjectionClass;
+      location_entity_id: number | null;
+      projectable_summary: string | null;
+      source_record_id: string | null;
+      created_at: number;
+    }> = [];
 
     for (const call of toolCalls) {
       if (call.name === "create_entity") {
@@ -650,7 +679,7 @@ export class MemoryTaskAgent {
     return privateEvents;
   }
 
-  private createSameEpisodeEdgesForBatch(privateEvents: AgentEventOverlay[]): void {
+  private createSameEpisodeEdgesForBatch(privateEvents: Array<{ event_id: number | null }>): void {
     const linkedEventIds = privateEvents
       .map((event) => event.event_id)
       .filter((eventId): eventId is number => typeof eventId === "number" && eventId > 0);

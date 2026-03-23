@@ -204,23 +204,6 @@ export type PointerRedirect = {
   created_at: number;
 };
 
-export type AgentEventOverlay = {
-  id: number;
-  event_id: number | null;
-  agent_id: string;
-  role: string | null;
-  private_notes: string | null;
-  salience: number | null;
-  emotion: string | null;
-  event_category: PrivateEventCategory;
-  primary_actor_entity_id: number | null;
-  projection_class: ProjectionClass;
-  location_entity_id: number | null;
-  projectable_summary: string | null;
-  source_record_id: string | null;
-  created_at: number;
-};
-
 export type AgentFactOverlay = {
   id: number;
   agent_id: string;
@@ -494,7 +477,7 @@ export interface IGraphNavigator {
 }
 
 export interface IMaterializationService {
-  materializeDelayed(privateEvents: AgentEventOverlay[], agentId: string): number[];
+  materializeDelayed(privateEvents: unknown[], agentId: string): number[];
 }
 
 export interface IPromotionService {

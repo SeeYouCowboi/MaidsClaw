@@ -66,12 +66,9 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_event_overlay (id INTEGER PRIMARY KEY, event_id INTEGER, agent_id TEXT NOT NULL, role TEXT, private_notes TEXT, salience REAL, emotion TEXT, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'thought', 'observation', 'state_change')), primary_actor_entity_id INTEGER, projection_class TEXT NOT NULL DEFAULT 'none' CHECK (projection_class IN ('none', 'area_candidate')), location_entity_id INTEGER, target_entity_id INTEGER, projectable_summary TEXT, source_record_id TEXT, cognition_key TEXT, explicit_kind TEXT, settlement_id TEXT, op_index INTEGER, metadata_json TEXT, cognition_status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, updated_at INTEGER)`,
-  `CREATE INDEX IF NOT EXISTS idx_agent_event_overlay_agent_event ON agent_event_overlay(agent_id, event_id)`,
   `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, belief_type TEXT, confidence REAL, epistemic_status TEXT CHECK (epistemic_status IN ('confirmed', 'suspected', 'hypothetical', 'retracted')), basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
   `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_event_overlay_agent_cognition_key_active ON agent_event_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL AND cognition_status = 'active'`,
   `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
   `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -408,6 +405,13 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
       );
+    },
+  },
+  {
+    id: "memory:017:drop-agent-event-overlay",
+    description: "Drop agent_event_overlay table (replaced by private_cognition_events + private_episode_events)",
+    up: (db: Db) => {
+      db.exec(`DROP TABLE IF EXISTS agent_event_overlay`);
     },
   },
 ];

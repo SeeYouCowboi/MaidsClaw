@@ -232,7 +232,7 @@ function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOut
 
   if (!hasContent) {
     throw new Error(
-      "empty turn: publicReply is empty and privateCommit has no ops"
+      "empty turn: publicReply is empty and privateCognition has no ops"
     );
   }
 
@@ -493,12 +493,12 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
   }
 
   if (raw === null || typeof raw !== "object") {
-    throw new Error("privateCommit must be an object if present");
+    throw new Error("privateCognition must be an object if present");
   }
 
   const commit = raw as Record<string, unknown>;
   if (!Array.isArray(commit.ops)) {
-    throw new Error("privateCommit.ops must be an array");
+    throw new Error("privateCognition.ops must be an array");
   }
 
   const normalizedOps: CognitionOp[] = [];
@@ -527,7 +527,7 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
       continue;
     }
 
-    throw new Error(`unsupported privateCommit op: ${JSON.stringify(op.op)}`);
+    throw new Error(`unsupported privateCognition op: ${JSON.stringify(op.op)}`);
   }
 
   return {

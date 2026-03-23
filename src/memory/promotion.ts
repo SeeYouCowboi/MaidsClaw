@@ -416,7 +416,7 @@ export class PromotionService implements IPromotionService {
     if (candidate.source_ref.startsWith("private_event:") || candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
       const id = Number(candidate.source_ref.split(":")[1]);
       const row = this.db
-        .prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`)
+        .prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`)
         .get(id) as { created_at: number } | null;
       return row?.created_at ?? Date.now();
     }

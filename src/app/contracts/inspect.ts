@@ -10,7 +10,7 @@ export type RedactedSettlement = {
   kinds?: string[];
 };
 
-export type PrivateCommitSummary = {
+export type PrivateCognitionSummary = {
   present: boolean;
   op_count: number;
   kinds: string[];

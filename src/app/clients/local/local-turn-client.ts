@@ -7,7 +7,7 @@ import type {
 	ObservationEvent,
 	TurnExecutionResult,
 } from "../../contracts/execution.js";
-import type { PrivateCommitSummary } from "../../contracts/inspect.js";
+import type { PrivateCognitionSummary } from "../../contracts/inspect.js";
 import { TraceStore } from "../../diagnostics/trace-store.js";
 import {
 	type ExecuteUserTurnDeps,
@@ -101,7 +101,7 @@ export async function executeLocalTurn(
 		? normalizeSettlementPayload(settlementPayloadRaw)
 		: undefined;
 
-	const privateCommit = summarizePrivateCommit(settlementPayload);
+	const privateCognition = summarizePrivateCognition(settlementPayload);
 	const hasPublicReply =
 		typeof settlementPayload?.hasPublicReply === "boolean"
 			? settlementPayload.hasPublicReply
@@ -117,7 +117,7 @@ export async function executeLocalTurn(
 				: undefined,
 		assistant_text: assistantText,
 		has_public_reply: hasPublicReply,
-		private_commit: privateCommit,
+		private_cognition: privateCognition,
 		recovery_required: deps.sessionService.requiresRecovery(params.sessionId),
 		public_chunks: publicChunks,
 		tool_events: toolEvents,
@@ -199,10 +199,10 @@ function normalizeChunk(
 	}
 }
 
-function summarizePrivateCommit(
-	settlementPayload: { privateCognition?: { ops: unknown[] }; privateCommit?: { ops: unknown[] } } | undefined,
-): PrivateCommitSummary {
-	const ops = (settlementPayload?.privateCognition?.ops ?? settlementPayload?.privateCommit?.ops ?? []) as Array<{ op: string; record?: { kind: string }; target?: { kind: string } }>;
+function summarizePrivateCognition(
+	settlementPayload: { privateCognition?: { ops: unknown[] } } | undefined,
+): PrivateCognitionSummary {
+	const ops = (settlementPayload?.privateCognition?.ops ?? []) as Array<{ op: string; record?: { kind: string }; target?: { kind: string } }>;
 	if (ops.length === 0) {
 		return {
 			present: false,

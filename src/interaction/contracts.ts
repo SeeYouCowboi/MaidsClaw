@@ -5,7 +5,6 @@ import type { ProjectionAppendix } from "../core/types.js";
 import type {
   ConflictFactor,
   PinnedSummaryProposal,
-  PrivateCognitionCommit,
   PrivateCognitionCommitV4,
   PrivateEpisodeArtifact,
   PublicationDeclaration,
@@ -102,8 +101,6 @@ export type TurnSettlementPayload = {
     currentLocationEntityId?: number;
   };
   schemaVersion?: "turn_settlement_v3" | "turn_settlement_v4" | "turn_settlement_v5";
-  /** @deprecated Use privateCognition. Kept for V3/V4 compat reads. */
-  privateCommit?: PrivateCognitionCommit | PrivateCognitionCommitV4;
   privateCognition?: PrivateCognitionCommitV4;
   privateEpisodes?: PrivateEpisodeArtifact[];
   publications?: PublicationDeclaration[];

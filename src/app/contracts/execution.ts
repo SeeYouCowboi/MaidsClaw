@@ -1,4 +1,4 @@
-import type { PrivateCommitSummary } from "./inspect.js";
+import type { PrivateCognitionSummary } from "./inspect.js";
 import type { AppExecutionMode } from "./session.js";
 
 type ToolLifecycleType =
@@ -65,7 +65,7 @@ export type TurnExecutionResult = {
   settlement_id?: string;
   assistant_text: string;
   has_public_reply: boolean;
-  private_commit: PrivateCommitSummary;
+  private_cognition: PrivateCognitionSummary;
   recovery_required: boolean;
   public_chunks: ObservationEvent[];
   tool_events: ObservationEvent[];

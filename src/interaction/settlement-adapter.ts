@@ -1,7 +1,6 @@
 import type {
 	ConflictFactor,
 	PinnedSummaryProposal,
-	PrivateCognitionCommit,
 	PrivateCognitionCommitV4,
 	PrivateEpisodeArtifact,
 	PublicationDeclaration,
@@ -68,28 +67,5 @@ export function normalizeSettlementPayload(
 function resolvePrivateCognition(
 	payload: TurnSettlementPayload,
 ): PrivateCognitionCommitV4 | undefined {
-	if (payload.privateCognition) {
-		return payload.privateCognition;
-	}
-	return normalizePrivateCommitCompat(payload.privateCommit);
-}
-
-function normalizePrivateCommitCompat(
-	privateCommit: PrivateCognitionCommit | PrivateCognitionCommitV4 | undefined,
-): PrivateCognitionCommitV4 | undefined {
-	if (!privateCommit) {
-		return undefined;
-	}
-
-	if (privateCommit.schemaVersion === "rp_private_cognition_v4") {
-		return privateCommit;
-	}
-
-	return {
-		schemaVersion: "rp_private_cognition_v4",
-		...(typeof privateCommit.summary === "string"
-			? { summary: privateCommit.summary }
-			: {}),
-		ops: privateCommit.ops,
-	};
+	return payload.privateCognition;
 }
