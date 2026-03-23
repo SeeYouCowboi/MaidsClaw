@@ -1,7 +1,7 @@
 import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
-import type { ViewerContext } from "./types";
+import type { NavigatorResult, ViewerContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tool definition shape
@@ -22,7 +22,7 @@ export type MemoryToolDefinition = {
 // ---------------------------------------------------------------------------
 
 type GraphNavigatorLike = {
-  explore(query: string, ctx: ViewerContext): unknown | Promise<unknown>;
+  explore(query: string, ctx: ViewerContext): NavigatorResult | Promise<NavigatorResult>;
 };
 
 // ---------------------------------------------------------------------------
@@ -260,6 +260,38 @@ async function narrativeSearchHandler(
   return { results };
 }
 
+function toExplainShell(result: NavigatorResult): {
+  query: string;
+  query_type: string;
+  summary: string;
+  evidence_paths: Array<{
+    rank: number;
+    summary: string;
+    score: number;
+    seed: string;
+    depth: number;
+    visible_steps: string[];
+    redacted: unknown[];
+    supporting_facts: number[];
+  }>;
+} {
+  return {
+    query: result.query,
+    query_type: result.query_type,
+    summary: result.summary ?? `Explain ${result.query_type}: ${result.evidence_paths.length} path(s)`,
+    evidence_paths: result.evidence_paths.map((path, index) => ({
+      rank: index + 1,
+      summary: path.summary ?? `${path.path.nodes.length} visible steps`,
+      score: path.score.path_score,
+      seed: path.path.seed,
+      depth: path.path.depth,
+      visible_steps: [...path.path.nodes],
+      redacted: [...(path.redacted_placeholders ?? [])],
+      supporting_facts: [...path.supporting_facts],
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tool: narrative_search
 // ---------------------------------------------------------------------------
@@ -399,7 +431,8 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
   return {
     name: "memory_explore",
     description:
-      `Deep graph-aware exploration of memory. Use for complex questions about causes, relationships, and timelines. ` +
+      `Explain evidence paths for why/relationship/timeline/state/conflict questions. ` +
+      `Returns concise summaries with redacted placeholders for hidden steps. ` +
       POINTER_GUIDE,
     effectClass: "read_only",
     traceVisibility: "public",
@@ -420,14 +453,18 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
       required: ["query"],
       additionalProperties: false,
     },
-    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
       const query = args.query as string;
+      if (typeof query !== "string" || query.trim().length === 0) {
+        return { success: false, error: "query must be a non-empty string" };
+      }
 
       if (!services.navigator) {
         return { success: false, error: "GraphNavigator not available" };
       }
 
-      return services.navigator.explore(query, viewerContext);
+      const result = await services.navigator.explore(query.trim(), viewerContext);
+      return toExplainShell(result);
     },
   };
 }

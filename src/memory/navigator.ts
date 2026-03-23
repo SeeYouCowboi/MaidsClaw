@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite";
 import type { AliasService } from "./alias.js";
 import type { RetrievalService } from "./retrieval.js";
 import { MAX_INTEGER } from "./schema.js";
+import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
+import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
   BeamEdge,
   BeamPath,
@@ -12,6 +14,7 @@ import type {
   NodeRefKind,
   PathScore,
   QueryType,
+  RedactedPlaceholder,
   SeedCandidate,
   ViewerContext,
 } from "./types.js";
@@ -79,12 +82,14 @@ const QUERY_TYPE_PRIORITY = {
   relationship: ["fact_relation", "fact_support", "participant", "semantic_similar"],
   timeline: ["temporal_prev", "temporal_next", "same_episode", "causal", "fact_support"],
   state: ["fact_relation", "conflict_or_update", "fact_support", "temporal_next"],
+  conflict: ["conflict_or_update", "fact_relation", "fact_support", "causal", "temporal_prev"],
 } satisfies Record<QueryType, NavigatorEdgeKind[]>;
 
 const WHY_KEYWORDS = ["why", "because", "reason", "cause"];
 const TIMELINE_KEYWORDS = ["when", "timeline", "before", "after", "sequence"];
 const RELATIONSHIP_KEYWORDS = ["relationship", "between", "connected", "related"];
 const STATE_KEYWORDS = ["state", "status", "current", "now", "is"];
+const CONFLICT_KEYWORDS = ["conflict", "contradict", "dispute", "contested", "inconsistent"];
 const TIME_CONSTRAINT_KEYWORDS = [
   "yesterday",
   "today",
@@ -107,6 +112,9 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
 ]);
 
 export class GraphNavigator {
+  private readonly visibilityPolicy: VisibilityPolicy;
+  private readonly redactionPolicy: RedactionPolicy;
+
   constructor(
     private readonly db: Database,
     private readonly retrieval: RetrievalService,
@@ -114,7 +122,14 @@ export class GraphNavigator {
     _modelProvider?: ModelProviderClientLike,
     private readonly narrativeSearch?: NarrativeSearchServiceLike,
     private readonly cognitionSearch?: CognitionSearchServiceLike,
-  ) {}
+    visibilityPolicy?: VisibilityPolicy,
+    redactionPolicy?: RedactionPolicy,
+    authorizationPolicy?: AuthorizationPolicy,
+  ) {
+    const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
+    this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
+    this.redactionPolicy = redactionPolicy ?? new RedactionPolicy();
+  }
 
   async explore(
     query: string,
@@ -138,6 +153,7 @@ export class GraphNavigator {
       return {
         query,
         query_type: analysis.query_type,
+        summary: `No explain evidence found for '${query}'`,
         evidence_paths: [],
       };
     }
@@ -150,6 +166,7 @@ export class GraphNavigator {
     return {
       query,
       query_type: analysis.query_type,
+      summary: this.summarizeResult(query, analysis.query_type, assembled),
       evidence_paths: assembled,
     };
   }
@@ -187,6 +204,8 @@ export class GraphNavigator {
     let queryType: QueryType = "event";
     if (this.includesAny(normalized, WHY_KEYWORDS)) {
       queryType = "why";
+    } else if (this.includesAny(normalized, CONFLICT_KEYWORDS)) {
+      queryType = "conflict";
     } else if (this.includesAny(normalized, TIMELINE_KEYWORDS)) {
       queryType = "timeline";
     } else if (this.includesAny(normalized, RELATIONSHIP_KEYWORDS)) {
@@ -363,6 +382,7 @@ export class GraphNavigator {
       relationship: { entity: 1, fact: 0.9, event: 0.45, private_event: 0.45, private_belief: 0.7 },
       timeline: { event: 1, fact: 0.5, entity: 0.3, private_event: 0.85, private_belief: 0.45 },
       state: { fact: 1, entity: 0.85, event: 0.5, private_event: 0.5, private_belief: 0.8 },
+      conflict: { private_belief: 1, fact: 0.9, event: 0.7, private_event: 0.75, entity: 0.6 },
     } satisfies Record<QueryType, Record<NodeRefKind, number>>;
 
     return priors[queryType][nodeKind] ?? 0.2;
@@ -1426,7 +1446,17 @@ export class GraphNavigator {
   }
 
   private applyPostFilterSafetyNet(evidencePath: EvidencePath, viewerContext: ViewerContext): EvidencePath | null {
-    const visibleNodes = evidencePath.path.nodes.filter((node) => this.isNodeVisible(node, viewerContext));
+    const visibleNodes: NodeRef[] = [];
+    const redactedPlaceholders: RedactedPlaceholder[] = [];
+    for (const node of evidencePath.path.nodes) {
+      const disposition = this.getNodeDisposition(node, viewerContext);
+      if (disposition === "visible") {
+        visibleNodes.push(node);
+      } else {
+        redactedPlaceholders.push(this.redactionPolicy.toPlaceholder(node, disposition));
+      }
+    }
+
     if (visibleNodes.length === 0) {
       return null;
     }
@@ -1447,7 +1477,10 @@ export class GraphNavigator {
       score: evidencePath.score,
       supporting_nodes: filteredSupportingNodes,
       supporting_facts: evidencePath.supporting_facts,
+      ...(redactedPlaceholders.length > 0 ? { redacted_placeholders: redactedPlaceholders } : {}),
     };
+
+    filtered.summary = this.summarizeEvidencePath(filtered);
 
     if (filtered.path.nodes.length === 0) {
       return null;
@@ -1456,59 +1489,81 @@ export class GraphNavigator {
   }
 
   private isNodeVisible(nodeRef: NodeRef, viewerContext: ViewerContext): boolean {
+    return this.getNodeDisposition(nodeRef, viewerContext) === "visible";
+  }
+
+  private getNodeDisposition(nodeRef: NodeRef, viewerContext: ViewerContext): VisibilityDisposition {
+    const nodeData = this.loadNodeVisibilityData(nodeRef);
+    if (!nodeData) {
+      return "hidden";
+    }
+    return this.visibilityPolicy.getNodeDisposition(viewerContext, nodeRef, nodeData);
+  }
+
+  private loadNodeVisibilityData(nodeRef: NodeRef): Record<string, unknown> | null {
     const parsed = this.parseNodeRef(nodeRef);
     if (!parsed) {
-      return false;
+      return null;
     }
 
     if (parsed.kind === "entity") {
       const row = this.db
         .prepare("SELECT memory_scope, owner_agent_id FROM entity_nodes WHERE id = ?")
         .get(parsed.id) as { memory_scope: "shared_public" | "private_overlay"; owner_agent_id: string | null } | undefined;
-      if (!row) {
-        return false;
-      }
-      return (
-        row.memory_scope === "shared_public" ||
-        (row.memory_scope === "private_overlay" && row.owner_agent_id === viewerContext.viewer_agent_id)
-      );
+      return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
     if (parsed.kind === "private_event") {
       const row = this.db
         .prepare("SELECT agent_id FROM agent_event_overlay WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
-      return row?.agent_id === viewerContext.viewer_agent_id;
+      return row ? { agent_id: row.agent_id } : null;
     }
 
     if (parsed.kind === "private_belief") {
       const row = this.db
         .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
-      return row?.agent_id === viewerContext.viewer_agent_id;
+      return row ? { agent_id: row.agent_id } : null;
     }
 
     if (parsed.kind === "event") {
       const row = this.db
         .prepare("SELECT visibility_scope, location_entity_id FROM event_nodes WHERE id = ?")
         .get(parsed.id) as { visibility_scope: "world_public" | "area_visible"; location_entity_id: number } | undefined;
-      if (!row) {
-        return false;
-      }
-      return (
-        row.visibility_scope === "world_public" ||
-        (row.visibility_scope === "area_visible" && viewerContext.current_area_id != null && row.location_entity_id === viewerContext.current_area_id)
-      );
+      return row
+        ? {
+          visibility_scope: row.visibility_scope,
+          location_entity_id: row.location_entity_id,
+          owner_agent_id: null,
+        }
+        : null;
     }
 
     if (parsed.kind === "fact") {
       const row = this.db
         .prepare("SELECT id FROM fact_edges WHERE id = ? AND t_invalid = ?")
         .get(parsed.id, MAX_INTEGER) as { id: number } | undefined;
-      return Boolean(row);
+      return row ? { id: row.id } : null;
     }
 
-    return false;
+    return null;
+  }
+
+  private summarizeEvidencePath(path: EvidencePath): string {
+    const stepCount = path.path.nodes.length;
+    const redactedCount = path.redacted_placeholders?.length ?? 0;
+    const facts = path.supporting_facts.length;
+    const confidence = Number.isFinite(path.score.path_score) ? path.score.path_score.toFixed(2) : "0.00";
+    return `${stepCount} visible step${stepCount === 1 ? "" : "s"}, ${facts} supporting fact${facts === 1 ? "" : "s"}, score ${confidence}${redactedCount > 0 ? `, ${redactedCount} redacted` : ""}`;
+  }
+
+  private summarizeResult(query: string, queryType: QueryType, evidencePaths: EvidencePath[]): string {
+    if (evidencePaths.length === 0) {
+      return `No explain evidence found for '${query}'`;
+    }
+    const redacted = evidencePaths.reduce((count, path) => count + (path.redacted_placeholders?.length ?? 0), 0);
+    return `Explain ${queryType}: ${evidencePaths.length} evidence path${evidencePaths.length === 1 ? "" : "s"}${redacted > 0 ? ` (${redacted} redacted placeholder${redacted === 1 ? "" : "s"})` : ""}`;
   }
 
   private getRelatedNodeRefs(nodeRef: string): NodeRef[] {

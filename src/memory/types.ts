@@ -29,8 +29,17 @@ export type SemanticEdgeType = (typeof SEMANTIC_EDGE_TYPES)[number];
 export const EMBEDDING_VIEW_TYPES = ["primary", "keywords", "context"] as const;
 export type EmbeddingViewType = (typeof EMBEDDING_VIEW_TYPES)[number];
 
-export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state"] as const;
+export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state", "conflict"] as const;
 export type QueryType = (typeof QUERY_TYPES)[number];
+
+export const REDACTION_REASONS = ["hidden", "private", "admin_only"] as const;
+export type RedactionReason = (typeof REDACTION_REASONS)[number];
+
+export type RedactedPlaceholder = {
+  type: "redacted";
+  reason: RedactionReason;
+  node_ref: string;
+};
 
 export const NAVIGATOR_EDGE_KINDS = [
   "causal",
@@ -339,11 +348,14 @@ export type EvidencePath = {
   score: PathScore;
   supporting_nodes: NodeRef[];
   supporting_facts: number[];
+  redacted_placeholders?: RedactedPlaceholder[];
+  summary?: string;
 };
 
 export type NavigatorResult = {
   query: string;
   query_type: QueryType;
+  summary?: string;
   evidence_paths: EvidencePath[];
 };
 

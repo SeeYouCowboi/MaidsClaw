@@ -406,6 +406,70 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
+  it("memory_explore is an explain-only entrypoint and redacts raw navigator payload fields", async () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as CoreMemoryService,
+      retrieval: {} as any,
+      navigator: {
+        async explore() {
+          return {
+            query: "why happened",
+            query_type: "why",
+            summary: "Explain why: 1 evidence path",
+            evidence_paths: [
+              {
+                path: {
+                  seed: "event:1",
+                  nodes: ["event:1"],
+                  edges: [],
+                  depth: 0,
+                },
+                score: {
+                  seed_score: 0.8,
+                  edge_type_score: 0.8,
+                  temporal_consistency: 1,
+                  query_intent_match: 1,
+                  support_score: 0.5,
+                  recency_score: 0.5,
+                  hop_penalty: 0,
+                  redundancy_penalty: 0,
+                  path_score: 0.86,
+                },
+                supporting_nodes: [],
+                supporting_facts: [11],
+                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:7" }],
+                summary: "1 visible step",
+              },
+            ],
+            raw_rows: [{ id: 1 }],
+            internal_json: { unsafe: true },
+          } as any;
+        },
+      },
+    });
+
+    const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+    expect(exploreTool).toBeDefined();
+    expect(exploreTool!.description.includes("Explain evidence paths")).toBe(true);
+    const exploreProperties = ((exploreTool!.parameters as { properties?: Record<string, unknown> }).properties ?? {});
+    expect(Object.keys(exploreProperties)).toEqual(["query"]);
+
+    const result = await exploreTool!.handler(
+      { query: "why happened" },
+      {
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        current_area_id: 1,
+        session_id: "sess-explore-contract",
+      },
+    ) as Record<string, unknown>;
+
+    expect(result.summary).toBe("Explain why: 1 evidence path");
+    expect(Array.isArray(result.evidence_paths)).toBe(true);
+    expect(result.raw_rows).toBeUndefined();
+    expect(result.internal_json).toBeUndefined();
+  });
+
   it("RP prompt frontstage uses persona/pinned-shared surfaces without legacy memory-hints injection", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 

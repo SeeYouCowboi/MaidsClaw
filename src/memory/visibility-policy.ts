@@ -1,4 +1,5 @@
 import type { ViewerContext } from "./types.js";
+import { AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
 
 /**
  * Unified visibility policy for the memory graph.
@@ -7,6 +8,8 @@ import type { ViewerContext } from "./types.js";
  * retrieval, navigation, and embedding queries share the same rules.
  */
 export class VisibilityPolicy {
+  constructor(private readonly authorization: AuthorizationPolicy = new AuthorizationPolicy()) {}
+
   // ── Per-node-type visibility checks ──────────────────────────────────
 
   isEventVisible(
@@ -62,22 +65,46 @@ export class VisibilityPolicy {
    *   - private_event / private_belief: { agent_id }
    */
   isNodeVisible(viewerContext: ViewerContext, nodeRef: string, nodeData: unknown): boolean {
+    return this.getNodeDisposition(viewerContext, nodeRef, nodeData) === "visible";
+  }
+
+  getNodeDisposition(
+    viewerContext: ViewerContext,
+    nodeRef: string,
+    nodeData: unknown,
+  ): VisibilityDisposition {
     const kind = nodeRef.split(":")[0];
     const data = nodeData as Record<string, unknown>;
 
     if (kind === "event") {
-      return this.isEventVisible(viewerContext, data as { visibility_scope: string; location_entity_id: number });
+      const visibilityScope = String(data.visibility_scope ?? "");
+      if (visibilityScope === "system_only") {
+        return this.authorization.canViewAdminOnly(viewerContext) ? "visible" : "admin_only";
+      }
+      if (visibilityScope === "owner_private") {
+        const ownerAgentId = typeof data.owner_agent_id === "string" ? data.owner_agent_id : null;
+        return this.authorization.canViewPrivateOwner(viewerContext, ownerAgentId) ? "visible" : "private";
+      }
+      return this.isEventVisible(viewerContext, data as { visibility_scope: string; location_entity_id: number })
+        ? "visible"
+        : "hidden";
     }
     if (kind === "entity") {
-      return this.isEntityVisible(viewerContext, data as { memory_scope: string; owner_agent_id: string | null });
+      const entity = data as { memory_scope: string; owner_agent_id: string | null };
+      if (entity.memory_scope === "private_overlay") {
+        return this.authorization.canViewPrivateOwner(viewerContext, entity.owner_agent_id)
+          ? "visible"
+          : "private";
+      }
+      return this.isEntityVisible(viewerContext, entity) ? "visible" : "hidden";
     }
     if (kind === "fact") {
-      return this.isFactVisible(viewerContext);
+      return this.isFactVisible(viewerContext) ? "visible" : "hidden";
     }
     if (kind === "private_event" || kind === "private_belief") {
-      return this.isPrivateNodeVisible(viewerContext, data as { agent_id: string });
+      return this.isPrivateNodeVisible(viewerContext, data as { agent_id: string }) ? "visible" : "private";
     }
-    return false;
+    return "hidden";
   }
 
   // ── SQL predicate builders ───────────────────────────────────────────

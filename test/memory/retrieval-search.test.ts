@@ -11,6 +11,7 @@ import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orch
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
+import { buildMemoryTools } from "../../src/memory/tools.js";
 import type { ViewerContext } from "../../src/memory/types.js";
 import { openDatabase } from "../../src/storage/database.js";
 
@@ -931,6 +932,57 @@ describe("RetrievalService", () => {
 	});
 
 	describe("Typed Retrieval Surface", () => {
+		it("keeps typed retrieval frontstage separate from memory_explore explain shell", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			storage.syncSearchDoc("world", "event:1" as any, "A ledger dispute happened in the hall");
+
+			const retrieval = new RetrievalService(db);
+			const typed = await retrieval.generateTypedRetrieval(
+				"ledger dispute",
+				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
+				undefined,
+				{
+					cognitionBudget: 1,
+					narrativeBudget: 1,
+					conflictNotesBudget: 1,
+					episodeBudget: 0,
+				},
+			);
+
+			expect((typed as Record<string, unknown>).evidence_paths).toBeUndefined();
+			expect((typed as Record<string, unknown>).query_type).toBeUndefined();
+
+			const tools = buildMemoryTools({
+				coreMemory: {} as any,
+				retrieval,
+				navigator: {
+					async explore() {
+						return {
+							query: "ledger dispute",
+							query_type: "conflict",
+							summary: "Explain conflict: 1 evidence path",
+							evidence_paths: [],
+						};
+					},
+				},
+			});
+
+			const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+			expect(exploreTool).toBeDefined();
+			const exploreResult = await exploreTool!.handler(
+				{ query: "ledger dispute" },
+				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
+			) as Record<string, unknown>;
+
+			expect(exploreResult.summary).toBe("Explain conflict: 1 evidence path");
+			expect(exploreResult.evidence_paths).toBeDefined();
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
 		it("uses per-type budgets and keeps episode default at zero", async () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
