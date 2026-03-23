@@ -1,7 +1,4 @@
-import {
-  BELIEF_TYPE_TO_BASIS,
-  EPISTEMIC_STATUS_TO_STANCE,
-} from "../runtime/rp-turn-contract.js";
+
 import type { Db } from "../storage/database.js";
 import type { MigrationStep } from "../storage/migrations.js";
 import { runMigrations } from "../storage/migrations.js";
@@ -218,8 +215,18 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:006:backfill-canonical-stances",
     description: "Backfill canonical stance and basis columns from legacy fields",
     up: (db: Db) => {
-      const stanceCase = buildCaseExpression(EPISTEMIC_STATUS_TO_STANCE);
-      const basisCase = buildCaseExpression(BELIEF_TYPE_TO_BASIS);
+      const stanceCase = buildCaseExpression({
+        confirmed: "confirmed",
+        suspected: "tentative",
+        hypothetical: "hypothetical",
+        retracted: "rejected",
+      });
+      const basisCase = buildCaseExpression({
+        observation: "first_hand",
+        inference: "inference",
+        suspicion: "inference",
+        intention: "introspection",
+      });
 
       db.exec(
         `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
