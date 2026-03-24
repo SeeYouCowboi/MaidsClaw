@@ -673,6 +673,26 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
     },
   },
+  {
+    id: "memory:025:add-pinned-summary-proposals-table",
+    description:
+      "Add pinned_summary_proposals table for persistent proposal workflow",
+    up: (db: Db) => {
+      db.exec(`CREATE TABLE IF NOT EXISTS pinned_summary_proposals (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        settlement_id TEXT NOT NULL,
+        proposed_text TEXT NOT NULL,
+        rationale TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'rejected')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_psp_agent_status ON pinned_summary_proposals(agent_id, status)`,
+      );
+    },
+  },
 ];
 
 function escapeSqlLiteral(value: string): string {

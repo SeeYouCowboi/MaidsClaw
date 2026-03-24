@@ -675,11 +675,11 @@ describe("migration:022 node_embeddings node_id", () => {
 		} catch {}
 	}
 
-	it("applies 24 migrations without error", () => {
+	it("applies 25 migrations without error", () => {
 		const { db, dbPath } = freshMigrationDb();
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(24);
+		expect(rows!.cnt).toBe(25);
 		db.close();
 		cleanup(dbPath);
 	});
