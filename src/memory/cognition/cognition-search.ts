@@ -3,7 +3,14 @@ import type { Db } from "../../storage/database.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
-import { RelationBuilder } from "./relation-builder.js";
+import { RelationBuilder, type ConflictEvidence } from "./relation-builder.js";
+
+type ConflictEvidenceItem = {
+  targetRef: string;
+  strength: number;
+  sourceKind: string;
+  sourceRef: string;
+};
 
 type CognitionSearchParams = {
   agentId: string;
@@ -23,7 +30,7 @@ type CognitionHit = {
   source_ref: NodeRef;
   content: string;
   updated_at: number;
-  conflictEvidence?: string[];
+  conflictEvidence?: ConflictEvidenceItem[];
   conflictSummary?: string | null;
   conflictFactorRefs?: NodeRef[];
 };
@@ -92,13 +99,18 @@ export class CognitionSearchService {
 
       hit.conflictSummary = summary;
       hit.conflictFactorRefs = factorRefs;
-      hit.conflictEvidence = [`Risk: ${summary}`];
-
-      if (!current && factorRefs.length === 0) {
-        hit.conflictEvidence = ["Risk: contested cognition"];
-      }
+      hit.conflictEvidence = this.toConflictEvidenceItems(evidence);
     }
     return hits;
+  }
+
+  private toConflictEvidenceItems(evidence: ConflictEvidence[]): ConflictEvidenceItem[] {
+    return evidence.map((e) => ({
+      targetRef: e.targetRef,
+      strength: e.strength,
+      sourceKind: e.sourceKind,
+      sourceRef: e.sourceRef,
+    }));
   }
 
   private parseFactorRefsJson(value: string | null): NodeRef[] {
@@ -386,4 +398,4 @@ export class CurrentProjectionReader {
   }
 }
 
-export type { CognitionHit, CognitionSearchParams, CognitionCurrentRow };
+export type { CognitionHit, CognitionSearchParams, CognitionCurrentRow, ConflictEvidenceItem };

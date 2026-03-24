@@ -130,7 +130,7 @@ describe("V2 validation: contested cognition", () => {
 			expect(currentRow?.conflict_factor_refs_json ?? null).toBeNull();
 			expect(contestedHit).toBeDefined();
 			expect(Array.isArray(contestedHit!.conflictEvidence)).toBe(true);
-			expect(contestedHit!.conflictEvidence!.join(" ")).toContain("contested cognition");
+			expect(contestedHit!.conflictEvidence).toEqual([]);
 		} finally {
 			cleanupDb(db, dbPath);
 		}

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
+import { RelationBuilder } from "../../src/memory/cognition/relation-builder.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
@@ -688,7 +689,7 @@ describe("RetrievalService", () => {
 			expect(hits.length).toBe(1);
 			expect(hits[0].stance).toBe("contested");
 			expect(hits[0].conflictEvidence).toBeDefined();
-			expect(hits[0].conflictEvidence).toEqual(["Risk: contested (1 factors)"]);
+			expect(hits[0].conflictEvidence).toEqual([]);
 			expect(hits[0].conflictSummary).toBe("contested (1 factors)");
 			expect(hits[0].conflictFactorRefs).toEqual(["private_belief:1"]);
 
@@ -1172,6 +1173,12 @@ describe("RetrievalService", () => {
 				basis: "first_hand",
 				preContestedStance: "accepted",
 			});
+
+			const tempSearch = new CognitionSearchService(db);
+			const tempHits = tempSearch.searchCognition({ agentId: "rp:alice", kind: "assertion", stance: "contested" });
+			const sourceRef = String(tempHits[0].source_ref);
+			const rb = new RelationBuilder(db);
+			rb.writeContestRelations(sourceRef, ["assertion:99"], "stl:typed-c2", 0.8);
 
 			const retrieval = new RetrievalService(db);
 			const typed = await retrieval.generateTypedRetrieval(

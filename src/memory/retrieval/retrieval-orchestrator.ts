@@ -202,11 +202,12 @@ export class RetrievalOrchestrator {
           continue;
         }
         const cognitionKey = hit.cognitionKey ?? this.extractCognitionKey(hit.source_ref);
-        for (const note of hit.conflictEvidence) {
+        for (const ev of hit.conflictEvidence) {
           if (typed.conflict_notes.length >= template.conflictNotesBudget) {
             break;
           }
-          const normalized = this.normalizeText(note);
+          const content = `Conflicts with ${ev.targetRef} (strength: ${ev.strength})`;
+          const normalized = this.normalizeText(content);
           if (normalized.length === 0 || seenText.has(normalized)) {
             continue;
           }
@@ -215,7 +216,7 @@ export class RetrievalOrchestrator {
             source_ref: `conflict_note:${hit.source_ref}`,
             from_source_ref: String(hit.source_ref),
             cognitionKey,
-            content: note,
+            content,
             score: hit.updated_at,
           });
         }
