@@ -13,6 +13,7 @@ import { GraphStorageService } from "../../src/memory/storage.js";
 import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { AreaWorldProjectionRepo } from "../../src/memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
@@ -774,11 +775,13 @@ describe("memory-entry-consumption: live runtime integration", () => {
       const episodeRepo = new EpisodeRepository(runtime.db);
       const cognitionEventRepo = new CognitionEventRepo(runtime.db.raw);
       const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(runtime.db.raw);
+      const areaProjectionRepo = new AreaWorldProjectionRepo(runtime.db.raw);
       const projectionManager = new ProjectionManager(
         episodeRepo,
         cognitionEventRepo,
         cognitionProjectionRepo,
         graphStorage,
+        areaProjectionRepo,
       );
       const interactionStore = new InteractionStore(runtime.db);
 

@@ -8,6 +8,7 @@ export type RetrievalTemplate = {
   narrativeBudget?: number;
   cognitionBudget?: number;
   conflictNotesBudget?: number;
+  episodicBudget?: number;
   episodeBudget?: number;
   queryEpisodeBoost?: number;
   sceneEpisodeBoost?: number;
@@ -24,6 +25,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     narrativeBudget: 3,
     cognitionBudget: 5,
     conflictNotesBudget: 2,
+    episodicBudget: 0,
     episodeBudget: 0,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
@@ -38,6 +40,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     narrativeBudget: 3,
     cognitionBudget: 0,
     conflictNotesBudget: 0,
+    episodicBudget: 0,
     episodeBudget: 0,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
@@ -52,6 +55,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     narrativeBudget: 0,
     cognitionBudget: 0,
     conflictNotesBudget: 0,
+    episodicBudget: 0,
     episodeBudget: 0,
     queryEpisodeBoost: 0,
     sceneEpisodeBoost: 0,
@@ -72,6 +76,7 @@ export function resolveTemplate(
   if (!override) return base;
   const narrativeBudget = override.narrativeBudget ?? override.maxNarrativeHits ?? base.narrativeBudget;
   const cognitionBudget = override.cognitionBudget ?? override.maxCognitionHits ?? base.cognitionBudget;
+  const episodicBudget = override.episodicBudget ?? override.episodeBudget ?? base.episodicBudget;
   return {
     narrativeEnabled: override.narrativeEnabled ?? base.narrativeEnabled,
     cognitionEnabled: override.cognitionEnabled ?? base.cognitionEnabled,
@@ -80,7 +85,8 @@ export function resolveTemplate(
     narrativeBudget,
     cognitionBudget,
     conflictNotesBudget: override.conflictNotesBudget ?? base.conflictNotesBudget,
-    episodeBudget: override.episodeBudget ?? base.episodeBudget,
+    episodicBudget,
+    episodeBudget: episodicBudget,
     queryEpisodeBoost: override.queryEpisodeBoost ?? base.queryEpisodeBoost,
     sceneEpisodeBoost: override.sceneEpisodeBoost ?? base.sceneEpisodeBoost,
     maxNarrativeHits: narrativeBudget,

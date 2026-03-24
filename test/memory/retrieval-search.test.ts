@@ -8,11 +8,14 @@ import { CognitionSearchService } from "../../src/memory/cognition/cognition-sea
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { RelationBuilder } from "../../src/memory/cognition/relation-builder.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
+import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { getTypedRetrievalSurface } from "../../src/memory/prompt-data.js";
 import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
+import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import type { CognitionHit } from "../../src/memory/cognition/cognition-search.js";
 import type { MemoryHint, NodeRef, ViewerContext } from "../../src/memory/types.js";
 import { openDatabase } from "../../src/storage/database.js";
@@ -1139,6 +1142,44 @@ describe("RetrievalService", () => {
 			);
 
 			expect(typed.episode.length).toBeGreaterThanOrEqual(1);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("getTypedRetrievalSurface auto-includes durable episodes without manual tool call", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			runInteractionMigrations(db);
+
+			const episodeRepo = new EpisodeRepository(db);
+			episodeRepo.append({
+				agentId: "rp:alice",
+				sessionId: "session-a",
+				settlementId: "stl:episode-1",
+				category: "observation",
+				summary: "Earlier in the kitchen, Bob dropped a brass key near the stove",
+				locationEntityId: 1,
+				committedTime: Date.now(),
+			});
+
+			const sessionA = RetrievalService.create(db);
+			const sessionB = RetrievalService.create(db);
+			expect(sessionA).not.toBe(sessionB);
+
+			const rendered = await getTypedRetrievalSurface(
+				"what happened before here in the kitchen",
+				viewer({
+					viewer_agent_id: "rp:alice",
+					session_id: "session-b",
+					current_area_id: 1,
+				}),
+				db,
+				sessionB,
+			);
+
+			expect(rendered).toContain("[episode]");
+			expect(rendered).toContain("Bob dropped a brass key");
 
 			db.close();
 			cleanupDb(dbPath);

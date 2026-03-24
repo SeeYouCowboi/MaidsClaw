@@ -5,6 +5,7 @@ import type { NarrativeSearchService } from "../narrative/narrative-search.js";
 import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } from "../cognition/cognition-search.js";
 import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
 import { resolveTemplate } from "../contracts/retrieval-template.js";
+import type { EpisodeRepository, EpisodeRow } from "../episode/episode-repo.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
 
@@ -12,6 +13,7 @@ type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
   currentProjectionReader?: CurrentProjectionReader | null;
+  episodeRepository?: EpisodeRepository | null;
 };
 
 type TypedRetrievalSegment = {
@@ -59,16 +61,19 @@ export type RetrievalDedupContext = {
 
 const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次)/i;
 const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景)/i;
+const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
   private readonly narrativeService: NarrativeSearchService;
   private readonly cognitionService: CognitionSearchService;
+  private readonly episodeRepository: EpisodeRepository | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
     this.cognitionService = deps.cognitionService;
     this.currentProjectionReader = deps.currentProjectionReader ?? null;
+    this.episodeRepository = deps.episodeRepository ?? null;
   }
 
   async search(
@@ -96,6 +101,7 @@ export class RetrievalOrchestrator {
     }
 
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(query, template, viewerContext);
+    const episodeHints = this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
 
     const narrativeHints: MemoryHint[] =
       template.narrativeEnabled && (template.narrativeBudget > 0 || effectiveEpisodeBudget > 0)
@@ -121,6 +127,7 @@ export class RetrievalOrchestrator {
       template,
       cognitionHits,
       narrativeHints,
+      episodeHints,
       seenText,
       recentCognitionKeys,
       effectiveEpisodeBudget,
@@ -155,6 +162,7 @@ export class RetrievalOrchestrator {
       narrativeBudget,
       cognitionBudget,
       conflictNotesBudget: template.conflictNotesBudget + 1,
+      episodicBudget: template.episodicBudget + 1,
       episodeBudget: template.episodeBudget + 1,
       queryEpisodeBoost: template.queryEpisodeBoost + 1,
       sceneEpisodeBoost: template.sceneEpisodeBoost + 1,
@@ -167,6 +175,7 @@ export class RetrievalOrchestrator {
     template: Required<RetrievalTemplate>,
     cognitionHits: CognitionHit[],
     narrativeHints: MemoryHint[],
+    episodeHints: TypedNarrativeSegment[],
     seenText: Set<string>,
     recentCognitionKeys: Set<string>,
     effectiveEpisodeBudget: number,
@@ -258,6 +267,18 @@ export class RetrievalOrchestrator {
     }
 
     if (template.episodeEnabled && effectiveEpisodeBudget > 0) {
+      for (const hint of episodeHints) {
+        if (typed.episode.length >= effectiveEpisodeBudget) {
+          break;
+        }
+        const normalized = this.normalizeText(hint.content);
+        if (normalized.length === 0 || seenText.has(normalized)) {
+          continue;
+        }
+        seenText.add(normalized);
+        typed.episode.push(hint);
+      }
+
       for (const hint of narrativeHints) {
         if (typed.episode.length >= effectiveEpisodeBudget) {
           break;
@@ -281,6 +302,48 @@ export class RetrievalOrchestrator {
     }
 
     return typed;
+  }
+
+  private resolveEpisodeHints(
+    query: string,
+    viewerContext: ViewerContext,
+    effectiveEpisodeBudget: number,
+  ): TypedNarrativeSegment[] {
+    if (!this.episodeRepository || effectiveEpisodeBudget <= 0) {
+      return [];
+    }
+
+    const rawRows = this.episodeRepository.readByAgent(
+      viewerContext.viewer_agent_id,
+      Math.max(effectiveEpisodeBudget * 3, effectiveEpisodeBudget + 4),
+    );
+
+    if (rawRows.length === 0) {
+      return [];
+    }
+
+    const rankedRows = rawRows
+      .map((row) => ({
+        row,
+        score: this.scoreEpisodeRow(row, query, viewerContext),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+        if (b.row.committed_time !== a.row.committed_time) {
+          return b.row.committed_time - a.row.committed_time;
+        }
+        return b.row.id - a.row.id;
+      });
+
+    return rankedRows.map(({ row, score }) => ({
+      source_ref: `episode:${row.id}`,
+      content: row.summary,
+      score,
+      doc_type: `episode_${row.category}`,
+      scope: "private",
+    }));
   }
 
   private seedSeenText(context?: RetrievalDedupContext): Set<string> {
@@ -332,7 +395,7 @@ export class RetrievalOrchestrator {
     template: Required<RetrievalTemplate>,
     viewerContext: ViewerContext,
   ): number {
-    let budget = template.episodeBudget;
+    let budget = Math.max(template.episodicBudget, template.episodeBudget);
     const trimmed = query.trim();
     if (trimmed.length > 0 && EPISODE_QUERY_TRIGGER.test(trimmed)) {
       budget += template.queryEpisodeBoost;
@@ -347,16 +410,40 @@ export class RetrievalOrchestrator {
     return hint.doc_type.includes("event") || String(hint.source_ref).startsWith("event:");
   }
 
+  private scoreEpisodeRow(row: EpisodeRow, query: string, viewerContext: ViewerContext): number {
+    let score = row.committed_time;
+    const queryText = query.trim().toLowerCase();
+    const haystack = `${row.summary} ${row.location_text ?? ""} ${row.category}`.toLowerCase();
+
+    if (queryText.length > 0) {
+      const terms = queryText.split(/\s+/).filter((term) => term.length >= 3);
+      for (const term of terms) {
+        if (haystack.includes(term)) {
+          score += 1_000_000;
+        }
+      }
+    }
+
+    if (viewerContext.current_area_id != null && row.location_entity_id === viewerContext.current_area_id) {
+      score += 2_000_000;
+    }
+    if (row.session_id === viewerContext.session_id) {
+      score += 500_000;
+    }
+
+    return score;
+  }
+
   private normalizeText(text: string): string {
     return text.toLowerCase().replace(/\s+/g, " ").trim();
   }
 
   private extractCognitionKey(sourceRef: string): string | null {
     const text = String(sourceRef);
-    if (!text.startsWith("cognition_key:")) {
+    if (!text.startsWith(COGNITION_KEY_PREFIX)) {
       return null;
     }
-    const key = text.slice("cognition_key:".length).trim();
+    const key = text.slice(COGNITION_KEY_PREFIX.length).trim();
     return key.length > 0 ? key : null;
   }
 }

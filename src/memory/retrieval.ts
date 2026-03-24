@@ -3,6 +3,7 @@ import { EmbeddingService } from "./embeddings.js";
 import { CognitionSearchService } from "./cognition/cognition-search.js";
 import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
 import { NarrativeSearchService } from "./narrative/narrative-search.js";
+import { EpisodeRepository } from "./episode/episode-repo.js";
 import {
   RetrievalOrchestrator,
   type RetrievalDedupContext,
@@ -75,6 +76,7 @@ export class RetrievalService {
         narrativeService: this.narrativeSearch,
         cognitionService: this.cognitionSearch,
         currentProjectionReader: this.cognitionSearch.createCurrentProjectionReader(),
+        episodeRepository: new EpisodeRepository(db),
       });
     this.visibilityPolicy = deps.visibilityPolicy ?? new VisibilityPolicy();
   }
