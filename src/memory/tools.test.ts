@@ -104,16 +104,16 @@ describe("Memory Tools", () => {
       }
     });
 
-    it("core_memory_append has label enum restricted to character and user", () => {
+    it("core_memory_append has label enum restricted to persona", () => {
       const tool = toolByName(tools, "core_memory_append");
       const props = (tool.parameters as Record<string, unknown>).properties as Record<string, Record<string, unknown>>;
-      expect(props.label.enum).toEqual(["character", "user"]);
+      expect(props.label.enum).toEqual(["persona"]);
     });
 
-    it("core_memory_replace has label enum restricted to character and user", () => {
+    it("core_memory_replace has label enum restricted to persona", () => {
       const tool = toolByName(tools, "core_memory_replace");
       const props = (tool.parameters as Record<string, unknown>).properties as Record<string, Record<string, unknown>>;
-      expect(props.label.enum).toEqual(["character", "user"]);
+      expect(props.label.enum).toEqual(["persona"]);
     });
   });
 
@@ -124,7 +124,7 @@ describe("Memory Tools", () => {
   describe("core_memory_append", () => {
     it("dispatches to CoreMemoryService and returns result", () => {
       const tool = toolByName(tools, "core_memory_append");
-      const result = tool.handler({ label: "character", content: "I love cats." }, ctx) as {
+      const result = tool.handler({ label: "persona", content: "I love cats." }, ctx) as {
         success: boolean;
         chars_current?: number;
       };
@@ -132,8 +132,7 @@ describe("Memory Tools", () => {
       expect(result.success).toBe(true);
       expect(result.chars_current).toBe(12);
 
-      // Verify it actually persisted
-      const block = coreMemory.getBlock(ctx.viewer_agent_id, "character");
+      const block = coreMemory.getBlock(ctx.viewer_agent_id, "persona");
       expect(block.value).toBe("I love cats.");
     });
 
@@ -152,7 +151,7 @@ describe("Memory Tools", () => {
     it("returns failure when append exceeds char limit", () => {
       const tool = toolByName(tools, "core_memory_append");
       const hugeContent = "x".repeat(5000);
-      const result = tool.handler({ label: "character", content: hugeContent }, ctx) as {
+      const result = tool.handler({ label: "persona", content: hugeContent }, ctx) as {
         success: boolean;
       };
 
@@ -166,18 +165,17 @@ describe("Memory Tools", () => {
 
   describe("core_memory_replace", () => {
     it("dispatches to CoreMemoryService and returns result", () => {
-      // Seed some content first
-      coreMemory.appendBlock(ctx.viewer_agent_id, "user", "Bob is 30 years old.");
+      coreMemory.appendBlock(ctx.viewer_agent_id, "persona", "Bob is 30 years old.");
 
       const tool = toolByName(tools, "core_memory_replace");
       const result = tool.handler(
-        { label: "user", old_content: "30 years old", new_content: "31 years old" },
+        { label: "persona", old_content: "30 years old", new_content: "31 years old" },
         ctx,
       ) as { success: boolean; chars_current?: number };
 
       expect(result.success).toBe(true);
 
-      const block = coreMemory.getBlock(ctx.viewer_agent_id, "user");
+      const block = coreMemory.getBlock(ctx.viewer_agent_id, "persona");
       expect(block.value).toBe("Bob is 31 years old.");
     });
 
@@ -196,7 +194,7 @@ describe("Memory Tools", () => {
     it("returns failure when old_content not found", () => {
       const tool = toolByName(tools, "core_memory_replace");
       const result = tool.handler(
-        { label: "character", old_content: "nonexistent", new_content: "new" },
+        { label: "persona", old_content: "nonexistent", new_content: "new" },
         ctx,
       ) as { success: boolean; reason?: string };
 
@@ -583,14 +581,12 @@ describe("Memory Tools", () => {
       coreMemory.initializeBlocks("agent-2");
 
       const tool = toolByName(tools, "core_memory_append");
-      tool.handler({ label: "character", content: "I am agent-2" }, otherCtx);
+      tool.handler({ label: "persona", content: "I am agent-2" }, otherCtx);
 
-      // agent-2 block should have content
-      const block2 = coreMemory.getBlock("agent-2", "character");
+      const block2 = coreMemory.getBlock("agent-2", "persona");
       expect(block2.value).toBe("I am agent-2");
 
-      // agent-1 block should still be empty
-      const block1 = coreMemory.getBlock("agent-1", "character");
+      const block1 = coreMemory.getBlock("agent-1", "persona");
       expect(block1.value).toBe("");
     });
   });

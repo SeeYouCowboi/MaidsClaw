@@ -2,7 +2,7 @@ import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../cor
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
 import { buildTimeSliceQuery, type TimeSliceDimension } from "./time-slice-query.js";
-import type { MemoryExploreInput, NavigatorResult, ViewerContext } from "./types.js";
+import type { CoreMemoryLabel, MemoryExploreInput, NavigatorResult, ViewerContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Tool definition shape
@@ -80,7 +80,7 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
     name: "core_memory_append",
     description:
       `Append content to a Core Memory block. Blocks hold persistent agent knowledge. ` +
-      `Labels: 'character' (agent persona) or 'user' (user info). ` +
+      `Labels: 'persona' (agent persona, identity, behavioral traits). ` +
       POINTER_GUIDE,
     effectClass: "immediate_write",
     traceVisibility: "public",
@@ -95,7 +95,7 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
       properties: {
         label: {
           type: "string",
-          enum: ["character", "user"],
+          enum: ["persona"],
           description: "Which core memory block to append to.",
         },
         content: {
@@ -111,12 +111,12 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
       const content = args.content as string;
 
       if (isForbiddenLabel(label)) {
-        return { success: false, error: "Label 'index' is forbidden for RP Agent tools" };
+        return { success: false, error: `Label '${label}' is forbidden for RP Agent tools` };
       }
 
       const result = services.coreMemory.appendBlock(
         viewerContext.viewer_agent_id,
-        label as "character" | "user",
+        label as CoreMemoryLabel,
         content,
       );
       return result;
@@ -133,7 +133,7 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
     name: "core_memory_replace",
     description:
       `Replace content in a Core Memory block (first occurrence). ` +
-      `Labels: 'character' (agent persona) or 'user' (user info). ` +
+      `Labels: 'persona' (agent persona, identity, behavioral traits). ` +
       POINTER_GUIDE,
     effectClass: "immediate_write",
     traceVisibility: "public",
@@ -148,7 +148,7 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
       properties: {
         label: {
           type: "string",
-          enum: ["character", "user"],
+          enum: ["persona"],
           description: "Which core memory block to edit.",
         },
         old_content: {
@@ -169,12 +169,12 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
       const newContent = args.new_content as string;
 
       if (isForbiddenLabel(label)) {
-        return { success: false, error: "Label 'index' is forbidden for RP Agent tools" };
+        return { success: false, error: `Label '${label}' is forbidden for RP Agent tools` };
       }
 
       const result = services.coreMemory.replaceBlock(
         viewerContext.viewer_agent_id,
-        label as "character" | "user",
+        label as CoreMemoryLabel,
         oldContent,
         newContent,
       );

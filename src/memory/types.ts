@@ -72,11 +72,12 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
 
 /**
  * All valid core memory block labels.
+ * - `persona`: canonical writable label for agent identity (T21 forward)
  * - `pinned_summary` / `pinned_index`: canonical labels (T7 forward)
- * - `character` / `index`: compat aliases kept for backward-compatible reads
- * - `user`: shared block (always on)
+ * - `character` / `user`: legacy labels, read-only compat aliases
+ * - `index`: compat alias for pinned_index, read-only
  */
-export const CORE_MEMORY_LABELS = ["character", "user", "index", "pinned_summary", "pinned_index"] as const;
+export const CORE_MEMORY_LABELS = ["character", "user", "index", "pinned_summary", "pinned_index", "persona"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
 /** Canonical labels introduced by T7 — the preferred write targets. */
@@ -89,8 +90,8 @@ export const COMPAT_ALIAS_MAP: Readonly<Record<string, CanonicalPinnedLabel>> = 
   index: "pinned_index",
 } as const;
 
-/** Labels that have no RP direct-write path. */
-export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index"] as const;
+/** Labels that have no RP direct-write path (includes legacy character/user). */
+export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index", "character", "user"] as const;
 
 // Node-Ref Strategy (T6 cutoff applied):
 // CANONICAL WRITE (new settlements): assertion:{id} | evaluation:{id} | commitment:{id}

@@ -102,33 +102,32 @@ describe("getCoreMemoryBlocks", () => {
     expect(xml).toContain('<core_memory label="character"');
     expect(xml).toContain('<core_memory label="index"');
     expect(xml).toContain('<core_memory label="user"');
+    expect(xml).toContain('<core_memory label="persona"');
     expect(xml).toContain('chars_current="0"');
     expect(xml).toContain('chars_limit="4000"');
     expect(xml).toContain('chars_limit="3000"');
     expect(xml).toContain('chars_limit="1500"');
   });
 
-  it("returns all 5 blocks", () => {
+  it("returns all 6 blocks", () => {
     const xml = getCoreMemoryBlocks("agent-1", db);
     const blockCount = (xml.match(/<core_memory /g) || []).length;
-    expect(blockCount).toBe(5);
+    expect(blockCount).toBe(6);
   });
 
   it("includes chars_current and chars_limit attributes", () => {
-    // Write some content to character block
     const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "character", "A cheerful maid");
+    service.appendBlock("agent-1", "persona", "A cheerful maid");
 
     const xml = getCoreMemoryBlocks("agent-1", db);
 
-    // character block should show chars_current=15 (length of "A cheerful maid")
     expect(xml).toContain('chars_current="15"');
     expect(xml).toContain('chars_limit="4000"');
   });
 
   it("includes block value content inside XML tags", () => {
     const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "character", "Sakura is a diligent maid");
+    service.appendBlock("agent-1", "persona", "Sakura is a diligent maid");
 
     const xml = getCoreMemoryBlocks("agent-1", db);
     expect(xml).toContain("Sakura is a diligent maid</core_memory>");
@@ -877,7 +876,7 @@ describe("getAttachedSharedBlocks", () => {
     createMemorySchema(db.raw);
     const coreMemory = new CoreMemoryService(db.raw);
     coreMemory.initializeBlocks("agent-1");
-    coreMemory.appendBlock("agent-1", "character", "A cheerful maid");
+    coreMemory.appendBlock("agent-1", "persona", "A cheerful maid");
 
     const blockId = seedSharedBlock("Shared Etiquette", "agent-owner");
     addSection(blockId, "greeting", "Always curtsy");
@@ -887,7 +886,7 @@ describe("getAttachedSharedBlocks", () => {
     const sharedResult = getAttachedSharedBlocks("agent-1", db);
 
     expect(coreResult).toContain("A cheerful maid");
-    expect(coreResult).toContain('<core_memory label="character"');
+    expect(coreResult).toContain('<core_memory label="persona"');
     expect(coreResult).not.toContain("Always curtsy");
 
     expect(sharedResult).toContain('<shared_block title="Shared Etiquette">');

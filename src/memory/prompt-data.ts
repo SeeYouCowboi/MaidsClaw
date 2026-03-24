@@ -8,7 +8,7 @@ import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
 /**
  * Get all core memory blocks formatted as XML for system prompt injection.
- * Always returns all 3 blocks (character, user, index).
+ * Returns all blocks (persona, pinned_summary, pinned_index, plus legacy character/user/index).
  * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
  */
 export function getCoreMemoryBlocks(agentId: string, db: Db): string {
@@ -16,7 +16,8 @@ export function getCoreMemoryBlocks(agentId: string, db: Db): string {
   return renderCoreMemoryBlocks(blocks, "core_memory");
 }
 
-const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "character"];
+const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
+// Legacy compat: user blocks still exist in DB (read-only) and are surfaced as shared blocks for display
 const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
 const retrievalServiceByDb = new WeakMap<Db, RetrievalService>();
 

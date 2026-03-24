@@ -21,25 +21,26 @@ describe("CoreMemoryService", () => {
   });
 
   describe("initializeBlocks", () => {
-    it("creates 5 blocks with correct limits", () => {
+    it("creates 6 blocks with correct limits", () => {
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(5);
+      expect(blocks).toHaveLength(6);
 
       const character = blocks.find((b) => b.label === "character")!;
       const user = blocks.find((b) => b.label === "user")!;
       const index = blocks.find((b) => b.label === "index")!;
       const pinnedSummary = blocks.find((b) => b.label === "pinned_summary")!;
       const pinnedIndex = blocks.find((b) => b.label === "pinned_index")!;
+      const persona = blocks.find((b) => b.label === "persona")!;
 
       expect(character.char_limit).toBe(4000);
-      expect(character.read_only).toBe(0);
-      expect(character.description).toBe("Agent persona and identity");
+      expect(character.read_only).toBe(1);
+      expect(character.description).toBe("Agent persona and identity (legacy, read-only)");
       expect(character.value).toBe("");
 
       expect(user.char_limit).toBe(3000);
-      expect(user.read_only).toBe(0);
-      expect(user.description).toBe("Information about the user");
+      expect(user.read_only).toBe(1);
+      expect(user.description).toBe("Information about the user (legacy, read-only)");
 
       expect(index.char_limit).toBe(1500);
       expect(index.read_only).toBe(1);
@@ -52,30 +53,35 @@ describe("CoreMemoryService", () => {
       expect(pinnedIndex.char_limit).toBe(1500);
       expect(pinnedIndex.read_only).toBe(1);
       expect(pinnedIndex.description).toBe("Pinned memory index (canonical, no RP direct-write)");
+
+      expect(persona.char_limit).toBe(4000);
+      expect(persona.read_only).toBe(0);
+      expect(persona.description).toBe("Agent persona, identity, and behavioral traits");
+      expect(persona.value).toBe("");
     });
 
     it("is idempotent — calling twice does not error or duplicate", () => {
       svc.initializeBlocks("agent-1");
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(5);
+      expect(blocks).toHaveLength(6);
     });
   });
 
   describe("getBlock", () => {
     it("returns block with chars_current=0 initially and correct chars_limit", () => {
       svc.initializeBlocks("agent-1");
-      const block = svc.getBlock("agent-1", "character");
+      const block = svc.getBlock("agent-1", "persona");
       expect(block.chars_current).toBe(0);
       expect(block.chars_limit).toBe(4000);
       expect(block.value).toBe("");
       expect(block.agent_id).toBe("agent-1");
-      expect(block.label).toBe("character");
+      expect(block.label).toBe("persona");
     });
 
     it("throws if block not initialized", () => {
-      expect(() => svc.getBlock("agent-1", "character")).toThrow(
-        "Block not found: agent-1/character",
+      expect(() => svc.getBlock("agent-1", "persona")).toThrow(
+        "Block not found: agent-1/persona",
       );
     });
   });
@@ -86,49 +92,59 @@ describe("CoreMemoryService", () => {
     });
 
     it("appends content and returns success with updated chars", () => {
-      const result = svc.appendBlock("agent-1", "character", "I am Alice");
+      const result = svc.appendBlock("agent-1", "persona", "I am Alice");
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.chars_current).toBe(10);
         expect(result.chars_limit).toBe(4000);
       }
 
-      const block = svc.getBlock("agent-1", "character");
+      const block = svc.getBlock("agent-1", "persona");
       expect(block.value).toBe("I am Alice");
     });
 
     it("appends multiple times correctly", () => {
-      svc.appendBlock("agent-1", "character", "Hello ");
-      const result = svc.appendBlock("agent-1", "character", "World");
+      svc.appendBlock("agent-1", "persona", "Hello ");
+      const result = svc.appendBlock("agent-1", "persona", "World");
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.chars_current).toBe(11);
       }
 
-      const block = svc.getBlock("agent-1", "character");
+      const block = svc.getBlock("agent-1", "persona");
       expect(block.value).toBe("Hello World");
     });
 
     it("returns failure with remaining when over char limit", () => {
-      const bigContent = "x".repeat(2900);
-      svc.appendBlock("agent-1", "user", bigContent);
+      const bigContent = "x".repeat(3900);
+      svc.appendBlock("agent-1", "persona", bigContent);
 
-      const result = svc.appendBlock("agent-1", "user", "y".repeat(200));
+      const result = svc.appendBlock("agent-1", "persona", "y".repeat(200));
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.remaining).toBe(100);
-        expect(result.limit).toBe(3000);
-        expect(result.current).toBe(2900);
+        expect(result.limit).toBe(4000);
+        expect(result.current).toBe(3900);
       }
     });
 
     it("allows append exactly at char limit", () => {
-      const content = "x".repeat(3000);
-      const result = svc.appendBlock("agent-1", "user", content);
+      const content = "x".repeat(4000);
+      const result = svc.appendBlock("agent-1", "persona", content);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.chars_current).toBe(3000);
+        expect(result.chars_current).toBe(4000);
       }
+    });
+
+    it("rejects character block writes (read-only)", () => {
+      const result = svc.appendBlock("agent-1", "character", "some data");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects user block writes (read-only)", () => {
+      const result = svc.appendBlock("agent-1", "user", "some data");
+      expect(result.success).toBe(false);
     });
 
     it("rejects index block writes when callerRole is undefined", () => {
@@ -165,22 +181,22 @@ describe("CoreMemoryService", () => {
   describe("replaceBlock", () => {
     beforeEach(() => {
       svc.initializeBlocks("agent-1");
-      svc.appendBlock("agent-1", "user", "The user likes cats and cats are great");
+      svc.appendBlock("agent-1", "persona", "The agent likes cats and cats are great");
     });
 
     it("replaces old text with new text correctly", () => {
-      const result = svc.replaceBlock("agent-1", "user", "cats", "dogs");
+      const result = svc.replaceBlock("agent-1", "persona", "cats", "dogs");
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.chars_current).toBe(38);
+        expect(result.chars_current).toBe(39);
       }
 
-      const block = svc.getBlock("agent-1", "user");
-      expect(block.value).toBe("The user likes dogs and cats are great");
+      const block = svc.getBlock("agent-1", "persona");
+      expect(block.value).toBe("The agent likes dogs and cats are great");
     });
 
     it("returns failure when old text not found in block", () => {
-      const result = svc.replaceBlock("agent-1", "user", "nonexistent text", "replacement");
+      const result = svc.replaceBlock("agent-1", "persona", "nonexistent text", "replacement");
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.reason).toBe("old_content not found in block");
@@ -188,10 +204,10 @@ describe("CoreMemoryService", () => {
     });
 
     it("returns failure when replacement would exceed char_limit", () => {
-      const big = "x".repeat(2990);
-      svc.replaceBlock("agent-1", "user", "The user likes cats and cats are great", big);
+      const big = "x".repeat(3990);
+      svc.replaceBlock("agent-1", "persona", "The agent likes cats and cats are great", big);
 
-      const result = svc.replaceBlock("agent-1", "user", "x", "y".repeat(100));
+      const result = svc.replaceBlock("agent-1", "persona", "x", "y".repeat(100));
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.reason).toBe("replacement would exceed char_limit");
@@ -229,25 +245,41 @@ describe("CoreMemoryService", () => {
     });
 
     it("replaces only the first occurrence", () => {
-      const result = svc.replaceBlock("agent-1", "user", "cats", "birds");
+      const result = svc.replaceBlock("agent-1", "persona", "cats", "birds");
       expect(result.success).toBe(true);
 
-      const block = svc.getBlock("agent-1", "user");
-      expect(block.value).toBe("The user likes birds and cats are great");
+      const block = svc.getBlock("agent-1", "persona");
+      expect(block.value).toBe("The agent likes birds and cats are great");
+    });
+
+    it("rejects character block writes (read-only)", () => {
+      const result = svc.replaceBlock("agent-1", "character", "old", "new");
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toContain("read-only");
+      }
+    });
+
+    it("rejects user block writes (read-only)", () => {
+      const result = svc.replaceBlock("agent-1", "user", "old", "new");
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toContain("read-only");
+      }
     });
   });
 
   describe("getAllBlocks", () => {
-    it("returns all 5 blocks with chars_current", () => {
+    it("returns all 6 blocks with chars_current", () => {
       svc.initializeBlocks("agent-1");
-      svc.appendBlock("agent-1", "character", "Alice the maid");
+      svc.appendBlock("agent-1", "persona", "Alice the maid");
 
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(5);
+      expect(blocks).toHaveLength(6);
 
-      const character = blocks.find((b) => b.label === "character")!;
-      expect(character.chars_current).toBe(14);
-      expect(character.value).toBe("Alice the maid");
+      const persona = blocks.find((b) => b.label === "persona")!;
+      expect(persona.chars_current).toBe(14);
+      expect(persona.value).toBe("Alice the maid");
 
       const user = blocks.find((b) => b.label === "user")!;
       expect(user.chars_current).toBe(0);
@@ -305,20 +337,23 @@ describe("CoreMemoryService", () => {
     });
     it("resolveCanonicalLabel returns canonical labels unchanged", () => {
       expect(resolveCanonicalLabel("pinned_summary")).toBe("pinned_summary");
-      expect(resolveCanonicalLabel("user")).toBe("user");
+      expect(resolveCanonicalLabel("persona")).toBe("persona");
     });
     it("COMPAT_ALIAS_MAP has exactly character and index", () => {
       expect(Object.keys(COMPAT_ALIAS_MAP)).toEqual(["character", "index"]);
     });
-    it("READ_ONLY_LABELS includes index and pinned_index", () => {
+    it("READ_ONLY_LABELS includes index, pinned_index, character, and user", () => {
       expect(READ_ONLY_LABELS).toContain("index");
       expect(READ_ONLY_LABELS).toContain("pinned_index");
+      expect(READ_ONLY_LABELS).toContain("character");
+      expect(READ_ONLY_LABELS).toContain("user");
       expect(READ_ONLY_LABELS).not.toContain("pinned_summary");
+      expect(READ_ONLY_LABELS).not.toContain("persona");
     });
     it("character block is still readable as compat alias", () => {
       svc.initializeBlocks("agent-1");
-      svc.appendBlock("agent-1", "character", "Legacy content");
-      expect(svc.getBlock("agent-1", "character").value).toBe("Legacy content");
+      expect(svc.getBlock("agent-1", "character").value).toBe("");
+      expect(svc.getBlock("agent-1", "character").read_only).toBe(1);
     });
   });
 
