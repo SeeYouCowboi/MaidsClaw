@@ -28,6 +28,21 @@ const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract> = {
     artifact_scope: "session",
     ledger_policy: "current_state",
   },
+  relationIntents: {
+    authority_level: "agent",
+    artifact_scope: "private",
+    ledger_policy: "append_only",
+  },
+  conflictFactors: {
+    authority_level: "agent",
+    artifact_scope: "private",
+    ledger_policy: "current_state",
+  },
+  areaStateArtifacts: {
+    authority_level: "agent",
+    artifact_scope: "area",
+    ledger_policy: "current_state",
+  },
 };
 
 export function makeSubmitRpTurnTool(): ToolDefinition {

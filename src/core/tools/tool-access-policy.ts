@@ -21,6 +21,14 @@ const CAPABILITY_MAP: Record<string, keyof AgentPermissions> = {
   cognition_read: "canAccessCognition",
   cognition_write: "canWriteCognition",
   admin_read: "canReadAdminOnly",
+  "memory.read.private": "canReadPrivateMemory",
+  "memory.read.redacted": "canReadRedactedMemory",
+  "memory.write.authoritative": "canWriteAuthoritatively",
+  "summary.pin.propose": "canProposePinnedSummary",
+  "summary.pin.commit": "canCommitPinnedSummary",
+  "shared.block.read": "canReadSharedBlocks",
+  "shared.block.mutate": "canMutateSharedBlocks",
+  "admin.rules.mutate": "canMutateAdminRules",
 };
 
 // ---------------------------------------------------------------------------
