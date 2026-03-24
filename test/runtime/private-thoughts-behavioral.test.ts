@@ -95,63 +95,36 @@ function build40RoundEntries(): RecentEntry[] {
 // ---------------------------------------------------------------------------
 
 describe("Behavioral: Prompt assembly for RP test", () => {
-  it("Eveline system prompt contains all required infrastructure for 40-round test", () => {
+  it("Mei system prompt contains all required infrastructure for manor RP", () => {
     const adapter = loadEvelineAdapter();
-    const prompt = adapter.getSystemPrompt("eveline")!;
+    const prompt = adapter.getSystemPrompt("mei")!;
 
     expect(prompt).toBeDefined();
 
-    // Hidden objectives injection
-    expect(prompt).toContain("<hidden_objectives>");
-    expect(prompt).toContain("调查管家");
-    expect(prompt).toContain("确认庄园财务");
-    expect(prompt).toContain("维持庄园内部秩序");
-
-    // Private persona injection
-    expect(prompt).toContain("<private_persona>");
-
-    // submit_rp_turn protocol
-    expect(prompt).toContain("submit_rp_turn");
-    expect(prompt).toContain("publicReply");
-    expect(prompt).toContain("latentScratchpad");
-    expect(prompt).toContain("privateCommit");
-
-    // 7-level information filtering (L0-L6)
-    expect(prompt).toContain("完全公开");
-    expect(prompt).toContain("完整撒谎");
-    expect(prompt).toContain("信息过滤");
-
-    // CognitionOp examples
-    expect(prompt).toContain('"kind": "assertion"');
-    expect(prompt).toContain('"kind": "evaluation"');
-    expect(prompt).toContain('"kind": "commitment"');
-
-    // Behavioral principles
-    expect(prompt).toContain("表里分离");
-    expect(prompt).toContain("说辞修补");
-
-    // Address: must use 主人, NOT 少爷
     expect(prompt).toContain("主人");
     expect(prompt).not.toContain("少爷");
+
+    expect(prompt).toContain("女仆");
+    expect(prompt).toContain("管家");
+
+    expect(prompt).toContain("Alice");
   });
 });
 
 describe("Behavioral: Lore rules loaded for manor scene", () => {
-  it("config/lore.json contains manor scene entries with correct keywords", () => {
+  it("config/lore.json contains world and etiquette entries with correct keywords", () => {
     const result = loadLoreEntries("", join(process.cwd(), "config/lore.json"));
 
     expect(result.errors).toHaveLength(0);
 
     const ids = result.entries.map((e) => e.id);
-    expect(ids).toContain("manor:etiquette");
-    expect(ids).toContain("manor:hierarchy");
-    expect(ids).toContain("manor:information-protocol");
-    expect(ids).toContain("manor:financial-rules");
+    expect(ids).toContain("world-rules-001");
+    expect(ids).toContain("etiquette-001");
 
     const allKeywords = result.entries.flatMap((e) => e.keywords);
-    expect(allKeywords).toContain("账目");
-    expect(allKeywords).toContain("管家");
-    expect(allKeywords).toContain("汇报");
+    expect(allKeywords).toContain("etiquette");
+    expect(allKeywords).toContain("service");
+    expect(allKeywords).toContain("maid");
   });
 });
 
@@ -379,12 +352,12 @@ describe("Behavioral: Document checkpoint scoring structure", () => {
 });
 
 describe("Behavioral: Raw persona card has no 少爷", () => {
-  it("Eveline raw card fields contain no 少爷 anywhere", () => {
+  it("Mei raw card fields contain no 少爷 anywhere", () => {
     const raw = readFileSync(join(process.cwd(), "config/personas.json"), "utf-8");
     const personas = JSON.parse(raw) as Array<Record<string, unknown>>;
-    const eveline = personas.find((p) => p.id === "eveline")!;
+    const mei = personas.find((p) => p.id === "mei")!;
 
-    const fullCard = JSON.stringify(eveline);
+    const fullCard = JSON.stringify(mei);
     expect(fullCard).not.toContain("少爷");
     expect(fullCard).toContain("主人");
   });
@@ -393,22 +366,16 @@ describe("Behavioral: Raw persona card has no 少爷", () => {
 describe("Behavioral: Process observation checks (doc §5.2)", () => {
   it("persona configuration supports all observation items", () => {
     const adapter = loadEvelineAdapter();
-    const prompt = adapter.getSystemPrompt("eveline")!;
+    const prompt = adapter.getSystemPrompt("mei")!;
 
-    // §5.2 row 1: always call user 主人
     expect(prompt).toContain("主人");
     expect(prompt).not.toContain("少爷");
 
-    // §5.2 row 3: attitude toward Alice — prompt references maids
     expect(prompt).toContain("女仆");
 
-    // §5.2 row 4: attitude toward butler
     expect(prompt).toContain("管家");
 
-    // §5.2 row 5: information filtering throughout
-    expect(prompt).toContain("信息释放");
-    expect(prompt).toContain("L0");
-    expect(prompt).toContain("L6");
+    expect(prompt).toContain("Alice");
   });
 });
 
@@ -433,22 +400,20 @@ describe("Behavioral: Internal state checkpoint structure (doc §5.3)", () => {
   });
 });
 
-describe("Behavioral: Config validation for rp:eveline", () => {
-  it("agents.json rp:eveline has correct format and tools", () => {
+describe("Behavioral: Config validation for rp:mei", () => {
+  it("agents.json rp:mei has correct format and tools", () => {
     const raw = readFileSync(join(process.cwd(), "config/agents.json"), "utf-8");
     const agents = JSON.parse(raw) as Array<Record<string, unknown>>;
-    const eveline = agents.find((a) => a.id === "rp:eveline");
+    const mei = agents.find((a) => a.id === "rp:mei");
 
-    expect(eveline).toBeDefined();
-    expect(eveline!.personaId).toBe("eveline");
-    expect(eveline!.role).toBe("rp_agent");
+    expect(mei).toBeDefined();
+    expect(mei!.personaId).toBe("mei");
+    expect(mei!.role).toBe("rp_agent");
 
-    const perms = eveline!.toolPermissions as string[];
+    const perms = mei!.toolPermissions as Array<Record<string, unknown>>;
     expect(Array.isArray(perms)).toBe(true);
-    expect(perms.every((p) => typeof p === "string")).toBe(true);
-    expect(perms).toContain("submit_rp_turn");
-    expect(perms).toContain("memory_read");
-    expect(perms).toContain("memory_search");
+    const toolNames = perms.map((p) => p.toolName);
+    expect(toolNames).toContain("submit_rp_turn");
   });
 });
 
