@@ -90,12 +90,58 @@ function insertPrivateBelief(
   sourceEntityId: number,
   targetEntityId: number,
   sourceEventRef: NodeRef | null,
+  options?: { predicate?: string; cognitionKey?: string | null },
 ): void {
   const now = Date.now();
   db.prepare(
-    `INSERT INTO agent_fact_overlay (id, agent_id, source_entity_id, target_entity_id, predicate, basis, stance, provenance, source_event_ref, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'suspects', 'inference', 'tentative', NULL, ?, ?, ?)`,
-  ).run(id, agentId, sourceEntityId, targetEntityId, sourceEventRef, now, now);
+    `INSERT INTO agent_fact_overlay (id, agent_id, source_entity_id, target_entity_id, predicate, basis, stance, provenance, source_event_ref, cognition_key, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'inference', 'tentative', NULL, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    agentId,
+    sourceEntityId,
+    targetEntityId,
+    options?.predicate ?? "suspects",
+    sourceEventRef,
+    options?.cognitionKey ?? null,
+    now,
+    now,
+  );
+}
+
+function insertPrivateCognitionAssertionCurrent(
+  db: Database,
+  params: {
+    id: number;
+    agentId: string;
+    cognitionKey: string;
+    sourcePointerKey: string;
+    targetPointerKey: string;
+    predicate: string;
+    sourceEventRef?: NodeRef | null;
+  },
+): void {
+  const now = Date.now();
+  const recordJson = JSON.stringify({
+    sourcePointerKey: params.sourcePointerKey,
+    targetPointerKey: params.targetPointerKey,
+    predicate: params.predicate,
+    sourceEventRef: params.sourceEventRef ?? null,
+  });
+  db.prepare(
+    `INSERT INTO private_cognition_current (
+       id, agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance,
+       conflict_summary, conflict_factor_refs_json, summary_text, record_json, source_event_id, updated_at
+     ) VALUES (?, ?, ?, 'assertion', 'tentative', 'inference', 'active', NULL, NULL, NULL, ?, ?, ?, ?)`,
+  ).run(
+    params.id,
+    params.agentId,
+    params.cognitionKey,
+    `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+    recordJson,
+    1,
+    now,
+  );
 }
 
 function insertSemantic(
@@ -490,6 +536,75 @@ describe("GraphNavigator", () => {
     const result = await navigator.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
     const edgeKinds = result.evidence_paths.flatMap((p) => p.path.edges.map((edge) => String(edge.kind)));
     expect(edgeKinds).toContain("supports");
+  });
+
+  it("uses private_cognition_current as keyed assertion source in private belief frontier", async () => {
+    insertEvent(db, 5, "world_public", 1, "[]", "source event");
+
+    insertPrivateBelief(db, 91, "agent-a", 2, 3, null, {
+      predicate: "overlay-predicate",
+      cognitionKey: "assert:key-91",
+    });
+    insertPrivateCognitionAssertionCurrent(db, {
+      id: 91,
+      agentId: "agent-a",
+      cognitionKey: "assert:key-91",
+      sourcePointerKey: "alice",
+      targetPointerKey: "bob",
+      predicate: "current-predicate",
+      sourceEventRef: "event:5" as NodeRef,
+    });
+
+    const retrieval = new StubRetrieval([seed("assertion:91" as NodeRef, "assertion")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("relationship", viewerA(), { maxDepth: 1, maxCandidates: 20 });
+    const outgoing = result.evidence_paths
+      .flatMap((path) => path.path.edges)
+      .filter((edge) => edge.from === ("assertion:91" as NodeRef));
+
+    expect(outgoing.some((edge) => edge.to === ("entity:1" as NodeRef))).toBe(true);
+    expect(outgoing.some((edge) => edge.to === ("entity:2" as NodeRef))).toBe(true);
+    expect(outgoing.some((edge) => edge.to === ("event:5" as NodeRef) && edge.kind === "fact_support")).toBe(true);
+    expect(outgoing.some((edge) => edge.to === ("entity:3" as NodeRef))).toBe(false);
+    expect(outgoing.map((edge) => edge.summary)).toContain("current-predicate");
+    expect(outgoing.map((edge) => edge.summary)).not.toContain("overlay-predicate");
+  });
+
+  it("uses memory_relations as relation-edge traversal authority", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "event one");
+    insertEvent(db, 2, "world_public", 1, "[]", "event two");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:2", "supports", 0.8, "direct", "system", "test", now);
+
+    const capturedSql: string[] = [];
+    const proxyDb = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === "prepare") {
+          return (sql: string) => {
+            capturedSql.push(sql);
+            return target.prepare(sql);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as Database;
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(proxyDb, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
+    const relationEdges = result.evidence_paths
+      .flatMap((path) => path.path.edges)
+      .filter((edge) => edge.from === ("event:1" as NodeRef) && edge.to === ("event:2" as NodeRef));
+
+    expect(capturedSql.some((sql) => sql.includes("FROM memory_relations"))).toBe(true);
+    expect(relationEdges.some((edge) => String(edge.kind) === "supports")).toBe(true);
+    expect(relationEdges.some((edge) => edge.kind === "fact_relation")).toBe(false);
   });
 
   it("existing query types still work with new optional constructor params", async () => {

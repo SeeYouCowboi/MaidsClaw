@@ -1011,11 +1011,85 @@ export class GraphNavigator {
     }
     const placeholders = ids.map(() => "?").join(",");
 
+    const pointerRefCache = new Map<string, NodeRef | null>();
+    const resolveEntityRef = (pointerKey: string | null): NodeRef | null => {
+      if (!pointerKey) {
+        return null;
+      }
+      const cacheKey = pointerKey.normalize("NFC");
+      if (pointerRefCache.has(cacheKey)) {
+        return pointerRefCache.get(cacheKey) ?? null;
+      }
+      const resolved = this.resolveEntityRefFromPointerKey(cacheKey, viewerContext.viewer_agent_id);
+      pointerRefCache.set(cacheKey, resolved);
+      return resolved;
+    };
+
+    const currentRows = this.db
+      .prepare(
+        `SELECT id, summary_text, record_json, updated_at
+         FROM private_cognition_current
+         WHERE agent_id = ? AND kind = 'assertion' AND id IN (${placeholders})`,
+      )
+      .all(viewerContext.viewer_agent_id, ...ids) as Array<{
+      id: number;
+      summary_text: string | null;
+      record_json: string;
+      updated_at: number;
+    }>;
+
+    for (const row of currentRows) {
+      const beliefRef = (idToRef.get(row.id) ?? `assertion:${row.id}`) as NodeRef;
+      const parsedRecord = this.parseAssertionRecord(row.record_json);
+      const summary = parsedRecord.predicate ?? row.summary_text;
+      const sourceRef = resolveEntityRef(parsedRecord.sourcePointerKey);
+      const targetRef = resolveEntityRef(parsedRecord.targetPointerKey);
+
+      if (sourceRef && this.isNodeVisible(sourceRef, viewerContext)) {
+        this.pushEdge(map, beliefRef, {
+          from: beliefRef,
+          to: sourceRef,
+          kind: "fact_relation",
+          weight: 0.75,
+          timestamp: row.updated_at,
+          summary,
+          canonical_fact_id: null,
+          canonical_evidence: false,
+        });
+      }
+
+      if (targetRef && this.isNodeVisible(targetRef, viewerContext)) {
+        this.pushEdge(map, beliefRef, {
+          from: beliefRef,
+          to: targetRef,
+          kind: "fact_relation",
+          weight: 0.75,
+          timestamp: row.updated_at,
+          summary,
+          canonical_fact_id: null,
+          canonical_evidence: false,
+        });
+      }
+
+      if (parsedRecord.sourceEventRef && this.isNodeVisible(parsedRecord.sourceEventRef, viewerContext)) {
+        this.pushEdge(map, beliefRef, {
+          from: beliefRef,
+          to: parsedRecord.sourceEventRef,
+          kind: "fact_support",
+          weight: 0.7,
+          timestamp: row.updated_at,
+          summary,
+          canonical_fact_id: null,
+          canonical_evidence: false,
+        });
+      }
+    }
+
     const rows = this.db
       .prepare(
         `SELECT id, source_entity_id, target_entity_id, predicate, source_event_ref, created_at
          FROM agent_fact_overlay
-         WHERE agent_id=? AND id IN (${placeholders})`,
+         WHERE agent_id=? AND cognition_key IS NULL AND id IN (${placeholders})`,
       )
       .all(viewerContext.viewer_agent_id, ...ids) as Array<{
       id: number;
@@ -1188,6 +1262,96 @@ export class GraphNavigator {
       return b.weight - a.weight;
     }
     return (b.timestamp ?? 0) - (a.timestamp ?? 0);
+  }
+
+  private parseAssertionRecord(recordJson: string | null): {
+    sourcePointerKey: string | null;
+    targetPointerKey: string | null;
+    predicate: string | null;
+    sourceEventRef: NodeRef | null;
+  } {
+    if (!recordJson) {
+      return {
+        sourcePointerKey: null,
+        targetPointerKey: null,
+        predicate: null,
+        sourceEventRef: null,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(recordJson) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") {
+        return {
+          sourcePointerKey: null,
+          targetPointerKey: null,
+          predicate: null,
+          sourceEventRef: null,
+        };
+      }
+
+      const sourcePointerKey =
+        typeof parsed.sourcePointerKey === "string" && parsed.sourcePointerKey.trim().length > 0
+          ? parsed.sourcePointerKey.trim()
+          : null;
+      const targetPointerKey =
+        typeof parsed.targetPointerKey === "string" && parsed.targetPointerKey.trim().length > 0
+          ? parsed.targetPointerKey.trim()
+          : null;
+      const predicate =
+        typeof parsed.predicate === "string" && parsed.predicate.trim().length > 0
+          ? parsed.predicate.trim()
+          : null;
+
+      const sourceEventRaw =
+        typeof parsed.sourceEventRef === "string"
+          ? parsed.sourceEventRef
+          : typeof parsed.source_event_ref === "string"
+            ? parsed.source_event_ref
+            : null;
+      const sourceEventCandidate = sourceEventRaw?.trim();
+      const sourceEventRef =
+        sourceEventCandidate && this.parseNodeRef(sourceEventCandidate as NodeRef)
+          ? (sourceEventCandidate as NodeRef)
+          : null;
+
+      return {
+        sourcePointerKey,
+        targetPointerKey,
+        predicate,
+        sourceEventRef,
+      };
+    } catch {
+      return {
+        sourcePointerKey: null,
+        targetPointerKey: null,
+        predicate: null,
+        sourceEventRef: null,
+      };
+    }
+  }
+
+  private resolveEntityRefFromPointerKey(pointerKey: string, viewerAgentId: string): NodeRef | null {
+    const normalized = pointerKey.trim();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    const row = this.db
+      .prepare(
+        `SELECT id
+         FROM entity_nodes
+         WHERE pointer_key = ?
+           AND (
+             (memory_scope = 'private_overlay' AND owner_agent_id = ?)
+             OR memory_scope = 'shared_public'
+           )
+         ORDER BY CASE WHEN memory_scope = 'private_overlay' THEN 0 ELSE 1 END
+         LIMIT 1`,
+      )
+      .get(normalized, viewerAgentId) as { id: number } | undefined;
+
+    return row ? (`entity:${row.id}` as NodeRef) : null;
   }
 
   private edgePriorityScore(kind: NavigatorEdgeKind, queryType: QueryType): number {
