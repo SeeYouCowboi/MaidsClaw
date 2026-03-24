@@ -498,7 +498,7 @@ export class MemoryTaskAgent {
         predicate: row.predicate,
         stance: row.stance,
         basis: row.basis,
-        cognition_key: row.cognitionKey,
+        "cognition_key": row.cognitionKey,
       })),
       ...commitments.map((row) => ({
         kind: "commitment" as const,
@@ -507,7 +507,7 @@ export class MemoryTaskAgent {
         status: row.commitmentStatus,
         stance: row.status === "active" ? "accepted" : "rejected",
         basis: null,
-        cognition_key: row.cognitionKey,
+        "cognition_key": row.cognitionKey,
       })),
     ];
 

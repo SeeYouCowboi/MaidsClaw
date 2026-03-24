@@ -921,8 +921,17 @@ export class GraphStorageService {
   }
 
   private syncFtsRow(tableName: string, rowId: number, content: string): void {
-    this.db.prepare(`DELETE FROM ${tableName} WHERE rowid = ?`).run(rowId);
-    this.db.prepare(`INSERT INTO ${tableName}(rowid, content) VALUES (?, ?)`).run(rowId, content);
+    try {
+      this.db.prepare(`DELETE FROM ${tableName} WHERE rowid = ?`).run(rowId);
+      this.db.prepare(`INSERT INTO ${tableName}(rowid, content) VALUES (?, ?)`).run(rowId, content);
+    } catch (error) {
+      console.error(`[GraphStorageService] FTS sync failed for ${tableName} rowid=${rowId}`, {
+        table: tableName,
+        rowId,
+        contentLength: content.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private getPrivateNodeAgent(nodeRef: NodeRef): string | null {
