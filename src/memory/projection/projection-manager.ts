@@ -171,7 +171,16 @@ export class ProjectionManager {
 		}
 	}
 
-	/** Sync projection: materializes publication declarations into graph storage within the settlement transaction. */
+	/**
+	 * Sync projection: materializes publication declarations into graph storage within the settlement transaction.
+	 *
+	 * Publication path semantics:
+	 * 1) `current_area` -> `area_visible` event projected directly into the current area.
+	 * 2) `world_public` -> `world_public` event projected with world-level visibility.
+	 * 3) no publications -> fast return without any projection work.
+	 *
+	 * Safety guard: when `graphStorage` is null, publication materialization is silently skipped.
+	 */
 	private materializePublicationsSafe(params: SettlementProjectionParams): void {
 		if (params.publications.length === 0 || !this.graphStorage) {
 			return;

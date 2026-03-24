@@ -301,6 +301,7 @@ export function materializePublications(
   },
 ): MaterializationResult {
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
+  const maxRetries = 3;
 
   for (let pubIndex = 0; pubIndex < publications.length; pubIndex += 1) {
     const pub = publications[pubIndex];
@@ -334,8 +335,9 @@ export function materializePublications(
     const participants = JSON.stringify([makeNodeRef("entity", locationEntityId)]);
     const timestamp = ctx.timestamp ?? Date.now();
 
-    try {
-      storage.createProjectedEvent({
+    const publicationWriteResult = createPublicationEventWithRetry(
+      storage,
+      {
         sessionId: ctx.sessionId,
         summary: pub.summary.trim(),
         timestamp,
@@ -346,36 +348,88 @@ export function materializePublications(
         visibilityScope,
         sourceSettlementId: settlementId,
         sourcePubIndex: pubIndex,
-      });
-      if (options?.projectionRepo && options.sourceAgentId) {
-        options.projectionRepo.applyPublicationProjection({
-          trigger: "publication",
-          targetScope: pub.targetScope,
-          agentId: options.sourceAgentId,
-          areaId: locationEntityId,
-          projectionKey: `publication:${settlementId}:${pubIndex}`,
-          summaryText: pub.summary.trim(),
-          payload: {
-            settlementId,
-            pubIndex,
-            visibilityScope,
-            kind: pub.kind,
-          },
-          surfacingClassification: "public_manifestation",
-          updatedAt: timestamp,
-        });
-      }
-      result.materialized += 1;
-    } catch (error: unknown) {
-      if (isSqliteUniqueConstraintError(error)) {
-        result.reconciled += 1;
-      } else {
-        throw error;
-      }
+      },
+      {
+        settlementId,
+        pubIndex,
+        maxRetries,
+      },
+    );
+
+    if (publicationWriteResult === "reconciled") {
+      result.reconciled += 1;
+      continue;
     }
+    if (publicationWriteResult === "skipped") {
+      result.skipped += 1;
+      continue;
+    }
+
+    if (options?.projectionRepo && options.sourceAgentId) {
+      options.projectionRepo.applyPublicationProjection({
+        trigger: "publication",
+        targetScope: pub.targetScope,
+        agentId: options.sourceAgentId,
+        areaId: locationEntityId,
+        projectionKey: `publication:${settlementId}:${pubIndex}`,
+        summaryText: pub.summary.trim(),
+        payload: {
+          settlementId,
+          pubIndex,
+          visibilityScope,
+          kind: pub.kind,
+        },
+        surfacingClassification: "public_manifestation",
+        updatedAt: timestamp,
+      });
+    }
+    result.materialized += 1;
   }
 
   return result;
+}
+
+type PublicationWriteResult = "materialized" | "reconciled" | "skipped";
+
+type PublicationRetryContext = {
+  settlementId: string;
+  pubIndex: number;
+  maxRetries: number;
+};
+
+function createPublicationEventWithRetry(
+  storage: GraphStorageService,
+  params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
+  retryContext: PublicationRetryContext,
+): PublicationWriteResult {
+  let retryCount = 0;
+
+  for (;;) {
+    try {
+      storage.createProjectedEvent(params);
+      return "materialized";
+    } catch (error: unknown) {
+      if (isSqliteUniqueConstraintError(error)) {
+        return "reconciled";
+      }
+
+      if (!isLikelySqliteError(error)) {
+        throw error;
+      }
+
+      if (retryCount >= retryContext.maxRetries) {
+        console.warn(
+          `[materializePublications] failed after ${retryContext.maxRetries} retries (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+          error,
+        );
+        return "skipped";
+      }
+
+      const backoffMs = 100 * 2 ** retryCount;
+      Bun.sleepSync(backoffMs);
+      retryCount += 1;
+    }
+  }
 }
 
 const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {
@@ -404,4 +458,20 @@ function isSqliteUniqueConstraintError(error: unknown): boolean {
     return msg.includes("unique constraint") || msg.includes("unique_constraint") || msg.includes("constraint failed");
   }
   return false;
+}
+
+function isLikelySqliteError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const name = error.name.toLowerCase();
+  const msg = error.message.toLowerCase();
+  return (
+    name.includes("sqlite") ||
+    msg.includes("sqlite") ||
+    msg.includes("database is locked") ||
+    msg.includes("database is busy") ||
+    msg.includes("sql logic error")
+  );
 }

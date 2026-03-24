@@ -131,3 +131,12 @@
 - .sisyphus/drafts/ added to .gitignore exception list (mirrors .sisyphus/plans/ pattern)
 - Test baseline: 463 pass / 0 fail (was 451 before T21/T22; 12 more from T24)
 - T33 trigger conditions documented in the eval doc
+
+## [2026-03-24] T25 — Correction (final)
+
+- materializePublications now wraps publication createProjectedEvent writes with transient SQLite retry handling.
+- Retry policy: up to 3 retries with exponential backoff 100ms, 200ms, 400ms using Bun.sleepSync.
+- UNIQUE constraint violations remain idempotent reconcile behavior and do not retry.
+- Persistent non-unique SQLite failures after retries are downgraded to warn+skip to preserve settlement consistency.
+- Added publication tests covering transient retry success and retry-exhausted skip.
+- Added ProjectionManager regression test proving graphStorage=null still silently skips publication materialization.

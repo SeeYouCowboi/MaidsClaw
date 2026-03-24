@@ -718,6 +718,139 @@ describe("Publication Materialization", () => {
 		cleanupDb(dbPath);
 	});
 
+	it("retries transient non-unique SQLite error then succeeds", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-hall",
+			displayName: "Retry Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Retry me once." },
+		];
+		const settlementId = `stl:retry-success-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		let attemptCount = 0;
+		patchedStorage.createProjectedEvent = ((params) => {
+			attemptCount += 1;
+			if (attemptCount === 1) {
+				const transient = new Error("database is locked");
+				transient.name = "SQLiteError";
+				throw transient;
+			}
+			return originalCreateProjectedEvent(params);
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		const sleepCalls: number[] = [];
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = (ms: number) => {
+			sleepCalls.push(ms);
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-success",
+				locationEntityId: locationId,
+				timestamp: 9_000,
+			});
+
+			expect(result.materialized).toBe(1);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(0);
+			expect(attemptCount).toBe(2);
+			expect(sleepCalls).toEqual([100]);
+
+			const rows = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+				[settlementId],
+			);
+			expect(rows.length).toBe(1);
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("skips publication after 3 retries for persistent non-unique SQLite error", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-fail-hall",
+			displayName: "Retry Fail Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "This keeps failing." },
+		];
+		const settlementId = `stl:retry-fail-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		let attemptCount = 0;
+		patchedStorage.createProjectedEvent = (() => {
+			attemptCount += 1;
+			const transient = new Error("database is busy");
+			transient.name = "SQLiteError";
+			throw transient;
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		const sleepCalls: number[] = [];
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = (ms: number) => {
+			sleepCalls.push(ms);
+		};
+
+		const originalWarn = console.warn;
+		let warned = 0;
+		console.warn = (..._args: unknown[]) => {
+			warned += 1;
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-fail",
+				locationEntityId: locationId,
+				timestamp: 9_500,
+			});
+
+			expect(result.materialized).toBe(0);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(1);
+			expect(attemptCount).toBe(4);
+			expect(sleepCalls).toEqual([100, 200, 400]);
+			expect(warned).toBe(1);
+
+			const rows = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+				[settlementId],
+			);
+			expect(rows.length).toBe(0);
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			console.warn = originalWarn;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
 	it("current_area publication is skipped when no locationEntityId is available", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);

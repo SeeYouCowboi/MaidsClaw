@@ -443,4 +443,45 @@ describe("V2 validation — turn settlement sync visibility", () => {
 			expect(areaNarrative).toBeUndefined();
 		}),
 	);
+
+	it("settlement commit silently skips publication materialization when graphStorage is null", () =>
+		withTempMemoryDb(({ db }) => {
+			runInteractionMigrations(db);
+			const { locationId } = seedStandardEntities(db);
+			const projectionManager = new ProjectionManager(
+				new EpisodeRepository(db),
+				new CognitionEventRepo(db),
+				new PrivateCognitionProjectionRepo(db),
+				null,
+			);
+			const interactionStore = new InteractionStore(db);
+
+			projectionManager.commitSettlement({
+				settlementId: "stl:validation:null-graph",
+				sessionId: "sess:validation:null-graph",
+				agentId: "rp:alice",
+				cognitionOps: [],
+				privateEpisodes: [],
+				publications: [{ kind: "spoken", targetScope: "current_area", summary: "Should be skipped." }],
+				viewerSnapshot: { currentLocationEntityId: locationId },
+				upsertRecentCognitionSlot: interactionStore.upsertRecentCognitionSlot.bind(interactionStore),
+				recentCognitionSlotJson: "[]",
+			});
+
+			const published = db.get<{ count: number }>(
+				"SELECT COUNT(*) AS count FROM event_nodes WHERE source_settlement_id = ?",
+				["stl:validation:null-graph"],
+			);
+			expect(published?.count ?? 0).toBe(0);
+
+			const slot = db.get<RecentSlotRow>(
+				`SELECT session_id, agent_id, last_settlement_id, slot_payload
+				 FROM recent_cognition_slots
+				 WHERE session_id = ? AND agent_id = ?`,
+				["sess:validation:null-graph", "rp:alice"],
+			);
+			expect(slot).toBeDefined();
+			expect(slot?.last_settlement_id).toBe("stl:validation:null-graph");
+		}),
+	);
 });
