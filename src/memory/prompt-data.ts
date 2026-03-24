@@ -18,6 +18,22 @@ export function getCoreMemoryBlocks(agentId: string, db: Db): string {
 
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "character"];
 const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
+const retrievalServiceByDb = new WeakMap<Db, RetrievalService>();
+
+function resolveRetrievalService(db: Db, retrievalService?: RetrievalService): RetrievalService {
+  if (retrievalService) {
+    return retrievalService;
+  }
+
+  const cached = retrievalServiceByDb.get(db);
+  if (cached) {
+    return cached;
+  }
+
+  const created = RetrievalService.create(db);
+  retrievalServiceByDb.set(db, created);
+  return created;
+}
 
 export function getPinnedBlocks(agentId: string, db: Db): string {
   const blocks = getAllCoreMemoryBlocks(agentId, db);
@@ -35,12 +51,13 @@ export async function getTypedRetrievalSurface(
   userMessage: string,
   viewerContext: ViewerContext,
   db: Db,
+  retrievalService?: RetrievalService,
 ): Promise<string> {
   if (userMessage.trim().length < 3) {
     return "";
   }
 
-  const retrieval = new RetrievalService(db);
+  const retrieval = resolveRetrievalService(db, retrievalService);
   const recentEntries = getRecentCognitionEntries(
     viewerContext.viewer_agent_id,
     viewerContext.session_id,
@@ -75,8 +92,9 @@ export async function getMemoryHints(
   viewerContext: ViewerContext,
   db: Db,
   limit?: number,
+  retrievalService?: RetrievalService,
 ): Promise<string> {
-  const service = new RetrievalService(db);
+  const service = resolveRetrievalService(db, retrievalService);
   const hints = await service.generateMemoryHints(userMessage, viewerContext, limit ?? 5);
 
   if (hints.length === 0) {

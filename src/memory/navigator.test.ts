@@ -334,7 +334,7 @@ describe("GraphNavigator", () => {
       .run("coffee event", now);
     db.prepare("INSERT INTO search_docs_world_fts (rowid, content) VALUES (?, ?)").run(worldDoc.lastInsertRowid, "coffee event");
 
-    const retrieval = new RetrievalService(db as unknown as ConstructorParameters<typeof RetrievalService>[0]);
+    const retrieval = RetrievalService.create(db as unknown as Parameters<typeof RetrievalService.create>[0]);
     const navigator = new GraphNavigator(db, retrieval, alias);
     const result = await navigator.explore("coffee", viewerA());
 

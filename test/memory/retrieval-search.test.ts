@@ -13,7 +13,8 @@ import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
-import type { ViewerContext } from "../../src/memory/types.js";
+import type { CognitionHit } from "../../src/memory/cognition/cognition-search.js";
+import type { MemoryHint, NodeRef, ViewerContext } from "../../src/memory/types.js";
 import { openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
@@ -83,7 +84,7 @@ describe("RetrievalService", () => {
 				origin: "runtime_projection",
 			});
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByEntity("alice", viewer({ current_area_id: locationId }));
 
 			expect(result.entity).not.toBeNull();
@@ -100,7 +101,7 @@ describe("RetrievalService", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByEntity("nonexistent", viewer());
 
 			expect(result.entity).toBeNull();
@@ -121,7 +122,7 @@ describe("RetrievalService", () => {
 			storage.invalidateFact(factId);
 			storage.createFact(aliceId, bobId, "current_relation");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByEntity("alice", viewer());
 
 			const predicates = result.facts.map((f) => f.predicate);
@@ -170,7 +171,7 @@ describe("RetrievalService", () => {
 				origin: "runtime_projection",
 			});
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByEntity("alice", viewer({ current_area_id: area1 }));
 
 			const summaries = result.events.map((e) => e.summary);
@@ -193,7 +194,7 @@ describe("RetrievalService", () => {
 			storage.syncSearchDoc("private", "private_event:1" as any, "Alice thinks Bob is suspicious", "rp:alice");
 			storage.syncSearchDoc("private", "private_event:2" as any, "Bob thinks Alice is kind", "rp:bob");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("suspicious", viewer({ viewer_agent_id: "rp:alice" }));
 
 			expect(results).toHaveLength(0);
@@ -210,7 +211,7 @@ describe("RetrievalService", () => {
 			storage.syncSearchDoc("area", "event:1" as any, "A loud crash in the kitchen", undefined, 10);
 			storage.syncSearchDoc("area", "event:2" as any, "A loud crash in the garden", undefined, 20);
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("crash", viewer({ current_area_id: 10 }));
 
 			expect(results.length).toBe(1);
@@ -227,7 +228,7 @@ describe("RetrievalService", () => {
 
 			storage.syncSearchDoc("world", "event:1" as any, "The annual festival began at dawn");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const alice = await retrieval.searchVisibleNarrative("festival", viewer({ viewer_agent_id: "rp:alice" }));
 			const bob = await retrieval.searchVisibleNarrative("festival", viewer({ viewer_agent_id: "rp:bob" }));
 
@@ -247,7 +248,7 @@ describe("RetrievalService", () => {
 			storage.syncSearchDoc("area", "event:1" as any, "The moonlit garden was peaceful", undefined, 1);
 			storage.syncSearchDoc("world", "event:2" as any, "A moonlit celebration in the town square");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("moonlit", viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }));
 
 			expect(results).toHaveLength(2);
@@ -271,7 +272,7 @@ describe("RetrievalService", () => {
 
 			storage.syncSearchDoc("world", "event:1" as any, "Alice baked a cake");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("dragon", viewer());
 
 			expect(results).toHaveLength(0);
@@ -287,7 +288,7 @@ describe("RetrievalService", () => {
 
 			storage.syncSearchDoc("world", "event:1" as any, "Alice visited the coffee shop downtown");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("coff", viewer());
 
 			expect(results.length).toBeGreaterThanOrEqual(1);
@@ -324,7 +325,7 @@ describe("RetrievalService", () => {
 				origin: "runtime_projection",
 			});
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByTopic("friendship", viewer({ current_area_id: locationId }));
 
 			expect(result.topic).not.toBeNull();
@@ -339,7 +340,7 @@ describe("RetrievalService", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const result = retrieval.readByTopic("nonexistent_topic", viewer());
 
 			expect(result.topic).toBeNull();
@@ -971,14 +972,25 @@ describe("RetrievalService", () => {
 		});
 	});
 
-	describe("Typed Retrieval Surface", () => {
-		it("keeps typed retrieval frontstage separate from memory_explore explain shell", async () => {
+		describe("Typed Retrieval Surface", () => {
+			it("create factory returns RetrievalService instance", () => {
+				const { dbPath, db } = createTempDb();
+				runMemoryMigrations(db);
+
+				const retrieval = RetrievalService.create(db);
+				expect(retrieval instanceof RetrievalService).toBe(true);
+
+				db.close();
+				cleanupDb(dbPath);
+			});
+
+			it("keeps typed retrieval frontstage separate from memory_explore explain shell", async () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
 			storage.syncSearchDoc("world", "event:1" as any, "A ledger dispute happened in the hall");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const typed = await retrieval.generateTypedRetrieval(
 				"ledger dispute",
 				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
@@ -1083,7 +1095,7 @@ describe("RetrievalService", () => {
 				basis: "first_hand",
 			});
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const typed = await retrieval.generateTypedRetrieval(
 				"ledger",
 				viewer({ viewer_agent_id: "rp:alice" }),
@@ -1111,7 +1123,7 @@ describe("RetrievalService", () => {
 
 			storage.syncSearchDoc("world", "event:10" as any, "Earlier in the hall, Bob dropped a key");
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const typed = await retrieval.generateTypedRetrieval(
 				"what happened before in the hall",
 				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
@@ -1180,7 +1192,7 @@ describe("RetrievalService", () => {
 			const rb = new RelationBuilder(db);
 			rb.writeContestRelations(sourceRef, ["assertion:99"], "stl:typed-c2", 0.8);
 
-			const retrieval = new RetrievalService(db);
+			const retrieval = RetrievalService.create(db);
 			const typed = await retrieval.generateTypedRetrieval(
 				"trusts",
 				viewer({ viewer_agent_id: "rp:alice" }),
@@ -1201,8 +1213,8 @@ describe("RetrievalService", () => {
 		});
 
 		it("strongly deduplicates recent cognition, conversation, cognitionKey, and surfaced narrative", async () => {
-			const orchestrator = new RetrievalOrchestrator(
-				{
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
 					generateMemoryHints: async () => [
 						{
 							source_ref: "event:1" as any,
@@ -1220,7 +1232,7 @@ describe("RetrievalService", () => {
 						},
 					],
 				} as unknown as NarrativeSearchService,
-				{
+				cognitionService: {
 					searchCognition: () => [
 						{
 							kind: "assertion",
@@ -1251,7 +1263,7 @@ describe("RetrievalService", () => {
 						},
 					],
 				} as unknown as CognitionSearchService,
-			);
+			});
 
 			const result = await orchestrator.search(
 				"recall",
@@ -1275,6 +1287,88 @@ describe("RetrievalService", () => {
 			expect(result.typed.cognition[0]?.cognitionKey).toBe("kept");
 			expect(result.typed.narrative).toHaveLength(1);
 			expect(result.typed.narrative[0]?.content).toBe("new narrative");
+		});
+
+		it("deep_explain strategy increases typed retrieval budgets over default_retrieval", async () => {
+			const now = Date.now();
+			const stubNarrativeHints: MemoryHint[] = [
+				{ source_ref: "fact:1" as NodeRef, doc_type: "fact", scope: "world", content: "narrative fact", score: 1.0 },
+				{ source_ref: "entity:1" as NodeRef, doc_type: "entity_summary", scope: "world", content: "narrative entity", score: 0.95 },
+				{ source_ref: "event:3" as NodeRef, doc_type: "event", scope: "world", content: "narrative event", score: 0.8 },
+			];
+			const stubCognitionHits: CognitionHit[] = [
+				{
+					kind: "assertion",
+					basis: "first_hand",
+					stance: "accepted",
+					source_ref: "assertion:1" as NodeRef,
+					cognitionKey: "k1",
+					content: "cognition 1",
+					updated_at: now,
+				},
+				{
+					kind: "assertion",
+					basis: "first_hand",
+					stance: "accepted",
+					source_ref: "assertion:2" as NodeRef,
+					cognitionKey: "k2",
+					content: "cognition 2",
+					updated_at: now - 1,
+				},
+				{
+					kind: "assertion",
+					basis: "first_hand",
+					stance: "contested",
+					source_ref: "assertion:3" as NodeRef,
+					cognitionKey: "k3",
+					content: "cognition 3",
+					updated_at: now - 2,
+					conflictEvidence: [{ targetRef: "assertion:99", strength: 0.7, sourceKind: "system", sourceRef: "test" }],
+				},
+			];
+
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => stubNarrativeHints,
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => stubCognitionHits,
+				} as unknown as CognitionSearchService,
+			});
+
+			const baseTemplate = {
+				cognitionBudget: 1,
+				narrativeBudget: 1,
+				conflictNotesBudget: 0,
+				episodeBudget: 0,
+				queryEpisodeBoost: 0,
+				sceneEpisodeBoost: 0,
+			};
+
+			const defaultResult = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				baseTemplate,
+				undefined,
+				"default_retrieval",
+			);
+
+			const deepResult = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				baseTemplate,
+				undefined,
+				"deep_explain",
+			);
+
+			expect(deepResult.typed.cognition.length).toBeGreaterThan(defaultResult.typed.cognition.length);
+			expect(deepResult.typed.episode.length).toBeGreaterThanOrEqual(defaultResult.typed.episode.length);
+			expect(
+				deepResult.typed.narrative.length + deepResult.typed.episode.length,
+			).toBeGreaterThan(defaultResult.typed.narrative.length + defaultResult.typed.episode.length);
+			expect(deepResult.typed.conflict_notes.length).toBeGreaterThanOrEqual(defaultResult.typed.conflict_notes.length);
 		});
 	});
 });

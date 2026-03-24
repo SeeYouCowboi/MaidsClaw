@@ -6,6 +6,7 @@ import { NarrativeSearchService } from "./narrative/narrative-search.js";
 import {
   RetrievalOrchestrator,
   type RetrievalDedupContext,
+  type RetrievalQueryStrategy,
   type TypedRetrievalResult,
 } from "./retrieval/retrieval-orchestrator.js";
 import { MAX_INTEGER } from "./schema.js";
@@ -45,24 +46,48 @@ type TopicReadResult = {
   episodes: EpisodeRow[];
 };
 
+type RetrievalServiceDeps = {
+  db: Db;
+  embeddingService?: EmbeddingService;
+  narrativeSearch?: NarrativeSearchService;
+  cognitionSearch?: CognitionSearchService;
+  orchestrator?: RetrievalOrchestrator;
+  visibilityPolicy?: VisibilityPolicy;
+};
+
 export class RetrievalService {
+  private readonly db: Db;
   private readonly embeddingService: EmbeddingService;
   private readonly narrativeSearch: NarrativeSearchService;
   private readonly cognitionSearch: CognitionSearchService;
   private readonly orchestrator: RetrievalOrchestrator;
   private readonly visibilityPolicy: VisibilityPolicy;
 
-  constructor(private readonly db: Db) {
-    const batcher = new TransactionBatcher(db);
-    this.embeddingService = new EmbeddingService(db, batcher);
-    this.narrativeSearch = new NarrativeSearchService(db);
-    this.cognitionSearch = new CognitionSearchService(db);
-    this.orchestrator = new RetrievalOrchestrator(
-      this.narrativeSearch,
-      this.cognitionSearch,
-      this.cognitionSearch.createCurrentProjectionReader(),
-    );
-    this.visibilityPolicy = new VisibilityPolicy();
+  constructor(dbOrDeps: Db | RetrievalServiceDeps) {
+    const deps = this.resolveDeps(dbOrDeps);
+    const { db } = deps;
+    this.db = db;
+    this.embeddingService = deps.embeddingService ?? new EmbeddingService(db, new TransactionBatcher(db));
+    this.narrativeSearch = deps.narrativeSearch ?? new NarrativeSearchService(db);
+    this.cognitionSearch = deps.cognitionSearch ?? new CognitionSearchService(db);
+    this.orchestrator = deps.orchestrator
+      ?? new RetrievalOrchestrator({
+        narrativeService: this.narrativeSearch,
+        cognitionService: this.cognitionSearch,
+        currentProjectionReader: this.cognitionSearch.createCurrentProjectionReader(),
+      });
+    this.visibilityPolicy = deps.visibilityPolicy ?? new VisibilityPolicy();
+  }
+
+  static create(db: Db): RetrievalService {
+    return Reflect.construct(this, [db]) as RetrievalService;
+  }
+
+  private resolveDeps(dbOrDeps: Db | RetrievalServiceDeps): RetrievalServiceDeps {
+    if ("db" in dbOrDeps) {
+      return dbOrDeps;
+    }
+    return { db: dbOrDeps };
   }
 
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
@@ -190,6 +215,7 @@ export class RetrievalService {
     viewerContext: ViewerContext,
     dedupContext?: RetrievalDedupContext,
     retrievalTemplate?: RetrievalTemplate,
+    queryStrategy: RetrievalQueryStrategy = "default_retrieval",
   ): Promise<TypedRetrievalResult> {
     const result = await this.orchestrator.search(
       query,
@@ -197,6 +223,7 @@ export class RetrievalService {
       viewerContext.viewer_role,
       retrievalTemplate,
       dedupContext,
+      queryStrategy,
     );
     const typed = result.typed;
     const conflictNotesBudget = retrievalTemplate?.conflictNotesBudget ?? 0;

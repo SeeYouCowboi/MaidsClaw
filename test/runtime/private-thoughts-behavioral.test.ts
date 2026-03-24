@@ -9,6 +9,7 @@ import { GraphStorageService } from "../../src/memory/storage.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
 import { getRecentCognition, getTypedRetrievalSurface } from "../../src/memory/prompt-data.js";
+import { RetrievalService } from "../../src/memory/retrieval.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { PersonaLoader } from "../../src/persona/loader.js";
 import { PersonaService } from "../../src/persona/service.js";
@@ -212,6 +213,48 @@ describe("Behavioral: typed retrieval prompt section", () => {
     );
 
     expect(output).toBe("");
+  });
+
+  it("reuses cached RetrievalService for repeated typed retrieval requests", async () => {
+    const originalCreate = RetrievalService.create;
+    let createCalls = 0;
+    Object.defineProperty(RetrievalService, "create", {
+      configurable: true,
+      value(dbArg: Db) {
+        createCalls += 1;
+        return originalCreate.call(RetrievalService, dbArg);
+      },
+    });
+
+    try {
+      await getTypedRetrievalSurface(
+        "coffee ledger",
+        {
+          viewer_agent_id: "rp:eveline",
+          viewer_role: "rp_agent",
+          current_area_id: 1,
+          session_id: "sess-typed",
+        },
+        db,
+      );
+      await getTypedRetrievalSurface(
+        "coffee service",
+        {
+          viewer_agent_id: "rp:eveline",
+          viewer_role: "rp_agent",
+          current_area_id: 1,
+          session_id: "sess-typed",
+        },
+        db,
+      );
+    } finally {
+      Object.defineProperty(RetrievalService, "create", {
+        configurable: true,
+        value: originalCreate,
+      });
+    }
+
+    expect(createCalls).toBe(1);
   });
 
   it("cross-session durable recall keeps cognition searchable for same agent", async () => {

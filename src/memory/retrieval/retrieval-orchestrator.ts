@@ -6,6 +6,14 @@ import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } fr
 import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
 import { resolveTemplate } from "../contracts/retrieval-template.js";
 
+export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
+
+type RetrievalOrchestratorDeps = {
+  narrativeService: NarrativeSearchService;
+  cognitionService: CognitionSearchService;
+  currentProjectionReader?: CurrentProjectionReader | null;
+};
+
 type TypedRetrievalSegment = {
   source_ref: string;
   content: string;
@@ -54,13 +62,13 @@ const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|æ
 
 export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
+  private readonly narrativeService: NarrativeSearchService;
+  private readonly cognitionService: CognitionSearchService;
 
-  constructor(
-    private readonly narrativeService: NarrativeSearchService,
-    private readonly cognitionService: CognitionSearchService,
-    currentProjectionReader?: CurrentProjectionReader,
-  ) {
-    this.currentProjectionReader = currentProjectionReader ?? null;
+  constructor(deps: RetrievalOrchestratorDeps) {
+    this.narrativeService = deps.narrativeService;
+    this.cognitionService = deps.cognitionService;
+    this.currentProjectionReader = deps.currentProjectionReader ?? null;
   }
 
   async search(
@@ -69,13 +77,15 @@ export class RetrievalOrchestrator {
     role: AgentRole,
     override?: RetrievalTemplate,
     dedupContext?: RetrievalDedupContext,
+    queryStrategy: RetrievalQueryStrategy = "default_retrieval",
   ): Promise<RetrievalResult> {
-    const template = resolveTemplate(role, override);
+    const baseTemplate = resolveTemplate(role, override);
+    const template = this.applyQueryStrategy(baseTemplate, queryStrategy);
 
     const seenText = this.seedSeenText(dedupContext);
 
     const recentCognitionKeys = new Set<string>(dedupContext?.recentCognitionKeys ?? []);
-    if (this.currentProjectionReader) {
+    if (this.currentProjectionReader && template.cognitionBudget > 0) {
       const currentRows = this.currentProjectionReader.getActiveCurrent(viewerContext.viewer_agent_id);
       for (const row of currentRows) {
         const key = row.cognition_key?.trim();
@@ -126,6 +136,30 @@ export class RetrievalOrchestrator {
         score: segment.score,
       })),
       cognitionHits,
+    };
+  }
+
+  private applyQueryStrategy(
+    template: Required<RetrievalTemplate>,
+    queryStrategy: RetrievalQueryStrategy,
+  ): Required<RetrievalTemplate> {
+    if (queryStrategy === "default_retrieval") {
+      return template;
+    }
+
+    const narrativeBudget = template.narrativeBudget + 2;
+    const cognitionBudget = template.cognitionBudget + 2;
+
+    return {
+      ...template,
+      narrativeBudget,
+      cognitionBudget,
+      conflictNotesBudget: template.conflictNotesBudget + 1,
+      episodeBudget: template.episodeBudget + 1,
+      queryEpisodeBoost: template.queryEpisodeBoost + 1,
+      sceneEpisodeBoost: template.sceneEpisodeBoost + 1,
+      maxNarrativeHits: narrativeBudget,
+      maxCognitionHits: cognitionBudget,
     };
   }
 
