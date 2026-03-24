@@ -650,11 +650,15 @@ describe("RetrievalService", () => {
 				preContestedStance: "accepted",
 			});
 
+			const now = Date.now();
 			db.run(
-				`UPDATE private_cognition_events
-				 SET record_json = ?
-				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				`INSERT INTO private_cognition_events (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
+					"rp:alice",
+					"evidence:contested",
+					"assertion",
+					"upsert",
 					JSON.stringify({
 						sourcePointerKey: "__self__",
 						predicate: "trusts",
@@ -665,9 +669,9 @@ describe("RetrievalService", () => {
 						conflictSummary: "contested (1 factors)",
 						conflictFactorRefs: ["private_belief:1"],
 					}),
-					"rp:alice",
-					"evidence:contested",
-					"stl:ev-2",
+					"stl:ev-3",
+					now,
+					now,
 				],
 			);
 

@@ -1949,11 +1949,15 @@ describe("PrivateCognitionProjectionRepo", () => {
 				preContestedStance: "accepted",
 			});
 
+			const now = Date.now();
 			db.run(
-				`UPDATE private_cognition_events
-				 SET record_json = ?
-				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				`INSERT INTO private_cognition_events (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
+					"rp:alice",
+					"proj:contested-metadata",
+					"assertion",
+					"upsert",
 					JSON.stringify({
 						sourcePointerKey: "__self__",
 						predicate: "trusts",
@@ -1963,9 +1967,9 @@ describe("PrivateCognitionProjectionRepo", () => {
 						conflictSummary: "contested (1 factors)",
 						conflictFactorRefs: ["private_belief:1"],
 					}),
-					"rp:alice",
-					"proj:contested-metadata",
-					"stl:ctm-2",
+					"stl:ctm-3",
+					now,
+					now,
 				],
 			);
 
@@ -2000,11 +2004,15 @@ describe("PrivateCognitionProjectionRepo", () => {
 				preContestedStance: "accepted",
 			});
 
+			const now = Date.now();
 			db.run(
-				`UPDATE private_cognition_events
-				 SET record_json = ?
-				 WHERE agent_id = ? AND cognition_key = ? AND settlement_id = ?`,
+				`INSERT INTO private_cognition_events (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				[
+					"rp:alice",
+					"proj:contested-bad-ref",
+					"assertion",
+					"upsert",
 					JSON.stringify({
 						sourcePointerKey: "__self__",
 						predicate: "trusts",
@@ -2013,9 +2021,9 @@ describe("PrivateCognitionProjectionRepo", () => {
 						preContestedStance: "accepted",
 						conflictFactorRefs: ["not-a-ref", "private_event:2"],
 					}),
-					"rp:alice",
-					"proj:contested-bad-ref",
-					"stl:ctb-1",
+					"stl:ctb-2",
+					now,
+					now,
 				],
 			);
 

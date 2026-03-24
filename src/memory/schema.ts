@@ -56,7 +56,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_logic_edges_source ON logic_edges(source_event_id)`,
   `CREATE INDEX IF NOT EXISTS idx_logic_edges_target ON logic_edges(target_event_id)`,
   `CREATE TABLE IF NOT EXISTS topics (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT, created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS fact_edges (id INTEGER PRIMARY KEY, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, t_valid INTEGER NOT NULL, t_invalid INTEGER NOT NULL DEFAULT ${MAX_INTEGER}, t_created INTEGER NOT NULL, t_expired INTEGER NOT NULL DEFAULT ${MAX_INTEGER}, source_event_id INTEGER)`,
+  `CREATE TABLE IF NOT EXISTS fact_edges (id INTEGER PRIMARY KEY, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, t_valid INTEGER NOT NULL CHECK (t_valid >= 0), t_invalid INTEGER NOT NULL DEFAULT ${MAX_INTEGER}, t_created INTEGER NOT NULL, t_expired INTEGER NOT NULL DEFAULT ${MAX_INTEGER}, source_event_id INTEGER)`,
   `CREATE INDEX IF NOT EXISTS idx_fact_edges_validity ON fact_edges(t_valid, t_invalid)`,
   `CREATE INDEX IF NOT EXISTS idx_fact_edges_current ON fact_edges(source_entity_id, predicate, target_entity_id) WHERE t_invalid = ${MAX_INTEGER}`,
   `CREATE TABLE IF NOT EXISTS entity_nodes (id INTEGER PRIMARY KEY, pointer_key TEXT NOT NULL, display_name TEXT NOT NULL, entity_type TEXT NOT NULL, memory_scope TEXT NOT NULL CHECK (memory_scope IN ('shared_public', 'private_overlay')), owner_agent_id TEXT, canonical_entity_id INTEGER, summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK ((memory_scope = 'shared_public' AND owner_agent_id IS NULL) OR (memory_scope = 'private_overlay' AND owner_agent_id IS NOT NULL)))`,
@@ -97,6 +97,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS private_episode_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, session_id TEXT NOT NULL, settlement_id TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('speech', 'action', 'observation', 'state_change')), summary TEXT NOT NULL, private_notes TEXT, location_entity_id INTEGER, location_text TEXT, valid_time INTEGER, committed_time INTEGER NOT NULL, source_local_ref TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_private_episode_events_settlement ON private_episode_events(settlement_id, agent_id)`,
   `CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent ON private_episode_events(agent_id, created_at DESC)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_episode_events_settlement_local_ref ON private_episode_events(settlement_id, source_local_ref) WHERE source_local_ref IS NOT NULL`,
 
   // ── Private Cognition Events (append-only ledger) ──
   `CREATE TABLE IF NOT EXISTS private_cognition_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), op TEXT NOT NULL CHECK (op IN ('upsert', 'retract')), record_json TEXT, settlement_id TEXT NOT NULL, committed_time INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
@@ -106,6 +107,11 @@ export const MEMORY_DDL: readonly string[] = [
   // ── Private Cognition Current (rebuildable projection) ──
   `CREATE TABLE IF NOT EXISTS private_cognition_current (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, cognition_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')), stance TEXT, basis TEXT, status TEXT NOT NULL DEFAULT 'active', pre_contested_stance TEXT, conflict_summary TEXT, conflict_factor_refs_json TEXT, summary_text TEXT, record_json TEXT NOT NULL, source_event_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_cognition_current_agent_key ON private_cognition_current(agent_id, cognition_key)`,
+
+  `CREATE TRIGGER IF NOT EXISTS trg_private_cognition_events_no_update BEFORE UPDATE ON private_cognition_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on private_cognition_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_private_cognition_events_no_delete BEFORE DELETE ON private_cognition_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on private_cognition_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_update BEFORE UPDATE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on private_episode_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_delete BEFORE DELETE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on private_episode_events'); END`,
 
   ...AREA_WORLD_PROJECTION_DDL,
 
@@ -472,6 +478,50 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
+      );
+    },
+  },
+  {
+    id: "memory:019:append-only-triggers-and-health-constraints",
+    description:
+      "Add append-only triggers on event ledgers, episode idempotency key, and fact_edges t_valid CHECK",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TRIGGER IF NOT EXISTS trg_private_cognition_events_no_update BEFORE UPDATE ON private_cognition_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on private_cognition_events'); END`,
+      );
+      db.exec(
+        `CREATE TRIGGER IF NOT EXISTS trg_private_cognition_events_no_delete BEFORE DELETE ON private_cognition_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on private_cognition_events'); END`,
+      );
+      db.exec(
+        `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_update BEFORE UPDATE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on private_episode_events'); END`,
+      );
+      db.exec(
+        `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_delete BEFORE DELETE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on private_episode_events'); END`,
+      );
+
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_private_episode_events_settlement_local_ref ON private_episode_events(settlement_id, source_local_ref) WHERE source_local_ref IS NOT NULL`,
+      );
+
+      db.exec(`CREATE TABLE IF NOT EXISTS fact_edges_new (
+        id INTEGER PRIMARY KEY,
+        source_entity_id INTEGER NOT NULL,
+        target_entity_id INTEGER NOT NULL,
+        predicate TEXT NOT NULL,
+        t_valid INTEGER NOT NULL CHECK (t_valid >= 0),
+        t_invalid INTEGER NOT NULL DEFAULT ${MAX_INTEGER},
+        t_created INTEGER NOT NULL,
+        t_expired INTEGER NOT NULL DEFAULT ${MAX_INTEGER},
+        source_event_id INTEGER
+      )`);
+      db.exec(`INSERT OR IGNORE INTO fact_edges_new SELECT * FROM fact_edges`);
+      db.exec(`DROP TABLE fact_edges`);
+      db.exec(`ALTER TABLE fact_edges_new RENAME TO fact_edges`);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_fact_edges_validity ON fact_edges(t_valid, t_invalid)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_fact_edges_current ON fact_edges(source_entity_id, predicate, target_entity_id) WHERE t_invalid = ${MAX_INTEGER}`,
       );
     },
   },

@@ -460,3 +460,192 @@ describe("enum-like const objects", () => {
 		expect(PromotionClass.WORLD_CANDIDATE).toBe("world_candidate");
 	});
 });
+
+// ─── 10. Append-only ledger triggers ────────────────────────────────────────
+
+describe("append-only ledger triggers", () => {
+	it("rejects UPDATE on private_cognition_events", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_cognition_events (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "key_1", "assertion", "upsert", '{}', "settle_1", now, now);
+
+		expect(() => {
+			db.prepare(
+				`UPDATE private_cognition_events SET record_json = '{"updated":true}' WHERE agent_id = 'agent_1'`,
+			).run();
+		}).toThrow(/append-only/);
+		db.close();
+	});
+
+	it("rejects DELETE on private_cognition_events", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_cognition_events (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "key_1", "assertion", "upsert", '{}', "settle_1", now, now);
+
+		expect(() => {
+			db.prepare(
+				`DELETE FROM private_cognition_events WHERE agent_id = 'agent_1'`,
+			).run();
+		}).toThrow(/append-only/);
+		db.close();
+	});
+
+	it("rejects UPDATE on private_episode_events", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "sess_1", "settle_1", "speech", "hello", now, now);
+
+		expect(() => {
+			db.prepare(
+				`UPDATE private_episode_events SET summary = 'modified' WHERE agent_id = 'agent_1'`,
+			).run();
+		}).toThrow(/append-only/);
+		db.close();
+	});
+
+	it("rejects DELETE on private_episode_events", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "sess_1", "settle_1", "speech", "hello", now, now);
+
+		expect(() => {
+			db.prepare(
+				`DELETE FROM private_episode_events WHERE agent_id = 'agent_1'`,
+			).run();
+		}).toThrow(/append-only/);
+		db.close();
+	});
+});
+
+// ─── 11. Episode idempotency key ────────────────────────────────────────────
+
+describe("private_episode_events idempotency", () => {
+	it("rejects duplicate (settlement_id, source_local_ref)", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "sess_1", "settle_1", "speech", "first", now, "ref_001", now);
+
+		expect(() => {
+			db.prepare(
+				`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run("agent_2", "sess_2", "settle_1", "action", "duplicate", now, "ref_001", now);
+		}).toThrow();
+		db.close();
+	});
+
+	it("allows same source_local_ref in different settlements", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "sess_1", "settle_1", "speech", "first", now, "ref_001", now);
+
+		let threw = false;
+		try {
+			db.prepare(
+				`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run("agent_1", "sess_1", "settle_2", "speech", "second", now, "ref_001", now);
+		} catch {
+			threw = true;
+		}
+		expect(threw).toBe(false);
+		db.close();
+	});
+
+	it("allows NULL source_local_ref duplicates in same settlement", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		db.prepare(
+			`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run("agent_1", "sess_1", "settle_1", "speech", "first", now, null, now);
+
+		let threw = false;
+		try {
+			db.prepare(
+				`INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, source_local_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run("agent_1", "sess_1", "settle_1", "speech", "second", now, null, now);
+		} catch {
+			threw = true;
+		}
+		expect(threw).toBe(false);
+		db.close();
+	});
+});
+
+// ─── 12. fact_edges t_valid CHECK ───────────────────────────────────────────
+
+describe("fact_edges t_valid CHECK constraint", () => {
+	it("allows t_valid = 0 (no time constraint)", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		let threw = false;
+		try {
+			db.prepare(
+				`INSERT INTO fact_edges (source_entity_id, target_entity_id, predicate, t_valid, t_created)
+         VALUES (?, ?, ?, ?, ?)`,
+			).run(1, 2, "knows", 0, now);
+		} catch {
+			threw = true;
+		}
+		expect(threw).toBe(false);
+		db.close();
+	});
+
+	it("allows positive t_valid", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		let threw = false;
+		try {
+			db.prepare(
+				`INSERT INTO fact_edges (source_entity_id, target_entity_id, predicate, t_valid, t_created)
+         VALUES (?, ?, ?, ?, ?)`,
+			).run(1, 2, "knows", 1000, now);
+		} catch {
+			threw = true;
+		}
+		expect(threw).toBe(false);
+		db.close();
+	});
+
+	it("rejects negative t_valid", () => {
+		const db = freshDb();
+		const now = Date.now();
+
+		expect(() => {
+			db.prepare(
+				`INSERT INTO fact_edges (source_entity_id, target_entity_id, predicate, t_valid, t_created)
+         VALUES (?, ?, ?, ?, ?)`,
+			).run(1, 2, "knows", -1, now);
+		}).toThrow();
+		db.close();
+	});
+});
