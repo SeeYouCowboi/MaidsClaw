@@ -255,10 +255,36 @@ describe("belief-revision / assertLegalStanceTransition", () => {
       ).not.toThrow();
     });
 
-    it("should throw for contested → different stance than preContestedStance", () => {
-      expect(() =>
-        assertLegalStanceTransition(createExisting("contested", "accepted"), "tentative", "test-key")
-      ).toThrow(MaidsClawError);
+    describe("one-step-below preContestedStance transitions", () => {
+      it("should allow contested → accepted when preContestedStance=confirmed (one step down)", () => {
+        expect(() =>
+          assertLegalStanceTransition(createExisting("contested", "confirmed"), "accepted", "test-key")
+        ).not.toThrow();
+      });
+
+      it("should allow contested → tentative when preContestedStance=accepted (one step down)", () => {
+        expect(() =>
+          assertLegalStanceTransition(createExisting("contested", "accepted"), "tentative", "test-key")
+        ).not.toThrow();
+      });
+
+      it("should throw for contested → tentative when preContestedStance=confirmed (two steps down)", () => {
+        expect(() =>
+          assertLegalStanceTransition(createExisting("contested", "confirmed"), "tentative", "test-key")
+        ).toThrow(MaidsClawError);
+      });
+
+      it("should throw for contested → hypothetical when preContestedStance=accepted (two steps down)", () => {
+        expect(() =>
+          assertLegalStanceTransition(createExisting("contested", "accepted"), "hypothetical", "test-key")
+        ).toThrow(MaidsClawError);
+      });
+
+      it("should still require preContestedStance for one-step-below logic", () => {
+        expect(() =>
+          assertLegalStanceTransition(createExisting("contested", null), "accepted", "test-key")
+        ).toThrow(MaidsClawError);
+      });
     });
   });
 

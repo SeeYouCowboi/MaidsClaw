@@ -77,6 +77,10 @@ function assertLegalStanceTransition(
     if (nextStance === existing.preContestedStance) {
       return;
     }
+    const preContestedLegalTargets = ALLOWED_STANCE_TRANSITIONS.get(existing.preContestedStance);
+    if (preContestedLegalTargets?.has(nextStance)) {
+      return;
+    }
     throw new MaidsClawError({
       code: "COGNITION_ILLEGAL_STANCE_TRANSITION",
       message: "illegal stance transition",
