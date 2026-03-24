@@ -100,3 +100,34 @@
 - SharedBlock type now includes retrievalOnly boolean field
 - schema.test.ts migration count assertion updated: 25 -> 26
 - Shared blocks test baseline: 63 pass / 0 fail
+
+## [2026-03-24] T26 — Settlement Payload Extension Evaluation
+
+### Settlement Payload Architecture
+- Two-layer design: agent submission (`RpTurnOutcomeSubmissionV5`) → settlement record (`TurnSettlementPayload`)
+- `areaStateArtifacts` exists ONLY in `TurnSettlementPayload` (system-injected), NOT in agent submission — correct pattern
+- `relationIntents` and `conflictFactors` are V5 additions but LACK `ArtifactContract` definitions in `SUBMIT_RP_TURN_ARTIFACT_CONTRACTS` → T27 should fix
+- `latentScratchpad` is intentionally ephemeral (trace-only), no ArtifactContract needed
+
+### Evaluation Outcome: NO EXTENSION for V3
+- Candidate A (granular publication body): DEFER — T25 is pipeline work, T31 is design RFC, neither needs payload changes
+- Candidate B (episode→cognition relation): EXCLUDE — already expressible via `relationIntents` + `localRef`
+- Candidate C (candidate-only/derive-only): DEFER — no V3 task requires deferred materialization
+- Design doc: `.sisyphus/drafts/settlement-payload-eval.md`
+
+### Test Baseline (post-Wave 4)
+- 1648 pass / 12 fail (4 pre-existing mei config + 8 from T21/T22/T24 wave 4 pending updates)
+- T26 made zero code changes, zero regressions
+
+## [2026-03-24] T28 — Explain Tool Facets Evaluation
+
+- All four candidate facets (memory_explain, memory_timeline, memory_conflicts, memory_state_trace) → DEFER/KEEP_UNIFIED
+- memory_explain = KEEP_UNIFIED: identical to memory_explore with no mode, adds nothing
+- memory_timeline = DEFER: mode=timeline already covers it; output format differentiation is T33 scope
+- memory_conflicts = DEFER: paired opposition view needs T33 ConflictView type; no conflict_read capability yet
+- memory_state_trace = DEFER: checkpoint evolution view needs T33 StateEvolutionResult type; strongest future case
+- Key insight: QUERY_TYPE_PRIORITY table in navigator.ts already encodes all mode-specific beam behavior
+- No code changes needed; memory_explore remains unified entry point
+- .sisyphus/drafts/ added to .gitignore exception list (mirrors .sisyphus/plans/ pattern)
+- Test baseline: 463 pass / 0 fail (was 451 before T21/T22; 12 more from T24)
+- T33 trigger conditions documented in the eval doc
