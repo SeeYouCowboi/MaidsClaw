@@ -2,6 +2,12 @@ import { MaidsClawError } from "../../core/errors.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import { CognitionEventRepo } from "./cognition-event-repo.js";
 import { RelationBuilder } from "./relation-builder.js";
+import {
+  TERMINAL_STANCES,
+  assertLegalStanceTransition,
+  assertBasisUpgradeOnly,
+} from "./belief-revision.js";
+import type { ExistingAssertionState } from "./belief-revision.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -136,31 +142,7 @@ type CognitionCurrentRow = {
   updated_at: number;
 };
 
-const TERMINAL_STANCES: ReadonlySet<AssertionStance> = new Set(["rejected", "abandoned"]);
 
-const ALLOWED_STANCE_TRANSITIONS: ReadonlyMap<AssertionStance, ReadonlySet<AssertionStance>> = new Map([
-  ["hypothetical", new Set(["tentative", "accepted", "contested", "rejected", "abandoned"])],
-  ["tentative", new Set(["accepted", "contested", "rejected", "abandoned"])],
-  ["accepted", new Set(["confirmed", "contested", "rejected", "abandoned", "tentative"])],
-  ["confirmed", new Set(["accepted", "contested"])],
-  ["contested", new Set(["rejected"])],
-  ["rejected", new Set()],
-  ["abandoned", new Set()],
-]);
-
-const ALLOWED_BASIS_UPGRADES = new Set<string>([
-  "belief->inference",
-  "belief->first_hand",
-  "inference->first_hand",
-  "hearsay->first_hand",
-]);
-
-type ExistingAssertionState = {
-  id: number;
-  stance: AssertionStance | null;
-  basis: AssertionBasis | null;
-  preContestedStance: AssertionStance | null;
-};
 
 export class CognitionRepository {
   private readonly relationBuilder: RelationBuilder;
@@ -250,11 +232,11 @@ export class CognitionRepository {
       }
 
       if (existing?.stance && params.stance !== existing.stance) {
-        this.assertLegalStanceTransition(existing, params.stance, cognitionKey);
+        assertLegalStanceTransition(existing, params.stance, cognitionKey);
       }
 
       if (existing) {
-        this.assertBasisUpgradeOnly(existing.basis, params.basis, cognitionKey);
+        assertBasisUpgradeOnly(existing.basis, params.basis, cognitionKey);
       }
 
       if (existing) {
@@ -439,75 +421,6 @@ export class CognitionRepository {
         committedTime: now,
       });
       return { id: insertedId };
-    });
-  }
-
-  private assertLegalStanceTransition(
-    existing: ExistingAssertionState,
-    nextStance: AssertionStance,
-    cognitionKey: string,
-  ): void {
-    const currentStance = existing.stance;
-    if (!currentStance) {
-      return;
-    }
-
-    if (currentStance === "contested" && nextStance !== "rejected") {
-      if (!existing.preContestedStance) {
-        throw new MaidsClawError({
-          code: "COGNITION_MISSING_PRE_CONTESTED_STANCE",
-          message: "contested rollback requires pre_contested_stance on existing assertion",
-          retriable: false,
-          details: { cognitionKey, currentStance, targetStance: nextStance },
-        });
-      }
-      if (nextStance === existing.preContestedStance) {
-        return;
-      }
-      throw new MaidsClawError({
-        code: "COGNITION_ILLEGAL_STANCE_TRANSITION",
-        message: "illegal stance transition",
-        retriable: false,
-        details: {
-          cognitionKey,
-          currentStance,
-          targetStance: nextStance,
-          preContestedStance: existing.preContestedStance,
-        },
-      });
-    }
-
-    const legalTargets = ALLOWED_STANCE_TRANSITIONS.get(currentStance);
-    if (legalTargets?.has(nextStance)) {
-      return;
-    }
-
-    throw new MaidsClawError({
-      code: "COGNITION_ILLEGAL_STANCE_TRANSITION",
-      message: "illegal stance transition",
-      retriable: false,
-      details: { cognitionKey, currentStance, targetStance: nextStance },
-    });
-  }
-
-  private assertBasisUpgradeOnly(
-    currentBasis: AssertionBasis | null,
-    nextBasis: AssertionBasis | undefined,
-    cognitionKey: string,
-  ): void {
-    if (!currentBasis || !nextBasis || currentBasis === nextBasis) {
-      return;
-    }
-
-    if (ALLOWED_BASIS_UPGRADES.has(`${currentBasis}->${nextBasis}`)) {
-      return;
-    }
-
-    throw new MaidsClawError({
-      code: "COGNITION_ILLEGAL_BASIS_DOWNGRADE",
-      message: "assertion basis change is not an allowed upgrade",
-      retriable: false,
-      details: { cognitionKey, currentBasis, targetBasis: nextBasis },
     });
   }
 
