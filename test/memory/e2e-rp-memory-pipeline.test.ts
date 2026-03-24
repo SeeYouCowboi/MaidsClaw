@@ -123,23 +123,23 @@ describe("E2E: RP memory pipeline", () => {
 
 		cm.initializeBlocks("rp:alice");
 
-		const charResult = cm.appendBlock("rp:alice", "character", "I am Alice, a loyal maid.");
+		const charResult = cm.appendBlock("rp:alice", "persona", "I am Alice, a loyal maid.");
 		expect(charResult.success).toBe(true);
 
-		const userResult = cm.appendBlock("rp:alice", "user", "Master enjoys tea.");
+		const userResult = cm.appendBlock("rp:alice", "persona", "Master enjoys tea.");
 		expect(userResult.success).toBe(true);
 
 		const allBlocks = cm.getAllBlocks("rp:alice");
-		expect(allBlocks).toHaveLength(5);
+		expect(allBlocks).toHaveLength(6);
 
-		const charBlock = allBlocks.find((b) => b.label === "character");
+		const charBlock = allBlocks.find((b) => b.label === "persona");
 		expect(charBlock).toBeDefined();
-		expect(charBlock!.value).toBe("I am Alice, a loyal maid.");
-		expect(charBlock!.chars_current).toBe(25);
+		expect(charBlock!.value).toBe("I am Alice, a loyal maid.Master enjoys tea.");
+		expect(charBlock!.chars_current).toBe(43);
 
 		const userBlock = allBlocks.find((b) => b.label === "user");
 		expect(userBlock).toBeDefined();
-		expect(userBlock!.value).toBe("Master enjoys tea.");
+		expect(userBlock!.value).toBe("");
 
 		const indexBlock = allBlocks.find((b) => b.label === "index");
 		expect(indexBlock).toBeDefined();

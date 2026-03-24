@@ -717,7 +717,57 @@ describe("migration:022 node_embeddings node_id", () => {
 	});
 });
 
-// ─── 14. parseGraphNodeRef backward compatibility ───────────────────────────
+// ─── 14. V3 Migration Backfill Consistency ──────────────────────────────────
+
+describe("V3 migration backfill consistency", () => {
+	it("migrations are idempotent — running twice yields exactly 26 records", () => {
+		const dbPath = join(tmpdir(), `maidsclaw-schema-idempotent-${randomUUID()}.db`);
+		const db = openDatabase({ path: dbPath });
+		createMemorySchema(db.raw);
+		runMemoryMigrations(db);
+		runMemoryMigrations(db);
+		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
+		expect(rows!.cnt).toBe(26);
+		db.close();
+		try {
+			rmSync(dbPath, { force: true });
+			rmSync(`${dbPath}-shm`, { force: true });
+			rmSync(`${dbPath}-wal`, { force: true });
+		} catch {}
+	});
+
+	it("V3 tables exist after full migration: pinned_summary_proposals, shared_blocks with retrieval_only", () => {
+		const dbPath = join(tmpdir(), `maidsclaw-schema-v3tables-${randomUUID()}.db`);
+		const db = openDatabase({ path: dbPath });
+		createMemorySchema(db.raw);
+		runMemoryMigrations(db);
+
+		const tables = db
+			.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")
+			.map((r) => r.name);
+		expect(tables).toContain("pinned_summary_proposals");
+		expect(tables).toContain("shared_blocks");
+
+		const cols = db
+			.query<{ name: string }>("PRAGMA table_info(shared_blocks)")
+			.map((r) => r.name);
+		expect(cols).toContain("retrieval_only");
+
+		const labelCols = db
+			.query<{ name: string }>("PRAGMA table_info(core_memory_blocks)")
+			.map((r) => r.name);
+		expect(labelCols).toContain("label");
+
+		db.close();
+		try {
+			rmSync(dbPath, { force: true });
+			rmSync(`${dbPath}-shm`, { force: true });
+			rmSync(`${dbPath}-wal`, { force: true });
+		} catch {}
+	});
+});
+
+// ─── 15. parseGraphNodeRef backward compatibility ───────────────────────────
 
 describe("parseGraphNodeRef backward compat", () => {
 	it("parses legacy private_belief:42 ref", () => {

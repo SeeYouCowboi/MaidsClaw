@@ -843,12 +843,12 @@ describe("CLI Acceptance Runbook", () => {
 			}
 		});
 
-		it("submit_rp_turn tool definition has executionContract and 5 artifactContracts", () => {
+		it("submit_rp_turn tool definition has executionContract and 8 artifactContracts", () => {
 			const tool = makeSubmitRpTurnTool();
 			expect(tool.executionContract).toBeDefined();
 			expect(tool.executionContract!.effect_type).toBe("settlement");
 			expect(tool.artifactContracts).toBeDefined();
-			expect(Object.keys(tool.artifactContracts!)).toHaveLength(5);
+			expect(Object.keys(tool.artifactContracts!)).toHaveLength(8);
 			expect(deriveEffectClass(tool.executionContract!.effect_type)).toBe("read_only");
 			expect(tool.effectClass).toBe("read_only");
 		});

@@ -195,13 +195,13 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       const result = (await runtime.toolExecutor.execute(
         "core_memory_append",
-        { label: "character", content: "Integration test entry." },
+        { label: "persona", content: "Integration test entry." },
         { sessionId: session.sessionId },
       )) as { success: boolean };
 
       expect(result.success).toBe(true);
 
-      const block = coreMemory.getBlock("maid:main", "character");
+      const block = coreMemory.getBlock("maid:main", "persona");
       expect(block.value).toContain("Integration test entry.");
     } finally {
       runtime.shutdown();

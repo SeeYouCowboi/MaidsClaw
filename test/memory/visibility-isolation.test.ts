@@ -175,11 +175,11 @@ describe("Core memory isolation", () => {
 		cm.initializeBlocks("rp:alice");
 		cm.initializeBlocks("rp:bob");
 
-		cm.appendBlock("rp:alice", "character", "I am Alice, a maid.");
-		cm.appendBlock("rp:bob", "character", "I am Bob, a butler.");
+		cm.appendBlock("rp:alice", "persona", "I am Alice, a maid.");
+		cm.appendBlock("rp:bob", "persona", "I am Bob, a butler.");
 
-		const aliceBlock = cm.getBlock("rp:alice", "character");
-		const bobBlock = cm.getBlock("rp:bob", "character");
+		const aliceBlock = cm.getBlock("rp:alice", "persona");
+		const bobBlock = cm.getBlock("rp:bob", "persona");
 
 		expect(aliceBlock.value).toBe("I am Alice, a maid.");
 		expect(bobBlock.value).toBe("I am Bob, a butler.");
@@ -238,9 +238,9 @@ describe("Core memory isolation", () => {
 		runMemoryMigrations(db);
 		const cm = new CoreMemoryService(db);
 		cm.initializeBlocks("rp:alice");
-		cm.appendBlock("rp:alice", "character", "Hello world");
+		cm.appendBlock("rp:alice", "persona", "Hello world");
 
-		const result = cm.replaceBlock("rp:alice", "character", "nonexistent text", "new text");
+		const result = cm.replaceBlock("rp:alice", "persona", "nonexistent text", "new text");
 		expect(result.success).toBe(false);
 		expect((result as { reason: string }).reason).toContain("not found");
 

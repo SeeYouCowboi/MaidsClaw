@@ -1510,6 +1510,10 @@ describe("RetrievalService", () => {
 					queryEpisodeBoost: 0,
 					sceneEpisodeBoost: 0,
 				},
+				{
+					recentCognitionKeys: new Set(["projection:key"]),
+					recentCognitionTexts: ["Projection duplicate text"],
+				},
 			);
 
 			expect(result.typed.cognition).toHaveLength(1);

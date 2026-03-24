@@ -40,7 +40,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(33);
+		expect(nonFtsCount?.count).toBe(34);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -495,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(23);
+		expect(migrationCount?.count).toBe(26);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -897,14 +897,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 23 after all migrations", () => {
+	it("migration count is 26 after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(23);
+		expect(migrationCount?.count).toBe(26);
 
 		db.close();
 		cleanupDb(dbPath);

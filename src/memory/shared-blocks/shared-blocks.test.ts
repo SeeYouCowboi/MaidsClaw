@@ -781,6 +781,44 @@ describe("SharedBlockPermissions — retrieval_only", () => {
   });
 });
 
+// ── V3 Stress: Cross-Agent Sequential Patch ──
+
+describe("SharedBlockPatchService — cross-agent sequential patch", () => {
+  it("two admin agents patching same block sequentially succeed with correct seq ordering", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const block = repo.createBlock("Shared", OWNER);
+    grantAdmin(block.id, ADMIN, OWNER);
+
+    const r1 = patchService.applyPatch(block.id, "set_section", { sectionPath: "notes", content: "owner-wrote" }, OWNER, "turn:1");
+    const r2 = patchService.applyPatch(block.id, "set_section", { sectionPath: "notes", content: "admin-overwrote" }, ADMIN, "turn:2");
+
+    expect(r1.patchSeq).toBe(1);
+    expect(r2.patchSeq).toBe(2);
+    expect(repo.getSection(block.id, "notes")?.content).toBe("admin-overwrote");
+
+    const logs = rawDb
+      .prepare(`SELECT applied_by_agent_id FROM shared_block_patch_log WHERE block_id = ? ORDER BY patch_seq`)
+      .all(block.id) as Array<{ applied_by_agent_id: string }>;
+    expect(logs.map((l) => l.applied_by_agent_id)).toEqual([OWNER, ADMIN]);
+  });
+
+  it("rapid sequential patches from same agent do not conflict", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const block = repo.createBlock("Rapid", OWNER);
+
+    const seqs: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v-${i}` }, OWNER);
+      seqs.push(r.patchSeq);
+    }
+
+    expect(seqs).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(repo.getSections(block.id)).toHaveLength(10);
+  });
+});
+
 // ── Concurrent Patch Conflict ──
 
 describe("SharedBlockPatchService — concurrent patch conflict", () => {

@@ -1055,16 +1055,19 @@ describe("TurnService", () => {
     expect(tool.executionContract!.capability_requirements).toEqual(["rp_settlement"]);
   });
 
-  it("submit_rp_turn has 5 artifact contracts with correct scope/policy", () => {
+  it("submit_rp_turn has 8 artifact contracts with correct scope/policy", () => {
     const tool = makeSubmitRpTurnTool();
     expect(tool.artifactContracts).toBeDefined();
     const contracts = tool.artifactContracts!;
     expect(Object.keys(contracts).sort()).toEqual([
+      "areaStateArtifacts",
+      "conflictFactors",
       "pinnedSummaryProposal",
       "privateCognition",
       "privateEpisodes",
       "publicReply",
       "publications",
+      "relationIntents",
     ]);
 
     expect(contracts.publicReply).toEqual({
@@ -1090,6 +1093,21 @@ describe("TurnService", () => {
     expect(contracts.pinnedSummaryProposal).toEqual({
       authority_level: "agent",
       artifact_scope: "session",
+      ledger_policy: "current_state",
+    });
+    expect(contracts.relationIntents).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "append_only",
+    });
+    expect(contracts.conflictFactors).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "current_state",
+    });
+    expect(contracts.areaStateArtifacts).toEqual({
+      authority_level: "agent",
+      artifact_scope: "area",
       ledger_policy: "current_state",
     });
   });

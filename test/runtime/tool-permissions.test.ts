@@ -25,12 +25,12 @@ describe("runtime tool registration", () => {
 
       const result = await runtime.toolExecutor.execute(
         "core_memory_append",
-        { label: "character", content: "Adapter path works." },
+        { label: "persona", content: "Adapter path works." },
         { sessionId: session.sessionId },
       ) as { success: boolean };
 
       expect(result.success).toBe(true);
-      expect(coreMemory.getBlock("rp:default", "character").value).toContain("Adapter path works.");
+      expect(coreMemory.getBlock("rp:default", "persona").value).toContain("Adapter path works.");
     } finally {
       runtime.shutdown();
     }

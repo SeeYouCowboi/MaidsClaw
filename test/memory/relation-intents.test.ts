@@ -201,7 +201,7 @@ describe("relation-intent resolver", () => {
 
     expect(result.resolved).toHaveLength(1);
     expect(result.unresolved).toHaveLength(1);
-    expect(result.resolved[0].nodeRef).toBe(`private_event:${commitment.id}`);
+		expect(result.resolved[0].nodeRef).toBe(`commitment:${commitment.id}`);
 
     const builder = new RelationBuilder(db);
     builder.writeContestRelations(`private_belief:${assertion.id}`, result.resolved.map((item) => item.nodeRef), "stl:ri-soft");
@@ -211,7 +211,7 @@ describe("relation-intent resolver", () => {
     );
     expect(relationRows.length).toBeGreaterThanOrEqual(1);
     expect(relationRows.every((row) => row.relation_type === "conflicts_with")).toBe(true);
-    expect(relationRows.some((row) => row.target_node_ref === `private_event:${commitment.id}`)).toBe(true);
+		expect(relationRows.some((row) => row.target_node_ref === `commitment:${commitment.id}`)).toBe(true);
 
     db.close();
     cleanupDb(dbPath);
