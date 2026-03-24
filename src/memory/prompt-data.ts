@@ -64,11 +64,18 @@ export async function getTypedRetrievalSurface(
     viewerContext.session_id,
     db,
   );
-  const recentCognitionKeys = new Set(
-    recentEntries
-      .map((entry) => entry.key?.trim())
-      .filter((entry): entry is string => Boolean(entry && entry.length > 0)),
-  );
+  const recentCognitionKeys = new Set<string>();
+  for (const entry of recentEntries) {
+    const key = entry.key?.trim();
+    const kind = entry.kind?.trim();
+    if (!key || key.length === 0) {
+      continue;
+    }
+    recentCognitionKeys.add(key);
+    if (kind && kind.length > 0) {
+      recentCognitionKeys.add(`${kind}:${key}`);
+    }
+  }
   const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
   const conversationTexts = getConversationMessageContents(viewerContext.session_id, db);
 

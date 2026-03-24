@@ -140,6 +140,9 @@ type UpsertExplicitCommitmentInput = UpsertCommitmentParams;
 type SearchScope = "private" | "area" | "world";
 type SameEpisodeEvent = { id: number; session_id: string; topic_id: number | null; timestamp: number };
 
+const legacyPrivateEventPrefix = "private_event:";
+const legacyPrivateBeliefPrefix = "private_belief:";
+
 export class GraphStorageService {
   private readonly batcher: TransactionBatcher;
   private readonly cognitionRepo: CognitionRepository;
@@ -935,8 +938,8 @@ export class GraphStorageService {
   }
 
   private getPrivateNodeAgent(nodeRef: NodeRef): string | null {
-    if (nodeRef.startsWith("private_event:")) {
-      const id = this.parseNodeRefId(nodeRef, "private_event");
+    if (nodeRef.startsWith(legacyPrivateEventPrefix)) {
+      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateEventPrefix);
       const episodeRow = this.db.prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
@@ -950,8 +953,8 @@ export class GraphStorageService {
       return cognitionRow?.agent_id ?? null;
     }
 
-    if (nodeRef.startsWith("private_belief:")) {
-      const id = this.parseNodeRefId(nodeRef, "private_belief");
+    if (nodeRef.startsWith(legacyPrivateBeliefPrefix)) {
+      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateBeliefPrefix);
       const row = this.db.prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
@@ -972,10 +975,9 @@ export class GraphStorageService {
     }
   }
 
-  private parseNodeRefId(nodeRef: NodeRef, expectedPrefix: "private_event" | "private_belief"): number {
-    const prefix = `${expectedPrefix}:`;
+  private parseLegacyNodeRefId(nodeRef: NodeRef, prefix: string): number {
     if (!nodeRef.startsWith(prefix)) {
-      throw new Error(`Invalid node ref prefix for ${expectedPrefix}: ${nodeRef}`);
+      throw new Error(`Invalid node ref prefix for ${prefix}: ${nodeRef}`);
     }
     const rawId = Number(nodeRef.slice(prefix.length));
     if (!Number.isInteger(rawId) || rawId <= 0) {

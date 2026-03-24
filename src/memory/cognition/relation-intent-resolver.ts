@@ -309,7 +309,7 @@ function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
-  if (/^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(raw)) {
+  if (/^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(raw)) { // compat: legacy ref literals accepted on read
     return raw;
   }
 
@@ -335,7 +335,10 @@ function resolveFactorNodeRef(
     )
     .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; kind: string | null } | null;
   if (event) {
-    return `private_event:${event.id}`;
+    if (event.kind === "evaluation" || event.kind === "commitment") {
+      return `${event.kind}:${event.id}`;
+    }
+    return null;
   }
 
   return null;

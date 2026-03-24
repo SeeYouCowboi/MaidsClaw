@@ -61,6 +61,9 @@ const STABLE_FACT_PATTERNS = [
   /\bis\s+(clean|open|closed|ready|safe)\b/i,
 ] as const;
 
+const legacyPrivateEventPrefix = "private_event:";
+const legacyPrivateBeliefPrefix = "private_belief:";
+
 export class PromotionService implements IPromotionService {
   private readonly projectionRepo: AreaWorldProjectionRepo;
   private readonly visibilityPolicy: VisibilityPolicy;
@@ -141,7 +144,7 @@ export class PromotionService implements IPromotionService {
   }
 
   resolveReferences(candidate: PromotionCandidate): ReferenceResolution[] {
-    if (candidate.source_ref.startsWith("private_belief:") || candidate.source_ref.startsWith("assertion:")) {
+    if (candidate.source_ref.startsWith(legacyPrivateBeliefPrefix) || candidate.source_ref.startsWith("assertion:")) {
       return [
         {
           source_ref: candidate.source_ref,
@@ -314,7 +317,7 @@ export class PromotionService implements IPromotionService {
       };
     }
 
-    if (candidate.source_ref.startsWith("private_belief:") || candidate.source_ref.startsWith("assertion:")) {
+    if (candidate.source_ref.startsWith(legacyPrivateBeliefPrefix) || candidate.source_ref.startsWith("assertion:")) {
       return undefined;
     }
 
@@ -436,7 +439,7 @@ export class PromotionService implements IPromotionService {
     }
   }
 
-  private parseNodeRefId(nodeRef: string, kind: "entity" | "event" | "private_event" | "private_belief"): number {
+  private parseNodeRefId(nodeRef: string, kind: "entity" | "event"): number {
     const prefix = `${kind}:`;
     if (!nodeRef.startsWith(prefix)) {
       throw new Error(`Invalid node ref kind for ${kind}: ${nodeRef}`);
@@ -454,7 +457,7 @@ export class PromotionService implements IPromotionService {
       return source?.timestamp ?? Date.now();
     }
 
-    if (candidate.source_ref.startsWith("private_event:") || candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
+    if (candidate.source_ref.startsWith(legacyPrivateEventPrefix) || candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
       const id = Number(candidate.source_ref.split(":")[1]);
       const row = this.db
         .prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`)

@@ -56,6 +56,9 @@ type RetrievalServiceDeps = {
   visibilityPolicy?: VisibilityPolicy;
 };
 
+const legacyPrivateEventKind = "private_event";
+const legacyPrivateBeliefKind = "private_belief";
+
 export class RetrievalService {
   private readonly db: Db;
   private readonly embeddingService: EmbeddingService;
@@ -412,8 +415,8 @@ export class RetrievalService {
       maybeKind === "event" ||
       maybeKind === "entity" ||
       maybeKind === "fact" ||
-      maybeKind === "private_event" ||
-      maybeKind === "private_belief" ||
+      maybeKind === legacyPrivateEventKind ||
+      maybeKind === legacyPrivateBeliefKind ||
       maybeKind === "assertion" ||
       maybeKind === "evaluation" ||
       maybeKind === "commitment"
@@ -424,7 +427,7 @@ export class RetrievalService {
   }
 
   private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
-    if (nodeKind === "private_event" || nodeKind === "private_belief" || nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment") {
+    if (nodeKind === legacyPrivateEventKind || nodeKind === legacyPrivateBeliefKind || nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment") {
       return "private";
     }
     return "world";

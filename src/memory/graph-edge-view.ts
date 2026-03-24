@@ -23,9 +23,11 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "assertion",
   "evaluation",
   "commitment",
-  "private_event",
-  "private_belief",
+  "private_event", // compat: legacy node kind (DB rows only, no new writes)
+  "private_belief", // compat: legacy node kind (DB rows only, no new writes)
 ]);
+const legacyPrivateEventKind: NodeRefKind = "private_event";
+const legacyPrivateBeliefKind: NodeRefKind = "private_belief";
 
 const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
   causal: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
@@ -389,7 +391,7 @@ export class GraphEdgeView {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === legacyPrivateEventKind) {
       const row = this.db
         .prepare("SELECT agent_id FROM private_episode_events WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
@@ -403,7 +405,7 @@ export class GraphEdgeView {
       return row ? { agent_id: row.agent_id } : null;
     }
 
-    if (parsed.kind === "private_belief" || parsed.kind === "assertion") {
+    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
       const row = this.db
         .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;

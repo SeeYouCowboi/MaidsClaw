@@ -1473,7 +1473,7 @@ Max Concurrent: 5 (Waves 0, 1)
 
 ### Wave 4 — Memory Replacement + Shared Blocks
 
-- [ ] 21. §10 Persona/Pinned/Shared 全面替换旧 Core Memory
+- [x] 21. §10 Persona/Pinned/Shared 全面替换旧 Core Memory
 
   **What to do**:
   - 将 `core_memory_blocks` 的 `character`/`user`/`index` 旧模型迁移到：
@@ -1541,7 +1541,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): replace legacy core memory labels with persona/pinned/shared model`
   - Files: `src/memory/core-memory.ts`, `src/memory/types.ts`, `src/memory/prompt-data.ts`, `src/memory/tools.ts`, `src/memory/schema.ts`
 
-- [ ] 22. §29.6 pinnedSummaryProposal 工作流闭环
+- [x] 22. §29.6 pinnedSummaryProposal 工作流闭环
 
   **What to do**:
   - 为 `pinnedSummaryProposal` 补全最小闭环：
@@ -1593,7 +1593,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message 1: `migration(memory:023): add pinned_summary_proposals table`
   - Message 2: `feat(memory): implement pinnedSummaryProposal workflow with persistence`
 
-- [ ] 23. §29.7 Shared Blocks 审计查询 Facade
+- [x] 23. §29.7 Shared Blocks 审计查询 Facade
 
   **What to do**:
   - 创建 `SharedBlockAuditFacade`（或扩展 `SharedBlockRepo`）统一提供：
@@ -1644,7 +1644,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): add shared block audit query facade`
   - Files: `src/memory/shared-blocks/shared-block-audit.ts`
 
-- [ ] 24. §11 Shared Blocks 多 Agent 协作层
+- [x] 24. §11 Shared Blocks 多 Agent 协作层
 
   **What to do**:
   - 将 shared blocks 从 V1 "always_on 小型规范块" 扩展为更成熟的协作系统：
@@ -1705,7 +1705,7 @@ Max Concurrent: 5 (Waves 0, 1)
 
 ### Wave 5 — Publication + Settlement + Explain
 
-- [ ] 25. §12 Publication/Materialization 一致性增强
+- [x] 25. §12 Publication/Materialization 一致性增强
 
   **What to do**:
   - 将 publication materialization 从"事务外最终一致"提升到更可控模型：
@@ -1758,7 +1758,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): enhance publication materialization consistency — idempotency + retry`
   - Files: `src/memory/materialization.ts`, `src/memory/projection/projection-manager.ts`
 
-- [ ] 26. §21 Settlement Payload 扩展评估
+- [x] 26. §21 Settlement Payload 扩展评估
 
   **What to do**:
   - 评估是否需要扩展 settlement payload 的 artifact 类型，产出设计文档：
@@ -1808,7 +1808,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): settlement payload extension — {decided artifact types}`
   - Files: `src/runtime/submit-rp-turn-tool.ts` (if needed)
 
-- [ ] 27. §20-p2 ArtifactContract + Capability Matrix
+- [x] 27. §20-p2 ArtifactContract + Capability Matrix
 
   **What to do**:
   - 为混合 settlement 工具补充 `ArtifactContract[]`：
@@ -1861,7 +1861,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(core): implement ArtifactContract and capability matrix for tool authorization`
   - Files: `src/core/tools/tool-definition.ts`, `src/core/tools/tool-access-policy.ts`
 
-- [ ] 28. §26 Explain 工具面评估
+- [x] 28. §26 Explain 工具面评估
 
   **What to do**:
   - 评估是否将 `memory_explore` 细分为独立 explain 工具：
@@ -1914,7 +1914,7 @@ Max Concurrent: 5 (Waves 0, 1)
 
 ### Wave 6 — Optimization + Design RFCs
 
-- [ ] 29. §25 Typed Retrieval Budget / Ranking 演进
+- [x] 29. §25 Typed Retrieval Budget / Ranking 演进
 
   **What to do**:
   - 将"计数预算"升级为"计数 + token 混合预算"
@@ -1969,7 +1969,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): evolve typed retrieval budget with token-aware adaptive planning`
   - Files: `src/memory/retrieval/retrieval-orchestrator.ts`, `src/memory/contracts/retrieval-template.ts`
 
-- [ ] 30. §16 Graph Retrieval 性能与策略优化
+- [x] 30. §16 Graph Retrieval 性能与策略优化
 
   **What to do**:
   - 对 graph expansion 实现 query-type-aware 策略优化：
@@ -2019,7 +2019,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message: `feat(memory): implement query-type-aware graph retrieval strategies`
   - Files: `src/memory/navigator.ts`
 
-- [ ] 31. §22 Publication 第二语义轴 (Design RFC)
+- [x] 31. §22 Publication 第二语义轴 (Design RFC)
 
   **What to do**:
   - 产出设计 RFC 文档 `.sisyphus/drafts/publication-second-axis-rfc.md`：
@@ -2049,7 +2049,7 @@ Max Concurrent: 5 (Waves 0, 1)
   **Commit**: YES
   - Message: `docs(memory): RFC — publication second semantic axis evaluation`
 
-- [ ] 32. §23+§24 Settlement Graph + Relation Intent 扩展 (Design RFC)
+- [x] 32. §23+§24 Settlement Graph + Relation Intent 扩展 (Design RFC)
 
   **What to do**:
   - 产出设计 RFC 文档 `.sisyphus/drafts/settlement-graph-relation-intent-rfc.md`：
@@ -2079,7 +2079,7 @@ Max Concurrent: 5 (Waves 0, 1)
   **Commit**: YES
   - Message: `docs(memory): RFC — settlement local graph and relation intent extension`
 
-- [ ] 33. §27 Explain Detail Levels 评估
+- [x] 33. §27 Explain Detail Levels 评估
 
   **What to do**:
   - 评估更细粒度 explain detail levels 的必要性：
@@ -2265,7 +2265,7 @@ Max Concurrent: 5 (Waves 0, 1)
   **Commit**: YES
   - Message: `test(memory): add V3 stress and regression test suite`
 
-- [ ] 37. §11.1 设计 RFC — Shared Current State 独立域
+- [x] 37. §11.1 设计 RFC — Shared Current State 独立域
 
   **What to do**:
   - 产出设计 RFC 文档 `.sisyphus/drafts/shared-current-state-rfc.md`：
@@ -2298,7 +2298,7 @@ Max Concurrent: 5 (Waves 0, 1)
   **Commit**: YES
   - Message: `docs(memory): RFC — shared current state independent domain evaluation`
 
-- [ ] 38. §17 外部参考吸收调研摘要
+- [x] 38. §17 外部参考吸收调研摘要
 
   **What to do**:
   - 产出调研摘要文档 `.sisyphus/drafts/external-references-rfc.md`：

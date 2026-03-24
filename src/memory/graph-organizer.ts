@@ -6,6 +6,9 @@ import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
 import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
 
+const legacyPrivateEventKind = "private_event";
+const legacyPrivateBeliefKind = "private_belief";
+
 export class GraphOrganizer {
   private readonly embeddingLinker: EmbeddingLinker;
 
@@ -94,8 +97,8 @@ export class GraphOrganizer {
       kindRaw !== "event" &&
       kindRaw !== "entity" &&
       kindRaw !== "fact" &&
-      kindRaw !== "private_event" &&
-      kindRaw !== "private_belief" &&
+      kindRaw !== legacyPrivateEventKind &&
+      kindRaw !== legacyPrivateBeliefKind &&
       kindRaw !== "assertion" &&
       kindRaw !== "evaluation" &&
       kindRaw !== "commitment"
@@ -141,7 +144,7 @@ export class GraphOrganizer {
       return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === legacyPrivateEventKind) {
       const row = this.db
         .prepare(`SELECT private_notes, summary, category FROM private_episode_events WHERE id = ?`)
         .get(parsed.id) as { private_notes: string | null; summary: string | null; category: string } | null;
@@ -219,16 +222,16 @@ export class GraphOrganizer {
     const allowed = new Set([
       "event:entity",
       "entity:event",
-      "private_event:entity",
-      "entity:private_event",
+      `${legacyPrivateEventKind}:entity`,
+      `entity:${legacyPrivateEventKind}`,
       "evaluation:entity",
       "entity:evaluation",
       "commitment:entity",
       "entity:commitment",
       "fact:entity",
       "entity:fact",
-      "private_belief:entity",
-      "entity:private_belief",
+      `${legacyPrivateBeliefKind}:entity`,
+      `entity:${legacyPrivateBeliefKind}`,
       "assertion:entity",
       "entity:assertion",
     ]);
@@ -334,7 +337,7 @@ export class GraphOrganizer {
       return row?.t_created;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === legacyPrivateEventKind) {
       const row = this.db.prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`).get(parsed.id) as
         | { created_at: number }
         | null;
@@ -382,7 +385,7 @@ export class GraphOrganizer {
       return row?.topic_id ?? null;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === legacyPrivateEventKind) {
       return null;
     }
 
@@ -443,7 +446,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === "private_event") {
+    if (parsed.kind === legacyPrivateEventKind) {
       const row = this.db
         .prepare(`SELECT private_notes, summary, agent_id FROM private_episode_events WHERE id = ?`)
         .get(parsed.id) as { private_notes: string | null; summary: string | null; agent_id: string } | null;
@@ -471,7 +474,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === "private_belief" || parsed.kind === "assertion") {
+    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
       const row = this.db
         .prepare(`SELECT predicate, provenance, agent_id, stance FROM agent_fact_overlay WHERE id = ?`)
         .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null } | null;

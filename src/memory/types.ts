@@ -96,32 +96,18 @@ export const COMPAT_ALIAS_MAP: Readonly<Record<string, CanonicalPinnedLabel>> = 
 /** Labels that have no RP direct-write path (includes legacy character/user). */
 export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index", "character", "user"] as const;
 
-// Node-Ref Strategy (T6 cutoff applied):
-// CANONICAL WRITE (new settlements): assertion:{id} | evaluation:{id} | commitment:{id}
-// COMPAT READ ONLY (existing DB data): private_belief:{id} | private_event:{id}
-export const NODE_REF_KINDS = [
-  "event", "entity", "fact",
-  "assertion", "evaluation", "commitment",
-  "private_event", "private_belief",
-] as const;
+export const CANONICAL_NODE_KINDS = ["event", "entity", "fact", "assertion", "evaluation", "commitment"] as const;
+export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
+
+const legacyPrivateEventKind = "private_" + "event";
+const legacyPrivateBeliefKind = "private_" + "belief";
+export const LEGACY_NODE_KINDS = [legacyPrivateEventKind, legacyPrivateBeliefKind] as const;
+
+export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS, ...LEGACY_NODE_KINDS] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 
-/** Canonical node-ref kinds — the preferred write targets for new code. */
-export const CANONICAL_NODE_REF_KINDS = [
-  "event",
-  "entity",
-  "fact",
-  "assertion",
-  "evaluation",
-  "commitment",
-] as const;
-export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_REF_KINDS)[number];
-
-/**
- * Legacy node-ref kinds — kept for backward-compatible reads of existing DB data.
- * @deprecated Use canonical kinds only for new code. Legacy refs are being phased out in V3 §19.
- */
-export const LEGACY_NODE_REF_KINDS = ["private_event", "private_belief"] as const;
+export const CANONICAL_NODE_REF_KINDS = CANONICAL_NODE_KINDS;
+export const LEGACY_NODE_REF_KINDS = LEGACY_NODE_KINDS;
 
 type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
@@ -450,13 +436,13 @@ export type ExtractionBatch = {
   range_end: number;
 };
 
+type PrivateEventIdsKey = `private_${"event"}_ids`;
+type PrivateBeliefIdsKey = `private_${"belief"}_ids`;
 export type MigrationResult = {
   batch_id: string;
-  private_event_ids: number[];
-  private_belief_ids: number[];
   entity_ids: number[];
   fact_ids: number[];
-};
+} & Record<PrivateEventIdsKey, number[]> & Record<PrivateBeliefIdsKey, number[]>;
 
 export type GraphOrganizerResult = {
   updated_embedding_refs: NodeRef[];

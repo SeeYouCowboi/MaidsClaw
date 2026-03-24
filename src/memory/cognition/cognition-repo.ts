@@ -1134,7 +1134,7 @@ export class CognitionRepository {
 
       for (const row of eventRows) {
         // Try canonical ref first, then legacy compat ref — handles transition period
-        for (const sourceRef of [`${refKind}:${row.id}`, `private_event:${row.id}`]) {
+        for (const sourceRef of [`${refKind}:${row.id}`, `private_event:${row.id}`]) { // compat: legacy source_ref reads
           this.db
             .prepare(
               `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,
@@ -1154,7 +1154,7 @@ export class CognitionRepository {
 
       for (const row of rows) {
         // Try canonical ref first, then legacy compat ref — handles transition period
-        for (const sourceRef of [`assertion:${row.id}`, `private_belief:${row.id}`]) {
+        for (const sourceRef of [`assertion:${row.id}`, `private_belief:${row.id}`]) { // compat: legacy source_ref reads
           this.db
             .prepare(
               `UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?`,

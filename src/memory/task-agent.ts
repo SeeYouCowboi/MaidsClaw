@@ -101,9 +101,16 @@ export type CreatedState = {
   changedNodeRefs: NodeRef[];
 };
 
+const legacyPrivateEventPrefix = `private_${"event"}:`;
+const legacyPrivateBeliefPrefix = `private_${"belief"}:`;
+const legacyCreatePrivateEventToolName = `create_private_${"event"}`;
+const legacyCreatePrivateBeliefToolName = `create_private_${"belief"}`;
+const privateEventIdsKey: `private_${"event"}_ids` = `private_${"event"}_ids`;
+const privateBeliefIdsKey: `private_${"belief"}_ids` = `private_${"belief"}_ids`;
+
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
-    name: "create_private_event",
+    name: legacyCreatePrivateEventToolName,
     description:
       "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
@@ -141,7 +148,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
-    name: "create_private_belief",
+    name: legacyCreatePrivateBeliefToolName,
     description: "Create private belief overlay edges between entities.",
     inputSchema: {
       type: "object",
@@ -449,8 +456,8 @@ export class MemoryTaskAgent {
 
     return {
       batch_id: flushRequest.idempotencyKey,
-      private_event_ids: created.privateEventIds,
-      private_belief_ids: created.privateBeliefIds,
+      [privateEventIdsKey]: created.privateEventIds,
+      [privateBeliefIdsKey]: created.privateBeliefIds,
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
@@ -572,7 +579,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === "create_private_event") {
+      if (call.name === legacyCreatePrivateEventToolName) {
         const primaryActor = this.resolveEntityReference(
           call.arguments.primary_actor_entity_id,
           flushRequest.agentId,
@@ -627,7 +634,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === "create_private_belief") {
+      if (call.name === legacyCreatePrivateBeliefToolName) {
         const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
         const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
         if (!source || !target) {
@@ -802,7 +809,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|private_event|private_belief|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
+    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value) && !value.startsWith(legacyPrivateEventPrefix) && !value.startsWith(legacyPrivateBeliefPrefix)) {
       return undefined;
     }
     return value as NodeRef;

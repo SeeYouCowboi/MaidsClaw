@@ -97,8 +97,8 @@ export class RetrievalOrchestrator {
       const currentRows = this.currentProjectionReader.getActiveCurrent(viewerContext.viewer_agent_id);
       for (const row of currentRows) {
         const key = row.cognition_key?.trim();
-        if (key) {
-          recentCognitionKeys.add(key);
+        if (!key || !recentCognitionKeys.has(key)) {
+          continue;
         }
         const summary = row.summary_text?.trim();
         if (summary && summary.length > 0) {

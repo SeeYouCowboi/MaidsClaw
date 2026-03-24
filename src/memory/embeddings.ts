@@ -16,6 +16,9 @@ type NeighborQueryOptions = {
   limit?: number;
 };
 
+const legacyPrivateEventKind = "private_event";
+const legacyPrivateBeliefKind = "private_belief";
+
 export class EmbeddingService {
   constructor(
     private readonly db: Db,
@@ -115,7 +118,7 @@ export class EmbeddingService {
     privateEventOwnerStmt: ReturnType<Db["prepare"]>,
     privateBeliefOwnerStmt: ReturnType<Db["prepare"]>,
   ): boolean {
-    if (nodeKind !== "private_event" && nodeKind !== "private_belief") {
+    if (nodeKind !== legacyPrivateEventKind && nodeKind !== legacyPrivateBeliefKind) {
       return true;
     }
 
@@ -124,7 +127,7 @@ export class EmbeddingService {
       return false;
     }
 
-    if (nodeKind !== "private_event" && nodeKind !== "private_belief") {
+    if (nodeKind !== legacyPrivateEventKind && nodeKind !== legacyPrivateBeliefKind) {
       return true;
     }
 
@@ -133,7 +136,7 @@ export class EmbeddingService {
       return false;
     }
 
-    if (nodeKind === "private_event") {
+    if (nodeKind === legacyPrivateEventKind) {
       const row = privateEventOwnerStmt.get(id) as { agent_id: string } | undefined;
       return row?.agent_id === agentId;
     }
