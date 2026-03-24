@@ -81,14 +81,13 @@ describe("CognitionOpCommitter", () => {
 							object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
 						},
 						stance: "accepted",
-						confidence: 0.9,
 					},
 				},
 			];
 
 			const refs = committer.commit(ops, "stl:turn-1");
 			expect(refs).toHaveLength(1);
-			expect(refs[0]).toMatch(/^private_(event|belief):/);
+			expect(refs[0]).toMatch(/^assertion:/);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -112,7 +111,6 @@ describe("CognitionOpCommitter", () => {
 						object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
 					},
 					stance,
-					confidence: 0.8,
 				},
 			});
 
@@ -157,13 +155,12 @@ describe("CognitionOpCommitter", () => {
 				"stl:turn-2",
 			);
 
-			const row = db.get<{ stance: string | null; epistemic_status: string | null }>(
-				"SELECT stance, epistemic_status FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+			const row = db.get<{ stance: string | null }>(
+				"SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
 				["rp:alice", "alice-likes-bob"],
 			);
 			expect(row).toBeDefined();
 			expect(row!.stance).toBe("rejected");
-			expect(row!.epistemic_status).toBe("retracted");
 
 			db.close();
 			cleanupDb(dbPath);
@@ -252,14 +249,13 @@ describe("CognitionOpCommitter", () => {
 				"stl:sm-4",
 			);
 
-			const contestedRow = db.get<{ stance: string | null; pre_contested_stance: string | null; confidence: number | null }>(
-				"SELECT stance, pre_contested_stance, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+			const contestedRow = db.get<{ stance: string | null; pre_contested_stance: string | null }>(
+				"SELECT stance, pre_contested_stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
 				["rp:alice", "state:legal"],
 			);
 			expect(contestedRow).toBeDefined();
 			expect(contestedRow!.stance).toBe("contested");
 			expect(contestedRow!.pre_contested_stance).toBe("confirmed");
-			expect(contestedRow!.confidence).toBeNull();
 
 			committer.commit(
 				[
@@ -280,13 +276,12 @@ describe("CognitionOpCommitter", () => {
 				"stl:sm-5",
 			);
 
-			const row = db.get<{ stance: string | null; pre_contested_stance: string | null; confidence: number | null }>(
-				"SELECT stance, pre_contested_stance, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+			const row = db.get<{ stance: string | null; pre_contested_stance: string | null }>(
+				"SELECT stance, pre_contested_stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
 				["rp:alice", "state:legal"],
 			);
 			expect(row).toBeDefined();
 			expect(row!.stance).toBe("rejected");
-			expect(row!.confidence).toBeNull();
 
 			db.close();
 			cleanupDb(dbPath);
@@ -996,7 +991,9 @@ describe("CognitionOpCommitter", () => {
 
 			// Verify each ref type
 			const refKinds = refs.map((r) => r.split(":")[0]);
-			expect(refKinds).toContain("private_event");
+			expect(refKinds).toContain("assertion");
+			expect(refKinds).toContain("evaluation");
+			expect(refKinds).toContain("commitment");
 
 			db.close();
 			cleanupDb(dbPath);
@@ -1004,7 +1001,7 @@ describe("CognitionOpCommitter", () => {
 	});
 
 	describe("CognitionRepository canonical operations", () => {
-		it("dual-writes canonical and compat columns for assertions", () => {
+		it("writes canonical stance/basis columns for assertions", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -1026,30 +1023,24 @@ describe("CognitionOpCommitter", () => {
 			const row = db.get<{
 				stance: string | null;
 				basis: string | null;
-				epistemic_status: string | null;
-				belief_type: string | null;
-				confidence: number | null;
 			}>(
-				"SELECT stance, basis, epistemic_status, belief_type, confidence FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance, basis FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
 				["rp:alice", "assert:dual-write"],
 			);
 
 			expect(row).toBeDefined();
 			expect(row!.stance).toBe("tentative");
 			expect(row!.basis).toBe("inference");
-			expect(row!.epistemic_status).toBe("suspected");
-			expect(row!.belief_type).toBe("inference");
-			expect(row!.confidence).toBeNull();
 
 			db.close();
 			cleanupDb(dbPath);
 		});
 
-		it("reads canonical stance/basis for both new and legacy rows", () => {
+		it("reads canonical stance/basis for repository-managed rows", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
-			const entities = seedEntities(storage);
+			seedEntities(storage);
 			const repo = new CognitionRepository(db);
 
 			repo.upsertAssertion({
@@ -1064,54 +1055,12 @@ describe("CognitionOpCommitter", () => {
 				basis: "hearsay",
 			});
 
-			db.run(
-				`INSERT INTO agent_fact_overlay (
-				  agent_id,
-				  source_entity_id,
-				  target_entity_id,
-				  predicate,
-				  belief_type,
-				  confidence,
-				  epistemic_status,
-				  basis,
-				  stance,
-				  provenance,
-				  cognition_key,
-				  settlement_id,
-				  op_index,
-				  created_at,
-				  updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				[
-					"rp:alice",
-					entities.selfId,
-					entities.bobId,
-					"knows",
-					"observation",
-					0.8,
-					"confirmed",
-					null,
-					null,
-					null,
-					"assert:legacy",
-					"stl:legacy",
-					1,
-					Date.now(),
-					Date.now(),
-				],
-			);
-
 			const assertions = repo.getAssertions("rp:alice", { activeOnly: false });
 			const newRow = assertions.find((row) => row.cognitionKey === "assert:new");
-			const legacyRow = assertions.find((row) => row.cognitionKey === "assert:legacy");
 
 			expect(newRow).toBeDefined();
 			expect(newRow!.stance).toBe("accepted");
 			expect(newRow!.basis).toBe("hearsay");
-
-			expect(legacyRow).toBeDefined();
-			expect(legacyRow!.stance).toBe("confirmed");
-			expect(legacyRow!.basis).toBe("first_hand");
 
 			db.close();
 			cleanupDb(dbPath);

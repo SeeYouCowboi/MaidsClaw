@@ -24,7 +24,7 @@ import {
   type MemoryFlushRequest,
 } from "../../src/memory/task-agent.js";
 import { PendingSettlementSweeper } from "../../src/memory/pending-settlement-sweeper.js";
-import type { PrivateCognitionCommit, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
+import type { PrivateCognitionCommitV4, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { PromptSectionSlot } from "../../src/core/prompt-template.js";
@@ -120,8 +120,8 @@ function commitPendingSettlementRange(params: {
       publicReply: "",
       hasPublicReply: false,
       viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-      privateCommit: {
-        schemaVersion: "rp_private_cognition_v3",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
         ops: [
           {
             op: "upsert",
@@ -316,8 +316,12 @@ describe("memory-entry-consumption: live runtime integration", () => {
         async runBuffered(_request: AgentRunRequest) {
           return {
             outcome: {
-              schemaVersion: "rp_turn_outcome_v3" as const,
+              schemaVersion: "rp_turn_outcome_v5" as const,
               publicReply: "Acknowledged.",
+              privateEpisodes: [],
+              publications: [],
+              relationIntents: [],
+              conflictFactors: [],
             },
           };
         },
@@ -700,8 +704,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
             selfPointerKey: "__self__",
             userPointerKey: "__user__",
           },
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{
               op: "upsert",
               record: {
@@ -908,8 +912,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
             selfPointerKey: "__self__",
             userPointerKey: "__user__",
           },
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -986,8 +990,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         selfPointerKey: "__self__",
         userPointerKey: "__user__",
       },
-      privateCommit: {
-        schemaVersion: "rp_private_cognition_v3",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
         ops: [
           {
             op: "upsert",
@@ -1065,8 +1069,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
     expect(settlementAttachments).toHaveLength(1);
 
     const attachedPayload = settlementAttachments[0]!.payload as TurnSettlementPayload;
-    expect(attachedPayload.privateCommit?.ops.length).toBe(2);
-    const firstOp = attachedPayload.privateCommit?.ops[0];
+    expect(attachedPayload.privateCognition?.ops.length).toBe(2);
+    const firstOp = attachedPayload.privateCognition?.ops[0];
     expect(firstOp?.op === "upsert" && firstOp.record.key === "belief:trust_user").toBe(true);
 
     expect(input.dialogue).toHaveLength(2);
@@ -1109,8 +1113,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
             publicReply: "",
             hasPublicReply: false,
             viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [{
                 op: "upsert",
                 record: {
@@ -1260,7 +1264,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
             userPointerKey: "__user__",
             currentLocationEntityId: 42,
           },
-          privateCommit: { schemaVersion: "rp_private_cognition_v3", ops: rawOps },
+          privateCognition: { schemaVersion: "rp_private_cognition_v4", ops: rawOps },
         } satisfies TurnSettlementPayload,
         correlatedTurnId: "req-raw-test",
       });
@@ -1302,23 +1306,23 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(receivedPayload.viewerSnapshot.selfPointerKey).toBe("__self__");
       expect(receivedPayload.viewerSnapshot.userPointerKey).toBe("__user__");
 
-      expect(receivedPayload.privateCommit).toBeDefined();
-      expect(receivedPayload.privateCommit?.ops).toBeDefined();
-      expect(receivedPayload.privateCommit?.ops).toHaveLength(2);
-      const op0 = receivedPayload.privateCommit?.ops[0];
+      expect(receivedPayload.privateCognition).toBeDefined();
+      expect(receivedPayload.privateCognition?.ops).toBeDefined();
+      expect(receivedPayload.privateCognition?.ops).toHaveLength(2);
+      const op0 = receivedPayload.privateCognition?.ops[0];
       expect(op0?.op === "upsert" && op0.record.key === "belief:alice_is_kind").toBe(true);
-      const op1 = receivedPayload.privateCommit?.ops[1];
+      const op1 = receivedPayload.privateCognition?.ops[1];
       expect(op1?.op === "upsert" && op1.record.kind === "evaluation").toBe(true);
 
       // Verify the redacted flag is NOT present - this proves raw path is used
       expect((receivedPayload.viewerSnapshot as { redacted?: boolean }).redacted).toBeUndefined();
-      expect((receivedPayload.privateCommit as { redacted?: boolean }).redacted).toBeUndefined();
+      expect((receivedPayload.privateCognition as { redacted?: boolean }).redacted).toBeUndefined();
     } finally {
       runtime.shutdown();
     }
   });
 
-  it("buildMigrateInput preserves full privateCommit settlement attachments", () => {
+  it("buildMigrateInput preserves full privateCognition settlement attachments", () => {
     const policy = new MemoryIngestionPolicy();
 
     const fullOps: CognitionOp[] = [
@@ -1328,14 +1332,13 @@ describe("memory-entry-consumption: live runtime integration", () => {
           kind: "assertion",
           key: "belief:user_is_trustworthy",
           salience: 0.9,
-          confidence: 0.85,
           proposition: {
             subject: { kind: "special", value: "user" },
             predicate: "is_trustworthy",
             object: { kind: "entity", ref: { kind: "special", value: "self" } },
           },
           stance: "accepted",
-          basis: "observation",
+          basis: "first_hand",
         },
       },
       {
@@ -1344,8 +1347,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
       },
     ];
 
-    const privateCommit: PrivateCognitionCommit = {
-      schemaVersion: "rp_private_cognition_v3",
+    const privateCognition: PrivateCognitionCommitV4 = {
+      schemaVersion: "rp_private_cognition_v4",
       summary: "Trust established after conversation",
       ops: fullOps,
     };
@@ -1358,7 +1361,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       publicReply: "I trust you.",
       hasPublicReply: true,
       viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-      privateCommit,
+      privateCognition,
     };
 
     const flushRequest: MemoryFlushRequest = {
@@ -1412,28 +1415,27 @@ describe("memory-entry-consumption: live runtime integration", () => {
     expect(meta.requestId).toBe("req-full-1");
     expect(meta.ownerAgentId).toBe("rp:alice");
 
-    // Full privateCommit preserved — NOT collapsed to {key, kind} summaries
-    expect(meta.privateCommit.schemaVersion).toBe("rp_private_cognition_v3");
-    expect(meta.privateCommit.summary).toBe("Trust established after conversation");
-    expect(meta.privateCommit.ops).toHaveLength(2);
+    // Full privateCognition preserved — NOT collapsed to {key, kind} summaries
+    expect(meta.privateCognition.schemaVersion).toBe("rp_private_cognition_v4");
+    expect(meta.privateCognition.summary).toBe("Trust established after conversation");
+    expect(meta.privateCognition.ops).toHaveLength(2);
 
     // Full upsert op with complete record shape
-    const upsertOp = meta.privateCommit.ops[0]!;
+    const upsertOp = meta.privateCognition.ops[0]!;
     expect(upsertOp.op).toBe("upsert");
     if (upsertOp.op === "upsert") {
       expect(upsertOp.record.kind).toBe("assertion");
       expect(upsertOp.record.key).toBe("belief:user_is_trustworthy");
       expect(upsertOp.record.salience).toBe(0.9);
-      expect(upsertOp.record.confidence).toBe(0.85);
       if (upsertOp.record.kind === "assertion") {
         expect(upsertOp.record.proposition.predicate).toBe("is_trustworthy");
         expect(upsertOp.record.stance).toBe("accepted");
-        expect(upsertOp.record.basis).toBe("observation");
+        expect(upsertOp.record.basis).toBe("first_hand");
       }
     }
 
     // Full retract op with complete target shape
-    const retractOp = meta.privateCommit.ops[1]!;
+    const retractOp = meta.privateCognition.ops[1]!;
     expect(retractOp.op).toBe("retract");
     if (retractOp.op === "retract") {
       expect(retractOp.target.kind).toBe("evaluation");
@@ -1445,7 +1447,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     expect(settlementAttachment).toBeDefined();
     expect(settlementAttachment!.explicitMeta).toBeDefined();
     expect(settlementAttachment!.explicitMeta!.settlementId).toBe("settle-full-1");
-    expect(settlementAttachment!.explicitMeta!.privateCommit.ops).toHaveLength(2);
+    expect(settlementAttachment!.explicitMeta!.privateCognition.ops).toHaveLength(2);
   });
 
   it("buildMigrateInput partitions explicit settlements from ordinary turns", () => {
@@ -1459,8 +1461,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
       publicReply: "Hello",
       hasPublicReply: true,
       viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-      privateCommit: {
-        schemaVersion: "rp_private_cognition_v3",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
         ops: [
           {
             op: "upsert",
@@ -1486,7 +1488,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       publicReply: "Yes",
       hasPublicReply: true,
       viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-      // No privateCommit — ordinary turn with no explicit cognition
+      // No privateCognition — ordinary turn with no explicit cognition
     };
 
     const flushRequest: MemoryFlushRequest = {
@@ -1559,8 +1561,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
     // Only the explicit settlement appears in explicitSettlements
     expect(input.explicitSettlements).toHaveLength(1);
     expect(input.explicitSettlements[0]!.settlementId).toBe("settle-explicit");
-    expect(input.explicitSettlements[0]!.privateCommit.ops).toHaveLength(1);
-    expect(input.explicitSettlements[0]!.privateCommit.ops[0]!.op).toBe("upsert");
+    expect(input.explicitSettlements[0]!.privateCognition.ops).toHaveLength(1);
+    expect(input.explicitSettlements[0]!.privateCognition.ops[0]!.op).toBe("upsert");
 
     // Both settlements still appear as attachments
     const settlementAttachments = input.attachments.filter((a) => a.recordType === "turn_settlement");
@@ -1586,8 +1588,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
   it("buildMigrateInput preserves dialogue with empty content when turn_settlement exists in range (with explicitSettlements metadata)", () => {
     const policy = new MemoryIngestionPolicy();
 
-    const privateCommit: PrivateCognitionCommit = {
-      schemaVersion: "rp_private_cognition_v3",
+    const privateCognition: PrivateCognitionCommitV4 = {
+      schemaVersion: "rp_private_cognition_v4",
       summary: "Silent observation",
       ops: [
         {
@@ -1648,7 +1650,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
             publicReply: "",
             hasPublicReply: false,
             viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-            privateCommit,
+            privateCognition,
           } satisfies TurnSettlementPayload,
           committedAt: 3000,
         },
@@ -1666,12 +1668,12 @@ describe("memory-entry-consumption: live runtime integration", () => {
     expect(input.explicitSettlements).toHaveLength(1);
     expect(input.explicitSettlements[0]!.settlementId).toBe("settle-empty");
     expect(input.explicitSettlements[0]!.ownerAgentId).toBe("rp:alice");
-    expect(input.explicitSettlements[0]!.privateCommit.schemaVersion).toBe("rp_private_cognition_v3");
-    expect(input.explicitSettlements[0]!.privateCommit.summary).toBe("Silent observation");
-    expect(input.explicitSettlements[0]!.privateCommit.ops).toHaveLength(1);
+    expect(input.explicitSettlements[0]!.privateCognition.schemaVersion).toBe("rp_private_cognition_v4");
+    expect(input.explicitSettlements[0]!.privateCognition.summary).toBe("Silent observation");
+    expect(input.explicitSettlements[0]!.privateCognition.ops).toHaveLength(1);
 
     // Full evaluation record shape preserved
-    const evalOp = input.explicitSettlements[0]!.privateCommit.ops[0]!;
+    const evalOp = input.explicitSettlements[0]!.privateCognition.ops[0]!;
     expect(evalOp.op).toBe("upsert");
     if (evalOp.op === "upsert") {
       expect(evalOp.record.kind).toBe("evaluation");
@@ -1722,8 +1724,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
             selfPointerKey: "__self__",
             userPointerKey: "__user__",
           },
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -2174,8 +2176,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
           publicReply: "",
           hasPublicReply: false,
           viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
                 op: "upsert",
@@ -2224,7 +2226,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
           schemaVersion: "turn_settlement_v4",
           publications: [],
           viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-          privateCommit: {
+          privateCognition: {
             schemaVersion: "rp_private_cognition_v4",
             ops: [
               {
@@ -2326,8 +2328,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
           publicReply: "v3 reply",
           hasPublicReply: true,
           viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{
               op: "upsert",
               record: {
@@ -2369,7 +2371,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
           schemaVersion: "turn_settlement_v4",
           publications: [],
           viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
-          privateCommit: {
+          privateCognition: {
             schemaVersion: "rp_private_cognition_v4",
             ops: [{
               op: "upsert",
@@ -2427,7 +2429,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
-  it("v3 RP output is normalized to v4 settlement with publications[]", async () => {
+  it("v5 RP output is committed as v5 settlement with publications[]", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
@@ -2443,27 +2445,31 @@ describe("memory-entry-consumption: live runtime integration", () => {
         async runBuffered(_request: AgentRunRequest) {
           return {
             outcome: {
-              schemaVersion: "rp_turn_outcome_v3",
-              publicReply: "Hello from v3.",
-              privateCommit: {
-                schemaVersion: "rp_private_cognition_v3",
+              schemaVersion: "rp_turn_outcome_v5",
+              publicReply: "Hello from v5.",
+              privateCognition: {
+                schemaVersion: "rp_private_cognition_v4",
                 ops: [
                   {
                     op: "upsert",
                     record: {
                       kind: "assertion",
-                      key: "belief:v3_test",
+                      key: "belief:v5_test",
                       proposition: {
                         subject: { kind: "special", value: "self" },
                         predicate: "trusts",
                         object: { kind: "entity", ref: { kind: "special", value: "user" } },
                       },
                       stance: "accepted",
-                      basis: "observation",
+                      basis: "first_hand",
                     },
                   },
                 ],
               },
+              privateEpisodes: [],
+              publications: [],
+              relationIntents: [],
+              conflictFactors: [],
             },
           };
         },
@@ -2481,14 +2487,14 @@ describe("memory-entry-consumption: live runtime integration", () => {
       const chunks = await collectChunks(
         turnService.run({
           sessionId: session.sessionId,
-          requestId: "req-v3-normalize",
-          messages: [{ role: "user", content: "v3 test" }],
+          requestId: "req-v5-normalize",
+          messages: [{ role: "user", content: "v5 test" }],
         }),
       );
 
       const textChunks = chunks.filter((c) => c.type === "text_delta");
       expect(textChunks).toHaveLength(1);
-      expect((textChunks[0] as { text: string }).text).toBe("Hello from v3.");
+      expect((textChunks[0] as { text: string }).text).toBe("Hello from v5.");
 
       const records = interactionStore.getBySession(session.sessionId);
       const settlements = records.filter((r) => r.recordType === "turn_settlement");
@@ -2497,9 +2503,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
       const payload = settlements[0]!.payload as TurnSettlementPayload;
       expect(payload.schemaVersion).toBe("turn_settlement_v5");
       expect(payload.publications).toEqual([]);
-      expect((payload.privateCognition ?? payload.privateCommit)?.schemaVersion).toBe("rp_private_cognition_v4");
+      expect(payload.privateCognition?.schemaVersion).toBe("rp_private_cognition_v4");
 
-      const upsertOp = (payload.privateCognition ?? payload.privateCommit)?.ops[0];
+      const upsertOp = payload.privateCognition?.ops[0];
       expect(upsertOp?.op).toBe("upsert");
       if (upsertOp?.op === "upsert" && upsertOp.record.kind === "assertion") {
         expect(upsertOp.record.stance).toBe("accepted");
@@ -2526,9 +2532,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
         async runBuffered(_request: AgentRunRequest) {
           return {
             outcome: {
-              schemaVersion: "rp_turn_outcome_v4",
+              schemaVersion: "rp_turn_outcome_v5",
               publicReply: "Hello from v4.",
-              privateCommit: {
+              privateCognition: {
                 schemaVersion: "rp_private_cognition_v4",
                 ops: [
                   {
@@ -2547,13 +2553,16 @@ describe("memory-entry-consumption: live runtime integration", () => {
                   },
                 ],
               },
+              privateEpisodes: [],
               publications: [
                 {
-                  kind: "speech",
+                  kind: "spoken",
                   targetScope: "current_area",
                   summary: "Alice greeted the user warmly.",
                 },
               ],
+              relationIntents: [],
+              conflictFactors: [],
             },
           };
         },
@@ -2588,7 +2597,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(payload.schemaVersion).toBe("turn_settlement_v5");
       expect(payload.publications).toHaveLength(1);
       expect(payload.publications![0]).toEqual({
-        kind: "speech",
+        kind: "spoken",
         targetScope: "current_area",
         summary: "Alice greeted the user warmly.",
       });
@@ -2625,24 +2634,27 @@ describe("memory-entry-consumption: live runtime integration", () => {
         async runBuffered(_request: AgentRunRequest) {
           return {
             outcome: {
-              schemaVersion: "rp_turn_outcome_v4",
+              schemaVersion: "rp_turn_outcome_v5",
               publicReply: "Good evening.",
-              privateCommit: {
+              privateCognition: {
                 schemaVersion: "rp_private_cognition_v4",
                 ops: [],
               },
+              privateEpisodes: [],
               publications: [
                 {
-                  kind: "speech",
+                  kind: "spoken",
                   targetScope: "current_area",
                   summary: "Alice greets everyone in the drawing room.",
                 },
                 {
-                  kind: "display",
+                  kind: "visual",
                   targetScope: "current_area",
                   summary: "A tea set is placed on the table.",
                 },
               ],
+              relationIntents: [],
+              conflictFactors: [],
             },
           };
         },
@@ -2723,7 +2735,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
             outcome: {
               schemaVersion: "rp_turn_outcome_v4",
               publicReply: "Should not be stored.",
-              privateCommit: {
+              privateCognition: {
                 schemaVersion: "rp_private_cognition_v4",
                 ops: [
                   {
@@ -3035,10 +3047,10 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(overlayFacts?.cnt).toBe(0);
 
       const overlayEvents = runtime.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM agent_event_overlay WHERE agent_id = ?`,
+        `SELECT COUNT(*) as cnt FROM private_episode_events WHERE agent_id = ?`,
         ["rp:alice"],
       );
-      expect(overlayEvents?.cnt).toBe(0);
+      expect(overlayEvents?.cnt).toBe(1);
 
       const slotRow = runtime.db.get<{ slot_payload: string }>(
         `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,

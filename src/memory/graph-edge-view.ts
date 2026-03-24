@@ -374,9 +374,16 @@ export class GraphEdgeView {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === "private_event" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "private_event") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_event_overlay WHERE id = ?")
+        .prepare("SELECT agent_id FROM private_episode_events WHERE id = ?")
+        .get(parsed.id) as { agent_id: string } | undefined;
+      return row ? { agent_id: row.agent_id } : null;
+    }
+
+    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const row = this.db
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row ? { agent_id: row.agent_id } : null;
     }

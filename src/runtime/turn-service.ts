@@ -32,7 +32,7 @@ import type {
 } from "../memory/task-agent.js";
 import type { SessionService } from "../session/service.js";
 import type {
-	AssertionRecord,
+	AssertionRecordV4,
 	CanonicalRpTurnOutcome,
 	CognitionEntityRef,
 	CognitionKind,
@@ -349,7 +349,7 @@ export class TurnService {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
-					"empty turn: publicReply is empty and privateCommit has no ops",
+					"empty turn: publicReply is empty and privateCognition has no ops",
 			};
 			this.traceLog(requestId, "warn", "RP buffered outcome was empty");
 			yield {
@@ -428,9 +428,6 @@ export class TurnService {
 					viewerSnapshot: resolvedViewerSnapshot,
 					schemaVersion: "turn_settlement_v5",
 					privateCognition: hasPrivateOps
-						? canonicalOutcome.privateCognition
-						: undefined,
-					privateCommit: hasPrivateOps
 						? canonicalOutcome.privateCognition
 						: undefined,
 					privateEpisodes: canonicalOutcome.privateEpisodes.length > 0
@@ -828,13 +825,13 @@ export class TurnService {
 		});
 
 		const redactedPayload = redacted.payload as {
-			privateCommit?: { opCount?: number; kinds?: string[] };
+			privateCognition?: { opCount?: number; kinds?: string[] };
 		};
 
 		return {
 			type: "turn_settlement",
-			op_count: redactedPayload.privateCommit?.opCount,
-			kinds: redactedPayload.privateCommit?.kinds,
+			op_count: redactedPayload.privateCognition?.opCount,
+			kinds: redactedPayload.privateCognition?.kinds,
 		};
 	}
 }
@@ -960,7 +957,7 @@ function refValue(ref: CognitionEntityRef | CognitionSelector): string {
 	return (ref as CognitionSelector).key;
 }
 
-function summarizeAssertion(record: AssertionRecord): string {
+function summarizeAssertion(record: AssertionRecordV4): string {
 	return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
 }
 
@@ -998,7 +995,7 @@ function buildCognitionSlotPayload(
 			let summary: string;
 			switch (record.kind) {
 				case "assertion":
-					summary = summarizeAssertion(record as AssertionRecord);
+					summary = summarizeAssertion(record as AssertionRecordV4);
 					break;
 				case "evaluation":
 					summary = summarizeEvaluation(record as EvaluationRecord);

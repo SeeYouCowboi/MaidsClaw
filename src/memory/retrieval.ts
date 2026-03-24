@@ -10,8 +10,8 @@ import {
 } from "./retrieval/retrieval-orchestrator.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
+import type { EpisodeRow } from "./episode/episode-repo.js";
 import type {
-  AgentEventOverlay,
   EntityNode,
   EventNode,
   FactEdge,
@@ -35,13 +35,13 @@ type EntityReadResult = {
   entity: EntityNode | null;
   facts: FactEdge[];
   events: EventNode[];
-  overlays: AgentEventOverlay[];
+  episodes: EpisodeRow[];
 };
 
 type TopicReadResult = {
   topic: Topic | null;
   events: EventNode[];
-  overlays: AgentEventOverlay[];
+  episodes: EpisodeRow[];
 };
 
 export class RetrievalService {
@@ -66,7 +66,7 @@ export class RetrievalService {
     const resolvedPointer = this.resolveRedirect(pointerKey, viewerContext.viewer_agent_id);
     const entity = this.resolveEntityByPointer(resolvedPointer, viewerContext.viewer_agent_id);
     if (!entity) {
-      return { entity: null, facts: [], events: [], overlays: [] };
+      return { entity: null, facts: [], events: [], episodes: [] };
     }
 
     const facts = this.db
@@ -94,28 +94,23 @@ export class RetrievalService {
           )
           .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
 
-    const eventIds = events.map((event) => event.id);
-    const overlays = eventIds.length > 0
-      ? (this.db
-          .prepare(
-            `SELECT * FROM agent_event_overlay
-             WHERE agent_id=? AND (event_id IN (${eventIds.map(() => "?").join(",")}) OR primary_actor_entity_id=?)`,
-          )
-          .all(viewerContext.viewer_agent_id, ...eventIds, entity.id) as AgentEventOverlay[])
-      : (this.db
-          .prepare(
-            "SELECT * FROM agent_event_overlay WHERE agent_id=? AND primary_actor_entity_id=?",
-          )
-          .all(viewerContext.viewer_agent_id, entity.id) as AgentEventOverlay[]);
+    const episodes = this.db
+      .prepare(
+        `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes,
+                location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at
+         FROM private_episode_events
+         WHERE agent_id=? AND location_entity_id=?`,
+      )
+      .all(viewerContext.viewer_agent_id, entity.id) as EpisodeRow[];
 
-    return { entity, facts, events, overlays };
+    return { entity, facts, events, episodes };
   }
 
   readByTopic(name: string, viewerContext: ViewerContext): TopicReadResult {
     const resolvedName = this.resolveRedirect(name, viewerContext.viewer_agent_id);
     const topic = this.db.prepare("SELECT * FROM topics WHERE name=?").get(resolvedName) as Topic | null;
     if (!topic) {
-      return { topic: null, events: [], overlays: [] };
+      return { topic: null, events: [], episodes: [] };
     }
 
     const events = viewerContext.current_area_id != null
@@ -137,17 +132,10 @@ export class RetrievalService {
           )
           .all(topic.id) as EventNode[];
 
-    const eventIds = events.map((event) => event.id);
-    const overlays = eventIds.length === 0
-      ? []
-      : (this.db
-          .prepare(
-            `SELECT * FROM agent_event_overlay
-             WHERE agent_id=? AND event_id IN (${eventIds.map(() => "?").join(",")})`,
-          )
-          .all(viewerContext.viewer_agent_id, ...eventIds) as AgentEventOverlay[]);
+    // Private episodes have no topic FK — no correlation possible in the new schema.
+    const episodes: EpisodeRow[] = [];
 
-    return { topic, events, overlays };
+    return { topic, events, episodes };
   }
 
   readByEventIds(ids: number[], viewerContext: ViewerContext): EventNode[] {

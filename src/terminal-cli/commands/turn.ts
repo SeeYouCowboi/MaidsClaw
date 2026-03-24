@@ -4,7 +4,7 @@
  * Executes a single turn against a session using the Local Mode transport.
  * Returns a {@link TurnExecutionResult} in the JSON envelope.
  *
- * Silent-private turns (empty assistant_text + private commit) are treated
+ * Silent-private turns (empty assistant_text + private cognition) are treated
  * as successful outcomes, NOT failures.
  *
  * `--raw` includes `public_chunks` and `tool_events` in the response
@@ -199,10 +199,10 @@ async function handleTurnSend(
       request_id: requestId,
       assistant_text: assistantParts.join(""),
       has_public_reply: summary.has_public_reply,
-      private_commit: {
-        present: summary.private_commit_count > 0,
-        op_count: summary.private_commit_count,
-        kinds: summary.settlement.private_commit_kinds ?? [],
+      private_cognition: {
+        present: summary.private_cognition_count > 0,
+        op_count: summary.private_cognition_count,
+        kinds: summary.settlement.private_cognition_kinds ?? [],
       },
       recovery_required: summary.recovery_required,
       ...(summary.settlement.settlement_id
@@ -226,13 +226,13 @@ async function handleTurnSend(
       const assistantText = typeof responseData.assistant_text === "string"
         ? responseData.assistant_text
         : "";
-      const privateCommit = responseData.private_commit as {
+      const privateCognition = responseData.private_cognition as {
         present: boolean;
       };
       if (assistantText) {
         writeText(assistantText);
-      } else if (privateCommit.present) {
-        writeText("[silent turn — private commit only]");
+      } else if (privateCognition.present) {
+        writeText("[silent turn — private cognition only]");
       } else {
         writeText("[no output]");
       }

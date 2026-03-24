@@ -270,13 +270,13 @@ describe("EpisodeRepository", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("does not write to agent_event_overlay", () => {
+	it("writes to private_episode_events and not to agent_fact_overlay", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 		const repo = new EpisodeRepository(db);
 
-		const countBefore = db.get<{ count: number }>(
-			"SELECT count(*) AS count FROM agent_event_overlay",
+		const factCountBefore = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM agent_fact_overlay",
 		);
 
 		repo.append({
@@ -288,11 +288,16 @@ describe("EpisodeRepository", () => {
 			committedTime: Date.now(),
 		});
 
-		const countAfter = db.get<{ count: number }>(
-			"SELECT count(*) AS count FROM agent_event_overlay",
+		const episodeCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events WHERE agent_id = ?",
+			["rp:alice"],
 		);
+		expect(episodeCount?.count).toBe(1);
 
-		expect(countAfter?.count).toBe(countBefore?.count ?? 0);
+		const factCountAfter = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM agent_fact_overlay",
+		);
+		expect(factCountAfter?.count).toBe(factCountBefore?.count ?? 0);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -6,9 +6,25 @@ import { join } from "node:path";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { MaterializationService, materializePublications } from "../../src/memory/materialization.js";
-import type { AgentEventOverlay } from "../../src/memory/types.js";
 import type { PublicationDeclaration } from "../../src/runtime/rp-turn-contract.js";
 import { openDatabase } from "../../src/storage/database.js";
+
+type MaterializablePrivateEvent = {
+	id: number;
+	event_id: number | null;
+	agent_id: string;
+	role: string | null;
+	private_notes: string | null;
+	salience: number | null;
+	emotion: string | null;
+	event_category: "speech" | "action" | "thought" | "observation" | "state_change";
+	primary_actor_entity_id: number | null;
+	projection_class: "none" | "area_candidate";
+	location_entity_id: number | null;
+	projectable_summary: string | null;
+	source_record_id: string | null;
+	created_at: number;
+};
 
 function createTempDb() {
 	const dbPath = join(tmpdir(), `maidsclaw-matrl-${randomUUID()}.db`);
@@ -24,12 +40,15 @@ function cleanupDb(dbPath: string): void {
 	} catch {}
 }
 
+let overlayIdSeq = 1;
+
 function insertOverlay(
-	db: ReturnType<typeof openDatabase>,
-	overrides: Partial<AgentEventOverlay> & { agent_id: string },
-): AgentEventOverlay {
+	_db: ReturnType<typeof openDatabase>,
+	overrides: Partial<MaterializablePrivateEvent> & { agent_id: string },
+): MaterializablePrivateEvent {
 	const now = Date.now();
 	const defaults = {
+		id: overlayIdSeq++,
 		event_id: null,
 		role: null,
 		private_notes: null,
@@ -51,24 +70,7 @@ function insertOverlay(
 		...overrides,
 	};
 
-	const result = db.run(
-		`INSERT INTO agent_event_overlay
-		 (event_id, agent_id, role, private_notes, salience, emotion, event_category,
-		  primary_actor_entity_id, projection_class, location_entity_id, projectable_summary,
-		  source_record_id, cognition_key, explicit_kind, settlement_id, op_index, metadata_json,
-		  cognition_status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		[
-			defaults.event_id, defaults.agent_id, defaults.role, defaults.private_notes,
-			defaults.salience, defaults.emotion, defaults.event_category,
-			defaults.primary_actor_entity_id, defaults.projection_class, defaults.location_entity_id,
-			defaults.projectable_summary, defaults.source_record_id, defaults.cognition_key,
-			defaults.explicit_kind, defaults.settlement_id, defaults.op_index,
-			defaults.metadata_json, defaults.cognition_status, defaults.created_at,
-		],
-	);
-
-	return { id: Number(result.lastInsertRowid), ...defaults } as AgentEventOverlay;
+	return defaults;
 }
 
 describe("MaterializationService", () => {
@@ -137,16 +139,15 @@ describe("MaterializationService", () => {
 			});
 
 			const matService = new MaterializationService(db as any, storage);
-			matService.materializeDelayed([overlay], "rp:alice");
+			const result = matService.materializeDelayed([overlay], "rp:alice");
+			expect(result.materialized).toBe(1);
 
-			// Check that overlay's event_id was updated
-			const updated = db.get<{ event_id: number | null }>(
-				"SELECT event_id FROM agent_event_overlay WHERE id = ?",
-				[overlay.id],
+			const publicEvents = db.query<{ id: number; source_record_id: string }>(
+				"SELECT id, source_record_id FROM event_nodes WHERE source_record_id = ?",
+				[overlay.source_record_id!],
 			);
-			expect(updated).not.toBeNull();
-			expect(updated!.event_id).not.toBeNull();
-			expect(typeof updated!.event_id).toBe("number");
+			expect(publicEvents.length).toBe(1);
+			expect(publicEvents[0].source_record_id).toBe(overlay.source_record_id!);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -155,7 +156,7 @@ describe("MaterializationService", () => {
 
 	// ── Scenario 2: Reconciliation ───────────────────────────────────
 
-	describe("Reconciliation", () => {
+		describe("Reconciliation", () => {
 		it("second overlay with same source_record_id reconciles to existing public event", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -193,10 +194,11 @@ describe("MaterializationService", () => {
 			expect(result.materialized).toBe(1);
 			expect(result.reconciled).toBe(1);
 
-			// Both overlays should point to the same public event
-			const ov1 = db.get<{ event_id: number }>("SELECT event_id FROM agent_event_overlay WHERE id = ?", [overlay1.id]);
-			const ov2 = db.get<{ event_id: number }>("SELECT event_id FROM agent_event_overlay WHERE id = ?", [overlay2.id]);
-			expect(ov1!.event_id).toBe(ov2!.event_id);
+			const publicEvents = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_record_id = ?",
+				[sharedSourceId],
+			);
+			expect(publicEvents.length).toBe(1);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -525,7 +527,7 @@ describe("Publication Materialization", () => {
 		});
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "speech", targetScope: "current_area", summary: "Alice announces dinner is ready." },
+			{ kind: "spoken", targetScope: "current_area", summary: "Alice announces dinner is ready." },
 		];
 		const settlementId = `stl:req-pub-${randomUUID()}`;
 
@@ -599,7 +601,7 @@ describe("Publication Materialization", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("publication kind maps correctly: display → observation, broadcast → speech", () => {
+	it("publication kind maps correctly: visual → observation, spoken/written → speech", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 		const storage = new GraphStorageService(db);
@@ -612,9 +614,9 @@ describe("Publication Materialization", () => {
 		});
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "display", targetScope: "current_area", summary: "A notice board displays a message." },
-			{ kind: "broadcast", targetScope: "current_area", summary: "A town crier announces the news." },
-			{ kind: "record", targetScope: "current_area", summary: "A record is read aloud." },
+			{ kind: "visual", targetScope: "current_area", summary: "A notice board displays a message." },
+			{ kind: "spoken", targetScope: "current_area", summary: "A town crier announces the news." },
+			{ kind: "written", targetScope: "current_area", summary: "A record is read aloud." },
 		];
 		const settlementId = `stl:kinds-${randomUUID()}`;
 
@@ -652,7 +654,7 @@ describe("Publication Materialization", () => {
 		});
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "broadcast", targetScope: "world_public", summary: "A decree is issued across the land." },
+			{ kind: "spoken", targetScope: "world_public", summary: "A decree is issued across the land." },
 		];
 		const settlementId = `stl:world-${randomUUID()}`;
 
@@ -687,7 +689,7 @@ describe("Publication Materialization", () => {
 		});
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "speech", targetScope: "current_area", summary: "First call." },
+			{ kind: "spoken", targetScope: "current_area", summary: "First call." },
 		];
 		const settlementId = `stl:idempotent-${randomUUID()}`;
 
@@ -722,7 +724,7 @@ describe("Publication Materialization", () => {
 		const storage = new GraphStorageService(db);
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "speech", targetScope: "current_area", summary: "Nobody hears this." },
+			{ kind: "spoken", targetScope: "current_area", summary: "Nobody hears this." },
 		];
 		const settlementId = `stl:noloc-${randomUUID()}`;
 
@@ -745,7 +747,7 @@ describe("Publication Materialization", () => {
 		const storage = new GraphStorageService(db);
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "broadcast", targetScope: "world_public", summary: "A global announcement." },
+			{ kind: "spoken", targetScope: "world_public", summary: "A global announcement." },
 		];
 		const settlementId = `stl:sentinel-${randomUUID()}`;
 
@@ -787,7 +789,7 @@ describe("Publication Materialization", () => {
 		});
 
 		const publications: PublicationDeclaration[] = [
-			{ kind: "speech", targetScope: "current_area", summary: "Welcome, everyone!" },
+			{ kind: "spoken", targetScope: "current_area", summary: "Welcome, everyone!" },
 		];
 		const settlementId = `stl:delegate-${randomUUID()}`;
 

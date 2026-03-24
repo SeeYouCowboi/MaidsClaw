@@ -355,8 +355,12 @@ describe("turn send", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Hello, master.",
+          privateEpisodes: [],
+          publications: [],
+          relationIntents: [],
+          conflictFactors: [],
         },
       }),
       commitService,
@@ -388,9 +392,9 @@ describe("turn send", () => {
     expect(typeof result.request_id).toBe("string");
     expect(result.assistant_text).toBe("Hello, master.");
     expect(result.has_public_reply).toBe(true);
-    expect(typeof result.private_commit.present).toBe("boolean");
-    expect(typeof result.private_commit.op_count).toBe("number");
-    expect(Array.isArray(result.private_commit.kinds)).toBe(true);
+    expect(typeof result.private_cognition.present).toBe("boolean");
+    expect(typeof result.private_cognition.op_count).toBe("number");
+    expect(Array.isArray(result.private_cognition.kinds)).toBe(true);
     expect(typeof result.recovery_required).toBe("boolean");
     expect(Array.isArray(result.public_chunks)).toBe(true);
     expect(Array.isArray(result.tool_events)).toBe(true);
@@ -407,12 +411,16 @@ describe("turn send", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{ op: "retract", target: { kind: "assertion", key: "mood" } }],
           },
+          privateEpisodes: [],
+          publications: [],
+          relationIntents: [],
+          conflictFactors: [],
         },
       }),
       commitService,
@@ -441,9 +449,9 @@ describe("turn send", () => {
     // Silent-private is a SUCCESS, not a failure
     expect(result.assistant_text).toBe("");
     expect(result.has_public_reply).toBe(false);
-    expect(result.private_commit.present).toBe(true);
-    expect(result.private_commit.op_count).toBe(1);
-    expect(result.private_commit.kinds).toEqual(["assertion"]);
+    expect(result.private_cognition.present).toBe(true);
+    expect(result.private_cognition.op_count).toBe(1);
+    expect(result.private_cognition.kinds).toEqual(["assertion"]);
     expect(result.recovery_required).toBe(false);
   });
 

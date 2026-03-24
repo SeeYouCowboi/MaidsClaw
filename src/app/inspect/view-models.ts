@@ -29,8 +29,8 @@ export type SummaryView = {
   settlement: {
     settlement_id?: string;
     has_public_reply: boolean;
-    private_commit_op_count: number;
-    private_commit_kinds: string[];
+    private_cognition_op_count: number;
+    private_cognition_kinds: string[];
     redacted: boolean;
   };
   error?: {
@@ -38,7 +38,7 @@ export type SummaryView = {
     message: string;
   };
   has_public_reply: boolean;
-  private_commit_count: number;
+  private_cognition_count: number;
   memory_flush: {
     requested: boolean;
     result?: string;
@@ -164,8 +164,8 @@ export function loadSummaryView(params: InspectViewLoadParams): SummaryView {
     settlement: {
       settlement_id: settlementPayload?.settlementId,
       has_public_reply: settlementPayload?.hasPublicReply ?? false,
-      private_commit_op_count: extractPrivateCommitCount(settlementPayload),
-      private_commit_kinds: extractPrivateCommitKinds(settlementPayload),
+      private_cognition_op_count: extractPrivateCognitionCount(settlementPayload),
+      private_cognition_kinds: extractPrivateCognitionKinds(settlementPayload),
       redacted: true,
     },
     ...(errorFromStatus
@@ -174,7 +174,7 @@ export function loadSummaryView(params: InspectViewLoadParams): SummaryView {
         ? { error: { message: errorFromTrace.message } }
         : {}),
     has_public_reply: settlementPayload?.hasPublicReply ?? false,
-    private_commit_count: extractPrivateCommitCount(settlementPayload),
+    private_cognition_count: extractPrivateCognitionCount(settlementPayload),
     memory_flush: {
       requested: evidence.trace?.flush?.requested ?? false,
       ...(evidence.trace?.flush?.result ? { result: evidence.trace.flush.result } : {}),
@@ -477,23 +477,23 @@ function collectTraceBundles(
   return bundles;
 }
 
-function extractPrivateCommitKinds(
+function extractPrivateCognitionKinds(
   payload: SettlementPayloadLike | undefined,
 ): string[] {
-  if (!payload?.privateCommit) {
+  if (!payload?.privateCognition) {
     return [];
   }
 
-  if (Array.isArray(payload.privateCommit.kinds)) {
-    return [...payload.privateCommit.kinds];
+  if (Array.isArray(payload.privateCognition.kinds)) {
+    return [...payload.privateCognition.kinds];
   }
 
-  if (!Array.isArray(payload.privateCommit.ops)) {
+  if (!Array.isArray(payload.privateCognition.ops)) {
     return [];
   }
 
   const kinds: string[] = [];
-  for (const op of payload.privateCommit.ops) {
+  for (const op of payload.privateCognition.ops) {
     const kind = op.op === "upsert" ? op.record.kind : op.target.kind;
     if (!kinds.includes(kind)) {
       kinds.push(kind);
@@ -503,17 +503,17 @@ function extractPrivateCommitKinds(
   return kinds;
 }
 
-function extractPrivateCommitCount(payload: SettlementPayloadLike | undefined): number {
-  if (!payload?.privateCommit) {
+function extractPrivateCognitionCount(payload: SettlementPayloadLike | undefined): number {
+  if (!payload?.privateCognition) {
     return 0;
   }
 
-  if (typeof payload.privateCommit.opCount === "number") {
-    return payload.privateCommit.opCount;
+  if (typeof payload.privateCognition.opCount === "number") {
+    return payload.privateCognition.opCount;
   }
 
-  if (Array.isArray(payload.privateCommit.ops)) {
-    return payload.privateCommit.ops.length;
+  if (Array.isArray(payload.privateCognition.ops)) {
+    return payload.privateCognition.ops.length;
   }
 
   return 0;
@@ -572,7 +572,7 @@ type SettlementPayloadLike = {
   ownerAgentId?: string;
   publicReply: string;
   hasPublicReply: boolean;
-  privateCommit?: {
+  privateCognition?: {
     ops?: Array<{ op: "upsert"; record: { kind: string } } | { op: "retract"; target: { kind: string } }>;
     opCount?: number;
     kinds?: string[];

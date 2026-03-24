@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
-import type { PublicationDeclaration, PublicationKind, PublicationKindV2 } from "../runtime/rp-turn-contract.js";
+import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
-import type { AgentEventOverlay, PublicEventCategory } from "./types.js";
+import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 
 export type MaterializationResult = {
   materialized: number;
@@ -32,6 +32,21 @@ type EntityRow = {
 
 const HIDDEN_ENTITY_MARKERS = ["unknown", "hidden", "redacted", "anonymous"] as const;
 
+// Minimal type for materializable private events (formerly AgentEventOverlay)
+type MaterializablePrivateEvent = {
+  id: number;
+  event_id: number | null;
+  agent_id: string;
+  projection_class: string;
+  event_category: PrivateEventCategory;
+  projectable_summary: string | null;
+  location_entity_id: number | null;
+  source_record_id: string | null;
+  primary_actor_entity_id: number | null;
+  created_at: number;
+  emotion: string | null;
+};
+
 export class MaterializationService {
   private readonly projectionRepo: AreaWorldProjectionRepo;
 
@@ -43,10 +58,11 @@ export class MaterializationService {
     this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
   }
 
-  materializeDelayed(privateEvents: AgentEventOverlay[], agentId: string): MaterializationResult {
+  materializeDelayed(privateEvents: unknown[], agentId: string): MaterializationResult {
     const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
 
-    for (const privateEvent of privateEvents) {
+    for (const event of privateEvents) {
+      const privateEvent = event as MaterializablePrivateEvent;
       if (
         privateEvent.agent_id !== agentId ||
         privateEvent.projection_class !== "area_candidate" ||
@@ -163,8 +179,8 @@ export class MaterializationService {
     return row;
   }
 
-  private linkPrivateToPublic(privateEventId: number, publicEventId: number): void {
-    this.db.prepare(`UPDATE agent_event_overlay SET event_id = ? WHERE id = ?`).run(publicEventId, privateEventId);
+  private linkPrivateToPublic(_privateEventId: number, _publicEventId: number): void {
+    // NOTE: episode→public event linkage is tracked via settlement_id in private_episode_events
   }
 
   private resolveEntityForPublic(entityId: number, timestamp: number, isLocation: boolean): number | null {
@@ -240,7 +256,7 @@ export class MaterializationService {
     return JSON.stringify(Array.from(refs));
   }
 
-  private toPublicEventCategory(category: AgentEventOverlay["event_category"]): PublicEventCategory | null {
+  private toPublicEventCategory(category: PrivateEventCategory): PublicEventCategory | null {
     if (
       category === "speech" ||
       category === "action" ||
@@ -372,7 +388,7 @@ const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {
   visual: "observation",
 };
 
-function publicationKindToCategory(kind: PublicationKind | PublicationKindV2): PublicEventCategory {
+function publicationKindToCategory(kind: string): PublicEventCategory {
   return PUBLICATION_KIND_TO_CATEGORY[kind] ?? "speech";
 }
 

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
-import type { PrivateCognitionCommit, PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
@@ -11,13 +11,13 @@ import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
+import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type {
-  AgentEventOverlay,
-  BeliefType,
-  EpistemicStatus,
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
+  PrivateEventCategory,
+  ProjectionClass,
 } from "./types.js";
 
 export type { MigrationResult, GraphOrganizerResult } from "./types.js";
@@ -49,7 +49,7 @@ export type ExplicitSettlementMeta = {
   settlementId: string;
   requestId: string;
   ownerAgentId: string;
-  privateCommit: PrivateCognitionCommit | PrivateCognitionCommitV4;
+  privateCognition: PrivateCognitionCommitV4;
 };
 
 export type IngestionAttachment = {
@@ -73,6 +73,8 @@ export type ToolCallResult = {
   name: string;
   arguments: Record<string, unknown>;
 };
+
+
 
 export type ChatToolDefinition = {
   name: string;
@@ -103,7 +105,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
     name: "create_private_event",
     description:
-      "Create private cognitive events in agent_event_overlay. Use for owner-private thoughts, observations, and public-candidate emission.",
+      "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
       type: "object",
       required: ["role", "private_notes", "salience", "emotion", "event_category", "primary_actor_entity_id", "projection_class"],
@@ -143,14 +145,13 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     description: "Create private belief overlay edges between entities.",
     inputSchema: {
       type: "object",
-      required: ["source", "target", "predicate", "belief_type", "confidence"],
+      required: ["source", "target", "predicate", "basis", "stance"],
       properties: {
         source: { type: ["number", "string"] },
         target: { type: ["number", "string"] },
         predicate: { type: "string" },
-        belief_type: { type: ["string", "null"] },
-        confidence: { type: ["number", "null"] },
-        epistemic_status: { type: ["string", "null"] },
+        basis: { type: "string", enum: ["first_hand", "hearsay", "inference", "introspection", "belief"] },
+        stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "contested", "rejected", "abandoned"] },
         provenance: { type: ["string", "null"] },
         source_event_ref: { type: ["string", "null"] },
       },
@@ -278,12 +279,12 @@ export class MemoryIngestionPolicy {
     for (const attachment of attachments) {
       if (attachment.recordType !== "turn_settlement") continue;
       const p = attachment.payload as TurnSettlementPayload | undefined;
-      if (!p || !p.privateCommit || !p.privateCommit.ops || p.privateCommit.ops.length === 0) continue;
+      if (!p || !p.privateCognition || !p.privateCognition.ops || p.privateCognition.ops.length === 0) continue;
       const meta: ExplicitSettlementMeta = {
         settlementId: p.settlementId,
         requestId: p.requestId,
         ownerAgentId: p.ownerAgentId,
-        privateCommit: p.privateCommit,
+        privateCognition: p.privateCognition,
       };
       attachment.explicitMeta = meta;
       explicitSettlements.push(meta);
@@ -517,9 +518,39 @@ export class MemoryTaskAgent {
     flushRequest: MemoryFlushRequest,
     toolCalls: ToolCallResult[],
     created: CreatedState,
-  ): AgentEventOverlay[] {
+  ): Array<{
+    id: number;
+    event_id: number | null;
+    agent_id: string;
+    role: string | null;
+    private_notes: string | null;
+    salience: number | null;
+    emotion: string | null;
+    event_category: PrivateEventCategory;
+    primary_actor_entity_id: number | null;
+    projection_class: ProjectionClass;
+    location_entity_id: number | null;
+    projectable_summary: string | null;
+    source_record_id: string | null;
+    created_at: number;
+  }> {
     const pointerToEntityId = new Map<string, number>();
-    const privateEvents: AgentEventOverlay[] = [];
+    const privateEvents: Array<{
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      role: string | null;
+      private_notes: string | null;
+      salience: number | null;
+      emotion: string | null;
+      event_category: PrivateEventCategory;
+      primary_actor_entity_id: number | null;
+      projection_class: ProjectionClass;
+      location_entity_id: number | null;
+      projectable_summary: string | null;
+      source_record_id: string | null;
+      created_at: number;
+    }> = [];
 
     for (const call of toolCalls) {
       if (call.name === "create_entity") {
@@ -565,8 +596,34 @@ export class MemoryTaskAgent {
         });
         created.privateEventIds.push(privateEventId);
         created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
-        const row = this.db.prepare(`SELECT * FROM agent_event_overlay WHERE id = ?`).get(privateEventId) as AgentEventOverlay;
-        privateEvents.push(row);
+        const row = this.db.prepare(
+          `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
+        ).get(privateEventId) as {
+          id: number;
+          event_id: number | null;
+          agent_id: string;
+          category: string;
+          summary: string;
+          private_notes: string | null;
+          committed_time: number;
+          created_at: number;
+        };
+        privateEvents.push({
+          id: row.id,
+          event_id: row.event_id,
+          agent_id: row.agent_id,
+          role: call.arguments.role as string | null,
+          private_notes: row.private_notes,
+          salience: (call.arguments.salience as number) ?? null,
+          emotion: (call.arguments.emotion as string) ?? null,
+          event_category: row.category as PrivateEventCategory,
+          primary_actor_entity_id: primaryActor ?? null,
+          projection_class: call.arguments.projection_class as ProjectionClass,
+          location_entity_id: location ?? null,
+          projectable_summary: (call.arguments.projectable_summary as string) ?? null,
+          source_record_id: (call.arguments.source_record_id as string) ?? null,
+          created_at: row.created_at,
+        });
         continue;
       }
 
@@ -581,9 +638,8 @@ export class MemoryTaskAgent {
           sourceEntityId: source,
           targetEntityId: target,
           predicate: this.asString(call.arguments.predicate),
-          beliefType: this.asOptionalString(call.arguments.belief_type) as BeliefType | undefined,
-          confidence: this.asOptionalNumber(call.arguments.confidence) ?? undefined,
-          epistemicStatus: this.asOptionalString(call.arguments.epistemic_status) as EpistemicStatus | undefined,
+          basis: this.asString(call.arguments.basis) as AssertionBasis,
+          stance: this.asString(call.arguments.stance) as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
           sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
         });
@@ -623,7 +679,7 @@ export class MemoryTaskAgent {
     return privateEvents;
   }
 
-  private createSameEpisodeEdgesForBatch(privateEvents: AgentEventOverlay[]): void {
+  private createSameEpisodeEdgesForBatch(privateEvents: Array<{ event_id: number | null }>): void {
     const linkedEventIds = privateEvents
       .map((event) => event.event_id)
       .filter((eventId): eventId is number => typeof eventId === "number" && eventId > 0);

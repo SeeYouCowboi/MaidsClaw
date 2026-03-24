@@ -328,12 +328,11 @@ function resolveFactorNodeRef(
 
   const event = db
     .prepare(
-      `SELECT id, explicit_kind FROM agent_event_overlay WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
+      `SELECT id, kind FROM private_cognition_current WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
     )
-    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; explicit_kind: string | null } | null;
+    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; kind: string | null } | null;
   if (event) {
-    const kind = event.explicit_kind === "commitment" ? "commitment" : "evaluation";
-    return `${kind}:${event.id}`;
+    return `private_event:${event.id}`;
   }
 
   return null;

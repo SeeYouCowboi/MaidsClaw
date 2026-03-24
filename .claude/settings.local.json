@@ -16,7 +16,10 @@
       "Bash(find /d/Projects/MaidsClaw/src/storage -type f -name *.ts)",
       "Bash(xargs grep:*)",
       "Bash(wc -l /d/Projects/MaidsClaw/src/memory/*.ts)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(grep -r \"belief_type\\\\|epistemic_status\\\\|\\\\.confidence\" src/ --include=*.ts -l)",
+      "Bash(grep -v \"//.*confidence\\\\|confidence_score\\\\|confidence_threshold\\\\|confident\")",
+      "Bash(grep -rn viewer_role src/memory/ --include=*.ts)"
     ]
   }
 }

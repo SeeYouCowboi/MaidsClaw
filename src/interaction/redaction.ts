@@ -11,7 +11,7 @@ import { normalizeSettlementPayload } from "./settlement-adapter.js";
  * For turn_settlement records:
  * - Keeps routing metadata: settlementId, requestId, sessionId, publicReply, hasPublicReply
  * - Replaces viewerSnapshot with { redacted: true }
- * - Replaces privateCommit with { redacted: true, opCount, kinds }
+ * - Replaces privateCognition with { redacted: true, opCount, kinds }
  *
  * For all other record types: returns unchanged.
  *
@@ -36,7 +36,7 @@ export function redactInteractionRecord(
 		publicReply: payload.publicReply,
 		hasPublicReply: payload.hasPublicReply,
 		viewerSnapshot: { redacted: true as const },
-		privateCommit: normalizedPayload.privateCognition
+		privateCognition: normalizedPayload.privateCognition
 			? {
 					redacted: true as const,
 					opCount: normalizedPayload.privateCognition.ops.length,

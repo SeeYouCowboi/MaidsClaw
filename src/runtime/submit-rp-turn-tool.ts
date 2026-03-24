@@ -50,8 +50,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
       properties: {
         schemaVersion: {
           type: "string",
-          enum: ["rp_turn_outcome_v3", "rp_turn_outcome_v4", "rp_turn_outcome_v5"],
-          description: "Must be rp_turn_outcome_v3, rp_turn_outcome_v4, or rp_turn_outcome_v5",
+          enum: ["rp_turn_outcome_v5"],
+          description: "Must be rp_turn_outcome_v5",
         },
         publicReply: {
           type: "string",
@@ -60,22 +60,6 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         latentScratchpad: {
           type: "string",
           description: "Optional internal reasoning scratchpad (trace-only, not a durable artifact)",
-        },
-        privateCommit: {
-          type: "object",
-          description: "Optional private cognition state mutations (V3/V4 compat)",
-          properties: {
-            schemaVersion: {
-              type: "string",
-              enum: ["rp_private_cognition_v3", "rp_private_cognition_v4"],
-            },
-            summary: { type: "string" },
-            ops: {
-              type: "array",
-              items: { type: "object" },
-            },
-          },
-          required: ["schemaVersion", "ops"],
         },
         privateCognition: {
           type: "object",
@@ -122,7 +106,7 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               localRef: { type: "string" },
               kind: {
                 type: "string",
-                enum: ["spoken", "written", "visual", "speech", "record", "display"],
+                enum: ["spoken", "written", "visual"],
               },
               targetScope: {
                 type: "string",

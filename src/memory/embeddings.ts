@@ -80,7 +80,7 @@ export class EmbeddingService {
           embedding: Buffer | Uint8Array;
         }>);
 
-    const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM agent_event_overlay WHERE id=?");
+    const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM private_episode_events WHERE id=?");
     const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM agent_fact_overlay WHERE id=?");
 
     const candidates: Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> = [];

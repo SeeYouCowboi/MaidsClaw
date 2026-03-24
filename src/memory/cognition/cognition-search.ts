@@ -1,9 +1,9 @@
-import type { Db } from "../../storage/database.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
+import type { Db } from "../../storage/database.js";
 import type { NodeRef } from "../types.js";
-import { RelationBuilder } from "./relation-builder.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
+import { RelationBuilder } from "./relation-builder.js";
 
 type CognitionSearchParams = {
   agentId: string;
@@ -144,7 +144,7 @@ export class CognitionSearchService {
 
     if (kind === "private_event" || kind === "evaluation" || kind === "commitment") {
       const row = this.db
-        .prepare(`SELECT cognition_key FROM agent_event_overlay WHERE id = ? AND agent_id = ?`)
+        .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
         .get(id, agentId) as { cognition_key: string | null } | null;
       return row?.cognition_key ?? null;
     }
@@ -157,7 +157,7 @@ export class CognitionSearchService {
     activeOnly: boolean,
     limit: number,
   ): CognitionHit[] {
-    const safeQuery = this.escapeFtsQuery(params.query!.trim());
+    const safeQuery = this.escapeFtsQuery((params.query ?? "").trim());
     const conditions: string[] = ["d.agent_id = ?"];
     const binds: unknown[] = [params.agentId];
 
@@ -256,9 +256,9 @@ export class CognitionSearchService {
       const overlayId = this.parseOverlayId(hit.source_ref);
       if (overlayId === null) return true;
       const row = this.db
-        .prepare(`SELECT cognition_status FROM agent_event_overlay WHERE id = ? AND agent_id = ?`)
-        .get(overlayId, agentId) as { cognition_status: string } | null;
-      return row?.cognition_status === "active";
+        .prepare(`SELECT status FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
+        .get(overlayId, agentId) as { status: string } | null;
+      return row?.status === "active";
     });
   }
 
@@ -272,20 +272,18 @@ export class CognitionSearchService {
 
       const row = this.db
         .prepare(
-          `SELECT metadata_json FROM agent_event_overlay WHERE id = ? AND agent_id = ?`,
+          `SELECT CAST(json_extract(record_json, '$.priority') AS INTEGER) AS priority,
+                  json_extract(record_json, '$.horizon') AS horizon
+           FROM private_cognition_current
+           WHERE id = ? AND agent_id = ?`,
         )
-        .get(overlayId, agentId) as { metadata_json: string | null } | null;
+        .get(overlayId, agentId) as { priority: number | null; horizon: string | null } | null;
 
-      if (row?.metadata_json) {
-        try {
-          const parsed = JSON.parse(row.metadata_json) as Record<string, unknown>;
-          commitmentMeta.set(String(hit.source_ref), {
-            priority: typeof parsed.priority === "number" ? parsed.priority : 999,
-            horizon: typeof parsed.horizon === "string" ? parsed.horizon : null,
-          });
-        } catch {
-          commitmentMeta.set(String(hit.source_ref), { priority: 999, horizon: null });
-        }
+      if (row) {
+        commitmentMeta.set(String(hit.source_ref), {
+          priority: typeof row.priority === "number" && Number.isFinite(row.priority) ? row.priority : 999,
+          horizon: typeof row.horizon === "string" ? row.horizon : null,
+        });
       }
     }
 

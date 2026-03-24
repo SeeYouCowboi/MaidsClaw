@@ -117,11 +117,11 @@ describe("EmbeddingService", () => {
   it("queryNearestNeighbors with agentId filters out other agents' private refs", () => {
     const now = Date.now();
     db.prepare(
-      "INSERT INTO agent_event_overlay (id, event_id, agent_id, event_category, projection_class, created_at) VALUES (?,?,?,?,?,?)",
-    ).run(1, null, "agent-a", "thought", "none", now);
+      "INSERT INTO private_episode_events (id, agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?,?,?,?,?,?,?,?)",
+    ).run(1, "agent-a", "sess-1", "stl-1", "observation", "thought a", now, now);
     db.prepare(
-      "INSERT INTO agent_event_overlay (id, event_id, agent_id, event_category, projection_class, created_at) VALUES (?,?,?,?,?,?)",
-    ).run(2, null, "agent-b", "thought", "none", now);
+      "INSERT INTO private_episode_events (id, agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?,?,?,?,?,?,?,?)",
+    ).run(2, "agent-b", "sess-1", "stl-1", "observation", "thought b", now, now);
 
     service.batchStoreEmbeddings([
       {

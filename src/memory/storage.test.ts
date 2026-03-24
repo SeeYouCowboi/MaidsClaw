@@ -106,13 +106,15 @@ describe("GraphStorageService", () => {
       projectableSummary: "public-safe",
     });
 
+    // 'thought' category routes to private_cognition_events; fields are in record_json
     const row = db
-      .prepare(`SELECT projection_class, event_category, projectable_summary FROM agent_event_overlay WHERE id = ?`)
-      .get(id) as { projection_class: string; event_category: string; projectable_summary: string };
+      .prepare(`SELECT record_json FROM private_cognition_events WHERE id = ?`)
+      .get(id) as { record_json: string };
+    const record = JSON.parse(row.record_json) as { projectionClass: string; category: string; summary: string | null };
 
-    expect(row.projection_class).toBe("area_candidate");
-    expect(row.event_category).toBe("thought");
-    expect(row.projectable_summary).toBe("public-safe");
+    expect(record.projectionClass).toBe("area_candidate");
+    expect(record.category).toBe("thought");
+    expect(record.summary).toBe("public-safe");
   });
 
   it("createPrivateBelief updates existing row for same tuple", () => {
@@ -121,7 +123,8 @@ describe("GraphStorageService", () => {
       sourceEntityId: 10,
       targetEntityId: 20,
       predicate: "likes",
-      confidence: 0.7,
+      basis: "inference",
+      stance: "tentative",
     });
 
     db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(1, beliefId1);
@@ -131,7 +134,8 @@ describe("GraphStorageService", () => {
       sourceEntityId: 10,
       targetEntityId: 20,
       predicate: "likes",
-      confidence: 0.95,
+      basis: "first_hand",
+      stance: "accepted",
     });
 
     expect(beliefId2).toBe(beliefId1);
@@ -436,7 +440,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "accepted",
-      confidence: 0.5,
     });
     const a2 = storage.upsertExplicitAssertion({
       agentId: "agent-1",
@@ -447,7 +450,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "tentative",
-      confidence: 0.9,
     });
     expect(a1).not.toBeNull();
     expect(a2).not.toBeNull();
@@ -456,10 +458,9 @@ describe("GraphStorageService", () => {
 
     // Verify content was updated
     const updatedRow = db
-      .prepare(`SELECT epistemic_status, confidence FROM agent_fact_overlay WHERE id = ?`)
-      .get(a1!.id) as { epistemic_status: string; confidence: number | null };
-    expect(updatedRow.epistemic_status).toBe("suspected");
-    expect(updatedRow.confidence).toBeNull();
+      .prepare(`SELECT stance FROM agent_fact_overlay WHERE id = ?`)
+      .get(a1!.id) as { stance: string };
+    expect(updatedRow.stance).toBe("tentative");
 
     // Only one row exists for this cognition_key
     const factCount = db
@@ -486,7 +487,7 @@ describe("GraphStorageService", () => {
     expect(e2.ref).toBe(e1.ref);
 
     const eventCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'eval:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'eval:stable'`)
       .get() as { cnt: number };
     expect(eventCount.cnt).toBe(1);
 
@@ -513,7 +514,7 @@ describe("GraphStorageService", () => {
     expect(c2.ref).toBe(c1.ref);
 
     const commitCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'commit:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'commit:stable'`)
       .get() as { cnt: number };
     expect(commitCount.cnt).toBe(1);
   });

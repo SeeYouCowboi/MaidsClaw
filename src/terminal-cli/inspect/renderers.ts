@@ -30,7 +30,7 @@ export function renderText(
 			`session_id: ${viewModel.session_id ?? "unknown"}`,
 			`agent_id: ${viewModel.agent_id ?? "unknown"}`,
 			`has_public_reply: ${String(viewModel.has_public_reply)}`,
-			`private_commit_count: ${viewModel.private_commit_count}`,
+			`private_cognition_count: ${viewModel.private_cognition_count}`,
 			`recovery_required: ${String(viewModel.recovery_required)}`,
 			`pending_sweep_status: ${viewModel.pending_sweep_state.status ?? "none"}`,
 			...(viewModel.error
