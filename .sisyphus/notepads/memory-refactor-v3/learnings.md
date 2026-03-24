@@ -140,3 +140,77 @@
 - Persistent non-unique SQLite failures after retries are downgraded to warn+skip to preserve settlement consistency.
 - Added publication tests covering transient retry success and retry-exhausted skip.
 - Added ProjectionManager regression test proving graphStorage=null still silently skips publication materialization.
+
+## [2026-03-24] T27 — ArtifactContract + Capability Matrix
+
+- SUBMIT_RP_TURN_ARTIFACT_CONTRACTS now has 8 entries: publicReply, privateCognition, privateEpisodes, publications, pinnedSummaryProposal, relationIntents, conflictFactors, areaStateArtifacts
+- AgentPermissions: 11 boolean capability fields total (3 existing + 8 new)
+- CAPABILITY_MAP: 11 entries mapping capability strings → AgentPermissions fields
+- rp_agent defaults: canProposePinnedSummary=true, canReadPrivateMemory=true, canReadSharedBlocks=true; all admin/mutate=false
+- maiden defaults: all true except canAccessCognition/canWriteCognition/canProposePinnedSummary=false
+- task_agent defaults: all false
+- canMutateSharedBlocks has two-layer enforcement: capability gate (tool-access-policy.ts) + object-level gate (SharedBlockPatchService → SharedBlockPermissions.canEdit)
+- Test baseline: 46 tool tests pass, 463 memory tests pass, build clean
+
+## [2026-03-24] Wave 6 Design RFCs (T31, T32, T37, T38)
+
+### T31 — Publication Second Axis
+- Current `publication.kind` has 5 values: spoken/written/visual/broadcast/record
+- `broadcast` naming collision between `kind` value and candidate `delivery_mode` value is the key blocker
+- DEFER — V4 scope; V6 schema bump with COMPAT_ALIAS_MAP pattern recommended
+- `target` field (current_area|world_public) already covers the main distribution distinction
+
+### T32 — Settlement Graph + Relation Intent
+- MEMORY_RELATION_TYPES (9 types): supports, triggered, conflicts_with, derived_from, supersedes, surfaced_as, published_as, resolved_by, downgraded_by
+- Forbidden from payload delegation forever: surfaced_as (projection-assigned ID), supersedes (temporal invariant), resolved_by (graph closure must be atomic), downgraded_by (temporal mutation)
+- V4 candidates: conflicts_with (intra-settlement scope), derived_from (if target stable)
+- Currently in V5 payload: supports, triggered only — sufficient for V3
+
+### T37 — Shared Current State
+- Gap confirmed: no group-scoped + mutable + current-state structure exists
+- Recommendation: extend shared_blocks with `shared_block_state_entries` sub-table (NOT a new domain)
+- Reuses T24 auth model (SharedBlockPermissions, canMutateSharedBlocks, retrievalOnly)
+- Schema: block_id + key UNIQUE, value_json, updated_by_agent_id, updated_at
+- Migration would be memory:027 or later
+
+### T38 — External References
+- Priority 1: AriGraph — episode-to-semantic bridge index (cross-layer navigation gap)
+- Priority 2: Graphiti — temporal community detection for co-evolving facts
+- Priority 3: Mem0 — procedural memory distinction (tool-use patterns have no explicit store)
+- Priority 4: Cognee — ontology-aware edge weight tuning for beam search in navigator.ts
+- All four are V4+ scope, none blocks V3
+
+## [2026-03-24] T33 — Explain Detail Levels
+
+### Decision: IMPLEMENT (lightweight)
+- T28 DEFER was about *tool facets* (new tool types requiring output format redesign)
+- Detail levels are orthogonal — pure result filter on already-sorted `evidence_paths[]`
+- Infrastructure cost is 1 private method + 2 lines in `explore()`
+
+### Implementation
+- `ExplainDetailLevel = "concise" | "standard" | "audit"` added to `types.ts`
+- `MemoryExploreInput.detailLevel?: ExplainDetailLevel` added
+- `asExploreInput()` detects `detailLevel` as a `MemoryExploreInput` discriminator
+- `applyDetailLevel()` private method in `GraphNavigator`
+  - `concise`: `paths.slice(0, 3)`
+  - `standard`: no change (backward-compat)
+  - `audit`: `effectiveMaxCandidates = rerankedPaths.length` bypasses maxCandidates cap before assembly
+- 3 TDD tests added: concise ≤3, standard=baseline, audit≥standard
+
+### Key insight
+- `audit` requires bypassing `assembleEvidence`'s `maxCandidates` cap — handled by passing `rerankedPaths.length` as cap when `detailLevel === "audit"`
+- This is the only place where detail level affects pre-assembly behavior; `concise` is a post-assembly slice
+
+### Test baseline (post-T33)
+- 469 memory tests pass / 0 fail (was 463 before, 6 more from T33 + other in-flight tasks)
+
+## [2026-03-24] T30 — Graph Retrieval Strategy Layer
+
+- GraphRetrievalStrategy type: name + edgeWeights (Partial<Record<MemoryRelationType, number>>) + beamWidthMultiplier
+- 4 named strategies: default_retrieval, deep_explain, time_slice_reconstruction, conflict_exploration
+- Strategy wired in 3 places: compareNeighborEdges (sort), preliminaryPathScore (beam pruning), rerankPaths (final ranking)
+- beamWidthMultiplier applied in expandTypedBeam: effectiveBeamWidth = ceil(beamWidth * multiplier), clamped [1, 32]
+- Edge weight multiplier: strategy.edgeWeights[edge.kind as MemoryRelationType] ?? 1.0
+- explore() 4th param is optional — undefined = default_retrieval (no behavior change)
+- Changes absorbed into concurrent commit 315011a (explain detail levels) — evidence diff saved separately
+- Test baseline: 27 navigator tests pass / 0 fail (3 new strategy tests)
