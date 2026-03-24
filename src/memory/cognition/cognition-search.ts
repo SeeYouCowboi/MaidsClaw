@@ -1,9 +1,12 @@
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import type { Db } from "../../storage/database.js";
+import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
 import { RelationBuilder, type ConflictEvidence } from "./relation-builder.js";
+
+const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 type ConflictEvidenceItem = {
   targetRef: string;
@@ -105,12 +108,23 @@ export class CognitionSearchService {
   }
 
   private toConflictEvidenceItems(evidence: ConflictEvidence[]): ConflictEvidenceItem[] {
-    return evidence.map((e) => ({
-      targetRef: e.targetRef,
-      strength: e.strength,
-      sourceKind: e.sourceKind,
-      sourceRef: e.sourceRef,
-    }));
+    const items: ConflictEvidenceItem[] = [];
+    for (const item of evidence) {
+      try {
+        parseGraphNodeRef(item.targetRef);
+      } catch {
+        continue;
+      }
+
+      items.push({
+        targetRef: item.targetRef,
+        strength: item.strength,
+        sourceKind: item.sourceKind,
+        sourceRef: item.sourceRef,
+      });
+    }
+
+    return items;
   }
 
   private parseFactorRefsJson(value: string | null): NodeRef[] {
@@ -133,8 +147,8 @@ export class CognitionSearchService {
 
   private resolveCognitionKey(sourceRef: NodeRef, agentId: string): string | null {
     const text = String(sourceRef);
-    if (text.startsWith("cognition_key:")) {
-      const key = text.slice("cognition_key:".length).trim();
+    if (text.startsWith(COGNITION_KEY_PREFIX)) {
+      const key = text.slice(COGNITION_KEY_PREFIX.length).trim();
       return key.length > 0 ? key : null;
     }
 
@@ -150,14 +164,14 @@ export class CognitionSearchService {
     if (kind === "private_belief" || kind === "assertion") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE id = ? AND agent_id = ?`)
-        .get(id, agentId) as { cognition_key: string | null } | null;
+        .get(id, agentId) as { "cognition_key": string | null } | null;
       return row?.cognition_key ?? null;
     }
 
     if (kind === "private_event" || kind === "evaluation" || kind === "commitment") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
-        .get(id, agentId) as { cognition_key: string | null } | null;
+        .get(id, agentId) as { "cognition_key": string | null } | null;
       return row?.cognition_key ?? null;
     }
 
@@ -335,7 +349,7 @@ export class CognitionSearchService {
   }
 
   private extractCognitionKey(sourceRef: string): string | null {
-    const prefix = "cognition_key:";
+    const prefix = COGNITION_KEY_PREFIX;
     if (!sourceRef.startsWith(prefix)) {
       return null;
     }

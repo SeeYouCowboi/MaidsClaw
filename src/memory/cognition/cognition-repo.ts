@@ -120,7 +120,7 @@ type FactOverlayRow = {
   pre_contested_stance: AssertionStance | null;
   provenance: string | null;
   source_event_ref: string | null;
-  cognition_key: string | null;
+  "cognition_key": string | null;
   settlement_id: string | null;
   op_index: number | null;
   created_at: number;
@@ -130,7 +130,7 @@ type FactOverlayRow = {
 type CognitionCurrentRow = {
   id: number;
   agent_id: string;
-  cognition_key: string;
+  "cognition_key": string;
   kind: "assertion" | "evaluation" | "commitment";
   stance: AssertionStance | null;
   basis: AssertionBasis | null;

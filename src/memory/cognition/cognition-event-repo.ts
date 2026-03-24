@@ -21,7 +21,7 @@ export type CognitionEventAppendParams = {
 export type CognitionEventRow = {
   id: number;
   agent_id: string;
-  cognition_key: string;
+  "cognition_key": string;
   kind: string;
   op: string;
   record_json: string | null;

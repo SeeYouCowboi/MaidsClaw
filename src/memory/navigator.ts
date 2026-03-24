@@ -190,7 +190,7 @@ export class GraphNavigator {
       drilldown: {
         mode: input.mode,
         focus_ref: input.focusRef,
-        focus_cognition_key: input.focusCognitionKey,
+        "focus_cognition_key": input.focusCognitionKey,
         as_of_valid_time: input.asOfValidTime,
         as_of_committed_time: input.asOfCommittedTime,
         time_sliced_paths: pathSummaries,

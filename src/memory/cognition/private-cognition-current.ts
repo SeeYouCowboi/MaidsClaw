@@ -12,7 +12,7 @@ type DbLike = {
 export type CognitionCurrentRow = {
   id: number;
   agent_id: string;
-  cognition_key: string;
+  "cognition_key": string;
   kind: string;
   stance: string | null;
   basis: string | null;

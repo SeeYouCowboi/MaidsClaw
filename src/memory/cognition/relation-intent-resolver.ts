@@ -56,6 +56,7 @@ type ResolveConflictFactorOptions = {
 };
 
 const ALLOWED_INTENTS = new Set(["supports", "triggered"]);
+const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export function prevalidateRelationIntents(outcome: CanonicalRpTurnOutcome): void {
   if (!outcome.relationIntents || outcome.relationIntents.length === 0) {
@@ -312,7 +313,9 @@ function resolveFactorNodeRef(
     return raw;
   }
 
-  const cognitionRef = raw.startsWith("cognition_key:") ? raw.slice("cognition_key:".length).trim() : raw;
+  const cognitionRef = raw.startsWith(COGNITION_KEY_PREFIX)
+    ? raw.slice(COGNITION_KEY_PREFIX.length).trim()
+    : raw;
   if (cognitionRef.length === 0) {
     return null;
   }

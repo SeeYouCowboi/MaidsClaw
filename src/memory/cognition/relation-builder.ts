@@ -24,7 +24,12 @@ type ConflictEvidenceRow = {
   created_at: number;
 };
 
+type AgentRow = { agent_id: string };
+type AssertionIdRow = { id: number };
+type CognitionProjectionRow = { id: number; kind: string | null };
+
 const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/;
+const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export const CONFLICTS_WITH: MemoryRelationType = "conflicts_with";
 export const DIRECTNESS_DIRECT: RelationDirectness = "direct";
@@ -55,18 +60,23 @@ export class RelationBuilder {
     sourceRef: string,
     strength = 0.8,
   ): void {
+    const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
+    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId) ?? sourceNodeRef.trim();
+
     const targets = new Set<string>();
     let droppedInvalidRefs = 0;
     for (const nodeRef of factorNodeRefs) {
-      const trimmed = nodeRef.trim();
-      if (!STABLE_FACTOR_REF_PATTERN.test(trimmed)) {
+      const resolvedTargetRef = this.resolveTargetNodeRef(nodeRef, sourceAgentId);
+      if (!resolvedTargetRef) {
         droppedInvalidRefs += 1;
         continue;
       }
-      if (trimmed === sourceNodeRef) {
+
+      if (resolvedTargetRef === canonicalSourceRef) {
         continue;
       }
-      targets.add(trimmed);
+
+      targets.add(resolvedTargetRef);
     }
 
     if (droppedInvalidRefs > 0) {
@@ -108,6 +118,7 @@ export class RelationBuilder {
    * Returns strongest-first.
    */
   getConflictEvidence(sourceNodeRef: string, limit = 3): ConflictEvidence[] {
+    const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
     const rows = this.db
       .prepare(
         `SELECT target_node_ref, strength, source_kind, source_ref, created_at
@@ -118,12 +129,130 @@ export class RelationBuilder {
       )
       .all(sourceNodeRef, CONFLICTS_WITH, limit) as ConflictEvidenceRow[];
 
-    return rows.map((row) => ({
-      targetRef: row.target_node_ref,
-      strength: row.strength,
-      sourceKind: row.source_kind as RelationSourceKind,
-      sourceRef: row.source_ref,
-      createdAt: row.created_at,
-    }));
+    const normalized: ConflictEvidence[] = [];
+    for (const row of rows) {
+      const targetRef = this.resolveTargetNodeRef(row.target_node_ref, sourceAgentId);
+      if (!targetRef) {
+        continue;
+      }
+      normalized.push({
+        targetRef,
+        strength: row.strength,
+        sourceKind: row.source_kind as RelationSourceKind,
+        sourceRef: row.source_ref,
+        createdAt: row.created_at,
+      });
+    }
+
+    return normalized;
+  }
+
+  private resolveTargetNodeRef(rawNodeRef: string, sourceAgentId: string | null): string | null {
+    const trimmed = rawNodeRef.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (STABLE_FACTOR_REF_PATTERN.test(trimmed)) {
+      if (trimmed.startsWith("private_belief:")) {
+        return `assertion:${trimmed.slice("private_belief:".length)}`;
+      }
+      if (trimmed.startsWith("private_event:")) {
+        return trimmed;
+      }
+      return trimmed;
+    }
+
+    const cognitionKey = this.extractCognitionKey(trimmed);
+    if (!cognitionKey) {
+      return null;
+    }
+
+    return this.resolveCanonicalCognitionRefByKey(cognitionKey, sourceAgentId);
+  }
+
+  private resolveSourceAgentId(sourceNodeRef: string): string | null {
+    const trimmed = sourceNodeRef.trim();
+
+    if (trimmed.startsWith("assertion:")) {
+      const id = Number(trimmed.slice("assertion:".length));
+      if (!Number.isFinite(id)) {
+        return null;
+      }
+
+      const row = this.db
+        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .get(id) as AgentRow | null;
+      return row?.agent_id ?? null;
+    }
+
+    if (trimmed.startsWith("private_belief:")) {
+      const id = Number(trimmed.slice("private_belief:".length));
+      if (!Number.isFinite(id)) {
+        return null;
+      }
+
+      const row = this.db
+        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .get(id) as AgentRow | null;
+      return row?.agent_id ?? null;
+    }
+
+    if (trimmed.startsWith("evaluation:") || trimmed.startsWith("commitment:") || trimmed.startsWith("private_event:")) {
+      const id = Number(trimmed.slice(trimmed.indexOf(":") + 1));
+      if (!Number.isFinite(id)) {
+        return null;
+      }
+
+      const row = this.db
+        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
+        .get(id) as AgentRow | null;
+      return row?.agent_id ?? null;
+    }
+
+    return null;
+  }
+
+  private extractCognitionKey(rawRef: string): string | null {
+    if (rawRef.startsWith(COGNITION_KEY_PREFIX)) {
+      const prefixed = rawRef.slice(COGNITION_KEY_PREFIX.length).trim();
+      return prefixed.length > 0 ? prefixed : null;
+    }
+
+    return null;
+  }
+
+  private resolveCanonicalCognitionRefByKey(cognitionKey: string, sourceAgentId: string | null): string | null {
+    const agentFilter = sourceAgentId ? " AND agent_id = ?" : "";
+    const agentBind = sourceAgentId ? [sourceAgentId] : [];
+
+    const assertion = this.db
+      .prepare(
+        `SELECT id
+         FROM agent_fact_overlay
+         WHERE cognition_key = ?${agentFilter}
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(cognitionKey, ...agentBind) as AssertionIdRow | null;
+    if (assertion) {
+      return `assertion:${assertion.id}`;
+    }
+
+    const cognition = this.db
+      .prepare(
+        `SELECT id, kind
+         FROM private_cognition_current
+         WHERE cognition_key = ?${agentFilter}
+           AND kind IN ('evaluation', 'commitment')
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(cognitionKey, ...agentBind) as CognitionProjectionRow | null;
+    if (!cognition || (cognition.kind !== "evaluation" && cognition.kind !== "commitment")) {
+      return null;
+    }
+
+    return `${cognition.kind}:${cognition.id}`;
   }
 }

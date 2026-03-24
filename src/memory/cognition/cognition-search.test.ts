@@ -57,7 +57,22 @@ describe("CognitionSearchService — conflictEvidence", () => {
 		try {
 			const repo = new CognitionRepository(db);
 
-			// 1. Create an accepted assertion, then contest it
+			repo.upsertAssertion({
+				agentId: AGENT_ID,
+				cognitionKey: "test:factor-assertion",
+				settlementId: "stl:ce-factor",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "knows",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const factorAssertion = db
+				.prepare(`SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ? LIMIT 1`)
+				.get(AGENT_ID, "test:factor-assertion") as { id: number };
+
 			repo.upsertAssertion({
 				agentId: AGENT_ID,
 				cognitionKey: "test:conflict-evidence",
@@ -82,7 +97,6 @@ describe("CognitionSearchService — conflictEvidence", () => {
 				preContestedStance: "accepted",
 			});
 
-			// 2. Look up the source_ref for the contested assertion
 			const searchBefore = new CognitionSearchService(db);
 			const hitsBefore = searchBefore.searchCognition({
 				agentId: AGENT_ID,
@@ -92,16 +106,14 @@ describe("CognitionSearchService — conflictEvidence", () => {
 			expect(hitsBefore.length).toBe(1);
 			const sourceRef = String(hitsBefore[0].source_ref);
 
-			// 3. Write conflicts_with relations via RelationBuilder
 			const relationBuilder = new RelationBuilder(db);
 			relationBuilder.writeContestRelations(
 				sourceRef,
-				["assertion:99", "private_belief:42"],
+				["cognition_key:test:factor-assertion", "private_belief:42"],
 				"stl:ce-2",
 				0.9,
 			);
 
-			// 4. Search again — conflictEvidence should now contain structured objects
 			const search = new CognitionSearchService(db);
 			const hits = search.searchCognition({
 				agentId: AGENT_ID,
@@ -116,18 +128,18 @@ describe("CognitionSearchService — conflictEvidence", () => {
 			expect(Array.isArray(hit.conflictEvidence)).toBe(true);
 			expect(hit.conflictEvidence!.length).toBe(2);
 
-			// Verify structured shape (not placeholder strings)
 			const first = hit.conflictEvidence![0];
 			expect(typeof first).toBe("object");
-			expect(first).toHaveProperty("targetRef");
-			expect(first).toHaveProperty("strength");
-			expect(first).toHaveProperty("sourceKind");
-			expect(first).toHaveProperty("sourceRef");
+			expect("targetRef" in first).toBe(true);
+			expect("strength" in first).toBe(true);
+			expect("sourceKind" in first).toBe(true);
+			expect("sourceRef" in first).toBe(true);
 
-			// Strongest-first ordering (both have strength 0.9, order by insertion)
 			expect(hit.conflictEvidence!.every((e) => typeof e === "object" && e !== null)).toBe(true);
 			expect(first.strength).toBe(0.9);
 			expect(first.sourceRef).toBe("stl:ce-2");
+			expect(hit.conflictEvidence!.every((e) => !e.targetRef.startsWith("cognition_key:"))).toBe(true);
+			expect(hit.conflictEvidence!.some((e) => e.targetRef === `assertion:${factorAssertion.id}`)).toBe(true);
 		} finally {
 			try { db.close(); } catch {}
 			cleanupDb(dbPath);
