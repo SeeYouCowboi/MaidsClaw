@@ -11,6 +11,7 @@ export type SharedBlock = {
   id: number;
   title: string;
   createdByAgentId: string;
+  retrievalOnly: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -36,14 +37,15 @@ export type SharedBlockSnapshot = {
 export class SharedBlockRepo {
   constructor(private readonly db: DbLike) {}
 
-  createBlock(title: string, createdByAgentId: string): SharedBlock {
+  createBlock(title: string, createdByAgentId: string, options?: { retrievalOnly?: boolean }): SharedBlock {
     const now = Date.now();
+    const retrievalOnly = options?.retrievalOnly ?? false;
     return this.db.transaction(() => {
       const result = this.db
         .prepare(
-          `INSERT INTO shared_blocks (title, created_by_agent_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+          `INSERT INTO shared_blocks (title, created_by_agent_id, retrieval_only, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
         )
-        .run(title, createdByAgentId, now, now);
+        .run(title, createdByAgentId, retrievalOnly ? 1 : 0, now, now);
       const blockId = Number(result.lastInsertRowid);
 
       this.db
@@ -56,6 +58,7 @@ export class SharedBlockRepo {
         id: blockId,
         title,
         createdByAgentId,
+        retrievalOnly,
         createdAt: now,
         updatedAt: now,
       };
@@ -64,15 +67,16 @@ export class SharedBlockRepo {
 
   getBlock(blockId: number): SharedBlock | undefined {
     const row = this.db
-      .prepare(`SELECT id, title, created_by_agent_id, created_at, updated_at FROM shared_blocks WHERE id = ?`)
+      .prepare(`SELECT id, title, created_by_agent_id, retrieval_only, created_at, updated_at FROM shared_blocks WHERE id = ?`)
       .get(blockId) as
-      | { id: number; title: string; created_by_agent_id: string; created_at: number; updated_at: number }
+      | { id: number; title: string; created_by_agent_id: string; retrieval_only: number; created_at: number; updated_at: number }
       | undefined;
     if (!row) return undefined;
     return {
       id: row.id,
       title: row.title,
       createdByAgentId: row.created_by_agent_id,
+      retrievalOnly: row.retrieval_only !== 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

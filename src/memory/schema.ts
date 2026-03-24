@@ -116,7 +116,7 @@ export const MEMORY_DDL: readonly string[] = [
   ...AREA_WORLD_PROJECTION_DDL,
 
   // ── Shared Blocks V1 ──
-  `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, retrieval_only INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
   `CREATE TABLE IF NOT EXISTS shared_block_admins (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL, granted_by_agent_id TEXT NOT NULL, granted_at INTEGER NOT NULL, UNIQUE(block_id, agent_id))`,
   `CREATE TABLE IF NOT EXISTS shared_block_attachments (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, target_kind TEXT NOT NULL DEFAULT 'agent' CHECK (target_kind = 'agent'), target_id TEXT NOT NULL, attached_by_agent_id TEXT NOT NULL, attached_at INTEGER NOT NULL, UNIQUE(block_id, target_kind, target_id))`,
@@ -287,7 +287,7 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     description: "Add shared block tables for V1 collaborative memory blocks",
     up: (db: Db) => {
       db.exec(
-        `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS shared_blocks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_by_agent_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
       );
       db.exec(
   `CREATE TABLE IF NOT EXISTS shared_block_sections (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, section_path TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(block_id, section_path))`,
@@ -691,6 +691,13 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_psp_agent_status ON pinned_summary_proposals(agent_id, status)`,
       );
+    },
+  },
+  {
+    id: "memory:026:add-retrieval-only-to-shared-blocks",
+    description: "Add retrieval_only flag to shared_blocks",
+    up: (db: Db) => {
+      addColumnIfMissing(db, "shared_blocks", "retrieval_only", "INTEGER NOT NULL DEFAULT 0");
     },
   },
 ];

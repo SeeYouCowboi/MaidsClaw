@@ -35,6 +35,14 @@ export class MoveTargetConflictError extends Error {
   }
 }
 
+export class PatchSeqConflictError extends Error {
+  readonly retryable = true;
+  constructor(blockId: number) {
+    super(`Concurrent patch conflict on block ${blockId}: patch_seq collision`);
+    this.name = "PatchSeqConflictError";
+  }
+}
+
 export class SharedBlockPatchService {
   private readonly repo: SharedBlockRepo;
   private readonly permissions: SharedBlockPermissions;
@@ -86,23 +94,31 @@ export class SharedBlockPatchService {
 
       const nextSeq = this.getNextPatchSeq(blockId);
 
-      this.db
-        .prepare(
-          `INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, target_path, content, before_value, after_value, source_ref, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          blockId,
-          nextSeq,
-          op,
-          params.sectionPath ?? null,
-          params.targetPath ?? null,
-          op === "set_title" ? (params.title ?? null) : (params.content ?? null),
-          beforeValue,
-          afterValue,
-          sourceRef,
-          appliedByAgentId,
-          Date.now(),
-        );
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, target_path, content, before_value, after_value, source_ref, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            blockId,
+            nextSeq,
+            op,
+            params.sectionPath ?? null,
+            params.targetPath ?? null,
+            op === "set_title" ? (params.title ?? null) : (params.content ?? null),
+            beforeValue,
+            afterValue,
+            sourceRef,
+            appliedByAgentId,
+            Date.now(),
+          );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("UNIQUE constraint failed: shared_block_patch_log.block_id, shared_block_patch_log.patch_seq")) {
+          throw new PatchSeqConflictError(blockId);
+        }
+        throw err;
+      }
 
       let snapshotTaken = false;
       if (nextSeq % AUTO_SNAPSHOT_INTERVAL === 0) {

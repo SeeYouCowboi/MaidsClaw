@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createMemorySchema } from "../schema.js";
 import { SharedBlockAttachService } from "./shared-block-attach-service.js";
 import { SharedBlockAuditFacade } from "./shared-block-audit.js";
-import { MoveTargetConflictError, SharedBlockPatchService } from "./shared-block-patch-service.js";
+import { MoveTargetConflictError, PatchSeqConflictError, SharedBlockPatchService } from "./shared-block-patch-service.js";
 import { SharedBlockPermissions } from "./shared-block-permissions.js";
+import type { SharedBlockRole } from "./shared-block-permissions.js";
 import { SharedBlockRepo } from "./shared-block-repo.js";
 
 let rawDb: Database;
@@ -656,5 +657,177 @@ describe("SharedBlockAuditFacade", () => {
   it("getBlockAuditView throws for non-existent block", () => {
     const audit = new SharedBlockAuditFacade(db);
     expect(() => audit.getBlockAuditView(9999)).toThrow();
+  });
+});
+
+// ── Permission Matrix ──
+
+const MEMBER = "agent-member";
+const NON_MEMBER = "agent-nobody";
+
+describe("SharedBlockPermissions — permission matrix", () => {
+  it("owner can read, edit, and grant admin", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const block = repo.createBlock("B", OWNER);
+
+    expect(perms.canRead(block.id, OWNER)).toBe(true);
+    expect(perms.canEdit(block.id, OWNER)).toBe(true);
+    expect(perms.canGrantAdmin(block.id, OWNER)).toBe(true);
+  });
+
+  it("admin can read and edit, but cannot grant admin", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const block = repo.createBlock("B", OWNER);
+    grantAdmin(block.id, ADMIN, OWNER);
+
+    expect(perms.canRead(block.id, ADMIN)).toBe(true);
+    expect(perms.canEdit(block.id, ADMIN)).toBe(true);
+    expect(perms.canGrantAdmin(block.id, ADMIN)).toBe(false);
+  });
+
+  it("member can read but cannot edit or grant admin", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const attachService = new SharedBlockAttachService(db);
+    const block = repo.createBlock("B", OWNER);
+    attachService.attachBlock(block.id, MEMBER, OWNER);
+
+    expect(perms.canRead(block.id, MEMBER)).toBe(true);
+    expect(perms.canEdit(block.id, MEMBER)).toBe(false);
+    expect(perms.canGrantAdmin(block.id, MEMBER)).toBe(false);
+  });
+
+  it("non-member cannot read, edit, or grant admin", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const block = repo.createBlock("B", OWNER);
+
+    expect(perms.canRead(block.id, NON_MEMBER)).toBe(false);
+    expect(perms.canEdit(block.id, NON_MEMBER)).toBe(false);
+    expect(perms.canGrantAdmin(block.id, NON_MEMBER)).toBe(false);
+  });
+
+  it("isMember returns true for attached agent, false for admin-only", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const attachService = new SharedBlockAttachService(db);
+    const block = repo.createBlock("B", OWNER);
+
+    attachService.attachBlock(block.id, MEMBER, OWNER);
+    grantAdmin(block.id, ADMIN, OWNER);
+
+    expect(perms.isMember(block.id, MEMBER)).toBe(true);
+    expect(perms.isMember(block.id, ADMIN)).toBe(false);
+    expect(perms.isMember(block.id, NON_MEMBER)).toBe(false);
+  });
+
+  it("getRole returns correct role for each agent type", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const attachService = new SharedBlockAttachService(db);
+    const block = repo.createBlock("B", OWNER);
+
+    grantAdmin(block.id, ADMIN, OWNER);
+    attachService.attachBlock(block.id, MEMBER, OWNER);
+
+    expect(perms.getRole(block.id, OWNER)).toBe("owner" satisfies SharedBlockRole);
+    expect(perms.getRole(block.id, ADMIN)).toBe("admin" satisfies SharedBlockRole);
+    expect(perms.getRole(block.id, MEMBER)).toBe("member" satisfies SharedBlockRole);
+    expect(perms.getRole(block.id, NON_MEMBER)).toBe("none" satisfies SharedBlockRole);
+  });
+});
+
+// ── retrieval_only ──
+
+describe("SharedBlockPermissions — retrieval_only", () => {
+  it("isRetrievalOnly returns false for normal blocks", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const block = repo.createBlock("Normal", OWNER);
+
+    expect(perms.isRetrievalOnly(block.id)).toBe(false);
+  });
+
+  it("isRetrievalOnly returns true for retrieval_only blocks", () => {
+    const repo = new SharedBlockRepo(db);
+    const perms = new SharedBlockPermissions(db);
+    const block = repo.createBlock("Retrieval", OWNER, { retrievalOnly: true });
+
+    expect(perms.isRetrievalOnly(block.id)).toBe(true);
+    expect(block.retrievalOnly).toBe(true);
+  });
+
+  it("isRetrievalOnly returns false for non-existent block", () => {
+    const perms = new SharedBlockPermissions(db);
+    expect(perms.isRetrievalOnly(9999)).toBe(false);
+  });
+
+  it("createBlock defaults retrieval_only to false", () => {
+    const repo = new SharedBlockRepo(db);
+    const block = repo.createBlock("Default", OWNER);
+    expect(block.retrievalOnly).toBe(false);
+
+    const fetched = repo.getBlock(block.id);
+    expect(fetched!.retrievalOnly).toBe(false);
+  });
+
+  it("getBlock reads retrieval_only correctly", () => {
+    const repo = new SharedBlockRepo(db);
+    const block = repo.createBlock("RO", OWNER, { retrievalOnly: true });
+    const fetched = repo.getBlock(block.id);
+    expect(fetched!.retrievalOnly).toBe(true);
+  });
+});
+
+// ── Concurrent Patch Conflict ──
+
+describe("SharedBlockPatchService — concurrent patch conflict", () => {
+  it("throws PatchSeqConflictError when patch_seq collides", () => {
+    const repo = new SharedBlockRepo(db);
+    const block = repo.createBlock("B", OWNER);
+
+    rawDb
+      .prepare(
+        `INSERT INTO shared_block_patch_log (block_id, patch_seq, op, section_path, content, before_value, after_value, source_ref, applied_by_agent_id, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(block.id, 1, "set_section", "pre-inserted", "conflict", null, "conflict", "system", OWNER, Date.now());
+
+    const staleDb = {
+      prepare(sql: string) {
+        const stmt = rawDb.prepare(sql);
+        const isSeqQuery = sql.includes("COALESCE(MAX(patch_seq)");
+        return {
+          run(...params: unknown[]) {
+            return stmt.run(...(params as Parameters<typeof stmt.run>));
+          },
+          all(...params: unknown[]) {
+            return stmt.all(...(params as Parameters<typeof stmt.all>));
+          },
+          get(...params: unknown[]) {
+            if (isSeqQuery) return { next_seq: 1 };
+            return stmt.get(...(params as Parameters<typeof stmt.get>));
+          },
+        };
+      },
+      transaction<T>(fn: () => T): T {
+        return rawDb.transaction(fn)();
+      },
+    };
+
+    const patchService = new SharedBlockPatchService(staleDb);
+
+    let caught: unknown;
+    try {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: "b", content: "v2" }, OWNER);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeDefined();
+    expect((caught as PatchSeqConflictError).name).toBe("PatchSeqConflictError");
+    expect((caught as PatchSeqConflictError).retryable).toBe(true);
+    expect((caught as PatchSeqConflictError).message).toContain("patch_seq collision");
   });
 });
