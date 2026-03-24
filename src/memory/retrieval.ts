@@ -10,6 +10,7 @@ import {
 } from "./retrieval/retrieval-orchestrator.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
+import { VisibilityPolicy } from "./visibility-policy.js";
 import type { EpisodeRow } from "./episode/episode-repo.js";
 import type {
   EntityNode,
@@ -49,6 +50,7 @@ export class RetrievalService {
   private readonly narrativeSearch: NarrativeSearchService;
   private readonly cognitionSearch: CognitionSearchService;
   private readonly orchestrator: RetrievalOrchestrator;
+  private readonly visibilityPolicy: VisibilityPolicy;
 
   constructor(private readonly db: Db) {
     const batcher = new TransactionBatcher(db);
@@ -60,6 +62,7 @@ export class RetrievalService {
       this.cognitionSearch,
       this.cognitionSearch.createCurrentProjectionReader(),
     );
+    this.visibilityPolicy = new VisibilityPolicy();
   }
 
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
@@ -75,24 +78,14 @@ export class RetrievalService {
       )
       .all(entity.id, entity.id, MAX_INTEGER) as FactEdge[];
 
-    const events = viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(`%entity:${entity.id}%`, entity.id, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-               AND visibility_scope='world_public'`,
-          )
-          .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const events = this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE (participants LIKE ? OR primary_actor_entity_id=?)
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
 
     const episodes = this.db
       .prepare(
@@ -113,24 +106,14 @@ export class RetrievalService {
       return { topic: null, events: [], episodes: [] };
     }
 
-    const events = viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE topic_id=?
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(topic.id, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE topic_id=?
-               AND visibility_scope='world_public'`,
-          )
-          .all(topic.id) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const events = this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE topic_id=?
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(topic.id) as EventNode[];
 
     // Private episodes have no topic FK — no correlation possible in the new schema.
     const episodes: EpisodeRow[] = [];
@@ -144,24 +127,14 @@ export class RetrievalService {
     }
 
     const placeholders = ids.map(() => "?").join(",");
-    return viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(...ids, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND visibility_scope='world_public'`,
-          )
-          .all(...ids) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    return this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE id IN (${placeholders})
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(...ids) as EventNode[];
   }
 
   readByFactIds(ids: number[], _viewerContext: ViewerContext): FactEdge[] {
@@ -225,7 +198,29 @@ export class RetrievalService {
       retrievalTemplate,
       dedupContext,
     );
-    return result.typed;
+    const typed = result.typed;
+    const conflictNotesBudget = retrievalTemplate?.conflictNotesBudget ?? 0;
+
+    if (conflictNotesBudget > 0 && typed.conflict_notes.length === 0) {
+      for (const hit of result.cognitionHits) {
+        if (typed.conflict_notes.length >= conflictNotesBudget) {
+          break;
+        }
+        if (hit.stance !== "contested") {
+          continue;
+        }
+        const content = hit.conflictSummary?.trim() || "contested cognition";
+        typed.conflict_notes.push({
+          source_ref: `conflict_note:${String(hit.source_ref)}`,
+          from_source_ref: String(hit.source_ref),
+          cognitionKey: hit.cognitionKey ?? null,
+          content,
+          score: hit.updated_at,
+        });
+      }
+    }
+
+    return typed;
   }
 
   async localizeSeedsHybrid(

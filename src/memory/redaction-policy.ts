@@ -1,4 +1,5 @@
 import type { RedactedPlaceholder, RedactionReason, ViewerContext } from "./types.js";
+import { getDefaultPermissions, hasAdminReadAccess } from "./contracts/agent-permissions.js";
 
 export type VisibilityDisposition = "visible" | "hidden" | "private" | "admin_only";
 
@@ -8,7 +9,8 @@ export class AuthorizationPolicy {
   }
 
   canViewAdminOnly(viewerContext: ViewerContext): boolean {
-    return viewerContext.viewer_role === "maiden";
+    const perms = getDefaultPermissions(viewerContext.viewer_agent_id, viewerContext.viewer_role);
+    return hasAdminReadAccess(perms);
   }
 }
 

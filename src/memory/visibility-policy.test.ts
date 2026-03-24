@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { VisibilityPolicy } from "./visibility-policy";
+import { getDefaultPermissions, hasAdminReadAccess } from "./contracts/agent-permissions";
 import type { ViewerContext } from "./types";
 
 function makeViewer(overrides?: Partial<ViewerContext>): ViewerContext {
@@ -94,6 +95,18 @@ describe("VisibilityPolicy", () => {
   // ── isNodeVisible (dispatch) ─────────────────────────────────────
 
   describe("isNodeVisible", () => {
+    it("returns admin_only for non-admin and visible for admin on system_only events", () => {
+      const event = { visibility_scope: "system_only", location_entity_id: 100, owner_agent_id: null };
+      const rpViewer = makeViewer({ viewer_role: "rp_agent" });
+      const maidenViewer = makeViewer({ viewer_role: "maiden" });
+
+      expect(hasAdminReadAccess(getDefaultPermissions(rpViewer.viewer_agent_id, rpViewer.viewer_role))).toBe(false);
+      expect(policy.getNodeDisposition(rpViewer, "event:99", event)).toBe("admin_only");
+
+      expect(hasAdminReadAccess(getDefaultPermissions(maidenViewer.viewer_agent_id, maidenViewer.viewer_role))).toBe(true);
+      expect(policy.getNodeDisposition(maidenViewer, "event:99", event)).toBe("visible");
+    });
+
     it("dispatches event: refs to isEventVisible", () => {
       const viewer = makeViewer({ current_area_id: 50 });
       expect(policy.isNodeVisible(viewer, "event:1", { visibility_scope: "area_visible", location_entity_id: 50 })).toBe(true);

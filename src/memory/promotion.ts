@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
   EventNode,
   IPromotionService,
@@ -10,6 +11,7 @@ import type {
   PromotionCandidate,
   PublicEventCategory,
   ReferenceResolution,
+  ViewerContext,
 } from "./types.js";
 
 type EventCandidateCriteria = {
@@ -49,7 +51,6 @@ type EventRow = {
   location_entity_id: number;
   event_category: PublicEventCategory;
   primary_actor_entity_id: number | null;
-  visibility_scope: "area_visible" | "world_public";
 };
 
 const IDENTITY_HIDDEN_MARKERS = ["unknown", "hidden", "redacted", "anonymous", "masked"] as const;
@@ -62,6 +63,7 @@ const STABLE_FACT_PATTERNS = [
 
 export class PromotionService implements IPromotionService {
   private readonly projectionRepo: AreaWorldProjectionRepo;
+  private readonly visibilityPolicy: VisibilityPolicy;
 
   constructor(
     private readonly db: Database,
@@ -70,13 +72,14 @@ export class PromotionService implements IPromotionService {
     projectionRepo?: AreaWorldProjectionRepo,
   ) {
     this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
+    this.visibilityPolicy = new VisibilityPolicy();
   }
 
   identifyEventCandidates(criteria: EventCandidateCriteria = {}): EventNode[] {
     const spoken = criteria.spoken ?? true;
     const stable = criteria.stable ?? true;
 
-    const clauses = ["visibility_scope = 'area_visible'", "summary IS NOT NULL"];
+    const clauses = [this.areaOnlyEventPredicate(), "summary IS NOT NULL"];
     if (spoken) {
       clauses.push("event_category = 'speech'");
     }
@@ -94,7 +97,7 @@ export class PromotionService implements IPromotionService {
       .prepare(
         `SELECT id, summary, participants, location_entity_id
          FROM event_nodes
-         WHERE visibility_scope IN ('area_visible', 'world_public')
+         WHERE ${this.allAreaAndWorldEventPredicate()}
            AND summary IS NOT NULL
          ORDER BY timestamp ASC, id ASC`,
       )
@@ -362,11 +365,49 @@ export class PromotionService implements IPromotionService {
   private getEventById(id: number): EventRow | null {
     return this.db
       .prepare(
-        `SELECT id, session_id, summary, timestamp, participants, location_entity_id, event_category, primary_actor_entity_id, visibility_scope
-         FROM event_nodes
-         WHERE id = ?`,
+        `SELECT id, session_id, summary, timestamp, participants, location_entity_id, event_category, primary_actor_entity_id
+          FROM event_nodes
+          WHERE id = ?`,
       )
       .get(id) as EventRow | null;
+  }
+
+  private allAreaAndWorldEventPredicate(tableAlias?: string): string {
+    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
+    const areaRows = this.db
+      .prepare("SELECT DISTINCT location_entity_id FROM event_nodes ORDER BY location_entity_id ASC")
+      .all() as Array<{ location_entity_id: number }>;
+
+    if (areaRows.length === 0) {
+      return worldOnlyPredicate;
+    }
+
+    const predicates = new Set<string>();
+    predicates.add(worldOnlyPredicate);
+    for (const row of areaRows) {
+      predicates.add(
+        this.visibilityPolicy.eventVisibilityPredicate(
+          this.makePolicyViewerContext(row.location_entity_id),
+          tableAlias,
+        ),
+      );
+    }
+    return `(${Array.from(predicates).join(" OR ")})`;
+  }
+
+  private areaOnlyEventPredicate(tableAlias?: string): string {
+    const allVisiblePredicate = this.allAreaAndWorldEventPredicate(tableAlias);
+    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
+    return `(${allVisiblePredicate} AND NOT ${worldOnlyPredicate})`;
+  }
+
+  private makePolicyViewerContext(currentAreaId: number | null): ViewerContext {
+    return {
+      viewer_agent_id: "promotion-system",
+      viewer_role: "maiden",
+      current_area_id: currentAreaId ?? undefined,
+      session_id: "promotion",
+    };
   }
 
   private findSharedEntityByPointer(pointerKey: string): { id: number } | null {
