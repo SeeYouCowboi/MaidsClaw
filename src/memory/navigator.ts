@@ -19,6 +19,7 @@ import type {
   MemoryExploreInput,
   NavigatorEdgeKind,
   NavigatorResult,
+  EventNode,
   NodeRef,
   NodeRefKind,
   PathScore,
@@ -624,38 +625,21 @@ export class GraphNavigator {
       });
     }
 
-    const eventRows = viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT id, participants, primary_actor_entity_id, timestamp, summary
-             FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(...ids, viewerContext.current_area_id) as Array<{
-          id: number;
-          participants: string | null;
-          primary_actor_entity_id: number | null;
-          timestamp: number;
-          summary: string | null;
-        }>
-      : this.db
-          .prepare(
-            `SELECT id, participants, primary_actor_entity_id, timestamp, summary
-             FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND visibility_scope='world_public'`,
-          )
-          .all(...ids) as Array<{
-          id: number;
-          participants: string | null;
-          primary_actor_entity_id: number | null;
-          timestamp: number;
-          summary: string | null;
-        }>;
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const eventRows = this.db
+      .prepare(
+        `SELECT id, participants, primary_actor_entity_id, timestamp, summary
+         FROM event_nodes
+         WHERE id IN (${placeholders})
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(...ids) as Array<{
+      id: number;
+      participants: string | null;
+      primary_actor_entity_id: number | null;
+      timestamp: number;
+      summary: string | null;
+    }>;
 
     for (const row of eventRows) {
       const srcRef = `event:${row.id}` as NodeRef;
@@ -753,25 +737,19 @@ export class GraphNavigator {
     }
 
     const participantConditions = ids.map(() => "participants LIKE ?").join(" OR ");
-    const areaClause = viewerContext.current_area_id != null
-      ? `AND (
-         visibility_scope='world_public'
-         OR (visibility_scope='area_visible' AND location_entity_id=?)
-       )`
-      : `AND visibility_scope='world_public'`;
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
     const participantSql =
       `SELECT id, participants, primary_actor_entity_id, timestamp, summary
        FROM event_nodes
        WHERE (
-         primary_actor_entity_id IN (${placeholders})` +
+          primary_actor_entity_id IN (${placeholders})` +
       (participantConditions.length > 0 ? ` OR ${participantConditions}` : "") +
       `)
-       ${areaClause}`;
+       AND ${eventVisibilityPredicate}`;
 
     const participantBindings = [
       ...ids,
       ...ids.map((id) => `%entity:${id}%`),
-      ...(viewerContext.current_area_id != null ? [viewerContext.current_area_id] : []),
     ];
     const participantRows = this.db.prepare(participantSql).all(
       ...participantBindings,
@@ -1113,7 +1091,7 @@ export class GraphNavigator {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
         to: edge.target_ref,
-        kind: "fact_relation",
+        kind: edge.relation_type as NavigatorEdgeKind,
         layer: edge.layer,
         weight: edge.weight,
         timestamp: edge.timestamp,
@@ -1554,15 +1532,9 @@ export class GraphNavigator {
 
     if (parsed.kind === "event") {
       const row = this.db
-        .prepare("SELECT visibility_scope, location_entity_id FROM event_nodes WHERE id = ?")
-        .get(parsed.id) as { visibility_scope: "world_public" | "area_visible"; location_entity_id: number } | undefined;
-      return row
-        ? {
-          visibility_scope: row.visibility_scope,
-          location_entity_id: row.location_entity_id,
-          owner_agent_id: null,
-        }
-        : null;
+        .prepare("SELECT * FROM event_nodes WHERE id = ?")
+        .get(parsed.id) as EventNode | undefined;
+      return row ? row as unknown as Record<string, unknown> : null;
     }
 
     if (parsed.kind === "fact") {

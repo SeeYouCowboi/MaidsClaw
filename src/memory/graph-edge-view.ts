@@ -149,7 +149,8 @@ export class GraphEdgeView {
            WHERE source_node_ref IN (${placeholders}) OR target_node_ref IN (${placeholders})`,
         )
         .all(...refs, ...refs) as typeof rows;
-    } catch {
+    } catch (error) {
+      console.error("[GraphEdgeView.readMemoryRelations] failed to read memory_relations", error);
       return [];
     }
 

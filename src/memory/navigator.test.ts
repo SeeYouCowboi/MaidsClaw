@@ -288,7 +288,7 @@ describe("GraphNavigator", () => {
       .run("coffee event", now);
     db.prepare("INSERT INTO search_docs_world_fts (rowid, content) VALUES (?, ?)").run(worldDoc.lastInsertRowid, "coffee event");
 
-    const retrieval = new RetrievalService(db);
+    const retrieval = new RetrievalService(db as unknown as ConstructorParameters<typeof RetrievalService>[0]);
     const navigator = new GraphNavigator(db, retrieval, alias);
     const result = await navigator.explore("coffee", viewerA());
 
@@ -362,6 +362,7 @@ describe("GraphNavigator", () => {
             from: "entity:1" as NodeRef,
             to: "private_event:70" as NodeRef,
             kind: "semantic_similar",
+            layer: "heuristic",
             weight: 0.9,
             timestamp: Date.now(),
             summary: "unsafe",
@@ -471,6 +472,24 @@ describe("GraphNavigator", () => {
     const result = await navigator.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
     const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
     expect(allNodes).toContain("event:2");
+  });
+
+  it("preserves memory relation semantic kind when expanding relation edges", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "event one");
+    insertEvent(db, 2, "world_public", 1, "[]", "event two");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:2", "supports", 0.8, "direct", "system", "test", now);
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
+    const edgeKinds = result.evidence_paths.flatMap((p) => p.path.edges.map((edge) => String(edge.kind)));
+    expect(edgeKinds).toContain("supports");
   });
 
   it("existing query types still work with new optional constructor params", async () => {
