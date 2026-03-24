@@ -1,10 +1,10 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { AliasService } from "./alias.js";
-import { GraphNavigator, type NarrativeSearchServiceLike, type CognitionSearchServiceLike } from "./navigator.js";
+import { GraphNavigator, GRAPH_RETRIEVAL_STRATEGIES, type NarrativeSearchServiceLike, type CognitionSearchServiceLike } from "./navigator.js";
 import { RetrievalService } from "./retrieval.js";
 import { createMemorySchema, MAX_INTEGER } from "./schema.js";
-import type { EvidencePath, NodeRef, SeedCandidate, ViewerContext } from "./types.js";
+import type { EvidencePath, MemoryExploreInput, NodeRef, SeedCandidate, ViewerContext } from "./types.js";
 
 function freshDb(): Database {
   const db = new Database(":memory:");
@@ -657,5 +657,162 @@ describe("GraphNavigator", () => {
     );
     const timelineResult = await navigator3.explore("timeline of events", viewerA());
     expect(timelineResult.query_type).toBe("timeline");
+  });
+
+  it("conflict_exploration strategy upweights conflicts_with edges vs default_retrieval", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "event one");
+    insertEvent(db, 2, "world_public", 1, "[]", "event two");
+    insertEvent(db, 3, "world_public", 1, "[]", "event three");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:2", "conflicts_with", 0.5, "direct", "system", "test", now);
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:3", "supports", 0.5, "direct", "system", "test", now);
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+
+    const navDefault = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const defaultResult = await navDefault.explore("what happened", viewerA(), { maxDepth: 1, maxCandidates: 20 });
+
+    const navConflict = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const conflictResult = await navConflict.explore(
+      "what happened",
+      viewerA(),
+      { maxDepth: 1, maxCandidates: 20 },
+      GRAPH_RETRIEVAL_STRATEGIES.conflict_exploration,
+    );
+
+    const defaultConflictEdges = defaultResult.evidence_paths
+      .flatMap((p) => p.path.edges)
+      .filter((e) => String(e.kind) === "conflicts_with");
+    const conflictConflictEdges = conflictResult.evidence_paths
+      .flatMap((p) => p.path.edges)
+      .filter((e) => String(e.kind) === "conflicts_with");
+
+    expect(conflictConflictEdges.length).toBeGreaterThanOrEqual(defaultConflictEdges.length);
+
+    const allNodes = conflictResult.evidence_paths.flatMap((p) => p.path.nodes);
+    expect(allNodes).toContain("event:2");
+  });
+
+  it("deep_explain strategy has wider effective beam than default", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]");
+    for (let i = 2; i <= 20; i += 1) {
+      insertEvent(db, i, "world_public", 1, "[]");
+      insertLogic(db, 1, i, "causal");
+    }
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+
+    const navDefault = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const defaultResult = await navDefault.explore("why branching", viewerA(), { maxDepth: 1, maxCandidates: 50 });
+    const defaultDepthOne = defaultResult.evidence_paths.filter((p) => p.path.depth === 1).length;
+
+    const navDeep = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const deepResult = await navDeep.explore(
+      "why branching",
+      viewerA(),
+      { maxDepth: 1, maxCandidates: 50 },
+      GRAPH_RETRIEVAL_STRATEGIES.deep_explain,
+    );
+    const deepDepthOne = deepResult.evidence_paths.filter((p) => p.path.depth === 1).length;
+
+    expect(deepDepthOne).toBeGreaterThan(defaultDepthOne);
+    expect(defaultDepthOne).toBeLessThanOrEqual(8);
+    expect(deepDepthOne).toBeLessThanOrEqual(12);
+  });
+
+  it("strategy=undefined produces same results as default_retrieval", async () => {
+    insertEvent(db, 1, "world_public", 1, JSON.stringify(["entity:1"]), "Alice leaves the garden");
+    insertEvent(db, 2, "world_public", 1, "[]", "Storm approaches");
+    insertLogic(db, 2, 1, "causal");
+    insertFact(db, 1, 1, 3, "was_at", 1);
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+
+    const navUndefined = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const undefinedResult = await navUndefined.explore("why did Alice leave", viewerA());
+
+    const navExplicit = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const explicitResult = await navExplicit.explore(
+      "why did Alice leave",
+      viewerA(),
+      undefined,
+      GRAPH_RETRIEVAL_STRATEGIES.default_retrieval,
+    );
+
+    expect(undefinedResult.query_type).toBe(explicitResult.query_type);
+    expect(undefinedResult.evidence_paths.length).toBe(explicitResult.evidence_paths.length);
+    for (let i = 0; i < undefinedResult.evidence_paths.length; i++) {
+      expect(undefinedResult.evidence_paths[i].path.nodes).toEqual(explicitResult.evidence_paths[i].path.nodes);
+      expect(undefinedResult.evidence_paths[i].score.path_score).toBeCloseTo(
+        explicitResult.evidence_paths[i].score.path_score,
+        6,
+      );
+    }
+  });
+
+  it("concise detail level returns at most 3 paths when many paths exist", async () => {
+    for (let i = 1; i <= 10; i += 1) {
+      insertEvent(db, i, "world_public", 1, JSON.stringify(["entity:1"]), `event ${i}`);
+    }
+    for (let i = 1; i <= 9; i += 1) {
+      insertLogic(db, i, i + 1, "causal");
+    }
+
+    const retrieval = new StubRetrieval(
+      Array.from({ length: 10 }, (_, i) => seed(`event:${i + 1}` as NodeRef, "event", 0.9 - i * 0.05)),
+    );
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const input: MemoryExploreInput = { query: "what happened", detailLevel: "concise" };
+    const result = await navigator.explore("what happened", viewerA(), input);
+
+    expect(result.evidence_paths.length).toBeLessThanOrEqual(3);
+  });
+
+  it("standard detail level is backward-compatible with no detailLevel", async () => {
+    insertEvent(db, 1, "world_public", 1, JSON.stringify(["entity:1"]), "base event");
+    insertEvent(db, 2, "world_public", 1, "[]", "linked event");
+    insertLogic(db, 2, 1, "causal");
+    insertFact(db, 1, 1, 2, "knows", 1);
+
+    const retrieval1 = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator1 = new GraphNavigator(db, retrieval1 as unknown as RetrievalService, alias);
+    const noLevel = await navigator1.explore("what happened", viewerA(), { maxCandidates: 20 });
+
+    const retrieval2 = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator2 = new GraphNavigator(db, retrieval2 as unknown as RetrievalService, alias);
+    const standardLevel = await navigator2.explore("what happened", viewerA(), { query: "what happened", detailLevel: "standard" } as MemoryExploreInput);
+
+    expect(standardLevel.evidence_paths.length).toBe(noLevel.evidence_paths.length);
+  });
+
+  it("audit detail level returns at least as many paths as standard", async () => {
+    for (let i = 1; i <= 8; i += 1) {
+      insertEvent(db, i, "world_public", 1, JSON.stringify(["entity:1"]), `event ${i}`);
+    }
+    for (let i = 1; i <= 7; i += 1) {
+      insertLogic(db, i, i + 1, "causal");
+    }
+
+    const retrieval1 = new StubRetrieval(
+      Array.from({ length: 8 }, (_, i) => seed(`event:${i + 1}` as NodeRef, "event", 0.9 - i * 0.05)),
+    );
+    const navigator1 = new GraphNavigator(db, retrieval1 as unknown as RetrievalService, alias);
+    const standardResult = await navigator1.explore("what happened", viewerA(), { query: "what happened", detailLevel: "standard" } as MemoryExploreInput);
+
+    const retrieval2 = new StubRetrieval(
+      Array.from({ length: 8 }, (_, i) => seed(`event:${i + 1}` as NodeRef, "event", 0.9 - i * 0.05)),
+    );
+    const navigator2 = new GraphNavigator(db, retrieval2 as unknown as RetrievalService, alias);
+    const auditResult = await navigator2.explore("what happened", viewerA(), { query: "what happened", detailLevel: "audit" } as MemoryExploreInput);
+
+    expect(auditResult.evidence_paths.length).toBeGreaterThanOrEqual(standardResult.evidence_paths.length);
   });
 });

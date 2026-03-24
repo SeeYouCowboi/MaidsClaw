@@ -38,6 +38,9 @@ export type EdgeLayer = (typeof EDGE_LAYERS)[number];
 export const EXPLORE_MODES = ["why", "timeline", "relationship", "state", "conflict"] as const;
 export type ExploreMode = (typeof EXPLORE_MODES)[number];
 
+export const EXPLAIN_DETAIL_LEVELS = ["concise", "standard", "audit"] as const;
+export type ExplainDetailLevel = (typeof EXPLAIN_DETAIL_LEVELS)[number];
+
 export const REDACTION_REASONS = ["hidden", "private", "admin_only"] as const;
 export type RedactionReason = (typeof REDACTION_REASONS)[number];
 
@@ -436,6 +439,7 @@ export type MemoryExploreInput = {
   focusCognitionKey?: string;
   asOfValidTime?: number;
   asOfCommittedTime?: number;
+  detailLevel?: ExplainDetailLevel;
 };
 
 export type ExtractionBatch = {

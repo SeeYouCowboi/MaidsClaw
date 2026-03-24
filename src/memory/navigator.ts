@@ -16,8 +16,10 @@ import type {
   BeamEdge,
   BeamPath,
   EvidencePath,
+  ExplainDetailLevel,
   ExploreMode,
   MemoryExploreInput,
+  MemoryRelationType,
   NavigatorEdgeKind,
   NavigatorResult,
   EventNode,
@@ -86,6 +88,39 @@ const DEFAULT_OPTIONS: Required<NavigatorOptions> = {
   maxCandidates: 12,
 };
 
+/**
+ * Strategy for tuning graph retrieval beam search behavior.
+ * Each strategy can boost/reduce specific memory relation types and adjust beam width.
+ */
+export type GraphRetrievalStrategy = {
+  name: string;
+  edgeWeights: Partial<Record<MemoryRelationType, number>>;
+  beamWidthMultiplier: number;
+};
+
+export const GRAPH_RETRIEVAL_STRATEGIES = {
+  default_retrieval: {
+    name: "default_retrieval",
+    edgeWeights: {},
+    beamWidthMultiplier: 1.0,
+  },
+  deep_explain: {
+    name: "deep_explain",
+    edgeWeights: { supports: 1.2, derived_from: 1.2 },
+    beamWidthMultiplier: 1.5,
+  },
+  time_slice_reconstruction: {
+    name: "time_slice_reconstruction",
+    edgeWeights: { surfaced_as: 1.3 },
+    beamWidthMultiplier: 1.0,
+  },
+  conflict_exploration: {
+    name: "conflict_exploration",
+    edgeWeights: { conflicts_with: 2.0, downgraded_by: 1.5, resolved_by: 1.3 },
+    beamWidthMultiplier: 1.2,
+  },
+} as const satisfies Record<string, GraphRetrievalStrategy>;
+
 const QUERY_TYPE_PRIORITY = {
   entity: ["fact_relation", "participant", "fact_support", "semantic_similar"],
   event: ["same_episode", "temporal_prev", "temporal_next", "causal", "fact_support"],
@@ -151,11 +186,13 @@ export class GraphNavigator {
     query: string,
     viewerContext: ViewerContext,
     optionsOrInput?: NavigatorOptions | MemoryExploreInput,
+    strategy?: GraphRetrievalStrategy,
   ): Promise<NavigatorResult> {
     if (!viewerContext || !viewerContext.viewer_agent_id) {
       throw new Error("viewerContext is required");
     }
 
+    const effectiveStrategy = strategy ?? GRAPH_RETRIEVAL_STRATEGIES.default_retrieval;
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = this.analyzeQuery(query, viewerContext, input.mode);
@@ -177,16 +214,18 @@ export class GraphNavigator {
     }
 
     const seedScores = this.computeSeedScores(visibleSeeds, analysis);
-    const expandedPaths = this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input);
-    const rerankedPaths = this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth);
-    const assembled = this.assembleEvidence(rerankedPaths, viewerContext, opts.maxCandidates);
+    const expandedPaths = this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy);
+    const rerankedPaths = this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy);
+    const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
+    const assembled = this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
     const sliced = filterEvidencePathsByTimeSlice(assembled, input);
+    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel);
     const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
 
     return {
       query,
       query_type: analysis.query_type,
-      summary: this.summarizeResult(query, analysis.query_type, sliced),
+      summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
       drilldown: {
         mode: input.mode,
         focus_ref: input.focusRef,
@@ -195,7 +234,7 @@ export class GraphNavigator {
         as_of_committed_time: input.asOfCommittedTime,
         time_sliced_paths: pathSummaries,
       },
-      evidence_paths: sliced,
+      evidence_paths: levelFiltered,
     };
   }
 
@@ -217,7 +256,7 @@ export class GraphNavigator {
     if (!maybeInput) {
       return { query };
     }
-    if (maybeInput.query != null || maybeInput.mode != null || maybeInput.focusRef != null || maybeInput.focusCognitionKey != null || maybeInput.asOfValidTime != null || maybeInput.asOfCommittedTime != null) {
+    if (maybeInput.query != null || maybeInput.mode != null || maybeInput.focusRef != null || maybeInput.focusCognitionKey != null || maybeInput.asOfValidTime != null || maybeInput.asOfCommittedTime != null || maybeInput.detailLevel != null) {
       return {
         query,
         mode: maybeInput.mode,
@@ -225,6 +264,7 @@ export class GraphNavigator {
         focusCognitionKey: maybeInput.focusCognitionKey,
         asOfValidTime: maybeInput.asOfValidTime,
         asOfCommittedTime: maybeInput.asOfCommittedTime,
+        detailLevel: maybeInput.detailLevel,
       };
     }
     return { query };
@@ -481,9 +521,11 @@ export class GraphNavigator {
     viewerContext: ViewerContext,
     options: Required<NavigatorOptions>,
     input: TimeSliceQuery,
+    strategy: GraphRetrievalStrategy,
   ): InternalBeamPath[] {
+    const effectiveBeamWidth = Math.min(32, Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)));
     const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
-    let currentLayer: InternalBeamPath[] = sortedSeeds.slice(0, options.beamWidth).map((seed) => ({
+    let currentLayer: InternalBeamPath[] = sortedSeeds.slice(0, effectiveBeamWidth).map((seed) => ({
       seed,
       path: {
         seed: seed.node_ref,
@@ -504,7 +546,7 @@ export class GraphNavigator {
       for (const pathItem of currentLayer) {
         const tail = pathItem.path.nodes[pathItem.path.nodes.length - 1];
         const neighbors = [...(neighborMap.get(tail) ?? [])];
-        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType));
+        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy));
 
         for (const edge of neighbors) {
           if (pathItem.path.nodes.includes(edge.to)) {
@@ -529,8 +571,8 @@ export class GraphNavigator {
       }
 
       const unique = this.deduplicatePaths(nextCandidates);
-      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType) - this.preliminaryPathScore(a, seedScores, queryType));
-      currentLayer = unique.slice(0, options.beamWidth);
+      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy) - this.preliminaryPathScore(a, seedScores, queryType, strategy));
+      currentLayer = unique.slice(0, effectiveBeamWidth);
       allPaths.push(...currentLayer);
     }
 
@@ -1253,14 +1295,16 @@ export class GraphNavigator {
     return null;
   }
 
-  private compareNeighborEdges(a: InternalBeamEdge, b: InternalBeamEdge, queryType: QueryType): number {
+  private compareNeighborEdges(a: InternalBeamEdge, b: InternalBeamEdge, queryType: QueryType, strategy?: GraphRetrievalStrategy): number {
     const scoreA = this.edgePriorityScore(a.kind, queryType);
     const scoreB = this.edgePriorityScore(b.kind, queryType);
     if (scoreA !== scoreB) {
       return scoreB - scoreA;
     }
-    if (a.weight !== b.weight) {
-      return b.weight - a.weight;
+    const weightA = a.weight * (strategy?.edgeWeights[a.kind as MemoryRelationType] ?? 1.0);
+    const weightB = b.weight * (strategy?.edgeWeights[b.kind as MemoryRelationType] ?? 1.0);
+    if (weightA !== weightB) {
+      return weightB - weightA;
     }
     return (b.timestamp ?? 0) - (a.timestamp ?? 0);
   }
@@ -1364,12 +1408,15 @@ export class GraphNavigator {
     return 1 - index / Math.max(ordered.length, 1);
   }
 
-  private preliminaryPathScore(path: InternalBeamPath, seedScores: Map<NodeRef, number>, queryType: QueryType): number {
+  private preliminaryPathScore(path: InternalBeamPath, seedScores: Map<NodeRef, number>, queryType: QueryType, strategy?: GraphRetrievalStrategy): number {
     const seed = seedScores.get(path.path.seed) ?? 0;
     const edgeScore = path.internal_edges.length === 0
       ? 0
-      : path.internal_edges.reduce((acc, edge) => acc + this.edgePriorityScore(edge.kind, queryType), 0) /
-        path.internal_edges.length;
+      : path.internal_edges.reduce((acc, edge) => {
+          const base = this.edgePriorityScore(edge.kind, queryType);
+          const multiplier = strategy?.edgeWeights[edge.kind as MemoryRelationType] ?? 1.0;
+          return acc + base * multiplier;
+        }, 0) / path.internal_edges.length;
     const hopPenalty = path.path.depth / 2;
     return 0.55 * seed + 0.45 * edgeScore - 0.1 * hopPenalty;
   }
@@ -1390,12 +1437,17 @@ export class GraphNavigator {
     seedScores: Map<NodeRef, number>,
     queryType: QueryType,
     maxDepth: number,
+    strategy?: GraphRetrievalStrategy,
   ): Array<{ path: InternalBeamPath; score: PathScore }> {
     const snapshots = this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
 
     const scored = paths.map((path) => {
       const seedScore = seedScores.get(path.path.seed) ?? 0;
-      const edgeTypeScore = this.average(path.internal_edges.map((edge) => this.edgePriorityScore(edge.kind, queryType)));
+      const edgeTypeScore = this.average(path.internal_edges.map((edge) => {
+        const base = this.edgePriorityScore(edge.kind, queryType);
+        const multiplier = strategy?.edgeWeights[edge.kind as MemoryRelationType] ?? 1.0;
+        return base * multiplier;
+      }));
       const temporalConsistency = this.calculateTemporalConsistency(path.internal_edges);
       const queryIntentMatch = this.calculateQueryIntentMatch(path.internal_edges, queryType);
       const supportScore = this.calculateSupportScore(path);
@@ -1590,6 +1642,16 @@ export class GraphNavigator {
       }
     }
     return result;
+  }
+
+  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel): EvidencePath[] {
+    if (!detailLevel || detailLevel === "standard") {
+      return paths;
+    }
+    if (detailLevel === "concise") {
+      return paths.slice(0, 3);
+    }
+    return paths;
   }
 
   private collectSupportingNodes(path: BeamPath): NodeRef[] {
