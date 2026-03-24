@@ -234,7 +234,7 @@ export type AgentFactOverlay = {
 };
 
 // Memory relation types - extracted from schema.ts CHECK constraints
-export const MEMORY_RELATION_TYPES = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes"] as const;
+export const MEMORY_RELATION_TYPES = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes", "surfaced_as", "published_as", "resolved_by", "downgraded_by"] as const;
 export type MemoryRelationType = (typeof MEMORY_RELATION_TYPES)[number];
 
 export const RELATION_DIRECTNESS_VALUES = ["direct", "inferred", "indirect"] as const;

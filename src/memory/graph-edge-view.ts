@@ -42,6 +42,10 @@ const MEMORY_RELATION_CONTRACTS: Record<MemoryRelationType, RelationContract> = 
   conflicts_with: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   derived_from: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   supersedes: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
+  surfaced_as: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
+  published_as: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
+  resolved_by: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+  downgraded_by: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
 };
 
 const RELATION_CONTRACTS: Record<string, RelationContract> = {

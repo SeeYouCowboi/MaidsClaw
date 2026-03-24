@@ -75,7 +75,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
   `CREATE TABLE IF NOT EXISTS semantic_edges (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')), weight REAL NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_edges_pair_type ON semantic_edges(source_node_ref, target_node_ref, relation_type)`,
-  `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, CHECK (source_node_ref != target_node_ref))`,
+  `CREATE TABLE IF NOT EXISTS memory_relations (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes', 'surfaced_as', 'published_as', 'resolved_by', 'downgraded_by')), strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1), directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')), source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')), source_ref TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, CHECK (source_node_ref != target_node_ref))`,
   `CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_node_ref, relation_type)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_node_ref, relation_type)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)`,
@@ -573,6 +573,38 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(`ALTER TABLE world_state_current_new RENAME TO world_state_current`);
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_world_state_current_updated ON world_state_current(updated_at DESC)`,
+      );
+    },
+  },
+  {
+    id: "memory:021:widen-memory-relations-relation-type-check",
+    description:
+      "Extend memory_relations.relation_type CHECK to include surfaced_as, published_as, resolved_by, downgraded_by",
+    up: (db: Db) => {
+      db.exec(`CREATE TABLE IF NOT EXISTS memory_relations_new (
+        id INTEGER PRIMARY KEY,
+        source_node_ref TEXT NOT NULL,
+        target_node_ref TEXT NOT NULL,
+        relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes', 'surfaced_as', 'published_as', 'resolved_by', 'downgraded_by')),
+        strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1),
+        directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')),
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')),
+        source_ref TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT 0,
+        CHECK (source_node_ref != target_node_ref)
+      )`);
+      db.exec(`INSERT OR IGNORE INTO memory_relations_new SELECT * FROM memory_relations`);
+      db.exec(`DROP TABLE memory_relations`);
+      db.exec(`ALTER TABLE memory_relations_new RENAME TO memory_relations`);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_node_ref, relation_type)`,
+      );
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_node_ref, relation_type)`,
+      );
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)`,
       );
     },
   },

@@ -495,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(20);
+		expect(migrationCount?.count).toBe(21);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -790,6 +790,98 @@ describe("memory schema", () => {
 			"SELECT name FROM sqlite_master WHERE type='table' AND name='private_episode_events'",
 		);
 		expect(table?.name).toBe("private_episode_events");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+});
+
+// ─── memory:021 — extended memory_relations relation_type CHECK ─────────────
+
+describe("memory:021 extended relation types", () => {
+	const NEW_RELATION_TYPES = ["surfaced_as", "published_as", "resolved_by", "downgraded_by"] as const;
+	const ALL_RELATION_TYPES = [
+		"supports", "triggered", "conflicts_with", "derived_from", "supersedes",
+		...NEW_RELATION_TYPES,
+	] as const;
+
+	it("accepts all 9 relation types in memory_relations after migration", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const now = Date.now();
+
+		for (const relType of ALL_RELATION_TYPES) {
+			let threw = false;
+			try {
+				db.run(
+					`INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					[`event:${100 + ALL_RELATION_TYPES.indexOf(relType)}`, `entity:${200 + ALL_RELATION_TYPES.indexOf(relType)}`, relType, 0.5, "direct", "system", "test:021", now, now],
+				);
+			} catch (e) {
+				threw = true;
+				throw new Error(`relation_type '${relType}' should be accepted but threw: ${e}`);
+			}
+			expect(threw).toBe(false);
+		}
+
+		const count = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM memory_relations",
+		);
+		expect(count?.count).toBe(ALL_RELATION_TYPES.length);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("still rejects invalid relation types", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const now = Date.now();
+
+		expect(() => {
+			db.run(
+				`INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				["event:1", "entity:2", "invalid_type", 0.5, "direct", "system", "test:021", now, now],
+			);
+		}).toThrow();
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("preserves existing rows after migration rebuild", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const now = Date.now();
+
+		db.run(
+			`INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			["event:1", "entity:2", "supports", 0.8, "direct", "turn", "turn:pre-021", now, now],
+		);
+
+		runMemoryMigrations(db);
+
+		const row = db.get<{ relation_type: string; strength: number }>(
+			"SELECT relation_type, strength FROM memory_relations WHERE source_ref = 'turn:pre-021'",
+		);
+		expect(row?.relation_type).toBe("supports");
+		expect(row?.strength).toBe(0.8);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("migration count is 21 after all migrations", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+
+		const migrationCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
+		);
+		expect(migrationCount?.count).toBe(21);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -10,14 +10,12 @@ import {
 } from "../types.js";
 
 describe("MemoryRelationType named types", () => {
-  it("MEMORY_RELATION_TYPES has exactly 5 values matching schema CHECK constraint", () => {
-    // From schema.ts line 78: CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes'))
-    const expectedTypes = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes"] as const;
+  it("MEMORY_RELATION_TYPES has exactly 9 values matching schema CHECK constraint", () => {
+    const expectedTypes = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes", "surfaced_as", "published_as", "resolved_by", "downgraded_by"] as const;
     
-    expect(MEMORY_RELATION_TYPES).toHaveLength(5);
+    expect(MEMORY_RELATION_TYPES).toHaveLength(9);
     expect(MEMORY_RELATION_TYPES).toEqual(expectedTypes);
     
-    // Verify each expected type is in the array
     for (const t of expectedTypes) {
       expect(MEMORY_RELATION_TYPES).toContain(t);
     }
@@ -40,16 +38,18 @@ describe("MemoryRelationType named types", () => {
   });
 
   it("MemoryRelationType type accepts valid relation types", () => {
-    // Type-level test - if this compiles, the type is correct
     const validTypes: MemoryRelationType[] = [
       "supports",
       "triggered", 
       "conflicts_with",
       "derived_from",
       "supersedes",
+      "surfaced_as",
+      "published_as",
+      "resolved_by",
+      "downgraded_by",
     ];
     
-    // Runtime verification
     for (const t of validTypes) {
       expect(MEMORY_RELATION_TYPES).toContain(t);
     }
