@@ -608,6 +608,33 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
     },
   },
+  {
+    id: "memory:022:add-node-id-to-node-embeddings",
+    description:
+      "Add node_id column to node_embeddings, backfilled from node_ref",
+    up: (db: Db) => {
+      db.exec(`CREATE TABLE IF NOT EXISTS node_embeddings_new (
+        id INTEGER PRIMARY KEY,
+        node_ref TEXT NOT NULL,
+        node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')),
+        node_id TEXT,
+        view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')),
+        model_id TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(`INSERT OR IGNORE INTO node_embeddings_new (id, node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at)
+        SELECT id, node_ref, node_kind,
+               CASE WHEN INSTR(node_ref, ':') > 0 THEN SUBSTR(node_ref, INSTR(node_ref, ':') + 1) ELSE NULL END,
+               view_type, model_id, embedding, updated_at
+        FROM node_embeddings`);
+      db.exec(`DROP TABLE node_embeddings`);
+      db.exec(`ALTER TABLE node_embeddings_new RENAME TO node_embeddings`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
+      );
+    },
+  },
 ];
 
 function escapeSqlLiteral(value: string): string {

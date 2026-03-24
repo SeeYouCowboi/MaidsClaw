@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { MAX_INTEGER } from "./schema.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
 import type { EdgeLayer, NodeRef, NodeRefKind, ViewerContext, MemoryRelationType } from "./types.js";
@@ -351,18 +352,19 @@ export class GraphEdgeView {
   }
 
   private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {
-    const [kindRaw, idRaw] = String(ref).split(":");
-    if (!kindRaw || !idRaw) {
+    try {
+      const parsed = parseGraphNodeRef(String(ref));
+      if (!KNOWN_NODE_KINDS.has(parsed.kind)) {
+        return null;
+      }
+      const id = Number(parsed.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return null;
+      }
+      return { kind: parsed.kind, id };
+    } catch {
       return null;
     }
-    if (!KNOWN_NODE_KINDS.has(kindRaw as NodeRefKind)) {
-      return null;
-    }
-    const id = Number(idRaw);
-    if (!Number.isInteger(id) || id <= 0) {
-      return null;
-    }
-    return { kind: kindRaw as NodeRefKind, id };
   }
 
   private isVisibleEdge(edge: GraphEdgeReadResult, viewerContext: ViewerContext): boolean {

@@ -1,5 +1,11 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openDatabase } from "../storage/database";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref";
 import {
 	createMemorySchema,
 	EventCategory,
@@ -8,6 +14,7 @@ import {
 	makeNodeRef,
 	ProjectionClass,
 	PromotionClass,
+	runMemoryMigrations,
 	VisibilityScope,
 } from "./schema";
 import { TransactionBatcher } from "./transaction-batcher";
@@ -647,5 +654,95 @@ describe("fact_edges t_valid CHECK constraint", () => {
 			).run(1, 2, "knows", -1, now);
 		}).toThrow();
 		db.close();
+	});
+});
+
+// ─── 13. Migration:022 — node_embeddings node_id column ────────────────────
+
+describe("migration:022 node_embeddings node_id", () => {
+	function freshMigrationDb() {
+		const dbPath = join(tmpdir(), `maidsclaw-schema-test-${randomUUID()}.db`);
+		const db = openDatabase({ path: dbPath });
+		createMemorySchema(db.raw);
+		return { db, dbPath };
+	}
+
+	function cleanup(dbPath: string) {
+		try {
+			rmSync(dbPath, { force: true });
+			rmSync(`${dbPath}-shm`, { force: true });
+			rmSync(`${dbPath}-wal`, { force: true });
+		} catch {}
+	}
+
+	it("applies 22 migrations without error", () => {
+		const { db, dbPath } = freshMigrationDb();
+		runMemoryMigrations(db);
+		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
+		expect(rows!.cnt).toBe(22);
+		db.close();
+		cleanup(dbPath);
+	});
+
+	it("node_embeddings has node_id column after migration", () => {
+		const { db, dbPath } = freshMigrationDb();
+		runMemoryMigrations(db);
+		const cols = db.query<{ name: string }>("PRAGMA table_info(node_embeddings)");
+		const colNames = cols.map((c) => c.name);
+		expect(colNames).toContain("node_id");
+		expect(colNames).toContain("node_kind");
+		expect(colNames).toContain("node_ref");
+		db.close();
+		cleanup(dbPath);
+	});
+
+	it("backfills node_id from node_ref during migration", () => {
+		const { db, dbPath } = freshMigrationDb();
+		const now = Date.now();
+		db.run(
+			`INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+			["private_belief:42", "private_belief", "primary", "test-model", new Uint8Array([1, 2, 3]), now],
+		);
+		runMemoryMigrations(db);
+		const row = db.get<{ node_id: string; node_kind: string; node_ref: string }>(
+			"SELECT node_id, node_kind, node_ref FROM node_embeddings WHERE node_ref = ?",
+			["private_belief:42"],
+		);
+		expect(row!.node_id).toBe("42");
+		expect(row!.node_kind).toBe("private_belief");
+		expect(row!.node_ref).toBe("private_belief:42");
+		db.close();
+		cleanup(dbPath);
+	});
+});
+
+// ─── 14. parseGraphNodeRef backward compatibility ───────────────────────────
+
+describe("parseGraphNodeRef backward compat", () => {
+	it("parses legacy private_belief:42 ref", () => {
+		const ref = parseGraphNodeRef("private_belief:42");
+		expect(ref.kind).toBe("private_belief");
+		expect(ref.id).toBe("42");
+	});
+
+	it("parses legacy private_event:7 ref", () => {
+		const ref = parseGraphNodeRef("private_event:7");
+		expect(ref.kind).toBe("private_event");
+		expect(ref.id).toBe("7");
+	});
+
+	it("parses canonical assertion:100 ref", () => {
+		const ref = parseGraphNodeRef("assertion:100");
+		expect(ref.kind).toBe("assertion");
+		expect(ref.id).toBe("100");
+	});
+
+	it("throws on invalid format", () => {
+		expect(() => parseGraphNodeRef("invalid")).toThrow();
+	});
+
+	it("throws on unknown kind", () => {
+		expect(() => parseGraphNodeRef("bogus:1")).toThrow();
 	});
 });

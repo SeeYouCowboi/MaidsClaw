@@ -495,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(21);
+		expect(migrationCount?.count).toBe(22);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -874,14 +874,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 21 after all migrations", () => {
+	it("migration count is 22 after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(21);
+		expect(migrationCount?.count).toBe(22);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { AliasService } from "./alias.js";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import type { RetrievalService } from "./retrieval.js";
 import { MAX_INTEGER } from "./schema.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
@@ -1751,18 +1752,19 @@ export class GraphNavigator {
   }
 
   private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {
-    const [kindRaw, idRaw] = String(ref).split(":");
-    if (!kindRaw || !idRaw) {
+    try {
+      const parsed = parseGraphNodeRef(String(ref));
+      if (!KNOWN_NODE_KINDS.has(parsed.kind)) {
+        return null;
+      }
+      const id = Number(parsed.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return null;
+      }
+      return { kind: parsed.kind, id };
+    } catch {
       return null;
     }
-    if (!KNOWN_NODE_KINDS.has(kindRaw as NodeRefKind)) {
-      return null;
-    }
-    const id = Number(idRaw);
-    if (!Number.isInteger(id) || id <= 0) {
-      return null;
-    }
-    return { kind: kindRaw as NodeRefKind, id };
   }
 
   private extractIdsFromRefs(refs: Set<NodeRef>, kind: NodeRefKind): number[] {
