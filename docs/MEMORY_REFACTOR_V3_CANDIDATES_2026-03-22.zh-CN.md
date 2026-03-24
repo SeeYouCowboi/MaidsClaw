@@ -77,9 +77,27 @@
 ## 9. Visibility / Redaction / Authorization 正式分层
 
 - 将 `VisibilityPolicy` 真正升级为唯一权威可见性判定源。
-- 正式引入 `RedactionPolicy`，避免“可见”与“可全文注入”混淆。
+- 正式引入 `RedactionPolicy`，避免”可见”与”可全文注入”混淆。
 - 将工具授权、写权限、publication/materialization 权限收敛到显式 `AuthorizationPolicy`。
 - 让 area state、shared blocks、typed retrieval surface 与 graph explore 都共享同一组边界控制层。
+
+### 9.1 已知代码级问题：`viewer_role` 在 AuthorizationPolicy 中做授权判断（legacy-cleanup 遗留）
+
+**位置**：`src/memory/redaction-policy.ts:11`
+
+```ts
+canViewAdminOnly(viewerContext: ViewerContext): boolean {
+  return viewerContext.viewer_role === “maiden”;
+}
+```
+
+**问题**：共识文档 §3.3 规定 `viewer_role` 只用于模板默认值选择，不参与可见性或授权判定。`canViewAdminOnly` 是一个 Layer 2（AgentPermissions）级别的检查，但它直接读取 `viewer_role` 做硬编码角色比对，而不是通过正式的 `AgentPermissions` 路径。
+
+**风险**：
+- `AgentPermissions` 层正式落地后，此处需同步迁移，否则会形成两套并行的授权判据。
+- 若 `maiden` 角色语义发生演变，此处的硬编码比对无法跟随统一配置变更。
+
+**建议处置**：V3 正式建立 `AgentPermissions` 层时，将 `canViewAdminOnly` 改为委托给 `AgentPermissions.hasAdminReadAccess(viewerContext)`，不再直接读取 `viewer_role` 字段。
 
 ## 10. Persona / Pinned / Shared 全面替换旧 Core Memory
 
@@ -187,7 +205,47 @@
 - Cognee GitHub: <https://github.com/topoteretes/cognee>
 - Cognee 2025 论文: <https://arxiv.org/abs/2505.24478>
 
-## 18. 使用建议
+## 18. 共识计划 §13 未完成条目（截至 2026-03-24 legacy-cleanup 完成后）
+
+> 说明：以下条目来自 `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md §13`，经对照代码实际状态核查后确认仍未完成。已完成的 Phase 0–5 主体（协议类型、schema 迁移、v5 写入链路、narrative_search/cognition_search 工具、memory_relations 表、pre_contested_stance 回退逻辑、assertLegalStanceTransition/assertBasisUpgradeOnly 校验、shared blocks 子系统）不在此列。
+
+### 18.1 cognition_search — contested 内联冲突证据（Phase 3）
+
+**共识原文**（§10.2）：contested 条目必须内联 1~3 条最相关冲突证据，并标明 `basis`、`stance`、`source_ref`。
+
+**现状**：`src/memory/cognition/cognition-search.ts` 对 contested assertion 的 `conflictEvidence` 填充仅为占位值：
+
+```ts
+hit.conflictEvidence = ["Risk: contested cognition"];
+```
+
+未真正查询 `memory_relations(relation_type='conflicts_with')` 并拉取关联证据节点的 `basis/stance/source_ref` 进行内联展示。
+
+**建议**：V3 实现时通过 `memory_relations` 查出冲突证据后，拼装符合共识格式的内联结构，而不是输出字符串占位符。
+
+---
+
+### 18.2 memory_explore — 尚未真正基于新关系层（Phase 6）
+
+**共识原文**（§10.4）：`memory_explore` 应改为基于 narrative layer、cognition layer、memory_relations 做统一图探索，不能继续依赖旧混合型脆弱路径。
+
+**现状**：`memory_explore` 工具调用 `navigator.explore()`，navigator 在 legacy-cleanup 中已从 `agent_event_overlay` 迁移到新表，但其图遍历核心（beam search、graph expansion）仍基于 `logic_edges` + `agent_fact_overlay` 的联合查询模式，尚未切换到以 `memory_relations` 为主权威关系层的统一图探索路径。
+
+**建议**：V3 将 `navigator.explore` 的图扩展逻辑迁移到读取 `memory_relations`，使 `supports / conflicts_with / derived_from / supersedes` 等语义边参与图遍历与相关性排序。
+
+---
+
+### 18.3 Phase 6 配套工程未完成
+
+共识计划 §13 Phase 6 的以下条目未执行：
+
+- [ ] 检查 RP tool policy 与 app/terminal 兼容（工具注册路径的完整性与新工具覆盖验证）
+- [ ] 检查 prompt 注入与 inspect 视图是否已使用新分层结果（contested、basis/stance 字段是否真正透传到 prompt 上下文）
+- [ ] 更新开发文档与测试文档（新表结构、新工具契约、新检索分层的文档化）
+
+---
+
+## 19. 使用建议
 
 - 在进入 V3 之前，建议先完成 V2 的“边界收敛”而不是立刻追求功能铺开。
 - 尤其优先完成:
