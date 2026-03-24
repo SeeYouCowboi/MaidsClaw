@@ -102,6 +102,23 @@ export const NODE_REF_KINDS = [
 ] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 
+/** Canonical node-ref kinds — the preferred write targets for new code. */
+export const CANONICAL_NODE_REF_KINDS = [
+  "event",
+  "entity",
+  "fact",
+  "assertion",
+  "evaluation",
+  "commitment",
+] as const;
+export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_REF_KINDS)[number];
+
+/**
+ * Legacy node-ref kinds — kept for backward-compatible reads of existing DB data.
+ * @deprecated Use canonical kinds only for new code. Legacy refs are being phased out in V3 §19.
+ */
+export const LEGACY_NODE_REF_KINDS = ["private_event", "private_belief"] as const;
+
 type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
 export type NodeRef = Brand<NodeRefLiteral, "NodeRef">;
