@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
+  filterProjectionRowsByTimeSlice,
   filterEvidencePathsByTimeSlice,
+  isProjectionRowInTimeSlice,
   isEdgeInTimeSlice,
   summarizeTimeSlicedPaths,
 } from "../../src/memory/time-slice-query.js";
@@ -146,5 +148,32 @@ describe("time-slice-query", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.redacted_placeholders).toEqual([{ type: "redacted", reason: "private", node_ref: "private_event:9" }]);
     expect(filtered[0]?.path.nodes).toEqual(["private_episode:1", "event:2"]);
+  });
+
+  it("filters area/world projection rows by valid_time and committed_time", () => {
+    const rows: Array<{ key: string; updated_at: number; valid_time: number | null; committed_time: number | null }> = [
+      { key: "area:old", updated_at: 100, valid_time: 100, committed_time: 120 },
+      { key: "area:new", updated_at: 500, valid_time: 500, committed_time: 520 },
+      { key: "world:fallback", updated_at: 200, valid_time: null, committed_time: null },
+    ];
+
+    const filtered = filterProjectionRowsByTimeSlice(rows, { asOfValidTime: 300, asOfCommittedTime: 300 });
+    expect(filtered.map((row) => row.key)).toEqual(["area:old", "world:fallback"]);
+  });
+
+  it("treats updated_at as fallback time for projection rows without explicit valid/committed times", () => {
+    expect(
+      isProjectionRowInTimeSlice(
+        { updated_at: 250, valid_time: null, committed_time: null },
+        { asOfValidTime: 300, asOfCommittedTime: 300 },
+      ),
+    ).toBe(true);
+
+    expect(
+      isProjectionRowInTimeSlice(
+        { updated_at: 450, valid_time: null, committed_time: null },
+        { asOfValidTime: 300, asOfCommittedTime: 300 },
+      ),
+    ).toBe(false);
   });
 });

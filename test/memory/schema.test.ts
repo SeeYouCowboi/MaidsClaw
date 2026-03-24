@@ -495,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(19);
+		expect(migrationCount?.count).toBe(20);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -517,6 +517,14 @@ describe("memory schema", () => {
 			"world_narrative_current",
 			"world_state_current",
 		]);
+
+		const areaColumns = listColumns(db, "area_state_current");
+		expect(areaColumns.includes("valid_time")).toBe(true);
+		expect(areaColumns.includes("committed_time")).toBe(true);
+
+		const worldColumns = listColumns(db, "world_state_current");
+		expect(worldColumns.includes("valid_time")).toBe(true);
+		expect(worldColumns.includes("committed_time")).toBe(true);
 
 		const now = Date.now();
 		db.run(

@@ -20,6 +20,12 @@ type TimeAwareEdge = {
   committed_time?: number | null;
 };
 
+export type TimeAwareProjectionRow = {
+  updated_at?: number | null;
+  valid_time?: number | null;
+  committed_time?: number | null;
+};
+
 export function hasTimeSlice(query?: TimeSliceQuery): boolean {
   return query?.asOfValidTime != null || query?.asOfCommittedTime != null;
 }
@@ -38,6 +44,31 @@ export function isEdgeInTimeSlice(edge: TimeAwareEdge, query?: TimeSliceQuery): 
     return false;
   }
   return true;
+}
+
+export function isProjectionRowInTimeSlice(row: TimeAwareProjectionRow, query?: TimeSliceQuery): boolean {
+  if (!hasTimeSlice(query)) {
+    return true;
+  }
+
+  const fallback = row.updated_at ?? null;
+  const effectiveValid = row.valid_time ?? fallback;
+  const effectiveCommitted = row.committed_time ?? fallback;
+
+  if (query?.asOfValidTime != null && effectiveValid != null && effectiveValid > query.asOfValidTime) {
+    return false;
+  }
+  if (query?.asOfCommittedTime != null && effectiveCommitted != null && effectiveCommitted > query.asOfCommittedTime) {
+    return false;
+  }
+  return true;
+}
+
+export function filterProjectionRowsByTimeSlice<T extends TimeAwareProjectionRow>(rows: T[], query?: TimeSliceQuery): T[] {
+  if (!hasTimeSlice(query)) {
+    return rows;
+  }
+  return rows.filter((row) => isProjectionRowInTimeSlice(row, query));
 }
 
 export function filterEvidencePathsByTimeSlice(paths: EvidencePath[], query?: TimeSliceQuery): EvidencePath[] {

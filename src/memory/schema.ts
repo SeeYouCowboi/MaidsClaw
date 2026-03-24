@@ -23,10 +23,10 @@ export const SurfacingClassification = {
 } as const;
 
 const AREA_WORLD_PROJECTION_DDL: readonly string[] = [
-  `CREATE TABLE IF NOT EXISTS area_state_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, PRIMARY KEY(agent_id, area_id, key))`,
+  `CREATE TABLE IF NOT EXISTS area_state_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, valid_time INTEGER, committed_time INTEGER, PRIMARY KEY(agent_id, area_id, key))`,
   `CREATE INDEX IF NOT EXISTS idx_area_state_current_agent_area ON area_state_current(agent_id, area_id, updated_at DESC)`,
   `CREATE TABLE IF NOT EXISTS area_narrative_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(agent_id, area_id))`,
-  `CREATE TABLE IF NOT EXISTS world_state_current (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS world_state_current (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, valid_time INTEGER, committed_time INTEGER)`,
   `CREATE INDEX IF NOT EXISTS idx_world_state_current_updated ON world_state_current(updated_at DESC)`,
   `CREATE TABLE IF NOT EXISTS world_narrative_current (id INTEGER PRIMARY KEY CHECK (id = 1), summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
 ];
@@ -522,6 +522,57 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
       db.exec(
         `CREATE INDEX IF NOT EXISTS idx_fact_edges_current ON fact_edges(source_entity_id, predicate, target_entity_id) WHERE t_invalid = ${MAX_INTEGER}`,
+      );
+    },
+  },
+  {
+    id: "memory:020:add-time-columns-to-area-world-current-projections",
+    description:
+      "Rebuild area_state_current/world_state_current with valid_time and committed_time columns",
+    up: (db: Db) => {
+      const areaHasValid = hasColumn(db, "area_state_current", "valid_time");
+      const areaHasCommitted = hasColumn(db, "area_state_current", "committed_time");
+      const worldHasValid = hasColumn(db, "world_state_current", "valid_time");
+      const worldHasCommitted = hasColumn(db, "world_state_current", "committed_time");
+      if (areaHasValid && areaHasCommitted && worldHasValid && worldHasCommitted) {
+        return;
+      }
+
+      db.exec(`CREATE TABLE area_state_current_new (
+        agent_id TEXT NOT NULL,
+        area_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value_json TEXT NOT NULL,
+        surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')),
+        updated_at INTEGER NOT NULL,
+        valid_time INTEGER,
+        committed_time INTEGER,
+        PRIMARY KEY(agent_id, area_id, key)
+      )`);
+      db.exec(`INSERT INTO area_state_current_new (agent_id, area_id, key, value_json, surfacing_classification, updated_at, valid_time, committed_time)
+        SELECT agent_id, area_id, key, value_json, surfacing_classification, updated_at, updated_at, updated_at
+        FROM area_state_current`);
+      db.exec(`DROP TABLE area_state_current`);
+      db.exec(`ALTER TABLE area_state_current_new RENAME TO area_state_current`);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_area_state_current_agent_area ON area_state_current(agent_id, area_id, updated_at DESC)`,
+      );
+
+      db.exec(`CREATE TABLE world_state_current_new (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')),
+        updated_at INTEGER NOT NULL,
+        valid_time INTEGER,
+        committed_time INTEGER
+      )`);
+      db.exec(`INSERT INTO world_state_current_new (key, value_json, surfacing_classification, updated_at, valid_time, committed_time)
+        SELECT key, value_json, surfacing_classification, updated_at, updated_at, updated_at
+        FROM world_state_current`);
+      db.exec(`DROP TABLE world_state_current`);
+      db.exec(`ALTER TABLE world_state_current_new RENAME TO world_state_current`);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_world_state_current_updated ON world_state_current(updated_at DESC)`,
       );
     },
   },

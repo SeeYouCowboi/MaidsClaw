@@ -142,6 +142,16 @@ type CognitionCurrentRow = {
   updated_at: number;
 };
 
+type AssertionProjectionRecord = {
+  sourcePointerKey?: string;
+  predicate?: string;
+  targetPointerKey?: string;
+  stance?: AssertionStance;
+  basis?: AssertionBasis;
+  preContestedStance?: AssertionStance;
+  provenance?: string;
+};
+
 
 
 export class CognitionRepository {
@@ -287,7 +297,7 @@ export class CognitionRepository {
               0.8,
             );
           }
-          this.eventRepo.append({
+          const eventId = this.eventRepo.append({
             agentId: params.agentId,
             cognitionKey,
             kind: "assertion",
@@ -295,6 +305,16 @@ export class CognitionRepository {
             recordJson,
             settlementId: params.settlementId,
             committedTime: now,
+          });
+          this.syncAssertionCurrentProjection({
+            agentId: params.agentId,
+            cognitionKey,
+            stance: params.stance,
+            basis: params.basis ?? null,
+            preContestedStance: params.preContestedStance ?? null,
+            recordJson,
+            sourceEventId: eventId,
+            updatedAt: now,
           });
           return { id: existing.id };
         });
@@ -354,7 +374,7 @@ export class CognitionRepository {
             0.8,
           );
         }
-        this.eventRepo.append({
+        const eventId = this.eventRepo.append({
           agentId: params.agentId,
           cognitionKey,
           kind: "assertion",
@@ -362,6 +382,16 @@ export class CognitionRepository {
           recordJson,
           settlementId: params.settlementId,
           committedTime: now,
+        });
+        this.syncAssertionCurrentProjection({
+          agentId: params.agentId,
+          cognitionKey,
+          stance: params.stance,
+          basis: params.basis ?? null,
+          preContestedStance: params.preContestedStance ?? null,
+          recordJson,
+          sourceEventId: eventId,
+          updatedAt: now,
         });
         return { id: insertedId };
       });
@@ -674,16 +704,7 @@ export class CognitionRepository {
 
     if (kind === "assertion") {
       this.runInTransaction(() => {
-        this.db
-          .prepare(
-            `UPDATE agent_fact_overlay
-             SET stance = 'rejected',
-                 updated_at = ?
-             WHERE agent_id = ? AND cognition_key = ?`,
-          )
-          .run(now, agentId, normalizedKey);
-        this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
-        this.eventRepo.append({
+        const eventId = this.eventRepo.append({
           agentId,
           cognitionKey: normalizedKey,
           kind: "assertion",
@@ -692,6 +713,25 @@ export class CognitionRepository {
           settlementId: effectiveSettlementId,
           committedTime: now,
         });
+        this.db
+          .prepare(
+            `UPDATE agent_fact_overlay
+             SET stance = 'rejected',
+                 updated_at = ?
+             WHERE agent_id = ? AND cognition_key = ?`,
+          )
+          .run(now, agentId, normalizedKey);
+        this.db
+          .prepare(
+            `UPDATE private_cognition_current
+             SET status = 'retracted',
+                 stance = 'rejected',
+                 source_event_id = ?,
+                 updated_at = ?
+             WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
+          )
+          .run(eventId, now, agentId, normalizedKey);
+        this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
       });
       return;
     }
@@ -733,8 +773,9 @@ export class CognitionRepository {
         .prepare(
           `UPDATE private_cognition_current
            SET status = 'retracted',
+                stance = CASE WHEN kind = 'assertion' THEN 'rejected' ELSE stance END,
                 updated_at = ?
-           WHERE agent_id = ? AND cognition_key = ? AND kind IN ('evaluation', 'commitment')`,
+           WHERE agent_id = ? AND cognition_key = ? AND kind IN ('assertion', 'evaluation', 'commitment')`,
         )
         .run(now, agentId, normalizedKey);
       this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
@@ -756,6 +797,17 @@ export class CognitionRepository {
     agentId: string,
     options?: { activeOnly?: boolean; stance?: AssertionStance; basis?: AssertionBasis },
   ): CanonicalAssertionRow[] {
+    const keyedRows = this.db
+      .prepare(
+        `SELECT id, agent_id, cognition_key, kind, stance, basis, status,
+                pre_contested_stance, summary_text, record_json, source_event_id, updated_at
+         FROM private_cognition_current
+         WHERE agent_id = ? AND kind = 'assertion'
+         ORDER BY updated_at DESC
+         LIMIT 500`,
+      )
+      .all(agentId) as CognitionCurrentRow[];
+
     const rows = this.db
       .prepare(
         `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
@@ -763,15 +815,21 @@ export class CognitionRepository {
                 provenance, source_event_ref, cognition_key, settlement_id, op_index,
                 created_at, updated_at
          FROM agent_fact_overlay
-         WHERE agent_id = ?
+         WHERE agent_id = ? AND cognition_key IS NULL
          ORDER BY updated_at DESC
          LIMIT 500`,
       )
       .all(agentId) as FactOverlayRow[];
 
-    let mapped = rows
+    const keyedMapped = keyedRows
+      .map((row) => this.toCanonicalAssertionFromProjection(row))
+      .filter((row): row is CanonicalAssertionRow => row !== null);
+
+    const unkeyedMapped = rows
       .map((row) => this.toCanonicalAssertion(row))
       .filter((row): row is CanonicalAssertionRow => row !== null);
+
+    let mapped = [...keyedMapped, ...unkeyedMapped].sort((a, b) => b.updatedAt - a.updatedAt);
 
     if (options?.activeOnly) {
       mapped = mapped.filter((row) => row.stance !== "rejected" && row.stance !== "abandoned");
@@ -830,6 +888,20 @@ export class CognitionRepository {
   }
 
   getAssertionByKey(agentId: string, cognitionKey: string): CanonicalAssertionRow | null {
+    const keyed = this.db
+      .prepare(
+        `SELECT id, agent_id, cognition_key, kind, stance, basis, status,
+                pre_contested_stance, summary_text, record_json, source_event_id, updated_at
+         FROM private_cognition_current
+         WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+      )
+      .get(agentId, cognitionKey.normalize("NFC")) as CognitionCurrentRow | null;
+    if (keyed) {
+      return this.toCanonicalAssertionFromProjection(keyed);
+    }
+
     const row = this.db
       .prepare(
         `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
@@ -913,6 +985,92 @@ export class CognitionRepository {
       basis: row.basis ?? null,
       preContestedStance: row.pre_contested_stance,
       createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private syncAssertionCurrentProjection(input: {
+    agentId: string;
+    cognitionKey: string;
+    stance: AssertionStance;
+    basis: AssertionBasis | null;
+    preContestedStance: AssertionStance | null;
+    recordJson: string;
+    sourceEventId: number;
+    updatedAt: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO private_cognition_current (
+           agent_id,
+           cognition_key,
+           kind,
+           stance,
+           basis,
+           status,
+           pre_contested_stance,
+           summary_text,
+           record_json,
+           source_event_id,
+           updated_at
+         ) VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_id, cognition_key) DO UPDATE SET
+           kind = 'assertion',
+           stance = excluded.stance,
+           basis = excluded.basis,
+           status = 'active',
+           pre_contested_stance = excluded.pre_contested_stance,
+           summary_text = excluded.summary_text,
+           record_json = excluded.record_json,
+           source_event_id = excluded.source_event_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        input.agentId,
+        input.cognitionKey,
+        input.stance,
+        input.basis,
+        input.preContestedStance,
+        safeParseJson(input.recordJson).predicate as string | undefined
+          ? `${String(safeParseJson(input.recordJson).predicate)}: ${String(safeParseJson(input.recordJson).sourcePointerKey ?? "?")} → ${String(safeParseJson(input.recordJson).targetPointerKey ?? "?")}`
+          : null,
+        input.recordJson,
+        input.sourceEventId,
+        input.updatedAt,
+      );
+  }
+
+  private toCanonicalAssertionFromProjection(row: CognitionCurrentRow): CanonicalAssertionRow | null {
+    if (!row.stance) {
+      return null;
+    }
+    const parsed = safeParseJson(row.record_json) as AssertionProjectionRecord;
+    const sourceEntityId = typeof parsed.sourcePointerKey === "string"
+      ? this.resolveEntityByPointerKey(parsed.sourcePointerKey, row.agent_id)
+      : null;
+    const targetEntityId = typeof parsed.targetPointerKey === "string"
+      ? this.resolveEntityByPointerKey(parsed.targetPointerKey, row.agent_id)
+      : null;
+    if (sourceEntityId == null || targetEntityId == null || typeof parsed.predicate !== "string") {
+      return null;
+    }
+
+    const projectionRecord = safeParseJson(row.record_json);
+    return {
+      id: row.id,
+      agentId: row.agent_id,
+      sourceEntityId,
+      targetEntityId,
+      predicate: parsed.predicate,
+      cognitionKey: row.cognition_key,
+      settlementId: typeof projectionRecord.settlementId === "string" ? projectionRecord.settlementId : null,
+      opIndex: typeof projectionRecord.opIndex === "number" ? projectionRecord.opIndex : null,
+      provenance: typeof parsed.provenance === "string" ? parsed.provenance : null,
+      sourceEventRef: null,
+      stance: row.stance,
+      basis: row.basis ?? null,
+      preContestedStance: row.pre_contested_stance,
+      createdAt: row.updated_at,
       updatedAt: row.updated_at,
     };
   }

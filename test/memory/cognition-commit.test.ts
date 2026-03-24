@@ -1000,7 +1000,7 @@ describe("CognitionOpCommitter", () => {
 		});
 	});
 
-	describe("CognitionRepository canonical operations", () => {
+		describe("CognitionRepository canonical operations", () => {
 		it("writes canonical stance/basis columns for assertions", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -1061,6 +1061,95 @@ describe("CognitionOpCommitter", () => {
 			expect(newRow).toBeDefined();
 			expect(newRow!.stance).toBe("accepted");
 			expect(newRow!.basis).toBe("hearsay");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("reads keyed assertions from private_cognition_current instead of overlay", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			const now = Date.now();
+			db.run(
+				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, cognition_key, settlement_id, op_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				[
+					"rp:alice",
+					1,
+					4,
+					"trusts",
+					"inference",
+					"tentative",
+					"assert:keyed-read-source",
+					"stl:keyed-overlay",
+					0,
+					now,
+					now,
+				],
+			);
+
+			db.run(
+				"INSERT INTO private_cognition_current (agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance, summary_text, record_json, source_event_id, updated_at) VALUES (?, ?, 'assertion', ?, ?, 'active', NULL, ?, ?, ?, ?)",
+				[
+					"rp:alice",
+					"assert:keyed-read-source",
+					"accepted",
+					"first_hand",
+					"trusts: __self__ → bob",
+					JSON.stringify({
+						sourcePointerKey: "__self__",
+						predicate: "trusts",
+						targetPointerKey: "bob",
+						stance: "accepted",
+						basis: "first_hand",
+					}),
+					1,
+					now + 1,
+				],
+			);
+
+			const assertion = repo.getAssertionByKey("rp:alice", "assert:keyed-read-source");
+			expect(assertion).toBeDefined();
+			expect(assertion!.stance).toBe("accepted");
+			expect(assertion!.basis).toBe("first_hand");
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
+		it("keeps unkeyed assertions on overlay read path", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const storage = new GraphStorageService(db);
+			seedEntities(storage);
+			const repo = new CognitionRepository(db);
+
+			const now = Date.now();
+			db.run(
+				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, cognition_key, settlement_id, op_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				[
+					"rp:alice",
+					1,
+					4,
+					"likes",
+					"hearsay",
+					"tentative",
+					null,
+					"stl:unkeyed",
+					1,
+					now,
+					now,
+				],
+			);
+
+			const assertions = repo.getAssertions("rp:alice", { activeOnly: false });
+			const unkeyed = assertions.find((row) => row.cognitionKey === null && row.predicate === "likes");
+			expect(unkeyed).toBeDefined();
+			expect(unkeyed!.stance).toBe("tentative");
+			expect(unkeyed!.basis).toBe("hearsay");
 
 			db.close();
 			cleanupDb(dbPath);
