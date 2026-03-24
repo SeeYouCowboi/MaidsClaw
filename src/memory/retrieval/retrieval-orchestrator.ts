@@ -60,6 +60,7 @@ export type RetrievalDedupContext = {
 };
 
 const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次)/i;
+const EPISODE_DETECTIVE_TRIGGER = /(detective|investigate|investigation|clue|evidence|timeline|who|why|how did|线索|证据|调查|推理|案发|时间线|谁|为什么)/i;
 const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景)/i;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
@@ -83,9 +84,11 @@ export class RetrievalOrchestrator {
     override?: RetrievalTemplate,
     dedupContext?: RetrievalDedupContext,
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
+    contestedCount?: number,
   ): Promise<RetrievalResult> {
     const baseTemplate = resolveTemplate(role, override);
     const template = this.applyQueryStrategy(baseTemplate, queryStrategy);
+    const effectiveConflictNotesBudget = this.resolveConflictNotesBudget(template, contestedCount);
 
     const seenText = this.seedSeenText(dedupContext);
 
@@ -96,6 +99,10 @@ export class RetrievalOrchestrator {
         const key = row.cognition_key?.trim();
         if (key) {
           recentCognitionKeys.add(key);
+        }
+        const summary = row.summary_text?.trim();
+        if (summary && summary.length > 0) {
+          seenText.add(this.normalizeText(summary));
         }
       }
     }
@@ -113,12 +120,12 @@ export class RetrievalOrchestrator {
         : [];
 
     const rawCognitionHits: CognitionHit[] =
-      template.cognitionEnabled && (template.cognitionBudget > 0 || template.conflictNotesBudget > 0)
+      template.cognitionEnabled && (template.cognitionBudget > 0 || effectiveConflictNotesBudget > 0)
         ? this.cognitionService.searchCognition({
             agentId: viewerContext.viewer_agent_id,
             query,
             activeOnly: true,
-            limit: Math.max(template.cognitionBudget + template.conflictNotesBudget + 4, template.cognitionBudget),
+            limit: Math.max(template.cognitionBudget + effectiveConflictNotesBudget + 4, template.cognitionBudget),
           })
         : [];
 
@@ -131,6 +138,7 @@ export class RetrievalOrchestrator {
       seenText,
       recentCognitionKeys,
       effectiveEpisodeBudget,
+      effectiveConflictNotesBudget,
     );
 
     return {
@@ -179,6 +187,7 @@ export class RetrievalOrchestrator {
     seenText: Set<string>,
     recentCognitionKeys: Set<string>,
     effectiveEpisodeBudget: number,
+    effectiveConflictNotesBudget: number,
   ): TypedRetrievalResult {
     const typed: TypedRetrievalResult = {
       cognition: [],
@@ -236,9 +245,9 @@ export class RetrievalOrchestrator {
       }
     }
 
-    if (template.conflictNotesEnabled && template.conflictNotesBudget > 0) {
+    if (template.conflictNotesEnabled && effectiveConflictNotesBudget > 0) {
       for (const hit of cognitionHits) {
-        if (typed.conflict_notes.length >= template.conflictNotesBudget) {
+        if (typed.conflict_notes.length >= effectiveConflictNotesBudget) {
           break;
         }
         if (hit.stance !== "contested" || !hit.conflictEvidence || hit.conflictEvidence.length === 0) {
@@ -246,7 +255,7 @@ export class RetrievalOrchestrator {
         }
         const cognitionKey = hit.cognitionKey ?? this.extractCognitionKey(hit.source_ref);
         for (const ev of hit.conflictEvidence) {
-          if (typed.conflict_notes.length >= template.conflictNotesBudget) {
+          if (typed.conflict_notes.length >= effectiveConflictNotesBudget) {
             break;
           }
           const content = `Conflicts with ${ev.targetRef} (strength: ${ev.strength})`;
@@ -397,13 +406,23 @@ export class RetrievalOrchestrator {
   ): number {
     let budget = Math.max(template.episodicBudget, template.episodeBudget);
     const trimmed = query.trim();
-    if (trimmed.length > 0 && EPISODE_QUERY_TRIGGER.test(trimmed)) {
+    if (trimmed.length > 0 && (EPISODE_QUERY_TRIGGER.test(trimmed) || EPISODE_DETECTIVE_TRIGGER.test(trimmed))) {
       budget += template.queryEpisodeBoost;
     }
     if (viewerContext.current_area_id != null && EPISODE_SCENE_TRIGGER.test(trimmed)) {
       budget += template.sceneEpisodeBoost;
     }
     return Math.max(0, budget);
+  }
+
+  private resolveConflictNotesBudget(
+    template: Required<RetrievalTemplate>,
+    contestedCount?: number,
+  ): number {
+    if ((contestedCount ?? 0) <= 0 || template.conflictBoostFactor <= 0) {
+      return template.conflictNotesBudget;
+    }
+    return template.conflictNotesBudget + Math.min(contestedCount ?? 0, 3) * template.conflictBoostFactor;
   }
 
   private isEpisodeCandidate(hint: MemoryHint): boolean {

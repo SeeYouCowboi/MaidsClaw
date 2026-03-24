@@ -214,3 +214,13 @@
 - explore() 4th param is optional — undefined = default_retrieval (no behavior change)
 - Changes absorbed into concurrent commit 315011a (explain detail levels) — evidence diff saved separately
 - Test baseline: 27 navigator tests pass / 0 fail (3 new strategy tests)
+
+## [2026-03-24] T29 — Typed Retrieval Budget / Ranking Evolution
+
+- `RetrievalTemplate` now includes `conflictBoostFactor?: number`; role defaults set `rp_agent=1`, others `0`
+- `RetrievalOrchestrator.search()` accepts optional trailing `contestedCount?: number` and computes effective conflict budget as `base + min(contestedCount, 3) * conflictBoostFactor`
+- Low-latency fallback preserved: when `conflictBoostFactor=0`, effective conflict budget equals prior `conflictNotesBudget`
+- Episode auto-boost now recognizes detective/investigation clue queries (in addition to existing temporal/scene triggers)
+- Cross-type dedup strengthened: active `currentProjectionReader.getActiveCurrent()` rows now seed `seenText` from `summary_text` to suppress duplicated cognition surface entries
+- Regression coverage added in `test/memory/retrieval-search.test.ts` for contested uplift, zero-boost fallback, detective episode boost, and projection-text dedup
+- Validation: `bun test src/memory/` (469 pass, 0 fail) and `bun run build` (tsc noEmit success)

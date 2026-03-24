@@ -10,6 +10,7 @@ export type RetrievalTemplate = {
   conflictNotesBudget?: number;
   episodicBudget?: number;
   episodeBudget?: number;
+  conflictBoostFactor?: number;
   queryEpisodeBoost?: number;
   sceneEpisodeBoost?: number;
   maxNarrativeHits?: number;
@@ -27,6 +28,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 2,
     episodicBudget: 0,
     episodeBudget: 0,
+    conflictBoostFactor: 1,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
     maxNarrativeHits: 3,
@@ -42,6 +44,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 0,
     episodicBudget: 0,
     episodeBudget: 0,
+    conflictBoostFactor: 0,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
     maxNarrativeHits: 3,
@@ -57,6 +60,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 0,
     episodicBudget: 0,
     episodeBudget: 0,
+    conflictBoostFactor: 0,
     queryEpisodeBoost: 0,
     sceneEpisodeBoost: 0,
     maxNarrativeHits: 0,
@@ -87,6 +91,7 @@ export function resolveTemplate(
     conflictNotesBudget: override.conflictNotesBudget ?? base.conflictNotesBudget,
     episodicBudget,
     episodeBudget: episodicBudget,
+    conflictBoostFactor: override.conflictBoostFactor ?? base.conflictBoostFactor,
     queryEpisodeBoost: override.queryEpisodeBoost ?? base.queryEpisodeBoost,
     sceneEpisodeBoost: override.sceneEpisodeBoost ?? base.sceneEpisodeBoost,
     maxNarrativeHits: narrativeBudget,

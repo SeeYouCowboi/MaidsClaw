@@ -1,0 +1,43 @@
+Task: T29 — §25 Typed Retrieval Budget / Ranking 演进
+Date: 2026-03-24
+
+Implemented:
+1) Conflict budget auto-uplift
+   - Added `conflictBoostFactor?: number` to `RetrievalTemplate`
+   - Role defaults:
+     - rp_agent: `conflictBoostFactor: 1`
+     - maiden/task_agent: `conflictBoostFactor: 0`
+   - Extended `RetrievalOrchestrator.search()` with optional trailing `contestedCount?: number`
+   - Effective conflict budget:
+     `conflictNotesBudget + min(contestedCount, 3) * conflictBoostFactor`
+
+2) Episode budget extension for detective/scene queries
+   - Added detective/investigation trigger regex and included it in episode budget resolution.
+
+3) Cross-type dedup hardening
+   - While reading active current-projection rows, seeded `seenText` with `summary_text`
+   - Prevents duplicate cognition surfacing when same content already appears in current projection slot.
+
+4) Low-latency fallback preserved
+   - When `conflictBoostFactor=0`, conflict budget remains unchanged from prior behavior.
+
+Tests added/updated:
+- `test/memory/retrieval-search.test.ts`
+  - contested auto-uplift (+3 capped)
+  - conflictBoostFactor=0 no-uplift fallback
+  - detective/scene-triggered episode boost
+  - dedup against active current-projection summary text
+
+Validation:
+- `bun test src/memory/` -> PASS
+  - 469 pass, 0 fail
+- `bun run build` -> PASS
+  - `tsc -p tsconfig.build.json --noEmit` success
+
+Changed files:
+- src/memory/contracts/retrieval-template.ts
+- src/memory/retrieval/retrieval-orchestrator.ts
+- src/memory/retrieval.ts
+- test/memory/retrieval-search.test.ts
+- .sisyphus/notepads/memory-refactor-v3/learnings.md (appended)
+- .sisyphus/evidence/task-29-adaptive-budget.txt

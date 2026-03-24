@@ -218,6 +218,7 @@ export class RetrievalService {
     dedupContext?: RetrievalDedupContext,
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
+    contestedCount?: number,
   ): Promise<TypedRetrievalResult> {
     const result = await this.orchestrator.search(
       query,
@@ -226,6 +227,7 @@ export class RetrievalService {
       retrievalTemplate,
       dedupContext,
       queryStrategy,
+      contestedCount,
     );
     const typed = result.typed;
     const conflictNotesBudget = retrievalTemplate?.conflictNotesBudget ?? 0;

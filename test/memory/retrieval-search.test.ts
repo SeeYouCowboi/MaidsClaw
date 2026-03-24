@@ -1147,6 +1147,42 @@ describe("RetrievalService", () => {
 			cleanupDb(dbPath);
 		});
 
+		it("supports detective/scene query-triggered episode boost from zero default", async () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+
+			const episodeRepo = new EpisodeRepository(db);
+			episodeRepo.append({
+				agentId: "rp:alice",
+				sessionId: "session-detective",
+				settlementId: "stl:episode-detective-1",
+				category: "observation",
+				summary: "A clue was left in the kitchen pantry after midnight",
+				locationEntityId: 1,
+				committedTime: Date.now(),
+			});
+
+			const retrieval = RetrievalService.create(db);
+			const typed = await retrieval.generateTypedRetrieval(
+				"investigate clues here in the kitchen",
+				viewer({ viewer_agent_id: "rp:alice", current_area_id: 1 }),
+				undefined,
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 1,
+					sceneEpisodeBoost: 1,
+				},
+			);
+
+			expect(typed.episode.length).toBeGreaterThanOrEqual(1);
+
+			db.close();
+			cleanupDb(dbPath);
+		});
+
 		it("getTypedRetrievalSurface auto-includes durable episodes without manual tool call", async () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -1328,6 +1364,156 @@ describe("RetrievalService", () => {
 			expect(result.typed.cognition[0]?.cognitionKey).toBe("kept");
 			expect(result.typed.narrative).toHaveLength(1);
 			expect(result.typed.narrative[0]?.content).toBe("new narrative");
+		});
+
+		it("auto-uplifts conflict_notes budget from contested assertion count", async () => {
+			const now = Date.now();
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "contested",
+							source_ref: "assertion:1" as NodeRef,
+							cognitionKey: "contested:key",
+							content: "contested cognition",
+							updated_at: now,
+							conflictEvidence: [
+								{ targetRef: "assertion:11", strength: 0.9, sourceKind: "system", sourceRef: "test" },
+								{ targetRef: "assertion:12", strength: 0.8, sourceKind: "system", sourceRef: "test" },
+								{ targetRef: "assertion:13", strength: 0.7, sourceKind: "system", sourceRef: "test" },
+								{ targetRef: "assertion:14", strength: 0.6, sourceKind: "system", sourceRef: "test" },
+							],
+						},
+					],
+				} as unknown as CognitionSearchService,
+			});
+
+			const result = await orchestrator.search(
+				"who is lying",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 1,
+					conflictBoostFactor: 1,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+				undefined,
+				"default_retrieval",
+				3,
+			);
+
+			expect(result.typed.conflict_notes).toHaveLength(4);
+		});
+
+		it("keeps conflict_notes budget unchanged when conflictBoostFactor is zero", async () => {
+			const now = Date.now();
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "contested",
+							source_ref: "assertion:2" as NodeRef,
+							cognitionKey: "contested:key:zero",
+							content: "contested cognition",
+							updated_at: now,
+							conflictEvidence: [
+								{ targetRef: "assertion:21", strength: 0.9, sourceKind: "system", sourceRef: "test" },
+								{ targetRef: "assertion:22", strength: 0.8, sourceKind: "system", sourceRef: "test" },
+								{ targetRef: "assertion:23", strength: 0.7, sourceKind: "system", sourceRef: "test" },
+							],
+						},
+					],
+				} as unknown as CognitionSearchService,
+			});
+
+			const result = await orchestrator.search(
+				"who is lying",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 1,
+					conflictBoostFactor: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+				undefined,
+				"default_retrieval",
+				3,
+			);
+
+			expect(result.typed.conflict_notes).toHaveLength(1);
+		});
+
+		it("deduplicates cognition hits against active current-projection summary text", async () => {
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:31" as NodeRef,
+							cognitionKey: "candidate-key",
+							content: "Projection duplicate text",
+							updated_at: 10,
+						},
+						{
+							kind: "evaluation",
+							basis: null,
+							stance: null,
+							source_ref: "evaluation:32" as NodeRef,
+							cognitionKey: "kept-key",
+							content: "Unique cognition text",
+							updated_at: 9,
+						},
+					],
+				} as unknown as CognitionSearchService,
+				currentProjectionReader: {
+					getActiveCurrent: () => [
+						{
+							cognition_key: "projection:key",
+							summary_text: "Projection duplicate text",
+						},
+					],
+				} as any,
+			});
+
+			const result = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 2,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+			);
+
+			expect(result.typed.cognition).toHaveLength(1);
+			expect(result.typed.cognition[0]?.cognitionKey).toBe("kept-key");
 		});
 
 		it("deep_explain strategy increases typed retrieval budgets over default_retrieval", async () => {
