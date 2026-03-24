@@ -496,11 +496,13 @@ describe("E2E: RP memory pipeline", () => {
 		const episodeRepo = new EpisodeRepository(db);
 		const cognitionEventRepo = new CognitionEventRepo(db.raw);
 		const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+		const areaProjectionRepo = new AreaWorldProjectionRepo(db.raw);
 		const projectionManager = new ProjectionManager(
 			episodeRepo,
 			cognitionEventRepo,
 			cognitionProjectionRepo,
 			graphStorage,
+			areaProjectionRepo,
 		);
 
 		const interactionStore = new InteractionStore(db);
@@ -590,11 +592,13 @@ describe("E2E: RP memory pipeline", () => {
 		const episodeRepo = new EpisodeRepository(db);
 		const cognitionEventRepo = new CognitionEventRepo(db.raw);
 		const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+		const areaProjectionRepo = new AreaWorldProjectionRepo(db.raw);
 		const projectionManager = new ProjectionManager(
 			episodeRepo,
 			cognitionEventRepo,
 			cognitionProjectionRepo,
 			graphStorage,
+			areaProjectionRepo,
 		);
 
 		const interactionStore = new InteractionStore(db);

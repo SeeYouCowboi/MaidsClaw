@@ -7,7 +7,10 @@ export const SURFACING_CLASSIFICATIONS = [
   "private_only",
 ] as const;
 
+export const AREA_STATE_SOURCE_TYPES = ["system", "gm", "simulation", "inferred_world"] as const;
+
 export type SurfacingClassification = (typeof SURFACING_CLASSIFICATIONS)[number];
+export type AreaStateSourceType = (typeof AREA_STATE_SOURCE_TYPES)[number];
 export type ProjectionUpdateTrigger = "publication" | "materialization" | "promotion";
 
 type AreaStateRow = {
@@ -16,7 +19,10 @@ type AreaStateRow = {
   key: string;
   value_json: string;
   surfacing_classification: SurfacingClassification;
+  source_type: AreaStateSourceType;
   updated_at: number;
+  valid_time: number | null;
+  committed_time: number | null;
 };
 
 type AreaNarrativeRow = {
@@ -39,28 +45,44 @@ type WorldNarrativeRow = {
   updated_at: number;
 };
 
+export type UpsertAreaStateInput = {
+  agentId: string;
+  areaId: number;
+  key: string;
+  value: unknown;
+  surfacingClassification: SurfacingClassification;
+  sourceType?: AreaStateSourceType;
+  updatedAt?: number;
+  validTime?: number;
+  committedTime?: number;
+};
+
 export class AreaWorldProjectionRepo {
   constructor(private readonly db: Database) {}
 
-  upsertAreaStateCurrent(input: {
-    agentId: string;
-    areaId: number;
-    key: string;
-    value: unknown;
-    surfacingClassification: SurfacingClassification;
-    updatedAt?: number;
-  }): void {
+  upsertAreaState(input: UpsertAreaStateInput): void {
+    this.upsertAreaStateCurrent(input);
+  }
+
+  upsertAreaStateCurrent(input: UpsertAreaStateInput): void {
     const updatedAt = input.updatedAt ?? Date.now();
+    const sourceType = input.sourceType ?? "system";
+    const validTime = input.validTime ?? updatedAt;
+    const committedTime = input.committedTime ?? updatedAt;
     this.assertSurfacingClassification(input.surfacingClassification);
+    this.assertAreaStateSourceType(sourceType);
     this.db
       .prepare(
-        `INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at, valid_time, committed_time)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(agent_id, area_id, key)
          DO UPDATE SET
-           value_json = excluded.value_json,
-           surfacing_classification = excluded.surfacing_classification,
-           updated_at = excluded.updated_at`,
+            value_json = excluded.value_json,
+            surfacing_classification = excluded.surfacing_classification,
+            source_type = excluded.source_type,
+            updated_at = excluded.updated_at,
+            valid_time = excluded.valid_time,
+            committed_time = excluded.committed_time`,
       )
       .run(
         input.agentId,
@@ -68,14 +90,17 @@ export class AreaWorldProjectionRepo {
         input.key,
         this.toJson(input.value),
         input.surfacingClassification,
+        sourceType,
         updatedAt,
+        validTime,
+        committedTime,
       );
   }
 
   getAreaStateCurrent(agentId: string, areaId: number, key: string): AreaStateRow | null {
     return this.db
       .prepare(
-        `SELECT agent_id, area_id, key, value_json, surfacing_classification, updated_at
+        `SELECT agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at, valid_time, committed_time
          FROM area_state_current
          WHERE agent_id = ? AND area_id = ? AND key = ?`,
       )
@@ -264,6 +289,13 @@ export class AreaWorldProjectionRepo {
       return;
     }
     throw new Error(`Invalid surfacing classification: ${value}`);
+  }
+
+  private assertAreaStateSourceType(value: string): void {
+    if (AREA_STATE_SOURCE_TYPES.includes(value as AreaStateSourceType)) {
+      return;
+    }
+    throw new Error(`Invalid area state source type: ${value}`);
   }
 
   private assertWorldClassification(value: SurfacingClassification): void {

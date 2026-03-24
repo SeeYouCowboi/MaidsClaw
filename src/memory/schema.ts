@@ -23,7 +23,7 @@ export const SurfacingClassification = {
 } as const;
 
 const AREA_WORLD_PROJECTION_DDL: readonly string[] = [
-  `CREATE TABLE IF NOT EXISTS area_state_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, valid_time INTEGER, committed_time INTEGER, PRIMARY KEY(agent_id, area_id, key))`,
+  `CREATE TABLE IF NOT EXISTS area_state_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), source_type TEXT NOT NULL DEFAULT 'system' CHECK (source_type IN ('system', 'gm', 'simulation', 'inferred_world')), updated_at INTEGER NOT NULL, valid_time INTEGER, committed_time INTEGER, PRIMARY KEY(agent_id, area_id, key))`,
   `CREATE INDEX IF NOT EXISTS idx_area_state_current_agent_area ON area_state_current(agent_id, area_id, updated_at DESC)`,
   `CREATE TABLE IF NOT EXISTS area_narrative_current (agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(agent_id, area_id))`,
   `CREATE TABLE IF NOT EXISTS world_state_current (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), updated_at INTEGER NOT NULL, valid_time INTEGER, committed_time INTEGER)`,
@@ -544,13 +544,14 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
         key TEXT NOT NULL,
         value_json TEXT NOT NULL,
         surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')),
+        source_type TEXT NOT NULL DEFAULT 'system' CHECK (source_type IN ('system', 'gm', 'simulation', 'inferred_world')),
         updated_at INTEGER NOT NULL,
         valid_time INTEGER,
         committed_time INTEGER,
         PRIMARY KEY(agent_id, area_id, key)
       )`);
-      db.exec(`INSERT INTO area_state_current_new (agent_id, area_id, key, value_json, surfacing_classification, updated_at, valid_time, committed_time)
-        SELECT agent_id, area_id, key, value_json, surfacing_classification, updated_at, updated_at, updated_at
+      db.exec(`INSERT INTO area_state_current_new (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at, valid_time, committed_time)
+        SELECT agent_id, area_id, key, value_json, surfacing_classification, 'system', updated_at, updated_at, updated_at
         FROM area_state_current`);
       db.exec(`DROP TABLE area_state_current`);
       db.exec(`ALTER TABLE area_state_current_new RENAME TO area_state_current`);
@@ -632,6 +633,19 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
       db.exec(`ALTER TABLE node_embeddings_new RENAME TO node_embeddings`);
       db.exec(
         `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
+      );
+    },
+  },
+  {
+    id: "memory:023:add-area-state-source-type",
+    description:
+      "Add source_type column to area_state_current for state provenance",
+    up: (db: Db) => {
+      addColumnIfMissing(
+        db,
+        "area_state_current",
+        "source_type",
+        "TEXT NOT NULL DEFAULT 'system' CHECK (source_type IN ('system', 'gm', 'simulation', 'inferred_world'))",
       );
     },
   },

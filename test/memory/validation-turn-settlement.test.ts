@@ -7,6 +7,7 @@ import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.j
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
 import { ExplicitSettlementProcessor } from "../../src/memory/explicit-settlement-processor.js";
+import { AreaWorldProjectionRepo } from "../../src/memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import type {
@@ -388,6 +389,58 @@ describe("V2 validation — turn settlement sync visibility", () => {
 			expect(row!.agent_id).toBe(agentId);
 			expect(row!.last_settlement_id).toBe(settlementId);
 			expect(row!.slot_payload).toContain("validation:slot:commitment");
+		}),
+	);
+
+	it("settlement commit can project latent area state without narrative event", () =>
+		withTempMemoryDb(({ db, storage }) => {
+			runInteractionMigrations(db);
+			const { locationId } = seedStandardEntities(db);
+			const areaProjectionRepo = new AreaWorldProjectionRepo(db.raw);
+			const projectionManager = new ProjectionManager(
+				new EpisodeRepository(db),
+				new CognitionEventRepo(db),
+				new PrivateCognitionProjectionRepo(db),
+				storage,
+				areaProjectionRepo,
+			);
+			const interactionStore = new InteractionStore(db);
+
+			projectionManager.commitSettlement({
+				settlementId: "stl:validation:latent-area",
+				sessionId: "sess:validation:latent-area",
+				agentId: "rp:alice",
+				cognitionOps: [],
+				privateEpisodes: [],
+				publications: [],
+				viewerSnapshot: { currentLocationEntityId: locationId },
+				areaStateArtifacts: [
+					{
+						key: "env.temperature",
+						value: { celsius: 18 },
+						surfacingClassification: "latent_state_update",
+						sourceType: "simulation",
+					},
+				],
+				upsertRecentCognitionSlot: interactionStore.upsertRecentCognitionSlot.bind(interactionStore),
+				recentCognitionSlotJson: "[]",
+			});
+
+			const areaState = db.get<{ surfacing_classification: string; source_type: string }>(
+				`SELECT surfacing_classification, source_type
+				 FROM area_state_current
+				 WHERE agent_id = ? AND area_id = ? AND key = ?`,
+				["rp:alice", locationId, "env.temperature"],
+			);
+			expect(areaState).toBeDefined();
+			expect(areaState?.surfacing_classification).toBe("latent_state_update");
+			expect(areaState?.source_type).toBe("simulation");
+
+			const areaNarrative = db.get<{ summary_text: string }>(
+				"SELECT summary_text FROM area_narrative_current WHERE agent_id = ? AND area_id = ?",
+				["rp:alice", locationId],
+			);
+			expect(areaNarrative).toBeUndefined();
 		}),
 	);
 });

@@ -34,6 +34,7 @@ import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js"
 import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
 import { EpisodeRepository } from "../memory/episode/episode-repo.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
+import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../memory/schema.js";
 import { GraphStorageService } from "../memory/storage.js";
@@ -459,11 +460,13 @@ export function bootstrapRuntime(
 	const episodeRepo = new EpisodeRepository(db);
 	const cognitionEventRepo = new CognitionEventRepo(db.raw);
 	const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+	const areaWorldProjectionRepo = new AreaWorldProjectionRepo(db.raw);
 	const projectionManager = new ProjectionManager(
 		episodeRepo,
 		cognitionEventRepo,
 		cognitionProjectionRepo,
 		graphStorage,
+		areaWorldProjectionRepo,
 	);
 
 	const turnService = new TurnService(

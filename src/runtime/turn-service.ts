@@ -483,6 +483,7 @@ export class TurnService {
 					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
 					privateEpisodes: canonicalOutcome.privateEpisodes,
 					publications,
+					areaStateArtifacts: settlementPayload.areaStateArtifacts,
 					viewerSnapshot: resolvedViewerSnapshot,
 					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
 					recentCognitionSlotJson: JSON.stringify(slotEntries),

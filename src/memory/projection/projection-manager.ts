@@ -2,8 +2,23 @@ import type { CognitionOp, PrivateEpisodeArtifact, PublicationDeclaration } from
 import type { CognitionEventRepo } from "../cognition/cognition-event-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
+import type {
+	AreaStateSourceType,
+	AreaWorldProjectionRepo,
+	SurfacingClassification,
+} from "./area-world-projection-repo.js";
 import type { GraphStorageService } from "../storage.js";
 import { materializePublications } from "../materialization.js";
+
+export type SettlementAreaStateArtifact = {
+	key: string;
+	value: unknown;
+	surfacingClassification?: SurfacingClassification;
+	sourceType?: AreaStateSourceType;
+	areaId?: number;
+	validTime?: number;
+	committedTime?: number;
+};
 
 export type SettlementProjectionParams = {
 	settlementId: string;
@@ -22,16 +37,45 @@ export type SettlementProjectionParams = {
 		newEntriesJson: string,
 	) => void;
 	recentCognitionSlotJson: string;
+	areaStateArtifacts?: SettlementAreaStateArtifact[];
 };
 
+/**
+ * Manages projection builds triggered by settlement commits.
+ *
+ * **Sync projections** (must complete within the caller's transaction):
+ *  - Episode append           → {@link appendEpisodes}
+ *  - Cognition event append   → {@link appendCognitionEvents}
+ *  - private_cognition_current upsert (inside appendCognitionEvents)
+ *  - Recent-cognition slot upsert
+ *  - Publication materialization → {@link materializePublicationsSafe}
+ *
+ * **Async projections** (deferred to {@link GraphOrganizerJob} via MemoryTaskAgent):
+ *  - Embedding generation
+ *  - Semantic edge construction
+ *  - Node scoring (salience / centrality / bridge)
+ *  - Same-episode edge maintenance
+ *
+ * Callers must NOT move any sync projection to the async path; the data must
+ * be queryable immediately after `commitSettlement` returns.
+ */
 export class ProjectionManager {
 	constructor(
 		private readonly episodeRepo: EpisodeRepository,
 		private readonly cognitionEventRepo: CognitionEventRepo,
 		private readonly cognitionProjectionRepo: PrivateCognitionProjectionRepo,
 		private readonly graphStorage: GraphStorageService | null,
+		private readonly areaWorldProjectionRepo: AreaWorldProjectionRepo | null = null,
 	) {}
 
+	/**
+	 * Runs all **sync projections** for a settlement within the caller's transaction.
+	 *
+	 * Every write here is synchronous and must be visible to subsequent reads
+	 * in the same connection immediately after this method returns.
+	 * Async projection work (embeddings, scoring) is handled separately by
+	 * {@link GraphOrganizerJob} dispatched from MemoryTaskAgent.
+	 */
 	commitSettlement(params: SettlementProjectionParams): void {
 		const now = Date.now();
 
@@ -45,9 +89,37 @@ export class ProjectionManager {
 			params.recentCognitionSlotJson,
 		);
 
+		this.upsertAreaStateArtifacts(params, now);
+
 		this.materializePublicationsSafe(params);
 	}
 
+	private upsertAreaStateArtifacts(params: SettlementProjectionParams, now: number): void {
+		if (!this.areaWorldProjectionRepo || !params.areaStateArtifacts?.length) {
+			return;
+		}
+
+		for (const artifact of params.areaStateArtifacts) {
+			const areaId = artifact.areaId ?? params.viewerSnapshot?.currentLocationEntityId;
+			if (areaId === undefined) {
+				continue;
+			}
+
+			this.areaWorldProjectionRepo.upsertAreaState({
+				agentId: params.agentId,
+				areaId,
+				key: artifact.key,
+				value: artifact.value,
+				surfacingClassification: artifact.surfacingClassification ?? "latent_state_update",
+				sourceType: artifact.sourceType ?? "system",
+				updatedAt: now,
+				validTime: artifact.validTime,
+				committedTime: artifact.committedTime ?? now,
+			});
+		}
+	}
+
+	/** Sync projection: appends private episode rows within the settlement transaction. */
 	private appendEpisodes(params: SettlementProjectionParams, now: number): void {
 		for (const episode of params.privateEpisodes) {
 			this.episodeRepo.append({
@@ -66,6 +138,7 @@ export class ProjectionManager {
 		}
 	}
 
+	/** Sync projection: appends cognition events and upserts private_cognition_current within the settlement transaction. */
 	private appendCognitionEvents(params: SettlementProjectionParams, now: number): void {
 		for (const op of params.cognitionOps) {
 			let recordJson: string | null = null;
@@ -87,7 +160,7 @@ export class ProjectionManager {
 			this.cognitionProjectionRepo.upsertFromEvent({
 				id: eventId,
 				agent_id: params.agentId,
-				cognition_key: op.op === "upsert" ? op.record.key : op.target.key,
+				"cognition_key": op.op === "upsert" ? op.record.key : op.target.key,
 				kind: op.op === "upsert" ? op.record.kind : op.target.kind,
 				op: op.op,
 				record_json: recordJson,
@@ -98,6 +171,7 @@ export class ProjectionManager {
 		}
 	}
 
+	/** Sync projection: materializes publication declarations into graph storage within the settlement transaction. */
 	private materializePublicationsSafe(params: SettlementProjectionParams): void {
 		if (params.publications.length === 0 || !this.graphStorage) {
 			return;

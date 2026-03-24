@@ -11,6 +11,9 @@ import type {
   RelationIntent,
 } from "../runtime/rp-turn-contract.js";
 
+type SurfacingClassification = "public_manifestation" | "latent_state_update" | "private_only";
+type AreaStateSourceType = "system" | "gm" | "simulation" | "inferred_world";
+
 // Actor types — who produced an interaction record
 // EXACTLY 6 actor types allowed
 export type ActorType =
@@ -107,6 +110,15 @@ export type TurnSettlementPayload = {
   pinnedSummaryProposal?: PinnedSummaryProposal;
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
+  areaStateArtifacts?: Array<{
+    key: string;
+    value: unknown;
+    surfacingClassification?: SurfacingClassification;
+    sourceType?: AreaStateSourceType;
+    areaId?: number;
+    validTime?: number;
+    committedTime?: number;
+  }>;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

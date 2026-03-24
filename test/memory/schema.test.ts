@@ -495,7 +495,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(22);
+		expect(migrationCount?.count).toBe(23);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -521,6 +521,7 @@ describe("memory schema", () => {
 		const areaColumns = listColumns(db, "area_state_current");
 		expect(areaColumns.includes("valid_time")).toBe(true);
 		expect(areaColumns.includes("committed_time")).toBe(true);
+		expect(areaColumns.includes("source_type")).toBe(true);
 
 		const worldColumns = listColumns(db, "world_state_current");
 		expect(worldColumns.includes("valid_time")).toBe(true);
@@ -553,6 +554,28 @@ describe("memory schema", () => {
 			["rp:alice", 1, "door:status"],
 		);
 		expect(areaRow?.surfacing_classification).toBe("latent_state_update");
+
+		db.run(
+			"INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			["rp:alice", 1, "door:gm-note", '{"locked":false}', "private_only", "gm", now],
+		);
+
+		const sourceTypeRow = db.get<{ source_type: string }>(
+			"SELECT source_type FROM area_state_current WHERE agent_id = ? AND area_id = ? AND key = ?",
+			["rp:alice", 1, "door:gm-note"],
+		);
+		expect(sourceTypeRow?.source_type).toBe("gm");
+
+		let invalidSourceTypeFailed = false;
+		try {
+			db.run(
+				"INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["rp:alice", 1, "door:bad-source", '{"locked":false}', "latent_state_update", "external", now],
+			);
+		} catch {
+			invalidSourceTypeFailed = true;
+		}
+		expect(invalidSourceTypeFailed).toBe(true);
 
 		const worldRow = db.get<{ surfacing_classification: string }>(
 			"SELECT surfacing_classification FROM world_state_current WHERE key = ?",
@@ -874,14 +897,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 22 after all migrations", () => {
+	it("migration count is 23 after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(22);
+		expect(migrationCount?.count).toBe(23);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -10,6 +10,7 @@ import { InteractionStore } from "../../src/interaction/store.js";
 import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { EpisodeRepository } from "../../src/memory/episode/episode-repo.js";
+import { AreaWorldProjectionRepo } from "../../src/memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -1112,6 +1113,7 @@ describe("TurnService with ProjectionManager", () => {
   let episodeRepo: EpisodeRepository;
   let cognitionEventRepo: CognitionEventRepo;
   let cognitionProjectionRepo: PrivateCognitionProjectionRepo;
+  let areaProjectionRepo: AreaWorldProjectionRepo;
 
   beforeEach(() => {
     db = openDatabase({ path: ":memory:" });
@@ -1125,11 +1127,13 @@ describe("TurnService with ProjectionManager", () => {
     episodeRepo = new EpisodeRepository(db);
     cognitionEventRepo = new CognitionEventRepo(db.raw);
     cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+    areaProjectionRepo = new AreaWorldProjectionRepo(db.raw);
     projectionManager = new ProjectionManager(
       episodeRepo,
       cognitionEventRepo,
       cognitionProjectionRepo,
       graphStorage,
+      areaProjectionRepo,
     );
   });
 
