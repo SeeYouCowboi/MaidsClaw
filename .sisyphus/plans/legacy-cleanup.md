@@ -294,14 +294,14 @@ Wave FINAL (4 parallel reviews → user okay):
 
 ## TODOs
 
-- [ ] 1. Green Baseline Verification
+- [x] 1. Green Baseline Verification
 
   **What**: Run `bun test` + `npx tsc --noEmit`, record pass count as baseline.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: None | **Blocks**: T2,T3
   **Acceptance**: baseline test count recorded to `.sisyphus/evidence/task-1-baseline.txt`
   **Commit**: NO
 
-- [ ] 2. Inline Migration:006 Constants
+- [x] 2. Inline Migration:006 Constants
 
   **What**: In `schema.ts` migration `memory:006`, replace imports of `EPISTEMIC_STATUS_TO_STANCE`/`BELIEF_TYPE_TO_BASIS` from rp-turn-contract with inline SQL CASE values. Migration behavior must be identical.
   **Must NOT**: Change migration ID, change behavior, modify other migrations.
@@ -310,14 +310,14 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: migration:006 no longer imports from rp-turn-contract.ts; `bun test` passes
   **Commit**: YES — `refactor(memory): inline migration:006 constants`
 
-- [ ] 3. Backfill Completeness Verification
+- [x] 3. Backfill Completeness Verification
 
   **What**: Run `SELECT COUNT(*) FROM agent_fact_overlay WHERE stance IS NULL AND epistemic_status IS NOT NULL`. If count > 0: document as blocker for T14 with remediation. If 0: safe to proceed.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T1 | **Blocks**: T14
   **Acceptance**: Result recorded to `.sisyphus/evidence/task-3-backfill-check.txt`
   **Commit**: NO
 
-- [ ] 4. Clean rp-turn-contract.ts — Remove v3/v4 Protocol
+- [x] 4. Clean rp-turn-contract.ts — Remove v3/v4 Protocol
 
   **What**:
   - **Remove types**: `RpTurnOutcomeSubmission`(v3), `RpTurnOutcomeSubmissionV4`, `PrivateCognitionCommit`(v3), `AssertionRecord`(v3), `PublicationKind`(v1)
@@ -333,7 +333,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `npx tsc --noEmit` passes for this file; no v3/v4 types remain; `detectOutcomeVersion` rejects v3/v4
   **Commit**: YES — `refactor(memory): remove v3/v4 protocol types and normalizer`
 
-- [ ] 5. Clean submit-rp-turn-tool.ts — v5-only Schema
+- [x] 5. Clean submit-rp-turn-tool.ts — v5-only Schema
 
   **What**: `schemaVersion.enum` → `["rp_turn_outcome_v5"]` only; remove `privateCommit` param (lines 64-79); `publications[].kind.enum` → `["spoken","written","visual"]` only; update descriptions.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T4 | **Blocks**: T16
@@ -341,7 +341,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: Tool schema only accepts v5; no privateCommit param; kind = spoken/written/visual only
   **Commit**: YES (groups with Wave 2)
 
-- [ ] 5a. Fix agent-loop.ts v4→v5 Fallback  ← NEW (CRITICAL-2 fix)
+- [x] 5a. Fix agent-loop.ts v4→v5 Fallback  ← NEW (CRITICAL-2 fix)
 
   **What**: Lines 583 and 680 have `schemaVersion: "rp_turn_outcome_v4"` in text fallback paths (model returns text without calling submit_rp_turn). Change both to `"rp_turn_outcome_v5"`. Update the fallback object shape so it fully conforms to the v5 submission schema used by `normalizeRpTurnOutcome()`.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T4 | **Blocks**: T16
@@ -349,7 +349,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "rp_turn_outcome_v4" src/core/agent-loop.ts` → 0; `npx tsc --noEmit` passes
   **Commit**: YES (groups with Wave 2)
 
-- [ ] 6. Clean ALL privateCommit References (15 files)  ← EXPANDED (CRITICAL-3 fix)
+- [x] 6. Clean ALL privateCommit References (15 files)  ← EXPANDED (CRITICAL-3 fix)
 
   **What**: Migrate `privateCommit`/`private_commit` → `privateCognition`/`private_cognition` across ALL 15 files:
 
@@ -398,7 +398,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep -r "privateCommit\|private_commit" src/` → 0 matches (excluding `privateCognition`/`private_cognition`)
   **Commit**: YES (groups with Wave 2)
 
-- [ ] 7. Update create_private_belief to Canonical Fields
+- [x] 7. Update create_private_belief to Canonical Fields
 
   **What**: `task-agent.ts` `create_private_belief` tool uses `BeliefType`/`EpistemicStatus` in schema and calls `storage.createPrivateBelief()`. **Decision (pre-resolved)**: This tool IS registered for task_agent role and actively used. Update it to use canonical fields: replace `belief_type` param → `basis` (AssertionBasis), `epistemic_status` → `stance` (AssertionStance), remove `confidence` param. Update `storage.createPrivateBelief()` to write canonical columns (stance/basis) instead of legacy columns (belief_type/epistemic_status/confidence). This task explicitly includes:
   - `src/memory/storage.ts:113-115,131` — legacy type signatures using `beliefType/confidence/epistemicStatus`
@@ -410,7 +410,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: No BeliefType/EpistemicStatus in task-agent.ts; `storage.ts` no longer reads/writes `belief_type` / `epistemic_status` / `confidence` in runtime code; storage writes canonical columns
   **Commit**: YES (groups with Wave 2)
 
-- [ ] 8. Clean memory/types.ts — Remove Legacy Types
+- [x] 8. Clean memory/types.ts — Remove Legacy Types
 
   **What**: Remove `BeliefType`/`BELIEF_TYPES`, `EpistemicStatus`/`EPISTEMIC_STATUSES`, `confidence`/`belief_type`/`epistemic_status` from `AgentFactOverlay` type. Fix resulting TS errors.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T4 | **Blocks**: T9,T9a,T14
@@ -418,7 +418,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: Zero legacy type references in types.ts; `npx tsc --noEmit` passes
   **Commit**: YES (groups with Wave 2)
 
-- [ ] 9. Migrate cognition-repo.ts — 13 SQL ops from agent_event_overlay  ← MASSIVELY EXPANDED
+- [x] 9. Migrate cognition-repo.ts — 13 SQL ops from agent_event_overlay  ← MASSIVELY EXPANDED
 
   **What**: This is the **core cognition CRUD layer**. 13 SQL operations must migrate from `agent_event_overlay` to `private_cognition_events` (append-only writes) + `private_cognition_current` (projection reads/updates):
 
@@ -455,7 +455,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/cognition/cognition-repo.ts` → 0; `bun test` passes
   **Commit**: YES — `refactor(memory): migrate cognition-repo CRUD from agent_event_overlay`
 
-- [ ] 9a. Migrate storage.ts + materialization.ts WRITES from agent_event_overlay  ← NEW
+- [x] 9a. Migrate storage.ts + materialization.ts WRITES from agent_event_overlay  ← NEW
 
   **What**: `storage.ts` has the base-level storage operations and `materialization.ts` has an event linkage UPDATE:
   - `storage.ts:550` — INSERT INTO agent_event_overlay (main private event write path)
@@ -470,7 +470,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/storage.ts src/memory/materialization.ts` → 0; `bun test` passes
   **Commit**: YES (groups with Wave 3)
 
-- [ ] 10. Migrate cognition-search.ts 3×READ
+- [x] 10. Migrate cognition-search.ts 3×READ
 
   **What**: Lines 147,259,275 — SELECT cognition_key/cognition_status/metadata_json from agent_event_overlay. Migrate to `private_cognition_current` with column renames (status, record_json JSON extraction for metadata).
   **Category**: `deep` | **Skills**: [] | **Blocked By**: T9,T9a | **Blocks**: T13
@@ -478,7 +478,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/cognition/cognition-search.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 11. Migrate relation-intent-resolver.ts 1×READ
+- [x] 11. Migrate relation-intent-resolver.ts 1×READ
 
   **What**: Line 331 — SELECT id,explicit_kind → `private_cognition_current` (last_event_id, kind).
   **Category**: `unspecified-high` | **Skills**: [] | **Blocked By**: T9,T9a | **Blocks**: T13
@@ -486,7 +486,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/cognition/relation-intent-resolver.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 12. Migrate graph-edge-view.ts 1×READ
+- [x] 12. Migrate graph-edge-view.ts 1×READ
 
   **What**: Line 379 — SELECT agent_id. Route based on NodeRef kind: private_event→private_episode_events, evaluation/commitment→private_cognition_current.
   **Category**: `unspecified-high` | **Skills**: [] | **Blocked By**: T9,T9a | **Blocks**: T13
@@ -494,7 +494,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/graph-edge-view.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 12a. Migrate navigator.ts 6×READ  ← NEW
+- [x] 12a. Migrate navigator.ts 6×READ  ← NEW
 
   **What**: 6 references:
   - `:980` — SELECT query
@@ -508,7 +508,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/navigator.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 12b. Migrate graph-organizer.ts 4×READ  ← NEW
+- [x] 12b. Migrate graph-organizer.ts 4×READ  ← NEW
 
   **What**: 4 SELECT queries for private_notes, projectable_summary, created_at, cognition_status, event_category. Map to `private_cognition_current` (record_json JSON extraction) and/or `private_episode_events`. This task also explicitly includes the `agent_fact_overlay` legacy-column reads in `graph-organizer.ts`:
   - `src/memory/graph-organizer.ts:155-160` — `SELECT ... stance, epistemic_status FROM agent_fact_overlay` and fallback `row.stance ?? row.epistemic_status`
@@ -519,7 +519,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/graph-organizer.ts` → 0; no runtime reads of `agent_fact_overlay.epistemic_status` remain in this file
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 12c. Migrate retrieval.ts 3×READ  ← NEW
+- [x] 12c. Migrate retrieval.ts 3×READ  ← NEW
 
   **What**: 3 SELECT * queries. These are broad queries returning all columns — must be decomposed into specific column selections from new tables.
   **Category**: `unspecified-high` | **Skills**: [] | **Blocked By**: T9,T9a | **Blocks**: T13
@@ -527,7 +527,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/retrieval.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 12d. Migrate promotion.ts + embeddings.ts 2×READ  ← NEW
+- [x] 12d. Migrate promotion.ts + embeddings.ts 2×READ  ← NEW
 
   **What**: `promotion.ts:419` — SELECT created_at. `embeddings.ts:83` — SELECT agent_id. Both are simple single-column lookups, route to appropriate new table.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T9,T9a | **Blocks**: T13
@@ -535,7 +535,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep "agent_event_overlay" src/memory/promotion.ts src/memory/embeddings.ts` → 0
   **Commit**: YES (groups with Wave 4)
 
-- [ ] 13. Migration memory:017 — DROP TABLE agent_event_overlay
+- [x] 13. Migration memory:017 — DROP TABLE agent_event_overlay
 
   **What**: Add migration `memory:017`: `DROP TABLE IF EXISTS agent_event_overlay`. Remove from MEMORY_DDL. If `AgentEventOverlay` type still exists in `types.ts`, remove it in this task. Update navigator.test.ts fixture.
   **Pre-condition**: `grep -r "agent_event_overlay" src/ --include="*.ts"` returns no remaining **production** runtime/storage/query references outside `src/memory/schema.ts` and test files scheduled for T16.
@@ -543,7 +543,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `grep -r "agent_event_overlay" src/ --include="*.ts"` → only `src/memory/schema.ts` and test files explicitly scheduled for T16
   **Commit**: YES — `refactor(memory): drop agent_event_overlay table via migration`
 
-- [ ] 14. Migration memory:018 — Rebuild agent_fact_overlay
+- [x] 14. Migration memory:018 — Rebuild agent_fact_overlay
 
   **What**: SQLite table rebuild: CREATE new (without confidence/belief_type/epistemic_status) → INSERT canonical columns → DROP old → RENAME → recreate indexes. Update MEMORY_DDL.
   **Pre-condition**: T3 verified count=0 (all rows backfilled).
@@ -551,7 +551,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: Fresh DB init succeeds; `bun test src/memory/schema.test.ts` passes
   **Commit**: YES (groups with Wave 5)
 
-- [ ] 15. Clean cognition-repo.ts — Remove Legacy Fallback
+- [x] 15. Clean cognition-repo.ts — Remove Legacy Fallback
 
   **What**: Remove `toCanonicalAssertion()` fallback (EPISTEMIC_STATUS_TO_STANCE/BELIEF_TYPE_TO_BASIS mapping), remove `backfillLegacyRows()` method. Remove those constant imports.
   **Must NOT**: Remove `assertLegalStanceTransition()`/`assertBasisUpgradeOnly()` (v5 validation).
@@ -559,7 +559,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: No legacy mapping imports in cognition-repo.ts; `bun test` passes
   **Commit**: YES (groups with Wave 5)
 
-- [ ] 16. Update Test Files — v3/v4 → v5
+- [x] 16. Update Test Files — v3/v4 → v5
 
   **What**:
   - `test/runtime/rp-turn-contract.test.ts` — Remove v3/v4 tests, verify v5 equivalents exist
@@ -576,7 +576,7 @@ Wave FINAL (4 parallel reviews → user okay):
   **Acceptance**: `bun test` 100% pass; test count delta vs T1 baseline documented explicitly, with each removed v3/v4-only test family named
   **Commit**: YES — `test(memory): update tests for v5-only protocol`
 
-- [ ] 17. Final Grep Verification + Full Regression
+- [x] 17. Final Grep Verification + Full Regression
 
   **What**: Run ALL grep commands from Success Criteria. Run `bun test` + `npx tsc --noEmit`. Compare test count with T1 baseline. Clean stale comments (tools.ts "T10 not yet created"). Also run a targeted runtime-code grep to confirm no remaining reads/writes of dropped `agent_fact_overlay` legacy columns outside `schema.ts` and test files.
   **Category**: `quick` | **Skills**: [] | **Blocked By**: T16 | **Blocks**: F1-F4
@@ -587,10 +587,10 @@ Wave FINAL (4 parallel reviews → user okay):
 
 ## Final Verification Wave (MANDATORY)
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
-- [ ] F2. **Code Quality Review** — `unspecified-high`
-- [ ] F3. **Real Manual QA** — `unspecified-high`
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F1. **Plan Compliance Audit** — `oracle`
+- [x] F2. **Code Quality Review** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
+- [x] F4. **Scope Fidelity Check** — `deep`
 -> Present results -> Get explicit user okay
 
 ---

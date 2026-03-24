@@ -131,7 +131,6 @@ type UpsertExplicitAssertionInput = {
   stance: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
-  confidence?: number;
   provenance?: string;
 };
 
