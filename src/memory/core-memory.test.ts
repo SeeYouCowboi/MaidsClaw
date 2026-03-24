@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { createMemorySchema } from "./schema.js";
+import { createMemorySchema, runMemoryMigrations } from "./schema.js";
 import { CoreMemoryService, resolveCanonicalLabel } from "./core-memory.js";
 import { COMPAT_ALIAS_MAP, READ_ONLY_LABELS } from "./types.js";
 import { PinnedSummaryProposalService } from "./pinned-summary-proposal.js";
+import { openDatabase } from "../storage/database.js";
 
 function freshDb() {
   const db = new Database(":memory:");
@@ -358,31 +359,46 @@ describe("CoreMemoryService", () => {
   });
 
   describe("PinnedSummaryProposalService", () => {
+    function freshProposalDb() {
+      const pdb = openDatabase({ path: ":memory:" });
+      createMemorySchema(pdb.raw);
+      runMemoryMigrations(pdb);
+      return pdb;
+    }
+
     it("stores proposal without auto-applying to pinned_summary", () => {
       svc.initializeBlocks("agent-1");
-      const ps = new PinnedSummaryProposalService();
+      const pdb = freshProposalDb();
+      const ps = new PinnedSummaryProposalService(pdb);
       ps.storeProposal("stl:1", "agent-1", { proposedText: "New summary", rationale: "Better" });
       expect(ps.getPendingProposals("agent-1")).toHaveLength(1);
       expect(ps.getPendingProposals("agent-1")[0]!.applied).toBe(false);
       expect(svc.getBlock("agent-1", "pinned_summary").value).toBe("");
+      pdb.close();
     });
     it("markApplied transitions proposal to applied", () => {
-      const ps = new PinnedSummaryProposalService();
+      const pdb = freshProposalDb();
+      const ps = new PinnedSummaryProposalService(pdb);
       ps.storeProposal("stl:1", "agent-1", { proposedText: "New" });
       expect(ps.markApplied("agent-1", "stl:1")).toBe(true);
       expect(ps.getPendingProposals("agent-1")).toHaveLength(0);
+      pdb.close();
     });
     it("getLatestPending returns most recent pending", () => {
-      const ps = new PinnedSummaryProposalService();
+      const pdb = freshProposalDb();
+      const ps = new PinnedSummaryProposalService(pdb);
       ps.storeProposal("stl:1", "agent-1", { proposedText: "First" });
       ps.storeProposal("stl:2", "agent-1", { proposedText: "Second" });
       expect(ps.getLatestPending("agent-1")?.proposal.proposedText).toBe("Second");
+      pdb.close();
     });
     it("clearAll removes all proposals", () => {
-      const ps = new PinnedSummaryProposalService();
+      const pdb = freshProposalDb();
+      const ps = new PinnedSummaryProposalService(pdb);
       ps.storeProposal("stl:1", "agent-1", { proposedText: "Content" });
       ps.clearAll("agent-1");
       expect(ps.getPendingProposals("agent-1")).toHaveLength(0);
+      pdb.close();
     });
   });
 });
