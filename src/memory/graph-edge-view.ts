@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { MAX_INTEGER } from "./schema.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
-import type { EdgeLayer, NodeRef, NodeRefKind, ViewerContext } from "./types.js";
+import type { EdgeLayer, NodeRef, NodeRefKind, ViewerContext, MemoryRelationType } from "./types.js";
 import type { TimeSliceQuery } from "./time-slice-query.js";
 import { isEdgeInTimeSlice } from "./time-slice-query.js";
 
@@ -26,19 +26,27 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "private_belief",
 ]);
 
-const RELATION_CONTRACTS: Record<string, RelationContract> = {
+const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
   causal: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
   temporal_prev: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
   temporal_next: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
   same_episode: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
+  semantic_similar: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+  conflict_or_update: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+  entity_bridge: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+};
+
+const MEMORY_RELATION_CONTRACTS: Record<MemoryRelationType, RelationContract> = {
   supports: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   triggered: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   conflicts_with: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   derived_from: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
   supersedes: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  semantic_similar: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
-  conflict_or_update: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
-  entity_bridge: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+};
+
+const RELATION_CONTRACTS: Record<string, RelationContract> = {
+  ...LOGIC_EDGE_CONTRACTS,
+  ...MEMORY_RELATION_CONTRACTS,
 };
 
 export type GraphEdgeReadResult = {

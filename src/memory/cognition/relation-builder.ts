@@ -6,6 +6,8 @@
  * Does NOT touch `logic_edges` (event-only).
  */
 
+import type { MemoryRelationType, RelationDirectness, RelationSourceKind } from "../types.js";
+
 type DbLike = {
   prepare(sql: string): {
     run(...params: unknown[]): { lastInsertRowid: number | bigint };
@@ -24,10 +26,14 @@ type ConflictEvidenceRow = {
 
 const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/;
 
+export const CONFLICTS_WITH: MemoryRelationType = "conflicts_with";
+export const DIRECTNESS_DIRECT: RelationDirectness = "direct";
+export const SOURCE_KIND_AGENT_OP: RelationSourceKind = "agent_op";
+
 export type ConflictEvidence = {
   targetRef: string;
   strength: number;
-  sourceKind: string;
+  sourceKind: RelationSourceKind;
   sourceRef: string;
   createdAt: number;
 };
@@ -79,11 +85,21 @@ export class RelationBuilder {
         .prepare(
           `INSERT INTO memory_relations
            (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
-           VALUES (?, ?, 'conflicts_with', ?, 'direct', 'agent_op', ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
            DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
         )
-        .run(sourceNodeRef, targetNodeRef, strength, sourceRef, now, now);
+        .run(
+          sourceNodeRef,
+          targetNodeRef,
+          CONFLICTS_WITH,
+          strength,
+          DIRECTNESS_DIRECT,
+          SOURCE_KIND_AGENT_OP,
+          sourceRef,
+          now,
+          now,
+        );
     }
   }
 
@@ -96,16 +112,16 @@ export class RelationBuilder {
       .prepare(
         `SELECT target_node_ref, strength, source_kind, source_ref, created_at
          FROM memory_relations
-         WHERE source_node_ref = ? AND relation_type = 'conflicts_with'
+         WHERE source_node_ref = ? AND relation_type = ?
          ORDER BY strength DESC
          LIMIT ?`,
       )
-      .all(sourceNodeRef, limit) as ConflictEvidenceRow[];
+      .all(sourceNodeRef, CONFLICTS_WITH, limit) as ConflictEvidenceRow[];
 
     return rows.map((row) => ({
       targetRef: row.target_node_ref,
       strength: row.strength,
-      sourceKind: row.source_kind,
+      sourceKind: row.source_kind as RelationSourceKind,
       sourceRef: row.source_ref,
       createdAt: row.created_at,
     }));

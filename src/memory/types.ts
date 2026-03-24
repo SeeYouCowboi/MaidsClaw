@@ -216,6 +216,29 @@ export type AgentFactOverlay = {
   updated_at: number;
 };
 
+// Memory relation types - extracted from schema.ts CHECK constraints
+export const MEMORY_RELATION_TYPES = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes"] as const;
+export type MemoryRelationType = (typeof MEMORY_RELATION_TYPES)[number];
+
+export const RELATION_DIRECTNESS_VALUES = ["direct", "inferred", "indirect"] as const;
+export type RelationDirectness = (typeof RELATION_DIRECTNESS_VALUES)[number];
+
+export const RELATION_SOURCE_KINDS = ["turn", "job", "agent_op", "system"] as const;
+export type RelationSourceKind = (typeof RELATION_SOURCE_KINDS)[number];
+
+export type MemoryRelationRecord = {
+  id: number;
+  source_node_ref: string;
+  target_node_ref: string;
+  relation_type: MemoryRelationType;
+  strength: number;
+  directness: RelationDirectness;
+  source_kind: RelationSourceKind;
+  source_ref: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export type CoreMemoryBlock = {
   id: number;
   agent_id: string;
