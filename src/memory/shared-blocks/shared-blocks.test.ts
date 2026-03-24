@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createMemorySchema } from "../schema.js";
 import { SharedBlockAttachService } from "./shared-block-attach-service.js";
+import { SharedBlockAuditFacade } from "./shared-block-audit.js";
 import { MoveTargetConflictError, SharedBlockPatchService } from "./shared-block-patch-service.js";
 import { SharedBlockPermissions } from "./shared-block-permissions.js";
 import { SharedBlockRepo } from "./shared-block-repo.js";
@@ -487,5 +488,173 @@ describe("SharedBlockPatchService", () => {
     expect(logs[3].patch_seq).toBe(4);
     expect(logs[3].op).toBe("delete_section");
     expect(logs[3].section_path).toBe("b");
+  });
+});
+
+// ── SharedBlockAuditFacade ──
+
+describe("SharedBlockAuditFacade", () => {
+  it("listBlockPatches returns patches in order with correct fields", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("Audit Test", OWNER);
+
+    patchService.applyPatch(block.id, "set_section", { sectionPath: "a", content: "v1" }, OWNER, "turn:t-1");
+    patchService.applyPatch(block.id, "set_section", { sectionPath: "b", content: "v2" }, OWNER, "turn:t-2");
+    patchService.applyPatch(block.id, "set_title", { title: "New Title" }, OWNER, "turn:t-3");
+
+    const patches = audit.listBlockPatches(block.id);
+    expect(patches).toHaveLength(3);
+    expect(patches[0].patchSeq).toBe(1);
+    expect(patches[0].op).toBe("set_section");
+    expect(patches[0].sectionPath).toBe("a");
+    expect(patches[0].content).toBe("v1");
+    expect(patches[0].sourceRef).toBe("turn:t-1");
+    expect(patches[0].appliedByAgentId).toBe(OWNER);
+    expect(patches[0].appliedAt).toBeGreaterThan(0);
+    expect(patches[1].patchSeq).toBe(2);
+    expect(patches[2].patchSeq).toBe(3);
+    expect(patches[2].op).toBe("set_title");
+  });
+
+  it("listBlockPatches supports limit and sinceSeq options", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("B", OWNER);
+
+    for (let i = 1; i <= 5; i++) {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v${i}` }, OWNER);
+    }
+
+    const limited = audit.listBlockPatches(block.id, { limit: 2 });
+    expect(limited).toHaveLength(2);
+    expect(limited[0].patchSeq).toBe(1);
+    expect(limited[1].patchSeq).toBe(2);
+
+    const sinceSeq = audit.listBlockPatches(block.id, { sinceSeq: 3 });
+    expect(sinceSeq).toHaveLength(2);
+    expect(sinceSeq[0].patchSeq).toBe(4);
+    expect(sinceSeq[1].patchSeq).toBe(5);
+
+    const combined = audit.listBlockPatches(block.id, { sinceSeq: 2, limit: 1 });
+    expect(combined).toHaveLength(1);
+    expect(combined[0].patchSeq).toBe(3);
+  });
+
+  it("listBlockPatches returns empty array for non-existent block", () => {
+    const audit = new SharedBlockAuditFacade(db);
+    expect(audit.listBlockPatches(9999)).toEqual([]);
+  });
+
+  it("listBlockSnapshots returns snapshot metadata without content", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("B", OWNER);
+
+    for (let i = 1; i <= 25; i++) {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v${i}` }, OWNER);
+    }
+
+    const snapshots = audit.listBlockSnapshots(block.id);
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0].snapshotSeq).toBe(0);
+    expect(snapshots[0].createdAt).toBeGreaterThan(0);
+    expect(snapshots[1].snapshotSeq).toBe(25);
+    expect((snapshots[0] as Record<string, unknown>)["contentJson"]).toBeUndefined();
+  });
+
+  it("listBlockSnapshots supports limit option", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("B", OWNER);
+
+    for (let i = 1; i <= 25; i++) {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v${i}` }, OWNER);
+    }
+
+    const limited = audit.listBlockSnapshots(block.id, { limit: 1 });
+    expect(limited).toHaveLength(1);
+    expect(limited[0].snapshotSeq).toBe(0);
+  });
+
+  it("getBlockSnapshot returns full snapshot with contentJson", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("B", OWNER);
+
+    for (let i = 1; i <= 25; i++) {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v${i}` }, OWNER);
+    }
+
+    const snapshot = audit.getBlockSnapshot(block.id, 25);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.snapshotSeq).toBe(25);
+    expect(snapshot!.createdAt).toBeGreaterThan(0);
+    const parsed = JSON.parse(snapshot!.contentJson);
+    expect(Object.keys(parsed)).toHaveLength(25);
+    expect(parsed["s-1"]).toBe("v1");
+
+    const baseline = audit.getBlockSnapshot(block.id, 0);
+    expect(baseline).not.toBeNull();
+    expect(baseline!.contentJson).toBe("{}");
+  });
+
+  it("getBlockSnapshot returns null for missing snapshot", () => {
+    const repo = new SharedBlockRepo(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("B", OWNER);
+
+    expect(audit.getBlockSnapshot(block.id, 999)).toBeNull();
+    expect(audit.getBlockSnapshot(9999, 0)).toBeNull();
+  });
+
+  it("getBlockAuditView returns comprehensive audit view", () => {
+    const repo = new SharedBlockRepo(db);
+    const patchService = new SharedBlockPatchService(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("Audit Block", OWNER);
+
+    for (let i = 1; i <= 7; i++) {
+      patchService.applyPatch(block.id, "set_section", { sectionPath: `s-${i}`, content: `v${i}` }, OWNER, `ref:${i}`);
+    }
+
+    const view = audit.getBlockAuditView(block.id);
+    expect(view.blockId).toBe(block.id);
+    expect(view.title).toBe("Audit Block");
+    expect(view.createdByAgentId).toBe(OWNER);
+    expect(view.createdAt).toBeGreaterThan(0);
+    expect(view.updatedAt).toBeGreaterThanOrEqual(view.createdAt);
+    expect(view.totalPatches).toBe(7);
+    expect(view.latestPatchSeq).toBe(7);
+    expect(view.totalSnapshots).toBe(1);
+    expect(view.latestSnapshotSeq).toBe(0);
+    expect(view.recentPatches).toHaveLength(5);
+    expect(view.recentPatches[0].patchSeq).toBe(3);
+    expect(view.recentPatches[4].patchSeq).toBe(7);
+  });
+
+  it("getBlockAuditView handles block with no patches", () => {
+    const repo = new SharedBlockRepo(db);
+    const audit = new SharedBlockAuditFacade(db);
+    const block = repo.createBlock("Empty Block", OWNER);
+
+    const view = audit.getBlockAuditView(block.id);
+    expect(view.blockId).toBe(block.id);
+    expect(view.title).toBe("Empty Block");
+    expect(view.totalPatches).toBe(0);
+    expect(view.latestPatchSeq).toBeNull();
+    expect(view.totalSnapshots).toBe(1);
+    expect(view.latestSnapshotSeq).toBe(0);
+    expect(view.recentPatches).toHaveLength(0);
+  });
+
+  it("getBlockAuditView throws for non-existent block", () => {
+    const audit = new SharedBlockAuditFacade(db);
+    expect(() => audit.getBlockAuditView(9999)).toThrow();
   });
 });
