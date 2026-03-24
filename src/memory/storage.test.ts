@@ -440,7 +440,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "accepted",
-      confidence: 0.5,
     });
     const a2 = storage.upsertExplicitAssertion({
       agentId: "agent-1",
@@ -451,7 +450,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "tentative",
-      confidence: 0.9,
     });
     expect(a1).not.toBeNull();
     expect(a2).not.toBeNull();

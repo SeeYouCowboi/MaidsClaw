@@ -220,6 +220,10 @@ describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
           outcome: {
             schemaVersion: "rp_turn_outcome_v5",
             publicReply: "I see.",
+            privateEpisodes: [],
+            publications: [],
+            relationIntents: [],
+            conflictFactors: [],
             privateCognition: {
               schemaVersion: "rp_private_cognition_v4",
               ops: [

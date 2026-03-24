@@ -54,7 +54,7 @@ function makePrivateCommitV4(ops: CognitionOp[]): PrivateCognitionCommitV4 {
 function makePublications(): PublicationDeclaration[] {
   return [
     {
-      kind: "speech",
+      kind: "spoken",
       targetScope: "current_area",
       summary: "brief spoken update",
     },
