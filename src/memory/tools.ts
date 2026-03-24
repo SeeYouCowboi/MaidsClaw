@@ -1,6 +1,7 @@
 import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
+import { buildTimeSliceQuery, type TimeSliceDimension } from "./time-slice-query.js";
 import type { MemoryExploreInput, NavigatorResult, ViewerContext } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -470,13 +471,22 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
           type: "string",
           description: "Optional cognition thread key to anchor conflict/state explain.",
         },
+        asOfTime: {
+          type: "number",
+          description: "Time cutoff value. Use with timeDimension to select valid_time ('what was the world state then') or committed_time ('what did the agent know then').",
+        },
+        timeDimension: {
+          type: "string",
+          enum: ["valid_time", "committed_time"],
+          description: "Which time dimension to slice: valid_time (world state) or committed_time (agent knowledge). Used with asOfTime.",
+        },
         asOfValidTime: {
           type: "number",
-          description: "Optional valid-time cutoff for summarized path filtering.",
+          description: "Optional valid-time cutoff (legacy). Prefer asOfTime + timeDimension.",
         },
         asOfCommittedTime: {
           type: "number",
-          description: "Optional committed-time cutoff for summarized path filtering.",
+          description: "Optional committed-time cutoff (legacy). Prefer asOfTime + timeDimension.",
         },
       },
       required: ["query"],
@@ -492,13 +502,29 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
         return { success: false, error: "GraphNavigator not available" };
       }
 
+      let resolvedValidTime = typeof args.asOfValidTime === "number" ? args.asOfValidTime : undefined;
+      let resolvedCommittedTime = typeof args.asOfCommittedTime === "number" ? args.asOfCommittedTime : undefined;
+
+      if (typeof args.asOfTime === "number" && typeof args.timeDimension === "string") {
+        const dimensionQuery = buildTimeSliceQuery({
+          dimension: args.timeDimension as TimeSliceDimension,
+          asOf: args.asOfTime,
+        });
+        if (resolvedValidTime == null && dimensionQuery.asOfValidTime != null) {
+          resolvedValidTime = dimensionQuery.asOfValidTime;
+        }
+        if (resolvedCommittedTime == null && dimensionQuery.asOfCommittedTime != null) {
+          resolvedCommittedTime = dimensionQuery.asOfCommittedTime;
+        }
+      }
+
       const result = await services.navigator.explore(query.trim(), viewerContext, {
         query: query.trim(),
         mode: typeof args.mode === "string" ? args.mode as MemoryExploreInput["mode"] : undefined,
         focusRef: typeof args.focusRef === "string" ? args.focusRef as MemoryExploreInput["focusRef"] : undefined,
         focusCognitionKey: typeof args.focusCognitionKey === "string" ? args.focusCognitionKey : undefined,
-        asOfValidTime: typeof args.asOfValidTime === "number" ? args.asOfValidTime : undefined,
-        asOfCommittedTime: typeof args.asOfCommittedTime === "number" ? args.asOfCommittedTime : undefined,
+        asOfValidTime: resolvedValidTime,
+        asOfCommittedTime: resolvedCommittedTime,
       });
       return toExplainShell(result);
     },

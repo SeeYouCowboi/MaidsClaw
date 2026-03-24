@@ -465,6 +465,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
       "mode",
       "focusRef",
       "focusCognitionKey",
+      "asOfTime",
+      "timeDimension",
       "asOfValidTime",
       "asOfCommittedTime",
     ]);

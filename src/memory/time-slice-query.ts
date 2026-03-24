@@ -1,9 +1,19 @@
 import type { EvidencePath, NodeRef } from "./types.js";
 
+export const TIME_SLICE_DIMENSIONS = ["valid_time", "committed_time"] as const;
+export type TimeSliceDimension = (typeof TIME_SLICE_DIMENSIONS)[number];
+
 export type TimeSliceQuery = {
   asOfValidTime?: number;
   asOfCommittedTime?: number;
 };
+
+export function buildTimeSliceQuery(opts: { dimension: TimeSliceDimension; asOf: number }): TimeSliceQuery {
+  if (opts.dimension === "valid_time") {
+    return { asOfValidTime: opts.asOf };
+  }
+  return { asOfCommittedTime: opts.asOf };
+}
 
 export type TimeSlicedPathSummary = {
   seed: NodeRef;
@@ -37,10 +47,10 @@ export function isEdgeInTimeSlice(edge: TimeAwareEdge, query?: TimeSliceQuery): 
   const effectiveValid = edge.valid_time ?? edge.timestamp ?? null;
   const effectiveCommitted = edge.committed_time ?? edge.timestamp ?? null;
 
-  if (query?.asOfValidTime != null && effectiveValid != null && effectiveValid > query.asOfValidTime) {
+  if (query?.asOfValidTime != null && effectiveValid != null && effectiveValid !== 0 && effectiveValid > query.asOfValidTime) {
     return false;
   }
-  if (query?.asOfCommittedTime != null && effectiveCommitted != null && effectiveCommitted > query.asOfCommittedTime) {
+  if (query?.asOfCommittedTime != null && effectiveCommitted != null && effectiveCommitted !== 0 && effectiveCommitted > query.asOfCommittedTime) {
     return false;
   }
   return true;
@@ -55,10 +65,10 @@ export function isProjectionRowInTimeSlice(row: TimeAwareProjectionRow, query?: 
   const effectiveValid = row.valid_time ?? fallback;
   const effectiveCommitted = row.committed_time ?? fallback;
 
-  if (query?.asOfValidTime != null && effectiveValid != null && effectiveValid > query.asOfValidTime) {
+  if (query?.asOfValidTime != null && effectiveValid != null && effectiveValid !== 0 && effectiveValid > query.asOfValidTime) {
     return false;
   }
-  if (query?.asOfCommittedTime != null && effectiveCommitted != null && effectiveCommitted > query.asOfCommittedTime) {
+  if (query?.asOfCommittedTime != null && effectiveCommitted != null && effectiveCommitted !== 0 && effectiveCommitted > query.asOfCommittedTime) {
     return false;
   }
   return true;
