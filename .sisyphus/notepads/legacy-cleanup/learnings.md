@@ -436,3 +436,20 @@ Test files updated:
 
 Build passes successfully with no references to makeLegacyNodeRef remaining.
 
+## [2026-03-25] Task 17 (renamed) — Rename CreatedState fields to canonical names
+
+### Changes
+- `privateEventIds` → `episodeEventIds` in CreatedState type + all usages
+- `privateBeliefIds` → `assertionIds` in CreatedState type + all usages
+- 6 files changed: 3 production (task-agent.ts, explicit-settlement-processor.ts, core-memory-index-updater.ts) + 3 tests
+
+### Pattern
+- Using `replaceAll` on field name substrings also renames local constant names that contain the field name as a prefix (e.g., `privateEventIdsKey` → `episodeEventIdsKey`). This is cosmetic since the string values remain unchanged.
+- Wire format keys (`private_event_ids`, `private_belief_ids` in MigrationResult) use computed property keys from template literal constants — they are unchanged by field renames.
+
+### Windows grep caveat
+- `mcp_grep` tool failed to find matches for `privateEventIds|privateBeliefIds` using regex OR syntax. Bash `grep -rn` worked correctly on Windows for the same pattern.
+
+### Evidence
+`.sisyphus/evidence/task-17-names-clean.txt`
+

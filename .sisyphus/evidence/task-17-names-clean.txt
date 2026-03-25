@@ -1,0 +1,41 @@
+Task 17: Rename CreatedState fields to canonical names
+=====================================================
+
+## Changes Made
+
+Renamed `privateEventIds` → `episodeEventIds` and `privateBeliefIds` → `assertionIds`
+across all consumers of CreatedState.
+
+### Files Modified
+
+**Production:**
+- src/memory/task-agent.ts: CreatedState type definition + 6 usage sites
+- src/memory/explicit-settlement-processor.ts: 5 usage sites (collectExplicitSettlementRefs)
+- src/memory/core-memory-index-updater.ts: 2 usage sites (updateIndex JSON payload)
+
+**Tests:**
+- test/memory/validation-contested-cognition.test.ts: 1 CreatedState literal
+- test/memory/validation-negative-cases.test.ts: 1 CreatedState literal
+- test/memory/validation-turn-settlement.test.ts: 1 CreatedState literal
+
+## Verification
+
+### grep -rn "privateEventIds|privateBeliefIds" src/ test/
+Result: 0 matches ✓
+
+### LSP diagnostics (error severity) on changed files:
+- task-agent.ts: No diagnostics ✓
+- explicit-settlement-processor.ts: No diagnostics ✓  
+- core-memory-index-updater.ts: No diagnostics ✓
+
+### bun run build
+Pre-existing error in schema.ts:893 (T18/T21 scope). No errors from T17 changes.
+
+### bun test
+Pre-existing schema.ts parse error blocks test suite startup (T18/T21 scope). No new failures from T17 changes.
+
+## Notes
+- Wire format keys (private_event_ids, private_belief_ids in MigrationResult) are unchanged.
+  These use computed property keys from legacy constants and represent external API contract.
+- Local constant names episodeEventIdsKey/assertionIdsKey were renamed as a side effect
+  of replaceAll (cosmetic, no behavior change since their string values are unchanged).
