@@ -956,7 +956,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: types.ts, graph-node-ref.ts, + all files importing AnyNodeRefKind/ALL_KNOWN_NODE_REF_KINDS
   - Pre-commit: `bun test`
 
-- [ ] 15. Remove legacy constants from navigator + graph-edge-view + visibility-policy + retrieval + graph-organizer + embeddings
+- [x] 15. Remove legacy constants from navigator + graph-edge-view + visibility-policy + retrieval + graph-organizer + embeddings
 
   **What to do**:
   - In each file, remove:
@@ -1008,7 +1008,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C8 (grouped with Task 14)
 
-- [ ] 16. Remove legacy patterns from promotion.ts + private-cognition-current.ts
+- [x] 16. Remove legacy patterns from promotion.ts + private-cognition-current.ts
 
   **What to do**:
   - `src/memory/promotion.ts`:
@@ -1050,7 +1050,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C8 (grouped)
 
-- [ ] 17. Rename CreatedState fields in ALL consumers
+- [x] 17. Rename CreatedState fields in ALL consumers
 
   **What to do**:
   - In `src/memory/task-agent.ts`:
@@ -1107,7 +1107,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: task-agent.ts, core-memory-index-updater.ts, test files
   - Pre-commit: `bun test`
 
-- [ ] 18. Write migration to tighten node_embeddings CHECK constraint
+- [x] 18. Write migration to tighten node_embeddings CHECK constraint
 
   **What to do**:
   - Add migration `memory:031:tighten-node-embeddings-check` in `src/memory/schema.ts`
@@ -1226,7 +1226,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: prompt-template.ts, prompt-builder.ts, prompt-data.ts, prompt-data-sources.ts, memory-adapter.ts
   - Pre-commit: `bun test`
 
-- [ ] 20. Remove COMPAT_ALIAS_MAP + READ_ONLY_LABELS + tighten CoreMemoryInput types
+- [x] 20. Remove COMPAT_ALIAS_MAP + READ_ONLY_LABELS + tighten CoreMemoryInput types
 
   **What to do**:
   - `src/memory/types.ts`:
@@ -1311,7 +1311,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/types.ts`, `src/memory/core-memory.ts`, `src/memory/schema.ts` (migration 032), `src/memory/prompt-data.ts`, `src/memory/prompt-data.test.ts`, `src/memory/core-memory.test.ts`
   - Pre-commit: `bun test`
 
-- [ ] 21. Remove schema.ts makeLegacyNodeRef function
+- [x] 21. Remove schema.ts makeLegacyNodeRef function
 
   **What to do**:
   - `src/memory/schema.ts`: Remove `makeLegacyNodeRef()` function (lines 45-53)

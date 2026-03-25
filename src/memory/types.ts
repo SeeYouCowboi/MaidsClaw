@@ -77,24 +77,15 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
  * All valid core memory block labels.
  * - `persona`: canonical writable label for agent identity (T21 forward)
  * - `pinned_summary` / `pinned_index`: canonical labels (T7 forward)
- * - `character` / `user`: legacy labels, read-only compat aliases
- * - `index`: compat alias for pinned_index, read-only
+ * - `user`: legacy label, read-only
+ * - `index`: read-only (managed by core-memory-index-updater)
  */
-export const CORE_MEMORY_LABELS = ["character", "user", "index", "pinned_summary", "pinned_index", "persona"] as const;
+export const CORE_MEMORY_LABELS = ["user", "index", "pinned_summary", "pinned_index", "persona"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
 /** Canonical labels introduced by T7 — the preferred write targets. */
 export const CANONICAL_PINNED_LABELS = ["pinned_summary", "pinned_index"] as const;
 export type CanonicalPinnedLabel = (typeof CANONICAL_PINNED_LABELS)[number];
-
-/** Compat aliases — still readable, map to canonical counterparts. */
-export const COMPAT_ALIAS_MAP: Readonly<Record<string, CanonicalPinnedLabel>> = {
-  character: "pinned_summary",
-  index: "pinned_index",
-} as const;
-
-/** Labels that have no RP direct-write path (includes legacy character/user). */
-export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_index", "character", "user"] as const;
 
 export const CANONICAL_NODE_KINDS = ["event", "entity", "fact", "assertion", "evaluation", "commitment"] as const;
 export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
@@ -392,12 +383,12 @@ export type MemoryHint = {
 };
 
 export type CoreMemoryAppendInput = {
-  label: "character" | "user" | "pinned_summary";
+  label: "user" | "pinned_summary";
   content: string;
 };
 
 export type CoreMemoryReplaceInput = {
-  label: "character" | "user" | "pinned_summary";
+  label: "user" | "pinned_summary";
   old_content: string;
   new_content: string;
 };

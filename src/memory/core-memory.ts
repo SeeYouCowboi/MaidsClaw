@@ -1,6 +1,8 @@
 import type { Db } from "../storage/database.js";
 import type { CoreMemoryBlock, CoreMemoryLabel, AppendResult, ReplaceResult } from "./types.js";
-import { COMPAT_ALIAS_MAP, READ_ONLY_LABELS } from "./types.js";
+
+/** Labels that are read-only for RP agents (index, pinned_index, user). */
+const RP_READ_ONLY: ReadonlySet<CoreMemoryLabel> = new Set(["index", "pinned_index", "user"]);
 
 const BLOCK_DEFAULTS: ReadonlyArray<{
   label: CoreMemoryLabel;
@@ -8,7 +10,6 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
   char_limit: number;
   read_only: number;
 }> = [
-  { label: "character", description: "Agent persona and identity (legacy, read-only)", char_limit: 4000, read_only: 1 },
   { label: "user", description: "Information about the user (legacy, read-only)", char_limit: 3000, read_only: 1 },
   { label: "index", description: "Memory index with pointer addresses", char_limit: 1500, read_only: 1 },
   { label: "pinned_summary", description: "Pinned character summary (canonical)", char_limit: 4000, read_only: 0 },
@@ -17,11 +18,7 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
 ];
 
 function isReadOnlyForRp(label: CoreMemoryLabel): boolean {
-  return READ_ONLY_LABELS.includes(label);
-}
-
-export function resolveCanonicalLabel(label: CoreMemoryLabel): CoreMemoryLabel {
-  return (COMPAT_ALIAS_MAP as Record<string, CoreMemoryLabel>)[label] ?? label;
+  return RP_READ_ONLY.has(label);
 }
 
 export class CoreMemoryService {

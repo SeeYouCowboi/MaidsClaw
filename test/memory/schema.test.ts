@@ -772,26 +772,231 @@ describe("memory schema", () => {
 		db.close();
 	});
 
-	describe("memory:030 drop-agent-fact-overlay", () => {
-		test("fresh DB via createMemorySchema() has no agent_fact_overlay table", () => {
-			const db = new Database(":memory:");
-			createMemorySchema(db);
-			const row = db.prepare(
-				`SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
-			).get() as { name: string } | null;
-			expect(row).toBeNull();
+  describe("memory:030 drop-agent-fact-overlay", () => {
+    test("fresh DB via createMemorySchema() has no agent_fact_overlay table", () => {
+      const db = new Database(":memory:");
+      createMemorySchema(db);
+      const row = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+      ).get() as { name: string } | null;
+      expect(row).toBeNull();
+      db.close();
+    });
+
+    test("fresh DB via runMemoryMigrations has no agent_fact_overlay table", () => {
+      const { dbPath, db } = createTempDb();
+      runMemoryMigrations(db);
+      const row = db.get<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+      );
+      expect(row).toBeUndefined();
+      db.close();
+      cleanupDb(dbPath);
+    });
+  });
+
+  describe("memory:031 tighten-node-embeddings-check", () => {
+    test("fresh DB rejects node_kind='private_event' INSERT (CHECK constraint)", () => {
+      const db = new Database(":memory:");
+      createMemorySchema(db);
+      const now = Date.now();
+
+      let privateEventInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["private_event:1", "private_event", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateEventInsertFailed = true;
+      }
+      expect(privateEventInsertFailed).toBe(true);
+
+      let privateBeliefInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["private_belief:2", "private_belief", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateBeliefInsertFailed = true;
+      }
+      expect(privateBeliefInsertFailed).toBe(true);
+
+      let assertionInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["assertion:1", "assertion", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        assertionInsertFailed = true;
+      }
+      expect(assertionInsertFailed).toBe(false);
+
+      const count = db.prepare("SELECT count(*) as count FROM node_embeddings").get() as { count: number };
+      expect(count.count).toBe(1);
+
+      db.close();
+    });
+
+    test("migration preserves canonical node_embeddings rows", () => {
+      const rawDb = new Database(":memory:");
+      const db = wrapRawDatabase(rawDb);
+
+      db.exec(`CREATE TABLE node_embeddings (
+        id INTEGER PRIMARY KEY,
+        node_ref TEXT NOT NULL,
+        node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')),
+        node_id TEXT,
+        view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')),
+        model_id TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(`CREATE UNIQUE INDEX ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`);
+
+      const now = Date.now();
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["event:1", "event", "1", "primary", "model-1", new Uint8Array([1, 2, 3]), now],
+      );
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["assertion:2", "assertion", "2", "primary", "model-1", new Uint8Array([4, 5, 6]), now],
+      );
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["private_event:3", "private_event", "3", "primary", "model-1", new Uint8Array([7, 8, 9]), now],
+      );
+
+      const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:031:tighten-node-embeddings-check");
+      if (!migration) {
+        throw new Error("memory:031 migration not found");
+      }
+      migration.up(db);
+
+      const remainingRows = db.query<{ node_ref: string }>("SELECT node_ref FROM node_embeddings ORDER BY node_ref");
+      expect(remainingRows.length).toBe(2);
+      expect(remainingRows[0].node_ref).toBe("assertion:2");
+      expect(remainingRows[1].node_ref).toBe("event:1");
+
+      let privateEventFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ["private_event:99", "private_event", "99", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateEventFailed = true;
+      }
+      expect(privateEventFailed).toBe(true);
+
+      db.close();
+    });
+  });
+
+	describe("memory:032 migrate-character-labels", () => {
+		test("migrates character rows to pinned_summary and tightens CHECK", () => {
+			const rawDb = new Database(":memory:");
+			const db = wrapRawDatabase(rawDb);
+
+			db.exec(`CREATE TABLE _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`);
+			db.exec(`CREATE TABLE core_memory_blocks (
+				id INTEGER PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+				description TEXT,
+				value TEXT NOT NULL DEFAULT '',
+				char_limit INTEGER NOT NULL,
+				read_only INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL
+			)`);
+			db.exec(`CREATE UNIQUE INDEX ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`);
+
+			const now = Date.now();
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "character", "Agent persona (legacy)", "I am Alice", 4000, 1, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "user", "User info", "Bob", 3000, 1, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "pinned_summary", "Pinned summary", "Existing summary", 4000, 0, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-2", "character", "Agent persona (legacy)", "I am Eve", 4000, 1, now],
+			);
+
+			const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:032:migrate-character-labels");
+			if (!migration) throw new Error("memory:032 migration not found");
+			migration.up(db);
+
+			const characterCount = db.get<{ count: number }>(
+				"SELECT count(*) AS count FROM core_memory_blocks WHERE label = 'character'",
+			);
+			expect(characterCount?.count).toBe(0);
+
+			const agent1Pinned = db.get<{ value: string }>(
+				"SELECT value FROM core_memory_blocks WHERE agent_id = 'agent-1' AND label = 'pinned_summary'",
+			);
+			expect(agent1Pinned?.value).toBe("Existing summary");
+
+			const agent2Pinned = db.get<{ value: string }>(
+				"SELECT value FROM core_memory_blocks WHERE agent_id = 'agent-2' AND label = 'pinned_summary'",
+			);
+			expect(agent2Pinned?.value).toBe("I am Eve");
+
+			const userRow = db.get<{ label: string }>(
+				"SELECT label FROM core_memory_blocks WHERE agent_id = 'agent-1' AND label = 'user'",
+			);
+			expect(userRow?.label).toBe("user");
+
+			let characterInsertFailed = false;
+			try {
+				db.run(
+					"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					["agent-2", "character", "Should fail", "", 4000, 1, now],
+				);
+			} catch {
+				characterInsertFailed = true;
+			}
+			expect(characterInsertFailed).toBe(true);
+
 			db.close();
 		});
 
-		test("fresh DB via runMemoryMigrations has no agent_fact_overlay table", () => {
-			const { dbPath, db } = createTempDb();
-			runMemoryMigrations(db);
-			const row = db.get<{ name: string }>(
-				`SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+		test("handles empty table gracefully", () => {
+			const rawDb = new Database(":memory:");
+			const db = wrapRawDatabase(rawDb);
+
+			db.exec(`CREATE TABLE _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`);
+			db.exec(`CREATE TABLE core_memory_blocks (
+				id INTEGER PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+				description TEXT,
+				value TEXT NOT NULL DEFAULT '',
+				char_limit INTEGER NOT NULL,
+				read_only INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL
+			)`);
+			db.exec(`CREATE UNIQUE INDEX ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`);
+
+			const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:032:migrate-character-labels");
+			if (!migration) throw new Error("memory:032 migration not found");
+			migration.up(db);
+
+			const count = db.get<{ count: number }>(
+				"SELECT count(*) AS count FROM core_memory_blocks",
 			);
-			expect(row).toBeUndefined();
+			expect(count?.count).toBe(0);
+
 			db.close();
-			cleanupDb(dbPath);
 		});
 	});
 

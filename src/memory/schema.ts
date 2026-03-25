@@ -67,9 +67,9 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('user', 'index', 'pinned_summary', 'pinned_index', 'persona')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
-  `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`, // compat: CHECK includes legacy private_event/private_belief for existing data
+  `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
   `CREATE TABLE IF NOT EXISTS semantic_edges (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')), weight REAL NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_edges_pair_type ON semantic_edges(source_node_ref, target_node_ref, relation_type)`,
@@ -831,6 +831,54 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
     description: "Drop legacy agent_fact_overlay table after canonical cognition cutover",
     up: (db: Db) => {
       db.prepare(`DROP TABLE IF EXISTS agent_fact_overlay`).run();
+    },
+  },
+  {
+    id: "memory:031:tighten-node-embeddings-check",
+    description: "Rebuild node_embeddings table with tightened CHECK constraint removing legacy private_event/private_belief kinds",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE node_embeddings_new (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')), node_id TEXT, view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
+      );
+      db.exec(`INSERT INTO node_embeddings_new SELECT * FROM node_embeddings WHERE node_kind NOT IN ('private_event', 'private_belief')`);
+      db.exec(`DROP TABLE node_embeddings`);
+      db.exec(`ALTER TABLE node_embeddings_new RENAME TO node_embeddings`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
+      );
+    },
+  },
+  {
+    id: "memory:032:migrate-character-labels",
+    description: "Migrate character → pinned_summary in core_memory_blocks and tighten CHECK to remove 'character'",
+    up: (db: Db) => {
+      // Delete character rows where the agent already has a pinned_summary row
+      // to avoid UNIQUE constraint violation on (agent_id, label).
+      db.prepare(
+        `DELETE FROM core_memory_blocks WHERE label = 'character' AND agent_id IN (
+          SELECT agent_id FROM core_memory_blocks WHERE label = 'pinned_summary'
+        )`,
+      ).run();
+      db.prepare(
+        `UPDATE core_memory_blocks SET label = 'pinned_summary' WHERE label = 'character'`,
+      ).run();
+
+      db.exec(`CREATE TABLE core_memory_blocks_new (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        label TEXT NOT NULL CHECK (label IN ('user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+        description TEXT,
+        value TEXT NOT NULL DEFAULT '',
+        char_limit INTEGER NOT NULL,
+        read_only INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(`INSERT OR IGNORE INTO core_memory_blocks_new SELECT * FROM core_memory_blocks`);
+      db.exec(`DROP TABLE core_memory_blocks`);
+      db.exec(`ALTER TABLE core_memory_blocks_new RENAME TO core_memory_blocks`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
+      );
     },
   },
 ];

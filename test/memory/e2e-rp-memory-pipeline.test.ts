@@ -130,7 +130,7 @@ describe("E2E: RP memory pipeline", () => {
 		expect(userResult.success).toBe(true);
 
 		const allBlocks = cm.getAllBlocks("rp:alice");
-		expect(allBlocks).toHaveLength(6);
+		expect(allBlocks).toHaveLength(5);
 
 		const charBlock = allBlocks.find((b) => b.label === "persona");
 		expect(charBlock).toBeDefined();
