@@ -188,3 +188,84 @@ These are modern legitimate usages unrelated to the removed BeliefType/Epistemic
 
 ### Evidence
 `.sisyphus/evidence/task-9-table-dropped.txt`
+
+## [2026-03-25] Stress Test Fixes — agent_fact_overlay compat patches
+
+### Problem
+Two stress test files (`stress-contested-chain.test.ts`, `contested-chain-v3.test.ts`) failed with "no such table: agent_fact_overlay" after migration 030 dropped the legacy table.
+
+### Root Cause
+1. `patchRelationBuilderAssertionProjectionCompat` in `cognition-repo.ts` called original methods that queried `agent_fact_overlay` without try/catch
+2. Test files used `createMemorySchema()` instead of `runMemoryMigrations()`, skipping migrations
+3. `cognition-search.ts` also had a direct query to `agent_fact_overlay`
+
+### Solutions Applied
+
+#### 1. Wrapped original calls in try/catch
+In `cognition-repo.ts`, both `resolveSourceAgentId` and `resolveCanonicalCognitionRefByKey` patches now wrap the original method calls in try/catch blocks:
+
+```typescript
+let resolved: string | null = null;
+try {
+  resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
+} catch {
+  // agent_fact_overlay may not exist after migration 030 — fall through
+}
+```
+
+This allows the fallback logic to execute when the original method fails due to missing table.
+
+#### 2. Updated test files to use `runMemoryMigrations()`
+Changed `freshDb()` in both test files from:
+- Import `createMemorySchema` → Import `runMemoryMigrations`
+- Call `createMemorySchema(db)` → Call `runMemoryMigrations(asDb(db))`
+- Added helper `asDb()` to wrap `Database` as `Db` type
+
+#### 3. Fixed `cognition-search.ts` query
+Changed the query on line 168 from:
+```sql
+SELECT cognition_key FROM agent_fact_overlay WHERE id = ? AND agent_id = ?
+```
+To:
+```sql
+SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ? AND kind = 'assertion'
+```
+
+### Key Pattern: Database Wrapper
+When tests need to use `runMemoryMigrations()` with an in-memory database, the `Database` from `bun:sqlite` must be wrapped as a `Db` type with all required methods (`exec`, `query`, `run`, `get`, `close`, `transaction`, `prepare`).
+
+### Migration Safety
+After dropping a table in a migration:
+1. Search for all queries to the dropped table
+2. Update compat patches to handle missing table gracefully (try/catch)
+3. Update any remaining queries to use the new canonical table
+4. Ensure tests use `runMemoryMigrations()` to get full schema + migrations
+
+### Test Results
+- `stress-contested-chain.test.ts` + `contested-chain-v3.test.ts`: 19 pass, 0 fail
+- `cognition/`: 84 pass, 0 fail
+- Build: Clean
+
+## [2026-03-25] T11 — Remove agent_fact_overlay READ references from graph modules
+
+### Changes Made
+- **graph-organizer.ts**: 3 replacements (renderNodeContent, lookupNodeUpdatedAt, syncSearchProjection)
+- **graph-edge-view.ts**: 1 replacement (loadNodeVisibilityData assertion/private_belief branch)
+- **embeddings.ts**: 2 changes (privateBeliefOwnerStmt + isNodeVisibleForAgent visibility check)
+
+### Key Pattern: record_json provenance extraction
+When replacing `agent_fact_overlay.predicate`/`provenance` with `private_cognition_current`, the mapping is:
+- `predicate` → `summary_text`
+- `provenance` → `JSON.parse(record_json).provenance` (defensive try/catch required)
+- `stance` → `stance` (same column name)
+- `agent_id` → `agent_id` (same column name)
+- `updated_at` → `updated_at` (same column name)
+
+### Visibility Check Extension
+`embeddings.ts:isNodeVisibleForAgent()` had a dead-code duplicate check (same condition at lines 121 and 130). Removed duplicate and extended the private-node check to include `"assertion"` kind alongside `legacyPrivateBeliefKind`.
+
+### Pre-existing Failures
+57 test failures, ALL pre-existing from migration 030 table drop. All in files outside T11 scope (navigator.ts, task-agent.ts, cognition-search.ts, etc.). Zero new failures from T11 changes.
+
+### Evidence
+`.sisyphus/evidence/task-11-no-overlay-refs.txt`

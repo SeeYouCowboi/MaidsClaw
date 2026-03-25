@@ -1,0 +1,79 @@
+Task 11: Remove agent_fact_overlay READ references from graph-organizer.ts, graph-edge-view.ts, embeddings.ts
+==============================================================================================================
+
+## Grep Verification: 0 matches in all 3 target files
+
+$ grep -n "agent_fact_overlay" src/memory/graph-organizer.ts
+(no matches)
+
+$ grep -n "agent_fact_overlay" src/memory/graph-edge-view.ts
+(no matches)
+
+$ grep -n "agent_fact_overlay" src/memory/embeddings.ts
+(no matches)
+
+## LSP Diagnostics: 0 errors on all 3 files
+
+graph-organizer.ts: No diagnostics found
+graph-edge-view.ts: No diagnostics found
+embeddings.ts: No diagnostics found
+
+## Build: bun run build exits 0 (tsc clean)
+
+$ bun run build
+$ tsc -p tsconfig.build.json --noEmit
+(exit 0)
+
+## Test: bun test — 1739 pass, 57 fail, 0 new failures introduced
+
+All 57 failures are pre-existing: "no such table: agent_fact_overlay" in files NOT touched by T11:
+- navigator.ts (T12 scope)
+- task-agent.ts / task-agent.test.ts
+- cognition-commit.test.ts
+- cognition-search.test.ts
+- integration.test.ts
+- private-episode-repo.test.ts
+- validation-negative-cases.test.ts
+- validation-explain-visibility.test.ts
+- memory-entry-consumption.test.ts
+- turn-service.test.ts
+- storage.test.ts
+- retrieval.test.ts
+- schema.test.ts (migration count assertions)
+- private-thoughts-behavioral.test.ts (config-related, not overlay)
+
+Zero failures in graph-organizer.ts, graph-edge-view.ts, or embeddings.ts code paths.
+
+## Changes Summary
+
+### graph-organizer.ts (3 replacements)
+
+1. renderNodeContent() fallback (was lines 167-174):
+   - FROM: SELECT predicate, provenance, stance FROM agent_fact_overlay WHERE id = ?
+   - TO: SELECT summary_text, record_json, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'
+   - Parses record_json for provenance field
+
+2. lookupNodeUpdatedAt() fallback (was lines 354-357):
+   - FROM: SELECT updated_at FROM agent_fact_overlay WHERE id = ?
+   - TO: SELECT updated_at FROM private_cognition_current WHERE id = ?
+
+3. syncSearchProjection() assertion branch (was lines 477-490):
+   - FROM: SELECT predicate, provenance, agent_id, stance FROM agent_fact_overlay WHERE id = ?
+   - TO: SELECT summary_text, record_json, agent_id, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'
+   - Parses record_json for provenance field
+
+### graph-edge-view.ts (1 replacement)
+
+4. loadNodeVisibilityData() assertion/private_belief branch (was lines 408-412):
+   - FROM: SELECT agent_id FROM agent_fact_overlay WHERE id = ?
+   - TO: SELECT agent_id FROM private_cognition_current WHERE id = ?
+
+### embeddings.ts (2 changes)
+
+5. queryNearestNeighbors() privateBeliefOwnerStmt (was line 87):
+   - FROM: SELECT agent_id FROM agent_fact_overlay WHERE id=?
+   - TO: SELECT agent_id FROM private_cognition_current WHERE id=?
+
+6. isNodeVisibleForAgent() (was lines 114-146):
+   - Added "assertion" to private node kind check (was only private_event/private_belief)
+   - Removed dead-code duplicate check at former line 130

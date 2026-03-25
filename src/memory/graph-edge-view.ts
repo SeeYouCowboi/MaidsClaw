@@ -407,7 +407,7 @@ export class GraphEdgeView {
 
     if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id = ?")
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row ? { agent_id: row.agent_id } : null;
     }

@@ -165,13 +165,21 @@ export class GraphOrganizer {
     }
 
     const row = this.db
-      .prepare(`SELECT predicate, provenance, stance FROM agent_fact_overlay WHERE id = ?`)
-      .get(parsed.id) as { predicate: string; provenance: string | null; stance: string | null } | null;
+      .prepare(`SELECT summary_text, record_json, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
+      .get(parsed.id) as { summary_text: string | null; record_json: string | null; stance: string | null } | null;
     if (!row) {
       return undefined;
     }
+    const predicate = row.summary_text ?? "";
+    let provenance = "";
+    if (row.record_json) {
+      try {
+        const record = JSON.parse(row.record_json);
+        provenance = record.provenance ?? "";
+      } catch { /* ignore malformed JSON */ }
+    }
     const displayStance = row.stance ?? "";
-    return `${row.predicate} ${row.provenance ?? ""} ${displayStance}`.trim();
+    return `${predicate} ${provenance} ${displayStance}`.trim();
   }
 
   private selectSemanticRelation(
@@ -351,7 +359,7 @@ export class GraphOrganizer {
       return row?.updated_at;
     }
 
-    const row = this.db.prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`).get(parsed.id) as
+    const row = this.db.prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`).get(parsed.id) as
       | { updated_at: number }
       | null;
     return row?.updated_at;
@@ -476,8 +484,8 @@ export class GraphOrganizer {
 
     if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
       const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id, stance FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null } | null;
+        .prepare(`SELECT summary_text, record_json, agent_id, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
+        .get(parsed.id) as { summary_text: string | null; record_json: string | null; agent_id: string; stance: string | null } | null;
       if (!row) {
         return;
       }
@@ -485,7 +493,14 @@ export class GraphOrganizer {
         this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
-      this.storage.syncSearchDoc("private", nodeRef, `${row.predicate} ${row.provenance ?? ""}`.trim(), row.agent_id);
+      let provenance = "";
+      if (row.record_json) {
+        try {
+          const record = JSON.parse(row.record_json);
+          provenance = record.provenance ?? "";
+        } catch { /* defensive: record_json may be malformed */ }
+      }
+      this.storage.syncSearchDoc("private", nodeRef, `${row.summary_text ?? ""} ${provenance}`.trim(), row.agent_id);
       return;
     }
 
