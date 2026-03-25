@@ -656,52 +656,35 @@ export class GraphStorageService {
   }
 
   createPrivateBelief(params: CreatePrivateBeliefInput): number {
-    const existing = this.db
-      .prepare(
-        `SELECT id FROM agent_fact_overlay
-         WHERE agent_id = ?
-           AND source_entity_id = ?
-           AND predicate = ?
-           AND target_entity_id = ?`,
-      )
-      .get(params.agentId, params.sourceEntityId, params.predicate, params.targetEntityId) as
-      | { id: number }
-      | null;
-
-    const now = Date.now();
-    if (existing) {
-      this.db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(now, existing.id);
-      return existing.id;
+    const source = this.getEntityById(params.sourceEntityId);
+    const target = this.getEntityById(params.targetEntityId);
+    if (!source || !target) {
+      throw new Error(
+        `Unable to resolve source/target entity pointer keys for private belief: ${params.sourceEntityId} -> ${params.targetEntityId}`,
+      );
     }
 
-    const result = this.db
-      .prepare(
-        `INSERT INTO agent_fact_overlay (
-          agent_id,
-          source_entity_id,
-          target_entity_id,
-          predicate,
-          basis,
-          stance,
-          provenance,
-          source_event_ref,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        params.agentId,
-        params.sourceEntityId,
-        params.targetEntityId,
-        params.predicate,
-        params.basis,
-        params.stance,
-        params.provenance ?? null,
-        params.sourceEventRef ?? null,
-        now,
-        now,
-      );
-    return Number(result.lastInsertRowid);
+    const cognitionKey = `legacy_private_belief:${params.agentId}:${params.sourceEntityId}:${params.predicate}:${params.targetEntityId}`;
+    const assertion = this.cognitionRepo.upsertAssertion({
+      agentId: params.agentId,
+      cognitionKey,
+      settlementId: `legacy:create_private_belief:${params.agentId}`,
+      opIndex: 0,
+      sourcePointerKey: source.pointerKey,
+      predicate: params.predicate,
+      targetPointerKey: target.pointerKey,
+      stance: params.stance,
+      basis: params.basis,
+      provenance: params.provenance,
+    });
+
+    if (params.sourceEventRef) {
+      this.db
+        .prepare(`UPDATE agent_fact_overlay SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+        .run(params.sourceEventRef, Date.now(), assertion.id);
+    }
+
+    return assertion.id;
   }
 
   updatePrivateEventLink(_privateEventId: number, _publicEventId: number): void {

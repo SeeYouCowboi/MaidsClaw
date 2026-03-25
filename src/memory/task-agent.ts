@@ -542,6 +542,9 @@ export class MemoryTaskAgent {
     created_at: number;
   }> {
     const pointerToEntityId = new Map<string, number>();
+    const cognitionRepo = new CognitionRepository(this.db);
+    const beliefSettlementId = `${flushRequest.idempotencyKey}:belief`;
+    let beliefOpIndex = 0;
     const privateEvents: Array<{
       id: number;
       event_id: number | null;
@@ -640,16 +643,38 @@ export class MemoryTaskAgent {
         if (!source || !target) {
           continue;
         }
-        const beliefId = this.storage.createPrivateBelief({
+        const sourcePointerKey =
+          typeof call.arguments.source === "string"
+            ? call.arguments.source
+            : this.storage.getEntityById(source)?.pointerKey;
+        const targetPointerKey =
+          typeof call.arguments.target === "string"
+            ? call.arguments.target
+            : this.storage.getEntityById(target)?.pointerKey;
+        if (!sourcePointerKey || !targetPointerKey) {
+          continue;
+        }
+
+        const beliefId = cognitionRepo.upsertAssertion({
           agentId: flushRequest.agentId,
-          sourceEntityId: source,
-          targetEntityId: target,
+          settlementId: beliefSettlementId,
+          opIndex: beliefOpIndex,
+          sourcePointerKey,
           predicate: this.asString(call.arguments.predicate),
+          targetPointerKey,
           basis: this.asString(call.arguments.basis) as AssertionBasis,
           stance: this.asString(call.arguments.stance) as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
-          sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
-        });
+        }).id;
+        beliefOpIndex += 1;
+
+        const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
+        if (sourceEventRef) {
+          this.db
+            .prepare(`UPDATE agent_fact_overlay SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+            .run(sourceEventRef, Date.now(), beliefId);
+        }
+
         created.privateBeliefIds.push(beliefId);
         created.changedNodeRefs.push(makeNodeRef("assertion", beliefId));
         continue;

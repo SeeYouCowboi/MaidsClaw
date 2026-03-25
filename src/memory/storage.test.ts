@@ -117,11 +117,26 @@ describe("GraphStorageService", () => {
     expect(record.summary).toBe("public-safe");
   });
 
-  it("createPrivateBelief updates existing row for same tuple", () => {
+  it("createPrivateBelief delegates to cognition upsert and updates same tuple", () => {
+    const sourceEntityId = storage.upsertEntity({
+      pointerKey: "person:alice",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    const targetEntityId = storage.upsertEntity({
+      pointerKey: "person:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
     const beliefId1 = storage.createPrivateBelief({
       agentId: "agent-1",
-      sourceEntityId: 10,
-      targetEntityId: 20,
+      sourceEntityId,
+      targetEntityId,
       predicate: "likes",
       basis: "inference",
       stance: "tentative",
@@ -131,8 +146,8 @@ describe("GraphStorageService", () => {
 
     const beliefId2 = storage.createPrivateBelief({
       agentId: "agent-1",
-      sourceEntityId: 10,
-      targetEntityId: 20,
+      sourceEntityId,
+      targetEntityId,
       predicate: "likes",
       basis: "first_hand",
       stance: "accepted",
