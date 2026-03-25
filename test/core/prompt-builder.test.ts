@@ -70,14 +70,11 @@ function makeDataSources(): {
 			],
 		},
 		memory: {
-			getCoreMemoryBlocks: (agentId: string) =>
-				`<core_memory>${agentId}</core_memory>`,
 			getPinnedBlocks: (_agentId: string) =>
 				`<pinned_block label="pinned_summary">core persona rails</pinned_block>`,
 			getSharedBlocks: (_agentId: string) =>
 				`<shared_block label="user">shared relationship facts</shared_block>`,
 			getRecentCognition: () => `\u2022 [assertion] Alice trusts Bob (accepted)\n\u2022 [evaluation] eval Bob [trust:8, warmth:7]`,
-			getMemoryHints: async (userMessage: string) => `hint for ${userMessage}`,
 			getTypedRetrievalSurface: async () => "",
 		},
 		operational: {
@@ -114,9 +111,6 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(true);
-		expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(false);
-		expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
-
 		const operational =
 			getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ??
 			"";
@@ -140,8 +134,6 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.PINNED_SHARED)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(false);
-		expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(false);
-		expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);

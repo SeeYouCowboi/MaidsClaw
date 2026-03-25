@@ -513,8 +513,6 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       const slots = output.sections.map((section) => section.slot);
       expect(slots.includes(PromptSectionSlot.PERSONA)).toBe(true);
-      expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(false);
-      expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
 
       const allContent = output.sections.map((section) => section.content).join("\n");
       expect(allContent).not.toContain("privateEpisodes");
@@ -553,7 +551,6 @@ describe("memory-entry-consumption: live runtime integration", () => {
 
       const slots = output.sections.map((section) => section.slot);
       expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(true);
-      expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
 
       const typedContent = output.sections
         .filter((section) => section.slot === PromptSectionSlot.TYPED_RETRIEVAL)

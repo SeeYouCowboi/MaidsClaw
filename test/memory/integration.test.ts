@@ -6,7 +6,7 @@ import { EmbeddingService } from "../../src/memory/embeddings.js";
 import { MaterializationService } from "../../src/memory/materialization.js";
 import { GraphNavigator } from "../../src/memory/navigator.js";
 import { PromotionService } from "../../src/memory/promotion.js";
-import { getMemoryHints } from "../../src/memory/prompt-data.js";
+
 import { RetrievalService } from "../../src/memory/retrieval.js";
 import { createMemorySchema, MAX_INTEGER, makeNodeRef, makeLegacyNodeRef } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
@@ -342,7 +342,6 @@ describe("Memory integration", () => {
 			evidence_paths: unknown[];
 		};
 
-		const hintText = await getMemoryHints("keepsake", makeViewer(), db as any, 5);
 		const semanticRows = db
 			.prepare(`SELECT source_node_ref, target_node_ref FROM semantic_edges`)
 			.all() as Array<{ source_node_ref: NodeRef; target_node_ref: NodeRef }>;
@@ -386,7 +385,7 @@ describe("Memory integration", () => {
 			.get() as { cnt: number };
 
 		let passed = 0;
-		const total = 14;
+		const total = 13;
 
 		expect(dialogueRecords).toHaveLength(10);
 		passed += 1;
@@ -454,12 +453,6 @@ describe("Memory integration", () => {
 		expect(relationshipResult.query_type).toBe("relationship");
 		expect(timelineResult.query_type).toBe("timeline");
 		expect(whyResult.evidence_paths.length).toBeGreaterThan(0);
-		passed += 1;
-
-		expect(hintText.length).toBeGreaterThan(0);
-		expect(hintText.includes("keepsake") || hintText.includes("Alice")).toBe(
-			true,
-		);
 		passed += 1;
 
 		const r4EventCount = db

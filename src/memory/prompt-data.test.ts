@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema";
 import { CoreMemoryService } from "./core-memory";
-import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition, formatContestedEntry, getAttachedSharedBlocks } from "./prompt-data";
+import { formatNavigatorEvidence, getRecentCognition, formatContestedEntry, getAttachedSharedBlocks, getPinnedBlocks } from "./prompt-data";
 import { openDatabase, closeDatabaseGracefully, type Db } from "../storage/database.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import type { ViewerContext, NavigatorResult, NodeRef } from "./types";
@@ -82,154 +82,6 @@ function insertSearchDocWorld(
     content,
   );
 }
-
-// ---------------------------------------------------------------------------
-// getCoreMemoryBlocks
-// ---------------------------------------------------------------------------
-
-describe("getCoreMemoryBlocks", () => {
-  let db: Database;
-
-  beforeEach(() => {
-    db = freshDb();
-    const service = new CoreMemoryService(db);
-    service.initializeBlocks("agent-1");
-  });
-
-  it("returns XML-wrapped blocks with chars metadata for empty blocks", () => {
-    const xml = getCoreMemoryBlocks("agent-1", db);
-
-    expect(xml).toContain('<core_memory label="character"');
-    expect(xml).toContain('<core_memory label="index"');
-    expect(xml).toContain('<core_memory label="user"');
-    expect(xml).toContain('<core_memory label="persona"');
-    expect(xml).toContain('chars_current="0"');
-    expect(xml).toContain('chars_limit="4000"');
-    expect(xml).toContain('chars_limit="3000"');
-    expect(xml).toContain('chars_limit="1500"');
-  });
-
-  it("returns all 6 blocks", () => {
-    const xml = getCoreMemoryBlocks("agent-1", db);
-    const blockCount = (xml.match(/<core_memory /g) || []).length;
-    expect(blockCount).toBe(6);
-  });
-
-  it("includes chars_current and chars_limit attributes", () => {
-    const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "persona", "A cheerful maid");
-
-    const xml = getCoreMemoryBlocks("agent-1", db);
-
-    expect(xml).toContain('chars_current="15"');
-    expect(xml).toContain('chars_limit="4000"');
-  });
-
-  it("includes block value content inside XML tags", () => {
-    const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "persona", "Sakura is a diligent maid");
-
-    const xml = getCoreMemoryBlocks("agent-1", db);
-    expect(xml).toContain("Sakura is a diligent maid</core_memory>");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getMemoryHints
-// ---------------------------------------------------------------------------
-
-describe("getMemoryHints", () => {
-  let db: Database;
-
-  beforeEach(() => {
-    db = freshDb();
-  });
-
-  it("returns formatted bullet list from search results", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "Alice visited the coffee shop today", "entity:1", "entity_summary");
-
-    const result = await getMemoryHints("coffee shop", ctx, db);
-
-    expect(result).toContain("•");
-    expect(result).toContain("[entity]");
-    expect(result).toContain("Alice visited the coffee shop today");
-  });
-
-  it("returns empty string for short query (< 3 chars)", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "Alice visited the coffee shop today", "entity:1");
-
-    const result = await getMemoryHints("ab", ctx, db);
-    expect(result).toBe("");
-  });
-
-  it("returns empty string when no matches", async () => {
-    const ctx = makeViewerContext();
-
-    const result = await getMemoryHints("nonexistent topic xyz", ctx, db);
-    expect(result).toBe("");
-  });
-
-  it("respects limit parameter", async () => {
-    const ctx = makeViewerContext();
-    // Insert multiple area docs
-    for (let i = 0; i < 10; i++) {
-      insertSearchDocArea(db, 1, `Event about coffee number ${i}`, `event:${i + 1}`);
-    }
-
-    const result = await getMemoryHints("coffee", ctx, db, 2);
-    const bulletCount = (result.match(/•/g) || []).length;
-    expect(bulletCount).toBeLessThanOrEqual(2);
-  });
-
-  it("defaults limit to 5", async () => {
-    const ctx = makeViewerContext();
-    for (let i = 0; i < 10; i++) {
-      insertSearchDocArea(db, 1, `Event about coffee number ${i}`, `event:${i + 1}`);
-    }
-
-    const result = await getMemoryHints("coffee", ctx, db);
-    const bulletCount = (result.match(/•/g) || []).length;
-    expect(bulletCount).toBeLessThanOrEqual(5);
-  });
-
-  it("narrative hints return area + world only (not private)", async () => {
-    const rpCtx = makeViewerContext({ viewer_role: "rp_agent", viewer_agent_id: "agent-1" });
-
-    insertSearchDocPrivate(db, "agent-1", "Private memory about coffee brewing", "private_event:1");
-    insertSearchDocArea(db, 1, "Area event about coffee ordering", "event:1");
-    insertSearchDocWorld(db, "World fact about coffee origins", "entity:1");
-
-    const result = await getMemoryHints("coffee", rpCtx, db);
-
-    expect(result).not.toContain("Private memory about coffee brewing");
-    expect(result).toContain("Area event about coffee ordering");
-    expect(result).toContain("World fact about coffee origins");
-  });
-
-  it("viewer_role does not affect narrative hints visibility", async () => {
-    insertSearchDocArea(db, 1, "Area event about coffee ordering", "event:1");
-    insertSearchDocWorld(db, "World fact about coffee origins", "entity:1");
-
-    const rpResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "rp_agent" }), db);
-    const maidenResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "maiden" }), db);
-    const taskResult = await getMemoryHints("coffee", makeViewerContext({ viewer_role: "task_agent" }), db);
-
-    expect(rpResult).toContain("Area event about coffee ordering");
-    expect(rpResult).toContain("World fact about coffee origins");
-    expect(rpResult).toBe(maidenResult);
-    expect(rpResult).toBe(taskResult);
-  });
-
-  it("uses node kind from source_ref in bullet format", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "A fact about tea leaves", "fact:42", "fact_triple");
-
-    const result = await getMemoryHints("tea leaves", ctx, db);
-    expect(result).toContain("[fact]");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // formatNavigatorEvidence
@@ -653,11 +505,9 @@ describe("getRecentCognition", () => {
     closeDatabaseGracefully(db);
   });
 
-  it("staged recent cognition appears before flush but NOT in getMemoryHints", async () => {
-    // Run memory migrations to ensure search_docs_private table exists
+  it("staged recent cognition appears before flush in getRecentCognition", () => {
     createMemorySchema(db as unknown as Database);
 
-    // Insert staged cognition directly into recent_cognition_slots (simulating settlement-time staging)
     const stagedEntries = [
       {
         settlementId: "stl:staged-1",
@@ -670,15 +520,9 @@ describe("getRecentCognition", () => {
     ];
     insertSlot("agent-1", "sess-1", stagedEntries);
 
-    // Verify getRecentCognition returns the staged entry (pre-flush continuity)
     const recentResult = getRecentCognition("agent-1", "sess-1", db);
     expect(recentResult).toContain("[assertion:staged-belief]");
     expect(recentResult).toContain("This is a staged belief before flush");
-
-    // Verify getMemoryHints does NOT include staged cognition (retrieval is flush-backed only)
-    const ctx = makeViewerContext({ viewer_agent_id: "agent-1", session_id: "sess-1" });
-    const hintsResult = await getMemoryHints("staged belief", ctx, db);
-    expect(hintsResult).toBe("");
 
     closeDatabaseGracefully(db);
   });
@@ -872,7 +716,7 @@ describe("getAttachedSharedBlocks", () => {
     expect(result).toBe("");
   });
 
-  it("shared blocks coexist with core memory blocks without overwriting", () => {
+  it("shared blocks coexist with pinned memory blocks without overwriting", () => {
     createMemorySchema(db.raw);
     const coreMemory = new CoreMemoryService(db.raw);
     coreMemory.initializeBlocks("agent-1");
@@ -882,12 +726,12 @@ describe("getAttachedSharedBlocks", () => {
     addSection(blockId, "greeting", "Always curtsy");
     attachToAgent(blockId, "agent-1", "agent-owner");
 
-    const coreResult = getCoreMemoryBlocks("agent-1", db.raw);
+    const pinnedResult = getPinnedBlocks("agent-1", db.raw);
     const sharedResult = getAttachedSharedBlocks("agent-1", db);
 
-    expect(coreResult).toContain("A cheerful maid");
-    expect(coreResult).toContain('<core_memory label="persona"');
-    expect(coreResult).not.toContain("Always curtsy");
+    expect(pinnedResult).toContain("A cheerful maid");
+    expect(pinnedResult).toContain('<pinned_block label="persona"');
+    expect(pinnedResult).not.toContain("Always curtsy");
 
     expect(sharedResult).toContain('<shared_block title="Shared Etiquette">');
     expect(sharedResult).toContain("greeting: Always curtsy");
