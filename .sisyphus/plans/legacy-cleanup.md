@@ -219,7 +219,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ## TODOs
 
-- [ ] 1. Redirect createPrivateBelief → upsertAssertion
+- [x] 1. Redirect createPrivateBelief → upsertAssertion
 
   **What to do**:
   - In `src/memory/storage.ts`: Remove the `createPrivateBelief()` method body that writes directly to `agent_fact_overlay` (lines 658-705)
@@ -287,7 +287,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/storage.ts`, `src/memory/task-agent.ts`, related tests
   - Pre-commit: `bun test`
 
-- [ ] 2. Guard migration 006 with tableExists check
+- [x] 2. Guard migration 006 with tableExists check
 
   **What to do**:
   - In `src/memory/schema.ts`, find migration `memory:006:backfill-canonical-stances` (lines 231-263)
@@ -342,7 +342,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 3. Make MemoryDataSource interface methods optional
+- [x] 3. Make MemoryDataSource interface methods optional
 
   **What to do**:
   - In `src/core/prompt-data-sources.ts`: Change `getCoreMemoryBlocks(agentId: string): string;` to `getCoreMemoryBlocks?(agentId: string): string;`

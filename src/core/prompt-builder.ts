@@ -226,8 +226,8 @@ export class PromptBuilder {
 
 		const hasSplitBlocks = Boolean(memDs.getPinnedBlocks || memDs.getSharedBlocks);
 		if (!hasSplitBlocks) {
-			const legacyCore = this.readDataSource("memory.getCoreMemoryBlocks", () =>
-				memDs.getCoreMemoryBlocks(agentId),
+		const legacyCore = this.readDataSource("memory.getCoreMemoryBlocks", () =>
+				memDs.getCoreMemoryBlocks?.(agentId) ?? "",
 			);
 			if (legacyCore) parts.push(legacyCore);
 		}

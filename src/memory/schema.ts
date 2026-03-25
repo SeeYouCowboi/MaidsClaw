@@ -231,35 +231,37 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:006:backfill-canonical-stances",
     description: "Backfill canonical stance and basis columns from legacy fields",
     up: (db: Db) => {
-      if (hasColumn(db, "agent_fact_overlay", "epistemic_status")) {
-        const stanceCase = buildCaseExpression({
-          confirmed: "confirmed",
-          suspected: "tentative",
-          hypothetical: "hypothetical",
-          retracted: "rejected",
-        });
+      if (tableExists(db, "agent_fact_overlay")) {
+        if (hasColumn(db, "agent_fact_overlay", "epistemic_status")) {
+          const stanceCase = buildCaseExpression({
+            confirmed: "confirmed",
+            suspected: "tentative",
+            hypothetical: "hypothetical",
+            retracted: "rejected",
+          });
 
-        db.exec(
-          `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+          db.exec(
+            `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+          );
+        }
+
+        if (hasColumn(db, "agent_fact_overlay", "belief_type")) {
+          const basisCase = buildCaseExpression({
+            observation: "first_hand",
+            inference: "inference",
+            suspicion: "inference",
+            intention: "introspection",
+          });
+
+          db.exec(
+            `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
+          );
+        }
+
+        db.get<{ count: number }>(
+          `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
         );
       }
-
-      if (hasColumn(db, "agent_fact_overlay", "belief_type")) {
-        const basisCase = buildCaseExpression({
-          observation: "first_hand",
-          inference: "inference",
-          suspicion: "inference",
-          intention: "introspection",
-        });
-
-        db.exec(
-          `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
-        );
-      }
-
-      db.get<{ count: number }>(
-        `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
-      );
     },
   },
   {
