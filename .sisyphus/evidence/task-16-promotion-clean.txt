@@ -1,0 +1,45 @@
+Task 16: Remove legacy private_belief, private_event, legacyPrivate* patterns
+=============================================================================
+
+## Files Changed
+- src/memory/promotion.ts
+- src/memory/cognition/private-cognition-current.ts
+- src/memory/schema.ts (fixed unclosed /* comment from prior task)
+
+## Changes Made
+
+### promotion.ts
+1. Removed constants: legacyPrivateEventPrefix, legacyPrivateBeliefPrefix (was lines 64-65)
+2. resolveReferences(): Removed `source_ref.startsWith(legacyPrivateBeliefPrefix)` check, kept `assertion:` check
+3. executeProjectedWrite(): Removed `source_ref.startsWith(legacyPrivateBeliefPrefix)` check, kept `assertion:` check
+4. resolveCandidateTimestamp(): Removed `source_ref.startsWith(legacyPrivateEventPrefix)` check, kept `evaluation:` and `commitment:` checks
+5. extractStablePredicate(): Removed `/\bprivate[_\s-]?belief\b/i` regex content filter
+
+### private-cognition-current.ts
+1. normalizeConflictFactorRefs(): Removed `private_belief|private_event` from regex
+   - Before: `assertion|evaluation|commitment|private_belief|private_event|private_episode|event`
+   - After:  `assertion|evaluation|commitment|private_episode|event`
+
+### schema.ts (incidental fix)
+- Prior task left unclosed `/*` comment at line 46, commenting out rest of file
+- Removed the dead `makeLegacyNodeRef` function and its comment properly
+
+## Verification
+
+### Grep check: 0 matches
+$ grep -n "private_belief\|private_event\|legacyPrivate" src/memory/promotion.ts src/memory/cognition/private-cognition-current.ts
+(no output — 0 matches)
+
+### Build: PASS
+$ bun run build
+$ tsc -p tsconfig.build.json --noEmit
+(clean exit, no errors)
+
+### Tests: 0 NEW failures
+$ bun test
+1749 pass, 44 fail (same 44 pre-existing failures from other uncommitted task work)
+Pre-existing failures confirmed by stashing my changes and re-running: same 44 failures.
+
+### LSP diagnostics: clean
+- promotion.ts: 0 errors
+- private-cognition-current.ts: 0 errors

@@ -453,3 +453,28 @@ Build passes successfully with no references to makeLegacyNodeRef remaining.
 ### Evidence
 `.sisyphus/evidence/task-17-names-clean.txt`
 
+## [2026-03-25] T16 — Remove legacy patterns from promotion.ts + private-cognition-current.ts
+
+### Changes Made
+- **promotion.ts**: Removed `legacyPrivateEventPrefix`/`legacyPrivateBeliefPrefix` constants and all 4 code locations referencing them:
+  1. `resolveReferences()`: Removed `legacyPrivateBeliefPrefix` check, kept `assertion:` check
+  2. `executeProjectedWrite()`: Same removal
+  3. `resolveCandidateTimestamp()`: Removed `legacyPrivateEventPrefix` check, kept `evaluation:` + `commitment:` checks
+  4. `extractStablePredicate()`: Removed `/\bprivate[_\s-]?belief\b/i` regex content filter
+- **private-cognition-current.ts**: Removed `private_belief|private_event` from `normalizeConflictFactorRefs()` regex
+
+### Incidental Fix
+- **schema.ts**: Prior task (T21) left an unclosed `/*` comment that commented out the entire rest of the file from line 46 onward. This broke both build and all tests. Fixed by properly removing the dead `makeLegacyNodeRef` function instead of commenting it out.
+
+### Key Pattern: Unclosed block comments are catastrophic
+A `/*` without matching `*/` silently comments out everything below it. The TSC error "expected '*/' at line 893" (past EOF) is the telltale. Always prefer deleting dead code outright over commenting it out.
+
+### Verification
+- 0 grep matches for `private_belief|private_event|legacyPrivate` in both target files
+- Build: clean exit 0
+- Tests: 1749 pass, 44 fail — identical to baseline (0 new failures)
+
+### Evidence
+`.sisyphus/evidence/task-16-promotion-clean.txt`
+
+
