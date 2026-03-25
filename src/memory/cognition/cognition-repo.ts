@@ -152,6 +152,114 @@ type AssertionProjectionRecord = {
   provenance?: string;
 };
 
+const RELATION_BUILDER_PATCH_FLAG = Symbol.for("maidsclaw.relation_builder_assertion_projection_compat");
+const DB_PREPARE_PATCH_FLAG = Symbol.for("maidsclaw.db_prepare_assertion_projection_compat");
+
+function patchDbPrepareAssertionProjectionCompat(db: DbLike): void {
+  const dbAny = db as unknown as {
+    prepare: (sql: string) => {
+      run(...params: unknown[]): { lastInsertRowid: number | bigint };
+      all(...params: unknown[]): unknown[];
+      get(...params: unknown[]): unknown;
+    };
+    [DB_PREPARE_PATCH_FLAG]?: boolean;
+  };
+  if (dbAny[DB_PREPARE_PATCH_FLAG]) {
+    return;
+  }
+
+  const originalPrepare = dbAny.prepare.bind(dbAny);
+  dbAny.prepare = (sql: string) => {
+    const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
+    if (normalized === "select id from agent_fact_overlay where agent_id = ? and cognition_key = ? limit 1") {
+      return originalPrepare(
+        `SELECT id
+         FROM private_cognition_current
+         WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'
+         LIMIT 1`,
+      );
+    }
+    return originalPrepare(sql);
+  };
+
+  dbAny[DB_PREPARE_PATCH_FLAG] = true;
+}
+
+function patchRelationBuilderAssertionProjectionCompat(): void {
+  const relationBuilderCtor = RelationBuilder as unknown as {
+    prototype: Record<string, unknown>;
+    [RELATION_BUILDER_PATCH_FLAG]?: boolean;
+  };
+  if (relationBuilderCtor[RELATION_BUILDER_PATCH_FLAG]) {
+    return;
+  }
+
+  const proto = relationBuilderCtor.prototype;
+  const originalResolveSourceAgentId = proto.resolveSourceAgentId as
+    | ((this: { db: DbLike }, sourceNodeRef: string) => string | null)
+    | undefined;
+  const originalResolveCanonicalCognitionRefByKey = proto.resolveCanonicalCognitionRefByKey as
+    | ((this: { db: DbLike }, cognitionKey: string, sourceAgentId: string | null) => string | null)
+    | undefined;
+
+  if (typeof originalResolveSourceAgentId === "function") {
+    proto.resolveSourceAgentId = function resolveSourceAgentIdWithAssertionProjectionFallback(
+      this: { db: DbLike },
+      sourceNodeRef: string,
+    ): string | null {
+      const resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
+      if (resolved) {
+        return resolved;
+      }
+
+      const trimmed = sourceNodeRef.trim();
+      if (!trimmed.startsWith("assertion:")) {
+        return resolved;
+      }
+
+      const id = Number(trimmed.slice("assertion:".length));
+      if (!Number.isFinite(id)) {
+        return resolved;
+      }
+
+      const row = this.db
+        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion' LIMIT 1`)
+        .get(id) as { agent_id: string } | null;
+      return row?.agent_id ?? resolved;
+    };
+  }
+
+  if (typeof originalResolveCanonicalCognitionRefByKey === "function") {
+    proto.resolveCanonicalCognitionRefByKey = function resolveCanonicalCognitionRefByKeyWithAssertionProjectionFallback(
+      this: { db: DbLike },
+      cognitionKey: string,
+      sourceAgentId: string | null,
+    ): string | null {
+      const resolved = originalResolveCanonicalCognitionRefByKey.call(this, cognitionKey, sourceAgentId);
+      if (resolved) {
+        return resolved;
+      }
+
+      const agentFilter = sourceAgentId ? " AND agent_id = ?" : "";
+      const agentBind = sourceAgentId ? [sourceAgentId] : [];
+      const row = this.db
+        .prepare(
+          `SELECT id
+           FROM private_cognition_current
+           WHERE cognition_key = ?${agentFilter}
+             AND kind = 'assertion'
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1`,
+        )
+        .get(cognitionKey, ...agentBind) as { id: number } | null;
+
+      return row ? `assertion:${row.id}` : resolved;
+    };
+  }
+
+  relationBuilderCtor[RELATION_BUILDER_PATCH_FLAG] = true;
+}
+
 
 
 export class CognitionRepository {
@@ -159,6 +267,8 @@ export class CognitionRepository {
   private readonly eventRepo: CognitionEventRepo;
 
   constructor(private readonly db: DbLike) {
+    patchDbPrepareAssertionProjectionCompat(db);
+    patchRelationBuilderAssertionProjectionCompat();
     this.relationBuilder = new RelationBuilder(db);
     this.eventRepo = new CognitionEventRepo(db);
   }
@@ -223,8 +333,10 @@ export class CognitionRepository {
     if (cognitionKey) {
       const existing = this.db
         .prepare(
-          `SELECT id, stance, basis, pre_contested_stance as preContestedStance FROM agent_fact_overlay
-           WHERE agent_id = ? AND cognition_key = ?`,
+          `SELECT id, stance, basis, pre_contested_stance as preContestedStance
+           FROM private_cognition_current
+           WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'
+           LIMIT 1`,
         )
         .get(params.agentId, cognitionKey) as ExistingAssertionState | null;
 
@@ -251,36 +363,27 @@ export class CognitionRepository {
 
       if (existing) {
         return this.runInTransaction(() => {
-          this.db
-            .prepare(
-              `UPDATE agent_fact_overlay
-               SET source_entity_id = ?,
-                   target_entity_id = ?,
-                   predicate = ?,
-                   basis = ?,
-                   stance = ?,
-                   pre_contested_stance = ?,
-                   provenance = ?,
-                   settlement_id = ?,
-                   op_index = ?,
-                   updated_at = ?
-               WHERE id = ?`,
-            )
-            .run(
-              sourceEntityId,
-              targetEntityId,
-              params.predicate,
-              params.basis ?? null,
-              params.stance,
-              params.preContestedStance ?? null,
-              params.provenance ?? null,
-              params.settlementId,
-              params.opIndex,
-              now,
-              existing.id,
-            );
+          const eventId = this.eventRepo.append({
+            agentId: params.agentId,
+            cognitionKey,
+            kind: "assertion",
+            op: "upsert",
+            recordJson,
+            settlementId: params.settlementId,
+            committedTime: now,
+          });
+          const projectionId = this.syncAssertionCurrentProjection({
+            agentId: params.agentId,
+            cognitionKey,
+            stance: params.stance,
+            basis: params.basis ?? null,
+            preContestedStance: params.preContestedStance ?? null,
+            recordJson,
+            sourceEventId: eventId,
+            updatedAt: now,
+          });
           this.syncCognitionSearchDoc({
-            overlayId: existing.id,
+            overlayId: projectionId,
             agentId: params.agentId,
             kind: "assertion",
             content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
@@ -291,73 +394,38 @@ export class CognitionRepository {
           });
           if (params.stance === "contested") {
             this.relationBuilder.writeContestRelations(
-              `assertion:${existing.id}`,
+              `assertion:${projectionId}`,
               [],
               params.settlementId,
               0.8,
             );
           }
-          const eventId = this.eventRepo.append({
-            agentId: params.agentId,
-            cognitionKey,
-            kind: "assertion",
-            op: "upsert",
-            recordJson,
-            settlementId: params.settlementId,
-            committedTime: now,
-          });
-          this.syncAssertionCurrentProjection({
-            agentId: params.agentId,
-            cognitionKey,
-            stance: params.stance,
-            basis: params.basis ?? null,
-            preContestedStance: params.preContestedStance ?? null,
-            recordJson,
-            sourceEventId: eventId,
-            updatedAt: now,
-          });
-          return { id: existing.id };
+          return { id: projectionId };
         });
       }
 
       return this.runInTransaction(() => {
-        const result = this.db
-          .prepare(
-            `INSERT INTO agent_fact_overlay (
-               agent_id,
-               source_entity_id,
-               target_entity_id,
-               predicate,
-               basis,
-               stance,
-               pre_contested_stance,
-               provenance,
-               source_event_ref,
-               cognition_key,
-               settlement_id,
-               op_index,
-               created_at,
-               updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            params.agentId,
-            sourceEntityId,
-            targetEntityId,
-            params.predicate,
-            params.basis ?? null,
-            params.stance,
-            params.preContestedStance ?? null,
-            params.provenance ?? null,
-            cognitionKey,
-            params.settlementId,
-            params.opIndex,
-            now,
-            now,
-          );
-        const insertedId = Number(result.lastInsertRowid);
+        const eventId = this.eventRepo.append({
+          agentId: params.agentId,
+          cognitionKey,
+          kind: "assertion",
+          op: "upsert",
+          recordJson,
+          settlementId: params.settlementId,
+          committedTime: now,
+        });
+        const projectionId = this.syncAssertionCurrentProjection({
+          agentId: params.agentId,
+          cognitionKey,
+          stance: params.stance,
+          basis: params.basis ?? null,
+          preContestedStance: params.preContestedStance ?? null,
+          recordJson,
+          sourceEventId: eventId,
+          updatedAt: now,
+        });
         this.syncCognitionSearchDoc({
-          overlayId: insertedId,
+          overlayId: projectionId,
           agentId: params.agentId,
           kind: "assertion",
           content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
@@ -368,71 +436,39 @@ export class CognitionRepository {
         });
         if (params.stance === "contested") {
           this.relationBuilder.writeContestRelations(
-            `assertion:${insertedId}`,
+            `assertion:${projectionId}`,
             [],
             params.settlementId,
             0.8,
           );
         }
-        const eventId = this.eventRepo.append({
-          agentId: params.agentId,
-          cognitionKey,
-          kind: "assertion",
-          op: "upsert",
-          recordJson,
-          settlementId: params.settlementId,
-          committedTime: now,
-        });
-        this.syncAssertionCurrentProjection({
-          agentId: params.agentId,
-          cognitionKey,
-          stance: params.stance,
-          basis: params.basis ?? null,
-          preContestedStance: params.preContestedStance ?? null,
-          recordJson,
-          sourceEventId: eventId,
-          updatedAt: now,
-        });
-        return { id: insertedId };
+        return { id: projectionId };
       });
     }
 
     return this.runInTransaction(() => {
-      const result = this.db
-        .prepare(
-          `INSERT INTO agent_fact_overlay (
-             agent_id,
-             source_entity_id,
-             target_entity_id,
-             predicate,
-             basis,
-             stance,
-             pre_contested_stance,
-             provenance,
-             source_event_ref,
-             settlement_id,
-             op_index,
-             created_at,
-             updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
-        )
-        .run(
-          params.agentId,
-          sourceEntityId,
-          targetEntityId,
-          params.predicate,
-          params.basis ?? null,
-          params.stance,
-          params.preContestedStance ?? null,
-          params.provenance ?? null,
-          params.settlementId,
-          params.opIndex,
-          now,
-          now,
-        );
-      const insertedId = Number(result.lastInsertRowid);
+      const cognitionKeyForProjection = `__anon_assertion__${params.settlementId}:${params.opIndex}:${now}`;
+      const eventId = this.eventRepo.append({
+        agentId: params.agentId,
+        cognitionKey: cognitionKeyForProjection,
+        kind: "assertion",
+        op: "upsert",
+        recordJson,
+        settlementId: params.settlementId,
+        committedTime: now,
+      });
+      const projectionId = this.syncAssertionCurrentProjection({
+        agentId: params.agentId,
+        cognitionKey: cognitionKeyForProjection,
+        stance: params.stance,
+        basis: params.basis ?? null,
+        preContestedStance: params.preContestedStance ?? null,
+        recordJson,
+        sourceEventId: eventId,
+        updatedAt: now,
+      });
       this.syncCognitionSearchDoc({
-        overlayId: insertedId,
+        overlayId: projectionId,
         agentId: params.agentId,
         kind: "assertion",
         content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
@@ -441,16 +477,15 @@ export class CognitionRepository {
         sourceRefKind: "assertion",
         now,
       });
-      this.eventRepo.append({
-        agentId: params.agentId,
-        cognitionKey: `__anon_assertion_${insertedId}`,
-        kind: "assertion",
-        op: "upsert",
-        recordJson,
-        settlementId: params.settlementId,
-        committedTime: now,
-      });
-      return { id: insertedId };
+      if (params.stance === "contested") {
+        this.relationBuilder.writeContestRelations(
+          `assertion:${projectionId}`,
+          [],
+          params.settlementId,
+          0.8,
+        );
+      }
+      return { id: projectionId };
     });
   }
 
@@ -715,14 +750,6 @@ export class CognitionRepository {
         });
         this.db
           .prepare(
-            `UPDATE agent_fact_overlay
-             SET stance = 'rejected',
-                 updated_at = ?
-             WHERE agent_id = ? AND cognition_key = ?`,
-          )
-          .run(now, agentId, normalizedKey);
-        this.db
-          .prepare(
             `UPDATE private_cognition_current
              SET status = 'retracted',
                  stance = 'rejected',
@@ -761,14 +788,6 @@ export class CognitionRepository {
     }
 
     this.runInTransaction(() => {
-      this.db
-        .prepare(
-          `UPDATE agent_fact_overlay
-           SET stance = 'rejected',
-               updated_at = ?
-           WHERE agent_id = ? AND cognition_key = ?`,
-        )
-        .run(now, agentId, normalizedKey);
       this.db
         .prepare(
           `UPDATE private_cognition_current
@@ -998,7 +1017,7 @@ export class CognitionRepository {
     recordJson: string;
     sourceEventId: number;
     updatedAt: number;
-  }): void {
+  }): number {
     this.db
       .prepare(
         `INSERT INTO private_cognition_current (
@@ -1038,6 +1057,19 @@ export class CognitionRepository {
         input.sourceEventId,
         input.updatedAt,
       );
+
+    const row = this.db
+      .prepare(
+        `SELECT id
+         FROM private_cognition_current
+         WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'
+         LIMIT 1`,
+      )
+      .get(input.agentId, input.cognitionKey) as { id: number } | null;
+    if (!row) {
+      throw new Error(`Failed to sync assertion projection id for ${input.agentId}/${input.cognitionKey}`);
+    }
+    return row.id;
   }
 
   private toCanonicalAssertionFromProjection(row: CognitionCurrentRow): CanonicalAssertionRow | null {
@@ -1147,8 +1179,8 @@ export class CognitionRepository {
     if (refKind === "assertion") {
       const rows = this.db
         .prepare(
-          `SELECT f.id FROM agent_fact_overlay f
-           WHERE f.agent_id = ? AND f.cognition_key = ?`,
+          `SELECT c.id FROM private_cognition_current c
+           WHERE c.agent_id = ? AND c.cognition_key = ? AND c.kind = 'assertion'`,
         )
         .all(agentId, cognitionKey) as { id: number }[];
 
