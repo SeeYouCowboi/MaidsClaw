@@ -1,16 +1,16 @@
 import type { EmbeddingService } from "./embeddings.js";
 import type { GraphStorageService } from "./storage.js";
-import type { NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
+import type { AnyNodeRefKind, NodeRef, SemanticEdgeType } from "./types.js";
 
 export type OrganizerNode = {
   nodeRef: NodeRef;
-  nodeKind: NodeRefKind;
+  nodeKind: AnyNodeRefKind;
   content: string;
 };
 
 export type OrganizerEmbeddingEntry = {
   nodeRef: NodeRef;
-  nodeKind: NodeRefKind;
+  nodeKind: AnyNodeRefKind;
   viewType: "primary";
   modelId: string;
   embedding: Float32Array;
@@ -23,10 +23,10 @@ export class EmbeddingLinker {
     private readonly renderNodeContent: (nodeRef: NodeRef) => string | undefined,
     private readonly selectSemanticRelation: (
       sourceRef: NodeRef,
-      sourceKind: NodeRefKind,
+      sourceKind: AnyNodeRefKind,
       sourceContent: string,
       targetRef: NodeRef,
-      targetKind: NodeRefKind,
+      targetKind: AnyNodeRefKind,
       targetContent: string,
       similarity: number,
       agentId: string,
@@ -62,7 +62,7 @@ export class EmbeddingLinker {
           source.nodeKind,
           sourceContent,
           neighbor.nodeRef,
-          neighbor.nodeKind as NodeRefKind,
+          neighbor.nodeKind as AnyNodeRefKind,
           targetContent,
           neighbor.similarity,
           agentId,

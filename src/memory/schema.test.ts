@@ -675,11 +675,11 @@ describe("migration:022 node_embeddings node_id", () => {
 		} catch {}
 	}
 
-	it("applies 26 migrations without error", () => {
+	it("applies 27 migrations without error", () => {
 		const { db, dbPath } = freshMigrationDb();
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(26);
+		expect(rows!.cnt).toBe(27);
 		db.close();
 		cleanup(dbPath);
 	});
@@ -727,7 +727,7 @@ describe("V3 migration backfill consistency", () => {
 		runMemoryMigrations(db);
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(26);
+		expect(rows!.cnt).toBe(27);
 		db.close();
 		try {
 			rmSync(dbPath, { force: true });

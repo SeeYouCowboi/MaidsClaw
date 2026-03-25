@@ -6,7 +6,7 @@ import {
 } from "./graph-node-ref.js";
 
 describe("parseGraphNodeRef", () => {
-  it("parses all 8 NodeRefKind values correctly", () => {
+  it("parses all 8 known kinds correctly (canonical + legacy compat)", () => {
     const cases: Array<{ input: string; expected: GraphNodeRef }> = [
       { input: "event:42", expected: { kind: "event", id: "42" } },
       { input: "entity:123", expected: { kind: "entity", id: "123" } },

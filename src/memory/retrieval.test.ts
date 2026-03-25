@@ -139,8 +139,8 @@ describe("RetrievalService", () => {
 
   it("searchVisibleNarrative returns area and world only (not private)", async () => {
     insertSearchDoc(db, "private", {
-      sourceRef: "private_event:1" as NodeRef,
-      docType: "private_event",
+      sourceRef: "assertion:1" as NodeRef,
+      docType: "assertion",
       agentId: "agent-a",
       content: "agent-a private coffee note",
     });
@@ -231,8 +231,8 @@ describe("RetrievalService", () => {
 
   it("agent-b cannot read agent-a private search docs", async () => {
     insertSearchDoc(db, "private", {
-      sourceRef: "private_event:1" as NodeRef,
-      docType: "private_event",
+      sourceRef: "assertion:1" as NodeRef,
+      docType: "assertion",
       agentId: "agent-a",
       content: "coffee secret",
     });
@@ -284,7 +284,7 @@ describe("RetrievalService", () => {
 
     db.prepare(
       "INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run("private_belief", "private_belief:1", "agent-a", "This belief has been flushed to overlay", now);
+    ).run("assertion", "assertion:1", "agent-a", "This belief has been flushed to overlay", now);
     const id = db.prepare("SELECT last_insert_rowid() as id").get() as { id: number };
     db.prepare("INSERT INTO search_docs_private_fts(rowid, content) VALUES (?,?)").run(id.id, "This belief has been flushed to overlay");
 

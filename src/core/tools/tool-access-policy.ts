@@ -17,7 +17,7 @@ import type { ToolSchema } from "./tool-definition.js";
 // Capability mapping: contract string → AgentPermissions field
 // ---------------------------------------------------------------------------
 
-const CAPABILITY_MAP: Record<string, keyof AgentPermissions> = {
+export const CAPABILITY_MAP: Record<string, keyof AgentPermissions> = {
   cognition_read: "canAccessCognition",
   cognition_write: "canWriteCognition",
   admin_read: "canReadAdminOnly",

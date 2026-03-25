@@ -109,7 +109,7 @@ describe("CognitionSearchService — conflictEvidence", () => {
 			const relationBuilder = new RelationBuilder(db);
 			relationBuilder.writeContestRelations(
 				sourceRef,
-				["cognition_key:test:factor-assertion", "private_belief:42"],
+				["cognition_key:test:factor-assertion", "assertion:42"],
 				"stl:ce-2",
 				0.9,
 			);

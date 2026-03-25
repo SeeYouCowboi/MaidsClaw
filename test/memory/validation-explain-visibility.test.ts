@@ -22,8 +22,6 @@ function buildNavigator(db: Db, seeds: SeedCandidate[]): GraphNavigator {
 
 function toSeed(nodeRef: NodeRef, nodeKind: SeedCandidate["node_kind"]): SeedCandidate {
   const isPrivate =
-    nodeKind === "private_event" ||
-    nodeKind === "private_belief" ||
     nodeKind === "assertion" ||
     nodeKind === "evaluation" ||
     nodeKind === "commitment";

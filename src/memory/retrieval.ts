@@ -1,4 +1,5 @@
 import type { Db } from "../storage/database.js";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { EmbeddingService } from "./embeddings.js";
 import { CognitionSearchService } from "./cognition/cognition-search.js";
 import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
@@ -20,7 +21,7 @@ import type {
   FactEdge,
   MemoryHint,
   NodeRef,
-  NodeRefKind,
+  AnyNodeRefKind,
   SeedCandidate,
   Topic,
   ViewerContext,
@@ -55,9 +56,6 @@ type RetrievalServiceDeps = {
   orchestrator?: RetrievalOrchestrator;
   visibilityPolicy?: VisibilityPolicy;
 };
-
-const legacyPrivateEventKind = "private_event";
-const legacyPrivateBeliefKind = "private_belief";
 
 export class RetrievalService {
   private readonly db: Db;
@@ -409,25 +407,16 @@ export class RetrievalService {
     return 1 / (60 + rank);
   }
 
-  private parseNodeRefKind(nodeRef: string): NodeRefKind | null {
-    const maybeKind = nodeRef.split(":")[0];
-    if (
-      maybeKind === "event" ||
-      maybeKind === "entity" ||
-      maybeKind === "fact" ||
-      maybeKind === legacyPrivateEventKind ||
-      maybeKind === legacyPrivateBeliefKind ||
-      maybeKind === "assertion" ||
-      maybeKind === "evaluation" ||
-      maybeKind === "commitment"
-    ) {
-      return maybeKind;
+  private parseNodeRefKind(nodeRef: string): AnyNodeRefKind | null {
+    try {
+      return parseGraphNodeRef(nodeRef).kind;
+    } catch {
+      return null;
     }
-    return null;
   }
 
-  private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
-    if (nodeKind === legacyPrivateEventKind || nodeKind === legacyPrivateBeliefKind || nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment") {
+  private scopeFromNodeKind(nodeKind: AnyNodeRefKind): "private" | "area" | "world" {
+    if (nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment" || nodeKind === "private_event" || nodeKind === "private_belief") {
       return "private";
     }
     return "world";

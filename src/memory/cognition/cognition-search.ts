@@ -332,10 +332,13 @@ export class CognitionSearchService {
   }
 
   private parseOverlayId(sourceRef: NodeRef): number | null {
-    const parts = String(sourceRef).split(":");
-    if (parts.length !== 2) return null;
-    const id = Number(parts[1]);
-    return Number.isNaN(id) ? null : id;
+    try {
+      const ref = parseGraphNodeRef(String(sourceRef));
+      const id = Number(ref.id);
+      return Number.isNaN(id) ? null : id;
+    } catch {
+      return null;
+    }
   }
 
   private toHit(row: CognitionSearchDocRow): CognitionHit {

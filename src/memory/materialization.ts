@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
-import { makeNodeRef } from "./schema.js";
+import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 
@@ -52,7 +52,7 @@ export class MaterializationService {
 
   constructor(
     private readonly db: Database,
-    private readonly storage: GraphStorageService,
+    private readonly storage: GraphStorageService | null,
     projectionRepo?: AreaWorldProjectionRepo,
   ) {
     this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
@@ -108,6 +108,11 @@ export class MaterializationService {
       const sessionId = baseEvent?.session_id ?? `agent:${agentId}`;
       const timestamp = baseEvent?.timestamp ?? privateEvent.created_at;
 
+      if (!this.storage) {
+        result.skipped += 1;
+        continue;
+      }
+
       try {
         const publicEventId = this.storage.createProjectedEvent({
           sessionId,
@@ -161,7 +166,7 @@ export class MaterializationService {
       .prepare(
         `SELECT id
          FROM event_nodes
-         WHERE source_record_id = ? AND visibility_scope = 'area_visible'
+         WHERE source_record_id = ? AND ${SQL_AREA_VISIBLE}
          LIMIT 1`,
       )
       .get(sourceRecordId) as { id: number } | null;
@@ -210,6 +215,10 @@ export class MaterializationService {
       .get(entity.pointer_key) as { id: number } | null;
     if (existingShared) {
       return existingShared.id;
+    }
+
+    if (!this.storage) {
+      return null;
     }
 
     if (this.isPubliclyIdentifiable(entity, isLocation)) {
@@ -287,7 +296,7 @@ export class MaterializationService {
 }
 
 export function materializePublications(
-  storage: GraphStorageService,
+  storage: GraphStorageService | null,
   publications: PublicationDeclaration[],
   settlementId: string,
   ctx: {
@@ -313,7 +322,6 @@ export function materializePublications(
     const visibilityScope = publicationScopeToVisibility(pub.targetScope);
 
     if (visibilityScope === "area_visible" && ctx.locationEntityId === undefined) {
-      // current_area publication requires a known location; skip when unavailable
       result.skipped += 1;
       continue;
     }
@@ -321,14 +329,16 @@ export function materializePublications(
     let locationEntityId: number;
     if (ctx.locationEntityId !== undefined) {
       locationEntityId = ctx.locationEntityId;
-    } else {
-      // world_public with no concrete location — use a sentinel entity
+    } else if (storage) {
       locationEntityId = storage.upsertEntity({
         pointerKey: "world",
         displayName: "The World",
         entityType: "location",
         memoryScope: "shared_public",
       });
+    } else {
+      result.skipped += 1;
+      continue;
     }
 
     const eventCategory = publicationKindToCategory(pub.kind);
@@ -398,10 +408,14 @@ type PublicationRetryContext = {
 };
 
 function createPublicationEventWithRetry(
-  storage: GraphStorageService,
+  storage: GraphStorageService | null,
   params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
   retryContext: PublicationRetryContext,
 ): PublicationWriteResult {
+  if (!storage) {
+    return "skipped";
+  }
+
   let retryCount = 0;
 
   for (;;) {

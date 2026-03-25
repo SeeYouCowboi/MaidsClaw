@@ -8,7 +8,7 @@ import { GraphNavigator } from "../../src/memory/navigator.js";
 import { PromotionService } from "../../src/memory/promotion.js";
 import { getMemoryHints } from "../../src/memory/prompt-data.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
-import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "../../src/memory/schema.js";
+import { createMemorySchema, MAX_INTEGER, makeNodeRef, makeLegacyNodeRef } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { type MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
@@ -217,9 +217,9 @@ describe("Memory integration", () => {
 			batchId: "manual-organize-1",
 			changedNodeRefs: [
 				...migration.entity_ids.map((id) => makeNodeRef("entity", id)),
-				...migration.private_event_ids.map((id) =>
-					makeNodeRef("private_event", id),
-				),
+			...migration.private_event_ids.map((id) =>
+				makeLegacyNodeRef("private_event", id),
+			),
 				...migration.private_belief_ids.map((id) =>
 					makeNodeRef("assertion", id),
 				),
@@ -274,7 +274,7 @@ describe("Memory integration", () => {
 		};
 
 		const factCandidate = {
-			source_ref: makeNodeRef("private_event", migration.private_event_ids[0]),
+			source_ref: makeLegacyNodeRef("private_event", migration.private_event_ids[0]),
 			target_scope: "world_public" as const,
 			summary: "Alice owns locket",
 			entity_refs: [

@@ -230,7 +230,7 @@ describe("E2E demo scenario", () => {
               focus_cognition_key: "assert:butler-accounts",
               time_sliced_paths: [
                 {
-                  seed: "private_belief:1",
+                  seed: "assertion:1",
                   depth: 1,
                   edge_count: 1,
                   omitted_edges: 0,
@@ -242,8 +242,8 @@ describe("E2E demo scenario", () => {
             evidence_paths: [
               {
                 path: {
-                  seed: "private_belief:1",
-                  nodes: ["private_belief:1"],
+                  seed: "assertion:1",
+                  nodes: ["assertion:1"],
                   edges: [],
                   depth: 0,
                 },
@@ -260,7 +260,7 @@ describe("E2E demo scenario", () => {
                 },
                 supporting_nodes: [],
                 supporting_facts: [3],
-                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:7" }],
+                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "event:7" }],
                 summary: "1 visible step, 1 supporting fact",
               },
             ],
@@ -287,7 +287,7 @@ describe("E2E demo scenario", () => {
     const drilldown = result.drilldown as Record<string, unknown>;
     expect(drilldown.focus_cognition_key).toBe("assert:butler-accounts");
     const evidence = result.evidence_paths as Array<Record<string, unknown>>;
-    expect(evidence[0]?.redacted).toEqual([{ type: "redacted", reason: "private", node_ref: "private_event:7" }]);
+    expect(evidence[0]?.redacted).toEqual([{ type: "redacted", reason: "private", node_ref: "event:7" }]);
   });
 
   it("legacy retirement audit keeps prompt/tool canonical surfaces free of private_event/private_belief names", () => {

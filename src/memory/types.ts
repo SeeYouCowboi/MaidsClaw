@@ -102,9 +102,13 @@ export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
 const legacyPrivateEventKind = "private_" + "event";
 const legacyPrivateBeliefKind = "private_" + "belief";
 export const LEGACY_NODE_KINDS = [legacyPrivateEventKind, legacyPrivateBeliefKind] as const;
+export type LegacyNodeRefKind = (typeof LEGACY_NODE_KINDS)[number];
 
-export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS, ...LEGACY_NODE_KINDS] as const;
+export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
+
+export const ALL_KNOWN_NODE_REF_KINDS = [...CANONICAL_NODE_KINDS, ...LEGACY_NODE_KINDS] as const;
+export type AnyNodeRefKind = (typeof ALL_KNOWN_NODE_REF_KINDS)[number];
 
 export const CANONICAL_NODE_REF_KINDS = CANONICAL_NODE_KINDS;
 export const LEGACY_NODE_REF_KINDS = LEGACY_NODE_KINDS;
@@ -321,7 +325,7 @@ export type SearchDocWorld = {
 
 export type SeedCandidate = {
   node_ref: NodeRef;
-  node_kind: NodeRefKind;
+  node_kind: AnyNodeRefKind;
   lexical_score: number;
   semantic_score: number;
   fused_score: number;

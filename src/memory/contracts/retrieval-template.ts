@@ -10,12 +10,24 @@ export type RetrievalTemplate = {
   conflictNotesBudget?: number;
   episodicBudget?: number;
   episodeBudget?: number;
+  narrativeTokenBudget?: number;
+  cognitionTokenBudget?: number;
+  conflictNotesTokenBudget?: number;
+  episodicTokenBudget?: number;
   conflictBoostFactor?: number;
   queryEpisodeBoost?: number;
   sceneEpisodeBoost?: number;
   maxNarrativeHits?: number;
   maxCognitionHits?: number;
 };
+
+/**
+ * Coarse token estimate (~3 chars/token). Not precise for CJK.
+ * Token budgets with value 0 are treated as disabled (no limit enforced).
+ */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3);
+}
 
 const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
   rp_agent: {
@@ -28,6 +40,10 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 2,
     episodicBudget: 0,
     episodeBudget: 0,
+    narrativeTokenBudget: 0,
+    cognitionTokenBudget: 0,
+    conflictNotesTokenBudget: 0,
+    episodicTokenBudget: 0,
     conflictBoostFactor: 1,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
@@ -44,6 +60,10 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 0,
     episodicBudget: 0,
     episodeBudget: 0,
+    narrativeTokenBudget: 0,
+    cognitionTokenBudget: 0,
+    conflictNotesTokenBudget: 0,
+    episodicTokenBudget: 0,
     conflictBoostFactor: 0,
     queryEpisodeBoost: 1,
     sceneEpisodeBoost: 1,
@@ -60,6 +80,10 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesBudget: 0,
     episodicBudget: 0,
     episodeBudget: 0,
+    narrativeTokenBudget: 0,
+    cognitionTokenBudget: 0,
+    conflictNotesTokenBudget: 0,
+    episodicTokenBudget: 0,
     conflictBoostFactor: 0,
     queryEpisodeBoost: 0,
     sceneEpisodeBoost: 0,
@@ -91,6 +115,10 @@ export function resolveTemplate(
     conflictNotesBudget: override.conflictNotesBudget ?? base.conflictNotesBudget,
     episodicBudget,
     episodeBudget: episodicBudget,
+    narrativeTokenBudget: override.narrativeTokenBudget ?? base.narrativeTokenBudget,
+    cognitionTokenBudget: override.cognitionTokenBudget ?? base.cognitionTokenBudget,
+    conflictNotesTokenBudget: override.conflictNotesTokenBudget ?? base.conflictNotesTokenBudget,
+    episodicTokenBudget: override.episodicTokenBudget ?? base.episodicTokenBudget,
     conflictBoostFactor: override.conflictBoostFactor ?? base.conflictBoostFactor,
     queryEpisodeBoost: override.queryEpisodeBoost ?? base.queryEpisodeBoost,
     sceneEpisodeBoost: override.sceneEpisodeBoost ?? base.sceneEpisodeBoost,

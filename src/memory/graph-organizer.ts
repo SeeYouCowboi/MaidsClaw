@@ -4,7 +4,7 @@ import type { EmbeddingService } from "./embeddings.js";
 import { EmbeddingLinker, type OrganizerEmbeddingEntry, type OrganizerNode } from "./embedding-linker.js";
 import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
-import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
+import type { AnyNodeRefKind, GraphOrganizerResult, NodeRef, SemanticEdgeType } from "./types.js";
 
 const legacyPrivateEventKind = "private_event";
 const legacyPrivateBeliefKind = "private_belief";
@@ -87,7 +87,7 @@ export class GraphOrganizer {
     };
   }
 
-  private parseNodeRef(nodeRef: NodeRef): { kind: NodeRefKind; id: number } | undefined {
+  private parseNodeRef(nodeRef: NodeRef): { kind: AnyNodeRefKind; id: number } | undefined {
     const [kindRaw, idRaw] = nodeRef.split(":");
     const id = Number(idRaw);
     if (!Number.isInteger(id) || id <= 0) {
@@ -176,10 +176,10 @@ export class GraphOrganizer {
 
   private selectSemanticRelation(
     sourceRef: NodeRef,
-    sourceKind: NodeRefKind,
+    sourceKind: AnyNodeRefKind,
     sourceContent: string,
     targetRef: NodeRef,
-    targetKind: NodeRefKind,
+    targetKind: AnyNodeRefKind,
     targetContent: string,
     similarity: number,
     agentId: string,
@@ -201,7 +201,7 @@ export class GraphOrganizer {
     return null;
   }
 
-  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string): boolean {
+  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: AnyNodeRefKind, agentId: string): boolean {
     const row = this.db
       .prepare(`SELECT embedding FROM node_embeddings WHERE node_ref = ? ORDER BY updated_at DESC LIMIT 1`)
       .get(targetRef) as { embedding: Buffer | Uint8Array } | null;
@@ -217,7 +217,7 @@ export class GraphOrganizer {
     return nearest.some((candidate) => candidate.nodeRef === sourceRef || candidate.nodeRef === targetRef);
   }
 
-  private isCuratedBridgePair(a: NodeRefKind, b: NodeRefKind): boolean {
+  private isCuratedBridgePair(a: AnyNodeRefKind, b: AnyNodeRefKind): boolean {
     const key = `${a}:${b}`;
     const allowed = new Set([
       "event:entity",

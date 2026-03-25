@@ -89,28 +89,54 @@ export class RelationBuilder {
       return;
     }
 
-    const now = Date.now();
     for (const targetNodeRef of targets) {
-      this.db
-        .prepare(
-          `INSERT INTO memory_relations
-           (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
-           DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
-        )
-        .run(
-          canonicalSourceRef,
-          targetNodeRef,
-          CONFLICTS_WITH,
-          strength,
-          DIRECTNESS_DIRECT,
-          SOURCE_KIND_AGENT_OP,
-          sourceRef,
-          now,
-          now,
-        );
+      this.writeRelation(CONFLICTS_WITH, canonicalSourceRef, targetNodeRef, sourceRef, {
+        strength,
+      });
     }
+  }
+
+  /**
+   * Write a single relation of any `MemoryRelationType` into `memory_relations`.
+   *
+   * Defaults mirror the `conflicts_with` path:
+   *   strength = 0.8, directness = "direct", sourceKind = "agent_op"
+   */
+  writeRelation(
+    relationType: MemoryRelationType,
+    sourceNodeRef: string,
+    targetNodeRef: string,
+    sourceRef: string,
+    options?: {
+      strength?: number;
+      directness?: RelationDirectness;
+      sourceKind?: RelationSourceKind;
+    },
+  ): void {
+    const strength = options?.strength ?? 0.8;
+    const directness: RelationDirectness = options?.directness ?? DIRECTNESS_DIRECT;
+    const sourceKind: RelationSourceKind = options?.sourceKind ?? SOURCE_KIND_AGENT_OP;
+    const now = Date.now();
+
+    this.db
+      .prepare(
+        `INSERT INTO memory_relations
+         (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
+         DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
+      )
+      .run(
+        sourceNodeRef,
+        targetNodeRef,
+        relationType,
+        strength,
+        directness,
+        sourceKind,
+        sourceRef,
+        now,
+        now,
+      );
   }
 
   /**

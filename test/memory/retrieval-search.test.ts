@@ -1601,5 +1601,182 @@ describe("RetrievalService", () => {
 			).toBeGreaterThan(defaultResult.typed.narrative.length + defaultResult.typed.episode.length);
 			expect(deepResult.typed.conflict_notes.length).toBeGreaterThanOrEqual(defaultResult.typed.conflict_notes.length);
 		});
+
+		it("token budget stops cognition before count budget when content is long", async () => {
+			const now = Date.now();
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:100" as NodeRef,
+							cognitionKey: "token:one",
+							content: "x".repeat(90),
+							updated_at: now,
+						},
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:101" as NodeRef,
+							cognitionKey: "token:two",
+							content: "y".repeat(90),
+							updated_at: now - 1,
+						},
+					],
+				} as unknown as CognitionSearchService,
+			});
+
+			const result = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 2,
+					cognitionTokenBudget: 30,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+			);
+
+			expect(result.typed.cognition).toHaveLength(1);
+			expect(result.typed.cognition[0]?.cognitionKey).toBe("token:one");
+		});
+
+		it("cross-type dedup filters cognition hit duplicating already surfaced narrative text", async () => {
+			const now = Date.now();
+			const duplicateText = "Shared duplicate memory";
+			const allSurfacedTexts = new Set<string>();
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [
+						{
+							source_ref: "event:200" as NodeRef,
+							doc_type: "event",
+							scope: "world",
+							content: duplicateText,
+							score: 1,
+						},
+					],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:200" as NodeRef,
+							cognitionKey: "dup:key",
+							content: duplicateText,
+							updated_at: now,
+						},
+					],
+				} as unknown as CognitionSearchService,
+			});
+
+			const first = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 0,
+					narrativeBudget: 1,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+				{ allSurfacedTexts },
+			);
+
+			const second = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 1,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+				{ allSurfacedTexts },
+			);
+
+			expect(first.typed.narrative).toHaveLength(1);
+			expect(second.typed.cognition).toHaveLength(0);
+		});
+
+		it("when token budget fields are not set, retrieval matches count-only behavior", async () => {
+			const now = Date.now();
+			const orchestrator = new RetrievalOrchestrator({
+				narrativeService: {
+					generateMemoryHints: async () => [],
+				} as unknown as NarrativeSearchService,
+				cognitionService: {
+					searchCognition: () => [
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:300" as NodeRef,
+							cognitionKey: "compat:one",
+							content: "a".repeat(120),
+							updated_at: now,
+						},
+						{
+							kind: "assertion",
+							basis: "first_hand",
+							stance: "accepted",
+							source_ref: "assertion:301" as NodeRef,
+							cognitionKey: "compat:two",
+							content: "b".repeat(120),
+							updated_at: now - 1,
+						},
+					],
+				} as unknown as CognitionSearchService,
+			});
+
+			const withoutTokenFields = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 2,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+			);
+
+			const explicitZeroTokenFields = await orchestrator.search(
+				"recall",
+				viewer(),
+				"rp_agent",
+				{
+					cognitionBudget: 2,
+					cognitionTokenBudget: 0,
+					narrativeBudget: 0,
+					conflictNotesBudget: 0,
+					episodeBudget: 0,
+					queryEpisodeBoost: 0,
+					sceneEpisodeBoost: 0,
+				},
+			);
+
+			expect(withoutTokenFields.typed.cognition).toHaveLength(2);
+			expect(withoutTokenFields.typed.cognition).toEqual(explicitZeroTokenFields.typed.cognition);
+		});
 	});
 });

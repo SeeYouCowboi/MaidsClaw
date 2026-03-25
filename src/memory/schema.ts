@@ -2,11 +2,12 @@
 import type { Db } from "../storage/database.js";
 import type { MigrationStep } from "../storage/migrations.js";
 import { runMigrations } from "../storage/migrations.js";
-import { MAX_INTEGER, NODE_REF_KINDS, type NodeRef, type NodeRefKind } from "./types.js";
+import { MAX_INTEGER, NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS, type NodeRef, type NodeRefKind, type AnyNodeRefKind } from "./types.js";
 
 export { MAX_INTEGER } from "./types.js";
 
 export const VisibilityScope = { AREA_VISIBLE: "area_visible", WORLD_PUBLIC: "world_public" } as const;
+export const SQL_AREA_VISIBLE = `visibility_scope = '${VisibilityScope.AREA_VISIBLE}'` as const;
 export const MemoryScope = { SHARED_PUBLIC: "shared_public", PRIVATE_OVERLAY: "private_overlay" } as const;
 export const EventCategory = {
   SPEECH: "speech",
@@ -32,7 +33,17 @@ const AREA_WORLD_PROJECTION_DDL: readonly string[] = [
 ];
 
 export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
-  if (!NODE_REF_KINDS.includes(kind)) {
+  if (!(NODE_REF_KINDS as readonly string[]).includes(kind)) {
+    throw new Error(`Invalid node ref kind: ${kind}`);
+  }
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error(`Invalid node ref id: ${id}`);
+  }
+  return `${kind}:${id}` as NodeRef;
+}
+
+export function makeLegacyNodeRef(kind: AnyNodeRefKind, id: number): NodeRef {
+  if (!(ALL_KNOWN_NODE_REF_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`Invalid node ref kind: ${kind}`);
   }
   if (!Number.isInteger(id) || id <= 0) {
@@ -698,6 +709,18 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     description: "Add retrieval_only flag to shared_blocks",
     up: (db: Db) => {
       addColumnIfMissing(db, "shared_blocks", "retrieval_only", "INTEGER NOT NULL DEFAULT 0");
+    },
+  },
+  {
+    id: "memory:027:legacy-compat-cutover-marker",
+    description:
+      "V3 T34 cutover marker: legacy private_event/private_belief node refs are now in read-only compat mode. " +
+      "No new rows with these kinds are written by the application layer. " +
+      "The node_embeddings.node_kind CHECK constraint retains both legacy values for existing DB rows only. " +
+      "Application-layer compat paths (relation-builder, graph-edge-view, cognition-repo) are marked // compat: and will be removed in a future cleanup cycle.",
+    up: (_db: Db) => {
+      // No DDL changes — this migration is a documentation-only cutover marker.
+      // The compat layer lives entirely in the application layer (not schema layer).
     },
   },
 ];

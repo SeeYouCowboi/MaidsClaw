@@ -41,3 +41,4 @@ reference/
 /config/personas.json
 /config/providers.json
 /config/runtime.json
+/.sisyphus/drafts

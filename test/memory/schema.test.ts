@@ -7,10 +7,11 @@ import { GraphNavigator } from "../../src/memory/navigator.js";
 import {
 	MAX_INTEGER,
 	makeNodeRef,
+	makeLegacyNodeRef,
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
-import { NODE_REF_KINDS } from "../../src/memory/types.js";
+import { NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS } from "../../src/memory/types.js";
 import { openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
@@ -495,7 +496,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(26);
+		expect(migrationCount?.count).toBe(27);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -609,10 +610,13 @@ describe("memory schema", () => {
 	});
 
 	it("keeps V1 node ref kinds unchanged and navigator importable", () => {
-		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment", "private_event", "private_belief"]);
+		// V3: NODE_REF_KINDS is canonical-only (6 kinds)
+		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment"]);
+		// ALL_KNOWN_NODE_REF_KINDS includes legacy compat (8 kinds)
+		expect([...ALL_KNOWN_NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment", "private_event", "private_belief"]);
 		expect(typeof GraphNavigator).toBe("function");
-		expect(String(makeNodeRef("private_belief", 1))).toBe("private_belief:1");
-		expect(String(makeNodeRef("private_event", 1))).toBe("private_event:1");
+		expect(String(makeLegacyNodeRef("private_belief", 1))).toBe("private_belief:1");
+		expect(String(makeLegacyNodeRef("private_event", 1))).toBe("private_event:1");
 	});
 
 	it("creates all 6 shared_blocks tables", () => {
@@ -897,14 +901,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 26 after all migrations", () => {
+	it("migration count is 27 after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(26);
+		expect(migrationCount?.count).toBe(27);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -320,3 +320,36 @@ describe("MaterializationService", () => {
     expect(publicMatches.length).toBe(1);
   });
 });
+
+describe("MaterializationService with null storage", () => {
+  let db: Database;
+  let service: MaterializationService;
+
+  beforeEach(() => {
+    db = freshDb();
+    service = new MaterializationService(db, null);
+  });
+
+  it("handles null graphStorage gracefully", () => {
+    const privateEvent = {
+      id: 1,
+      event_id: null,
+      agent_id: "maid-alice",
+      projection_class: "area_candidate" as const,
+      event_category: "observation" as const,
+      projectable_summary: "Test observation",
+      location_entity_id: null,
+      source_record_id: "test-record-1",
+      primary_actor_entity_id: null,
+      created_at: Date.now(),
+      emotion: null,
+    };
+
+    expect(() => {
+      service.materializeDelayed([privateEvent], "maid-alice");
+    }).not.toThrow();
+
+    const result = service.materializeDelayed([privateEvent], "maid-alice");
+    expect(result.skipped).toBe(1);
+  });
+});

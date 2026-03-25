@@ -5,6 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   NODE_REF_KINDS,
+  ALL_KNOWN_NODE_REF_KINDS,
   CANONICAL_NODE_REF_KINDS,
   LEGACY_NODE_REF_KINDS,
   type NodeRefKind,
@@ -12,16 +13,28 @@ import {
 } from "./types.js";
 
 describe("NODE_REF_KINDS canonical/legacy split", () => {
-  it("NODE_REF_KINDS contains all 8 kinds (canonical + legacy)", () => {
-    expect(NODE_REF_KINDS).toHaveLength(8);
+  it("NODE_REF_KINDS contains exactly 6 canonical kinds", () => {
+    expect(NODE_REF_KINDS).toHaveLength(6);
     expect(NODE_REF_KINDS).toContain("event");
     expect(NODE_REF_KINDS).toContain("entity");
     expect(NODE_REF_KINDS).toContain("fact");
     expect(NODE_REF_KINDS).toContain("assertion");
     expect(NODE_REF_KINDS).toContain("evaluation");
     expect(NODE_REF_KINDS).toContain("commitment");
-    expect(NODE_REF_KINDS).toContain("private_event");
-    expect(NODE_REF_KINDS).toContain("private_belief");
+    expect(NODE_REF_KINDS).not.toContain("private_event");
+    expect(NODE_REF_KINDS).not.toContain("private_belief");
+  });
+
+  it("ALL_KNOWN_NODE_REF_KINDS contains canonical + legacy kinds", () => {
+    expect(ALL_KNOWN_NODE_REF_KINDS).toHaveLength(8);
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("event");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("entity");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("fact");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("assertion");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("evaluation");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("commitment");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("private_event");
+    expect(ALL_KNOWN_NODE_REF_KINDS).toContain("private_belief");
   });
 
   it("CANONICAL_NODE_REF_KINDS contains exactly 6 canonical kinds", () => {
@@ -39,8 +52,8 @@ describe("NODE_REF_KINDS canonical/legacy split", () => {
     expect(LEGACY_NODE_REF_KINDS).toEqual(["private_event", "private_belief"]);
   });
 
-  it("canonical and legacy are disjoint subsets of NODE_REF_KINDS", () => {
-    const all = new Set<string>(NODE_REF_KINDS);
+  it("canonical and legacy are disjoint subsets of ALL_KNOWN_NODE_REF_KINDS", () => {
+    const all = new Set<string>(ALL_KNOWN_NODE_REF_KINDS);
     const canonical = new Set<string>(CANONICAL_NODE_REF_KINDS);
     const legacy = new Set<string>(LEGACY_NODE_REF_KINDS);
 

@@ -4,7 +4,7 @@ import type { MemoryHint } from "../types.js";
 import type { NarrativeSearchService } from "../narrative/narrative-search.js";
 import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } from "../cognition/cognition-search.js";
 import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
-import { resolveTemplate } from "../contracts/retrieval-template.js";
+import { estimateTokens, resolveTemplate } from "../contracts/retrieval-template.js";
 import type { EpisodeRepository, EpisodeRow } from "../episode/episode-repo.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
@@ -57,6 +57,7 @@ export type RetrievalDedupContext = {
   recentCognitionTexts?: string[];
   conversationTexts?: string[];
   surfacedNarrativeTexts?: string[];
+  allSurfacedTexts?: Set<string>;
 };
 
 const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次)/i;
@@ -91,6 +92,7 @@ export class RetrievalOrchestrator {
     const effectiveConflictNotesBudget = this.resolveConflictNotesBudget(template, contestedCount);
 
     const seenText = this.seedSeenText(dedupContext);
+    const allSurfacedTexts = dedupContext?.allSurfacedTexts ?? new Set<string>();
 
     const recentCognitionKeys = new Set<string>(dedupContext?.recentCognitionKeys ?? []);
     if (this.currentProjectionReader && template.cognitionBudget > 0) {
@@ -105,6 +107,10 @@ export class RetrievalOrchestrator {
           seenText.add(this.normalizeText(summary));
         }
       }
+    }
+
+    for (const normalized of seenText) {
+      allSurfacedTexts.add(normalized);
     }
 
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(query, template, viewerContext);
@@ -136,6 +142,7 @@ export class RetrievalOrchestrator {
       narrativeHints,
       episodeHints,
       seenText,
+      allSurfacedTexts,
       recentCognitionKeys,
       effectiveEpisodeBudget,
       effectiveConflictNotesBudget,
@@ -185,6 +192,7 @@ export class RetrievalOrchestrator {
     narrativeHints: MemoryHint[],
     episodeHints: TypedNarrativeSegment[],
     seenText: Set<string>,
+    allSurfacedTexts: Set<string>,
     recentCognitionKeys: Set<string>,
     effectiveEpisodeBudget: number,
     effectiveConflictNotesBudget: number,
@@ -196,9 +204,17 @@ export class RetrievalOrchestrator {
       episode: [],
     };
 
+    let cognitionTokens = 0;
+    let narrativeTokens = 0;
+    let conflictNotesTokens = 0;
+    let episodeTokens = 0;
+
     if (template.cognitionEnabled && template.cognitionBudget > 0) {
       for (const hit of cognitionHits) {
         if (typed.cognition.length >= template.cognitionBudget) {
+          break;
+        }
+        if (template.cognitionTokenBudget > 0 && cognitionTokens >= template.cognitionTokenBudget) {
           break;
         }
         const key = hit.cognitionKey ?? this.extractCognitionKey(hit.source_ref);
@@ -206,10 +222,16 @@ export class RetrievalOrchestrator {
           continue;
         }
         const normalized = this.normalizeText(hit.content);
-        if (normalized.length === 0 || seenText.has(normalized)) {
+        if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+          continue;
+        }
+        const tokenEstimate = estimateTokens(hit.content);
+        if (template.cognitionTokenBudget > 0 && cognitionTokens + tokenEstimate > template.cognitionTokenBudget) {
           continue;
         }
         seenText.add(normalized);
+        allSurfacedTexts.add(normalized);
+        cognitionTokens += tokenEstimate;
         typed.cognition.push({
           source_ref: String(hit.source_ref),
           content: hit.content,
@@ -227,14 +249,23 @@ export class RetrievalOrchestrator {
         if (typed.narrative.length >= template.narrativeBudget) {
           break;
         }
+        if (template.narrativeTokenBudget > 0 && narrativeTokens >= template.narrativeTokenBudget) {
+          break;
+        }
         if (effectiveEpisodeBudget > 0 && this.isEpisodeCandidate(hint)) {
           continue;
         }
         const normalized = this.normalizeText(hint.content);
-        if (normalized.length === 0 || seenText.has(normalized)) {
+        if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+          continue;
+        }
+        const tokenEstimate = estimateTokens(hint.content);
+        if (template.narrativeTokenBudget > 0 && narrativeTokens + tokenEstimate > template.narrativeTokenBudget) {
           continue;
         }
         seenText.add(normalized);
+        allSurfacedTexts.add(normalized);
+        narrativeTokens += tokenEstimate;
         typed.narrative.push({
           source_ref: String(hint.source_ref),
           content: hint.content,
@@ -250,6 +281,9 @@ export class RetrievalOrchestrator {
         if (typed.conflict_notes.length >= effectiveConflictNotesBudget) {
           break;
         }
+        if (template.conflictNotesTokenBudget > 0 && conflictNotesTokens >= template.conflictNotesTokenBudget) {
+          break;
+        }
         if (hit.stance !== "contested" || !hit.conflictEvidence || hit.conflictEvidence.length === 0) {
           continue;
         }
@@ -260,10 +294,19 @@ export class RetrievalOrchestrator {
           }
           const content = `Conflicts with ${ev.targetRef} (strength: ${ev.strength})`;
           const normalized = this.normalizeText(content);
-          if (normalized.length === 0 || seenText.has(normalized)) {
+          if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+            continue;
+          }
+          const tokenEstimate = estimateTokens(content);
+          if (
+            template.conflictNotesTokenBudget > 0
+            && conflictNotesTokens + tokenEstimate > template.conflictNotesTokenBudget
+          ) {
             continue;
           }
           seenText.add(normalized);
+          allSurfacedTexts.add(normalized);
+          conflictNotesTokens += tokenEstimate;
           typed.conflict_notes.push({
             source_ref: `conflict_note:${hit.source_ref}`,
             from_source_ref: String(hit.source_ref),
@@ -280,11 +323,20 @@ export class RetrievalOrchestrator {
         if (typed.episode.length >= effectiveEpisodeBudget) {
           break;
         }
+        if (template.episodicTokenBudget > 0 && episodeTokens >= template.episodicTokenBudget) {
+          break;
+        }
         const normalized = this.normalizeText(hint.content);
-        if (normalized.length === 0 || seenText.has(normalized)) {
+        if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+          continue;
+        }
+        const tokenEstimate = estimateTokens(hint.content);
+        if (template.episodicTokenBudget > 0 && episodeTokens + tokenEstimate > template.episodicTokenBudget) {
           continue;
         }
         seenText.add(normalized);
+        allSurfacedTexts.add(normalized);
+        episodeTokens += tokenEstimate;
         typed.episode.push(hint);
       }
 
@@ -292,14 +344,23 @@ export class RetrievalOrchestrator {
         if (typed.episode.length >= effectiveEpisodeBudget) {
           break;
         }
+        if (template.episodicTokenBudget > 0 && episodeTokens >= template.episodicTokenBudget) {
+          break;
+        }
         if (!this.isEpisodeCandidate(hint)) {
           continue;
         }
         const normalized = this.normalizeText(hint.content);
-        if (normalized.length === 0 || seenText.has(normalized)) {
+        if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+          continue;
+        }
+        const tokenEstimate = estimateTokens(hint.content);
+        if (template.episodicTokenBudget > 0 && episodeTokens + tokenEstimate > template.episodicTokenBudget) {
           continue;
         }
         seenText.add(normalized);
+        allSurfacedTexts.add(normalized);
+        episodeTokens += tokenEstimate;
         typed.episode.push({
           source_ref: String(hint.source_ref),
           content: hint.content,

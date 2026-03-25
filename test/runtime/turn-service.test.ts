@@ -359,7 +359,6 @@ describe("TurnService", () => {
                     object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
                   },
                   stance: "accepted",
-                  confidence: 0.9,
                   salience: 5,
                 },
               },
@@ -423,7 +422,6 @@ describe("TurnService", () => {
           object: { kind: "entity", ref: { kind: "pointer_key", value: "target:bob" } },
         },
         stance: "accepted",
-        confidence: 0.9,
         salience: 5,
       },
     });

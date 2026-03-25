@@ -13,6 +13,7 @@ import {
 } from "./time-slice-query.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
+  AnyNodeRefKind,
   BeamEdge,
   BeamPath,
   EvidencePath,
@@ -152,7 +153,7 @@ const TIME_CONSTRAINT_KEYWORDS = [
 const legacyPrivateEventKind = "private_event";
 const legacyPrivateBeliefKind = "private_belief";
 
-const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
+const KNOWN_NODE_KINDS = new Set<AnyNodeRefKind>([
   "event",
   "entity",
   "fact",
@@ -503,7 +504,7 @@ export class GraphNavigator {
     return analysis.resolved_entity_ids.has(parsed.id);
   }
 
-  private nodeTypePrior(queryType: QueryType, nodeKind: NodeRefKind): number {
+  private nodeTypePrior(queryType: QueryType, nodeKind: AnyNodeRefKind): number {
     const priors = {
     entity:       { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7,  evaluation: 0.4,  commitment: 0.4,  [legacyPrivateEventKind]: 0.4, [legacyPrivateBeliefKind]: 0.7 },
     event:        { event: 1, fact: 0.7,  entity: 0.55, assertion: 0.45, evaluation: 0.8,  commitment: 0.6,  [legacyPrivateEventKind]: 0.8, [legacyPrivateBeliefKind]: 0.45 },
@@ -512,7 +513,7 @@ export class GraphNavigator {
     timeline:     { event: 1, fact: 0.5,  entity: 0.3,  assertion: 0.45, evaluation: 0.85, commitment: 0.7,  [legacyPrivateEventKind]: 0.85, [legacyPrivateBeliefKind]: 0.45 },
     state:        { fact: 1, entity: 0.85, event: 0.5,  assertion: 0.8,  evaluation: 0.5,  commitment: 0.75, [legacyPrivateEventKind]: 0.5, [legacyPrivateBeliefKind]: 0.8 },
     conflict:     { [legacyPrivateBeliefKind]: 1, assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, [legacyPrivateEventKind]: 0.75, entity: 0.6 },
-    } satisfies Record<QueryType, Record<NodeRefKind, number>>;
+    } satisfies Record<QueryType, Record<AnyNodeRefKind, number>>;
 
     return (priors[queryType] as Record<string, number>)[nodeKind] ?? 0.2;
   }
@@ -582,8 +583,8 @@ export class GraphNavigator {
     return allPaths;
   }
 
-  private groupFrontierByKind(paths: InternalBeamPath[]): Map<NodeRefKind, Set<NodeRef>> {
-    const grouped = new Map<NodeRefKind, Set<NodeRef>>();
+  private groupFrontierByKind(paths: InternalBeamPath[]): Map<AnyNodeRefKind, Set<NodeRef>> {
+    const grouped = new Map<AnyNodeRefKind, Set<NodeRef>>();
     for (const path of paths) {
       const tail = path.path.nodes[path.path.nodes.length - 1];
       const parsed = this.parseNodeRef(tail);
@@ -598,7 +599,7 @@ export class GraphNavigator {
   }
 
   private fetchNeighborsByFrontier(
-    frontier: Map<NodeRefKind, Set<NodeRef>>,
+    frontier: Map<AnyNodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     timeSlice: TimeSliceQuery,
   ): Map<NodeRef, InternalBeamEdge[]> {
@@ -1195,7 +1196,7 @@ export class GraphNavigator {
   }
 
   private expandRelationEdges(
-    frontier: Map<NodeRefKind, Set<NodeRef>>,
+    frontier: Map<AnyNodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
@@ -1489,7 +1490,7 @@ export class GraphNavigator {
 
   private loadNodeSnapshots(refs: NodeRef[]): Map<NodeRef, NodeSnapshot> {
     const unique = Array.from(new Set(refs));
-    const byKind = new Map<NodeRefKind, number[]>();
+    const byKind = new Map<AnyNodeRefKind, number[]>();
     for (const ref of unique) {
       const parsed = this.parseNodeRef(ref);
       if (!parsed) {
@@ -1516,7 +1517,7 @@ export class GraphNavigator {
 
   private populateSnapshots(
     map: Map<NodeRef, NodeSnapshot>,
-    kind: NodeRefKind,
+    kind: AnyNodeRefKind,
     ids: number[] | undefined,
     table: string,
     summaryColumn: string,
@@ -1816,7 +1817,7 @@ export class GraphNavigator {
     return "state";
   }
 
-  private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {
+  private parseNodeRef(ref: NodeRef): { kind: AnyNodeRefKind; id: number } | null {
     try {
       const parsed = parseGraphNodeRef(String(ref));
       if (!KNOWN_NODE_KINDS.has(parsed.kind)) {

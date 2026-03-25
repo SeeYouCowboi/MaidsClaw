@@ -172,7 +172,7 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
         stance: "contested",
         preContestedStance: "accepted",
         conflictSummary: "contested (3 factors)",
-        conflictFactorRefs: ["private_event:11", "private_event:12", "private_belief:7"],
+        conflictFactorRefs: ["event:11", "event:12", "assertion:7"],
       },
     ];
 

@@ -142,13 +142,13 @@ describe("time-slice-query", () => {
         },
         supporting_nodes: ["event:2" as NodeRef],
         supporting_facts: [],
-        redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:9" }],
+        redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "event:9" }],
       },
     ];
 
     const filtered = filterEvidencePathsByTimeSlice(input, { asOfCommittedTime: 300 });
     expect(filtered).toHaveLength(1);
-    expect(filtered[0]?.redacted_placeholders).toEqual([{ type: "redacted", reason: "private", node_ref: "private_event:9" }]);
+    expect(filtered[0]?.redacted_placeholders).toEqual([{ type: "redacted", reason: "private", node_ref: "event:9" }]);
     expect(filtered[0]?.path.nodes).toEqual(["private_episode:1", "event:2"]);
   });
 
