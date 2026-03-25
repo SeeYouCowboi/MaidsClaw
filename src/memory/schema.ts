@@ -77,9 +77,6 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
-  `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
   `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`, // compat: CHECK includes legacy private_event/private_belief for existing data
@@ -149,6 +146,8 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:002:add-cognition-keys",
     description: "Add cognition keys and metadata columns to overlays",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       addColumnIfMissing(db, "agent_fact_overlay", "cognition_key", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "settlement_id", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "op_index", "INTEGER");
@@ -189,6 +188,8 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:004:add-canonical-overlay-columns",
     description: "Add canonical overlay columns to agent overlays",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       addColumnIfMissing(
         db,
         "agent_fact_overlay",
@@ -446,6 +447,8 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
     description:
       "Rebuild agent_fact_overlay without legacy columns: belief_type, confidence, epistemic_status",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       // Check if old columns still exist (idempotency)
       const hasBelief = db
         .query<{ name: string }>(`PRAGMA table_info(agent_fact_overlay)`)
@@ -831,6 +834,13 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
             OR target_node_ref LIKE 'private_event:%'
             OR target_node_ref LIKE 'private_belief:%'`,
       ).run();
+    },
+  },
+  {
+    id: "memory:030:drop-agent-fact-overlay",
+    description: "Drop legacy agent_fact_overlay table after canonical cognition cutover",
+    up: (db: Db) => {
+      db.prepare(`DROP TABLE IF EXISTS agent_fact_overlay`).run();
     },
   },
 ];

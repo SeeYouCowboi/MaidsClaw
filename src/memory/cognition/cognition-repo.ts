@@ -207,7 +207,12 @@ function patchRelationBuilderAssertionProjectionCompat(): void {
       this: { db: DbLike },
       sourceNodeRef: string,
     ): string | null {
-      const resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
+      let resolved: string | null = null;
+      try {
+        resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
+      } catch {
+        // agent_fact_overlay may not exist after migration 030 — fall through
+      }
       if (resolved) {
         return resolved;
       }
@@ -235,7 +240,12 @@ function patchRelationBuilderAssertionProjectionCompat(): void {
       cognitionKey: string,
       sourceAgentId: string | null,
     ): string | null {
-      const resolved = originalResolveCanonicalCognitionRefByKey.call(this, cognitionKey, sourceAgentId);
+      let resolved: string | null = null;
+      try {
+        resolved = originalResolveCanonicalCognitionRefByKey.call(this, cognitionKey, sourceAgentId);
+      } catch {
+        // agent_fact_overlay may not exist after migration 030 — fall through
+      }
       if (resolved) {
         return resolved;
       }

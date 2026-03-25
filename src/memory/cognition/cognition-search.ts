@@ -165,7 +165,7 @@ export class CognitionSearchService {
 
     if (kind === LEGACY_PRIVATE_BELIEF_KIND || kind === "assertion") { // compat: legacy kind reads
       const row = this.db
-        .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE id = ? AND agent_id = ?`)
+        .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ? AND kind = 'assertion'`)
         .get(id, agentId) as { "cognition_key": string | null } | null;
       return row?.cognition_key ?? null;
     }
