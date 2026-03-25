@@ -3,6 +3,8 @@
 Date: 2026-03-23
 Scope: T15 architecture acceptance + legacy private path retirement audit
 
+> **NOTE: Legacy retirement completed as of March 2026.** The `private_event` / `private_belief` naming audit is done and both node kinds are fully removed from the type system and all production code. `agent_fact_overlay` has been dropped via migration 030. `agent_event_overlay` was dropped via migration 017. The canonical tables going forward are `private_episode_events`, `private_cognition_events`, and `private_cognition_current`. See legacy-cleanup refactor commits (migrations 027–032).
+
 ## Goals
 
 - Lock section-18 architecture acceptance into automated suites (runtime, memory, e2e).

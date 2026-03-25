@@ -259,6 +259,8 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ## Scenario 17 — Legacy Private Path Retirement Audit (Section-18 Follow-up)
 
+> **Retirement status: COMPLETE** (March 2026). `private_event` and `private_belief` are fully removed from all production code as of the legacy-cleanup refactor. `agent_fact_overlay` has been dropped (migration 030). The scenarios below document the acceptance criteria that confirmed the retirement was safe before it was finalized.
+
 **What it proves:** Canonical prompt/tool surface and migration acceptance no longer treat `private_event` / `private_belief` labels as frontstage naming, and new synchronous projection writes do not require legacy private overlays.
 
 **Test files:**
@@ -267,7 +269,7 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 - `test/memory/e2e-rp-memory-pipeline.test.ts` — conflict factor soft-fail behavior with stable refs
 
 **Key assertions:**
-- Prompt slot definitions and tool descriptions avoid exposing `private_event` / `private_belief` as canonical user-facing surface names
+- Prompt slot definitions and tool descriptions avoid exposing `private_event` / `private_belief` as canonical user-facing surface names (these node kinds are now fully retired from the type system)
 - Synchronous projection path materializes section-18 artifacts without waiting for legacy migration loops
 - Shape-valid but unresolved conflict factors degrade quality (`resolved/dropped`) instead of aborting settlement
 
