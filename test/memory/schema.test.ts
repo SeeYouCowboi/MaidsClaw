@@ -14,7 +14,7 @@ import {
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
-import { ALL_KNOWN_NODE_REF_KINDS, NODE_REF_KINDS } from "../../src/memory/types.js";
+import { NODE_REF_KINDS } from "../../src/memory/types.js";
 import { type Db, openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
@@ -900,11 +900,9 @@ describe("memory schema", () => {
 	it("keeps V1 node ref kinds unchanged and navigator importable", () => {
 		// V3: NODE_REF_KINDS is canonical-only (6 kinds)
 		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment"]);
-		// ALL_KNOWN_NODE_REF_KINDS includes legacy compat (8 kinds)
-		expect([...ALL_KNOWN_NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment", "private_event", "private_belief"]);
 		expect(typeof GraphNavigator).toBe("function");
-		expect(String(makeLegacyNodeRef("private_belief", 1))).toBe("private_belief:1");
-		expect(String(makeLegacyNodeRef("private_event", 1))).toBe("private_event:1");
+		expect(() => makeLegacyNodeRef("private_belief" as never, 1)).toThrow();
+		expect(() => makeLegacyNodeRef("private_event" as never, 1)).toThrow();
 	});
 
 	it("creates all 6 shared_blocks tables", () => {

@@ -8,6 +8,7 @@ import { openDatabase } from "../storage/database";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref";
 import {
 	createMemorySchema,
+	MEMORY_MIGRATIONS,
 	EventCategory,
 	MAX_INTEGER,
 	MemoryScope,
@@ -679,7 +680,7 @@ describe("migration:022 node_embeddings node_id", () => {
 		const { db, dbPath } = freshMigrationDb();
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(27);
+		expect(rows!.cnt).toBe(MEMORY_MIGRATIONS.length);
 		db.close();
 		cleanup(dbPath);
 	});
@@ -702,16 +703,16 @@ describe("migration:022 node_embeddings node_id", () => {
 		db.run(
 			`INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-			["private_belief:42", "private_belief", "primary", "test-model", new Uint8Array([1, 2, 3]), now],
+			["assertion:42", "assertion", "primary", "test-model", new Uint8Array([1, 2, 3]), now],
 		);
 		runMemoryMigrations(db);
 		const row = db.get<{ node_id: string; node_kind: string; node_ref: string }>(
 			"SELECT node_id, node_kind, node_ref FROM node_embeddings WHERE node_ref = ?",
-			["private_belief:42"],
+			["assertion:42"],
 		);
 		expect(row!.node_id).toBe("42");
-		expect(row!.node_kind).toBe("private_belief");
-		expect(row!.node_ref).toBe("private_belief:42");
+		expect(row!.node_kind).toBe("assertion");
+		expect(row!.node_ref).toBe("assertion:42");
 		db.close();
 		cleanup(dbPath);
 	});
@@ -727,7 +728,7 @@ describe("V3 migration backfill consistency", () => {
 		runMemoryMigrations(db);
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(27);
+		expect(rows!.cnt).toBe(MEMORY_MIGRATIONS.length);
 		db.close();
 		try {
 			rmSync(dbPath, { force: true });
@@ -769,17 +770,13 @@ describe("V3 migration backfill consistency", () => {
 
 // ─── 15. parseGraphNodeRef backward compatibility ───────────────────────────
 
-describe("parseGraphNodeRef backward compat", () => {
-	it("parses legacy private_belief:42 ref", () => {
-		const ref = parseGraphNodeRef("private_belief:42");
-		expect(ref.kind).toBe("private_belief");
-		expect(ref.id).toBe("42");
+describe("parseGraphNodeRef canonical-only", () => {
+	it("rejects legacy private_belief:42 ref", () => {
+		expect(() => parseGraphNodeRef("private_belief:42")).toThrow();
 	});
 
-	it("parses legacy private_event:7 ref", () => {
-		const ref = parseGraphNodeRef("private_event:7");
-		expect(ref.kind).toBe("private_event");
-		expect(ref.id).toBe("7");
+	it("rejects legacy private_event:7 ref", () => {
+		expect(() => parseGraphNodeRef("private_event:7")).toThrow();
 	});
 
 	it("parses canonical assertion:100 ref", () => {

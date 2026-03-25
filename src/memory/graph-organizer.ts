@@ -4,10 +4,10 @@ import type { EmbeddingService } from "./embeddings.js";
 import { EmbeddingLinker, type OrganizerEmbeddingEntry, type OrganizerNode } from "./embedding-linker.js";
 import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
-import type { AnyNodeRefKind, GraphOrganizerResult, NodeRef, SemanticEdgeType } from "./types.js";
+import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
 
-const legacyPrivateEventKind = "private_event";
-const legacyPrivateBeliefKind = "private_belief";
+const legacyPrivateEventKind: string = "private_event";
+const legacyPrivateBeliefKind: string = "private_belief";
 
 export class GraphOrganizer {
   private readonly embeddingLinker: EmbeddingLinker;
@@ -87,7 +87,7 @@ export class GraphOrganizer {
     };
   }
 
-  private parseNodeRef(nodeRef: NodeRef): { kind: AnyNodeRefKind; id: number } | undefined {
+  private parseNodeRef(nodeRef: NodeRef): { kind: NodeRefKind; id: number } | undefined {
     const [kindRaw, idRaw] = nodeRef.split(":");
     const id = Number(idRaw);
     if (!Number.isInteger(id) || id <= 0) {
@@ -105,7 +105,7 @@ export class GraphOrganizer {
     ) {
       return undefined;
     }
-    return { kind: kindRaw, id };
+    return { kind: kindRaw as NodeRefKind, id };
   }
 
   private renderNodeContent(nodeRef: NodeRef): string | undefined {
@@ -184,10 +184,10 @@ export class GraphOrganizer {
 
   private selectSemanticRelation(
     sourceRef: NodeRef,
-    sourceKind: AnyNodeRefKind,
+    sourceKind: NodeRefKind,
     sourceContent: string,
     targetRef: NodeRef,
-    targetKind: AnyNodeRefKind,
+    targetKind: NodeRefKind,
     targetContent: string,
     similarity: number,
     agentId: string,
@@ -209,7 +209,7 @@ export class GraphOrganizer {
     return null;
   }
 
-  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: AnyNodeRefKind, agentId: string): boolean {
+  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string): boolean {
     const row = this.db
       .prepare(`SELECT embedding FROM node_embeddings WHERE node_ref = ? ORDER BY updated_at DESC LIMIT 1`)
       .get(targetRef) as { embedding: Buffer | Uint8Array } | null;
@@ -225,7 +225,7 @@ export class GraphOrganizer {
     return nearest.some((candidate) => candidate.nodeRef === sourceRef || candidate.nodeRef === targetRef);
   }
 
-  private isCuratedBridgePair(a: AnyNodeRefKind, b: AnyNodeRefKind): boolean {
+  private isCuratedBridgePair(a: NodeRefKind, b: NodeRefKind): boolean {
     const key = `${a}:${b}`;
     const allowed = new Set([
       "event:entity",

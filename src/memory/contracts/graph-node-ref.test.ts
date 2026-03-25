@@ -6,7 +6,7 @@ import {
 } from "./graph-node-ref.js";
 
 describe("parseGraphNodeRef", () => {
-  it("parses all 8 known kinds correctly (canonical + legacy compat)", () => {
+  it("parses all 6 canonical kinds correctly", () => {
     const cases: Array<{ input: string; expected: GraphNodeRef }> = [
       { input: "event:42", expected: { kind: "event", id: "42" } },
       { input: "entity:123", expected: { kind: "entity", id: "123" } },
@@ -14,8 +14,6 @@ describe("parseGraphNodeRef", () => {
       { input: "assertion:99", expected: { kind: "assertion", id: "99" } },
       { input: "evaluation:7", expected: { kind: "evaluation", id: "7" } },
       { input: "commitment:100", expected: { kind: "commitment", id: "100" } },
-      { input: "private_event:55", expected: { kind: "private_event", id: "55" } },
-      { input: "private_belief:88", expected: { kind: "private_belief", id: "88" } },
     ];
 
     for (const { input, expected } of cases) {
@@ -53,8 +51,6 @@ describe("serializeGraphNodeRef", () => {
       { input: { kind: "assertion", id: "99" }, expected: "assertion:99" },
       { input: { kind: "evaluation", id: "7" }, expected: "evaluation:7" },
       { input: { kind: "commitment", id: "100" }, expected: "commitment:100" },
-      { input: { kind: "private_event", id: "55" }, expected: "private_event:55" },
-      { input: { kind: "private_belief", id: "88" }, expected: "private_belief:88" },
     ];
 
     for (const { input, expected } of cases) {
@@ -72,8 +68,6 @@ describe("roundtrip", () => {
       "assertion:99",
       "evaluation:7",
       "commitment:100",
-      "private_event:55",
-      "private_belief:88",
     ];
 
     for (const original of originals) {
@@ -91,8 +85,6 @@ describe("roundtrip", () => {
       { kind: "assertion", id: "99" },
       { kind: "evaluation", id: "7" },
       { kind: "commitment", id: "100" },
-      { kind: "private_event", id: "55" },
-      { kind: "private_belief", id: "88" },
     ];
 
     for (const ref of refs) {

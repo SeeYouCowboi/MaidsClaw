@@ -21,7 +21,7 @@ import type {
   FactEdge,
   MemoryHint,
   NodeRef,
-  AnyNodeRefKind,
+  NodeRefKind,
   SeedCandidate,
   Topic,
   ViewerContext,
@@ -407,7 +407,7 @@ export class RetrievalService {
     return 1 / (60 + rank);
   }
 
-  private parseNodeRefKind(nodeRef: string): AnyNodeRefKind | null {
+  private parseNodeRefKind(nodeRef: string): NodeRefKind | null {
     try {
       return parseGraphNodeRef(nodeRef).kind;
     } catch {
@@ -415,8 +415,9 @@ export class RetrievalService {
     }
   }
 
-  private scopeFromNodeKind(nodeKind: AnyNodeRefKind): "private" | "area" | "world" {
-    if (nodeKind === "assertion" || nodeKind === "evaluation" || nodeKind === "commitment" || nodeKind === "private_event" || nodeKind === "private_belief") {
+  private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
+    const kind = nodeKind as string;
+    if (kind === "assertion" || kind === "evaluation" || kind === "commitment" || kind === "private_event" || kind === "private_belief") {
       return "private";
     }
     return "world";

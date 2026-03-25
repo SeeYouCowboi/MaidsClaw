@@ -2,7 +2,7 @@
 import type { Db } from "../storage/database.js";
 import type { MigrationStep } from "../storage/migrations.js";
 import { runMigrations } from "../storage/migrations.js";
-import { MAX_INTEGER, NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS, type NodeRef, type NodeRefKind, type AnyNodeRefKind } from "./types.js";
+import { MAX_INTEGER, NODE_REF_KINDS, type NodeRef, type NodeRefKind } from "./types.js";
 
 export { MAX_INTEGER } from "./types.js";
 
@@ -42,8 +42,8 @@ export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   return `${kind}:${id}` as NodeRef;
 }
 
-export function makeLegacyNodeRef(kind: AnyNodeRefKind, id: number): NodeRef {
-  if (!(ALL_KNOWN_NODE_REF_KINDS as readonly string[]).includes(kind)) {
+export function makeLegacyNodeRef(kind: NodeRefKind, id: number): NodeRef {
+  if (!(NODE_REF_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`Invalid node ref kind: ${kind}`);
   }
   if (!Number.isInteger(id) || id <= 0) {

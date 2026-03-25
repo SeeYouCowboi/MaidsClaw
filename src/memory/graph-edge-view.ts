@@ -1,13 +1,16 @@
 import type { Database } from "bun:sqlite";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { MAX_INTEGER } from "./schema.js";
-import { VisibilityPolicy } from "./visibility-policy.js";
-import type { EdgeLayer, NodeRef, NodeRefKind, AnyNodeRefKind, ViewerContext, MemoryRelationType } from "./types.js";
+import type { VisibilityPolicy } from "./visibility-policy.js";
+import type { EdgeLayer, NodeRef, NodeRefKind, ViewerContext, MemoryRelationType } from "./types.js";
 import type { TimeSliceQuery } from "./time-slice-query.js";
 import { isEdgeInTimeSlice } from "./time-slice-query.js";
 
 type GraphEdgeFamily = "logic_edges" | "memory_relations" | "semantic_edges";
-type EndpointFamily = AnyNodeRefKind | "unknown";
+type EndpointFamily = NodeRefKind | "unknown";
+
+const legacyPrivateEventKind = "private_event" as NodeRefKind;
+const legacyPrivateBeliefKind = "private_belief" as NodeRefKind;
 
 type RelationContract = {
   source_family: EndpointFamily;
@@ -16,18 +19,16 @@ type RelationContract = {
   heuristic_only: boolean;
 };
 
-const KNOWN_NODE_KINDS = new Set<AnyNodeRefKind>([
+const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "event",
   "entity",
   "fact",
   "assertion",
   "evaluation",
   "commitment",
-  "private_event", // compat: legacy node kind (DB rows only, no new writes)
-  "private_belief", // compat: legacy node kind (DB rows only, no new writes)
+  legacyPrivateEventKind, // compat: legacy node kind (DB rows only, no new writes)
+  legacyPrivateBeliefKind, // compat: legacy node kind (DB rows only, no new writes)
 ]);
-const legacyPrivateEventKind: AnyNodeRefKind = "private_event";
-const legacyPrivateBeliefKind: AnyNodeRefKind = "private_belief";
 
 const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
   causal: { source_family: "event", target_family: "event", truth_bearing: true, heuristic_only: false },
@@ -353,7 +354,7 @@ export class GraphEdgeView {
     return ids;
   }
 
-  private parseNodeRef(ref: NodeRef): { kind: AnyNodeRefKind; id: number } | null {
+  private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {
     try {
       const parsed = parseGraphNodeRef(String(ref));
       if (!KNOWN_NODE_KINDS.has(parsed.kind)) {
@@ -363,7 +364,7 @@ export class GraphEdgeView {
       if (!Number.isInteger(id) || id <= 0) {
         return null;
       }
-      return { kind: parsed.kind, id };
+      return { kind: parsed.kind as NodeRefKind, id };
     } catch {
       return null;
     }

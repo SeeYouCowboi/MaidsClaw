@@ -99,19 +99,10 @@ export const READ_ONLY_LABELS: readonly CoreMemoryLabel[] = ["index", "pinned_in
 export const CANONICAL_NODE_KINDS = ["event", "entity", "fact", "assertion", "evaluation", "commitment"] as const;
 export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
 
-const legacyPrivateEventKind = "private_" + "event";
-const legacyPrivateBeliefKind = "private_" + "belief";
-export const LEGACY_NODE_KINDS = [legacyPrivateEventKind, legacyPrivateBeliefKind] as const;
-export type LegacyNodeRefKind = (typeof LEGACY_NODE_KINDS)[number];
-
 export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
 
-export const ALL_KNOWN_NODE_REF_KINDS = [...CANONICAL_NODE_KINDS, ...LEGACY_NODE_KINDS] as const;
-export type AnyNodeRefKind = (typeof ALL_KNOWN_NODE_REF_KINDS)[number];
-
 export const CANONICAL_NODE_REF_KINDS = CANONICAL_NODE_KINDS;
-export const LEGACY_NODE_REF_KINDS = LEGACY_NODE_KINDS;
 
 type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
@@ -325,7 +316,7 @@ export type SearchDocWorld = {
 
 export type SeedCandidate = {
   node_ref: NodeRef;
-  node_kind: AnyNodeRefKind;
+  node_kind: NodeRefKind;
   lexical_score: number;
   semantic_score: number;
   fused_score: number;

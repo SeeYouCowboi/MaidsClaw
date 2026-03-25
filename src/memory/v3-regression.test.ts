@@ -8,7 +8,6 @@ import { describe, it, expect } from "bun:test";
 import {
   NODE_REF_KINDS,
   CANONICAL_NODE_REF_KINDS,
-  LEGACY_NODE_REF_KINDS,
   MEMORY_RELATION_TYPES,
   type MemoryRelationType,
 } from "./types.js";
@@ -52,12 +51,6 @@ describe("V3 regression: node ref kind invariants", () => {
     expect(CANONICAL_NODE_REF_KINDS).toHaveLength(6);
   });
 
-  it("LEGACY_NODE_REF_KINDS has exactly 2 kinds: private_event and private_belief", () => {
-    expect(LEGACY_NODE_REF_KINDS).toHaveLength(2);
-    expect(LEGACY_NODE_REF_KINDS).toContain("private_event");
-    expect(LEGACY_NODE_REF_KINDS).toContain("private_belief");
-  });
-
   it("canonical kinds do not contain private_event or private_belief", () => {
     expect(CANONICAL_NODE_REF_KINDS).not.toContain("private_event");
     expect(CANONICAL_NODE_REF_KINDS).not.toContain("private_belief");
@@ -67,17 +60,20 @@ describe("V3 regression: node ref kind invariants", () => {
     expect(NODE_REF_KINDS).toHaveLength(6);
   });
 
+  it("NODE_REF_KINDS equals canonical kinds", () => {
+    expect(NODE_REF_KINDS).toEqual(CANONICAL_NODE_REF_KINDS);
+  });
+
   it("canonical kinds include all 6 V3 standard kinds", () => {
     for (const k of ["event", "entity", "fact", "assertion", "evaluation", "commitment"]) {
       expect(CANONICAL_NODE_REF_KINDS).toContain(k);
     }
   });
 
-  it("canonical and legacy kinds are disjoint", () => {
-    const legacySet = new Set<string>(LEGACY_NODE_REF_KINDS);
-    for (const k of CANONICAL_NODE_REF_KINDS) {
-      expect(legacySet.has(k)).toBe(false);
-    }
+  it("canonical kinds are exactly the supported graph node kinds", () => {
+    const canonicalSet = new Set<string>(CANONICAL_NODE_REF_KINDS);
+    expect(canonicalSet.has("private_event")).toBe(false);
+    expect(canonicalSet.has("private_belief")).toBe(false);
   });
 });
 
@@ -174,25 +170,25 @@ describe("V3 regression: belief-revision module exports", () => {
 
   it("assertLegalStanceTransition throws for rejected → uncertain (terminal stance)", () => {
     expect(() => {
-      assertLegalStanceTransition({ stance: "rejected", cognitionKey: "k:1" }, "uncertain" as never, "k:1");
+      assertLegalStanceTransition({ id: 1, stance: "rejected", basis: null, preContestedStance: null }, "uncertain" as never, "k:1");
     }).toThrow();
   });
 
   it("assertLegalStanceTransition throws for abandoned → any transition", () => {
     expect(() => {
-      assertLegalStanceTransition({ stance: "abandoned", cognitionKey: "k:2" }, "tentative", "k:2");
+      assertLegalStanceTransition({ id: 2, stance: "abandoned", basis: null, preContestedStance: null }, "tentative", "k:2");
     }).toThrow();
   });
 
   it("assertBasisUpgradeOnly does not throw for same basis (no-op)", () => {
     expect(() => {
-      assertBasisUpgradeOnly("observation", "observation", "k:3");
+      assertBasisUpgradeOnly("first_hand", "first_hand", "k:3");
     }).not.toThrow();
   });
 
   it("assertBasisUpgradeOnly throws for downgrade (observation → belief)", () => {
     expect(() => {
-      assertBasisUpgradeOnly("observation", "belief", "k:4");
+      assertBasisUpgradeOnly("first_hand", "belief", "k:4");
     }).toThrow();
   });
 });
