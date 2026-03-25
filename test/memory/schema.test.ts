@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
@@ -5,14 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GraphNavigator } from "../../src/memory/navigator.js";
 import {
+	MEMORY_MIGRATIONS,
 	MAX_INTEGER,
-	makeNodeRef,
 	makeLegacyNodeRef,
+	makeNodeRef,
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
-import { NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS } from "../../src/memory/types.js";
-import { openDatabase } from "../../src/storage/database.js";
+import { ALL_KNOWN_NODE_REF_KINDS, NODE_REF_KINDS } from "../../src/memory/types.js";
+import { type Db, openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
 	const dbPath = join(tmpdir(), `maidsclaw-memory-schema-${randomUUID()}.db`);
@@ -30,6 +32,51 @@ function cleanupDb(dbPath: string): void {
 
 function listColumns(db: ReturnType<typeof createTempDb>["db"], tableName: string): string[] {
 	return db.query<{ name: string }>(`PRAGMA table_info(${tableName})`).map((row) => row.name);
+}
+
+function wrapRawDatabase(raw: Database): Db {
+	return {
+		raw,
+		exec(sql: string): void {
+			raw.exec(sql);
+		},
+		query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+			const stmt = raw.prepare(sql);
+			return (params ? stmt.all(...params as []) : stmt.all()) as T[];
+		},
+		run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.run(...params as []) : stmt.run();
+			return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+		},
+		get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.get(...params as []) : stmt.get();
+			return result === null ? undefined : result as T;
+		},
+		close(): void {
+			raw.close();
+		},
+		transaction<T>(fn: () => T): T {
+			return raw.transaction(fn)();
+		},
+		prepare(sql: string) {
+			const stmt = raw.prepare(sql);
+			return {
+				run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+					const result = params.length > 0 ? stmt.run(...params as []) : stmt.run();
+					return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+				},
+				all(...params: unknown[]): unknown[] {
+					return (params.length > 0 ? stmt.all(...params as []) : stmt.all()) as unknown[];
+				},
+				get(...params: unknown[]): unknown {
+					const result = params.length > 0 ? stmt.get(...params as []) : stmt.get();
+					return result === null ? undefined : result;
+				},
+			};
+		},
+	};
 }
 
 describe("memory schema", () => {
@@ -443,6 +490,217 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
+	it("memory:029 purges legacy node refs from derived tables without touching source-of-truth tables", () => {
+		const rawDb = new Database(":memory:");
+		const db = wrapRawDatabase(rawDb);
+
+		db.exec(`CREATE TABLE search_docs_cognition (
+			id INTEGER PRIMARY KEY,
+			doc_type TEXT NOT NULL,
+			source_ref TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			basis TEXT,
+			stance TEXT,
+			content TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE node_embeddings (
+			id INTEGER PRIMARY KEY,
+			node_ref TEXT NOT NULL,
+			node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')),
+			view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')),
+			model_id TEXT NOT NULL,
+			embedding BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE semantic_edges (
+			id INTEGER PRIMARY KEY,
+			source_node_ref TEXT NOT NULL,
+			target_node_ref TEXT NOT NULL,
+			relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')),
+			weight REAL NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE node_scores (
+			node_ref TEXT PRIMARY KEY,
+			salience REAL NOT NULL,
+			centrality REAL NOT NULL,
+			bridge_score REAL NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE memory_relations (
+			id INTEGER PRIMARY KEY,
+			source_node_ref TEXT NOT NULL,
+			target_node_ref TEXT NOT NULL,
+			relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes', 'surfaced_as', 'published_as', 'resolved_by', 'downgraded_by')),
+			strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1),
+			directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')),
+			source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')),
+			source_ref TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			CHECK (source_node_ref != target_node_ref)
+		)`);
+		db.exec(`CREATE TABLE private_episode_events (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			settlement_id TEXT NOT NULL,
+			category TEXT NOT NULL CHECK (category IN ('speech', 'action', 'observation', 'state_change')),
+			summary TEXT NOT NULL,
+			private_notes TEXT,
+			location_entity_id INTEGER,
+			location_text TEXT,
+			valid_time INTEGER,
+			committed_time INTEGER NOT NULL,
+			source_local_ref TEXT,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE private_cognition_current (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			stance TEXT,
+			basis TEXT,
+			status TEXT NOT NULL DEFAULT 'active',
+			pre_contested_stance TEXT,
+			conflict_summary TEXT,
+			conflict_factor_refs_json TEXT,
+			summary_text TEXT,
+			record_json TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+
+		const now = Date.now();
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "private_event:1", "agent-1", "assertion", "belief", "tentative", "legacy event", now, now],
+		);
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "private_belief:2", "agent-1", "evaluation", "inference", "accepted", "legacy belief", now, now],
+		);
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "assertion:3", "agent-1", "assertion", "first_hand", "confirmed", "canonical", now, now],
+		);
+
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_event:1", "private_event", "primary", "model-1", new Uint8Array([1, 2, 3]), now],
+		);
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_belief:2", "private_belief", "primary", "model-1", new Uint8Array([4, 5, 6]), now],
+		);
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "assertion", "primary", "model-1", new Uint8Array([7, 8, 9]), now],
+		);
+
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_event:1", "assertion:3", "semantic_similar", 0.9, now, now],
+		);
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "private_belief:2", "entity_bridge", 0.6, now, now],
+		);
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "evaluation:4", "semantic_similar", 0.3, now, now],
+		);
+
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["private_event:1", 0.9, 0.8, 0.7, now],
+		);
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["private_belief:2", 0.5, 0.4, 0.3, now],
+		);
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["assertion:3", 0.2, 0.2, 0.2, now],
+		);
+
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["private_event:1", "assertion:3", "supports", 0.8, "direct", "system", "test:1", now, now],
+		);
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["assertion:3", "private_belief:2", "triggered", 0.6, "inferred", "system", "test:2", now, now],
+		);
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["assertion:3", "evaluation:4", "supports", 0.4, "direct", "system", "test:3", now, now],
+		);
+
+		db.run(
+			"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			["agent-1", "session-1", "settlement-1", "observation", "source event", now, now],
+		);
+		db.run(
+			"INSERT INTO private_cognition_current (agent_id, cognition_key, kind, record_json, source_event_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["agent-1", "ck-1", "assertion", '{"value":"truth"}', 1, now],
+		);
+
+		const sourceTruthBeforeEpisode = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events",
+		)?.count;
+		const sourceTruthBeforeCognition = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current",
+		)?.count;
+
+		const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:029:purge-legacy-node-refs");
+		if (!migration) {
+			throw new Error("memory:029 migration not found");
+		}
+		migration.up(db);
+
+		const legacyCognitionDocs = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM search_docs_cognition WHERE source_ref LIKE 'private_%'",
+		);
+		expect(legacyCognitionDocs?.count).toBe(0);
+
+		const legacyEmbeddings = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM node_embeddings WHERE node_kind IN ('private_event','private_belief')",
+		);
+		expect(legacyEmbeddings?.count).toBe(0);
+
+		const legacySemanticEdges = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM semantic_edges WHERE source_node_ref LIKE 'private_%' OR target_node_ref LIKE 'private_%'",
+		);
+		expect(legacySemanticEdges?.count).toBe(0);
+
+		const legacyNodeScores = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM node_scores WHERE node_ref LIKE 'private_%'",
+		);
+		expect(legacyNodeScores?.count).toBe(0);
+
+		const legacyMemoryRelations = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM memory_relations WHERE source_node_ref LIKE 'private_%' OR target_node_ref LIKE 'private_%'",
+		);
+		expect(legacyMemoryRelations?.count).toBe(0);
+
+		const sourceTruthAfterEpisode = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events",
+		)?.count;
+		const sourceTruthAfterCognition = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current",
+		)?.count;
+		expect(sourceTruthAfterEpisode).toBe(sourceTruthBeforeEpisode);
+		expect(sourceTruthAfterCognition).toBe(sourceTruthBeforeCognition);
+
+		db.close();
+	});
+
 	it("removes legacy overlay columns after rebuild migration", () => {
 		const { dbPath, db } = createTempDb();
 
@@ -496,7 +754,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(27);
+		expect(migrationCount?.count).toBe(MEMORY_MIGRATIONS.length);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -901,14 +1159,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 27 after all migrations", () => {
+	it("migration count matches memory migrations after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(27);
+		expect(migrationCount?.count).toBe(MEMORY_MIGRATIONS.length);
 
 		db.close();
 		cleanupDb(dbPath);

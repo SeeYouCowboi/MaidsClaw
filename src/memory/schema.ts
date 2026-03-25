@@ -137,7 +137,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
 ];
 
-const MEMORY_MIGRATIONS: MigrationStep[] = [
+export const MEMORY_MIGRATIONS: MigrationStep[] = [
   {
     id: "memory:001:create-memory-schema",
     description: "Create base memory schema",
@@ -723,6 +723,45 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     up: (_db: Db) => {
       // No DDL changes — this migration is a documentation-only cutover marker.
       // The compat layer lives entirely in the application layer (not schema layer).
+    },
+  },
+  {
+    id: "memory:029:purge-legacy-node-refs",
+    description:
+      "Delete legacy private_event/private_belief refs from derived tables to allow clean rebuild from canonical cognition projections",
+    up: (db: Db) => {
+      db.prepare(
+        `DELETE FROM search_docs_cognition
+         WHERE source_ref LIKE 'private_event:%'
+            OR source_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM node_embeddings
+         WHERE node_kind IN ('private_event', 'private_belief')`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM semantic_edges
+         WHERE source_node_ref LIKE 'private_event:%'
+            OR source_node_ref LIKE 'private_belief:%'
+            OR target_node_ref LIKE 'private_event:%'
+            OR target_node_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM node_scores
+         WHERE node_ref LIKE 'private_event:%'
+            OR node_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM memory_relations
+         WHERE source_node_ref LIKE 'private_event:%'
+            OR source_node_ref LIKE 'private_belief:%'
+            OR target_node_ref LIKE 'private_event:%'
+            OR target_node_ref LIKE 'private_belief:%'`,
+      ).run();
     },
   },
 ];
