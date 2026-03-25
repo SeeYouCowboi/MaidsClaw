@@ -2199,7 +2199,7 @@ Max Concurrent: 5 (Waves 0, 1)
   - Message 2: `refactor(memory): converge runtime node refs to canonical kinds — legacy as compat alias`
   - Message 3: `refactor(memory): remove private_event/private_belief from NODE_REF_KINDS`
 
-- [ ] 35. §18.3 Phase 6 文档更新
+- [x] 35. §18.3 Phase 6 文档更新
 
   **What to do**:
   - 更新开发文档覆盖 V3 新表结构、新工具契约、新检索分层

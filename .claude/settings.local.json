@@ -19,7 +19,11 @@
       "Bash(done)",
       "Bash(grep -r \"belief_type\\\\|epistemic_status\\\\|\\\\.confidence\" src/ --include=*.ts -l)",
       "Bash(grep -v \"//.*confidence\\\\|confidence_score\\\\|confidence_threshold\\\\|confident\")",
-      "Bash(grep -rn viewer_role src/memory/ --include=*.ts)"
+      "Bash(grep -rn viewer_role src/memory/ --include=*.ts)",
+      "Bash(wc -l .sisyphus/drafts/*.md)",
+      "Bash(cd:*)",
+      "mcp__plugin_oh-my-claudecode_t__state_list_active",
+      "mcp__plugin_oh-my-claudecode_t__state_clear"
     ]
   }
 }

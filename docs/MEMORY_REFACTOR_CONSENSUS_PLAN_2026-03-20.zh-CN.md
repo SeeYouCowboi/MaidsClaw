@@ -619,11 +619,29 @@ src/memory/
 
 ### Phase 6: Explore 与兼容收尾
 
-- [ ] 迁移 `memory_explore` 到新关系层
-- [ ] 检查 RP tool policy 与 app/terminal 兼容
-- [ ] 检查 prompt 注入与 inspect 视图
-- [ ] 清理旧字段与过时分支
-- [ ] 更新开发文档与测试文档
+> **V3 更新（2026-03-25）**: 本阶段所有主要条目已在 Memory Refactor V3 中完成。
+> 详见 `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md` 及
+> `.sisyphus/plans/memory-refactor-v3.md`（T11、T19、T34、T35、T36）。
+
+- [x] 迁移 `memory_explore` 到新关系层
+  - **V3 T11**: `navigator.ts` 图扩展已切换到 `memory_relations` 为主权威关系层；
+    `expandRelationEdges`、`expandPrivateBeliefFrontier` 读取 `private_cognition_current`。
+- [x] 检查 RP tool policy 与 app/terminal 兼容
+  - **V3 T15/T20**: `ToolExecutionContract` capability enforcement 中间件已实装；
+    `tool-access-policy.ts` 8 种 capability 矩阵覆盖所有主要工具；
+    现有 app/terminal 接口通过兼容 facade 继续工作。
+- [x] 检查 prompt 注入与 inspect 视图
+  - **V3 T8/T12**: `RetrievalOrchestrator` 已接管 prompt 自动检索主链；
+    `VisibilityPolicy`/`RedactionPolicy` 在所有检索路径前置执行；
+    contested、basis/stance 字段通过 `TypedRetrievalResult` 正确透传到 prompt 上下文。
+- [x] 清理旧字段与过时分支
+  - **V3 T4/T34**: `private_event`/`private_belief` 已收敛至 `LEGACY_NODE_REF_KINDS`，
+    非 compat/legacy/test/migration 代码零引用（DoD #4 通过）；
+    migration:027 记录 compat 层退役状态。
+- [x] 更新开发文档与测试文档
+  - **V3 T35/T36**: 本节已更新；`src/memory/v3-regression.test.ts` 新增 26 项回归测试；
+    7 份设计 RFC/评估文档写入 `.sisyphus/drafts/`；
+    测试数从基线 1457 增至 1736+（`bun test` 验证）。
 
 ## 14. 注意事项
 
