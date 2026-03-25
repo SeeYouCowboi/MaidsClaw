@@ -315,8 +315,8 @@ describe("V2 validation: contested cognition", () => {
 			};
 
 			const created: CreatedState = {
-				privateEventIds: [],
-				privateBeliefIds: [],
+				episodeEventIds: [],
+				assertionIds: [],
 				entityIds: [],
 				factIds: [],
 				changedNodeRefs: [],

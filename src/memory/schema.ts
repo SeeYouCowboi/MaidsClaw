@@ -42,16 +42,6 @@ export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   return `${kind}:${id}` as NodeRef;
 }
 
-export function makeLegacyNodeRef(kind: NodeRefKind, id: number): NodeRef {
-  if (!(NODE_REF_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(`Invalid node ref kind: ${kind}`);
-  }
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new Error(`Invalid node ref id: ${id}`);
-  }
-  return `${kind}:${id}` as NodeRef;
-}
-
 export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS _memory_runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`,

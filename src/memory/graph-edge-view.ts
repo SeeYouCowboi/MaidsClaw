@@ -9,9 +9,6 @@ import { isEdgeInTimeSlice } from "./time-slice-query.js";
 type GraphEdgeFamily = "logic_edges" | "memory_relations" | "semantic_edges";
 type EndpointFamily = NodeRefKind | "unknown";
 
-const legacyPrivateEventKind = "private_event" as NodeRefKind;
-const legacyPrivateBeliefKind = "private_belief" as NodeRefKind;
-
 type RelationContract = {
   source_family: EndpointFamily;
   target_family: EndpointFamily;
@@ -26,8 +23,6 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "assertion",
   "evaluation",
   "commitment",
-  legacyPrivateEventKind, // compat: legacy node kind (DB rows only, no new writes)
-  legacyPrivateBeliefKind, // compat: legacy node kind (DB rows only, no new writes)
 ]);
 
 const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
@@ -392,13 +387,6 @@ export class GraphEdgeView {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_episode_events WHERE id = ?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row ? { agent_id: row.agent_id } : null;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
@@ -406,7 +394,7 @@ export class GraphEdgeView {
       return row ? { agent_id: row.agent_id } : null;
     }
 
-    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
+    if (parsed.kind === "assertion") {
       const row = this.db
         .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;

@@ -6,9 +6,6 @@ import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
 import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
 
-const legacyPrivateEventKind: string = "private_event";
-const legacyPrivateBeliefKind: string = "private_belief";
-
 export class GraphOrganizer {
   private readonly embeddingLinker: EmbeddingLinker;
 
@@ -97,8 +94,6 @@ export class GraphOrganizer {
       kindRaw !== "event" &&
       kindRaw !== "entity" &&
       kindRaw !== "fact" &&
-      kindRaw !== legacyPrivateEventKind &&
-      kindRaw !== legacyPrivateBeliefKind &&
       kindRaw !== "assertion" &&
       kindRaw !== "evaluation" &&
       kindRaw !== "commitment"
@@ -142,16 +137,6 @@ export class GraphOrganizer {
         return undefined;
       }
       return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
-    }
-
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare(`SELECT private_notes, summary, category FROM private_episode_events WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; summary: string | null; category: string } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.private_notes ?? ""} ${row.summary ?? ""} ${row.category}`.trim();
     }
 
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
@@ -230,16 +215,12 @@ export class GraphOrganizer {
     const allowed = new Set([
       "event:entity",
       "entity:event",
-      `${legacyPrivateEventKind}:entity`,
-      `entity:${legacyPrivateEventKind}`,
       "evaluation:entity",
       "entity:evaluation",
       "commitment:entity",
       "entity:commitment",
       "fact:entity",
       "entity:fact",
-      `${legacyPrivateBeliefKind}:entity`,
-      `entity:${legacyPrivateBeliefKind}`,
       "assertion:entity",
       "entity:assertion",
     ]);
@@ -345,13 +326,6 @@ export class GraphOrganizer {
       return row?.t_created;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db.prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`).get(parsed.id) as
-        | { created_at: number }
-        | null;
-      return row?.created_at;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db.prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`).get(parsed.id) as
         | { updated_at: number }
@@ -391,10 +365,6 @@ export class GraphOrganizer {
         | { topic_id: number | null }
         | null;
       return row?.topic_id ?? null;
-    }
-
-    if (parsed.kind === legacyPrivateEventKind) {
-      return null;
     }
 
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
@@ -454,18 +424,6 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare(`SELECT private_notes, summary, agent_id FROM private_episode_events WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; summary: string | null; agent_id: string } | null;
-      if (!row) {
-        return;
-      }
-      const content = `${row.private_notes ?? ""} ${row.summary ?? ""}`.trim();
-      this.storage.syncSearchDoc("private", nodeRef, content, row.agent_id);
-      return;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(`SELECT json_extract(record_json, '$.privateNotes') as private_notes, summary_text, agent_id, status FROM private_cognition_current WHERE id = ?`)
@@ -482,7 +440,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
+    if (parsed.kind === "assertion") {
       const row = this.db
         .prepare(`SELECT summary_text, record_json, agent_id, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
         .get(parsed.id) as { summary_text: string | null; record_json: string | null; agent_id: string; stance: string | null } | null;

@@ -94,8 +94,8 @@ export type MemoryTaskModelProvider = {
 };
 
 export type CreatedState = {
-  privateEventIds: number[];
-  privateBeliefIds: number[];
+  episodeEventIds: number[];
+  assertionIds: number[];
   entityIds: number[];
   factIds: number[];
   changedNodeRefs: NodeRef[];
@@ -105,8 +105,8 @@ const legacyPrivateEventPrefix = `private_${"event"}:`;
 const legacyPrivateBeliefPrefix = `private_${"belief"}:`;
 const legacyCreatePrivateEventToolName = `create_private_${"event"}`;
 const legacyCreatePrivateBeliefToolName = `create_private_${"belief"}`;
-const privateEventIdsKey: `private_${"event"}_ids` = `private_${"event"}_ids`;
-const privateBeliefIdsKey: `private_${"belief"}_ids` = `private_${"belief"}_ids`;
+const episodeEventIdsKey: `private_${"event"}_ids` = `private_${"event"}_ids`;
+const assertionIdsKey: `private_${"belief"}_ids` = `private_${"belief"}_ids`;
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
@@ -373,8 +373,8 @@ export class MemoryTaskAgent {
     const ingest = this.ingestionPolicy.buildMigrateInput(flushRequest);
     const existingContext = this.loadExistingContext(flushRequest.agentId);
     const created: CreatedState = {
-      privateEventIds: [],
-      privateBeliefIds: [],
+      episodeEventIds: [],
+      assertionIds: [],
       entityIds: [],
       factIds: [],
       changedNodeRefs: [],
@@ -456,8 +456,8 @@ export class MemoryTaskAgent {
 
     return {
       batch_id: flushRequest.idempotencyKey,
-      [privateEventIdsKey]: created.privateEventIds,
-      [privateBeliefIdsKey]: created.privateBeliefIds,
+      [episodeEventIdsKey]: created.episodeEventIds,
+      [assertionIdsKey]: created.assertionIds,
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
@@ -604,7 +604,7 @@ export class MemoryTaskAgent {
           projectableSummary: this.asOptionalString(call.arguments.projectable_summary) ?? undefined,
           sourceRecordId: this.asOptionalString(call.arguments.source_record_id) ?? undefined,
         });
-        created.privateEventIds.push(privateEventId);
+        created.episodeEventIds.push(privateEventId);
         created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
         const row = this.db.prepare(
           `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
@@ -675,7 +675,7 @@ export class MemoryTaskAgent {
             .run(sourceEventRef, Date.now(), beliefId);
         }
 
-        created.privateBeliefIds.push(beliefId);
+        created.assertionIds.push(beliefId);
         created.changedNodeRefs.push(makeNodeRef("assertion", beliefId));
         continue;
       }

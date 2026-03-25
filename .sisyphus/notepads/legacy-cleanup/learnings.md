@@ -246,6 +246,30 @@ After dropping a table in a migration:
 - `cognition/`: 84 pass, 0 fail
 - Build: Clean
 
+## [2026-03-25] T10 — Remove agent_fact_overlay reads from cognition-repo
+
+### Key Findings
+- Removed all `agent_fact_overlay` reads from `src/memory/cognition/cognition-repo.ts`.
+- Deleted `patchDbPrepareAssertionProjectionCompat` and its constructor invocation.
+- Kept `patchRelationBuilderAssertionProjectionCompat` intact because relation-builder still needs transition fallback until Task 13 completes.
+- Removed overlay fallback query + merge path in `getAssertions()`; now reads only from `private_cognition_current`.
+- Removed overlay fallback query in `getAssertionByKey()`; now reads only from `private_cognition_current`.
+- Removed now-dead `FactOverlayRow` type and `toCanonicalAssertion()` helper that only served overlay rows.
+
+### Verification
+- `grep -n "agent_fact_overlay" src/memory/cognition/cognition-repo.ts` → 0 matches.
+- LSP diagnostics on changed file (`error` severity) → clean.
+- `bun run build` → exit 0.
+- `bun test src/memory/cognition/` after edits currently fails in `cognition-search.test.ts` due to a direct test query to `agent_fact_overlay` (`no such table`), which is outside this task file scope.
+
+### Pattern
+- Once migration 030 drops a table, compat shims inside one module can be removed safely only if no caller in other files/tests still directly queries the dropped table.
+- Task-scoped file edits can expose stale direct-table usage in neighboring tests even when production code is clean.
+
+### Evidence
+- `.sisyphus/evidence/task-10-no-overlay-refs.txt`
+- `.sisyphus/evidence/task-10-tests.txt`
+
 ## [2026-03-25] T11 — Remove agent_fact_overlay READ references from graph modules
 
 ### Changes Made
@@ -296,3 +320,119 @@ T10 and T13 both modified `cognition-repo.ts`. T10 removed `patchDbPrepareAssert
 
 ### Evidence
 `.sisyphus/evidence/task-13-no-overlay-refs.txt`
+
+## [2026-03-25] T12 — navigator.ts remove overlay reads + legacy node kinds
+
+### Key Findings
+- Removed legacy constants `legacyPrivateEventKind` / `legacyPrivateBeliefKind` and removed legacy members from `KNOWN_NODE_KINDS`.
+- Tightened navigator internals from `AnyNodeRefKind` to `NodeRefKind` in frontier parsing/snapshot paths and `parseNodeRef()` return typing.
+- Replaced entity-frontier assertion expansion query from `agent_fact_overlay` to `private_cognition_current` (`kind='assertion'`) and filtered by `sourceEntityId` / `targetEntityId` parsed from `record_json`.
+- Removed unkeyed overlay fallback in `expandPrivateBeliefFrontier()`; assertion edges now come only from `private_cognition_current`.
+- Replaced assertion agent ownership lookups in `getPrivateNodeAgentId()` and `loadNodeVisibilityData()` with `private_cognition_current`.
+- Updated assertion snapshot source from `agent_fact_overlay.predicate/created_at` to `private_cognition_current.summary_text/updated_at`.
+
+### Record JSON compatibility pattern
+- Assertion relation extraction now supports both pointer-key and numeric-id payloads:
+  - pointer keys: `sourcePointerKey`, `targetPointerKey`
+  - numeric ids: `sourceEntityId`/`source_entity_id`, `targetEntityId`/`target_entity_id`
+- This keeps frontier traversal working for both canonical writes and migration 028 backfill payloads.
+
+### Test updates
+- Removed all navigator tests that seeded/asserted legacy `private_event:*` / `private_belief:*` refs.
+- Replaced with canonical private cognition refs (`evaluation:*`, `assertion:*`) and helper insertion into `private_cognition_current`.
+- Updated keyed-assertion test to seed numeric entity ids in `record_json` and assert canonical-only summaries.
+
+### Verification
+- `grep -n "agent_fact_overlay\|legacyPrivate\|private_event\|private_belief" src/memory/navigator.ts` → 0 matches
+- `bun test src/memory/navigator.test.ts` → 27 pass, 0 fail
+- `bun run build` → exit 0
+- LSP diagnostics (error severity) clean on changed files
+
+### Evidence
+`.sisyphus/evidence/task-12-navigator-clean.txt`
+
+## [2026-03-25] Remove final agent_fact_overlay references from storage.ts + tests
+
+### Changes Made
+
+**Production files:**
+- `src/memory/storage.ts`: 
+  - Removed dead UPDATE block for agent_fact_overlay (lines 681-685) that was updating source_event_ref
+  - Replaced legacy belief lookup query to use `private_cognition_current` instead of `agent_fact_overlay`
+
+- `src/memory/task-agent.ts`:
+  - Updated UPDATE statement to use `private_cognition_current` instead of `agent_fact_overlay`
+
+**Test files:**
+- `src/memory/storage.test.ts`: Updated 4 SQL queries to use `private_cognition_current`
+- `src/memory/retrieval.test.ts`: Fixed INSERT statement with correct column structure for `private_cognition_current`
+- `src/memory/task-agent.test.ts`: Fixed 6 SQL queries and INSERTs with correct column structure
+
+### Key Learning: Schema Differences
+
+The `private_cognition_current` table has a different schema than the old `agent_fact_overlay`:
+
+**agent_fact_overlay (legacy):**
+- Had columns: `source_entity_id`, `target_entity_id`, `predicate`, etc.
+
+**private_cognition_current (current):**
+- Uses `record_json` to store assertion details including `sourcePointerKey`, `targetPointerKey`, `predicate`
+- Has `cognition_key`, `kind`, `stance`, `basis`, `status`, `summary_text` columns
+- References to entities are via pointer keys (like "__self__", "__user__") in record_json, not entity IDs
+
+### Test Fix Pattern
+
+When migrating test data from `agent_fact_overlay` to `private_cognition_current`:
+1. Change table name
+2. Replace `source_entity_id`/`target_entity_id` columns with `record_json` containing `sourcePointerKey`/`targetPointerKey`
+3. Add required columns: `cognition_key`, `kind`, `status`, `source_event_id`
+4. Store predicate in both `summary_text` and `record_json`
+
+### Verification
+- All 48 tests pass across the 3 modified test files
+- Build exits 0
+- 0 agent_fact_overlay references in src/ (excluding schema.ts)
+
+## [2026-03-25] T15 — Remove legacy node kind constants + branches from 6 files
+
+### Changes Made
+- **graph-edge-view.ts**: Removed `legacyPrivateEventKind`/`legacyPrivateBeliefKind` constants, removed from `KNOWN_NODE_KINDS`, removed `legacyPrivateEventKind` branch in `loadNodeVisibilityData()`, simplified `legacyPrivateBeliefKind || "assertion"` to just `"assertion"`
+- **visibility-policy.ts**: Removed static readonly constants, simplified `getNodeDisposition()` condition to just `"assertion" || "evaluation" || "commitment"`, updated JSDoc comment
+- **retrieval.ts**: Removed `"private_event" || "private_belief"` from `scopeFromNodeKind()` condition
+- **graph-organizer.ts**: Removed constants, removed legacy kinds from `parseNodeRef()` validation, removed `legacyPrivateEventKind` branches in `renderNodeContent()`, `lookupNodeUpdatedAt()`, `lookupTopicCluster()`, `syncSearchProjection()`, removed legacy pairs from `isCuratedBridgePair()`, simplified `legacyPrivateBeliefKind || "assertion"` to just `"assertion"` in `syncSearchProjection()`
+- **embeddings.ts**: Removed constants, simplified `isNodeVisibleForAgent()` to check only `"assertion" || "evaluation" || "commitment"`, removed legacy `private_event` ownership check branch
+- **navigator.ts**: Already clean (T12 removed everything)
+
+### Key Pattern
+When removing legacy kind constants that were aliased to string literals (`"private_event"`, `"private_belief"`), every branch must be traced through:
+1. Constant declaration → remove
+2. Set/array membership → remove entry
+3. `if (kind === legacyConst)` branches → remove entire branch
+4. `if (kind === legacyConst || kind === "modern")` branches → simplify to just modern check
+5. JSDoc comments referencing legacy kinds → update
+
+### Remaining Legacy Prefix References
+`storage.ts` and `task-agent.ts` still have `legacyPrivateEventPrefix`/`legacyPrivateBeliefPrefix` — these are Prefix variants (not Kind), outside T15 scope.
+
+### Verification
+- 0 matches for `legacyPrivateEventKind`/`legacyPrivateBeliefKind`/`private_event`/`private_belief` in 6 target files
+- LSP diagnostics: 0 errors across all 5 changed files
+- Build: pre-existing schema.ts comment error (not from T15)
+
+### Evidence
+`.sisyphus/evidence/task-15-constants-clean.txt`
+
+## Task 21: Remove makeLegacyNodeRef() function
+
+Completed: 2026-03-25
+
+Removed makeLegacyNodeRef() from src/memory/schema.ts and all test usages.
+The function was a legacy wrapper that is no longer needed since the
+canonical makeNodeRef() function handles all node ref creation.
+
+Test files updated:
+- test/memory/integration.test.ts: Changed 2 usages from makeLegacyNodeRef to makeNodeRef
+- test/memory/schema.test.ts: Removed test assertions for the removed function
+
+Build passes successfully with no references to makeLegacyNodeRef remaining.
+

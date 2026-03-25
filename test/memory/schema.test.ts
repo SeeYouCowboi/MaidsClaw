@@ -9,7 +9,6 @@ import {
 	MEMORY_MIGRATIONS,
 	MAX_INTEGER,
 	createMemorySchema,
-	makeLegacyNodeRef,
 	makeNodeRef,
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
@@ -901,8 +900,6 @@ describe("memory schema", () => {
 		// V3: NODE_REF_KINDS is canonical-only (6 kinds)
 		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment"]);
 		expect(typeof GraphNavigator).toBe("function");
-		expect(() => makeLegacyNodeRef("private_belief" as never, 1)).toThrow();
-		expect(() => makeLegacyNodeRef("private_event" as never, 1)).toThrow();
 	});
 
 	it("creates all 6 shared_blocks tables", () => {

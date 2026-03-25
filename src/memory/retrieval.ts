@@ -417,7 +417,7 @@ export class RetrievalService {
 
   private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
     const kind = nodeKind as string;
-    if (kind === "assertion" || kind === "evaluation" || kind === "commitment" || kind === "private_event" || kind === "private_belief") {
+    if (kind === "assertion" || kind === "evaluation" || kind === "commitment") {
       return "private";
     }
     return "world";

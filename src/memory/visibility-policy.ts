@@ -10,9 +10,6 @@ import { AuthorizationPolicy, type VisibilityDisposition } from "./redaction-pol
 export class VisibilityPolicy {
   constructor(private readonly authorization: AuthorizationPolicy = new AuthorizationPolicy()) {}
 
-  private static readonly legacyPrivateEventKind = "private_event";
-  private static readonly legacyPrivateBeliefKind = "private_belief";
-
   // ── Per-node-type visibility checks ──────────────────────────────────
 
   isEventVisible(
@@ -65,7 +62,7 @@ export class VisibilityPolicy {
    *   - event:        { visibility_scope, location_entity_id }
    *   - entity:       { memory_scope, owner_agent_id }
    *   - fact:         (no extra fields needed)
-   *   - legacy private_event / private_belief: { agent_id }
+   *   - assertion / evaluation / commitment: { agent_id }
    */
   isNodeVisible(viewerContext: ViewerContext, nodeRef: string, nodeData: unknown): boolean {
     return this.getNodeDisposition(viewerContext, nodeRef, nodeData) === "visible";
@@ -115,7 +112,7 @@ export class VisibilityPolicy {
     if (kind === "fact") {
       return this.isFactVisible(viewerContext) ? "visible" : "hidden";
     }
-    if (kind === VisibilityPolicy.legacyPrivateEventKind || kind === VisibilityPolicy.legacyPrivateBeliefKind || kind === "assertion" || kind === "evaluation" || kind === "commitment") {
+    if (kind === "assertion" || kind === "evaluation" || kind === "commitment") {
       return this.isPrivateNodeVisible(viewerContext, data as { agent_id: string }) ? "visible" : "private";
     }
     return "hidden";

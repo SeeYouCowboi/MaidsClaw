@@ -148,8 +148,8 @@ async function processExplicitSettlement(params: {
 	};
 
 	const created: CreatedState = {
-		privateEventIds: [],
-		privateBeliefIds: [],
+		episodeEventIds: [],
+		assertionIds: [],
 		entityIds: [],
 		factIds: [],
 		changedNodeRefs: [],
