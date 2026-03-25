@@ -671,7 +671,7 @@ export class MemoryTaskAgent {
         const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
         if (sourceEventRef) {
           this.db
-            .prepare(`UPDATE agent_fact_overlay SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+            .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
             .run(sourceEventRef, Date.now(), beliefId);
         }
 

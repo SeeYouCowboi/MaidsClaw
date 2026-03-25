@@ -313,14 +313,14 @@ describe("MemoryTaskAgent", () => {
     expect(provider.chatCalls).toBe(3);
 
     const explicitRow = db
-      .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE cognition_key = 'assert:explicit-trust'`)
+      .prepare(`SELECT cognition_key FROM private_cognition_current WHERE cognition_key = 'assert:explicit-trust'`)
       .get() as { cognition_key: string } | null;
     expect(explicitRow?.cognition_key).toBe("assert:explicit-trust");
 
     const ordinaryBelief = db
-      .prepare(`SELECT predicate FROM agent_fact_overlay WHERE predicate = 'seems_tired'`)
-      .get() as { predicate: string } | null;
-    expect(ordinaryBelief?.predicate).toBe("seems_tired");
+      .prepare(`SELECT summary_text FROM private_cognition_current WHERE summary_text LIKE ?`)
+      .get("%seems_tired%") as { summary_text: string } | null;
+    expect(ordinaryBelief?.summary_text).toContain("seems_tired");
   });
 
   it("ordinary CALL_ONE excludes dialogue already covered by explicit settlements", async () => {
@@ -763,7 +763,7 @@ describe("MemoryTaskAgent", () => {
     expect(beliefRefs.length).toBeGreaterThanOrEqual(1);
 
     const assertionRow = db
-      .prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:ref-test'`)
+      .prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:ref-test'`)
       .get() as { id: number };
     expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("assertion", assertionRow.id));
   });
@@ -858,10 +858,10 @@ describe("MemoryTaskAgent", () => {
     expect((mce.details as { settlementId: string }).settlementId).toBe("stl:req-unresolved");
     expect((mce.details as { unresolvedKeys: string[] }).unresolvedKeys).toContain("assert:unresolved-trust");
 
-    const overlayCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved-trust'`)
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:unresolved-trust'`)
       .get() as { cnt: number };
-    expect(overlayCount.cnt).toBe(0);
+    expect(cognitionCount.cnt).toBe(0);
   });
 
   it("exposes no onTurn or onSessionEnd trigger hooks", () => {
@@ -956,21 +956,21 @@ describe("MemoryTaskAgent", () => {
       .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = '__user__' AND owner_agent_id = 'agent-1'`)
       .get() as { id: number };
 
+    const now = Date.now();
     db.prepare(
-      `INSERT INTO agent_fact_overlay
-       (agent_id, source_entity_id, target_entity_id, predicate,
-        stance, basis,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO private_cognition_current
+       (agent_id, cognition_key, kind, stance, basis, status,
+        summary_text, record_json, source_event_id, updated_at)
+       VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?)`,
     ).run(
       "agent-1",
-      selfId.id,
-      userId.id,
-      "legacy_trusts",
+      "assert:legacy-trusts",
       "confirmed",
       "first_hand",
-      Date.now(),
-      Date.now(),
+      "legacy_trusts",
+      JSON.stringify({ predicate: "legacy_trusts", sourcePointerKey: "__self__", targetPointerKey: "__user__" }),
+      1,
+      now,
     );
 
     const provider = new MockModelProvider([
@@ -1133,9 +1133,9 @@ describe("MemoryTaskAgent", () => {
     expect(mce.code).toBe("COGNITION_UNRESOLVED_REFS");
     expect(mce.retriable).toBe(true);
 
-    const overlayCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:backoff-verify'`)
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:backoff-verify'`)
       .get() as { cnt: number };
-    expect(overlayCount.cnt).toBe(0);
+    expect(cognitionCount.cnt).toBe(0);
   });
 });

@@ -142,7 +142,7 @@ describe("GraphStorageService", () => {
       stance: "tentative",
     });
 
-    db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(1, beliefId1);
+    db.prepare(`UPDATE private_cognition_current SET updated_at = ? WHERE id = ?`).run(1, beliefId1);
 
     const beliefId2 = storage.createPrivateBelief({
       agentId: "agent-1",
@@ -156,12 +156,12 @@ describe("GraphStorageService", () => {
     expect(beliefId2).toBe(beliefId1);
 
     const row = db
-      .prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`)
+      .prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`)
       .get(beliefId1) as { updated_at: number };
     expect(row.updated_at).toBeGreaterThan(1);
 
     const count = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'agent-1'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1'`)
       .get() as { cnt: number };
     expect(count.cnt).toBe(1);
   });
@@ -473,13 +473,13 @@ describe("GraphStorageService", () => {
 
     // Verify content was updated
     const updatedRow = db
-      .prepare(`SELECT stance FROM agent_fact_overlay WHERE id = ?`)
+      .prepare(`SELECT stance FROM private_cognition_current WHERE id = ?`)
       .get(a1!.id) as { stance: string };
     expect(updatedRow.stance).toBe("tentative");
 
     // Only one row exists for this cognition_key
     const factCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'assert:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'assert:stable'`)
       .get() as { cnt: number };
     expect(factCount.cnt).toBe(1);
 
@@ -562,9 +562,9 @@ describe("GraphStorageService", () => {
     expect((mce.details as { unresolvedPointerKeys: string[] }).unresolvedPointerKeys).toContain("__user__");
     expect((mce.details as { settlementId: string }).settlementId).toBe("stl-unresolved");
 
-    // Verify no overlay rows were written
+    // Verify no cognition rows were written
     const row = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:unresolved'`)
       .get() as { cnt: number };
     expect(row.cnt).toBe(0);
   });

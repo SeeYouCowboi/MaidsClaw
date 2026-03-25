@@ -678,12 +678,6 @@ export class GraphStorageService {
       provenance: params.provenance,
     });
 
-    if (params.sourceEventRef) {
-      this.db
-        .prepare(`UPDATE agent_fact_overlay SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
-        .run(params.sourceEventRef, Date.now(), assertion.id);
-    }
-
     return assertion.id;
   }
 
@@ -938,7 +932,7 @@ export class GraphStorageService {
 
     if (nodeRef.startsWith(legacyPrivateBeliefPrefix)) {
       const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateBeliefPrefix);
-      const row = this.db.prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`).get(id) as
+      const row = this.db.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
       return row?.agent_id ?? null;
