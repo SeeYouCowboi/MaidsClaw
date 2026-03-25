@@ -75,40 +75,6 @@ function insertFact(
   ).run(id, sourceEntityId, targetEntityId, predicate, now, MAX_INTEGER, now, MAX_INTEGER, sourceEventId);
 }
 
-function insertPrivateEvent(db: Database, id: number, agentId: string, _linkedEventId: number | null): void {
-  const now = Date.now();
-  db.prepare(
-    `INSERT INTO private_episode_events (id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at)
-     VALUES (?, ?, 'sess-1', 'stl:test', 'observation', 'private summary', NULL, NULL, NULL, ?, ?, NULL, ?)`,
-  ).run(id, agentId, now, now, now);
-}
-
-function insertPrivateBelief(
-  db: Database,
-  id: number,
-  agentId: string,
-  sourceEntityId: number,
-  targetEntityId: number,
-  sourceEventRef: NodeRef | null,
-  options?: { predicate?: string; cognitionKey?: string | null },
-): void {
-  const now = Date.now();
-  db.prepare(
-    `INSERT INTO agent_fact_overlay (id, agent_id, source_entity_id, target_entity_id, predicate, basis, stance, provenance, source_event_ref, cognition_key, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'inference', 'tentative', NULL, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    agentId,
-    sourceEntityId,
-    targetEntityId,
-    options?.predicate ?? "suspects",
-    sourceEventRef,
-    options?.cognitionKey ?? null,
-    now,
-    now,
-  );
-}
-
 function insertPrivateCognitionAssertionCurrent(
   db: Database,
   params: {
@@ -119,12 +85,16 @@ function insertPrivateCognitionAssertionCurrent(
     targetPointerKey: string;
     predicate: string;
     sourceEventRef?: NodeRef | null;
+    sourceEntityId?: number;
+    targetEntityId?: number;
   },
 ): void {
   const now = Date.now();
   const recordJson = JSON.stringify({
     sourcePointerKey: params.sourcePointerKey,
     targetPointerKey: params.targetPointerKey,
+    sourceEntityId: params.sourceEntityId ?? null,
+    targetEntityId: params.targetEntityId ?? null,
     predicate: params.predicate,
     sourceEventRef: params.sourceEventRef ?? null,
   });
@@ -139,6 +109,31 @@ function insertPrivateCognitionAssertionCurrent(
     params.cognitionKey,
     `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
     recordJson,
+    1,
+    now,
+  );
+}
+
+function insertPrivateCognitionEvaluationCurrent(
+  db: Database,
+  params: {
+    id: number;
+    agentId: string;
+    cognitionKey: string;
+    summaryText: string;
+  },
+): void {
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO private_cognition_current (
+       id, agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance,
+       conflict_summary, conflict_factor_refs_json, summary_text, record_json, source_event_id, updated_at
+     ) VALUES (?, ?, ?, 'evaluation', 'tentative', 'inference', 'active', NULL, NULL, NULL, ?, '{}', ?, ?)`,
+  ).run(
+    params.id,
+    params.agentId,
+    params.cognitionKey,
+    params.summaryText,
     1,
     now,
   );
@@ -369,32 +364,56 @@ describe("GraphNavigator", () => {
     expect(capturedSql.some((sql) => sql.includes("FROM fact_edges"))).toBe(true);
   });
 
-  it("prevents agent-a from traversing through agent-b private overlay nodes", async () => {
-    insertPrivateBelief(db, 51, "agent-b", 1, 2, null);
-    insertSemantic(db, "entity:1" as NodeRef, "private_belief:51" as NodeRef);
+  it("prevents agent-a from traversing through agent-b private assertion nodes", async () => {
+    insertPrivateCognitionAssertionCurrent(db, {
+      id: 51,
+      agentId: "agent-b",
+      cognitionKey: "assert:key-51",
+      sourcePointerKey: "alice",
+      targetPointerKey: "bob",
+      sourceEntityId: 1,
+      targetEntityId: 2,
+      predicate: "suspects",
+    });
+    insertSemantic(db, "entity:1" as NodeRef, "assertion:51" as NodeRef);
     const retrieval = new StubRetrieval([seed("entity:1" as NodeRef, "entity")]);
     const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
 
     const result = await navigator.explore("relationship", viewerA(), { maxDepth: 2, maxCandidates: 20 });
     const nodes = result.evidence_paths.flatMap((path) => path.path.nodes);
-    expect(nodes).not.toContain("private_belief:51");
+    expect(nodes).not.toContain("assertion:51");
   });
 
-  it("never traverses semantic edges between different agents' private nodes", async () => {
-    insertPrivateEvent(db, 61, "agent-a", null);
-    insertPrivateEvent(db, 62, "agent-b", null);
-    insertSemantic(db, "private_event:61" as NodeRef, "private_event:62" as NodeRef);
+  it("never traverses semantic edges between different agents' canonical private nodes", async () => {
+    insertPrivateCognitionEvaluationCurrent(db, {
+      id: 61,
+      agentId: "agent-a",
+      cognitionKey: "eval:key-61",
+      summaryText: "agent-a eval",
+    });
+    insertPrivateCognitionEvaluationCurrent(db, {
+      id: 62,
+      agentId: "agent-b",
+      cognitionKey: "eval:key-62",
+      summaryText: "agent-b eval",
+    });
+    insertSemantic(db, "evaluation:61" as NodeRef, "evaluation:62" as NodeRef);
 
-    const retrieval = new StubRetrieval([seed("private_event:61" as NodeRef, "private_event")]);
+    const retrieval = new StubRetrieval([seed("evaluation:61" as NodeRef, "evaluation")]);
     const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
     const result = await navigator.explore("why", viewerA(), { maxDepth: 1, maxCandidates: 10 });
 
     const nodes = result.evidence_paths.flatMap((path) => path.path.nodes);
-    expect(nodes).not.toContain("private_event:62");
+    expect(nodes).not.toContain("evaluation:62");
   });
 
   it("post-filter safety net strips nodes that bypassed upstream filters", () => {
-    insertPrivateEvent(db, 70, "agent-b", null);
+    insertPrivateCognitionEvaluationCurrent(db, {
+      id: 70,
+      agentId: "agent-b",
+      cognitionKey: "eval:key-70",
+      summaryText: "agent-b private eval",
+    });
 
     const retrieval = new StubRetrieval([seed("entity:1" as NodeRef, "entity")]);
     const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
@@ -402,11 +421,11 @@ describe("GraphNavigator", () => {
     const unsafe: EvidencePath = {
       path: {
         seed: "entity:1" as NodeRef,
-        nodes: ["entity:1" as NodeRef, "private_event:70" as NodeRef],
+        nodes: ["entity:1" as NodeRef, "evaluation:70" as NodeRef],
         edges: [
           {
             from: "entity:1" as NodeRef,
-            to: "private_event:70" as NodeRef,
+            to: "evaluation:70" as NodeRef,
             kind: "semantic_similar",
             layer: "heuristic",
             weight: 0.9,
@@ -427,7 +446,7 @@ describe("GraphNavigator", () => {
         redundancy_penalty: 0,
         path_score: 0.6,
       },
-      supporting_nodes: ["private_event:70" as NodeRef],
+      supporting_nodes: ["evaluation:70" as NodeRef],
       supporting_facts: [],
     };
 
@@ -466,12 +485,17 @@ describe("GraphNavigator", () => {
   });
 
   it("merges cognition search seeds when cognitionSearch is provided", async () => {
-    insertPrivateEvent(db, 80, "agent-a", null);
+    insertPrivateCognitionEvaluationCurrent(db, {
+      id: 80,
+      agentId: "agent-a",
+      cognitionKey: "eval:key-80",
+      summaryText: "agent-a eval",
+    });
 
     const stubRetrieval = new StubRetrieval([seed("entity:1" as NodeRef, "entity")]);
     const mockCognition: CognitionSearchServiceLike = {
       searchCognition() {
-        return [{ source_ref: "private_event:80" }];
+        return [{ source_ref: "evaluation:80" }];
       },
     };
 
@@ -486,7 +510,7 @@ describe("GraphNavigator", () => {
 
     const result = await navigator.explore("what happened", viewerA());
     const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
-    expect(allNodes).toContain("private_event:80");
+    expect(allNodes).toContain("evaluation:80");
   });
 
   it("returns results without crash when memory_relations table has no rows", async () => {
@@ -541,16 +565,14 @@ describe("GraphNavigator", () => {
   it("uses private_cognition_current as keyed assertion source in private belief frontier", async () => {
     insertEvent(db, 5, "world_public", 1, "[]", "source event");
 
-    insertPrivateBelief(db, 91, "agent-a", 2, 3, null, {
-      predicate: "overlay-predicate",
-      cognitionKey: "assert:key-91",
-    });
     insertPrivateCognitionAssertionCurrent(db, {
       id: 91,
       agentId: "agent-a",
       cognitionKey: "assert:key-91",
       sourcePointerKey: "alice",
       targetPointerKey: "bob",
+      sourceEntityId: 1,
+      targetEntityId: 2,
       predicate: "current-predicate",
       sourceEventRef: "event:5" as NodeRef,
     });
@@ -568,7 +590,6 @@ describe("GraphNavigator", () => {
     expect(outgoing.some((edge) => edge.to === ("event:5" as NodeRef) && edge.kind === "fact_support")).toBe(true);
     expect(outgoing.some((edge) => edge.to === ("entity:3" as NodeRef))).toBe(false);
     expect(outgoing.map((edge) => edge.summary)).toContain("current-predicate");
-    expect(outgoing.map((edge) => edge.summary)).not.toContain("overlay-predicate");
   });
 
   it("uses memory_relations as relation-edge traversal authority", async () => {

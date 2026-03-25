@@ -13,7 +13,6 @@ import {
 } from "./time-slice-query.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
-  AnyNodeRefKind,
   BeamEdge,
   BeamPath,
   EvidencePath,
@@ -150,18 +149,13 @@ const TIME_CONSTRAINT_KEYWORDS = [
   "after",
 ];
 
-const legacyPrivateEventKind = "private_event";
-const legacyPrivateBeliefKind = "private_belief";
-
-const KNOWN_NODE_KINDS = new Set<AnyNodeRefKind>([
+const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "event",
   "entity",
   "fact",
   "assertion",
   "evaluation",
   "commitment",
-  legacyPrivateEventKind,
-  legacyPrivateBeliefKind,
 ]);
 
 export class GraphNavigator {
@@ -461,7 +455,8 @@ export class GraphNavigator {
 
     for (const seed of seeds) {
       const aliasBonus = this.isAliasMatchedSeed(seed, analysis) ? 1 : 0;
-      const nodeTypePrior = this.nodeTypePrior(analysis.query_type, seed.node_kind);
+      const parsedSeed = this.parseNodeRef(seed.node_ref);
+      const nodeTypePrior = parsedSeed ? this.nodeTypePrior(analysis.query_type, parsedSeed.kind) : 0.2;
       const salience = salienceByRef.get(seed.node_ref) ?? 0;
       const seedScore =
         0.35 * seed.lexical_score +
@@ -504,16 +499,16 @@ export class GraphNavigator {
     return analysis.resolved_entity_ids.has(parsed.id);
   }
 
-  private nodeTypePrior(queryType: QueryType, nodeKind: AnyNodeRefKind): number {
+  private nodeTypePrior(queryType: QueryType, nodeKind: NodeRefKind): number {
     const priors = {
-    entity:       { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7,  evaluation: 0.4,  commitment: 0.4,  [legacyPrivateEventKind]: 0.4, [legacyPrivateBeliefKind]: 0.7 },
-    event:        { event: 1, fact: 0.7,  entity: 0.55, assertion: 0.45, evaluation: 0.8,  commitment: 0.6,  [legacyPrivateEventKind]: 0.8, [legacyPrivateBeliefKind]: 0.45 },
-    why:          { event: 1, fact: 0.85, entity: 0.5,  assertion: 0.65, evaluation: 0.85, commitment: 0.75, [legacyPrivateEventKind]: 0.85, [legacyPrivateBeliefKind]: 0.65 },
-    relationship: { entity: 1, fact: 0.9,  event: 0.45, assertion: 0.7,  evaluation: 0.45, commitment: 0.5,  [legacyPrivateEventKind]: 0.45, [legacyPrivateBeliefKind]: 0.7 },
-    timeline:     { event: 1, fact: 0.5,  entity: 0.3,  assertion: 0.45, evaluation: 0.85, commitment: 0.7,  [legacyPrivateEventKind]: 0.85, [legacyPrivateBeliefKind]: 0.45 },
-    state:        { fact: 1, entity: 0.85, event: 0.5,  assertion: 0.8,  evaluation: 0.5,  commitment: 0.75, [legacyPrivateEventKind]: 0.5, [legacyPrivateBeliefKind]: 0.8 },
-    conflict:     { [legacyPrivateBeliefKind]: 1, assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, [legacyPrivateEventKind]: 0.75, entity: 0.6 },
-    } satisfies Record<QueryType, Record<AnyNodeRefKind, number>>;
+      entity: { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7, evaluation: 0.4, commitment: 0.4 },
+      event: { event: 1, fact: 0.7, entity: 0.55, assertion: 0.45, evaluation: 0.8, commitment: 0.6 },
+      why: { event: 1, fact: 0.85, entity: 0.5, assertion: 0.65, evaluation: 0.85, commitment: 0.75 },
+      relationship: { entity: 1, fact: 0.9, event: 0.45, assertion: 0.7, evaluation: 0.45, commitment: 0.5 },
+      timeline: { event: 1, fact: 0.5, entity: 0.3, assertion: 0.45, evaluation: 0.85, commitment: 0.7 },
+      state: { fact: 1, entity: 0.85, event: 0.5, assertion: 0.8, evaluation: 0.5, commitment: 0.75 },
+      conflict: { assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, entity: 0.6 },
+    } satisfies Record<QueryType, Record<NodeRefKind, number>>;
 
     return (priors[queryType] as Record<string, number>)[nodeKind] ?? 0.2;
   }
@@ -583,8 +578,8 @@ export class GraphNavigator {
     return allPaths;
   }
 
-  private groupFrontierByKind(paths: InternalBeamPath[]): Map<AnyNodeRefKind, Set<NodeRef>> {
-    const grouped = new Map<AnyNodeRefKind, Set<NodeRef>>();
+  private groupFrontierByKind(paths: InternalBeamPath[]): Map<NodeRefKind, Set<NodeRef>> {
+    const grouped = new Map<NodeRefKind, Set<NodeRef>>();
     for (const path of paths) {
       const tail = path.path.nodes[path.path.nodes.length - 1];
       const parsed = this.parseNodeRef(tail);
@@ -599,7 +594,7 @@ export class GraphNavigator {
   }
 
   private fetchNeighborsByFrontier(
-    frontier: Map<AnyNodeRefKind, Set<NodeRef>>,
+    frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     timeSlice: TimeSliceQuery,
   ): Map<NodeRef, InternalBeamEdge[]> {
@@ -609,14 +604,12 @@ export class GraphNavigator {
     this.expandEntityFrontier(frontier.get("entity"), viewerContext, map, timeSlice);
     this.expandFactFrontier(frontier.get("fact"), viewerContext, map, timeSlice);
     const privateEventFrontier = new Set<NodeRef>([
-      ...(frontier.get(legacyPrivateEventKind) ?? []),
       ...(frontier.get("evaluation") ?? []),
       ...(frontier.get("commitment") ?? []),
     ]);
     this.expandPrivateEventFrontier(privateEventFrontier.size > 0 ? privateEventFrontier : undefined, viewerContext, map, timeSlice);
 
     const privateBeliefFrontier = new Set<NodeRef>([
-      ...(frontier.get(legacyPrivateBeliefKind) ?? []),
       ...(frontier.get("assertion") ?? []),
     ]);
     this.expandPrivateBeliefFrontier(privateBeliefFrontier.size > 0 ? privateBeliefFrontier : undefined, viewerContext, map, timeSlice);
@@ -842,50 +835,63 @@ export class GraphNavigator {
       }
     }
 
+    const idSet = new Set<number>(ids);
     const beliefRows = this.db
       .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, source_event_ref, created_at
-         FROM agent_fact_overlay
-         WHERE agent_id = ? AND (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))`,
+        `SELECT id, summary_text, record_json, updated_at
+         FROM private_cognition_current
+         WHERE agent_id = ? AND kind = 'assertion'`,
       )
-      .all(viewerContext.viewer_agent_id, ...ids, ...ids) as Array<{
+      .all(viewerContext.viewer_agent_id) as Array<{
       id: number;
-      source_entity_id: number;
-      target_entity_id: number;
-      predicate: string;
-      source_event_ref: NodeRef | null;
-      created_at: number;
+      summary_text: string | null;
+      record_json: string | null;
+      updated_at: number;
     }>;
 
     for (const row of beliefRows) {
-      const beliefRef = `${legacyPrivateBeliefKind}:${row.id}` as NodeRef;
+      const parsedRecord = this.parseAssertionRecord(row.record_json);
+      const sourceEntityId = parsedRecord.sourceEntityId;
+      const targetEntityId = parsedRecord.targetEntityId;
+      if (sourceEntityId === null && targetEntityId === null) {
+        continue;
+      }
+
+      const sourceMatches = sourceEntityId !== null && idSet.has(sourceEntityId);
+      const targetMatches = targetEntityId !== null && idSet.has(targetEntityId);
+      if (!sourceMatches && !targetMatches) {
+        continue;
+      }
+
+      const beliefRef = `assertion:${row.id}` as NodeRef;
       if (!this.isNodeVisible(beliefRef, viewerContext)) {
         continue;
       }
 
-      const sourceRef = `entity:${row.source_entity_id}` as NodeRef;
-      const targetRef = `entity:${row.target_entity_id}` as NodeRef;
+      const sourceRef = sourceEntityId !== null ? (`entity:${sourceEntityId}` as NodeRef) : null;
+      const targetRef = targetEntityId !== null ? (`entity:${targetEntityId}` as NodeRef) : null;
+      const summary = parsedRecord.predicate ?? row.summary_text;
 
-      if (frontier.has(sourceRef)) {
+      if (sourceRef && frontier.has(sourceRef)) {
         this.pushEdge(map, sourceRef, {
           from: sourceRef,
           to: beliefRef,
           kind: "fact_relation",
           weight: 0.7,
-          timestamp: row.created_at,
-          summary: row.predicate,
+          timestamp: row.updated_at,
+          summary,
           canonical_fact_id: null,
           canonical_evidence: false,
         });
       }
-      if (frontier.has(targetRef)) {
+      if (targetRef && frontier.has(targetRef)) {
         this.pushEdge(map, targetRef, {
           from: targetRef,
           to: beliefRef,
           kind: "fact_relation",
           weight: 0.7,
-          timestamp: row.created_at,
-          summary: row.predicate,
+          timestamp: row.updated_at,
+          summary,
           canonical_fact_id: null,
           canonical_evidence: false,
         });
@@ -986,52 +992,6 @@ export class GraphNavigator {
       return;
     }
 
-    const idToRef = new Map<number, NodeRef>();
-    for (const ref of frontier) {
-      const parsed = this.parseNodeRef(ref);
-    if (parsed?.kind === legacyPrivateEventKind) {
-        idToRef.set(parsed.id, ref);
-      }
-    }
-    const ids = [...idToRef.keys()];
-    if (ids.length === 0) {
-      this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
-      return;
-    }
-    const placeholders = ids.map(() => "?").join(",");
-
-    const rows = this.db
-      .prepare(
-        `SELECT id, location_entity_id, summary, created_at
-         FROM private_episode_events
-         WHERE agent_id=? AND id IN (${placeholders})`,
-      )
-      .all(viewerContext.viewer_agent_id, ...ids) as Array<{
-      id: number;
-      location_entity_id: number | null;
-      summary: string | null;
-      created_at: number;
-    }>;
-
-    for (const row of rows) {
-      const privateRef = (idToRef.get(row.id) ?? `${legacyPrivateEventKind}:${row.id}`) as NodeRef;
-      if (row.location_entity_id !== null) {
-        const locationRef = `entity:${row.location_entity_id}` as NodeRef;
-        if (this.isNodeVisible(locationRef, viewerContext)) {
-          this.pushEdge(map, privateRef, {
-            from: privateRef,
-            to: locationRef,
-            kind: "entity_bridge",
-            weight: 0.65,
-            timestamp: row.created_at,
-            summary: row.summary,
-            canonical_fact_id: null,
-            canonical_evidence: false,
-          });
-        }
-      }
-    }
-
     this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
@@ -1089,8 +1049,12 @@ export class GraphNavigator {
       const beliefRef = (idToRef.get(row.id) ?? `assertion:${row.id}`) as NodeRef;
       const parsedRecord = this.parseAssertionRecord(row.record_json);
       const summary = parsedRecord.predicate ?? row.summary_text;
-      const sourceRef = resolveEntityRef(parsedRecord.sourcePointerKey);
-      const targetRef = resolveEntityRef(parsedRecord.targetPointerKey);
+      const sourceRef =
+        resolveEntityRef(parsedRecord.sourcePointerKey)
+        ?? (parsedRecord.sourceEntityId !== null ? (`entity:${parsedRecord.sourceEntityId}` as NodeRef) : null);
+      const targetRef =
+        resolveEntityRef(parsedRecord.targetPointerKey)
+        ?? (parsedRecord.targetEntityId !== null ? (`entity:${parsedRecord.targetEntityId}` as NodeRef) : null);
 
       if (sourceRef && this.isNodeVisible(sourceRef, viewerContext)) {
         this.pushEdge(map, beliefRef, {
@@ -1132,71 +1096,11 @@ export class GraphNavigator {
       }
     }
 
-    const rows = this.db
-      .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, source_event_ref, created_at
-         FROM agent_fact_overlay
-         WHERE agent_id=? AND cognition_key IS NULL AND id IN (${placeholders})`,
-      )
-      .all(viewerContext.viewer_agent_id, ...ids) as Array<{
-      id: number;
-      source_entity_id: number;
-      target_entity_id: number;
-      predicate: string;
-      source_event_ref: NodeRef | null;
-      created_at: number;
-    }>;
-
-    for (const row of rows) {
-      const beliefRef = (idToRef.get(row.id) ?? `${legacyPrivateBeliefKind}:${row.id}`) as NodeRef;
-      const sourceRef = `entity:${row.source_entity_id}` as NodeRef;
-      const targetRef = `entity:${row.target_entity_id}` as NodeRef;
-
-      if (this.isNodeVisible(sourceRef, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
-          to: sourceRef,
-          kind: "fact_relation",
-          weight: 0.75,
-          timestamp: row.created_at,
-          summary: row.predicate,
-          canonical_fact_id: null,
-          canonical_evidence: false,
-        });
-      }
-
-      if (this.isNodeVisible(targetRef, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
-          to: targetRef,
-          kind: "fact_relation",
-          weight: 0.75,
-          timestamp: row.created_at,
-          summary: row.predicate,
-          canonical_fact_id: null,
-          canonical_evidence: false,
-        });
-      }
-
-      if (row.source_event_ref && this.isNodeVisible(row.source_event_ref, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
-          to: row.source_event_ref,
-          kind: "fact_support",
-          weight: 0.7,
-          timestamp: row.created_at,
-          summary: row.predicate,
-          canonical_fact_id: null,
-          canonical_evidence: false,
-        });
-      }
-    }
-
     this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
   private expandRelationEdges(
-    frontier: Map<AnyNodeRefKind, Set<NodeRef>>,
+    frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
@@ -1252,8 +1156,8 @@ export class GraphNavigator {
   private isSameAgentPrivateCompatibility(from: NodeRef, to: NodeRef, viewerAgentId: string): boolean {
     const fromKind = this.parseNodeRef(from)?.kind;
     const toKind = this.parseNodeRef(to)?.kind;
-    const fromPrivate = fromKind === legacyPrivateEventKind || fromKind === legacyPrivateBeliefKind || fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment";
-    const toPrivate = toKind === legacyPrivateEventKind || toKind === legacyPrivateBeliefKind || toKind === "assertion" || toKind === "evaluation" || toKind === "commitment";
+    const fromPrivate = fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment";
+    const toPrivate = toKind === "assertion" || toKind === "evaluation" || toKind === "commitment";
 
     if (!fromPrivate && !toPrivate) {
       return true;
@@ -1278,21 +1182,15 @@ export class GraphNavigator {
     if (!parsed) {
       return null;
     }
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_episode_events WHERE id=?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row?.agent_id ?? null;
-    }
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare("SELECT agent_id FROM private_cognition_current WHERE id=?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row?.agent_id ?? null;
     }
-    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
+    if (parsed.kind === "assertion") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id=?")
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id=?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row?.agent_id ?? null;
     }
@@ -1318,6 +1216,8 @@ export class GraphNavigator {
     targetPointerKey: string | null;
     predicate: string | null;
     sourceEventRef: NodeRef | null;
+    sourceEntityId: number | null;
+    targetEntityId: number | null;
   } {
     if (!recordJson) {
       return {
@@ -1325,6 +1225,8 @@ export class GraphNavigator {
         targetPointerKey: null,
         predicate: null,
         sourceEventRef: null,
+        sourceEntityId: null,
+        targetEntityId: null,
       };
     }
 
@@ -1336,6 +1238,8 @@ export class GraphNavigator {
           targetPointerKey: null,
           predicate: null,
           sourceEventRef: null,
+          sourceEntityId: null,
+          targetEntityId: null,
         };
       }
 
@@ -1364,11 +1268,25 @@ export class GraphNavigator {
           ? (sourceEventCandidate as NodeRef)
           : null;
 
+      const sourceEntityRaw = parsed.sourceEntityId ?? parsed.source_entity_id;
+      const sourceEntityId =
+        typeof sourceEntityRaw === "number" && Number.isInteger(sourceEntityRaw) && sourceEntityRaw > 0
+          ? sourceEntityRaw
+          : null;
+
+      const targetEntityRaw = parsed.targetEntityId ?? parsed.target_entity_id;
+      const targetEntityId =
+        typeof targetEntityRaw === "number" && Number.isInteger(targetEntityRaw) && targetEntityRaw > 0
+          ? targetEntityRaw
+          : null;
+
       return {
         sourcePointerKey,
         targetPointerKey,
         predicate,
         sourceEventRef,
+        sourceEntityId,
+        targetEntityId,
       };
     } catch {
       return {
@@ -1376,6 +1294,8 @@ export class GraphNavigator {
         targetPointerKey: null,
         predicate: null,
         sourceEventRef: null,
+        sourceEntityId: null,
+        targetEntityId: null,
       };
     }
   }
@@ -1490,7 +1410,7 @@ export class GraphNavigator {
 
   private loadNodeSnapshots(refs: NodeRef[]): Map<NodeRef, NodeSnapshot> {
     const unique = Array.from(new Set(refs));
-    const byKind = new Map<AnyNodeRefKind, number[]>();
+    const byKind = new Map<NodeRefKind, number[]>();
     for (const ref of unique) {
       const parsed = this.parseNodeRef(ref);
       if (!parsed) {
@@ -1506,18 +1426,16 @@ export class GraphNavigator {
     this.populateSnapshots(map, "event", byKind.get("event"), "event_nodes", "summary", "timestamp");
     this.populateSnapshots(map, "entity", byKind.get("entity"), "entity_nodes", "summary", "updated_at");
     this.populateSnapshots(map, "fact", byKind.get("fact"), "fact_edges", "predicate", "t_valid");
-    this.populateSnapshots(map, legacyPrivateEventKind, byKind.get(legacyPrivateEventKind), "private_episode_events", "summary", "created_at");
-    this.populateSnapshots(map, "evaluation",    byKind.get("evaluation"),    "private_cognition_current", "summary_text", "updated_at");
-    this.populateSnapshots(map, "commitment",    byKind.get("commitment"),    "private_cognition_current", "summary_text", "updated_at");
-    this.populateSnapshots(map, legacyPrivateBeliefKind, byKind.get(legacyPrivateBeliefKind), "agent_fact_overlay", "predicate", "created_at");
-    this.populateSnapshots(map, "assertion",     byKind.get("assertion"),     "agent_fact_overlay", "predicate", "created_at");
+    this.populateSnapshots(map, "evaluation", byKind.get("evaluation"), "private_cognition_current", "summary_text", "updated_at");
+    this.populateSnapshots(map, "commitment", byKind.get("commitment"), "private_cognition_current", "summary_text", "updated_at");
+    this.populateSnapshots(map, "assertion", byKind.get("assertion"), "private_cognition_current", "summary_text", "updated_at");
 
     return map;
   }
 
   private populateSnapshots(
     map: Map<NodeRef, NodeSnapshot>,
-    kind: AnyNodeRefKind,
+    kind: NodeRefKind,
     ids: number[] | undefined,
     table: string,
     summaryColumn: string,
@@ -1740,13 +1658,6 @@ export class GraphNavigator {
       return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_episode_events WHERE id = ?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row ? { agent_id: row.agent_id } : null;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
@@ -1754,9 +1665,9 @@ export class GraphNavigator {
       return row ? { agent_id: row.agent_id } : null;
     }
 
-    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
+    if (parsed.kind === "assertion") {
       const row = this.db
-        .prepare("SELECT agent_id FROM agent_fact_overlay WHERE id = ?")
+        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
         .get(parsed.id) as { agent_id: string } | undefined;
       return row ? { agent_id: row.agent_id } : null;
     }
@@ -1817,17 +1728,18 @@ export class GraphNavigator {
     return "state";
   }
 
-  private parseNodeRef(ref: NodeRef): { kind: AnyNodeRefKind; id: number } | null {
+  private parseNodeRef(ref: NodeRef): { kind: NodeRefKind; id: number } | null {
     try {
       const parsed = parseGraphNodeRef(String(ref));
-      if (!KNOWN_NODE_KINDS.has(parsed.kind)) {
+      const kind = parsed.kind as NodeRefKind;
+      if (!KNOWN_NODE_KINDS.has(kind)) {
         return null;
       }
       const id = Number(parsed.id);
       if (!Number.isInteger(id) || id <= 0) {
         return null;
       }
-      return { kind: parsed.kind, id };
+      return { kind, id };
     } catch {
       return null;
     }
