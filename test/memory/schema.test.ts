@@ -490,6 +490,85 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
+	it("memory:028 backfills NULL cognition_key overlay assertions into canonical cognition tables", () => {
+		const rawDb = new Database(":memory:");
+		const db = wrapRawDatabase(rawDb);
+
+		db.exec(`CREATE TABLE agent_fact_overlay (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			source_entity_id INTEGER NOT NULL,
+			target_entity_id INTEGER NOT NULL,
+			predicate TEXT NOT NULL,
+			basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')),
+			stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')),
+			pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')),
+			provenance TEXT,
+			source_label_raw TEXT,
+			source_event_ref TEXT,
+			cognition_key TEXT,
+			settlement_id TEXT,
+			op_index INTEGER,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			CHECK (pre_contested_stance IS NULL OR stance = 'contested')
+		)`);
+		db.exec(`CREATE TABLE private_cognition_events (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			op TEXT NOT NULL CHECK (op IN ('upsert', 'retract')),
+			record_json TEXT,
+			settlement_id TEXT NOT NULL,
+			committed_time INTEGER NOT NULL,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE private_cognition_current (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			stance TEXT,
+			basis TEXT,
+			status TEXT NOT NULL DEFAULT 'active',
+			pre_contested_stance TEXT,
+			conflict_summary TEXT,
+			conflict_factor_refs_json TEXT,
+			summary_text TEXT,
+			record_json TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+
+		const now = Date.now();
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-a", 1, 2, "knows", "first_hand", "confirmed", null, "witnessed", null, now - 3, now - 3],
+		);
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-a", 3, 4, "owes", "inference", "tentative", null, "rumor", null, now - 2, now - 2],
+		);
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-b", 5, 6, "fears", "belief", "contested", "accepted", "self-report", null, now - 1, now - 1],
+		);
+
+		const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:028:backfill-unkeyed-assertions");
+		if (!migration) {
+			throw new Error("memory:028 migration not found");
+		}
+		migration.up(db);
+
+		const backfilledCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current WHERE cognition_key LIKE 'legacy_backfill:%'",
+		);
+		expect(backfilledCount?.count).toBe(3);
+
+		db.close();
+	});
+
 	it("memory:029 purges legacy node refs from derived tables without touching source-of-truth tables", () => {
 		const rawDb = new Database(":memory:");
 		const db = wrapRawDatabase(rawDb);

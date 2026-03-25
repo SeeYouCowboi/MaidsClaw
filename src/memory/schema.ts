@@ -726,6 +726,75 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
     },
   },
   {
+    id: "memory:028:backfill-unkeyed-assertions",
+    description:
+      "Backfill legacy agent_fact_overlay assertion rows without cognition_key into canonical cognition tables",
+    up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) {
+        return;
+      }
+
+      const now = Date.now();
+      const rows = db.prepare(
+        `SELECT id, agent_id, source_entity_id, target_entity_id,
+                predicate, basis, stance, pre_contested_stance,
+                provenance, created_at, updated_at
+         FROM agent_fact_overlay
+         WHERE cognition_key IS NULL`,
+      ).all() as Array<{
+        id: number;
+        agent_id: string;
+        source_entity_id: number | null;
+        target_entity_id: number | null;
+        predicate: string | null;
+        basis: string | null;
+        stance: string | null;
+        pre_contested_stance: string | null;
+        provenance: string | null;
+        created_at: number | null;
+        updated_at: number | null;
+      }>;
+
+      for (const row of rows) {
+        const cognitionKey = `legacy_backfill:${row.agent_id}:${row.id}`;
+        const recordJson = JSON.stringify({
+          predicate: row.predicate ?? "",
+          stance: row.stance ?? "proposed",
+          basis: row.basis ?? null,
+          provenance: row.provenance ?? null,
+          sourceEntityId: row.source_entity_id,
+          targetEntityId: row.target_entity_id,
+        });
+
+        const eventCommittedTime = row.updated_at ?? now;
+        const eventCreatedAt = row.created_at ?? eventCommittedTime;
+        const eventInsert = db.prepare(
+          `INSERT INTO private_cognition_events
+             (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+           VALUES (?, ?, 'assertion', 'upsert', ?, 'legacy_backfill', ?, ?)`,
+        ).run(row.agent_id, cognitionKey, recordJson, eventCommittedTime, eventCreatedAt);
+
+        db.prepare(
+          `INSERT OR IGNORE INTO private_cognition_current
+             (agent_id, cognition_key, kind, stance, basis, status,
+              pre_contested_stance, summary_text, record_json,
+              source_event_id, updated_at)
+           VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?, ?)`,
+        ).run(
+          row.agent_id,
+          cognitionKey,
+          row.stance ?? "proposed",
+          row.basis ?? null,
+          row.pre_contested_stance ?? null,
+          row.predicate ?? "",
+          recordJson,
+          Number(eventInsert.lastInsertRowid),
+          eventCommittedTime,
+        );
+      }
+    },
+  },
+  {
     id: "memory:029:purge-legacy-node-refs",
     description:
       "Delete legacy private_event/private_belief refs from derived tables to allow clean rebuild from canonical cognition projections",
