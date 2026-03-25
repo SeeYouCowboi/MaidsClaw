@@ -112,11 +112,6 @@ describe("VisibilityPolicy", () => {
 			expect(policy.isNodeVisible(viewer(), "entity:1", data)).toBe(true);
 		});
 
-		it("dispatches private_event: prefix to isPrivateNodeVisible", () => {
-			expect(policy.isNodeVisible(viewer({ viewer_agent_id: "rp:alice" }), "private_event:1", { agent_id: "rp:alice" })).toBe(true);
-			expect(policy.isNodeVisible(viewer({ viewer_agent_id: "rp:bob" }), "private_event:1", { agent_id: "rp:alice" })).toBe(false);
-		});
-
 		it("unknown prefix returns false", () => {
 			expect(policy.isNodeVisible(viewer(), "unknown:1", {})).toBe(false);
 		});

@@ -695,7 +695,7 @@ describe("RetrievalService", () => {
 			expect(hits[0].conflictEvidence).toBeDefined();
 			expect(hits[0].conflictEvidence).toEqual([]);
 			expect(hits[0].conflictSummary).toBe("contested (1 factors)");
-			expect(hits[0].conflictFactorRefs).toEqual(["private_belief:1"]);
+			expect(hits[0].conflictFactorRefs).toEqual([]);
 
 			db.close();
 			cleanupDb(dbPath);

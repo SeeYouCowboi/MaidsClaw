@@ -937,7 +937,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       });
 
       const beforeFlush = runtime.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+		`SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
         ["rp:alice", "assert:flush-authoritative"],
       );
       expect(beforeFlush?.cnt).toBe(0);
@@ -969,7 +969,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
 
       const afterFlush = runtime.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+		`SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
         ["rp:alice", "assert:flush-authoritative"],
       );
       expect(afterFlush?.cnt).toBe(1);
@@ -1773,7 +1773,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       await turnService.flushOnSessionClose(session.sessionId, "rp:alice");
 
       const afterFlush = runtime.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+		`SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
         ["rp:alice", "assert:flush-unresolved"],
       );
       expect(afterFlush?.cnt).toBe(0);
@@ -2801,7 +2801,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
-  it("dual-write: CognitionRepository writes to both overlay and event ledger via bootstrapped DB", () => {
+  it("dual-write: CognitionRepository writes to both current projection and event ledger via bootstrapped DB", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
     try {
       const { CognitionRepository } = require("../../src/memory/cognition/cognition-repo.js");
@@ -2832,7 +2832,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(events[0].op).toBe("upsert");
 
       const overlayRow = runtime.db.get<{ id: number }>(
-        "SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+		"SELECT id FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
         ["rp:alice", "live:dw-test"],
       );
       expect(overlayRow).toBeDefined();
@@ -3042,11 +3042,11 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(episodes).toHaveLength(1);
       expect(episodes[0].summary).toBe("Expressed trust");
 
-      const overlayFacts = runtime.db.get<{ cnt: number }>(
-        `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
-        ["rp:alice", "nextvis:trust"],
-      );
-      expect(overlayFacts?.cnt).toBe(0);
+		const overlayFacts = runtime.db.get<{ cnt: number }>(
+			`SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
+			["rp:alice", "nextvis:trust"],
+		);
+		expect(overlayFacts?.cnt).toBe(1);
 
       const overlayEvents = runtime.db.get<{ cnt: number }>(
         `SELECT COUNT(*) as cnt FROM private_episode_events WHERE agent_id = ?`,

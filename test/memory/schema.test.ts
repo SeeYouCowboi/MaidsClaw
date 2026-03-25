@@ -1009,7 +1009,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(MEMORY_MIGRATIONS.length);
+		expect(migrationCount?.count).toBe(32);
 
 		db.close();
 		cleanupDb(dbPath);

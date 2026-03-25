@@ -154,7 +154,7 @@ describe("GraphNavigator explain shell", () => {
     expect(safe?.redacted_placeholders).toEqual([
       {
         type: "redacted",
-        reason: "private",
+        reason: "hidden",
         node_ref: "private_event:70",
       },
     ]);

@@ -32,6 +32,11 @@ describe("parseGraphNodeRef", () => {
     expect(() => parseGraphNodeRef("foo:123")).toThrow("Unknown node ref kind: foo");
   });
 
+  it("rejects legacy private_event/private_belief refs", () => {
+    expect(() => parseGraphNodeRef("private_event:55")).toThrow("Unknown node ref kind: private_event");
+    expect(() => parseGraphNodeRef("private_belief:88")).toThrow("Unknown node ref kind: private_belief");
+  });
+
   it("parses empty id portion as empty string (edge case)", () => {
     // Empty id after colon is valid parsing-wise (id can be empty string)
     expect(parseGraphNodeRef("event:")).toEqual({ kind: "event", id: "" });

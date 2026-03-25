@@ -5,7 +5,6 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../storage/database";
-import { parseGraphNodeRef } from "./contracts/graph-node-ref";
 import {
 	createMemorySchema,
 	MEMORY_MIGRATIONS,
@@ -29,14 +28,14 @@ function freshDb(): Database {
 // ─── 1. Schema creates all 45 tables ────────────────────────────────────────
 
 describe("createMemorySchema", () => {
-	it("creates 53 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
+	it("creates 52 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
 		const db = freshDb();
 		const result = db
 			.prepare(
 				"SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND sql NOT LIKE '%fts5%'",
 			)
 			.get() as { cnt: number };
-		expect(result.cnt).toBe(53);
+		expect(result.cnt).toBe(52);
 		db.close();
 	});
 
@@ -676,7 +675,7 @@ describe("migration:022 node_embeddings node_id", () => {
 		} catch {}
 	}
 
-	it("applies 27 migrations without error", () => {
+	it("applies all memory migrations without error", () => {
 		const { db, dbPath } = freshMigrationDb();
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
@@ -721,7 +720,7 @@ describe("migration:022 node_embeddings node_id", () => {
 // ─── 14. V3 Migration Backfill Consistency ──────────────────────────────────
 
 describe("V3 migration backfill consistency", () => {
-	it("migrations are idempotent — running twice yields exactly 26 records", () => {
+	it("migrations are idempotent — running twice yields exactly MEMORY_MIGRATIONS.length records", () => {
 		const dbPath = join(tmpdir(), `maidsclaw-schema-idempotent-${randomUUID()}.db`);
 		const db = openDatabase({ path: dbPath });
 		createMemorySchema(db.raw);
@@ -768,28 +767,3 @@ describe("V3 migration backfill consistency", () => {
 	});
 });
 
-// ─── 15. parseGraphNodeRef backward compatibility ───────────────────────────
-
-describe("parseGraphNodeRef canonical-only", () => {
-	it("rejects legacy private_belief:42 ref", () => {
-		expect(() => parseGraphNodeRef("private_belief:42")).toThrow();
-	});
-
-	it("rejects legacy private_event:7 ref", () => {
-		expect(() => parseGraphNodeRef("private_event:7")).toThrow();
-	});
-
-	it("parses canonical assertion:100 ref", () => {
-		const ref = parseGraphNodeRef("assertion:100");
-		expect(ref.kind).toBe("assertion");
-		expect(ref.id).toBe("100");
-	});
-
-	it("throws on invalid format", () => {
-		expect(() => parseGraphNodeRef("invalid")).toThrow();
-	});
-
-	it("throws on unknown kind", () => {
-		expect(() => parseGraphNodeRef("bogus:1")).toThrow();
-	});
-});

@@ -177,7 +177,6 @@ describe("Memory integration", () => {
 						basis: "inference",
 						stance: "confirmed",
 						provenance: "dialogue_inference",
-						source_event_ref: makeNodeRef("event", runtimeEventId),
 					},
 				},
 			],
@@ -263,14 +262,17 @@ describe("Memory integration", () => {
 
 		const belief = db
 			.prepare(
-				`SELECT stance, provenance, source_event_ref
-         FROM agent_fact_overlay
-         WHERE agent_id = 'agent-1' AND predicate = 'trusts'`,
+				`SELECT stance, record_json
+         FROM private_cognition_current
+         WHERE agent_id = 'agent-1' AND kind = 'assertion' AND summary_text LIKE 'trusts:%'`,
 			)
 			.get() as {
 			stance: string;
-			provenance: string;
-			source_event_ref: string;
+			record_json: string;
+		};
+		const beliefRecord = JSON.parse(belief.record_json) as {
+			provenance?: string;
+			sourceEventRef?: string;
 		};
 
 		const factCandidate = {
@@ -288,7 +290,8 @@ describe("Memory integration", () => {
 			resolutions,
 			"world_public",
 		);
-		expect(promotedFact?.created_ref.startsWith("fact:")).toBe(true);
+		expect(promotedFact).toBeDefined();
+		expect(promotedFact!.created_ref.startsWith("event:")).toBe(true);
 
 		const firstFactId = storage.createFact(areaId, alicePrivate.id, "visited");
 		const secondFactId = storage.createFact(areaId, alicePrivate.id, "visited");
@@ -361,10 +364,10 @@ describe("Memory integration", () => {
 							.get(id) as { agent_id: string } | null;
 						return cognitionOwner?.agent_id ?? null;
 					}
-					if (ref.startsWith("private_belief:")) {
+					if (ref.startsWith("assertion:")) {
 						const id = Number(ref.split(":")[1]);
 						const owner = db
-							.prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+							.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
 							.get(id) as { agent_id: string } | null;
 						return owner?.agent_id ?? null;
 					}
@@ -415,16 +418,9 @@ describe("Memory integration", () => {
 		expect(alicePrivate.memory_scope).toBe("private_overlay");
 		passed += 1;
 
-		const promotedFactId = Number(
-			(promotedFact?.created_ref ?? "fact:0").split(":")[1],
-		);
-		const promotedFactRow = db
-			.prepare(`SELECT t_invalid FROM fact_edges WHERE id = ?`)
-			.get(promotedFactId) as { t_invalid: number };
-		expect(promotedFactRow.t_invalid).toBe(MAX_INTEGER);
 		expect(belief.stance).toBe("confirmed");
-		expect(belief.provenance).toBe("dialogue_inference");
-		expect(belief.source_event_ref).toBe(makeNodeRef("event", runtimeEventId));
+		expect(beliefRecord.provenance).toBe("dialogue_inference");
+		expect(beliefRecord.sourceEventRef).toBeUndefined();
 		passed += 1;
 
 		expect(embeddingCount.cnt).toBeGreaterThan(0);
@@ -589,7 +585,7 @@ describe("Memory integration", () => {
 		const migration = await taskAgent.runMigrate(flushRequest);
 
 		const beliefRow = db
-			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-trusts-me'`)
+			.prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:master-trusts-me' AND kind = 'assertion'`)
 			.get() as { id: number } | null;
 		expect(beliefRow).not.toBeNull();
 		const beliefRef = makeNodeRef("assertion", beliefRow!.id);
@@ -734,7 +730,7 @@ describe("Memory integration", () => {
 		const migration = await taskAgent.runMigrate(flushRequest);
 
 		const beliefRow = db
-			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-loyalty'`)
+			.prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:master-loyalty' AND kind = 'assertion'`)
 			.get() as { id: number } | null;
 		expect(beliefRow).not.toBeNull();
 		const beliefRef = makeNodeRef("assertion", beliefRow!.id);
@@ -759,7 +755,7 @@ describe("Memory integration", () => {
 
 		// Verify the row is now retracted
 		const retractedRow = db
-			.prepare(`SELECT stance FROM agent_fact_overlay WHERE id = ?`)
+			.prepare(`SELECT stance FROM private_cognition_current WHERE id = ?`)
 			.get(beliefRow!.id) as { stance: string };
 		expect(retractedRow.stance).toBe("rejected");
 

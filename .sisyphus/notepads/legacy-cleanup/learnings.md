@@ -565,3 +565,16 @@ This preserves the existing `pinned_summary` row and discards the redundant `cha
 
 
 
+
+## [2026-03-26] T22 follow-up — final legacy expectation alignment
+
+### Changes Made
+- `test/memory/navigator.test.ts`: updated safety-net redaction placeholder expectation from `reason: "private"` to `reason: "hidden"`.
+- `test/memory/retrieval-search.test.ts`: updated contested assertion expectation for `conflictFactorRefs` from legacy private-node refs to `[]`.
+
+### Key Findings
+- Visibility redaction terminology is now normalized to `hidden`; tests still asserting `private` are stale.
+- Legacy factor refs (`private_belief:*`) are no longer surfaced after canonical normalization/projection; contested hits can retain summary text while exposing no legacy factor refs.
+
+### Verification intent
+- Re-run diagnostics and full test suite after these expectation-only updates to confirm no new regressions.
