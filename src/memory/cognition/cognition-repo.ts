@@ -109,24 +109,6 @@ type CanonicalCommitmentRow = {
   updatedAt: number | null;
 };
 
-type FactOverlayRow = {
-  id: number;
-  agent_id: string;
-  source_entity_id: number;
-  target_entity_id: number;
-  predicate: string;
-  basis: AssertionBasis | null;
-  stance: AssertionStance | null;
-  pre_contested_stance: AssertionStance | null;
-  provenance: string | null;
-  source_event_ref: string | null;
-  "cognition_key": string | null;
-  settlement_id: string | null;
-  op_index: number | null;
-  created_at: number;
-  updated_at: number;
-};
-
 type CognitionCurrentRow = {
   id: number;
   agent_id: string;
@@ -153,37 +135,6 @@ type AssertionProjectionRecord = {
 };
 
 const RELATION_BUILDER_PATCH_FLAG = Symbol.for("maidsclaw.relation_builder_assertion_projection_compat");
-const DB_PREPARE_PATCH_FLAG = Symbol.for("maidsclaw.db_prepare_assertion_projection_compat");
-
-function patchDbPrepareAssertionProjectionCompat(db: DbLike): void {
-  const dbAny = db as unknown as {
-    prepare: (sql: string) => {
-      run(...params: unknown[]): { lastInsertRowid: number | bigint };
-      all(...params: unknown[]): unknown[];
-      get(...params: unknown[]): unknown;
-    };
-    [DB_PREPARE_PATCH_FLAG]?: boolean;
-  };
-  if (dbAny[DB_PREPARE_PATCH_FLAG]) {
-    return;
-  }
-
-  const originalPrepare = dbAny.prepare.bind(dbAny);
-  dbAny.prepare = (sql: string) => {
-    const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
-    if (normalized === "select id from agent_fact_overlay where agent_id = ? and cognition_key = ? limit 1") {
-      return originalPrepare(
-        `SELECT id
-         FROM private_cognition_current
-         WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'
-         LIMIT 1`,
-      );
-    }
-    return originalPrepare(sql);
-  };
-
-  dbAny[DB_PREPARE_PATCH_FLAG] = true;
-}
 
 function patchRelationBuilderAssertionProjectionCompat(): void {
   const relationBuilderCtor = RelationBuilder as unknown as {
@@ -210,9 +161,7 @@ function patchRelationBuilderAssertionProjectionCompat(): void {
       let resolved: string | null = null;
       try {
         resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
-      } catch {
-        // agent_fact_overlay may not exist after migration 030 — fall through
-      }
+      } catch {}
       if (resolved) {
         return resolved;
       }
@@ -243,9 +192,7 @@ function patchRelationBuilderAssertionProjectionCompat(): void {
       let resolved: string | null = null;
       try {
         resolved = originalResolveCanonicalCognitionRefByKey.call(this, cognitionKey, sourceAgentId);
-      } catch {
-        // agent_fact_overlay may not exist after migration 030 — fall through
-      }
+      } catch {}
       if (resolved) {
         return resolved;
       }
@@ -270,14 +217,11 @@ function patchRelationBuilderAssertionProjectionCompat(): void {
   relationBuilderCtor[RELATION_BUILDER_PATCH_FLAG] = true;
 }
 
-
-
 export class CognitionRepository {
   private readonly relationBuilder: RelationBuilder;
   private readonly eventRepo: CognitionEventRepo;
 
   constructor(private readonly db: DbLike) {
-    patchDbPrepareAssertionProjectionCompat(db);
     patchRelationBuilderAssertionProjectionCompat();
     this.relationBuilder = new RelationBuilder(db);
     this.eventRepo = new CognitionEventRepo(db);
@@ -837,28 +781,10 @@ export class CognitionRepository {
       )
       .all(agentId) as CognitionCurrentRow[];
 
-    const rows = this.db
-      .prepare(
-        `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
-                basis, stance, pre_contested_stance,
-                provenance, source_event_ref, cognition_key, settlement_id, op_index,
-                created_at, updated_at
-         FROM agent_fact_overlay
-         WHERE agent_id = ? AND cognition_key IS NULL
-         ORDER BY updated_at DESC
-         LIMIT 500`,
-      )
-      .all(agentId) as FactOverlayRow[];
-
-    const keyedMapped = keyedRows
+    let mapped = keyedRows
       .map((row) => this.toCanonicalAssertionFromProjection(row))
-      .filter((row): row is CanonicalAssertionRow => row !== null);
-
-    const unkeyedMapped = rows
-      .map((row) => this.toCanonicalAssertion(row))
-      .filter((row): row is CanonicalAssertionRow => row !== null);
-
-    let mapped = [...keyedMapped, ...unkeyedMapped].sort((a, b) => b.updatedAt - a.updatedAt);
+      .filter((row): row is CanonicalAssertionRow => row !== null)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
 
     if (options?.activeOnly) {
       mapped = mapped.filter((row) => row.stance !== "rejected" && row.stance !== "abandoned");
@@ -927,23 +853,8 @@ export class CognitionRepository {
          LIMIT 1`,
       )
       .get(agentId, cognitionKey.normalize("NFC")) as CognitionCurrentRow | null;
-    if (keyed) {
-      return this.toCanonicalAssertionFromProjection(keyed);
-    }
-
-    const row = this.db
-      .prepare(
-        `SELECT id, agent_id, source_entity_id, target_entity_id, predicate,
-                basis, stance, pre_contested_stance,
-                provenance, source_event_ref, cognition_key, settlement_id, op_index,
-                created_at, updated_at
-         FROM agent_fact_overlay
-         WHERE agent_id = ? AND cognition_key = ?
-         LIMIT 1`,
-      )
-      .get(agentId, cognitionKey.normalize("NFC")) as FactOverlayRow | null;
-    if (!row) return null;
-    return this.toCanonicalAssertion(row);
+    if (!keyed) return null;
+    return this.toCanonicalAssertionFromProjection(keyed);
   }
 
   getEvaluationByKey(agentId: string, cognitionKey: string): CanonicalEvaluationRow | null {
@@ -993,29 +904,6 @@ export class CognitionRepository {
       .get(normalizedPointerKey, agentId) as { id: number } | null;
 
     return row?.id ?? null;
-  }
-
-  private toCanonicalAssertion(row: FactOverlayRow): CanonicalAssertionRow | null {
-    if (!row.stance) {
-      return null;
-    }
-    return {
-      id: row.id,
-      agentId: row.agent_id,
-      sourceEntityId: row.source_entity_id,
-      targetEntityId: row.target_entity_id,
-      predicate: row.predicate,
-      cognitionKey: row.cognition_key,
-      settlementId: row.settlement_id,
-      opIndex: row.op_index,
-      provenance: row.provenance,
-      sourceEventRef: row.source_event_ref,
-      stance: row.stance,
-      basis: row.basis ?? null,
-      preContestedStance: row.pre_contested_stance,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
   }
 
   private syncAssertionCurrentProjection(input: {

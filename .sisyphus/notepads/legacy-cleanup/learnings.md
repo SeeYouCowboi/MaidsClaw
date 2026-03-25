@@ -269,3 +269,30 @@ When replacing `agent_fact_overlay.predicate`/`provenance` with `private_cogniti
 
 ### Evidence
 `.sisyphus/evidence/task-11-no-overlay-refs.txt`
+
+## [2026-03-25] T13 — Remove agent_fact_overlay reads from cognition modules
+
+### Changes
+- **relation-builder.ts**: 3 `agent_fact_overlay` queries replaced with `private_cognition_current`
+  - `resolveSourceAgentId()` assertion branch: added `AND kind = 'assertion'`
+  - `resolveSourceAgentId()` private_belief branch: no kind filter (legacy row may have any kind)
+  - `resolveCanonicalCognitionRefByKey()`: added `AND kind = 'assertion'`
+- **relation-intent-resolver.ts**: 1 query replaced in `resolveFactorNodeRef()`
+- **cognition-search.ts**: Already clean (0 references)
+- **cognition-search.test.ts**: Fixed 1 test that queried `agent_fact_overlay` directly
+- **cognition-repo.ts**: Removed `patchRelationBuilderAssertionProjectionCompat` function + `RELATION_BUILDER_PATCH_FLAG` constant + constructor call. T10 had already removed `patchDbPrepareAssertionProjectionCompat`.
+
+### Key Insight: Compat Patch Removal Safety
+After fixing the underlying RelationBuilder methods to use `private_cognition_current`, the `patchRelationBuilderAssertionProjectionCompat` try/catch wrapper becomes a no-op. The original methods no longer throw "no such table" since they no longer reference `agent_fact_overlay`.
+
+### Coordination Note
+T10 and T13 both modified `cognition-repo.ts`. T10 removed `patchDbPrepareAssertionProjectionCompat` + `DB_PREPARE_PATCH_FLAG`. T13 removed `patchRelationBuilderAssertionProjectionCompat` + `RELATION_BUILDER_PATCH_FLAG`. No conflicts because they targeted separate symbols.
+
+### Verification
+- `grep agent_fact_overlay src/memory/cognition/*.ts`: 0 matches
+- Build: tsc clean
+- cognition tests: 84 pass, 0 fail
+- Full memory tests: 544 pass, 19 fail (improved from 20 pre-existing failures)
+
+### Evidence
+`.sisyphus/evidence/task-13-no-overlay-refs.txt`

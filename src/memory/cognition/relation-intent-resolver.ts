@@ -322,7 +322,7 @@ function resolveFactorNodeRef(
 
   const fact = db
     .prepare(
-      `SELECT id FROM agent_fact_overlay WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
+      `SELECT id FROM private_cognition_current WHERE cognition_key = ? AND kind = 'assertion' ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
     )
     .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number } | null;
   if (fact) {

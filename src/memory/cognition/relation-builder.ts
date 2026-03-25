@@ -207,7 +207,7 @@ export class RelationBuilder {
       }
 
       const row = this.db
-        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
         .get(id) as AgentRow | null;
       return row?.agent_id ?? null;
     }
@@ -219,7 +219,7 @@ export class RelationBuilder {
       }
 
       const row = this.db
-        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
         .get(id) as AgentRow | null;
       return row?.agent_id ?? null;
     }
@@ -286,8 +286,9 @@ export class RelationBuilder {
     const assertion = this.db
       .prepare(
         `SELECT id
-         FROM agent_fact_overlay
+         FROM private_cognition_current
          WHERE cognition_key = ?${agentFilter}
+           AND kind = 'assertion'
          ORDER BY updated_at DESC, id DESC
          LIMIT 1`,
       )

@@ -70,7 +70,7 @@ describe("CognitionSearchService — conflictEvidence", () => {
 			});
 
 			const factorAssertion = db
-				.prepare(`SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ? LIMIT 1`)
+				.prepare(`SELECT id FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion' LIMIT 1`)
 				.get(AGENT_ID, "test:factor-assertion") as { id: number };
 
 			repo.upsertAssertion({
