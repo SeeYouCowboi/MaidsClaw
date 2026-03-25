@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,7 @@ import { GraphNavigator } from "../../src/memory/navigator.js";
 import {
 	MEMORY_MIGRATIONS,
 	MAX_INTEGER,
+	createMemorySchema,
 	makeLegacyNodeRef,
 	makeNodeRef,
 	runMemoryMigrations,
@@ -88,7 +89,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(34);
+		expect(nonFtsCount?.count).toBe(33);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -377,14 +378,6 @@ describe("memory schema", () => {
 		const { dbPath, db } = createTempDb();
 
 		runMemoryMigrations(db);
-
-		const factColumns = listColumns(db, "agent_fact_overlay");
-		expect(factColumns.includes("basis")).toBe(true);
-		expect(factColumns.includes("stance")).toBe(true);
-		expect(factColumns.includes("pre_contested_stance")).toBe(true);
-		expect(factColumns.includes("source_label_raw")).toBe(true);
-		expect(factColumns.includes("source_event_ref")).toBe(true);
-		expect(factColumns.includes("updated_at")).toBe(true);
 
 		const episodeEventColumns = listColumns(db, "private_episode_events");
 		expect(episodeEventColumns.includes("location_entity_id")).toBe(true);
@@ -780,48 +773,27 @@ describe("memory schema", () => {
 		db.close();
 	});
 
-	it("removes legacy overlay columns after rebuild migration", () => {
-		const { dbPath, db } = createTempDb();
+	describe("memory:030 drop-agent-fact-overlay", () => {
+		test("fresh DB via createMemorySchema() has no agent_fact_overlay table", () => {
+			const db = new Database(":memory:");
+			createMemorySchema(db);
+			const row = db.prepare(
+				`SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+			).get() as { name: string } | null;
+			expect(row).toBeNull();
+			db.close();
+		});
 
-		runMemoryMigrations(db);
-
-		const factColumns = listColumns(db, "agent_fact_overlay");
-		expect(factColumns.includes("belief_type")).toBe(false);
-		expect(factColumns.includes("confidence")).toBe(false);
-		expect(factColumns.includes("epistemic_status")).toBe(false);
-
-		db.close();
-		cleanupDb(dbPath);
-	});
-
-	it("stores canonical stance and basis directly after rebuild migration", () => {
-		const { dbPath, db } = createTempDb();
-
-		runMemoryMigrations(db);
-
-		const insertResult = db.run(
-			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, basis, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			[
-				"agent-1",
-				1,
-				2,
-				"knows",
-				"tentative",
-				"first_hand",
-				Date.now(),
-				Date.now(),
-			],
-		);
-
-		const row = db.get<{ stance: string | null; basis: string | null }>(
-			"SELECT stance, basis FROM agent_fact_overlay WHERE id = ?",
-			[Number(insertResult.lastInsertRowid)],
-		);
-		expect(row?.stance).toBe("tentative");
-		expect(row?.basis).toBe("first_hand");
-
-		db.close();
-		cleanupDb(dbPath);
+		test("fresh DB via runMemoryMigrations has no agent_fact_overlay table", () => {
+			const { dbPath, db } = createTempDb();
+			runMemoryMigrations(db);
+			const row = db.get<{ name: string }>(
+				`SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+			);
+			expect(row).toBeUndefined();
+			db.close();
+			cleanupDb(dbPath);
+		});
 	});
 
 	it("is idempotent when migrations run multiple times", () => {
@@ -920,27 +892,6 @@ describe("memory schema", () => {
 			["world:decree"],
 		);
 		expect(worldRow?.surfacing_classification).toBe("public_manifestation");
-
-		db.close();
-		cleanupDb(dbPath);
-	});
-
-	it("allows contested stance without pre_contested_stance for legacy-table compatibility", () => {
-		const { dbPath, db } = createTempDb();
-
-		runMemoryMigrations(db);
-
-		let insertFailed = false;
-		try {
-			db.run(
-				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, pre_contested_stance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				["agent-1", 1, 2, "knows", "contested", null, Date.now(), Date.now()],
-			);
-		} catch {
-			insertFailed = true;
-		}
-
-		expect(insertFailed).toBe(false);
 
 		db.close();
 		cleanupDb(dbPath);

@@ -86,3 +86,105 @@ These are modern legitimate usages unrelated to the removed BeliefType/Epistemic
 
 ### Evidence
 `.sisyphus/evidence/task-5-no-retract-writes.txt`
+
+## [2026-03-25] T8 — memory:029 purge legacy node refs from derived tables
+
+### Key Findings
+- Added `memory:029:purge-legacy-node-refs` to `MEMORY_MIGRATIONS` and kept it unconditional (no `tableExists` guard), because all target derived tables are core schema tables.
+- Purge is **delete-only** across five rebuildable tables: `search_docs_cognition`, `node_embeddings`, `semantic_edges`, `node_scores`, `memory_relations`.
+- `src/memory/schema.ts` now exports `MEMORY_MIGRATIONS`, which enables direct migration lookup in tests (`find(step => step.id === ...)`) and direct `up(db)` invocation without running migration chains.
+
+### Test Pattern That Works
+- For migration behavior that must remain stable across future DDL tightening, build a **self-contained in-memory DB** with hardcoded minimal `CREATE TABLE` statements in the test.
+- Use legacy `node_embeddings.node_kind` CHECK including `private_event` and `private_belief` so cleanup behavior remains testable after future CHECK tightening.
+- Run only the target migration's `up()` directly and assert both:
+  - legacy rows removed from derived tables; and
+  - source-of-truth tables (`private_episode_events`, `private_cognition_current`) are unchanged.
+
+### Verification
+- `bun test test/memory/schema.test.ts` → pass
+- targeted migration test for memory:029 → pass
+- `bun run build` → exit 0
+- LSP diagnostics on changed files: no errors
+
+### Evidence
+- `.sisyphus/evidence/task-8-refs-purged.txt`
+- `.sisyphus/evidence/task-8-source-tables-safe.txt`
+
+## [2026-03-25] T7 — memory:028 backfill unkeyed overlay assertions
+
+### Key Findings
+- Added migration `memory:028:backfill-unkeyed-assertions` directly before existing `memory:029` in `MEMORY_MIGRATIONS` to preserve chronological ordering.
+- Fresh-DB safety for legacy table access should use explicit guard: `if (!tableExists(db, "agent_fact_overlay")) return;`.
+- For legacy overlay assertions with `cognition_key IS NULL`, synthetic canonical keys are stable as `legacy_backfill:${agent_id}:${overlay_id}`.
+- `private_cognition_events` schema requires both `settlement_id` and `created_at` as NOT NULL; backfill inserts must supply both.
+
+### Mapping Pattern (overlay → canonical projection)
+- `predicate` → `summary_text`
+- `stance` → `stance` (fallback `"proposed"` for legacy nulls)
+- `basis` → `basis`
+- `pre_contested_stance` → `pre_contested_stance`
+- `provenance`, entity ids, predicate persisted in `record_json`
+
+### Test Pattern That Works
+- Mirror T8 style: use in-memory DB + hardcoded minimal DDL; do **not** rely on `createMemorySchema()` for migration behavior tests.
+- Seed only legacy-shape rows needed for assertion (`cognition_key = NULL`) and invoke target migration with `migration.up(db)`.
+- Assert projection outcome via key prefix (`legacy_backfill:%`) to avoid coupling to row IDs.
+
+### Verification
+- `bun test test/memory/schema.test.ts` → pass (26 tests)
+- `bun run build` → exit 0
+- LSP diagnostics (errors) on changed files → clean
+
+### Evidence
+- `.sisyphus/evidence/task-7-backfill.txt`
+
+## [2026-03-25] T6 — Remove legacy source_ref compat loops in updateCognitionSearchDocStance()
+
+### Changes
+- Removed 2 compat for-loops in updateCognitionSearchDocStance()
+- Loop 1 (evaluation/commitment path): was iterating over [canonical, private_event:id] — now single canonical `${refKind}:${row.id}`
+- Loop 2 (assertion path): was iterating over [assertion:id, private_belief:id] — now single canonical `assertion:${row.id}`
+- Zero references to private_event or private_belief remain in cognition-repo.ts
+
+### Verification
+- Tests: 84 pass, 0 fail across 3 files (no test changes needed)
+- Build: tsc clean, 0 diagnostics
+- grep private_event/private_belief: 0 matches
+
+### Context
+- Safe to remove because migration 029 (T8) purges all legacy source_refs from search_docs_cognition
+- The compat loops were a transition-period safeguard that is no longer needed
+
+### Evidence
+`.sisyphus/evidence/task-6-no-legacy-refs.txt`
+
+## [2026-03-25] T9 — Fix failing tests after agent_fact_overlay table drop (migration 030)
+
+### Key Findings
+- Migration 030 (`memory:030:drop-agent-fact-overlay`) drops the `agent_fact_overlay` table entirely
+- This caused 4 test failures in test/memory/schema.test.ts because tests were still asserting on the table's existence and columns
+- Table count assertion needed update: 34 → 33 (one less table after drop)
+- `db.get()` returns `undefined` (not `null`) when no row is found, so assertions must use `toBeUndefined()`
+
+### Test Changes Required
+1. **Table count assertion** (line ~92): Changed expected count from 34 to 33
+2. **Removed column checks**: Deleted 6 assertions checking agent_fact_overlay columns (basis, stance, pre_contested_stance, source_label_raw, source_event_ref, updated_at) from "adds canonical overlay and publication provenance columns" test
+3. **Removed test** "removes legacy overlay columns after rebuild migration" — tried to list columns from dropped table
+4. **Removed test** "stores canonical stance and basis directly after rebuild migration" — inserted into dropped table
+5. **Removed test** "allows contested stance without pre_contested_stance for legacy-table compatibility" — inserted into dropped table
+6. **Added new test** for migration 030: "fresh DB via runMemoryMigrations has no agent_fact_overlay table"
+
+### Patterns
+- When a migration drops a table, all tests referencing that table must be updated/removed
+- `db.get<T>(sql)` returns `undefined` when no row matches; use `toBeUndefined()` not `toBeNull()`
+- Tests using in-memory DB with hardcoded DDL (like memory:028, memory:029) don't need changes since they create their own schema
+
+### Verification
+- Before: 23 pass, 4 fail
+- After: 25 pass, 0 fail
+- Build: tsc clean
+- No new agent_fact_overlay references added
+
+### Evidence
+`.sisyphus/evidence/task-9-table-dropped.txt`
