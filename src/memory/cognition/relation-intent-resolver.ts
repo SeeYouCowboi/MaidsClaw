@@ -126,15 +126,6 @@ export function resolveLocalRefs(
     requiredLocalRefs.add(factor.ref);
   }
 
-  for (const localRef of requiredLocalRefs) {
-    if (settledArtifacts.localRefIndex.has(localRef)) {
-      continue;
-    }
-    if (settledArtifacts.cognitionByKey.has(localRef)) {
-      continue;
-    }
-  }
-
   return {
     settlementId: settledArtifacts.settlementId,
     agentId: settledArtifacts.agentId,
