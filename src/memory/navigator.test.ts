@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { AliasService } from "./alias.js";
 import { GraphNavigator, GRAPH_RETRIEVAL_STRATEGIES, type NarrativeSearchServiceLike, type CognitionSearchServiceLike } from "./navigator.js";
 import { RetrievalService } from "./retrieval.js";
@@ -835,5 +835,149 @@ describe("GraphNavigator", () => {
     const auditResult = await navigator2.explore("what happened", viewerA(), { query: "what happened", detailLevel: "audit" } as MemoryExploreInput);
 
     expect(auditResult.evidence_paths.length).toBeGreaterThanOrEqual(standardResult.evidence_paths.length);
+  });
+
+  it("logs debug message when narrative search throws error", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "test event");
+
+    const stubRetrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const mockNarrative: NarrativeSearchServiceLike = {
+      async searchNarrative() {
+        throw new Error("narrative search failed");
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+    );
+
+    const debugSpy = spyOn(console, "debug").mockImplementation(() => {});
+    const ctx = viewerA({ viewer_agent_id: "agent-test-123" });
+    const result = await navigator.explore("test query that is quite long and needs truncation for debug logging purposes", ctx);
+
+    expect(debugSpy.mock.calls.length).toBeGreaterThan(0);
+    const calls = debugSpy.mock.calls;
+    const narrativeCall = calls.find((call) =>
+      String(call[0]).includes("supplemental narrative search unavailable")
+    );
+    expect(narrativeCall).toBeDefined();
+    expect(narrativeCall?.[1].error).toBe("narrative search failed");
+    expect(narrativeCall?.[1].query).toBe("test query that is quite long and needs truncation for debug logging purposes".slice(0, 100));
+    expect(narrativeCall?.[1].agentId).toBe("agent-test-123");
+
+    expect(result.evidence_paths.length).toBeGreaterThan(0);
+
+    debugSpy.mockRestore();
+  });
+
+  it("logs debug message when cognition search throws error", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "test event");
+
+    const stubRetrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const mockCognition: CognitionSearchServiceLike = {
+      searchCognition() {
+        throw new Error("cognition search failed");
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      undefined,
+      mockCognition,
+    );
+
+    const debugSpy = spyOn(console, "debug").mockImplementation(() => {});
+    const ctx = viewerA({ viewer_agent_id: "agent-cog-456" });
+    const result = await navigator.explore("cognition test query", ctx);
+
+    expect(debugSpy.mock.calls.length).toBeGreaterThan(0);
+    const calls = debugSpy.mock.calls;
+    const cognitionCall = calls.find((call) =>
+      String(call[0]).includes("supplemental cognition search unavailable")
+    );
+    expect(cognitionCall).toBeDefined();
+    expect(cognitionCall?.[1].error).toBe("cognition search failed");
+    expect(cognitionCall?.[1].query).toBe("cognition test query");
+    expect(cognitionCall?.[1].agentId).toBe("agent-cog-456");
+
+    expect(result.evidence_paths.length).toBeGreaterThan(0);
+
+    debugSpy.mockRestore();
+  });
+
+  it("does not log debug messages when searches succeed", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "test event");
+    insertEvent(db, 2, "world_public", 1, "[]", "another event");
+
+    const stubRetrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const mockNarrative: NarrativeSearchServiceLike = {
+      async searchNarrative() {
+        return [{ source_ref: "event:2" }];
+      },
+    };
+    const mockCognition: CognitionSearchServiceLike = {
+      searchCognition() {
+        return [];
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+      mockCognition,
+    );
+
+    const debugSpy = spyOn(console, "debug").mockImplementation(() => {});
+    const result = await navigator.explore("success test", viewerA());
+
+    expect(debugSpy.mock.calls.length).toBe(0);
+
+    const allNodes = result.evidence_paths.flatMap((p) => p.path.nodes);
+    expect(allNodes).toContain("event:1");
+    expect(allNodes).toContain("event:2");
+
+    debugSpy.mockRestore();
+  });
+
+  it("logs debug with non-Error thrown value converted to string", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "test event");
+
+    const stubRetrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const mockNarrative: NarrativeSearchServiceLike = {
+      async searchNarrative() {
+        // eslint-disable-next-line no-throw-literal
+        throw "string error";
+      },
+    };
+
+    const navigator = new GraphNavigator(
+      db,
+      stubRetrieval as unknown as RetrievalService,
+      alias,
+      undefined,
+      mockNarrative,
+    );
+
+    const debugSpy = spyOn(console, "debug").mockImplementation(() => {});
+    await navigator.explore("test", viewerA());
+
+    const calls = debugSpy.mock.calls;
+    const narrativeCall = calls.find((call) =>
+      String(call[0]).includes("supplemental narrative search unavailable")
+    );
+    expect(narrativeCall).toBeDefined();
+    expect(narrativeCall?.[1].error).toBe("string error");
+
+    debugSpy.mockRestore();
   });
 });
