@@ -1,6 +1,6 @@
 # Memory Architecture 2026 (v4 Refactor)
 
-> Status: Updated 2026-03-26. Covers work completed in T1–T35 (V3 refactor) and the subsequent legacy-cleanup refactor (migrations 027–032, March 2026).
+> Status: Updated 2026-03-26. Covers work completed in T1–T35 (V3 refactor), the subsequent legacy-cleanup refactor (migrations 027–032, March 2026), and Wave 3 tasks T1–T7 (executionContext wiring, EmbeddingPurpose rename, WriteTemplate enforcement, conflict-factor validation, navigator observability, ArtifactContract runtime enforcement, PublicationRecoverySweeper).
 >
 > **Legacy cleanup complete:** `agent_fact_overlay` was dropped by migration 030. `agent_event_overlay` was dropped by migration 017. `private_event` and `private_belief` node kinds are fully removed from the type system and all production code. The canonical tables for private memory are `private_episode_events`, `private_cognition_events`, and `private_cognition_current`.
 
@@ -207,10 +207,10 @@ Registered in `src/bootstrap/tools.ts`, implemented in `src/memory/tools.ts`.
 |------|-------------|
 | `narrative_search` | Searches area + world FTS. Delegates to `NarrativeSearchService`. |
 | `cognition_search` | Searches private cognition by kind/stance/basis. Delegates to `CognitionSearchService`. |
-| `memory_search` | Compat alias. Identical behavior to `narrative_search`; schema unchanged. |
+| `memory_search` | **Retired (March 2026).** `EmbeddingPurpose` value renamed to `narrative_search`. No longer registered as a tool. |
 | `memory_explore` | Beam-expansion graph walk. Upgraded `GraphNavigator` with narrative + cognition seeds and `memory_relations` edge expansion. |
 
-`RP_AUTHORIZED_TOOLS` is 7 entries, including all four above plus `submit_rp_turn`, `memory_store_note`, `memory_flag_for_review`.
+`RP_AUTHORIZED_TOOLS` is 6 entries: `narrative_search`, `cognition_search`, `memory_explore`, `submit_rp_turn`, `memory_store_note`, `memory_flag_for_review`. (`memory_search` was retired in March 2026.)
 
 ### `memory_explore` internals (`src/memory/navigator.ts`)
 
@@ -218,7 +218,7 @@ The `GraphNavigator` now accepts optional `narrativeSearch` and `cognitionSearch
 - Narrative seeds (score 0.7, scope "world")
 - Cognition seeds (score 0.6, scope "private")
 
-`getRelatedNodeRefs(nodeRef)` queries `memory_relations` for both source/target directions, adding edges with `kind="fact_relation"`, weight 0.6. All three enhancement paths use try/catch with empty-result fallback.
+`getRelatedNodeRefs(nodeRef)` queries `memory_relations` for both source/target directions, adding edges with `kind="fact_relation"`, weight 0.6. All three enhancement paths use try/catch with empty-result fallback. Catch blocks in `collectSupplementalSeeds()` emit `console.debug` with error context (T5) for observability.
 
 ---
 
@@ -304,8 +304,8 @@ Migration 024 added `persona`. Migration 014 added `pinned_summary` and `pinned_
 **Key constants:**
 
 - `CANONICAL_PINNED_LABELS = ["pinned_summary", "pinned_index"]` — preferred write targets
-- `READ_ONLY_LABELS = ["index", "pinned_index", "character", "user"]` — no direct-write path
-- `COMPAT_ALIAS_MAP = { character: "pinned_summary", index: "pinned_index" }` — maps legacy reads
+- `READ_ONLY_LABELS` — removed in legacy cleanup; no longer in production code
+- `COMPAT_ALIAS_MAP` — removed in legacy cleanup; no longer in production code
 - `BLOCK_DEFAULTS` (in `core-memory.ts`) — 6 entries covering all labels; `character` and `user` default to `read_only = 1`
 
 **Tool enum:** RP tools expose only `["persona"]` as a writable target. The RP tool schema enum intentionally excludes `character`, `user`, `index`, `pinned_index`.
@@ -414,6 +414,8 @@ type ArtifactContract = {
 
 `submit_rp_turn` has 8 artifact contracts: `publicReply`, `privateCognition`, `privateEpisodes`, `publications`, `pinnedSummaryProposal`, `relationIntents`, `conflictFactors`, `areaStateArtifacts`.
 
+**Runtime enforcement (T6):** `ArtifactContracts` are now enforced at runtime via `src/core/tools/artifact-contract-policy.ts`. `enforceArtifactContracts()` checks `authority_level` (cross-agent writes rejected) and `ledger_policy` (overwrite on `append_only` artifacts rejected). `filterArtifactsByScope()` redacts private-scoped artifact names from trace kinds. Both are wired in the settlement path via `ExplicitSettlementProcessor`.
+
 ### CAPABILITY_MAP (11 capabilities)
 
 Maps capability string keys (used in `capability_requirements[]`) to `AgentPermissions` fields:
@@ -431,10 +433,13 @@ Maps capability string keys (used in `capability_requirements[]`) to `AgentPermi
 | `shared.block.read` | `canReadSharedBlocks` | true | true | false |
 | `shared.block.mutate` | `canMutateSharedBlocks` | false | true | false |
 | `admin.rules.mutate` | `canMutateAdminRules` | false | true | false |
+| `rp_settlement` | `canSettleRpTurn` | true | false | false |
 
 **Two-layer enforcement for `canMutateSharedBlocks`:** the capability gate fires in `tool-access-policy.ts` (tool dispatch level); `SharedBlockPermissions.canEdit(blockId, agentId)` fires inside `SharedBlockPatchService.applyPatch()` (object level). Both must pass.
 
 **Execution gate flow:** `canExecuteTool()` checks three layers in order: (1) allowlist gate, (2) capability requirements via `CAPABILITY_MAP`, (3) cardinality enforcement (`once` / `at_most_once` tools rejected on second call within a turn).
+
+**`executionContext` wiring (T1):** `AgentLoop` passes a full `executionContext` (schema, permissions, `turnToolsUsed` set) at both call sites (lines 311 and 636). A fresh `Set<string>` is created per turn so cardinality resets correctly between turns. The buffered executor path uses `baseToolSchema ?? bufferedToolSchema` fallback so `submit_rp_turn` receives capability and cardinality checks even when injected only into the buffered executor.
 
 ---
 
@@ -456,14 +461,18 @@ src/memory/
   task-agent.ts                loadExistingContext via CognitionRepository
   materialization.ts           Publication hot-path materialization (transient retry, 3x backoff)
   pending-settlement-sweeper.ts  Mixed-history flush (version-agnostic)
+  publication-recovery-sweeper.ts  PublicationRecoverySweeper (T7): reads pending jobs from
+                               _memory_maintenance_jobs and re-materializes via createProjectedEvent();
+                               status flow: pending → retrying → reconciled|exhausted;
+                               wired in runtime.ts; sweep() callable independently of timer
   retrieval.ts                 Legacy retrieval (narrative path now delegates to NarrativeSearchService)
   navigator.ts                 GraphNavigator, memory_explore beam expansion, GraphRetrievalStrategy
   prompt-data.ts               Renders cognition for model context (PINNED_LABELS = [pinned_summary, persona])
-  tools.ts                     narrative_search, cognition_search, memory_search, memory_explore
+  tools.ts                     narrative_search, cognition_search, memory_explore (memory_search retired March 2026)
   graph-organizer.ts           Canonical-read fallback pattern for display
   types.ts                     All memory types: ExplainDetailLevel, MemoryRelationType, GraphNodeRef,
-                               CanonicalNodeRefKind, LEGACY_NODE_REF_KINDS, CORE_MEMORY_LABELS,
-                               READ_ONLY_LABELS, COMPAT_ALIAS_MAP
+                               CanonicalNodeRefKind, LEGACY_NODE_REF_KINDS, CORE_MEMORY_LABELS
+                               (READ_ONLY_LABELS, COMPAT_ALIAS_MAP removed in legacy cleanup)
 
   cognition/
     cognition-repo.ts          Single write point for all cognition
@@ -480,7 +489,9 @@ src/memory/
   contracts/
     retrieval-template.ts      RetrievalTemplate (V3: episodeBudget, conflictBoostFactor, queryEpisodeBoost)
                                + getDefaultTemplate + resolveTemplate
-    write-template.ts          WriteTemplate + getDefaultWriteTemplate
+    write-template.ts          WriteTemplate + getDefaultWriteTemplate + enforceWriteTemplate()
+                               (T3: enforced at settlement boundary via ExplicitSettlementProcessor.process()
+                               and materializePublications(); maiden/task_agent writes throw WRITE_TEMPLATE_DENIED)
     visibility-policy.ts       Re-export only
     agent-permissions.ts       AgentPermissions (11 fields) + getDefaultPermissions
 
@@ -497,7 +508,9 @@ src/memory/
 
 src/core/tools/
   tool-definition.ts           ToolExecutionContract, ArtifactContract, ToolEffectType, deriveEffectClass
-  tool-access-policy.ts        CAPABILITY_MAP (11 entries), getFilteredSchemas, canExecuteTool (3-layer)
+  tool-access-policy.ts        CAPABILITY_MAP (12 entries incl. rp_settlement), getFilteredSchemas, canExecuteTool (3-layer)
+  artifact-contract-policy.ts  enforceArtifactContracts() (authority_level + ledger_policy),
+                               filterArtifactsByScope() (redacts private artifact names from trace kinds)
 
 src/bootstrap/
   tools.ts                     Instantiates all services, registers tools

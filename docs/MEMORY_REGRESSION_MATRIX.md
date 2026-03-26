@@ -79,21 +79,22 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 **Key assertions:**
 - `narrative_search` queries only `search_docs_area` + `search_docs_world`; `search_docs_private` and `search_docs_cognition` are never touched
 - `cognition_search` queries only `search_docs_cognition`; narrative tables are never touched
-- `memory_search` (alias) produces identical results to `narrative_search`
 
 ---
 
-## Scenario 6 — `memory_search` Alias Behavior
+## Scenario 6 — `memory_search` Retired
 
-**What it proves:** `memory_search` is a transparent alias for `narrative_search` with the same schema and result shape.
+**Status: Retired (March 2026).** `memory_search` was removed when `EmbeddingPurpose` was renamed from `"memory_search"` to `"narrative_search"` (T2). The tool is no longer registered.
+
+**What this scenario now tests:** `narrative_search` produces valid embeddings and returns results with the correct `EmbeddingPurpose` value.
 
 **Test files:**
-- `test/memory/retrieval-search.test.ts` — alias verification test
+- `test/memory/retrieval-search.test.ts` — narrative search embedding and result shape
 
 **Key assertions:**
-- Calling `memory_search` and `narrative_search` with identical inputs returns identical outputs
-- `memory_search` schema has no cognition-specific params (`kind`, `stance`, `basis`, `active_only`)
-- Tool count stays at 7 after alias is registered
+- `narrative_search` uses `EmbeddingPurpose = "narrative_search"` (not the retired `"memory_search"` value)
+- `narrative_search` schema has no cognition-specific params (`kind`, `stance`, `basis`, `active_only`)
+- Tool count is 6 (not 7); `memory_search` is absent from `RP_AUTHORIZED_TOOLS`
 
 ---
 
