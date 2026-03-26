@@ -333,6 +333,7 @@ export class AgentLoop {
 						},
 					);
 					activeToolCall = undefined;
+					turnToolsUsed.add(toolCall.name);
 
 					yield {
 						type: "tool_execution_result" as const,
@@ -677,6 +678,7 @@ export class AgentLoop {
 							agentId: runContext.agentId,
 						},
 					);
+					turnToolsUsed.add(toolCall.name);
 
 					if (toolCall.name === "submit_rp_turn") {
 						return { outcome: result as CanonicalRpTurnOutcome };

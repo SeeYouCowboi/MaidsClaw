@@ -8,6 +8,7 @@ import type { WriteTemplate } from "./contracts/write-template.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 
 export type MaterializationResult = {
@@ -322,14 +323,17 @@ export function materializePublications(
     writeTemplateOverride?: WriteTemplate;
     artifactContracts?: Record<string, ArtifactContract>;
     artifactEnforcementContext?: ArtifactEnforcementContext;
+    skipEnforcement?: boolean;
   },
 ): MaterializationResult {
-  if (options?.agentRole) {
-    enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
-  }
+  if (!options?.skipEnforcement) {
+    if (options?.agentRole) {
+      enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
+    }
 
-  if (options?.artifactContracts && options.artifactEnforcementContext) {
-    enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
+    if (options?.artifactContracts && options.artifactEnforcementContext) {
+      enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
+    }
   }
 
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
@@ -431,22 +435,7 @@ type PublicationRetryContext = {
   maxRetries: number;
 };
 
-type PublicationRecoveryJobPayload = {
-  settlementId: string;
-  pubIndex: number;
-  visibilityScope: "area_visible" | "world_public";
-  sessionId: string;
-  failureCount: number;
-  lastAttemptAt: number;
-  nextAttemptAt: number | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  summary: string;
-  timestamp: number;
-  participants: string;
-  locationEntityId: number;
-  eventCategory: PublicEventCategory;
-};
+// PublicationRecoveryJobPayload imported from publication-recovery-types.ts
 
 const PUBLICATION_RECOVERY_JOB_TYPE = "publication_recovery";
 
@@ -500,61 +489,71 @@ function writePublicationRecoveryJob(
   error: unknown,
 ): void {
   if (!db) {
+    console.warn(
+      `[materializePublications] cannot write recovery job: db handle not provided (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+    );
     return;
   }
 
-  const now = Date.now();
-  const payload: PublicationRecoveryJobPayload = {
-    settlementId: retryContext.settlementId,
-    pubIndex: retryContext.pubIndex,
-    visibilityScope: params.visibilityScope ?? "area_visible",
-    sessionId: params.sessionId,
-    failureCount,
-    lastAttemptAt: now,
-    nextAttemptAt: now,
-    lastErrorCode: error instanceof Error ? error.name : null,
-    lastErrorMessage: error instanceof Error ? error.message : String(error),
-    summary: params.summary,
-    timestamp: params.timestamp,
-    participants: params.participants,
-    locationEntityId: params.locationEntityId,
-    eventCategory: params.eventCategory,
-  };
+  try {
+    const now = Date.now();
+    const payload: PublicationRecoveryJobPayload = {
+      settlementId: retryContext.settlementId,
+      pubIndex: retryContext.pubIndex,
+      visibilityScope: params.visibilityScope ?? "area_visible",
+      sessionId: params.sessionId,
+      failureCount,
+      lastAttemptAt: now,
+      nextAttemptAt: now,
+      lastErrorCode: error instanceof Error ? error.name : null,
+      lastErrorMessage: error instanceof Error ? error.message : String(error),
+      summary: params.summary,
+      timestamp: params.timestamp,
+      participants: params.participants,
+      locationEntityId: params.locationEntityId,
+      eventCategory: params.eventCategory,
+    };
 
-  const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
+    const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
 
-  const insertResult = db
-    .prepare(
-      `INSERT OR IGNORE INTO _memory_maintenance_jobs
-       (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      PUBLICATION_RECOVERY_JOB_TYPE,
+    const insertResult = db
+      .prepare(
+        `INSERT OR IGNORE INTO _memory_maintenance_jobs
+         (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        PUBLICATION_RECOVERY_JOB_TYPE,
+        "pending",
+        idempotencyKey,
+        JSON.stringify(payload),
+        now,
+        now,
+        payload.nextAttemptAt,
+      );
+
+    if (insertResult.changes > 0) {
+      return;
+    }
+
+    db.prepare(
+      `UPDATE _memory_maintenance_jobs
+       SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
+       WHERE job_type = ? AND idempotency_key = ?`,
+    ).run(
       "pending",
-      idempotencyKey,
       JSON.stringify(payload),
       now,
-      now,
       payload.nextAttemptAt,
+      PUBLICATION_RECOVERY_JOB_TYPE,
+      idempotencyKey,
     );
-
-  if (insertResult.changes > 0) {
-    return;
+  } catch (recoveryError) {
+    console.warn(
+      `[materializePublications] recovery job write failed (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+      recoveryError,
+    );
   }
-
-  db.prepare(
-    `UPDATE _memory_maintenance_jobs
-     SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
-     WHERE job_type = ? AND idempotency_key = ?`,
-  ).run(
-    "pending",
-    JSON.stringify(payload),
-    now,
-    payload.nextAttemptAt,
-    PUBLICATION_RECOVERY_JOB_TYPE,
-    idempotencyKey,
-  );
 }
 
 const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {

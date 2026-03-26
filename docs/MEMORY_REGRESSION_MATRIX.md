@@ -1,4 +1,4 @@
-# Memory Regression Matrix (v4 Refactor)
+# Memory Regression Matrix (v4/v5 Refactor)
 
 > Test baseline: **1273 pass, 0 fail** across 85 files (2026-03-21, after T1–T19)
 > Runner: `bun test`
@@ -7,12 +7,12 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ---
 
-## Scenario 1 — v4 Settlement Write + Publication Materialization
+## Scenario 1 — v5 Settlement Write + Publication Materialization
 
-**What it proves:** A v4 RP turn with `publications[]` commits a settlement, writes canonical cognition, and materializes visible `event_nodes` with correct provenance — all in one atomic pass.
+**What it proves:** A v5 RP turn with `publications[]` commits a settlement, writes canonical cognition, and materializes visible `event_nodes` with correct provenance — all in one atomic pass.
 
 **Test files:**
-- `test/runtime/memory-entry-consumption.test.ts` — mixed v3/v4 settlement integration
+- `test/runtime/memory-entry-consumption.test.ts` — mixed v3/v4/v5 settlement integration
 - `test/memory/materialization-promotion.test.ts` — publication provenance, idempotency via `ux_event_nodes_publication_scope`
 - `test/memory/e2e-rp-memory-pipeline.test.ts` — end-to-end RP memory pipeline
 
@@ -24,12 +24,12 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ---
 
-## Scenario 2 — v3/v4 Mixed-History Sweeper
+## Scenario 2 — v3/v4/v5 Mixed-History Sweeper
 
-**What it proves:** `PendingSettlementSweeper` processes a session containing both v3 and v4 settlement records without mis-routing or dropping either.
+**What it proves:** `PendingSettlementSweeper` processes a session containing v3, v4, and v5 settlement records without mis-routing or dropping any.
 
 **Test files:**
-- `test/runtime/memory-entry-consumption.test.ts` — sweeper mixed v3/v4 coverage
+- `test/runtime/memory-entry-consumption.test.ts` — sweeper mixed v3/v4/v5 coverage
 - `src/memory/task-agent.test.ts` — loadExistingContext v3 legacy fallback + canonical read
 
 **Key assertions:**

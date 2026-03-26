@@ -170,7 +170,7 @@ async function processExplicitSettlement(params: {
 		created,
 		[] satisfies ChatToolDefinition[],
 		{
-			agentRole: params.agentRole,
+			agentRole: params.agentRole ?? "rp_agent",
 			writeTemplateOverride: params.writeTemplateOverride,
 			agentId: params.writingAgentId ?? params.agentId,
 			artifactContracts: params.artifactContracts,

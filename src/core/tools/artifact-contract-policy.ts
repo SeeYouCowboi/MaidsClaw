@@ -12,23 +12,33 @@ export function enforceArtifactContracts(
   context: ArtifactEnforcementContext,
 ): void {
   for (const [artifactName, contract] of Object.entries(contracts)) {
-    if (
-      contract.authority_level === "agent" &&
-      context.writingAgentId &&
-      context.ownerAgentId &&
-      context.writingAgentId !== context.ownerAgentId
-    ) {
-      throw new MaidsClawError({
-        code: "ARTIFACT_CONTRACT_DENIED",
-        message: `Artifact '${artifactName}' requires owner agent authority`,
-        retriable: false,
-        details: {
-          artifactName,
-          requiredAuthority: contract.authority_level,
-          writingAgentId: context.writingAgentId,
-          ownerAgentId: context.ownerAgentId,
-        },
-      });
+    if (contract.authority_level === "agent") {
+      if (!context.writingAgentId || !context.ownerAgentId) {
+        throw new MaidsClawError({
+          code: "ARTIFACT_CONTRACT_DENIED",
+          message: `Artifact '${artifactName}' requires agent authority context but writingAgentId or ownerAgentId is missing`,
+          retriable: false,
+          details: {
+            artifactName,
+            requiredAuthority: contract.authority_level,
+            writingAgentId: context.writingAgentId,
+            ownerAgentId: context.ownerAgentId,
+          },
+        });
+      }
+      if (context.writingAgentId !== context.ownerAgentId) {
+        throw new MaidsClawError({
+          code: "ARTIFACT_CONTRACT_DENIED",
+          message: `Artifact '${artifactName}' requires owner agent authority`,
+          retriable: false,
+          details: {
+            artifactName,
+            requiredAuthority: contract.authority_level,
+            writingAgentId: context.writingAgentId,
+            ownerAgentId: context.ownerAgentId,
+          },
+        });
+      }
     }
 
     if (contract.ledger_policy === "append_only" && context.writeOperation === "overwrite") {

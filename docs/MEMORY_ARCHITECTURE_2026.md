@@ -16,18 +16,15 @@ The memory subsystem was refactored from a mixed-concern monolith into a layered
 
 ### `src/runtime/rp-turn-contract.ts`
 
-This file is the single source of truth for turn outcome types and the v3/v4 normalizer.
+This file is the single source of truth for turn outcome types and the v5 normalizer.
 
 Key exports:
 
-- `RpTurnOutcomeSubmissionV4` — v4 turn outcome shape with `publications[]` and `PrivateCognitionCommitV4`
+- `RpTurnOutcomeSubmissionV5` — v5 turn outcome shape with `publications[]` and `PrivateCognitionCommitV4`
 - `PrivateCognitionCommitV4` — ops array with 7-stance assertions, 5-basis values
-- `AssertionStance` — `"tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned" | "superseded"`
-- `AssertionBasis` — `"belief" | "inference" | "first_hand" | "introspection" | "axiom"`
-- `EPISTEMIC_STATUS_TO_STANCE` — deterministic v3→v4 stance mapping constant
-- `BELIEF_TYPE_TO_BASIS` — deterministic v3→v4 basis mapping constant
-- `normalizeRpTurnOutcome(raw)` — single entry point; accepts v3 or v4 shape, emits `CanonicalRpTurnOutcome`
-- `validateRpTurnOutcome(raw)` — backward-compat alias for `normalizeRpTurnOutcome`
+- `AssertionStance` — `"hypothetical" | "tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned"`
+- `AssertionBasis` — `"first_hand" | "hearsay" | "inference" | "introspection" | "belief"`
+- `normalizeRpTurnOutcome(raw)` — single entry point; accepts v5 shape only (v3/v4 submissions are rejected), emits `CanonicalRpTurnOutcome`
 
 **Normalizer guarantees:**
 - `publications: []` and `publications: undefined` are equivalent (always normalized to `[]`)
@@ -37,12 +34,12 @@ Key exports:
 
 ### `src/interaction/contracts.ts` + settlement adapter
 
-`TurnSettlementPayload` carries either a v3 or v4 private commit. The settlement adapter (`normalizeSettlementPayload`) is the single consumer-facing read path:
+`TurnSettlementPayload` carries a v3, v4, or v5 private commit. The settlement adapter (`normalizeSettlementPayload`) is the single consumer-facing read path:
 
-- `detectSettlementVersion(payload)` — returns `"v3"` if no explicit v4 marker; never guesses
-- `normalizeSettlementPayload(payload)` — emits `NormalizedSettlementPayload` with `schemaVersion: "turn_settlement_v4"` and `publications: []`
+- `detectSettlementVersion(payload)` — returns `"v3"` if no explicit v4/v5 marker; never guesses
+- `normalizeSettlementPayload(payload)` — emits `NormalizedSettlementPayload` with `schemaVersion: "turn_settlement_v5"` and `publications: []`
 
-All consumers (redaction, inspect, local-turn-client, runtime traces) route through the adapter. No consumer has its own v3/v4 branch logic.
+All consumers (redaction, inspect, local-turn-client, runtime traces) route through the adapter. No consumer has its own v3/v4/v5 branch logic.
 
 ---
 
@@ -121,9 +118,9 @@ File: `src/memory/cognition/cognition-repo.ts`
 
 Valid transitions enforce a directional graph. Key rules:
 
-- Terminal stances (`rejected`, `abandoned`, `superseded`) cannot be written over with a new upsert on the same `cognition_key`
+- Terminal stances (`rejected`, `abandoned`) cannot be written over with a new upsert on the same `cognition_key`
 - `contested` requires `pre_contested_stance` to be persisted; the previous stance is captured automatically
-- Basis can only move toward stronger evidence (`belief` → `inference` → `first_hand` / `introspection` → `axiom`); downgrades are rejected with `COGNITION_ILLEGAL_BASIS_DOWNGRADE`
+- Basis can only move toward stronger evidence (`"belief" → "inference"/"first_hand"`, `"inference" → "first_hand"`, `"hearsay" → "first_hand"`); downgrades are rejected with `COGNITION_ILLEGAL_BASIS_DOWNGRADE`
 - Double-retract (retract an already-rejected key) is silently idempotent
 
 **Error codes:** `COGNITION_ILLEGAL_STANCE_TRANSITION`, `COGNITION_ILLEGAL_BASIS_DOWNGRADE`, `COGNITION_TERMINAL_KEY_REUSE`, `COGNITION_MISSING_PRE_CONTESTED_STANCE`, `COGNITION_DOUBLE_RETRACT`
@@ -251,7 +248,7 @@ All services use duck-typed `DbLike` interfaces to avoid importing the concrete 
 
 ### v3/v4 coexistence
 
-- `normalizeRpTurnOutcome()` accepts v3 or v4 shape; callers never inspect the raw shape themselves
+- `normalizeRpTurnOutcome()` accepts v5 shape only (v3/v4 rejected with error); callers never inspect the raw shape themselves
 - `detectSettlementVersion()` returns `"v3"` when the explicit v4 marker is absent — no guessing
 - `PendingSettlementSweeper` forwards records without inspecting schema version; the processor handles both
 - `CognitionRepository.toCanonicalAssertion()` falls back to `EPISTEMIC_STATUS_TO_STANCE` / `BELIEF_TYPE_TO_BASIS` for legacy rows with NULL canonical columns
@@ -262,7 +259,7 @@ All services use duck-typed `DbLike` interfaces to avoid importing the concrete 
 
 All cognition data that survived the compat window was migrated into `private_cognition_events` (append-only ledger) and `private_cognition_current` (rebuildable projection) before the drop. Episode data was migrated into `private_episode_events`.
 
-The columns `belief_type`, `confidence`, and `epistemic_status` no longer exist anywhere in the schema. The dual-write compat path in `CognitionRepository` has been removed. `EPISTEMIC_STATUS_TO_STANCE` / `BELIEF_TYPE_TO_BASIS` mapping constants are retained in `rp-turn-contract.ts` only to normalize any inbound v3 turn submissions that still carry the old field names.
+The columns `belief_type`, `confidence`, and `epistemic_status` no longer exist anywhere in the schema. The dual-write compat path in `CognitionRepository` has been removed. The `EPISTEMIC_STATUS_TO_STANCE` / `BELIEF_TYPE_TO_BASIS` mapping constants have been removed from `rp-turn-contract.ts` as v3/v4 submissions are no longer accepted.
 
 ### Graph organizer read pattern
 
@@ -416,7 +413,7 @@ type ArtifactContract = {
 
 **Runtime enforcement (T6):** `ArtifactContracts` are now enforced at runtime via `src/core/tools/artifact-contract-policy.ts`. `enforceArtifactContracts()` checks `authority_level` (cross-agent writes rejected) and `ledger_policy` (overwrite on `append_only` artifacts rejected). `filterArtifactsByScope()` redacts private-scoped artifact names from trace kinds. Both are wired in the settlement path via `ExplicitSettlementProcessor`.
 
-### CAPABILITY_MAP (11 capabilities)
+### CAPABILITY_MAP (12 capabilities)
 
 Maps capability string keys (used in `capability_requirements[]`) to `AgentPermissions` fields:
 
