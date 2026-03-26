@@ -13,6 +13,7 @@ import { TruncateCompactor } from "../../src/core/truncate-compactor.js";
 import { getFilteredSchemas } from "../../src/core/tools/tool-access-policy.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { ToolDefinition } from "../../src/core/tools/tool-definition.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 
 const TEST_PROFILE: AgentProfile = {
   id: "agent-maiden-1",
@@ -544,7 +545,7 @@ describe("RP tool policy filtering", () => {
 
     const executor = new ToolExecutor();
     executor.registerLocal({
-      name: "core_memory_append",
+      name: MEMORY_TOOL_NAMES.coreMemoryAppend,
       description: "Append to core memory",
       parameters: { type: "object", properties: {} },
       effectClass: "immediate_write",
@@ -552,7 +553,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "core_memory_replace",
+      name: MEMORY_TOOL_NAMES.coreMemoryReplace,
       description: "Replace core memory",
       parameters: { type: "object", properties: {} },
       effectClass: "immediate_write",
@@ -566,7 +567,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "memory_read",
+      name: MEMORY_TOOL_NAMES.memoryRead,
       description: "Read memory",
       parameters: { type: "object", properties: {} },
       effectClass: "read_only",
@@ -574,7 +575,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "memory_search",
+      name: MEMORY_TOOL_NAMES.narrativeSearch,
       description: "Search memory",
       parameters: { type: "object", properties: {} },
       effectClass: "read_only",
@@ -585,12 +586,12 @@ describe("RP tool policy filtering", () => {
     const filtered = getFilteredSchemas(rpProfile, executor);
     const names = filtered.map((s) => s.name);
 
-    expect(names).not.toContain("core_memory_append");
-    expect(names).not.toContain("core_memory_replace");
+    expect(names).not.toContain(MEMORY_TOOL_NAMES.coreMemoryAppend);
+    expect(names).not.toContain(MEMORY_TOOL_NAMES.coreMemoryReplace);
     expect(names).not.toContain("delegate_task");
 
-    expect(names).toContain("memory_read");
-    expect(names).toContain("memory_search");
+    expect(names).toContain(MEMORY_TOOL_NAMES.memoryRead);
+    expect(names).toContain(MEMORY_TOOL_NAMES.narrativeSearch);
   });
 });
 

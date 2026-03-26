@@ -309,7 +309,7 @@ function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
-  if (/^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(raw)) { // compat: legacy ref literals accepted on read
+  if (/^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(raw)) {
     return raw;
   }
 

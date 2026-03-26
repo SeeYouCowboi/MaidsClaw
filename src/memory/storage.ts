@@ -140,8 +140,10 @@ type UpsertExplicitCommitmentInput = UpsertCommitmentParams;
 type SearchScope = "private" | "area" | "world";
 type SameEpisodeEvent = { id: number; session_id: string; topic_id: number | null; timestamp: number };
 
-const legacyPrivateEventPrefix = "private_event:";
-const legacyPrivateBeliefPrefix = "private_belief:";
+const privateEpisodeRefPrefix = "private_episode:";
+const assertionRefPrefix = "assertion:";
+const evaluationRefPrefix = "evaluation:";
+const commitmentRefPrefix = "commitment:";
 
 export class GraphStorageService {
   private readonly batcher: TransactionBatcher;
@@ -664,11 +666,11 @@ export class GraphStorageService {
       );
     }
 
-    const cognitionKey = `legacy_private_belief:${params.agentId}:${params.sourceEntityId}:${params.predicate}:${params.targetEntityId}`;
+    const cognitionKey = `assert:${params.agentId}:${source.pointerKey}:${params.predicate}:${target.pointerKey}`;
     const assertion = this.cognitionRepo.upsertAssertion({
       agentId: params.agentId,
       cognitionKey,
-      settlementId: `legacy:create_private_belief:${params.agentId}`,
+      settlementId: `storage:upsert_assertion:${params.agentId}`,
       opIndex: 0,
       sourcePointerKey: source.pointerKey,
       predicate: params.predicate,
@@ -915,23 +917,20 @@ export class GraphStorageService {
   }
 
   private getPrivateNodeAgent(nodeRef: NodeRef): string | null {
-    if (nodeRef.startsWith(legacyPrivateEventPrefix)) {
-      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateEventPrefix);
+    if (nodeRef.startsWith(privateEpisodeRefPrefix)) {
+      const id = this.parseNodeRefId(nodeRef, privateEpisodeRefPrefix);
       const episodeRow = this.db.prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
-      if (episodeRow) {
-        return episodeRow.agent_id;
-      }
-
-      const cognitionRow = this.db.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`).get(id) as
-        | { agent_id: string }
-        | null;
-      return cognitionRow?.agent_id ?? null;
+      return episodeRow?.agent_id ?? null;
     }
 
-    if (nodeRef.startsWith(legacyPrivateBeliefPrefix)) {
-      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateBeliefPrefix);
+    if (
+      nodeRef.startsWith(assertionRefPrefix)
+      || nodeRef.startsWith(evaluationRefPrefix)
+      || nodeRef.startsWith(commitmentRefPrefix)
+    ) {
+      const id = this.parseNodeRefId(nodeRef, nodeRef.slice(0, nodeRef.indexOf(":") + 1));
       const row = this.db.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
@@ -952,7 +951,7 @@ export class GraphStorageService {
     }
   }
 
-  private parseLegacyNodeRefId(nodeRef: NodeRef, prefix: string): number {
+  private parseNodeRefId(nodeRef: string, prefix: string): number {
     if (!nodeRef.startsWith(prefix)) {
       throw new Error(`Invalid node ref prefix for ${prefix}: ${nodeRef}`);
     }

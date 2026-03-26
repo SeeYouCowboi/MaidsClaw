@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { registerRuntimeTools } from "../../src/bootstrap/tools.js";
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
+import { ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 
 describe("runtime tool registration", () => {
   it("registers all memory tools via adapter and executes through core executor", async () => {
@@ -11,20 +12,16 @@ describe("runtime tool registration", () => {
       registerRuntimeTools(runtime.toolExecutor, runtime.runtimeServices);
 
       const schemaNames = runtime.toolExecutor.getSchemas().map((schema) => schema.name);
-      expect(schemaNames).toContain("core_memory_append");
-      expect(schemaNames).toContain("core_memory_replace");
-      expect(schemaNames).toContain("memory_read");
-      expect(schemaNames).toContain("narrative_search");
-      expect(schemaNames).toContain("cognition_search");
-      expect(schemaNames).toContain("memory_search");
-      expect(schemaNames).toContain("memory_explore");
+      for (const toolName of ALL_MEMORY_TOOL_NAMES) {
+        expect(schemaNames).toContain(toolName);
+      }
 
       const session = runtime.sessionService.createSession("rp:default");
       const coreMemory = new CoreMemoryService(runtime.db);
       coreMemory.initializeBlocks("rp:default");
 
       const result = await runtime.toolExecutor.execute(
-        "core_memory_append",
+        MEMORY_TOOL_NAMES.coreMemoryAppend,
         { label: "persona", content: "Adapter path works." },
         { sessionId: session.sessionId },
       ) as { success: boolean };

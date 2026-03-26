@@ -35,6 +35,7 @@ import { createLocalRuntime } from "../../src/terminal-cli/local-runtime.js";
 import { SessionService } from "../../src/session/service.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
+import { ALL_MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
@@ -824,10 +825,7 @@ describe("CLI Acceptance Runbook", () => {
 			const app = bootstrapApp({ cwd: createTempDir("contract"), enableGateway: false, requireAllProviders: false });
 			try {
 				const schemas = app.runtime.toolExecutor.getSchemas();
-				const memoryNames = [
-					"core_memory_append", "core_memory_replace", "memory_read",
-					"narrative_search", "cognition_search", "memory_search", "memory_explore",
-				];
+				const memoryNames = [...ALL_MEMORY_TOOL_NAMES];
 				for (const name of memoryNames) {
 					const schema = schemas.find((s) => s.name === name);
 					expect(schema).toBeDefined();
@@ -857,11 +855,7 @@ describe("CLI Acceptance Runbook", () => {
 			const app = bootstrapApp({ cwd: createTempDir("contract-non-mem"), enableGateway: false, requireAllProviders: false });
 			try {
 				const schemas = app.runtime.toolExecutor.getSchemas();
-				const memoryAndSettlementNames = new Set([
-					"core_memory_append", "core_memory_replace", "memory_read",
-					"narrative_search", "cognition_search", "memory_search", "memory_explore",
-					"submit_rp_turn",
-				]);
+				const memoryAndSettlementNames = new Set([...ALL_MEMORY_TOOL_NAMES, "submit_rp_turn"]);
 				const nonMemorySchemas = schemas.filter((s) => !memoryAndSettlementNames.has(s.name));
 				for (const schema of nonMemorySchemas) {
 					expect(schema.executionContract).toBeUndefined();
