@@ -229,16 +229,23 @@ describe("validation explain visibility/redaction", () => {
     }
   });
 
-  it("Admin-only access for maiden role only", () => {
+  it("Admin-only access follows explicit viewer capability", () => {
     const { db, dbPath } = createTempDb();
     try {
       const authorization = new AuthorizationPolicy();
-      const maidenViewer = createViewerContext({ viewer_agent_id: "agent_maiden", viewer_role: "maiden" });
-      const rpAgentViewer = createViewerContext({ viewer_agent_id: "agent_rp", viewer_role: "rp_agent" });
+      const adminViewer = createViewerContext({
+        viewer_agent_id: "agent_admin",
+        viewer_role: "task_agent",
+        can_read_admin_only: true,
+      });
+      const nonAdminViewer = createViewerContext({
+        viewer_agent_id: "agent_rp",
+        viewer_role: "maiden",
+        can_read_admin_only: false,
+      });
 
-      // Legacy behavior per V3 candidates §9.1 — maiden is the only admin-capable role
-      expect(authorization.canViewAdminOnly(maidenViewer)).toBe(true);
-      expect(authorization.canViewAdminOnly(rpAgentViewer)).toBe(false);
+      expect(authorization.canViewAdminOnly(adminViewer)).toBe(true);
+      expect(authorization.canViewAdminOnly(nonAdminViewer)).toBe(false);
     } finally {
       cleanupDb(db, dbPath);
     }

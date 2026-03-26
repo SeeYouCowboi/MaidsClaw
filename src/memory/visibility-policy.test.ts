@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { VisibilityPolicy } from "./visibility-policy";
-import { getDefaultPermissions, hasAdminReadAccess } from "./contracts/agent-permissions";
 import type { ViewerContext } from "./types";
 
 function makeViewer(overrides?: Partial<ViewerContext>): ViewerContext {
   return {
     viewer_agent_id: "agent-1",
     viewer_role: "rp_agent",
+    can_read_admin_only: false,
     current_area_id: 100,
     session_id: "sess-1",
     ...overrides,
@@ -95,16 +95,13 @@ describe("VisibilityPolicy", () => {
   // ── isNodeVisible (dispatch) ─────────────────────────────────────
 
   describe("isNodeVisible", () => {
-    it("returns admin_only for non-admin and visible for admin on system_only events", () => {
+    it("returns admin_only without explicit admin-read capability and visible with it", () => {
       const event = { visibility_scope: "system_only", location_entity_id: 100, owner_agent_id: null };
-      const rpViewer = makeViewer({ viewer_role: "rp_agent" });
-      const maidenViewer = makeViewer({ viewer_role: "maiden" });
+      const viewerWithoutAdmin = makeViewer({ viewer_role: "maiden", can_read_admin_only: false });
+      const viewerWithAdmin = makeViewer({ viewer_role: "rp_agent", can_read_admin_only: true });
 
-      expect(hasAdminReadAccess(getDefaultPermissions(rpViewer.viewer_agent_id, rpViewer.viewer_role))).toBe(false);
-      expect(policy.getNodeDisposition(rpViewer, "event:99", event)).toBe("admin_only");
-
-      expect(hasAdminReadAccess(getDefaultPermissions(maidenViewer.viewer_agent_id, maidenViewer.viewer_role))).toBe(true);
-      expect(policy.getNodeDisposition(maidenViewer, "event:99", event)).toBe("visible");
+      expect(policy.getNodeDisposition(viewerWithoutAdmin, "event:99", event)).toBe("admin_only");
+      expect(policy.getNodeDisposition(viewerWithAdmin, "event:99", event)).toBe("visible");
     });
 
     it("dispatches event: refs to isEventVisible", () => {
@@ -193,6 +190,19 @@ describe("VisibilityPolicy", () => {
 
       expect(rpSql).toBe(taskSql);
       expect(rpSql).toBe(maidenSql);
+    });
+
+    it("viewer_role does not affect system_only disposition when admin capability is unchanged", () => {
+      const event = { visibility_scope: "system_only", location_entity_id: 100, owner_agent_id: null };
+      const rpViewer = makeViewer({ viewer_role: "rp_agent", can_read_admin_only: false });
+      const maidenViewer = makeViewer({ viewer_role: "maiden", can_read_admin_only: false });
+      const taskAdminViewer = makeViewer({ viewer_role: "task_agent", can_read_admin_only: true });
+      const rpAdminViewer = makeViewer({ viewer_role: "rp_agent", can_read_admin_only: true });
+
+      expect(policy.getNodeDisposition(rpViewer, "event:99", event)).toBe("admin_only");
+      expect(policy.getNodeDisposition(maidenViewer, "event:99", event)).toBe("admin_only");
+      expect(policy.getNodeDisposition(taskAdminViewer, "event:99", event)).toBe("visible");
+      expect(policy.getNodeDisposition(rpAdminViewer, "event:99", event)).toBe("visible");
     });
   });
 });
