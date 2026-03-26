@@ -224,14 +224,14 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ## Scenario 15 — Bootstrap: All Services Wired
 
-**What it proves:** The runtime bootstrap correctly instantiates `NarrativeSearchService`, `CognitionSearchService`, and `GraphNavigator` with all services, and all 7 RP tools are registered.
+**What it proves:** The runtime bootstrap correctly instantiates `NarrativeSearchService`, `CognitionSearchService`, and `GraphNavigator` with all services, and all 6 RP tools are registered (`memory_search` was retired in March 2026).
 
 **Test files:**
 - `test/runtime/bootstrap.test.ts` — preset merge, agent-loader template roundtrip
-- `test/runtime/tool-permissions.test.ts` — RP authorized tool count = 7
+- `test/runtime/tool-permissions.test.ts` — RP authorized tool count = 6
 
 **Key assertions:**
-- `RP_AUTHORIZED_TOOLS` has 7 entries including `narrative_search` and `cognition_search`
+- `RP_AUTHORIZED_TOOLS` has 6 entries including `narrative_search` and `cognition_search` (`memory_search` retired)
 - `GraphNavigator` receives `narrativeSearch` and `cognitionSearch` service instances (not null)
 - `AgentProfile.retrievalTemplate` / `writeTemplate` optional fields survive the `toAgentProfile()` roundtrip
 - Role defaults (`rp_agent`) correctly set `canAccessCognition = true`, `canWriteCognition = true`
@@ -291,7 +291,7 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 | `test/runtime/turn-service.test.ts` | 1 (settlement atomicity) |
 | `test/runtime/rp-turn-contract.test.ts` | 3 (normalizer, mapping constants) |
 | `test/runtime/bootstrap.test.ts` | 15 (service wiring, tool count) |
-| `test/runtime/tool-permissions.test.ts` | 15 (RP_AUTHORIZED_TOOLS = 7) |
+| `test/runtime/tool-permissions.test.ts` | 15 (RP_AUTHORIZED_TOOLS = 6) |
 | `src/memory/task-agent.test.ts` | 2, 11 (sweeper, loadExistingContext) |
 | `src/memory/navigator.test.ts` | 9 (beam expansion, supplemental seeds) |
 | `src/memory/prompt-data.test.ts` | 8 (contested rendering) |

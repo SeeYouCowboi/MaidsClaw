@@ -557,6 +557,75 @@ describe("Publication Materialization", () => {
 		}
 	});
 
+	it("allows publication writes for rp_agent role (positive case)", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "rp-allow-location",
+			displayName: "RP Allow Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "RP agent publishes successfully." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:rp-allow-${randomUUID()}`, {
+			sessionId: "sess-rp-allow",
+			locationEntityId: locationId,
+			timestamp: 2000,
+		}, {
+			agentRole: "rp_agent",
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("allows publication writes for maiden with writeTemplate override", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "maiden-override-location",
+			displayName: "Maiden Override Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Maiden publishes with override." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:maiden-override-${randomUUID()}`, {
+			sessionId: "sess-maiden-override",
+			locationEntityId: locationId,
+			timestamp: 3000,
+		}, {
+			agentRole: "maiden",
+			writeTemplateOverride: { allowPublications: true },
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
 	it("explicit publication creates event_node with provenance columns", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);

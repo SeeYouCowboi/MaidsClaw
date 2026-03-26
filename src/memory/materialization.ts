@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
+import type { ArtifactContract } from "../core/tools/tool-definition.js";
+import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
@@ -318,10 +320,16 @@ export function materializePublications(
     sourceAgentId?: string;
     agentRole?: AgentRole;
     writeTemplateOverride?: WriteTemplate;
+    artifactContracts?: Record<string, ArtifactContract>;
+    artifactEnforcementContext?: ArtifactEnforcementContext;
   },
 ): MaterializationResult {
   if (options?.agentRole) {
     enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
+  }
+
+  if (options?.artifactContracts && options.artifactEnforcementContext) {
+    enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
   }
 
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };

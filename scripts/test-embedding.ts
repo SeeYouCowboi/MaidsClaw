@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     console.log("  文本:");
     texts.forEach((t, i) => console.log(`    ${i + 1}. ${t}`));
 
-    const embeddings = await provider.embed(texts, "memory_search", EMBEDDING_MODEL);
+    const embeddings = await provider.embed(texts, "narrative_search", EMBEDDING_MODEL);
     
     console.log("\n  相似度矩阵 (猫 vs 其他):");
     const catEmbedding = embeddings[0];

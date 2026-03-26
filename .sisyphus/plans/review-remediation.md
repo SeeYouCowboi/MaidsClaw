@@ -384,7 +384,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: write-template.ts, explicit-settlement-processor.ts, materialization.ts, tests
   - Pre-commit: `bun test`
 
-- [ ] 4. A3: Validate conflict_factor_refs_json at write time (TDD)
+- [x] 4. A3: Validate conflict_factor_refs_json at write time (TDD)
 
   **What to do**:
   - RED: Write test: call `applyContestConflictFactors()` with invalid ref `"garbage:ref"` → expect rejection or logged warning + dropped ref
@@ -502,7 +502,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: navigator.ts, test
   - Pre-commit: `bun test`
 
-- [ ] 6. A2: ArtifactContract runtime enforcement (TDD)
+- [x] 6. A2: ArtifactContract runtime enforcement (TDD)
 
   **What to do**:
   - RED: Write tests for all 3 enforcement dimensions:
@@ -587,7 +587,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: artifact-contract-policy.ts (new), tool-executor.ts, settlement processor, diagnostics trace, tests
   - Pre-commit: `bun test`
 
-- [ ] 7. A4: PublicationRecoverySweeper with persistent recovery (TDD)
+- [x] 7. A4: PublicationRecoverySweeper with persistent recovery (TDD)
 
   **What to do**:
   - RED: Write test: create orphaned publication (settlement exists but no matching event_nodes row) → sweep → verify event_nodes row created
@@ -676,7 +676,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: publication-recovery-sweeper.ts (new), materialization.ts, bootstrap/runtime.ts, tests
   - Pre-commit: `bun test`
 
-- [ ] 8. Update architecture & regression docs
+- [x] 8. Update architecture & regression docs
 
   **What to do**:
   - **`docs/MEMORY_ARCHITECTURE_2026.md`** (505 lines):
@@ -743,7 +743,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `deep`
+- [x] F1. **Plan Compliance Audit** — `deep`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
@@ -772,7 +772,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/final-qa/f1-must-not-have.txt
   ```
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
@@ -795,7 +795,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/final-qa/f2-quality.txt
   ```
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration. Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | VERDICT`
 
@@ -821,7 +821,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/final-qa/f3-integration.txt
   ```
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Unaccounted [CLEAN/N files] | VERDICT`
 

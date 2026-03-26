@@ -538,12 +538,18 @@ export class TurnService {
 
 		if (hasPublications && this.graphStorage && !this.projectionManager) {
 			try {
-				materializePublications(this.graphStorage, publications, settlementId, {
+			materializePublications(this.graphStorage, publications, settlementId, {
 					sessionId: effectiveRequest.sessionId,
 					locationEntityId: viewerSnapshot?.currentLocationEntityId,
 					timestamp: Date.now(),
 				}, {
 					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
 				});
 			} catch (err) {
 				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
