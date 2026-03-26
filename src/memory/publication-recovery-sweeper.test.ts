@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { materializePublications } from "./materialization.js";
+import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { PublicationRecoverySweeper } from "./publication-recovery-sweeper.js";
 import { runMemoryMigrations } from "./schema.js";
 import { GraphStorageService } from "./storage.js";
@@ -27,8 +29,11 @@ function insertRecoveryJob(params: {
   status?: "pending" | "retrying" | "reconciled" | "exhausted";
   settlementId: string;
   pubIndex: number;
+  targetScope?: "current_area" | "world_public";
   visibilityScope?: "area_visible" | "world_public";
   sessionId?: string;
+  sourceAgentId?: string | null;
+  kind?: string;
   summary?: string;
   timestamp?: number;
   locationEntityId?: number;
@@ -45,8 +50,11 @@ function insertRecoveryJob(params: {
   const payload = {
     settlementId: params.settlementId,
     pubIndex: params.pubIndex,
+    targetScope: params.targetScope ?? "current_area",
     visibilityScope: params.visibilityScope ?? "area_visible",
     sessionId: params.sessionId ?? "sess:recovery",
+    sourceAgentId: params.sourceAgentId ?? null,
+    kind: params.kind ?? "spoken",
     summary: params.summary ?? "Recovered publication",
     timestamp: params.timestamp ?? now,
     participants: params.participants ?? "[]",
@@ -76,11 +84,12 @@ function insertRecoveryJob(params: {
 }
 
 describe("PublicationRecoverySweeper", () => {
-  it("orphaned publication recovery creates event_nodes row and marks job reconciled", async () => {
+  it("orphaned publication recovery recreates projections and marks job reconciled", async () => {
     const { dbPath, db } = createTempDb();
     runMemoryMigrations(db);
 
     const storage = new GraphStorageService(db);
+    const projectionRepo = new AreaWorldProjectionRepo(db.raw);
     const locationId = storage.upsertEntity({
       pointerKey: "recovery-hall",
       displayName: "Recovery Hall",
@@ -97,12 +106,14 @@ describe("PublicationRecoverySweeper", () => {
       summary: "Recovered by sweeper.",
       locationEntityId: locationId,
       participants: JSON.stringify([`entity:${locationId}`]),
+      sourceAgentId: "rp:alice",
       timestamp: 12_345,
       nextAttemptAt: 0,
     });
 
     const sweeper = new PublicationRecoverySweeper(db, storage, {
       now: () => 1,
+      projectionRepo,
     });
 
     try {
@@ -121,6 +132,19 @@ describe("PublicationRecoverySweeper", () => {
       expect(event!.visibility_scope).toBe("area_visible");
       expect(event!.summary).toBe("Recovered by sweeper.");
 
+      const areaState = projectionRepo.getAreaStateCurrent(
+        "rp:alice",
+        locationId,
+        `publication:${settlementId}:0`,
+      );
+      expect(areaState).not.toBeNull();
+
+      const areaNarrative = projectionRepo.getAreaNarrativeCurrent(
+        "rp:alice",
+        locationId,
+      );
+      expect(areaNarrative?.summary_text).toBe("Recovered by sweeper.");
+
       const job = db.get<{ status: string }>(
         "SELECT status FROM _memory_maintenance_jobs WHERE job_type = 'publication_recovery' AND idempotency_key = ?",
         [`publication_recovery:${settlementId}:0`],
@@ -138,6 +162,7 @@ describe("PublicationRecoverySweeper", () => {
     runMemoryMigrations(db);
 
     const storage = new GraphStorageService(db);
+    const projectionRepo = new AreaWorldProjectionRepo(db.raw);
     const locationId = storage.upsertEntity({
       pointerKey: "recovery-kitchen",
       displayName: "Recovery Kitchen",
@@ -167,12 +192,14 @@ describe("PublicationRecoverySweeper", () => {
       summary: "Already materialized",
       locationEntityId: locationId,
       participants: JSON.stringify([`entity:${locationId}`]),
+      sourceAgentId: "rp:alice",
       timestamp: 200,
       nextAttemptAt: 0,
     });
 
     const sweeper = new PublicationRecoverySweeper(db, storage, {
       now: () => 1,
+      projectionRepo,
     });
 
     try {
@@ -189,6 +216,101 @@ describe("PublicationRecoverySweeper", () => {
         [settlementId, 1],
       );
       expect(count?.cnt).toBe(1);
+
+      const areaState = projectionRepo.getAreaStateCurrent(
+        "rp:alice",
+        locationId,
+        `publication:${settlementId}:1`,
+      );
+      expect(areaState).not.toBeNull();
+    } finally {
+      sweeper.stop();
+      db.close();
+      cleanupDb(dbPath);
+    }
+  });
+
+  it("materializePublications recovery jobs preserve projection metadata for sweeper replay", async () => {
+    const { dbPath, db } = createTempDb();
+    runMemoryMigrations(db);
+
+    const storage = new GraphStorageService(db);
+    const projectionRepo = new AreaWorldProjectionRepo(db.raw);
+    const locationId = storage.upsertEntity({
+      pointerKey: "recovery-library",
+      displayName: "Recovery Library",
+      entityType: "location",
+      memoryScope: "shared_public",
+    });
+
+    const failingStorage = {
+      createProjectedEvent: () => {
+        const transient = new Error("database is locked");
+        transient.name = "SQLiteError";
+        throw transient;
+      },
+    } as unknown as GraphStorageService;
+
+    const settlementId = `stl:projection-replay-${randomUUID()}`;
+    const result = materializePublications(
+      failingStorage,
+      [{ kind: "spoken", targetScope: "current_area", summary: "Recovered through job replay." }],
+      settlementId,
+      {
+        sessionId: "sess:projection-replay",
+        locationEntityId: locationId,
+        timestamp: 345,
+      },
+      {
+        db: db.raw,
+        projectionRepo,
+        sourceAgentId: "rp:alice",
+      },
+    );
+
+    expect(result).toEqual({ materialized: 0, reconciled: 0, skipped: 1 });
+
+    const job = db.get<{ payload: string }>(
+      "SELECT payload FROM _memory_maintenance_jobs WHERE job_type = 'publication_recovery' AND idempotency_key = ?",
+      [`publication_recovery:${settlementId}:0`],
+    );
+    expect(job).toBeDefined();
+    const payload = JSON.parse(job!.payload) as {
+      nextAttemptAt: number;
+      sourceAgentId: string | null;
+      targetScope: string;
+      kind: string;
+    };
+    expect(payload.sourceAgentId).toBe("rp:alice");
+    expect(payload.targetScope).toBe("current_area");
+    expect(payload.kind).toBe("spoken");
+
+    const sweeper = new PublicationRecoverySweeper(db, storage, {
+      now: () => payload.nextAttemptAt,
+      projectionRepo,
+    });
+
+    try {
+      await sweeper.sweep();
+
+      const event = db.get<{ summary: string }>(
+        "SELECT summary FROM event_nodes WHERE source_settlement_id = ? AND source_pub_index = ?",
+        [settlementId, 0],
+      );
+      expect(event?.summary).toBe("Recovered through job replay.");
+
+      const areaState = projectionRepo.getAreaStateCurrent(
+        "rp:alice",
+        locationId,
+        `publication:${settlementId}:0`,
+      );
+      expect(areaState).not.toBeNull();
+
+      const areaNarrative = projectionRepo.getAreaNarrativeCurrent(
+        "rp:alice",
+        locationId,
+      );
+      expect(areaNarrative?.summary_text).toBe("Recovered through job replay.");
     } finally {
       sweeper.stop();
       db.close();

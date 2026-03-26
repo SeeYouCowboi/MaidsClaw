@@ -202,6 +202,8 @@ export class ProjectionManager {
 			timestamp: Date.now(),
 		}, {
 			db: this.db,
+			projectionRepo: this.areaWorldProjectionRepo ?? undefined,
+			sourceAgentId: params.agentId,
 			agentRole: params.agentRole,
 			writeTemplateOverride: params.writeTemplateOverride,
 			artifactContracts: params.artifactContracts,

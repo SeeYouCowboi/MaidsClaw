@@ -390,41 +390,73 @@ export function materializePublications(
         settlementId,
         pubIndex,
         maxRetries,
+        targetScope: pub.targetScope,
+        sourceAgentId: options?.sourceAgentId ?? null,
+        kind: pub.kind,
       },
       options?.db,
     );
 
-    if (publicationWriteResult === "reconciled") {
-      result.reconciled += 1;
-      continue;
-    }
     if (publicationWriteResult === "skipped") {
       result.skipped += 1;
       continue;
     }
 
-    if (options?.projectionRepo && options.sourceAgentId) {
-      options.projectionRepo.applyPublicationProjection({
-        trigger: "publication",
-        targetScope: pub.targetScope,
-        agentId: options.sourceAgentId,
-        areaId: locationEntityId,
-        projectionKey: `publication:${settlementId}:${pubIndex}`,
-        summaryText: pub.summary.trim(),
-        payload: {
-          settlementId,
-          pubIndex,
-          visibilityScope,
-          kind: pub.kind,
-        },
-        surfacingClassification: "public_manifestation",
-        updatedAt: timestamp,
-      });
+    applyPublicationProjectionUpdate(options?.projectionRepo, {
+      targetScope: pub.targetScope,
+      sourceAgentId: options?.sourceAgentId,
+      locationEntityId,
+      settlementId,
+      pubIndex,
+      summary: pub.summary.trim(),
+      visibilityScope,
+      kind: pub.kind,
+      timestamp,
+    });
+    if (publicationWriteResult === "reconciled") {
+      result.reconciled += 1;
+      continue;
     }
     result.materialized += 1;
   }
 
   return result;
+}
+
+export function applyPublicationProjectionUpdate(
+  projectionRepo: AreaWorldProjectionRepo | null | undefined,
+  input: {
+    targetScope: PublicationDeclaration["targetScope"];
+    sourceAgentId?: string | null;
+    locationEntityId: number;
+    settlementId: string;
+    pubIndex: number;
+    summary: string;
+    visibilityScope: "area_visible" | "world_public";
+    kind: string;
+    timestamp: number;
+  },
+): void {
+  if (!projectionRepo || !input.sourceAgentId) {
+    return;
+  }
+
+  projectionRepo.applyPublicationProjection({
+    trigger: "publication",
+    targetScope: input.targetScope,
+    agentId: input.sourceAgentId,
+    areaId: input.locationEntityId,
+    projectionKey: `publication:${input.settlementId}:${input.pubIndex}`,
+    summaryText: input.summary,
+    payload: {
+      settlementId: input.settlementId,
+      pubIndex: input.pubIndex,
+      visibilityScope: input.visibilityScope,
+      kind: input.kind,
+    },
+    surfacingClassification: "public_manifestation",
+    updatedAt: input.timestamp,
+  });
 }
 
 type PublicationWriteResult = "materialized" | "reconciled" | "skipped";
@@ -433,6 +465,9 @@ type PublicationRetryContext = {
   settlementId: string;
   pubIndex: number;
   maxRetries: number;
+  targetScope: PublicationDeclaration["targetScope"];
+  sourceAgentId: string | null;
+  kind: string;
 };
 
 // PublicationRecoveryJobPayload imported from publication-recovery-types.ts
@@ -500,8 +535,11 @@ function writePublicationRecoveryJob(
     const payload: PublicationRecoveryJobPayload = {
       settlementId: retryContext.settlementId,
       pubIndex: retryContext.pubIndex,
+      targetScope: retryContext.targetScope,
       visibilityScope: params.visibilityScope ?? "area_visible",
       sessionId: params.sessionId,
+      sourceAgentId: retryContext.sourceAgentId,
+      kind: retryContext.kind,
       failureCount,
       lastAttemptAt: now,
       nextAttemptAt: now,

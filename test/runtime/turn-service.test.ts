@@ -1580,5 +1580,18 @@ describe("TurnService with ProjectionManager", () => {
     );
     expect(publicEvents).toHaveLength(1);
     expect(publicEvents[0].summary).toBe("Good morning from the garden.");
+
+    const areaState = areaProjectionRepo.getAreaStateCurrent(
+      "rp:alice",
+      locationEntityId,
+      "publication:stl:req-combined:0",
+    );
+    expect(areaState).not.toBeNull();
+
+    const areaNarrative = areaProjectionRepo.getAreaNarrativeCurrent(
+      "rp:alice",
+      locationEntityId,
+    );
+    expect(areaNarrative?.summary_text).toBe("Good morning from the garden.");
   });
 });

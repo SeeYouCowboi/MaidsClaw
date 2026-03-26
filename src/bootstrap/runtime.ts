@@ -494,7 +494,9 @@ export function bootstrapRuntime(
 			)
 		: null;
 	const publicationRecoverySweeper = graphStorage
-		? new PublicationRecoverySweeper(db, graphStorage)
+		? new PublicationRecoverySweeper(db, graphStorage, {
+				projectionRepo: areaWorldProjectionRepo,
+			})
 		: null;
 	pendingSettlementSweeper?.start();
 	publicationRecoverySweeper?.start();

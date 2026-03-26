@@ -133,15 +133,15 @@ export class AgentLoop {
 		const workingMessages = [...initialPromptState.messages];
 		const systemPrompt = initialPromptState.systemPrompt;
 		let turnIndex = 0;
+		const turnToolsUsed = new Set<string>();
+		const defaultPermissions = getDefaultPermissions(
+			this.profile.id,
+			this.profile.role,
+		);
+		const toolSchemas = this.toolExecutor.getSchemas();
 
 		while (true) {
 			turnIndex += 1;
-			const turnToolsUsed = new Set<string>();
-			const defaultPermissions = getDefaultPermissions(
-				this.profile.id,
-				this.profile.role,
-			);
-			const toolSchemas = this.toolExecutor.getSchemas();
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];
@@ -439,16 +439,16 @@ export class AgentLoop {
 			message: `prompt: sysLen=${systemPromptLen} msgs=${conversationLen} estTokens=${estimatedTokens}`,
 			timestamp: Date.now(),
 		});
+		const turnToolsUsed = new Set<string>();
+		const defaultPermissions = getDefaultPermissions(
+			this.profile.id,
+			this.profile.role,
+		);
+		const baseToolSchemas = this.toolExecutor.getSchemas();
+		const bufferedToolSchemas = bufferedToolExecutor.getSchemas();
 
 		while (true) {
 			turnIndex += 1;
-			const turnToolsUsed = new Set<string>();
-			const defaultPermissions = getDefaultPermissions(
-				this.profile.id,
-				this.profile.role,
-			);
-			const baseToolSchemas = this.toolExecutor.getSchemas();
-			const bufferedToolSchemas = bufferedToolExecutor.getSchemas();
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];

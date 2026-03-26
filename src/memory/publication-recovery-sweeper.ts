@@ -1,7 +1,9 @@
 import type { Db } from "../storage/database.js";
+import type { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { GraphStorageService } from "./storage.js";
 import type { PublicEventCategory } from "./types.js";
+import { applyPublicationProjectionUpdate } from "./materialization.js";
 
 const JOB_TYPE = "publication_recovery";
 const PERIODIC_INTERVAL_MS = 30_000;
@@ -32,6 +34,7 @@ export class PublicationRecoverySweeper {
       maxRetries?: number;
       now?: () => number;
       random?: () => number;
+      projectionRepo?: AreaWorldProjectionRepo | null;
     } = {},
   ) {}
 
@@ -106,8 +109,11 @@ export class PublicationRecoverySweeper {
       this.updateJob(job.id, "exhausted", {
         settlementId: "",
         pubIndex: -1,
+        targetScope: "current_area",
         visibilityScope: "area_visible",
         sessionId: "",
+        sourceAgentId: null,
+        kind: "spoken",
         summary: "",
         timestamp: now,
         participants: "[]",
@@ -143,45 +149,21 @@ export class PublicationRecoverySweeper {
         sourceSettlementId: payload.settlementId,
         sourcePubIndex: payload.pubIndex,
       });
+    } catch (error: unknown) {
+      if (!isSqliteUniqueConstraintError(error)) {
+        this.handleFailure(job.id, payload, error, now);
+        return;
+      }
+    }
 
+    try {
+      this.applyProjection(payload);
       this.updateJob(job.id, "reconciled", {
         ...payload,
         nextAttemptAt: null,
       });
-      return;
     } catch (error: unknown) {
-      if (isSqliteUniqueConstraintError(error)) {
-        this.updateJob(job.id, "reconciled", {
-          ...payload,
-          nextAttemptAt: null,
-        });
-        return;
-      }
-
-      const failureCount = payload.failureCount + 1;
-      const errorCode = error instanceof Error ? error.name : null;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES;
-
-      if (failureCount >= maxRetries) {
-        this.updateJob(job.id, "exhausted", {
-          ...payload,
-          failureCount,
-          nextAttemptAt: null,
-          lastErrorCode: errorCode,
-          lastErrorMessage: errorMessage,
-        });
-        return;
-      }
-
-      const delayMs = this.calculateBackoffMs(failureCount, TRANSIENT_BASE_BACKOFF_MS, TRANSIENT_MAX_BACKOFF_MS);
-      this.updateJob(job.id, "retrying", {
-        ...payload,
-        failureCount,
-        nextAttemptAt: now + delayMs,
-        lastErrorCode: errorCode,
-        lastErrorMessage: errorMessage,
-      });
+      this.handleFailure(job.id, payload, error, now);
     }
   }
 
@@ -218,8 +200,22 @@ export class PublicationRecoverySweeper {
       return {
         settlementId: parsed.settlementId,
         pubIndex: parsed.pubIndex,
+        targetScope:
+          parsed.targetScope === "current_area" || parsed.targetScope === "world_public"
+            ? parsed.targetScope
+            : parsed.visibilityScope === "world_public"
+              ? "world_public"
+              : "current_area",
         visibilityScope: parsed.visibilityScope,
         sessionId: parsed.sessionId,
+        sourceAgentId:
+          typeof parsed.sourceAgentId === "string" ? parsed.sourceAgentId : null,
+        kind:
+          typeof parsed.kind === "string"
+            ? parsed.kind
+            : parsed.eventCategory === "observation"
+              ? "visual"
+              : "spoken",
         summary: parsed.summary,
         timestamp: parsed.timestamp,
         participants: parsed.participants,
@@ -250,12 +246,74 @@ export class PublicationRecoverySweeper {
     return Math.min(maxMs, exponential - jitterRange + jitter);
   }
 
+  private handleFailure(
+    jobId: number,
+    payload: PublicationRecoveryJobPayload,
+    error: unknown,
+    now: number,
+  ): void {
+    const failureCount = payload.failureCount + 1;
+    const errorCode = error instanceof Error ? error.name : null;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const maxRetries = this.options.maxRetries ?? DEFAULT_MAX_RETRIES;
+
+    if (failureCount >= maxRetries) {
+      this.updateJob(jobId, "exhausted", {
+        ...payload,
+        failureCount,
+        nextAttemptAt: null,
+        lastErrorCode: errorCode,
+        lastErrorMessage: errorMessage,
+      });
+      return;
+    }
+
+    const delayMs = this.calculateBackoffMs(
+      failureCount,
+      TRANSIENT_BASE_BACKOFF_MS,
+      TRANSIENT_MAX_BACKOFF_MS,
+    );
+    this.updateJob(jobId, "retrying", {
+      ...payload,
+      failureCount,
+      nextAttemptAt: now + delayMs,
+      lastErrorCode: errorCode,
+      lastErrorMessage: errorMessage,
+    });
+  }
+
   private now(): number {
     return this.options.now?.() ?? Date.now();
   }
 
   private random(): number {
     return this.options.random?.() ?? Math.random();
+  }
+
+  private applyProjection(payload: PublicationRecoveryJobPayload): void {
+    applyPublicationProjectionUpdate(this.options.projectionRepo, {
+      targetScope: payload.targetScope,
+      sourceAgentId: payload.sourceAgentId ?? this.lookupSessionAgentId(payload.sessionId),
+      locationEntityId: payload.locationEntityId,
+      settlementId: payload.settlementId,
+      pubIndex: payload.pubIndex,
+      summary: payload.summary,
+      visibilityScope: payload.visibilityScope,
+      kind: payload.kind,
+      timestamp: payload.timestamp,
+    });
+  }
+
+  private lookupSessionAgentId(sessionId: string): string | null {
+    try {
+      const rows = this.db.query<{ agent_id: string }>(
+        `SELECT agent_id FROM sessions WHERE session_id = ? LIMIT 1`,
+        [sessionId],
+      );
+      return rows[0]?.agent_id ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 
