@@ -207,7 +207,7 @@ Registered in `src/bootstrap/tools.ts`, implemented in `src/memory/tools.ts`.
 | `memory_search` | **Retired (March 2026).** `EmbeddingPurpose` value renamed to `narrative_search`. No longer registered as a tool. |
 | `memory_explore` | Beam-expansion graph walk. Upgraded `GraphNavigator` with narrative + cognition seeds and `memory_relations` edge expansion. |
 
-`RP_AUTHORIZED_TOOLS` is 6 entries: `narrative_search`, `cognition_search`, `memory_explore`, `submit_rp_turn`, `memory_store_note`, `memory_flag_for_review`. (`memory_search` was retired in March 2026.)
+`RP_AUTHORIZED_TOOLS` is 6 entries: `memory_read`, `narrative_search`, `cognition_search`, `memory_explore`, `persona_check_drift`, `submit_rp_turn`. (`memory_search` was retired in March 2026.)
 
 ### `memory_explore` internals (`src/memory/navigator.ts`)
 

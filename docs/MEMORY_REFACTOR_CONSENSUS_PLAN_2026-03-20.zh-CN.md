@@ -343,18 +343,20 @@
 
 ### 8.3 publication[] 规范
 
+> **已被 §18.26 取代（2026-03-22 分支共识补充）**: 下方 `kind` 枚举（`speech / record / display / broadcast`）为原始设计草案。正式实现已按 §18.26 收敛为表现形式轴：`spoken | written | visual`。`broadcast` 不再作为 primary kind。当前代码中的类型定义为 `PublicationKindV2 = "spoken" | "written" | "visual"`（`src/runtime/rp-turn-contract.ts:82`）。
+
 V1 最小字段:
 
 - `kind`
 - `target_scope`
 - `summary`
 
-V1 `kind`:
+V1 `kind`（历史草案，已被 §18.26 取代）:
 
-- `speech`
-- `record`
-- `display`
-- `broadcast`
+- ~~`speech`~~ → `spoken`
+- ~~`record`~~ → `written`
+- ~~`display`~~ → `visual`
+- ~~`broadcast`~~ → 从 primary kind 中移除（V3 候选第二语义轴）
 
 V1 `target_scope`:
 
@@ -363,11 +365,11 @@ V1 `target_scope`:
 
 额外规则:
 
-- `speech` 的 `summary` 必须显式填写，不默认复用 `publicReply`
+- ~~`speech`~~ `spoken` 类 publication 的 `summary` 必须显式填写，不默认复用 `publicReply`
 - `publicReply=""` 但 `publications[]` 非空是合法的
 - 如果 `publicReply` 存在但 `publications[]` 没有声明，则默认不算 publication
-- 普通 `speech` 默认最多传播到 `current_area`
-- `world_public` 主要留给 `record`、`broadcast` 与明确的公共声明
+- 普通 ~~`speech`~~ `spoken` 默认最多传播到 `current_area`
+- `world_public` 主要留给 `written`、明确的公共声明与未来 V3 传播轴
 
 ### 8.4 传播边界
 
@@ -573,61 +575,73 @@ src/memory/
 
 ### Phase 0: 协议与类型草案
 
+> **状态（2026-03-26）：全部完成。** 所有类型定义见 `src/runtime/rp-turn-contract.ts`。
+
 - [x] 定义 `rp_turn_outcome_v5` 与兼容适配规则（原草案 v4 → 实现为 v5）
-- [ ] 在 `rp-turn-contract` 中加入 `publications[]`
-- [ ] 定义新的 `basis` 枚举
-- [ ] 定义新的 7 态 `stance`
-- [ ] 为 assertion 增加 `pre_contested_stance`
-- [ ] 从 canonical assertion schema 中移除持久化 `confidence`
-- [ ] 更新 redaction 与 inspect 展示协议
+- [x] 在 `rp-turn-contract` 中加入 `publications[]`（`RpTurnOutcomeSubmissionV5.publications`，line 126）
+- [x] 定义新的 `basis` 枚举（`AssertionBasis`: first_hand / hearsay / inference / introspection / belief，line 35-40）
+- [x] 定义新的 7 态 `stance`（`AssertionStance`: hypothetical / tentative / accepted / confirmed / contested / rejected / abandoned，line 26-33）
+- [x] 为 assertion 增加 `pre_contested_stance`（`AssertionRecordV4.preContestedStance`，line 47）
+- [x] 从 canonical assertion schema 中移除持久化 `confidence`（`AssertionRecordV4` 无 confidence 字段；legacy `agent_fact_overlay` 已由 migration 030 删除）
+- [x] 更新 redaction 与 inspect 展示协议（`src/interaction/redaction.ts` + `settlement-adapter.ts` 已对齐 v5 语义）
 
 ### Phase 1: Schema 增量迁移
 
-- [ ] 为 `event_nodes` 新增 `source_settlement_id`
-- [ ] 为 `event_nodes` 新增 `source_pub_index`
-- [ ] 新建 `memory_relations`
-- [ ] 新建 shared blocks 相关表
-- [ ] 为 cognition 层建立独立检索索引
-- [ ] 为 assertion 持久层新增 `basis`、`stance`、`pre_contested_stance`
-- [ ] 设计旧字段向新字段的迁移脚本
+> **状态（2026-03-26）：全部完成。** 32 个 migration (001-032) 见 `src/memory/schema.ts`。
+
+- [x] 为 `event_nodes` 新增 `source_settlement_id`（migration 006）
+- [x] 为 `event_nodes` 新增 `source_pub_index`（migration 006）
+- [x] 新建 `memory_relations`（migration 007）
+- [x] 新建 shared blocks 相关表（migration 008，6 张表）
+- [x] 为 cognition 层建立独立检索索引（migration 007，`search_docs_cognition` + FTS5）
+- [x] 为 assertion 持久层新增 `basis`、`stance`、`pre_contested_stance`（migration 004 增列；migration 028 backfill 到 `private_cognition_events` / `private_cognition_current`；旧表由 migration 030 删除）
+- [x] 设计旧字段向新字段的迁移脚本（migration 028/029 backfill + migration 030 drop `agent_fact_overlay`）
 
 ### Phase 2: Runtime 写入链路
 
+> **状态（2026-03-26）：全部完成。** 见 `src/memory/explicit-settlement-processor.ts` + `src/memory/materialization.ts`。
+
 - [x] 让 `TurnService` 接受 v5 settlement（原草案 v4 → 实现为 v5）
-- [ ] 用 `publications[]` 替代 `publicReply -> area_candidate` 主路径
-- [ ] publication 走 hot path 直接写 visible layer
-- [ ] 保留 v3 兼容读取
-- [ ] 保留 `source_record_id` 的幂等职责
-- [ ] 在物化阶段写入 `source_settlement_id/source_pub_index`
+- [x] 用 `publications[]` 替代 `publicReply -> area_candidate` 主路径（`materializePublications()` 以 `publications[]` 为主路径写 `event_nodes`）
+- [x] publication 走 hot path 直接写 visible layer（`createPublicationEventWithRetry()` 同步 3x backoff 写入）
+- [x] 保留 v3 兼容读取（`TurnSettlementPayload.schemaVersion` 支持 v3/v4/v5 读取；`normalizeSettlementPayload()` 统一适配）
+- [x] 保留 `source_record_id` 的幂等职责（`source_record_id` 沿用；不与 publication provenance 混淆）
+- [x] 在物化阶段写入 `source_settlement_id/source_pub_index`（`materialization.ts` 在 `createProjectedEvent()` 中写入）
 
 ### Phase 3: Retrieval 与工具拆分
 
-- [ ] 从 `retrieval.ts` 移除按 `viewer_role` 控制范围的逻辑
-- [ ] 新建 `narrative_search`
-- [ ] 新建 `cognition_search`
-- [ ] 兼容期保留 `memory_search`
-- [ ] 让 `cognition_search` 返回统一结果流
-- [ ] contested 结果内联冲突证据摘要
-- [ ] 按模板层接管 retrieval 策略
+> **状态（2026-03-26）：全部完成。** 见 `src/memory/narrative/`、`src/memory/cognition/`、`src/memory/retrieval/`。
+
+- [x] 从 `retrieval.ts` 移除按 `viewer_role` 控制范围的逻辑（`VisibilityPolicy` 仅依赖 `viewer_agent_id` + `current_area_id`）
+- [x] 新建 `narrative_search`（`src/memory/narrative/narrative-search.ts`，仅查询 `search_docs_area` + `search_docs_world`）
+- [x] 新建 `cognition_search`（`src/memory/cognition/cognition-search.ts`，仅查询 `search_docs_cognition`）
+- [x] 兼容期保留 `memory_search`（已完成兼容期并退役；`EmbeddingPurpose` 已重命名为 `narrative_search`，工具不再注册）
+- [x] 让 `cognition_search` 返回统一结果流（`CognitionHit[]`，包含 `kind`/`basis`/`stance`/`conflictEvidence`）
+- [x] contested 结果内联冲突证据摘要（`RelationBuilder.getConflictEvidence()` 查询 `memory_relations(relation_type='conflicts_with')`，最多 3 条）
+- [x] 按模板层接管 retrieval 策略（`RetrievalOrchestrator` + `RetrievalTemplate` 驱动 narrative/cognition/episode/conflict 四层调度）
 
 ### Phase 4: 关系层与 belief revision
 
-- [ ] 实现 `memory_relations` 写入与读取
-- [ ] 补上 `supports / conflicts_with / derived_from / supersedes`
-- [ ] 实现 contested 的结构化展示
-- [ ] 实现 `pre_contested_stance` 回退逻辑
-- [ ] 实现 basis 单向向上规则校验
-- [ ] 对非法 stance/basis 跳转做 runtime 强校验
+> **状态（2026-03-26）：全部完成。** 见 `src/memory/cognition/relation-builder.ts` + `belief-revision.ts`。
+
+- [x] 实现 `memory_relations` 写入与读取（`RelationBuilder` 提供完整 CRUD）
+- [x] 补上 `supports / conflicts_with / derived_from / supersedes`（migration 007 建表；migration 021 扩展至 9 种关系类型，含 `surfaced_as`/`published_as`/`resolved_by`/`downgraded_by`）
+- [x] 实现 contested 的结构化展示（`formatContestedEntry()` 在 `prompt-data.ts` 渲染 `[CONTESTED: was {preContestedStance}] ... | Conflicts: {evidence}`）
+- [x] 实现 `pre_contested_stance` 回退逻辑（`belief-revision.ts` `assertLegalStanceTransition()` 校验 contested 必须提供 `preContestedStance`）
+- [x] 实现 basis 单向向上规则校验（`belief-revision.ts` `assertBasisUpgradeOnly()` 强制 belief→inference→first_hand 单向）
+- [x] 对非法 stance/basis 跳转做 runtime 强校验（error codes: `COGNITION_ILLEGAL_STANCE_TRANSITION`、`COGNITION_ILLEGAL_BASIS_DOWNGRADE`、`COGNITION_TERMINAL_KEY_REUSE`、`COGNITION_MISSING_PRE_CONTESTED_STANCE`）
 
 ### Phase 5: Shared Blocks
 
-- [ ] 定义 shared block 表结构
-- [ ] 定义 attach / detach API
-- [ ] 定义 owner/admin ACL
-- [ ] 定义 section path 规范
-- [ ] 实现 patch log
-- [ ] 实现周期快照
-- [ ] 实现 shared block 审计查询
+> **状态（2026-03-26）：全部完成。** 见 `src/memory/shared-blocks/`。
+
+- [x] 定义 shared block 表结构（migration 008，6 张表；migration 010 增审计列；migration 026 增 `retrieval_only`）
+- [x] 定义 attach / detach API（`shared-block-attach-service.ts`，`attachBlock` 幂等 INSERT OR IGNORE）
+- [x] 定义 owner/admin ACL（`shared-block-permissions.ts`：`isOwner`/`isAdmin`/`canEdit`/`canRead`/`canGrantAdmin`/`getRole`/`isRetrievalOnly`）
+- [x] 定义 section path 规范（`section-path-validator.ts`，正则 `^[a-z0-9_-]+(/[a-z0-9_-]+)*$`）
+- [x] 实现 patch log（`shared-block-patch-service.ts`，`applyPatch()` 事务内写 op + log）
+- [x] 实现周期快照（每 25 个 patch 自动触发 `writeSnapshot()`）
+- [x] 实现 shared block 审计查询（`shared-block-audit.ts`）
 
 ### Phase 6: Explore 与兼容收尾
 
@@ -640,7 +654,7 @@ src/memory/
     `expandRelationEdges`、`expandPrivateBeliefFrontier` 读取 `private_cognition_current`。
 - [x] 检查 RP tool policy 与 app/terminal 兼容
   - **V3 T15/T20**: `ToolExecutionContract` capability enforcement 中间件已实装；
-    `tool-access-policy.ts` 8 种 capability 矩阵覆盖所有主要工具；
+    `tool-access-policy.ts` 12 种 capability 矩阵覆盖所有主要工具（含 `rp_settlement`）；
     现有 app/terminal 接口通过兼容 facade 继续工作。
 - [x] 检查 prompt 注入与 inspect 视图
   - **V3 T8/T12**: `RetrievalOrchestrator` 已接管 prompt 自动检索主链；
@@ -659,39 +673,47 @@ src/memory/
 
 ### 14.1 不要做的事
 
-- [ ] 不要再让 `viewer_role` 直接控制可见性
-- [ ] 不要再让 narrative search 混入 private cognition 检索职责
-- [ ] 不要再用 `publicReply` 文本自动推断 publication
-- [ ] 不要把 `logic_edges` 与认知证据关系混成一张表
-- [ ] 不要把 shared block 当成现有 `core_memory_blocks` 的简单扩展
-- [ ] 不要允许 per-turn 模板切换
+> **审计状态（2026-03-27）：全部遵守。**
+
+- [x] 不要再让 `viewer_role` 直接控制可见性（`VisibilityPolicy` 仅依赖 `viewer_agent_id` + `current_area_id`；`AuthorizationPolicy.canViewAdminOnly()` 已改为读取显式 capability `ViewerContext.can_read_admin_only`，不再依赖 `viewer_role`）
+- [x] 不要再让 narrative search 混入 private cognition 检索职责（`narrative-search.ts` 与 `cognition-search.ts` 严格隔离；各自查询不同 FTS 表）
+- [x] 不要再用 `publicReply` 文本自动推断 publication（`publications[]` 为独立 artifact；`publicReply` 存在但 `publications[]` 为空时不产生 publication event）
+- [x] 不要把 `logic_edges` 与认知证据关系混成一张表（`logic_edges` 仅承载 event-to-event；`memory_relations` 独立承载 `supports`/`conflicts_with`/`derived_from`/`supersedes` 等 9 种关系）
+- [x] 不要把 shared block 当成现有 `core_memory_blocks` 的简单扩展（`shared_blocks` 为独立子系统，6 张表，独立 owner/admin ACL）
+- [x] 不要允许 per-turn 模板切换（`RetrievalTemplate` / `WriteTemplate` 按 profile 解析，不可被 per-turn 动态修改）
 
 ### 14.2 实施时必须保持的语义
 
-- [ ] private belief 合法存在，不应被世界事实静默覆盖
-- [ ] contested 必须同时保留原信念与冲突证据
-- [ ] rejected / abandoned 后再次持有必须新建 assertion
-- [ ] basis 只能单向向上升级
-- [ ] `source_record_id`、`source_settlement_id`、`source_pub_index` 三者职责不能混淆
-- [ ] `VisibilityPolicy`、`AgentPermissions`、策略模板层职责不能重叠
+> **审计状态（2026-03-26）：全部保持。**
+
+- [x] private belief 合法存在，不应被世界事实静默覆盖（`private_cognition_events` / `private_cognition_current` 独立于 world narrative）
+- [x] contested 必须同时保留原信念与冲突证据（`pre_contested_stance` 持久化；`conflicts_with` 边写入 `memory_relations`；`formatContestedEntry` 同时展示旧信念与冲突证据）
+- [x] rejected / abandoned 后再次持有必须新建 assertion（`COGNITION_TERMINAL_KEY_REUSE` 错误码阻止终态 key 复用）
+- [x] basis 只能单向向上升级（`assertBasisUpgradeOnly()` 强制 belief→inference→first_hand 单向；违规触发 `COGNITION_ILLEGAL_BASIS_DOWNGRADE`）
+- [x] `source_record_id`、`source_settlement_id`、`source_pub_index` 三者职责不能混淆（`source_record_id` 对账；`source_settlement_id` settlement 归属；`source_pub_index` publication 索引）
+- [x] `VisibilityPolicy`、`AgentPermissions`、策略模板层职责不能重叠（Layer 1/2/3 独立文件；12-capability `CAPABILITY_MAP` 驱动权限）
 
 ### 14.3 兼容性要求
 
-- [ ] 尽量不迫使 `terminal-cli` 与 `app` 重构整层接口
-- [ ] 所有新增能力应优先通过兼容 facade 落地
+> **审计状态（2026-03-26）：全部满足。**
+
+- [x] 尽量不迫使 `terminal-cli` 与 `app` 重构整层接口（`settlement-adapter.ts` 统一 v3/v4/v5；app/terminal 接口保持兼容）
+- [x] 所有新增能力应优先通过兼容 facade 落地（`narrative_search` / `cognition_search` 通过 `src/memory/tools.ts` 注册；旧 `memory_search` 已平滑退役）
 - [x] 对 v3/v4/v5 协议提供清晰的兼容过渡（v3/v4 提交已被拒绝；settlement 读取仍兼容 v3/v4/v5）
 
 ## 15. 完成标准
 
+> **状态（2026-03-26）：全部达成。** Phase 0-6 已完成，详见 §13。
+
 当以下条件都成立时，可认为本次 memory 重构计划阶段完成:
 
-- [ ] 所有顶层共识都已被编码进类型、schema 与 runtime contract
-- [ ] cognition 与 narrative 已被明确拆层
-- [ ] publication 已从隐式投影改为显式声明
-- [ ] shared blocks 已具备最小可用版本
-- [ ] 访问控制的 4 层职责已在代码中真正分离
-- [ ] app / terminal-cli 在兼容 facade 下仍可运行
-- [ ] 旧逻辑只作为兼容路径存在，不再承担主业务职责
+- [x] 所有顶层共识都已被编码进类型、schema 与 runtime contract（`rp-turn-contract.ts` 定义 v5 类型；`schema.ts` 32 个 migration；`belief-revision.ts` 编码 stance/basis 规则）
+- [x] cognition 与 narrative 已被明确拆层（`narrative-search.ts` 仅查 area/world FTS；`cognition-search.ts` 仅查 `search_docs_cognition`；`retrieval-orchestrator.ts` 统一调度）
+- [x] publication 已从隐式投影改为显式声明（`publications[]` 为 v5 payload 主路径；`materializePublications()` 写 `source_settlement_id` / `source_pub_index`）
+- [x] shared blocks 已具备最小可用版本（6 张表、4 个服务：repo / permissions / attach / patch；section path 校验；auto-snapshot）
+- [x] 访问控制的 4 层职责已在代码中真正分离（Layer 0: schema CHECK；Layer 1: `VisibilityPolicy`；Layer 2: `AgentPermissions` + 12-capability `CAPABILITY_MAP`；Layer 3: `RetrievalTemplate` / `WriteTemplate`）
+- [x] app / terminal-cli 在兼容 facade 下仍可运行（`settlement-adapter.ts` 统一 v3/v4/v5 读取；现有 app/terminal 接口未被破坏）
+- [x] 旧逻辑只作为兼容路径存在，不再承担主业务职责（`agent_fact_overlay` 已由 migration 030 删除；`agent_event_overlay` 已由 migration 017 删除；`private_event` / `private_belief` 仅在 `LEGACY_NODE_REF_KINDS` 中以只读形式保留）
 
 ## 16. Schema 草案
 

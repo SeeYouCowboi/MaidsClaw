@@ -1,7 +1,9 @@
 # Memory Regression Matrix (v4/v5 Refactor)
 
-> Test baseline: **1273 pass, 0 fail** across 85 files (2026-03-21, after T1–T19)
+> Test baseline: **1779 pass, 4 fail** across 113 files (2026-03-26, after Phase 0–6 + legacy-cleanup + Wave 3)
 > Runner: `bun test`
+>
+> Note: The 4 failures are config-dependent behavioral tests in `test/runtime/private-thoughts-behavioral.test.ts` (require `rp:mei` persona/agent in config), unrelated to the memory system.
 
 Each scenario lists what it proves, the test file(s) that cover it, and the key assertion or guard being validated.
 
@@ -194,15 +196,15 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ## Scenario 13 — Schema Migration Idempotency
 
-**What it proves:** Running all 8 migrations twice on the same database produces no error and no duplicate rows or columns.
+**What it proves:** Running all 32 migrations twice on the same database produces no error and no duplicate rows or columns.
 
 **Test files:**
 - `test/memory/schema.test.ts` — idempotency run, table/index count assertions
 
 **Key assertions:**
-- Non-FTS table count = 27 after all migrations (checked via `sql NOT LIKE '%fts5%'`)
+- Non-FTS table count after all migrations (checked via `sql NOT LIKE '%fts5%'`)
 - FTS5 virtual table count = 4
-- Migration count = 8
+- Migration count = 32 (memory:001 through memory:032)
 - Unique constraint on `ux_event_nodes_publication_scope` blocks duplicate publication rows while allowing NULL provenance
 
 ---
