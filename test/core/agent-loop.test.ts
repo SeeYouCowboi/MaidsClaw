@@ -295,6 +295,130 @@ describe("AgentLoop", () => {
       expect(lastChunk.code).toBe("MCP_TOOL_ERROR");
     }
   });
+
+  it("enforces once-cardinality across multiple model rounds in streaming mode", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_1", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_2", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_2", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_2" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    let executions = 0;
+    executor.registerLocal({
+      name: "once_tool",
+      description: "May only execute once per turn",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "public",
+      executionContract: {
+        effect_type: "read_only",
+        turn_phase: "any",
+        cardinality: "once",
+        trace_visibility: "public",
+      },
+      async execute() {
+        executions += 1;
+        return { executions };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: {
+        ...TEST_PROFILE,
+        toolPermissions: [],
+      },
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-once-streaming",
+        requestId: "request-once-streaming",
+        messages: [{ role: "user", content: "run once" }],
+      }),
+    );
+
+    expect(executions).toBe(1);
+    const lastChunk = chunks[chunks.length - 1];
+    expect(lastChunk?.type).toBe("error");
+    if (lastChunk && lastChunk.type === "error") {
+      expect(lastChunk.code).toBe("TOOL_PERMISSION_DENIED");
+    }
+  });
+
+	it("denies submit_rp_turn for maiden when execution context is enforced", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Denied if capability gate works."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const executor = new ToolExecutor();
+		let executed = false;
+		executor.registerLocal({
+			name: "submit_rp_turn",
+			description: "Synthetic settlement tool for permission regression test",
+			parameters: { type: "object", properties: {} },
+			effectClass: "read_only",
+			traceVisibility: "private_runtime",
+			executionContract: {
+				effect_type: "settlement",
+				turn_phase: "post_turn",
+				cardinality: "once",
+				capability_requirements: ["rp_settlement"],
+				trace_visibility: "private_runtime",
+			},
+			async execute() {
+				executed = true;
+				return { ok: true };
+			},
+		});
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: executor,
+		});
+
+		const chunks = await collectChunks(
+			loop.run({
+				sessionId: "session-settlement-denied",
+				requestId: "request-settlement-denied",
+				messages: [{ role: "user", content: "try to settle" }],
+			}),
+		);
+
+		const lastChunk = chunks[chunks.length - 1];
+		expect(lastChunk?.type).toBe("error");
+		if (lastChunk && lastChunk.type === "error") {
+			expect(lastChunk.code).toBe("TOOL_PERMISSION_DENIED");
+		}
+		expect(executed).toBe(false);
+	});
 });
 
 describe("AgentLoop.runBuffered", () => {
@@ -494,6 +618,106 @@ describe("AgentLoop.runBuffered", () => {
     }
     expect(executed).toBe(false);
   });
+
+  it("enforces once-cardinality across multiple model rounds in buffered mode", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_1", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_2", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_2", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_2" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_3", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_3",
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"done"}',
+        },
+        { type: "tool_use_end", id: "call_3" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    let executions = 0;
+    executor.registerLocal({
+      name: "once_tool",
+      description: "May only execute once per buffered turn",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "private_runtime",
+      executionContract: {
+        effect_type: "read_only",
+        turn_phase: "any",
+        cardinality: "once",
+        trace_visibility: "private_runtime",
+      },
+      async execute() {
+        executions += 1;
+        return { executions };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: rpProfile(["once_tool", "submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-once-buffered",
+      requestId: "request-once-buffered",
+      messages: [{ role: "user", content: "run once" }],
+    });
+
+    expect(executions).toBe(1);
+    expect("outcome" in result).toBe(true);
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("done");
+    }
+  });
+
+	it("skips submit_rp_turn in buffered mode when role lacks rp_settlement capability", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Should be skipped for maiden."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-buffered-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: new ToolExecutor(),
+		});
+
+		const result = await loop.runBuffered({
+			sessionId: "session-buffered-settlement-denied",
+			requestId: "request-buffered-settlement-denied",
+			messages: [{ role: "user", content: "attempt settlement" }],
+		});
+
+		expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
+	});
 });
 
 describe("RunContext", () => {

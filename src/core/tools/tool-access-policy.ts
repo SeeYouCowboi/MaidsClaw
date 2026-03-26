@@ -29,6 +29,7 @@ export const CAPABILITY_MAP: Record<string, keyof AgentPermissions> = {
   "shared.block.read": "canReadSharedBlocks",
   "shared.block.mutate": "canMutateSharedBlocks",
   "admin.rules.mutate": "canMutateAdminRules",
+  rp_settlement: "canSettleRpTurn",
 };
 
 // ---------------------------------------------------------------------------

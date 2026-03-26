@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
 import { MaidsClawError } from "../core/errors.js";
+import { enforceArtifactContracts } from "../core/tools/artifact-contract-policy.js";
+import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import type {
   AssertionBasis,
   AssertionRecordV4,
@@ -12,6 +15,8 @@ import type {
 } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
+import { normalizeConflictFactorRefs } from "./cognition/private-cognition-current.js";
+import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { RelationBuilder } from "./cognition/relation-builder.js";
 import {
   materializeRelationIntents,
@@ -32,6 +37,7 @@ import type {
   MemoryFlushRequest,
   MemoryTaskModelProvider,
 } from "./task-agent.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 
 type ExistingContextLoader = (agentId: string) => { entities: unknown[]; privateBeliefs: unknown[] };
 type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => void;
@@ -64,7 +70,26 @@ export class ExplicitSettlementProcessor {
     ingest: IngestionInput,
     created: CreatedState,
     explicitSupportTools: ChatToolDefinition[],
+    options: {
+      agentRole: AgentRole;
+      writeTemplateOverride?: WriteTemplate;
+      agentId?: string;
+      artifactContracts?: Record<string, ArtifactContract>;
+      skipEnforcement?: boolean;
+    },
   ): Promise<void> {
+    if (!options.skipEnforcement) {
+      enforceWriteTemplate(options.agentRole, "cognition", options.writeTemplateOverride);
+
+      if (options.artifactContracts) {
+        enforceArtifactContracts(options.artifactContracts, {
+          writingAgentId: options.agentId,
+          ownerAgentId: ingest.agentId,
+          writeOperation: "append",
+        });
+      }
+    }
+
     for (const explicitMeta of ingest.explicitSettlements) {
       const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
       const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
@@ -324,14 +349,19 @@ export class ExplicitSettlementProcessor {
       return;
     }
 
+    const { refs: validRefs, dropped } = normalizeConflictFactorRefs(resolvedFactorNodeRefs);
+    if (dropped > 0) {
+      console.warn(`[settlement] dropped ${dropped} invalid conflict_factor_refs for settlement ${settlementId}`);
+    }
+
     const summary = unresolvedCount > 0
-      ? `contested (${resolvedFactorNodeRefs.length} factors resolved, ${unresolvedCount} dropped)`
-      : `contested (${resolvedFactorNodeRefs.length} factors)`;
+      ? `contested (${validRefs.length} factors resolved, ${unresolvedCount} dropped)`
+      : `contested (${validRefs.length} factors)`;
 
     for (const assertion of contestedAssertions) {
       this.relationBuilder.writeContestRelations(
         assertion.nodeRef,
-        resolvedFactorNodeRefs,
+        validRefs,
         settlementId,
       );
 
@@ -345,7 +375,7 @@ export class ExplicitSettlementProcessor {
         )
         .run(
           summary,
-          JSON.stringify(resolvedFactorNodeRefs),
+          JSON.stringify(validRefs),
           Date.now(),
           agentId,
           assertion.cognitionKey,

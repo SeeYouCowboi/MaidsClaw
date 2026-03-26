@@ -34,6 +34,7 @@ import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js"
 import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
 import { EpisodeRepository } from "../memory/episode/episode-repo.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
+import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
 import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../memory/schema.js";
@@ -467,6 +468,7 @@ export function bootstrapRuntime(
 		cognitionProjectionRepo,
 		graphStorage,
 		areaWorldProjectionRepo,
+		db.raw,
 	);
 
 	const turnService = new TurnService(
@@ -491,10 +493,17 @@ export function bootstrapRuntime(
 				memoryTaskAgent,
 			)
 		: null;
+	const publicationRecoverySweeper = graphStorage
+		? new PublicationRecoverySweeper(db, graphStorage, {
+				projectionRepo: areaWorldProjectionRepo,
+			})
+		: null;
 	pendingSettlementSweeper?.start();
+	publicationRecoverySweeper?.start();
 
 	const shutdown = (): void => {
 		pendingSettlementSweeper?.stop();
+		publicationRecoverySweeper?.stop();
 		closeDatabaseGracefully(db);
 	};
 

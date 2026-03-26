@@ -1,6 +1,11 @@
+import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../../agents/profile.js";
+import type { ArtifactContract } from "../../core/tools/tool-definition.js";
+import type { ArtifactEnforcementContext } from "../../core/tools/artifact-contract-policy.js";
 import type { CognitionOp, PrivateEpisodeArtifact, PublicationDeclaration } from "../../runtime/rp-turn-contract.js";
 import type { CognitionEventRepo } from "../cognition/cognition-event-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
+import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
 import type {
 	AreaStateSourceType,
@@ -38,6 +43,10 @@ export type SettlementProjectionParams = {
 	) => void;
 	recentCognitionSlotJson: string;
 	areaStateArtifacts?: SettlementAreaStateArtifact[];
+	agentRole?: AgentRole;
+	writeTemplateOverride?: WriteTemplate;
+	artifactContracts?: Record<string, ArtifactContract>;
+	artifactEnforcementContext?: ArtifactEnforcementContext;
 };
 
 /**
@@ -66,6 +75,7 @@ export class ProjectionManager {
 		private readonly cognitionProjectionRepo: PrivateCognitionProjectionRepo,
 		private readonly graphStorage: GraphStorageService | null,
 		private readonly areaWorldProjectionRepo: AreaWorldProjectionRepo | null = null,
+		private readonly db?: Database,
 	) {}
 
 	/**
@@ -190,6 +200,14 @@ export class ProjectionManager {
 			sessionId: params.sessionId,
 			locationEntityId: params.viewerSnapshot?.currentLocationEntityId,
 			timestamp: Date.now(),
+		}, {
+			db: this.db,
+			projectionRepo: this.areaWorldProjectionRepo ?? undefined,
+			sourceAgentId: params.agentId,
+			agentRole: params.agentRole,
+			writeTemplateOverride: params.writeTemplateOverride,
+			artifactContracts: params.artifactContracts,
+			artifactEnforcementContext: params.artifactEnforcementContext,
 		});
 	}
 }

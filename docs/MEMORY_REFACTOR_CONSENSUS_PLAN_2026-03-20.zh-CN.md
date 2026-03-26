@@ -337,9 +337,9 @@
 
 ### 8.2 协议升级
 
-- 引入 `rp_turn_outcome_v4`
-- 保留 v3 兼容读取
-- v4 顶层新增 `publications[]`
+- 引入 `rp_turn_outcome_v5`（原草案为 v4，已在实现中升级至 v5）
+- v3/v4 提交已不再被接受（`normalizeRpTurnOutcome` 仅接受 v5）
+- v5 顶层新增 `publications[]`、`privateEpisodes[]`、`relationIntents[]`、`conflictFactors[]`、`pinnedSummaryProposal`
 
 ### 8.3 publication[] 规范
 
@@ -573,7 +573,7 @@ src/memory/
 
 ### Phase 0: 协议与类型草案
 
-- [ ] 定义 `rp_turn_outcome_v4` 与兼容适配规则
+- [x] 定义 `rp_turn_outcome_v5` 与兼容适配规则（原草案 v4 → 实现为 v5）
 - [ ] 在 `rp-turn-contract` 中加入 `publications[]`
 - [ ] 定义新的 `basis` 枚举
 - [ ] 定义新的 7 态 `stance`
@@ -593,7 +593,7 @@ src/memory/
 
 ### Phase 2: Runtime 写入链路
 
-- [ ] 让 `TurnService` 接受 v4 settlement
+- [x] 让 `TurnService` 接受 v5 settlement（原草案 v4 → 实现为 v5）
 - [ ] 用 `publications[]` 替代 `publicReply -> area_candidate` 主路径
 - [ ] publication 走 hot path 直接写 visible layer
 - [ ] 保留 v3 兼容读取
@@ -679,7 +679,7 @@ src/memory/
 
 - [ ] 尽量不迫使 `terminal-cli` 与 `app` 重构整层接口
 - [ ] 所有新增能力应优先通过兼容 facade 落地
-- [ ] 对 v3/v4 协议提供清晰的兼容过渡
+- [x] 对 v3/v4/v5 协议提供清晰的兼容过渡（v3/v4 提交已被拒绝；settlement 读取仍兼容 v3/v4/v5）
 
 ## 15. 完成标准
 
@@ -1084,73 +1084,95 @@ export type SharedBlockPatchOp =
 export type SharedBlockTargetKind = "agent";
 ```
 
-### 17.2 RP turn v4 草案
+### 17.2 RP turn v5 类型定义（原 v4 草案已被取代）
+
+> **实现状态（2026-03-26）**: 原 v4 草案已在实现中升级为 v5。以下为当前代码中的实际类型定义（`src/runtime/rp-turn-contract.ts`）。v3/v4 提交已不再被 `normalizeRpTurnOutcome()` 接受。
 
 ```ts
-export type PublicActDeclaration = {
-  kind: PublicationKind;
-  target_scope: PublicationTargetScope;
+export type PublicationKindV2 = "spoken" | "written" | "visual";
+export type PublicationTargetScope = "current_area" | "world_public";
+
+export type PublicationDeclaration = {
+  localRef?: string;
+  kind: PublicationKindV2;
+  targetScope: PublicationTargetScope;
   summary: string;
 };
 
 export type PrivateCognitionCommitV4 = {
   schemaVersion: "rp_private_cognition_v4";
+  localRef?: string;
   summary?: string;
-  ops: CognitionOpV4[];
+  ops: CognitionOp[];
 };
 
-export type RpTurnOutcomeSubmissionV4 = {
-  schemaVersion: "rp_turn_outcome_v4";
+export type RpTurnOutcomeSubmissionV5 = {
+  schemaVersion: "rp_turn_outcome_v5";
   publicReply: string;
   latentScratchpad?: string;
-  publications?: PublicActDeclaration[];
-  privateCommit?: PrivateCognitionCommitV4;
+  privateCognition?: PrivateCognitionCommitV4;
+  privateEpisodes?: PrivateEpisodeArtifact[];
+  publications?: PublicationDeclaration[];
+  pinnedSummaryProposal?: PinnedSummaryProposal;
+  relationIntents?: RelationIntent[];
+  conflictFactors?: ConflictFactor[];
 };
 
-export type TurnSettlementPayloadV4 = {
+export type TurnSettlementPayload = {
   settlementId: string;
   requestId: string;
   sessionId: string;
   ownerAgentId: string;
   publicReply: string;
   hasPublicReply: boolean;
-  publications: PublicActDeclaration[];
   viewerSnapshot: {
     selfPointerKey: string;
     userPointerKey: string;
     currentLocationEntityId?: number;
   };
-  privateCommit?: PrivateCognitionCommitV4;
+  schemaVersion?: "turn_settlement_v3" | "turn_settlement_v4" | "turn_settlement_v5";
+  privateCognition?: PrivateCognitionCommitV4;
+  privateEpisodes?: PrivateEpisodeArtifact[];
+  publications?: PublicationDeclaration[];
+  pinnedSummaryProposal?: PinnedSummaryProposal;
+  relationIntents?: RelationIntent[];
+  conflictFactors?: ConflictFactor[];
+  areaStateArtifacts?: Array<{
+    key: string;
+    value: unknown;
+    surfacingClassification?: string;
+    sourceType?: string;
+    areaId?: number;
+    validTime?: number;
+    committedTime?: number;
+  }>;
 };
 ```
 
-### 17.3 cognition 草案
+### 17.3 cognition 类型定义（与代码对齐）
+
+> **实现状态（2026-03-26）**: 以下为当前代码中的实际类型定义（`src/runtime/rp-turn-contract.ts`）。cognition 内部 schema 版本仍为 `rp_private_cognition_v4`，因为 cognition ops 结构未发生 breaking change。
 
 ```ts
-export type CognitionRecordBaseV4 = {
+export type CognitionKind = "assertion" | "evaluation" | "commitment";
+
+export type CognitionRecordBase = {
+  kind: CognitionKind;
   key: string;
   salience?: number;
+  provenance?: string;
   ttlTurns?: number;
 };
 
-export type AssertionProvenance = {
-  source_label_raw?: string;
-  source_event_ref?: NodeRef;
-};
-
-export type AssertionRecordV4 = CognitionRecordBaseV4 & {
+export type AssertionRecordV4 = CognitionRecordBase & {
   kind: "assertion";
   proposition: EntityProposition;
-  basis: AssertionBasis;
   stance: AssertionStance;
-  preContestedStance?: Extract<
-    AssertionStance,
-    "hypothetical" | "tentative" | "accepted" | "confirmed"
-  >;
-  provenance?: AssertionProvenance;
+  basis?: AssertionBasis;
+  preContestedStance?: AssertionStance;
 };
 
-export type EvaluationRecordV4 = CognitionRecordBaseV4 & {
+export type EvaluationRecord = CognitionRecordBase & {
   kind: "evaluation";
   target: CognitionEntityRef | CognitionSelector;
   dimensions: Array<{ name: string; value: number }>;
@@ -1158,7 +1180,7 @@ export type EvaluationRecordV4 = CognitionRecordBaseV4 & {
   notes?: string;
 };
 
-export type CommitmentRecordV4 = CognitionRecordBaseV4 & {
+export type CommitmentRecord = CognitionRecordBase & {
   kind: "commitment";
   mode: "goal" | "intent" | "plan" | "constraint" | "avoidance";
   target: EntityProposition | { action: string; target?: CognitionEntityRef };
@@ -1167,13 +1189,13 @@ export type CommitmentRecordV4 = CognitionRecordBaseV4 & {
   horizon?: "immediate" | "near" | "long";
 };
 
-export type CognitionRecordV4 =
+export type CognitionRecord =
   | AssertionRecordV4
-  | EvaluationRecordV4
-  | CommitmentRecordV4;
+  | EvaluationRecord
+  | CommitmentRecord;
 
-export type CognitionOpV4 =
-  | { op: "upsert"; record: CognitionRecordV4 }
+export type CognitionOp =
+  | { op: "upsert"; record: CognitionRecord }
   | { op: "retract"; target: CognitionSelector };
 ```
 
@@ -1340,8 +1362,11 @@ export type CognitionSearchHit = {
 
 ### 17.8 兼容约束
 
-- `RpTurnOutcomeSubmissionV4` 应与现有 v3 路径并存，直到 runtime 全部切到 v4。
-- `memory_search` 可在兼容期继续存在，但不再代表最终接口。
+> **实现状态（2026-03-26）**: v3/v4 兼容过渡已完成。`normalizeRpTurnOutcome()` 仅接受 `rp_turn_outcome_v5`，v3/v4 提交被显式拒绝。`memory_search` 工具已于 2026-03 退役，`EmbeddingPurpose` 重命名为 `narrative_search`。
+
+- `RpTurnOutcomeSubmissionV5` 为当前唯一接受的提交格式；v3/v4 提交触发错误。
+- `TurnSettlementPayload.schemaVersion` 仍支持读取 `v3`/`v4`/`v5`（settlement adapter 兼容旧记录）。
+- `memory_search` 已退役（2026-03），由 `narrative_search` 替代。
 - TypeScript 类型草案优先表达目标语义，不要求与当前文件布局一一对应。
 
 ## 18. 2026-03-22 分支共识补充

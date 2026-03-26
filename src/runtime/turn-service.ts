@@ -8,6 +8,7 @@ import type { Chunk } from "../core/chunk.js";
 import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
+
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -43,6 +44,7 @@ import type {
 	RpBufferedExecutionResult,
 } from "./rp-turn-contract.js";
 import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "./submit-rp-turn-tool.js";
 
 type TurnServiceAgentLoop = {
 	run(request: AgentRunRequest): AsyncIterable<Chunk>;
@@ -487,6 +489,13 @@ export class TurnService {
 					viewerSnapshot: resolvedViewerSnapshot,
 					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
 					recentCognitionSlotJson: JSON.stringify(slotEntries),
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
 				});
 			} else {
 				this.interactionStore.upsertRecentCognitionSlot(
@@ -536,10 +545,18 @@ export class TurnService {
 
 		if (hasPublications && this.graphStorage && !this.projectionManager) {
 			try {
-				materializePublications(this.graphStorage, publications, settlementId, {
+			materializePublications(this.graphStorage, publications, settlementId, {
 					sessionId: effectiveRequest.sessionId,
 					locationEntityId: viewerSnapshot?.currentLocationEntityId,
 					timestamp: Date.now(),
+				}, {
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayloadAfterCommit?.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
 				});
 			} catch (err) {
 				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -756,6 +773,7 @@ export class TurnService {
 			dialogueRecords: toDialogueRecords(records),
 			interactionRecords: records as never,
 			queueOwnerAgentId,
+			agentRole: this.resolveAssistantActorType(flushRequest.sessionId),
 		});
 
 		this.interactionStore.markProcessed(
@@ -829,10 +847,28 @@ export class TurnService {
 			privateCognition?: { opCount?: number; kinds?: string[] };
 		};
 
+		const presentPublicArtifactKinds: string[] = [];
+		if (payload.hasPublicReply) {
+			presentPublicArtifactKinds.push("publicReply");
+		}
+		if (payload.publications && payload.publications.length > 0) {
+			presentPublicArtifactKinds.push("publications");
+		}
+		if (payload.pinnedSummaryProposal) {
+			presentPublicArtifactKinds.push("pinnedSummaryProposal");
+		}
+		if ((payload as Record<string, unknown>).areaStateArtifacts) {
+			presentPublicArtifactKinds.push("areaStateArtifacts");
+		}
+		const allKinds = [
+			...(redactedPayload.privateCognition?.kinds ?? []),
+			...presentPublicArtifactKinds,
+		];
+
 		return {
 			type: "turn_settlement",
 			op_count: redactedPayload.privateCognition?.opCount,
-			kinds: redactedPayload.privateCognition?.kinds,
+			kinds: allKinds.length > 0 ? allKinds : undefined,
 		};
 	}
 }

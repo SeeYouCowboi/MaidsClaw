@@ -19,6 +19,7 @@ export type AgentPermissions = {
    */
   canMutateSharedBlocks: boolean;
   canMutateAdminRules: boolean;
+  canSettleRpTurn: boolean;
 };
 
 export function hasAdminReadAccess(perms: AgentPermissions): boolean {
@@ -41,6 +42,7 @@ export function getDefaultPermissions(agentId: string, role: AgentRole): AgentPe
         canReadSharedBlocks: true,
         canMutateSharedBlocks: false,
         canMutateAdminRules: false,
+        canSettleRpTurn: true,
       };
     case "maiden":
       return {
@@ -56,6 +58,7 @@ export function getDefaultPermissions(agentId: string, role: AgentRole): AgentPe
         canReadSharedBlocks: true,
         canMutateSharedBlocks: true,
         canMutateAdminRules: true,
+        canSettleRpTurn: false,
       };
     case "task_agent":
       return {
@@ -71,6 +74,7 @@ export function getDefaultPermissions(agentId: string, role: AgentRole): AgentPe
         canReadSharedBlocks: false,
         canMutateSharedBlocks: false,
         canMutateAdminRules: false,
+        canSettleRpTurn: false,
       };
   }
 }

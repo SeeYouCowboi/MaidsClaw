@@ -1,7 +1,10 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../runtime/submit-rp-turn-tool.js";
 import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
@@ -35,6 +38,8 @@ export type MemoryFlushRequest = CoreMemoryFlushRequest & {
   dialogueRecords?: DialogueRecord[];
   queueOwnerAgentId?: string;
   interactionRecords?: InteractionRecord[];
+  agentRole?: AgentRole;
+  writeTemplateOverride?: WriteTemplate;
 };
 
 export type GraphOrganizerJob = {
@@ -90,7 +95,7 @@ export type ChatMessage = {
 export type MemoryTaskModelProvider = {
   readonly defaultEmbeddingModelId: string;
   chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
-  embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
+  embed(texts: string[], purpose: "memory_index" | "narrative_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
 
 export type CreatedState = {
@@ -380,7 +385,12 @@ export class MemoryTaskAgent {
 
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
-      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS);
+      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
+        agentRole: flushRequest.agentRole ?? "rp_agent",
+        writeTemplateOverride: flushRequest.writeTemplateOverride,
+        agentId: flushRequest.agentId,
+        artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+      });
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
       const dedupedIngest: IngestionInput = {

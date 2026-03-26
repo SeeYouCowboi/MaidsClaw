@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MaidsClawError } from "../../src/core/errors.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { MaterializationService, materializePublications } from "../../src/memory/materialization.js";
@@ -514,6 +515,117 @@ describe("MaterializationService", () => {
 });
 
 describe("Publication Materialization", () => {
+	it("blocks publication writes for task_agent role with WRITE_TEMPLATE_DENIED", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "task-deny-location",
+			displayName: "Task Deny Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Task agent should not publish this." },
+		];
+
+		try {
+			let caught: unknown;
+			try {
+				materializePublications(storage, publications, `stl:task-deny-${randomUUID()}`, {
+					sessionId: "sess-task-deny-code",
+					locationEntityId: locationId,
+					timestamp: 1235,
+				}, {
+					agentRole: "task_agent",
+				});
+			} catch (error) {
+				caught = error;
+			}
+
+			expect(caught).toBeDefined();
+			expect(caught instanceof MaidsClawError).toBe(true);
+			expect((caught as MaidsClawError).code).toBe("WRITE_TEMPLATE_DENIED");
+
+			const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+			expect(rows.length).toBe(0);
+		} finally {
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("allows publication writes for rp_agent role (positive case)", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "rp-allow-location",
+			displayName: "RP Allow Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "RP agent publishes successfully." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:rp-allow-${randomUUID()}`, {
+			sessionId: "sess-rp-allow",
+			locationEntityId: locationId,
+			timestamp: 2000,
+		}, {
+			agentRole: "rp_agent",
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("allows publication writes for maiden with writeTemplate override", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "maiden-override-location",
+			displayName: "Maiden Override Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Maiden publishes with override." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:maiden-override-${randomUUID()}`, {
+			sessionId: "sess-maiden-override",
+			locationEntityId: locationId,
+			timestamp: 3000,
+		}, {
+			agentRole: "maiden",
+			writeTemplateOverride: { allowPublications: true },
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
 	it("explicit publication creates event_node with provenance columns", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
@@ -835,13 +947,95 @@ describe("Publication Materialization", () => {
 			expect(result.skipped).toBe(1);
 			expect(attemptCount).toBe(4);
 			expect(sleepCalls).toEqual([100, 200, 400]);
-			expect(warned).toBe(1);
+			expect(warned).toBe(2);
 
 			const rows = db.query<{ id: number }>(
 				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
 				[settlementId],
 			);
 			expect(rows.length).toBe(0);
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			console.warn = originalWarn;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("creates publication_recovery job before returning skipped when db option is provided", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-fail-with-job",
+			displayName: "Retry Fail With Job",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "This should produce a recovery job." },
+		];
+		const settlementId = `stl:retry-fail-job-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		patchedStorage.createProjectedEvent = (() => {
+			const transient = new Error("database is busy");
+			transient.name = "SQLiteError";
+			throw transient;
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = () => {
+		};
+
+		const originalWarn = console.warn;
+		console.warn = (..._args: unknown[]) => {
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-fail-job",
+				locationEntityId: locationId,
+				timestamp: 11_500,
+			}, {
+				db: db.raw,
+			});
+
+			expect(result.materialized).toBe(0);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(1);
+
+			const job = db.get<{
+				job_type: string;
+				status: string;
+				idempotency_key: string;
+				payload: string;
+			}>(
+				"SELECT job_type, status, idempotency_key, payload FROM _memory_maintenance_jobs WHERE job_type = 'publication_recovery' AND idempotency_key = ?",
+				[`publication_recovery:${settlementId}:0`],
+			);
+
+			expect(job).toBeDefined();
+			expect(job!.job_type).toBe("publication_recovery");
+			expect(job!.status).toBe("pending");
+			expect(job!.idempotency_key).toBe(`publication_recovery:${settlementId}:0`);
+
+			const payload = JSON.parse(job!.payload) as {
+				settlementId: string;
+				pubIndex: number;
+				visibilityScope: string;
+				sessionId: string;
+			};
+			expect(payload.settlementId).toBe(settlementId);
+			expect(payload.pubIndex).toBe(0);
+			expect(payload.visibilityScope).toBe("area_visible");
+			expect(payload.sessionId).toBe("sess-retry-fail-job");
 		} finally {
 			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
 			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;

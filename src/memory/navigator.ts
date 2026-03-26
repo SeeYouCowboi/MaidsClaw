@@ -401,8 +401,12 @@ export class GraphNavigator {
             source_scope: "world",
           });
         }
-      } catch {
-        // narrative search unavailable — continue with existing seeds
+      } catch (err) {
+        console.debug("[navigator] supplemental narrative search unavailable", {
+          error: err instanceof Error ? err.message : String(err),
+          query: query.slice(0, 100),
+          agentId: viewerContext.viewer_agent_id,
+        });
       }
     }
 
@@ -428,8 +432,12 @@ export class GraphNavigator {
             source_scope: "private",
           });
         }
-      } catch {
-        // cognition search unavailable — continue with existing seeds
+      } catch (err) {
+        console.debug("[navigator] supplemental cognition search unavailable", {
+          error: err instanceof Error ? err.message : String(err),
+          query: query.slice(0, 100),
+          agentId: viewerContext.viewer_agent_id,
+        });
       }
     }
 

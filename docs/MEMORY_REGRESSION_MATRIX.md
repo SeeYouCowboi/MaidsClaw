@@ -1,4 +1,4 @@
-# Memory Regression Matrix (v4 Refactor)
+# Memory Regression Matrix (v4/v5 Refactor)
 
 > Test baseline: **1273 pass, 0 fail** across 85 files (2026-03-21, after T1–T19)
 > Runner: `bun test`
@@ -7,12 +7,12 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ---
 
-## Scenario 1 — v4 Settlement Write + Publication Materialization
+## Scenario 1 — v5 Settlement Write + Publication Materialization
 
-**What it proves:** A v4 RP turn with `publications[]` commits a settlement, writes canonical cognition, and materializes visible `event_nodes` with correct provenance — all in one atomic pass.
+**What it proves:** A v5 RP turn with `publications[]` commits a settlement, writes canonical cognition, and materializes visible `event_nodes` with correct provenance — all in one atomic pass.
 
 **Test files:**
-- `test/runtime/memory-entry-consumption.test.ts` — mixed v3/v4 settlement integration
+- `test/runtime/memory-entry-consumption.test.ts` — mixed v3/v4/v5 settlement integration
 - `test/memory/materialization-promotion.test.ts` — publication provenance, idempotency via `ux_event_nodes_publication_scope`
 - `test/memory/e2e-rp-memory-pipeline.test.ts` — end-to-end RP memory pipeline
 
@@ -24,12 +24,12 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ---
 
-## Scenario 2 — v3/v4 Mixed-History Sweeper
+## Scenario 2 — v3/v4/v5 Mixed-History Sweeper
 
-**What it proves:** `PendingSettlementSweeper` processes a session containing both v3 and v4 settlement records without mis-routing or dropping either.
+**What it proves:** `PendingSettlementSweeper` processes a session containing v3, v4, and v5 settlement records without mis-routing or dropping any.
 
 **Test files:**
-- `test/runtime/memory-entry-consumption.test.ts` — sweeper mixed v3/v4 coverage
+- `test/runtime/memory-entry-consumption.test.ts` — sweeper mixed v3/v4/v5 coverage
 - `src/memory/task-agent.test.ts` — loadExistingContext v3 legacy fallback + canonical read
 
 **Key assertions:**
@@ -79,21 +79,22 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 **Key assertions:**
 - `narrative_search` queries only `search_docs_area` + `search_docs_world`; `search_docs_private` and `search_docs_cognition` are never touched
 - `cognition_search` queries only `search_docs_cognition`; narrative tables are never touched
-- `memory_search` (alias) produces identical results to `narrative_search`
 
 ---
 
-## Scenario 6 — `memory_search` Alias Behavior
+## Scenario 6 — `memory_search` Retired
 
-**What it proves:** `memory_search` is a transparent alias for `narrative_search` with the same schema and result shape.
+**Status: Retired (March 2026).** `memory_search` was removed when `EmbeddingPurpose` was renamed from `"memory_search"` to `"narrative_search"` (T2). The tool is no longer registered.
+
+**What this scenario now tests:** `narrative_search` produces valid embeddings and returns results with the correct `EmbeddingPurpose` value.
 
 **Test files:**
-- `test/memory/retrieval-search.test.ts` — alias verification test
+- `test/memory/retrieval-search.test.ts` — narrative search embedding and result shape
 
 **Key assertions:**
-- Calling `memory_search` and `narrative_search` with identical inputs returns identical outputs
-- `memory_search` schema has no cognition-specific params (`kind`, `stance`, `basis`, `active_only`)
-- Tool count stays at 7 after alias is registered
+- `narrative_search` uses `EmbeddingPurpose = "narrative_search"` (not the retired `"memory_search"` value)
+- `narrative_search` schema has no cognition-specific params (`kind`, `stance`, `basis`, `active_only`)
+- Tool count is 6 (not 7); `memory_search` is absent from `RP_AUTHORIZED_TOOLS`
 
 ---
 
@@ -223,14 +224,14 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 
 ## Scenario 15 — Bootstrap: All Services Wired
 
-**What it proves:** The runtime bootstrap correctly instantiates `NarrativeSearchService`, `CognitionSearchService`, and `GraphNavigator` with all services, and all 7 RP tools are registered.
+**What it proves:** The runtime bootstrap correctly instantiates `NarrativeSearchService`, `CognitionSearchService`, and `GraphNavigator` with all services, and all 6 RP tools are registered (`memory_search` was retired in March 2026).
 
 **Test files:**
 - `test/runtime/bootstrap.test.ts` — preset merge, agent-loader template roundtrip
-- `test/runtime/tool-permissions.test.ts` — RP authorized tool count = 7
+- `test/runtime/tool-permissions.test.ts` — RP authorized tool count = 6
 
 **Key assertions:**
-- `RP_AUTHORIZED_TOOLS` has 7 entries including `narrative_search` and `cognition_search`
+- `RP_AUTHORIZED_TOOLS` has 6 entries including `narrative_search` and `cognition_search` (`memory_search` retired)
 - `GraphNavigator` receives `narrativeSearch` and `cognitionSearch` service instances (not null)
 - `AgentProfile.retrievalTemplate` / `writeTemplate` optional fields survive the `toAgentProfile()` roundtrip
 - Role defaults (`rp_agent`) correctly set `canAccessCognition = true`, `canWriteCognition = true`
@@ -290,7 +291,7 @@ Each scenario lists what it proves, the test file(s) that cover it, and the key 
 | `test/runtime/turn-service.test.ts` | 1 (settlement atomicity) |
 | `test/runtime/rp-turn-contract.test.ts` | 3 (normalizer, mapping constants) |
 | `test/runtime/bootstrap.test.ts` | 15 (service wiring, tool count) |
-| `test/runtime/tool-permissions.test.ts` | 15 (RP_AUTHORIZED_TOOLS = 7) |
+| `test/runtime/tool-permissions.test.ts` | 15 (RP_AUTHORIZED_TOOLS = 6) |
 | `src/memory/task-agent.test.ts` | 2, 11 (sweeper, loadExistingContext) |
 | `src/memory/navigator.test.ts` | 9 (beam expansion, supplemental seeds) |
 | `src/memory/prompt-data.test.ts` | 8 (contested rendering) |

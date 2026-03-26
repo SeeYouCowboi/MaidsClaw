@@ -56,7 +56,7 @@ function safeParseJson(value: string | null): Record<string, unknown> {
   }
 }
 
-function normalizeConflictFactorRefs(value: unknown): { refs: string[]; dropped: number } {
+export function normalizeConflictFactorRefs(value: unknown): { refs: string[]; dropped: number } {
   if (!Array.isArray(value)) {
     return { refs: [], dropped: 0 };
   }

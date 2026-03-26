@@ -1,8 +1,14 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
+import type { ArtifactContract } from "../core/tools/tool-definition.js";
+import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
+import { enforceWriteTemplate } from "./contracts/write-template.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 
 export type MaterializationResult = {
@@ -286,11 +292,16 @@ export class MaterializationService {
       locationEntityId?: number;
       timestamp?: number;
       sourceAgentId?: string;
+      agentRole?: AgentRole;
+      writeTemplateOverride?: WriteTemplate;
     },
   ): MaterializationResult {
     return materializePublications(this.storage, publications, settlementId, ctx, {
+      db: this.db,
       projectionRepo: this.projectionRepo,
       sourceAgentId: ctx.sourceAgentId,
+      agentRole: ctx.agentRole,
+      writeTemplateOverride: ctx.writeTemplateOverride,
     });
   }
 }
@@ -305,10 +316,26 @@ export function materializePublications(
     timestamp?: number;
   },
   options?: {
+    db?: Database;
     projectionRepo?: AreaWorldProjectionRepo;
     sourceAgentId?: string;
+    agentRole?: AgentRole;
+    writeTemplateOverride?: WriteTemplate;
+    artifactContracts?: Record<string, ArtifactContract>;
+    artifactEnforcementContext?: ArtifactEnforcementContext;
+    skipEnforcement?: boolean;
   },
 ): MaterializationResult {
+  if (!options?.skipEnforcement) {
+    if (options?.agentRole) {
+      enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
+    }
+
+    if (options?.artifactContracts && options.artifactEnforcementContext) {
+      enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
+    }
+  }
+
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
   const maxRetries = 3;
 
@@ -363,40 +390,73 @@ export function materializePublications(
         settlementId,
         pubIndex,
         maxRetries,
+        targetScope: pub.targetScope,
+        sourceAgentId: options?.sourceAgentId ?? null,
+        kind: pub.kind,
       },
+      options?.db,
     );
 
-    if (publicationWriteResult === "reconciled") {
-      result.reconciled += 1;
-      continue;
-    }
     if (publicationWriteResult === "skipped") {
       result.skipped += 1;
       continue;
     }
 
-    if (options?.projectionRepo && options.sourceAgentId) {
-      options.projectionRepo.applyPublicationProjection({
-        trigger: "publication",
-        targetScope: pub.targetScope,
-        agentId: options.sourceAgentId,
-        areaId: locationEntityId,
-        projectionKey: `publication:${settlementId}:${pubIndex}`,
-        summaryText: pub.summary.trim(),
-        payload: {
-          settlementId,
-          pubIndex,
-          visibilityScope,
-          kind: pub.kind,
-        },
-        surfacingClassification: "public_manifestation",
-        updatedAt: timestamp,
-      });
+    applyPublicationProjectionUpdate(options?.projectionRepo, {
+      targetScope: pub.targetScope,
+      sourceAgentId: options?.sourceAgentId,
+      locationEntityId,
+      settlementId,
+      pubIndex,
+      summary: pub.summary.trim(),
+      visibilityScope,
+      kind: pub.kind,
+      timestamp,
+    });
+    if (publicationWriteResult === "reconciled") {
+      result.reconciled += 1;
+      continue;
     }
     result.materialized += 1;
   }
 
   return result;
+}
+
+export function applyPublicationProjectionUpdate(
+  projectionRepo: AreaWorldProjectionRepo | null | undefined,
+  input: {
+    targetScope: PublicationDeclaration["targetScope"];
+    sourceAgentId?: string | null;
+    locationEntityId: number;
+    settlementId: string;
+    pubIndex: number;
+    summary: string;
+    visibilityScope: "area_visible" | "world_public";
+    kind: string;
+    timestamp: number;
+  },
+): void {
+  if (!projectionRepo || !input.sourceAgentId) {
+    return;
+  }
+
+  projectionRepo.applyPublicationProjection({
+    trigger: "publication",
+    targetScope: input.targetScope,
+    agentId: input.sourceAgentId,
+    areaId: input.locationEntityId,
+    projectionKey: `publication:${input.settlementId}:${input.pubIndex}`,
+    summaryText: input.summary,
+    payload: {
+      settlementId: input.settlementId,
+      pubIndex: input.pubIndex,
+      visibilityScope: input.visibilityScope,
+      kind: input.kind,
+    },
+    surfacingClassification: "public_manifestation",
+    updatedAt: input.timestamp,
+  });
 }
 
 type PublicationWriteResult = "materialized" | "reconciled" | "skipped";
@@ -405,12 +465,20 @@ type PublicationRetryContext = {
   settlementId: string;
   pubIndex: number;
   maxRetries: number;
+  targetScope: PublicationDeclaration["targetScope"];
+  sourceAgentId: string | null;
+  kind: string;
 };
+
+// PublicationRecoveryJobPayload imported from publication-recovery-types.ts
+
+const PUBLICATION_RECOVERY_JOB_TYPE = "publication_recovery";
 
 function createPublicationEventWithRetry(
   storage: GraphStorageService | null,
   params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
   retryContext: PublicationRetryContext,
+  db?: Database,
 ): PublicationWriteResult {
   if (!storage) {
     return "skipped";
@@ -436,6 +504,8 @@ function createPublicationEventWithRetry(
           `[materializePublications] failed after ${retryContext.maxRetries} retries (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
           error,
         );
+
+        writePublicationRecoveryJob(db, params, retryContext, retryCount + 1, error);
         return "skipped";
       }
 
@@ -443,6 +513,84 @@ function createPublicationEventWithRetry(
       Bun.sleepSync(backoffMs);
       retryCount += 1;
     }
+  }
+}
+
+function writePublicationRecoveryJob(
+  db: Database | undefined,
+  params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
+  retryContext: PublicationRetryContext,
+  failureCount: number,
+  error: unknown,
+): void {
+  if (!db) {
+    console.warn(
+      `[materializePublications] cannot write recovery job: db handle not provided (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+    );
+    return;
+  }
+
+  try {
+    const now = Date.now();
+    const payload: PublicationRecoveryJobPayload = {
+      settlementId: retryContext.settlementId,
+      pubIndex: retryContext.pubIndex,
+      targetScope: retryContext.targetScope,
+      visibilityScope: params.visibilityScope ?? "area_visible",
+      sessionId: params.sessionId,
+      sourceAgentId: retryContext.sourceAgentId,
+      kind: retryContext.kind,
+      failureCount,
+      lastAttemptAt: now,
+      nextAttemptAt: now,
+      lastErrorCode: error instanceof Error ? error.name : null,
+      lastErrorMessage: error instanceof Error ? error.message : String(error),
+      summary: params.summary,
+      timestamp: params.timestamp,
+      participants: params.participants,
+      locationEntityId: params.locationEntityId,
+      eventCategory: params.eventCategory,
+    };
+
+    const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
+
+    const insertResult = db
+      .prepare(
+        `INSERT OR IGNORE INTO _memory_maintenance_jobs
+         (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        PUBLICATION_RECOVERY_JOB_TYPE,
+        "pending",
+        idempotencyKey,
+        JSON.stringify(payload),
+        now,
+        now,
+        payload.nextAttemptAt,
+      );
+
+    if (insertResult.changes > 0) {
+      return;
+    }
+
+    db.prepare(
+      `UPDATE _memory_maintenance_jobs
+       SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
+       WHERE job_type = ? AND idempotency_key = ?`,
+    ).run(
+      "pending",
+      JSON.stringify(payload),
+      now,
+      payload.nextAttemptAt,
+      PUBLICATION_RECOVERY_JOB_TYPE,
+      idempotencyKey,
+    );
+  } catch (recoveryError) {
+    console.warn(
+      `[materializePublications] recovery job write failed (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+      recoveryError,
+    );
   }
 }
 
