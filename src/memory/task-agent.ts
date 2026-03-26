@@ -90,7 +90,7 @@ export type ChatMessage = {
 export type MemoryTaskModelProvider = {
   readonly defaultEmbeddingModelId: string;
   chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
-  embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
+  embed(texts: string[], purpose: "memory_index" | "narrative_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
 
 export type CreatedState = {
