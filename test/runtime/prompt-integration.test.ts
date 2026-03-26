@@ -150,6 +150,7 @@ describe("runtime prompt integration", () => {
     expect(buildInputs[0]?.viewerContext).toEqual({
       viewer_agent_id: RP_PROFILE.id,
       viewer_role: RP_PROFILE.role,
+      can_read_admin_only: false,
       current_area_id: 42,
       session_id: "session-live",
     });

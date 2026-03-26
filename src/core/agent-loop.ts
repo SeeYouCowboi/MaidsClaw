@@ -8,7 +8,10 @@ import {
 import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
 import { getDefaultPermissions } from "../memory/contracts/agent-permissions.js";
 import type { Chunk, TextDeltaChunk } from "./chunk.js";
-import type { ViewerContext } from "./contracts/viewer-context.js";
+import {
+	defaultViewerCanReadAdminOnly,
+	type ViewerContext,
+} from "./contracts/viewer-context.js";
 import { MaidsClawError, wrapError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type {
@@ -736,7 +739,7 @@ export class AgentLoop {
 			};
 		}
 
-		const viewerContext = this.viewerContextResolver
+		const resolvedViewerContext = this.viewerContextResolver
 			? await this.viewerContextResolver({
 					sessionId: request.sessionId,
 					agentId: this.profile.id,
@@ -745,8 +748,15 @@ export class AgentLoop {
 			: {
 					viewer_agent_id: this.profile.id,
 					viewer_role: this.profile.role,
+					can_read_admin_only: defaultViewerCanReadAdminOnly(this.profile.role),
 					session_id: request.sessionId,
 				};
+		const viewerContext: ViewerContext = {
+			...resolvedViewerContext,
+			can_read_admin_only:
+				resolvedViewerContext.can_read_admin_only ??
+				defaultViewerCanReadAdminOnly(resolvedViewerContext.viewer_role),
+		};
 
 		const promptSections = await this.promptBuilder.build({
 			profile: this.profile,

@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { defaultViewerCanReadAdminOnly } from "../core/contracts/viewer-context.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
@@ -405,6 +406,7 @@ export class PromotionService implements IPromotionService {
     return {
       viewer_agent_id: "promotion-system",
       viewer_role: "maiden",
+      can_read_admin_only: defaultViewerCanReadAdminOnly("maiden"),
       current_area_id: currentAreaId ?? undefined,
       session_id: "promotion",
     };

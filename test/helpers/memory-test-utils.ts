@@ -61,6 +61,7 @@ export function createViewerContext(overrides?: Partial<ViewerContext>): ViewerC
 	return {
 		viewer_agent_id: "__self__",
 		viewer_role: "rp_agent",
+		can_read_admin_only: false,
 		session_id: "test-session-1",
 		...overrides,
 	};

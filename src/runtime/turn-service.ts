@@ -5,7 +5,7 @@ import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
-import type { ViewerContext } from "../core/contracts/viewer-context.js";
+import { defaultViewerCanReadAdminOnly, type ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 
@@ -624,12 +624,19 @@ export class TurnService {
 		role: AgentProfile["role"];
 	}): Promise<ViewerContext> {
 		if (this.viewerContextResolver) {
-			return await this.viewerContextResolver(params);
+			const resolved = await this.viewerContextResolver(params);
+			return {
+				...resolved,
+				can_read_admin_only:
+					resolved.can_read_admin_only ??
+					defaultViewerCanReadAdminOnly(resolved.viewer_role),
+			};
 		}
 
 		return {
 			viewer_agent_id: params.agentId,
 			viewer_role: params.role,
+			can_read_admin_only: defaultViewerCanReadAdminOnly(params.role),
 			session_id: params.sessionId,
 			current_area_id: undefined,
 		};
