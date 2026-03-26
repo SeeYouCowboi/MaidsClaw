@@ -3,7 +3,7 @@ import {
   type GraphNodeRef,
   parseGraphNodeRef,
   serializeGraphNodeRef,
-} from "./graph-node-ref.js";
+} from "../../../src/memory/contracts/graph-node-ref.js";
 
 describe("parseGraphNodeRef", () => {
   it("parses all 6 canonical kinds correctly", () => {

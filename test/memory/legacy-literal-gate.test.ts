@@ -6,7 +6,8 @@ import { spawnSync } from "node:child_process";
 const ALLOWED_FILES = new Set([
   "src/memory/schema.ts",
   "test/memory/schema.test.ts",
-  "src/memory/contracts/graph-node-ref.test.ts",
+  "test/memory/contracts/graph-node-ref.test.ts",
+  "test/memory/legacy-literal-gate.test.ts",
 ]);
 
 const IGNORED_PREFIXES = [".sisyphus/", ".claude/", "docs/"] as const;
