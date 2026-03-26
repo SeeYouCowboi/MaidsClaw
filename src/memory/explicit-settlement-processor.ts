@@ -70,23 +70,24 @@ export class ExplicitSettlementProcessor {
     ingest: IngestionInput,
     created: CreatedState,
     explicitSupportTools: ChatToolDefinition[],
-    options?: {
-      agentRole?: AgentRole;
+    options: {
+      agentRole: AgentRole;
       writeTemplateOverride?: WriteTemplate;
       agentId?: string;
       artifactContracts?: Record<string, ArtifactContract>;
+      skipEnforcement?: boolean;
     },
   ): Promise<void> {
-    if (options?.agentRole) {
+    if (!options.skipEnforcement) {
       enforceWriteTemplate(options.agentRole, "cognition", options.writeTemplateOverride);
-    }
 
-    if (options?.artifactContracts) {
-      enforceArtifactContracts(options.artifactContracts, {
-        writingAgentId: options.agentId,
-        ownerAgentId: ingest.agentId,
-        writeOperation: "append",
-      });
+      if (options.artifactContracts) {
+        enforceArtifactContracts(options.artifactContracts, {
+          writingAgentId: options.agentId,
+          ownerAgentId: ingest.agentId,
+          writeOperation: "append",
+        });
+      }
     }
 
     for (const explicitMeta of ingest.explicitSettlements) {

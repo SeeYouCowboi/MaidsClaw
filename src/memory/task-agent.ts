@@ -386,7 +386,7 @@ export class MemoryTaskAgent {
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
       await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
-        agentRole: flushRequest.agentRole,
+        agentRole: flushRequest.agentRole ?? "rp_agent",
         writeTemplateOverride: flushRequest.writeTemplateOverride,
         agentId: flushRequest.agentId,
         artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,

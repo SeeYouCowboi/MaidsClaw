@@ -489,6 +489,13 @@ export class TurnService {
 					viewerSnapshot: resolvedViewerSnapshot,
 					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
 					recentCognitionSlotJson: JSON.stringify(slotEntries),
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
 				});
 			} else {
 				this.interactionStore.upsertRecentCognitionSlot(

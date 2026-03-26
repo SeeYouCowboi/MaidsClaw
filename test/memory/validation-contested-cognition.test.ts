@@ -322,7 +322,7 @@ describe("V2 validation: contested cognition", () => {
 				changedNodeRefs: [],
 			};
 
-			await processor.process(flushRequest, ingestion, created, []);
+			await processor.process(flushRequest, ingestion, created, [], { agentRole: "rp_agent" });
 
 			const row = db.get<{ conflict_summary: string | null }>(
 				"SELECT conflict_summary FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
@@ -450,7 +450,7 @@ describe("write-time validation: conflict_factor_refs_json", () => {
 				changedNodeRefs: [],
 			};
 
-			await processor.process(flushRequest, ingestion, created, []);
+			await processor.process(flushRequest, ingestion, created, [], { agentRole: "rp_agent" });
 
 			// Verify warning was logged
 			expect(warnSpy.mock.calls.length).toBeGreaterThan(0);
@@ -587,7 +587,7 @@ describe("write-time validation: conflict_factor_refs_json", () => {
 				changedNodeRefs: [],
 			};
 
-			await processor.process(flushRequest, ingestion, created, []);
+			await processor.process(flushRequest, ingestion, created, [], { agentRole: "rp_agent" });
 
 			// Verify no warning was logged (all refs valid)
 			const relevantCall = warnSpy.mock.calls.find((call: string[]) =>
@@ -719,7 +719,7 @@ describe("write-time validation: conflict_factor_refs_json", () => {
 				changedNodeRefs: [],
 			};
 
-			await processor.process(flushRequest, ingestion, created, []);
+			await processor.process(flushRequest, ingestion, created, [], { agentRole: "rp_agent" });
 
 			// Verify stored refs is empty array
 			const row = db.get<{ conflict_factor_refs_json: string | null }>(

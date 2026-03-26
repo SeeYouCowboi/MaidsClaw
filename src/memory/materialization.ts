@@ -8,6 +8,7 @@ import type { WriteTemplate } from "./contracts/write-template.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 
 export type MaterializationResult = {
@@ -322,14 +323,17 @@ export function materializePublications(
     writeTemplateOverride?: WriteTemplate;
     artifactContracts?: Record<string, ArtifactContract>;
     artifactEnforcementContext?: ArtifactEnforcementContext;
+    skipEnforcement?: boolean;
   },
 ): MaterializationResult {
-  if (options?.agentRole) {
-    enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
-  }
+  if (!options?.skipEnforcement) {
+    if (options?.agentRole) {
+      enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
+    }
 
-  if (options?.artifactContracts && options.artifactEnforcementContext) {
-    enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
+    if (options?.artifactContracts && options.artifactEnforcementContext) {
+      enforceArtifactContracts(options.artifactContracts, options.artifactEnforcementContext);
+    }
   }
 
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
@@ -431,22 +435,7 @@ type PublicationRetryContext = {
   maxRetries: number;
 };
 
-type PublicationRecoveryJobPayload = {
-  settlementId: string;
-  pubIndex: number;
-  visibilityScope: "area_visible" | "world_public";
-  sessionId: string;
-  failureCount: number;
-  lastAttemptAt: number;
-  nextAttemptAt: number | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  summary: string;
-  timestamp: number;
-  participants: string;
-  locationEntityId: number;
-  eventCategory: PublicEventCategory;
-};
+// PublicationRecoveryJobPayload imported from publication-recovery-types.ts
 
 const PUBLICATION_RECOVERY_JOB_TYPE = "publication_recovery";
 

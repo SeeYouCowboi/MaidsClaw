@@ -155,7 +155,7 @@ async function processExplicitSettlement(params: {
 		changedNodeRefs: [],
 	};
 
-	await processor.process(flushRequest, ingest, created, [] satisfies ChatToolDefinition[]);
+	await processor.process(flushRequest, ingest, created, [] satisfies ChatToolDefinition[], { agentRole: "rp_agent" });
 }
 
 describe("V2 validation — negative/edge-case boundaries", () => {

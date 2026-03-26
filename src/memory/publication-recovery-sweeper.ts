@@ -1,4 +1,5 @@
 import type { Db } from "../storage/database.js";
+import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { GraphStorageService } from "./storage.js";
 import type { PublicEventCategory } from "./types.js";
 
@@ -10,22 +11,7 @@ const DEFAULT_MAX_RETRIES = 5;
 
 type JobStatus = "pending" | "retrying" | "reconciled" | "exhausted";
 
-type PublicationRecoveryJobPayload = {
-  settlementId: string;
-  pubIndex: number;
-  visibilityScope: "area_visible" | "world_public";
-  sessionId: string;
-  failureCount: number;
-  lastAttemptAt: number;
-  nextAttemptAt: number | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  summary: string;
-  timestamp: number;
-  participants: string;
-  locationEntityId: number;
-  eventCategory: PublicEventCategory;
-};
+// PublicationRecoveryJobPayload imported from publication-recovery-types.ts
 
 type PublicationRecoveryJobRow = {
   id: number;
