@@ -1350,7 +1350,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 22. Remove legacy-ONLY test files + assertions
+- [x] 22. Remove legacy-ONLY test files + assertions
 
   **What to do**:
   Most test updates are already co-located in Tasks 1-21 (each production task updates its own tests). This task handles ONLY test files/assertions that are purely about legacy invariants with no corresponding production change:
@@ -1388,7 +1388,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `test: remove legacy-only test files + assertions`
   - Pre-commit: `bun test`
 
-- [ ] 23. Clean up legacy docs
+- [x] 23. Clean up legacy docs
 
   **What to do**:
   - `docs/MEMORY_REGRESSION_MATRIX.md`: Remove "Legacy Private Path Retirement Audit" section (lines 260-272) or update to reflect completion
@@ -1430,7 +1430,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `deep`
+- [x] F1. **Plan Compliance Audit** — `deep`
   Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
@@ -1450,7 +1450,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F1-compliance.txt
   ```
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check no legacy patterns remain.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
@@ -1466,7 +1466,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F2-quality.txt
   ```
 
-- [ ] F3. **Automated End-to-End QA** — `unspecified-high`
+- [x] F3. **Automated End-to-End QA** — `unspecified-high`
   Start from clean state. Run full `bun test`. Verify all Definition of Done criteria via Grep tool. Test assertion upsert still works correctly end-to-end.
   Output: `Scenarios [N/N pass] | Integration [N/N] | VERDICT`
 
@@ -1489,7 +1489,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F3-qa.txt
   ```
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance. Verify private_episode_events, private_cognition_events, private_cognition_current tables are UNTOUCHED.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | VERDICT`
 
