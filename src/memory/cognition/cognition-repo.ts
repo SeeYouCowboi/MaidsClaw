@@ -134,95 +134,11 @@ type AssertionProjectionRecord = {
   provenance?: string;
 };
 
-const RELATION_BUILDER_PATCH_FLAG = Symbol.for("maidsclaw.relation_builder_assertion_projection_compat");
-
-function patchRelationBuilderAssertionProjectionCompat(): void {
-  const relationBuilderCtor = RelationBuilder as unknown as {
-    prototype: Record<string, unknown>;
-    [RELATION_BUILDER_PATCH_FLAG]?: boolean;
-  };
-  if (relationBuilderCtor[RELATION_BUILDER_PATCH_FLAG]) {
-    return;
-  }
-
-  const proto = relationBuilderCtor.prototype;
-  const originalResolveSourceAgentId = proto.resolveSourceAgentId as
-    | ((this: { db: DbLike }, sourceNodeRef: string) => string | null)
-    | undefined;
-  const originalResolveCanonicalCognitionRefByKey = proto.resolveCanonicalCognitionRefByKey as
-    | ((this: { db: DbLike }, cognitionKey: string, sourceAgentId: string | null) => string | null)
-    | undefined;
-
-  if (typeof originalResolveSourceAgentId === "function") {
-    proto.resolveSourceAgentId = function resolveSourceAgentIdWithAssertionProjectionFallback(
-      this: { db: DbLike },
-      sourceNodeRef: string,
-    ): string | null {
-      let resolved: string | null = null;
-      try {
-        resolved = originalResolveSourceAgentId.call(this, sourceNodeRef);
-      } catch {}
-      if (resolved) {
-        return resolved;
-      }
-
-      const trimmed = sourceNodeRef.trim();
-      if (!trimmed.startsWith("assertion:")) {
-        return resolved;
-      }
-
-      const id = Number(trimmed.slice("assertion:".length));
-      if (!Number.isFinite(id)) {
-        return resolved;
-      }
-
-      const row = this.db
-        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion' LIMIT 1`)
-        .get(id) as { agent_id: string } | null;
-      return row?.agent_id ?? resolved;
-    };
-  }
-
-  if (typeof originalResolveCanonicalCognitionRefByKey === "function") {
-    proto.resolveCanonicalCognitionRefByKey = function resolveCanonicalCognitionRefByKeyWithAssertionProjectionFallback(
-      this: { db: DbLike },
-      cognitionKey: string,
-      sourceAgentId: string | null,
-    ): string | null {
-      let resolved: string | null = null;
-      try {
-        resolved = originalResolveCanonicalCognitionRefByKey.call(this, cognitionKey, sourceAgentId);
-      } catch {}
-      if (resolved) {
-        return resolved;
-      }
-
-      const agentFilter = sourceAgentId ? " AND agent_id = ?" : "";
-      const agentBind = sourceAgentId ? [sourceAgentId] : [];
-      const row = this.db
-        .prepare(
-          `SELECT id
-           FROM private_cognition_current
-           WHERE cognition_key = ?${agentFilter}
-             AND kind = 'assertion'
-           ORDER BY updated_at DESC, id DESC
-           LIMIT 1`,
-        )
-        .get(cognitionKey, ...agentBind) as { id: number } | null;
-
-      return row ? `assertion:${row.id}` : resolved;
-    };
-  }
-
-  relationBuilderCtor[RELATION_BUILDER_PATCH_FLAG] = true;
-}
-
 export class CognitionRepository {
   private readonly relationBuilder: RelationBuilder;
   private readonly eventRepo: CognitionEventRepo;
 
   constructor(private readonly db: DbLike) {
-    patchRelationBuilderAssertionProjectionCompat();
     this.relationBuilder = new RelationBuilder(db);
     this.eventRepo = new CognitionEventRepo(db);
   }
