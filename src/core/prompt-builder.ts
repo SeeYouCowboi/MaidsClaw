@@ -239,11 +239,9 @@ export class PromptBuilder {
 		}
 
 		if (memDs.getAttachedSharedBlocks) {
-			const attached = this.readDataSource("memory.getAttachedSharedBlocks", () => {
-				const result = memDs.getAttachedSharedBlocks!(agentId);
-				if (result instanceof Promise) return "";
-				return result;
-			});
+			const attached = this.readDataSource("memory.getAttachedSharedBlocks", () =>
+				memDs.getAttachedSharedBlocks!(agentId),
+			);
 			if (attached) parts.push(attached);
 		}
 

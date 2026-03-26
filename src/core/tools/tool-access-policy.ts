@@ -107,13 +107,12 @@ export function canExecuteTool(
     }
   }
 
-  // Layer 3: cardinality enforcement
+  // Layer 3: cardinality enforcement (read-only — recording happens post-execution in AgentLoop)
   if (contract && turnToolsUsed) {
     const { cardinality } = contract;
     if (cardinality === "once" || cardinality === "at_most_once") {
       if (turnToolsUsed.has(toolName)) return false;
     }
-    turnToolsUsed.add(toolName);
   }
 
   return true;

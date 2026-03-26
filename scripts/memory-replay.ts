@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { openDatabase } from "../src/storage/database.js";
 import { runMemoryMigrations } from "../src/memory/schema.js";
+import { PrivateCognitionProjectionRepo } from "../src/memory/cognition/private-cognition-current.js";
 
 const dbPath = process.argv[2] ?? process.env.MAIDSCLAW_DB_PATH;
 if (!dbPath) {
@@ -22,39 +23,31 @@ if (eventCount === 0) {
   process.exit(0);
 }
 
-db.transaction(() => {
-  const deleted = db.run(
-    "DELETE FROM private_cognition_current WHERE agent_id IN (SELECT DISTINCT agent_id FROM private_cognition_events)",
-  );
-  console.log(`Cleared ${deleted.changes} projected rows from private_cognition_current.`);
+const agentIds = (
+  db.query<{ agent_id: string }>(
+    "SELECT DISTINCT agent_id FROM private_cognition_events",
+  ) as Iterable<{ agent_id: string }>
+);
 
-  const events = db.query<{
-    agent_id: string;
-    cognition_key: string;
-    kind: string;
-    stance: string;
-    summary_text: string;
-    basis: string;
-    source_ref: string;
-    settlement_id: string;
-    committed_at: number;
-  }>(
-    `SELECT agent_id, cognition_key, kind, stance, summary_text, basis, source_ref, settlement_id, committed_at
-     FROM private_cognition_events
-     ORDER BY seq_num ASC`,
-  );
+const repo = new PrivateCognitionProjectionRepo(db);
 
-  let rebuilt = 0;
-  for (const evt of events) {
-    db.run(
-      `INSERT OR REPLACE INTO private_cognition_current
-       (agent_id, cognition_key, kind, stance, summary_text, basis, source_ref, settlement_id, committed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [evt.agent_id, evt.cognition_key, evt.kind, evt.stance, evt.summary_text, evt.basis, evt.source_ref, evt.settlement_id, evt.committed_at],
-    );
-    rebuilt++;
-  }
-  console.log(`Replayed ${rebuilt} events → private_cognition_current rebuilt.`);
-});
+let totalAgents = 0;
+for (const { agent_id } of agentIds) {
+  const before = db.get<{ cnt: number }>(
+    "SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = ?",
+    [agent_id],
+  )?.cnt ?? 0;
 
+  repo.rebuild(agent_id);
+
+  const after = db.get<{ cnt: number }>(
+    "SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = ?",
+    [agent_id],
+  )?.cnt ?? 0;
+
+  console.log(`Agent ${agent_id}: ${before} → ${after} projected rows`);
+  totalAgents++;
+}
+
+console.log(`Replayed ${eventCount} events across ${totalAgents} agents.`);
 db.close();

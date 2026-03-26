@@ -16,7 +16,7 @@ export type MemoryDataSource = {
   getPinnedBlocks?(agentId: string): string;
   getSharedBlocks?(agentId: string): string;
   getRecentCognition(viewerContext: ViewerContext): string;
-  getAttachedSharedBlocks?(agentId: string): string | Promise<string>;
+  getAttachedSharedBlocks?(agentId: string): string;
   getTypedRetrievalSurface?(userMessage: string, viewerContext: ViewerContext): string | Promise<string>;
 };
 

@@ -178,7 +178,6 @@ describe("stress: cardinality once", () => {
 		const ctx = makeContext(schema, permissions, turnToolsUsed);
 
 		expect(canExecuteTool(profile, "once-tool", ctx)).toBe(true);
-		expect(turnToolsUsed.has("once-tool")).toBe(true);
 	});
 
 	it("second call to once-cardinality tool is blocked", () => {
@@ -187,11 +186,10 @@ describe("stress: cardinality once", () => {
 		const permissions = makePermissions();
 		const turnToolsUsed = new Set<string>();
 
-		// First call
 		const ctx1 = makeContext(schema, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "once-tool", ctx1)).toBe(true);
+		turnToolsUsed.add("once-tool");
 
-		// Second call — same turnToolsUsed set
 		const ctx2 = makeContext(schema, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "once-tool", ctx2)).toBe(false);
 	});
@@ -205,6 +203,7 @@ describe("stress: cardinality once", () => {
 
 		const ctxA = makeContext(schemaA, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "once-A", ctxA)).toBe(true);
+		turnToolsUsed.add("once-A");
 
 		const ctxB = makeContext(schemaB, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "once-B", ctxB)).toBe(true);
@@ -222,6 +221,7 @@ describe("stress: cardinality at_most_once", () => {
 
 		const ctx1 = makeContext(schema, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "amo-tool", ctx1)).toBe(true);
+		turnToolsUsed.add("amo-tool");
 
 		const ctx2 = makeContext(schema, permissions, turnToolsUsed);
 		expect(canExecuteTool(profile, "amo-tool", ctx2)).toBe(false);
