@@ -10,6 +10,7 @@ import {
   type MemoryToolServices,
   type ToolExecutorLike,
 } from "./tools";
+import { ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES } from "./tool-names.js";
 import type { ViewerContext } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -65,20 +66,12 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("tool definitions", () => {
-    it("defines exactly 7 tools", () => {
-      expect(tools).toHaveLength(7);
+    it("defines all canonical memory tools", () => {
+      expect(tools).toHaveLength(ALL_MEMORY_TOOL_NAMES.length);
     });
 
     it("all tools have valid JSON Schema parameter definitions", () => {
-      const expectedNames = [
-        "core_memory_append",
-        "core_memory_replace",
-        "memory_read",
-        "narrative_search",
-        "cognition_search",
-        "memory_search",
-        "memory_explore",
-      ];
+      const expectedNames = ALL_MEMORY_TOOL_NAMES;
 
       for (const name of expectedNames) {
         const tool = toolByName(tools, name);
@@ -105,13 +98,13 @@ describe("Memory Tools", () => {
     });
 
     it("core_memory_append has label enum restricted to persona", () => {
-      const tool = toolByName(tools, "core_memory_append");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryAppend);
       const props = (tool.parameters as Record<string, unknown>).properties as Record<string, Record<string, unknown>>;
       expect(props.label.enum).toEqual(["persona"]);
     });
 
     it("core_memory_replace has label enum restricted to persona", () => {
-      const tool = toolByName(tools, "core_memory_replace");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryReplace);
       const props = (tool.parameters as Record<string, unknown>).properties as Record<string, Record<string, unknown>>;
       expect(props.label.enum).toEqual(["persona"]);
     });
@@ -121,9 +114,9 @@ describe("Memory Tools", () => {
   // core_memory_append
   // -------------------------------------------------------------------------
 
-  describe("core_memory_append", () => {
+  describe(MEMORY_TOOL_NAMES.coreMemoryAppend, () => {
     it("dispatches to CoreMemoryService and returns result", () => {
-      const tool = toolByName(tools, "core_memory_append");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryAppend);
       const result = tool.handler({ label: "persona", content: "I love cats." }, ctx) as {
         success: boolean;
         chars_current?: number;
@@ -137,7 +130,7 @@ describe("Memory Tools", () => {
     });
 
     it("returns error when label is 'index'", () => {
-      const tool = toolByName(tools, "core_memory_append");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryAppend);
       const result = tool.handler({ label: "index", content: "sneaky write" }, ctx) as {
         success: boolean;
         error?: string;
@@ -149,7 +142,7 @@ describe("Memory Tools", () => {
     });
 
     it("returns failure when append exceeds char limit", () => {
-      const tool = toolByName(tools, "core_memory_append");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryAppend);
       const hugeContent = "x".repeat(5000);
       const result = tool.handler({ label: "persona", content: hugeContent }, ctx) as {
         success: boolean;
@@ -163,11 +156,11 @@ describe("Memory Tools", () => {
   // core_memory_replace
   // -------------------------------------------------------------------------
 
-  describe("core_memory_replace", () => {
+  describe(MEMORY_TOOL_NAMES.coreMemoryReplace, () => {
     it("dispatches to CoreMemoryService and returns result", () => {
       coreMemory.appendBlock(ctx.viewer_agent_id, "persona", "Bob is 30 years old.");
 
-      const tool = toolByName(tools, "core_memory_replace");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryReplace);
       const result = tool.handler(
         { label: "persona", old_content: "30 years old", new_content: "31 years old" },
         ctx,
@@ -180,7 +173,7 @@ describe("Memory Tools", () => {
     });
 
     it("returns error when label is 'index'", () => {
-      const tool = toolByName(tools, "core_memory_replace");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryReplace);
       const result = tool.handler(
         { label: "index", old_content: "old", new_content: "new" },
         ctx,
@@ -192,7 +185,7 @@ describe("Memory Tools", () => {
     });
 
     it("returns failure when old_content not found", () => {
-      const tool = toolByName(tools, "core_memory_replace");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryReplace);
       const result = tool.handler(
         { label: "persona", old_content: "nonexistent", new_content: "new" },
         ctx,
@@ -207,9 +200,9 @@ describe("Memory Tools", () => {
   // memory_read
   // -------------------------------------------------------------------------
 
-  describe("memory_read", () => {
+  describe(MEMORY_TOOL_NAMES.memoryRead, () => {
     it("dispatches entity read to RetrievalService.readByEntity", () => {
-      const tool = toolByName(tools, "memory_read");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryRead);
       const result = tool.handler({ entity: "Alice" }, ctx) as {
         entity: unknown;
         facts: unknown[];
@@ -221,7 +214,7 @@ describe("Memory Tools", () => {
     });
 
     it("dispatches topic read to RetrievalService.readByTopic", () => {
-      const tool = toolByName(tools, "memory_read");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryRead);
       const result = tool.handler({ topic: "weather" }, ctx) as {
         topic: unknown;
         events: unknown[];
@@ -232,7 +225,7 @@ describe("Memory Tools", () => {
     });
 
     it("dispatches event_ids read to RetrievalService.readByEventIds", () => {
-      const tool = toolByName(tools, "memory_read");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryRead);
       const result = tool.handler({ event_ids: [1, 2, 3] }, ctx) as unknown[];
 
       expect(Array.isArray(result)).toBe(true);
@@ -240,7 +233,7 @@ describe("Memory Tools", () => {
     });
 
     it("dispatches fact_ids read to RetrievalService.readByFactIds", () => {
-      const tool = toolByName(tools, "memory_read");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryRead);
       const result = tool.handler({ fact_ids: [10, 20] }, ctx) as unknown[];
 
       expect(Array.isArray(result)).toBe(true);
@@ -248,7 +241,7 @@ describe("Memory Tools", () => {
     });
 
     it("returns error when no argument provided", () => {
-      const tool = toolByName(tools, "memory_read");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryRead);
       const result = tool.handler({}, ctx) as { success: boolean; error: string };
 
       expect(result.success).toBe(false);
@@ -257,37 +250,12 @@ describe("Memory Tools", () => {
   });
 
   // -------------------------------------------------------------------------
-  // memory_search
-  // -------------------------------------------------------------------------
-
-  describe("memory_search", () => {
-    it("dispatches to RetrievalService.searchVisibleNarrative", async () => {
-      const tool = toolByName(tools, "memory_search");
-      const result = (await tool.handler({ query: "coffee" }, ctx)) as {
-        results: unknown[];
-      };
-
-      expect(result.results).toBeDefined();
-      expect(Array.isArray(result.results)).toBe(true);
-    });
-
-    it("returns empty results for short queries", async () => {
-      const tool = toolByName(tools, "memory_search");
-      const result = (await tool.handler({ query: "ab" }, ctx)) as {
-        results: unknown[];
-      };
-
-      expect(result.results).toEqual([]);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // narrative_search
   // -------------------------------------------------------------------------
 
-  describe("narrative_search", () => {
+  describe(MEMORY_TOOL_NAMES.narrativeSearch, () => {
     it("dispatches to RetrievalService.searchVisibleNarrative (fallback path)", async () => {
-      const tool = toolByName(tools, "narrative_search");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.narrativeSearch);
       const result = (await tool.handler({ query: "coffee" }, ctx)) as {
         results: unknown[];
       };
@@ -306,7 +274,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNarrative = buildMemoryTools({ ...services, narrativeSearch: mockNarrativeSearch });
-      const tool = toolByName(toolsWithNarrative, "narrative_search");
+      const tool = toolByName(toolsWithNarrative, MEMORY_TOOL_NAMES.narrativeSearch);
       const result = (await tool.handler({ query: "test query" }, ctx)) as {
         results: unknown[];
       };
@@ -320,9 +288,9 @@ describe("Memory Tools", () => {
   // cognition_search
   // -------------------------------------------------------------------------
 
-  describe("cognition_search", () => {
+  describe(MEMORY_TOOL_NAMES.cognitionSearch, () => {
     it("returns error when cognitionSearch service is not available", () => {
-      const tool = toolByName(tools, "cognition_search");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.cognitionSearch);
       const result = tool.handler({ query: "trust" }, ctx) as {
         success: boolean;
         error: string;
@@ -342,7 +310,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithCognition = buildMemoryTools({ ...services, cognitionSearch: mockCognitionSearch });
-      const tool = toolByName(toolsWithCognition, "cognition_search");
+      const tool = toolByName(toolsWithCognition, MEMORY_TOOL_NAMES.cognitionSearch);
       const result = tool.handler(
         { query: "trust", kind: "assertion", active_only: true },
         ctx,
@@ -357,42 +325,10 @@ describe("Memory Tools", () => {
   });
 
   // -------------------------------------------------------------------------
-  // memory_search alias behavior
-  // -------------------------------------------------------------------------
-
-  describe("memory_search alias", () => {
-    it("produces identical output to narrative_search for same query", async () => {
-      const narrativeTool = toolByName(tools, "narrative_search");
-      const aliasTool = toolByName(tools, "memory_search");
-
-      const narrativeResult = await narrativeTool.handler({ query: "coffee" }, ctx);
-      const aliasResult = await aliasTool.handler({ query: "coffee" }, ctx);
-
-      expect(aliasResult).toEqual(narrativeResult);
-    });
-
-    it("delegates to narrativeSearch service when available (same as narrative_search)", async () => {
-      let callCount = 0;
-      const mockNarrativeSearch = {
-        async searchNarrative(_query: string, _ctx: ViewerContext) {
-          callCount++;
-          return [{ source_ref: "e:1", content: "mock" }];
-        },
-      };
-
-      const toolsWithNarrative = buildMemoryTools({ ...services, narrativeSearch: mockNarrativeSearch });
-      const aliasTool = toolByName(toolsWithNarrative, "memory_search");
-      await aliasTool.handler({ query: "test" }, ctx);
-
-      expect(callCount).toBe(1);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // memory_explore
   // -------------------------------------------------------------------------
 
-  describe("memory_explore", () => {
+  describe(MEMORY_TOOL_NAMES.memoryExplore, () => {
     it("dispatches to navigator.explore when navigator is available", async () => {
       const mockNavigator = {
         explore(query: string, _ctx: ViewerContext) {
@@ -401,7 +337,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
-      const tool = toolByName(toolsWithNav, "memory_explore");
+      const tool = toolByName(toolsWithNav, MEMORY_TOOL_NAMES.memoryExplore);
       const result = await tool.handler({ query: "why did Alice leave" }, ctx) as {
         query: string;
         query_type: string;
@@ -425,7 +361,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
-      const tool = toolByName(toolsWithNav, "memory_explore");
+      const tool = toolByName(toolsWithNav, MEMORY_TOOL_NAMES.memoryExplore);
       await tool.handler({ query: "test", asOfTime: 500, timeDimension: "valid_time" }, ctx);
 
       expect(capturedInput?.asOfValidTime).toBe(500);
@@ -442,7 +378,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
-      const tool = toolByName(toolsWithNav, "memory_explore");
+      const tool = toolByName(toolsWithNav, MEMORY_TOOL_NAMES.memoryExplore);
       await tool.handler({ query: "test", asOfTime: 700, timeDimension: "committed_time" }, ctx);
 
       expect(capturedInput?.asOfCommittedTime).toBe(700);
@@ -459,7 +395,7 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
-      const tool = toolByName(toolsWithNav, "memory_explore");
+      const tool = toolByName(toolsWithNav, MEMORY_TOOL_NAMES.memoryExplore);
       await tool.handler({ query: "test", asOfValidTime: 300, asOfCommittedTime: 400 }, ctx);
 
       expect(capturedInput?.asOfValidTime).toBe(300);
@@ -476,14 +412,14 @@ describe("Memory Tools", () => {
       };
 
       const toolsWithNav = buildMemoryTools({ ...services, navigator: mockNavigator });
-      const tool = toolByName(toolsWithNav, "memory_explore");
+      const tool = toolByName(toolsWithNav, MEMORY_TOOL_NAMES.memoryExplore);
       await tool.handler({ query: "test", asOfValidTime: 300, asOfTime: 500, timeDimension: "valid_time" }, ctx);
 
       expect(capturedInput?.asOfValidTime).toBe(300);
     });
 
     it("returns error when navigator is not available", async () => {
-      const tool = toolByName(tools, "memory_explore");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.memoryExplore);
       const result = await tool.handler({ query: "why did Alice leave" }, ctx) as {
         success: boolean;
         error: string;
@@ -529,7 +465,7 @@ describe("Memory Tools", () => {
         cognitionSearch: mockCognition,
       };
       const fullTools = buildMemoryTools(fullServices);
-      const tool = toolByName(fullTools, "memory_explore");
+      const tool = toolByName(fullTools, MEMORY_TOOL_NAMES.memoryExplore);
       const result = await tool.handler({ query: "what happened" }, ctx) as {
         query: string;
         query_type: string;
@@ -549,7 +485,7 @@ describe("Memory Tools", () => {
   // -------------------------------------------------------------------------
 
   describe("registerMemoryTools", () => {
-    it("successfully registers all 7 tools", () => {
+    it("successfully registers all 6 tools", () => {
       const registered: MemoryToolDefinition[] = [];
       const executor: ToolExecutorLike = {
         registerLocal(tool: MemoryToolDefinition) {
@@ -559,15 +495,14 @@ describe("Memory Tools", () => {
 
       registerMemoryTools(executor, services);
 
-      expect(registered).toHaveLength(7);
+      expect(registered).toHaveLength(ALL_MEMORY_TOOL_NAMES.length);
       const names = registered.map((t) => t.name);
-      expect(names).toContain("core_memory_append");
-      expect(names).toContain("core_memory_replace");
-      expect(names).toContain("memory_read");
-      expect(names).toContain("narrative_search");
-      expect(names).toContain("cognition_search");
-      expect(names).toContain("memory_search");
-      expect(names).toContain("memory_explore");
+      expect(names).toContain(MEMORY_TOOL_NAMES.coreMemoryAppend);
+      expect(names).toContain(MEMORY_TOOL_NAMES.coreMemoryReplace);
+      expect(names).toContain(MEMORY_TOOL_NAMES.memoryRead);
+      expect(names).toContain(MEMORY_TOOL_NAMES.narrativeSearch);
+      expect(names).toContain(MEMORY_TOOL_NAMES.cognitionSearch);
+      expect(names).toContain(MEMORY_TOOL_NAMES.memoryExplore);
     });
   });
 
@@ -580,7 +515,7 @@ describe("Memory Tools", () => {
       const otherCtx = makeViewerContext({ viewer_agent_id: "agent-2" });
       coreMemory.initializeBlocks("agent-2");
 
-      const tool = toolByName(tools, "core_memory_append");
+      const tool = toolByName(tools, MEMORY_TOOL_NAMES.coreMemoryAppend);
       tool.handler({ label: "persona", content: "I am agent-2" }, otherCtx);
 
       const block2 = coreMemory.getBlock("agent-2", "persona");

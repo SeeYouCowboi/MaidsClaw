@@ -30,6 +30,7 @@ import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { PromptSectionSlot } from "../../src/core/prompt-template.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
+import { ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 
 function makeMockAgentLoop(chunks: Chunk[]): AgentLoop {
   return {
@@ -146,34 +147,33 @@ function commitPendingSettlementRange(params: {
 }
 
 describe("memory-entry-consumption: live runtime integration", () => {
-  it("bootstrapped runtime registers all 7 memory tools via registerRuntimeTools", () => {
+  it("bootstrapped runtime registers all memory tools via registerRuntimeTools", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
       const schemaNames = runtime.toolExecutor.getSchemas().map((s) => s.name);
 
-      expect(schemaNames).toContain("core_memory_append");
-      expect(schemaNames).toContain("core_memory_replace");
-      expect(schemaNames).toContain("memory_read");
-      expect(schemaNames).toContain("narrative_search");
-      expect(schemaNames).toContain("cognition_search");
-      expect(schemaNames).toContain("memory_search");
-      expect(schemaNames).toContain("memory_explore");
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.coreMemoryAppend);
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.coreMemoryReplace);
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.memoryRead);
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.narrativeSearch);
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.cognitionSearch);
+      expect(schemaNames).toContain(MEMORY_TOOL_NAMES.memoryExplore);
     } finally {
       runtime.shutdown();
     }
   });
 
-  it("all 7 memory tool schemas have name, description, and parameters", () => {
+  it("all memory tool schemas have name, description, and parameters", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
       const schemas = runtime.toolExecutor.getSchemas();
       const memorySchemas = schemas.filter((s) =>
-        ["core_memory_append", "core_memory_replace", "memory_read", "narrative_search", "cognition_search", "memory_search", "memory_explore"].includes(s.name),
+        [MEMORY_TOOL_NAMES.coreMemoryAppend, MEMORY_TOOL_NAMES.coreMemoryReplace, MEMORY_TOOL_NAMES.memoryRead, MEMORY_TOOL_NAMES.narrativeSearch, MEMORY_TOOL_NAMES.cognitionSearch, MEMORY_TOOL_NAMES.memoryExplore].includes(s.name),
       );
 
-      expect(memorySchemas).toHaveLength(7);
+      expect(memorySchemas).toHaveLength(ALL_MEMORY_TOOL_NAMES.length);
       for (const schema of memorySchemas) {
         expect(typeof schema.name).toBe("string");
         expect(schema.name.length > 0).toBe(true);
@@ -194,7 +194,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       coreMemory.initializeBlocks("maid:main");
 
       const result = (await runtime.toolExecutor.execute(
-        "core_memory_append",
+        MEMORY_TOOL_NAMES.coreMemoryAppend,
         { label: "persona", content: "Integration test entry." },
         { sessionId: session.sessionId },
       )) as { success: boolean };
@@ -301,8 +301,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -393,7 +393,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(profileIds).toContain(TASK_AGENT_PROFILE.id);
 
       const schemas = runtime.toolExecutor.getSchemas();
-      expect(schemas.length).toBeGreaterThanOrEqual(7);
+      expect(schemas.length).toBeGreaterThanOrEqual(6);
 
       expect(maidenProfile?.toolPermissions).toBeDefined();
     } finally {
@@ -446,7 +446,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
                 },
                 supporting_nodes: [],
                 supporting_facts: [11],
-                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_event:7" }],
+                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "private_episode:7" }],
                 summary: "1 visible step",
               },
             ],
@@ -457,7 +457,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       },
     });
 
-    const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+    const exploreTool = tools.find((tool) => tool.name === MEMORY_TOOL_NAMES.memoryExplore);
     expect(exploreTool).toBeDefined();
     expect(exploreTool!.description.includes("Explain evidence paths")).toBe(true);
     const exploreProperties = ((exploreTool!.parameters as { properties?: Record<string, unknown> }).properties ?? {});
@@ -604,8 +604,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -729,8 +729,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -1172,8 +1172,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -1276,8 +1276,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -1534,7 +1534,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
           recordIndex: 3,
           actorType: "rp_agent",
           recordType: "tool_call",
-          payload: { toolCallId: "tc-1", toolName: "memory_search", arguments: { query: "test" } },
+          payload: { toolCallId: "tc-1", toolName: MEMORY_TOOL_NAMES.narrativeSearch, arguments: { query: "test" } },
           committedAt: 3000,
         },
         {
@@ -1796,8 +1796,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -1840,8 +1840,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -2146,8 +2146,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -2300,8 +2300,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
         migrateCalls.push(request);
         return {
           batch_id: request.idempotencyKey,
-          private_event_ids: [],
-          private_belief_ids: [],
+          episode_event_ids: [],
+          assertion_ids: [],
           entity_ids: [],
           fact_ids: [],
         };
@@ -2875,12 +2875,12 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
-  it("all 7 memory tools have executionContract metadata after build", () => {
+  it("all memory tools have executionContract metadata after build", () => {
     const tools = buildMemoryTools({
       coreMemory: {} as never,
       retrieval: {} as never,
     });
-    expect(tools).toHaveLength(7);
+    expect(tools).toHaveLength(ALL_MEMORY_TOOL_NAMES.length);
     for (const tool of tools) {
       expect(tool.executionContract).toBeDefined();
       expect(tool.executionContract!.effect_type).toBeDefined();
@@ -2896,10 +2896,10 @@ describe("memory-entry-consumption: live runtime integration", () => {
       retrieval: {} as never,
     });
     const writeTools = tools.filter((t) =>
-      ["core_memory_append", "core_memory_replace"].includes(t.name),
+      [MEMORY_TOOL_NAMES.coreMemoryAppend, MEMORY_TOOL_NAMES.coreMemoryReplace].includes(t.name),
     );
     const readTools = tools.filter((t) =>
-      ["memory_read", "narrative_search", "cognition_search", "memory_search", "memory_explore"].includes(t.name),
+      [MEMORY_TOOL_NAMES.memoryRead, MEMORY_TOOL_NAMES.narrativeSearch, MEMORY_TOOL_NAMES.cognitionSearch, MEMORY_TOOL_NAMES.memoryExplore].includes(t.name),
     );
 
     for (const t of writeTools) {
@@ -2924,8 +2924,8 @@ describe("memory-entry-consumption: live runtime integration", () => {
     try {
       const schemas = runtime.toolExecutor.getSchemas();
       const memorySchemaNames = [
-        "core_memory_append", "core_memory_replace", "memory_read",
-        "narrative_search", "cognition_search", "memory_search", "memory_explore",
+        MEMORY_TOOL_NAMES.coreMemoryAppend, MEMORY_TOOL_NAMES.coreMemoryReplace, MEMORY_TOOL_NAMES.memoryRead,
+        MEMORY_TOOL_NAMES.narrativeSearch, MEMORY_TOOL_NAMES.cognitionSearch, MEMORY_TOOL_NAMES.memoryExplore,
       ];
 
       for (const name of memorySchemaNames) {
@@ -2944,7 +2944,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       coreMemory: {} as never,
       retrieval: {} as never,
     });
-    const cogSearch = tools.find((t) => t.name === "cognition_search");
+    const cogSearch = tools.find((t) => t.name === MEMORY_TOOL_NAMES.cognitionSearch);
     expect(cogSearch!.executionContract!.capability_requirements).toEqual(["cognition_read"]);
   });
 

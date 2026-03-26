@@ -117,7 +117,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "Alice looks worried",
@@ -132,7 +132,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_belief",
+          name: "upsert_assertion",
           arguments: {
             source: "person:alice",
             target: "person:alice",
@@ -153,8 +153,8 @@ describe("MemoryTaskAgent", () => {
     const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
     const result = await agent.runMigrate(makeFlushRequest());
 
-    expect(result.private_event_ids.length).toBe(1);
-    expect(result.private_belief_ids.length).toBe(1);
+    expect(result.episode_event_ids.length).toBe(1);
+    expect(result.assertion_ids.length).toBe(1);
     expect(result.entity_ids.length).toBe(1);
     expect(provider.chatCalls).toBe(2);
 
@@ -164,7 +164,7 @@ describe("MemoryTaskAgent", () => {
 
     const privateEvent = db
       .prepare(`SELECT category FROM private_episode_events WHERE id = ?`)
-      .get(result.private_event_ids[0]) as { category: string };
+      .get(result.episode_event_ids[0]) as { category: string };
     expect(privateEvent.category).toBe("observation");
   });
 
@@ -197,7 +197,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_belief",
+          name: "upsert_assertion",
           arguments: {
             source: "person:carol",
             target: "person:carol",
@@ -508,7 +508,7 @@ describe("MemoryTaskAgent", () => {
     const provider = new MockModelProvider([
       [
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked one",
@@ -521,7 +521,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked two",
@@ -534,7 +534,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked three",

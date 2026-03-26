@@ -53,7 +53,7 @@ describe("validateAgentFile", () => {
 				personaId: "alice",
 				toolPermissions: [
 					"memory_read",
-					"memory_search",
+					"narrative_search",
 					"submit_rp_turn",
 				],
 			},
@@ -82,7 +82,7 @@ describe("validateAgentFile", () => {
 			{
 				id: "rp:bad",
 				role: "rp_agent",
-				toolPermissions: ["memory_read", "memory_search"],
+				toolPermissions: ["memory_read", "narrative_search"],
 			},
 		];
 

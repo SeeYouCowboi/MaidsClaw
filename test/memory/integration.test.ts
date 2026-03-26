@@ -11,6 +11,7 @@ import { RetrievalService } from "../../src/memory/retrieval.js";
 import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { type MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import type { NodeRef, ViewerContext } from "../../src/memory/types.js";
@@ -138,7 +139,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_event",
+					name: "create_episode_event",
 					arguments: {
 						role: "assistant",
 						private_notes:
@@ -154,7 +155,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_event",
+					name: "create_episode_event",
 					arguments: {
 						role: "assistant",
 						private_notes: "Alice shows the keepsake to Bob in confidence.",
@@ -169,7 +170,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_belief",
+					name: "upsert_assertion",
 					arguments: {
 						source: "person:alice",
 						target: "person:bob",
@@ -216,10 +217,10 @@ describe("Memory integration", () => {
 			batchId: "manual-organize-1",
 			changedNodeRefs: [
 				...migration.entity_ids.map((id) => makeNodeRef("entity", id)),
-			...migration.private_event_ids.map((id) =>
+			...migration.episode_event_ids.map((id) =>
 				makeNodeRef("event", id),
 			),
-				...migration.private_belief_ids.map((id) =>
+				...migration.assertion_ids.map((id) =>
 					makeNodeRef("assertion", id),
 				),
 			],
@@ -276,7 +277,7 @@ describe("Memory integration", () => {
 		};
 
 		const factCandidate = {
-			source_ref: makeNodeRef("event", migration.private_event_ids[0]),
+			source_ref: makeNodeRef("event", migration.episode_event_ids[0]),
 			target_scope: "world_public" as const,
 			summary: "Alice owns locket",
 			entity_refs: [
@@ -321,7 +322,7 @@ describe("Memory integration", () => {
 
 		const navigator = new GraphNavigator(db, retrieval, alias);
 		const tools = buildMemoryTools({ coreMemory, retrieval, navigator });
-		const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+		const exploreTool = tools.find((tool) => tool.name === MEMORY_TOOL_NAMES.memoryExplore);
 		expect(exploreTool).toBeDefined();
 		const whyResult = (await exploreTool?.handler(
 			{ query: "why did alice reveal the keepsake" },
@@ -353,12 +354,15 @@ describe("Memory integration", () => {
 			const pair = [row.source_node_ref, row.target_node_ref];
 			const owners = pair
 				.map((ref) => {
-					if (ref.startsWith("private_event:")) {
+					if (ref.startsWith("private_episode:")) {
 						const id = Number(ref.split(":")[1]);
 						const episodeOwner = db
 							.prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`)
 							.get(id) as { agent_id: string } | null;
-						if (episodeOwner?.agent_id) return episodeOwner.agent_id;
+						return episodeOwner?.agent_id ?? null;
+					}
+					if (ref.startsWith("evaluation:") || ref.startsWith("commitment:")) {
+						const id = Number(ref.split(":")[1]);
 						const cognitionOwner = db
 							.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
 							.get(id) as { agent_id: string } | null;
@@ -459,8 +463,8 @@ describe("Memory integration", () => {
 		expect(r4EventCount.cnt).toBe(1);
 		passed += 1;
 
-		expect(migration.private_event_ids.length).toBeGreaterThan(0);
-		expect(migration.private_belief_ids.length).toBeGreaterThan(0);
+		expect(migration.episode_event_ids.length).toBeGreaterThan(0);
+		expect(migration.assertion_ids.length).toBeGreaterThan(0);
 		passed += 1;
 
 		const verdict = passed === total ? "APPROVE" : "REJECT";

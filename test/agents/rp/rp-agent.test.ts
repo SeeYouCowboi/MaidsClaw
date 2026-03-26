@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { AgentPermissions } from "../../../src/agents/permissions.js";
 import { AgentRegistry } from "../../../src/agents/registry.js";
 import { createRpProfile } from "../../../src/agents/rp/profile.js";
-import { RpToolPolicy } from "../../../src/agents/rp/tool-policy.js";
+import { RP_AUTHORIZED_TOOLS, RpToolPolicy } from "../../../src/agents/rp/tool-policy.js";
+import { MEMORY_TOOL_NAMES } from "../../../src/memory/tool-names.js";
 
 describe("RP Agent profile", () => {
   it("createRpProfile assembles persona-aware defaults", () => {
@@ -19,7 +20,7 @@ describe("RpToolPolicy", () => {
   it("allows authorized tools and denies unknown tools", () => {
     const policy = new RpToolPolicy();
 
-    expect(policy.isAllowed("memory_read")).toBe(true);
+    expect(policy.isAllowed(MEMORY_TOOL_NAMES.memoryRead)).toBe(true);
     expect(policy.isAllowed("admin_tool")).toBe(false);
   });
 
@@ -27,7 +28,7 @@ describe("RpToolPolicy", () => {
     const policy = new RpToolPolicy();
     const permissions = policy.toToolPermissions();
 
-    expect(permissions.length).toBe(7);
+    expect(permissions.length).toBe(RP_AUTHORIZED_TOOLS.length);
     expect(permissions.every((entry) => entry.allowed)).toBe(true);
   });
 });
@@ -38,7 +39,7 @@ describe("RP Agent permission boundaries", () => {
     registry.register(createRpProfile("open", { toolPermissions: [] }));
     const permissions = new AgentPermissions(registry);
 
-    expect(permissions.canUseTool("rp:open", "memory_read")).toBe(true);
+    expect(permissions.canUseTool("rp:open", MEMORY_TOOL_NAMES.memoryRead)).toBe(true);
     expect(permissions.canUseTool("rp:open", "admin_tool")).toBe(true);
   });
 
@@ -52,7 +53,7 @@ describe("RP Agent permission boundaries", () => {
     );
     const permissions = new AgentPermissions(registry);
 
-    expect(permissions.canUseTool("rp:locked", "memory_read")).toBe(true);
+    expect(permissions.canUseTool("rp:locked", MEMORY_TOOL_NAMES.memoryRead)).toBe(true);
     expect(permissions.canUseTool("rp:locked", "admin_tool")).toBe(false);
   });
 

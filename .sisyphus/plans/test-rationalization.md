@@ -1,116 +1,109 @@
-# Test Rationalization — Slim Down & Relocate
+# Test Rationalization — Remove Obsolete, Legacy, Duplicate, or Low-Signal Tests
 
 ## TL;DR
 
-> **Quick Summary**: Consolidate 113 test files into ~95 by merging duplicate pairs, relocating `src/memory/*.test.ts` → `test/memory/`, consolidating stress/validation suites, and deleting dead scaffolding tests. Every merge preserves unique assertions — no behavioral coverage is lost.
-> 
+> **Quick Summary**: Audit and clean up the 112-file test suite by removing tautologies, inlining thin wrappers, relocating a gated historical-exemption file, and auditing 7 candidate duplicate families + legacy-facing tests — acting on findings only when evidence proves a test no longer adds signal.
+>
 > **Deliverables**:
-> - Duplicate test file pairs (schema, navigator) merged — single source of truth per module
-> - All `src/memory/*.test.ts` relocated to `test/memory/` — unified test directory convention
-> - Stress tests consolidated into fewer files
-> - Batch-created validation tests consolidated into fewer files
-> - Dead scaffolding tests deleted
-> - ~15-20 files removed, ~50-80 truly-duplicate test cases pruned
-> 
-> **Estimated Effort**: Large
-> **Parallel Execution**: YES - 6 waves (4a/4b split due to file conflict)
-> **Critical Path**: T1→T5→T11→T13→F1-F4
-> 
-> **PREREQUISITE**: The `legacy-cleanup` plan MUST complete first. That plan removes legacy-only test files and updates legacy references in surviving tests. This plan handles non-legacy structural consolidation only.
+> - Tautology removed from `test/bootstrap.test.ts`
+> - `test/runtime/tool-permissions.test.ts` inlined into `test/runtime/bootstrap.test.ts` and deleted
+> - `src/memory/contracts/graph-node-ref.test.ts` moved to `test/memory/contracts/` with gate update and import rewrite
+> - 7 structured audit artifacts in `.sisyphus/evidence/audit-*.md`
+> - Legacy-test classification with conditional removals
+> - Coverage baseline and final comparison
+>
+> **Estimated Effort**: Medium
+> **Parallel Execution**: YES — 2 waves (Wave 1 sequential, Wave 2 parallel with 7 tasks)
+> **Critical Path**: T1 → T2 → T3 → T4 → (T5–T11 parallel) → F1–F4
 
 ---
 
 ## Context
 
 ### Original Request
-User considers 1788 tests across 113 files excessive. Wants aggressive pruning and file relocation (瘦身/搬家).
+Rewrite the existing test-rationalization policy document into an executable Sisyphus-format plan with concrete tasks, QA scenarios, parallel waves, and agent dispatch.
 
-### Research Findings
-
-**Critical finding from Metis review**: The initial audit claimed stress/validation files "overlap" with counterparts and could be deleted. Deep assertion-level analysis proves they are NOT redundant — each has unique behavioral coverage at different abstraction layers. The real problem is too many small files, not too many tests.
-
-**What's actually achievable**:
-- FILE count reduction: 113 → ~95 files (merge duplicates, consolidate small files)
-- TEST count reduction: ~50-80 truly-duplicate tests pruned during merges
-- DIRECTORY normalization: all test files under `test/` (currently split between `src/` and `test/`)
-
-**What's NOT in scope** (handled by legacy-cleanup plan — runs BEFORE this plan):
-- `canonical-node-refs.test.ts` deletion — Task 22 of legacy plan (file won't exist when we run)
-- `v3-regression.test.ts` deletion — Task 22 of legacy plan (file won't exist when we run)
-- Legacy assertion updates in schema/graph-node-ref/demo-scenario tests — Task 22 of legacy plan
-- `contested-chain-v3.test.ts` rewriting (agent_fact_overlay removal) — Task 4 of legacy plan
-
-**Coordination with legacy-cleanup** (files touched by BOTH plans):
-- `contested-chain-v3.test.ts`: legacy-cleanup REWRITES it (Task 4), then this plan RELOCATES it (Task 5) — no conflict
-- `contracts/graph-node-ref.test.ts`: legacy-cleanup UPDATES legacy assertions (Task 22), then this plan RELOCATES it (Task 5) — no conflict
+### Interview Summary
+**Key Discussions**:
+- Prior plan review identified it as a sound policy document but not agent-executable — missing QA scenarios, agent categories, parallel waves, and concrete verification steps
+- All 112 test files verified (26 under `src/`, 86 under `test/`)
+- `bootstrap.test.ts` tautology (`expect(true).toBe(true)` line 21) confirmed
+- `tool-permissions.test.ts` has real runtime registration coverage — cannot be deleted without inlining
+- Legacy-literal-gate whitelist confirmed: `src/memory/schema.ts`, `test/memory/schema.test.ts`, `src/memory/contracts/graph-node-ref.test.ts`
+- Duplicate candidate size disparities verified (schema 769 vs 1404, navigator 839 vs 220, retrieval 296 vs 1783) — clearly NOT simple duplicates
+- Build passes, `check:legacy-memory-surface` = `bun test test/memory/legacy-literal-gate.test.ts`
 
 ### Metis Review
-**Key risks addressed**:
-- Double-booking with legacy-cleanup plan → Explicit exclusion boundary defined
-- Deleting "overlapping" tests that aren't actually redundant → Pre-merge assertion verification required
-- Breaking shared test helper dependencies → `memory-test-utils.ts` consumers tracked
+**Identified Gaps** (addressed):
+- `bun run build` does NOT check test files (`tsconfig.build.json` excludes `test/**` and `**/*.test.ts`) — added `bunx tsc --noEmit` to all verification steps
+- `graph-node-ref.test.ts` uses relative import `"./graph-node-ref.js"` — moving it requires import path rewrite to `"../../../src/memory/contracts/graph-node-ref.js"`
+- `test/memory/contracts/` directory does not exist — must be created before the move
+- Gate update must be a SET REPLACEMENT (remove old path + add new path), not just an append
+- `tool-permissions.test.ts` inlining adds 4 new imports to host file — confirmed acceptable at ~160 lines total
+- 16 non-audited `src/memory/*.test.ts` files explicitly out of scope
+- Wave 4 (conditional execution) may be a no-op if all audits recommend "keep separate" — valid outcome
+- No test file imports from other test files — moves won't cascade
 
 ---
 
 ## Work Objectives
 
 ### Core Objective
-Reduce test file count from 113 to ~95 by merging duplicate pairs, relocating scattered test files to a unified `test/` directory, and consolidating small files — while preserving 100% of unique behavioral assertions.
+Remove tests that genuinely no longer add signal (tautologies, legacy-only, proven duplicates, thin wrappers) using an evidence-based audit approach, while preserving all coverage that protects live production behavior.
 
 ### Concrete Deliverables
-- All `src/memory/*.test.ts` files relocated to `test/memory/`
-- Duplicate schema test files merged (73 tests → ~50)
-- Duplicate navigator test files merged (31 tests → ~25)
-- Stress test files consolidated from 4 → 2
-- Validation test files consolidated from 8 → 4
-- Dead scaffolding tests deleted (~5 tests)
+- 3 high-confidence cleanups completed (Wave 1)
+- 7 structured audit artifacts with recommendations and rationale
+- Conditional file modifications based on audit evidence
+- Coverage baseline + final comparison report
 
 ### Definition of Done
-- [ ] `bun test` passes with 0 failures
-- [ ] `bun run build` passes with 0 type errors
-- [ ] Zero test files remain anywhere under `src/memory/` including subdirectories (all relocated to `test/memory/`)
-- [ ] Glob `src/memory/**/*.test.ts` → 0 files (covers top-level, contracts/, shared-blocks/, cognition/)
-- [ ] Total test files ≤ 100 (from 113)
-- [ ] No orphaned imports in `test/helpers/memory-test-utils.ts`
+- [ ] `bun test` passes with zero failures
+- [ ] `bunx tsc --noEmit` passes (full type-check including test files)
+- [ ] `bun run check:legacy-memory-surface` passes
+- [ ] Every removed test/assertion has a written rationale in its commit message
+- [ ] Coverage does not regress vs baseline
 
 ### Must Have
-- Every unique assertion from a deleted source file MUST exist verbatim in the merge target BEFORE the source is deleted
-- `bun test` green after every task
-- Two-commit pattern: (1) merge assertions into target + verify, (2) delete source file
+- Evidence-based audit before any duplicate removal
+- Atomic commit for graph-node-ref move + gate update + import rewrite
+- Structured audit artifacts saved to `.sisyphus/evidence/`
+- Pre-flight green confirmation before any changes
 
 ### Must NOT Have (Guardrails)
-- MUST NOT touch files DELETED by legacy-cleanup: `canonical-node-refs.test.ts`, `v3-regression.test.ts` (both deleted by legacy Task 22)
-- MUST NOT modify legacy assertions in `graph-node-ref.test.ts` or `demo-scenario.test.ts` (legacy-cleanup Task 22 handles those) — but pure relocation (git mv) IS allowed after legacy-cleanup completes
-- NOTE: `contested-chain-v3.test.ts` is REWRITTEN (not deleted) by legacy-cleanup Task 4 — after legacy-cleanup completes, it's a normal test file eligible for relocation
-- MUST NOT delete `test/architecture/import-boundaries.test.ts` — unique architectural constraint enforcement
-- MUST NOT delete `test/cli/local-runtime.test.ts` — unique `createLocalRuntime()` result shape coverage
-- MUST NOT delete `test/memory/integration.test.ts` — unique end-to-end memory pipeline (3 tests but critical path)
-- MUST NOT delete `test/memory/relation-intents.test.ts` — unique relation resolution logic
-- MUST NOT delete `stress-capability-matrix.test.ts` — unique tool system correctness coverage (17 tests)
-- MUST NOT delete `validation-turn-settlement.test.ts` — unique settlement pipeline coverage (7 tests)
-- MUST NOT delete `validation-negative-cases.test.ts` — unique edge case coverage (9 tests)
-- MUST NOT modify `test/helpers/memory-test-utils.ts` shared helper
-- MUST NOT change any non-test production source file
-- MUST NOT refactor test logic — only move/merge/delete
+- Do NOT delete tests based on name alone (`legacy`, `v3`, `proposal`)
+- Do NOT merge files only because they are small
+- Do NOT use file count reduction as a success metric
+- Do NOT modify any production source files (`src/**/*.ts` excluding `*.test.ts`)
+- Do NOT modify CLI test files, stress test files, or validation-suite files outside explicit audit scope
+- Do NOT create new test utility/helper files or extract shared fixtures
+- Do NOT "improve" or "modernize" any test code — only remove, inline, or move as specified
+- Do NOT touch the 16 non-audited `src/memory/*.test.ts` files: `tools.test.ts`, `storage.test.ts`, `visibility-policy.test.ts`, `embeddings.test.ts`, `core-memory.test.ts`, `contested-chain-v3.test.ts`, `cognition/cognition-search.test.ts`, `cognition/memory-relation-types.test.ts`, `cognition/belief-revision.test.ts`, `materialization.test.ts`, `time-slice-v3.test.ts`, `pinned-summary-proposal.test.ts`, `promotion.test.ts`, `shared-blocks/section-path-validator.test.ts`, `alias.test.ts`, `prompt-data.test.ts`
 
 ---
 
 ## Verification Strategy
 
-> **ZERO HUMAN INTERVENTION** — ALL verification is agent-executed.
+> **ZERO HUMAN INTERVENTION** — ALL verification is agent-executed. No exceptions.
 
 ### Test Decision
-- **Infrastructure exists**: YES (bun test)
-- **Automated tests**: Tests-after (verify after each merge)
-- **Framework**: bun test
+- **Infrastructure exists**: YES — Bun test runner
+- **Automated tests**: Existing tests used as regression gates, no new tests written
+- **Framework**: `bun test`
 
 ### QA Policy
-Every task MUST include:
-- Pre-merge assertion count (`bun test <target-file>` → N pass)
-- Post-merge assertion count (`bun test <target-file>` → N+M pass)
-- Post-delete suite verification (`bun test` → all pass)
-- Use Grep tool for content searches (Windows environment)
-- Use Bash ONLY for `bun test` commands
+Every task MUST include agent-executed QA scenarios.
+Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
+
+### Verification Command Set (ALL tasks)
+```powershell
+bun run build                              # Production type-check
+bunx tsc --noEmit                          # Full type-check INCLUDING test files
+bun run check:legacy-memory-surface        # Legacy gate
+bun test                                   # Full suite
+```
+
+> **CRITICAL**: `bun run build` alone is NOT sufficient. It uses `tsconfig.build.json` which excludes `test/**` and `**/*.test.ts`. You MUST also run `bunx tsc --noEmit` which uses the base `tsconfig.json` and type-checks test files. Failing to do this will miss broken import paths in moved test files.
 
 ---
 
@@ -119,817 +112,1021 @@ Every task MUST include:
 ### Parallel Execution Waves
 
 ```
-Wave 1 (Safe deletions — no merge needed):
-├── Task 1: Delete test/bootstrap.test.ts (scaffolding) [quick]
-└── Task 2: Delete test/runtime/tool-permissions.test.ts (1 test, verify covered first) [quick]
+Wave 1 (Sequential — git state dependency, each task commits before next starts):
+├── T1: Preflight verification + coverage baseline [quick]
+├── T2: Remove bootstrap tautology [quick] (depends: T1)
+├── T3: Inline tool-permissions into runtime bootstrap [quick] (depends: T2)
+└── T4: Move graph-node-ref + gate update + import rewrite [quick] (depends: T3)
 
-Wave 2 (Relocate src/memory/*.test.ts → test/memory/ — no assertion changes):
-├── Task 3: Relocate src/memory/schema.test.ts → test/memory/schema-unit.test.ts [quick]
-├── Task 4: Relocate src/memory/navigator.test.ts → test/memory/navigator-unit.test.ts [quick]
-├── Task 5: Relocate remaining src/memory/*.test.ts files (batch) [unspecified-high]
-└── Task 6: Relocate src/memory/cognition/*.test.ts files [quick]
-
-Wave 3 (Merge duplicates — merge into target, then delete source):
-├── Task 7: Merge test/memory/navigator.test.ts into navigator-unit.test.ts (after T4) [unspecified-high]
-├── Task 8: Deduplicate test/memory/schema.test.ts + schema-unit.test.ts overlapping describes (after T3) [deep]
-└── Task 9: Deduplicate test/memory/retrieval-search.test.ts + retrieval.test.ts overlapping describes [unspecified-high]
-
-Wave 4a (Consolidate stress + validation suites — parallel batch):
-├── Task 10: Merge stress-shared-blocks unique assertions into shared-blocks.test.ts, delete source [unspecified-high]
-├── Task 11: Merge stress-time-slice unique assertions into time-slice-query.test.ts, delete source [unspecified-high]
-├── Task 12: Merge validation-contested-cognition into cognition-commit.test.ts [unspecified-high]
-├── Task 14: Merge validation-explain-visibility into visibility-isolation.test.ts [unspecified-high]
-├── Task 15: Merge validation-cross-session + validation-episode-lifecycle + validation-publication-pipeline + validation-area-world-surfacing into integration.test.ts [deep]
-└── Task 16: Merge tiny CLI tests (trace-store + config-doctor → nearest CLI file) [quick]
-
-Wave 4b (After Task 11 — same target file conflict):
-└── Task 13: Merge validation-time-model into time-slice-query.test.ts (AFTER Task 11 — both write same file) [unspecified-high]
+Wave 2 (Parallel — 7 independent audit-then-act tasks):
+├── T5: Schema-family audit-then-act (depends: T4) [deep]
+├── T6: Navigator-family audit-then-act (depends: T4) [deep]
+├── T7: Retrieval-family audit-then-act (depends: T4) [deep]
+├── T8: Shared-blocks stress audit-then-act (depends: T4) [deep]
+├── T9: Time-slice stress audit-then-act (depends: T4) [deep]
+├── T10: Validation overlap audit-then-act (depends: T4) [deep]
+└── T11: Legacy-test inventory + classify + conditional removals (depends: T4) [deep]
 
 Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
-├── Task F1: Plan compliance audit (deep)
-├── Task F2: Code quality review (unspecified-high)
-├── Task F3: Automated end-to-end QA (unspecified-high)
-└── Task F4: Scope fidelity check (deep)
--> Present results -> Get explicit user okay
+├── F1: Plan compliance audit (oracle)
+├── F2: Code quality review (unspecified-high)
+├── F3: Full test suite + coverage comparison (unspecified-high)
+└── F4: Scope fidelity check (deep)
+→ Present results → Get explicit user okay
+
+Critical Path: T1 → T2 → T3 → T4 → T5–T11 (parallel) → F1–F4 → user okay
+Parallel Speedup: ~50% faster than fully sequential (7 parallel audits)
+Max Concurrent: 7 (Wave 2)
 ```
 
 ### Dependency Matrix
 
-| Task | Depends On | Blocks | Wave | Parallel |
-|------|-----------|--------|------|----------|
-| 1 | — | — | 1 | YES (with 2) |
-| 2 | — | — | 1 | YES (with 1) |
-| 3 | — | 8 | 2 | YES (with 4,5,6) |
-| 4 | — | 7 | 2 | YES (with 3,5,6) |
-| 5 | — | 10,11 | 2 | YES (with 3,4,6) |
-| 6 | — | 12 | 2 | YES (with 3,4,5) |
-| 7 | 4 | — | 3 | YES (with 8,9) |
-| 8 | 3 | — | 3 | YES (with 7,9) |
-| 9 | 5 | — | 3 | YES (with 7,8) |
-| 10 | 5 | — | 4a | YES (with 11,12,14-16) |
-| 11 | 5 | 13 | 4a | YES (with 10,12,14-16) |
-| 12 | 6 | — | 4a | YES (with 10,11,14-16) |
-| 13 | 5, **11** | — | 4b | NO — serial after T11 (both write time-slice-query.test.ts) |
-| 14 | 5 | — | 4a | YES (with 10-12,15,16) |
-| 15 | 5 | — | 4a | YES (with 10-12,14,16) |
-| 16 | — | — | 4a | YES (with 10-12,14,15) |
+| Task | Blocked By | Blocks |
+|------|-----------|--------|
+| T1   | —         | T2     |
+| T2   | T1        | T3     |
+| T3   | T2        | T4     |
+| T4   | T3        | T5–T11 |
+| T5   | T4        | F1–F4  |
+| T6   | T4        | F1–F4  |
+| T7   | T4        | F1–F4  |
+| T8   | T4        | F1–F4  |
+| T9   | T4        | F1–F4  |
+| T10  | T4        | F1–F4  |
+| T11  | T4        | F1–F4  |
+| F1–F4| T5–T11    | user okay |
 
 ### Agent Dispatch Summary
 
-- **Wave 1**: 2 parallel — T1-T2→`quick`
-- **Wave 2**: 4 parallel — T3-T4,T6→`quick`, T5→`unspecified-high`
-- **Wave 3**: 3 parallel — T7,T9→`unspecified-high`, T8→`deep`
-- **Wave 4a**: 6 parallel — T10-T12,T14,T16→`unspecified-high`, T15→`deep`
-- **Wave 4b**: 1 serial — T13→`unspecified-high` (after T11 — same target file)
-- **FINAL**: 4 parallel — F1,F4→`deep`, F2-F3→`unspecified-high`
+- **Wave 1**: **4** — T1 → `quick`, T2 → `quick`, T3 → `quick`, T4 → `quick`
+- **Wave 2**: **7** — T5–T11 → `deep` (each requires thorough file analysis + conditional action)
+- **FINAL**: **4** — F1 → `oracle`, F2 → `unspecified-high`, F3 → `unspecified-high`, F4 → `deep`
+
+---
+
+## Philosophy (Preserved from Original Plan)
+
+> A test is removed or merged only when we can explain **why it no longer adds signal**.
+
+Allowed reasons:
+1. **Pure scaffolding / tautology** — assertion that tests nothing (`expect(true).toBe(true)`)
+2. **Legacy-only coverage** — for a production path that has already been removed
+3. **Exact duplicate** — assertion-level duplicate already present elsewhere
+4. **Thin wrapper** — unique assertion can be inlined into a more appropriate host test
+
+### Wave 2 Audit Protocol
+
+Each Wave 2 task follows a strict two-phase pattern:
+
+**Phase A — Read-Only Audit** (MANDATORY first):
+1. List all `describe(...)` blocks in both files
+2. List all `it(...)` names in both files
+3. Classify each source assertion as: `exact duplicate`, `complementary`, `historical/migration-only`, `obsolete`
+4. Produce structured audit artifact → save to `.sisyphus/evidence/audit-{name}.md`
+5. Choose recommendation: `keep separate` | `prune duplicates only` | `merge source into target` | `delete source after inline`
+
+**Phase B — Conditional Action** (ONLY if Phase A recommends changes):
+- If `keep separate`: log rationale, no file changes, commit audit artifact only
+- If `prune duplicates only`: delete specific duplicate `it()` blocks, preserve unique assertions
+- If `merge source into target`: copy unique assertions to target, delete source file
+- If `delete source after inline`: inline unique assertions into target, delete source file
+- After any file modification: run full verification command set
+
+> **Wave 2 may result in zero file modifications. This is a valid and expected outcome.**
 
 ---
 
 ## TODOs
 
-- [ ] 1. Delete test/bootstrap.test.ts
+- [x] 1. Preflight Verification + Coverage Baseline
 
   **What to do**:
-  - Delete `test/bootstrap.test.ts` (3 tests: version import, truth assertion, pure scaffolding)
-  - Verify `test/runtime/bootstrap.test.ts` (5 tests) is separate and unaffected
-
-  **Recommended Agent Profile**:
-  - **Category**: `quick`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 1 (with Task 2)
-  - **Blocks**: None
-  - **Blocked By**: None
-
-  **References**:
-  - `test/bootstrap.test.ts` — File to delete (3 pure scaffolding tests)
-  - `test/runtime/bootstrap.test.ts` — Separate file, must NOT be deleted
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Scaffolding tests deleted, runtime bootstrap untouched
-    Tool: Bash (bun test) + Glob tool
-    Steps:
-      1. Verify test/bootstrap.test.ts does not exist (use Glob)
-      2. Run `bun test test/runtime/bootstrap.test.ts` → passes
-      3. Run `bun test` → all pass
-    Expected Result: File deleted; runtime bootstrap unaffected; suite green
-    Evidence: .sisyphus/evidence/task-1-scaffolding-deleted.txt
-  ```
-
-  **Commit**: YES — C1
-  - Message: `test: delete scaffolding tests (bootstrap, tool-permissions)`
-  - Pre-commit: `bun test`
-
-- [ ] 2. Delete test/runtime/tool-permissions.test.ts
-
-  **What to do**:
-  - First verify this 1-test file's assertion is covered by `test/runtime/bootstrap.test.ts`
-  - If covered → delete. If NOT covered → move the single `it(...)` block into `test/runtime/bootstrap.test.ts` (natural target: both import `bootstrapRuntime` + `registerRuntimeTools` from `src/bootstrap/`)
-  - Either way, the standalone 1-test file is eliminated
-
-  **Recommended Agent Profile**:
-  - **Category**: `quick`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 1 (with Task 1)
-  - **Blocks**: None
-  - **Blocked By**: None
-
-  **References**:
-  - `test/runtime/tool-permissions.test.ts` — 1-test file to eliminate (imports `bootstrapRuntime`, `registerRuntimeTools`)
-  - `test/runtime/bootstrap.test.ts` — Natural merge target (5 tests, same `bootstrapRuntime` import, same runtime domain)
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: tool-permissions file eliminated
-    Tool: Bash (bun test) + Glob tool
-    Steps:
-      1. Verify test/runtime/tool-permissions.test.ts does not exist
-      2. Run `bun test test/runtime/bootstrap.test.ts` → passes (≥ 5 tests; 6 if assertion merged here)
-      3. Run `bun test` → all pass (full suite verification)
-    Expected Result: File eliminated; assertion preserved in bootstrap.test.ts if unique; full suite green
-    Evidence: .sisyphus/evidence/task-2-permissions-eliminated.txt
-  ```
-
-  **Commit**: YES — C1 (grouped with Task 1)
-
-- [ ] 3. Relocate src/memory/schema.test.ts → test/memory/schema-unit.test.ts
-
-  **What to do**:
-  - `git mv src/memory/schema.test.ts test/memory/schema-unit.test.ts`
-  - Update any relative imports in the moved file (e.g., `./schema` → `../../src/memory/schema`)
-  - Verify imports resolve correctly after move
+  - Run `bun test` and confirm zero failures — this establishes the green baseline
+  - Capture test file inventory: count all `*.test.ts` files under `src/` and `test/` separately
+  - Capture coverage baseline: `bun test --coverage 2>&1` and save output
+  - Record results as the before-snapshot for the entire plan
 
   **Must NOT do**:
-  - MUST NOT change any test assertions — pure relocation only
-  - MUST NOT merge with `test/memory/schema.test.ts` yet (that's Task 8)
+  - Modify any files
+  - Skip the full test run — a pre-existing failure must be caught now, not confused with a regression later
 
   **Recommended Agent Profile**:
   - **Category**: `quick`
+    - Reason: Read-only verification, no code changes, simple command execution
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 2 (with Tasks 4, 5, 6)
-  - **Blocks**: Task 8
+  - **Can Run In Parallel**: NO
+  - **Parallel Group**: Wave 1 (sequential position 1)
+  - **Blocks**: T2, T3, T4
   - **Blocked By**: None
 
   **References**:
-  - `src/memory/schema.test.ts` — Source (49 tests)
-  - `test/memory/schema.test.ts` — Existing file (24 tests) — NOT touched here
+
+  **Pattern References**:
+  - `package.json:8` — `"build": "tsc -p tsconfig.build.json --noEmit"` (production type-check)
+  - `package.json:9` — `"check:legacy-memory-surface": "bun test test/memory/legacy-literal-gate.test.ts"` (gate check)
 
   **Acceptance Criteria**:
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: Schema unit tests relocated and passing
-    Tool: Bash (bun test)
+  Scenario: Full test suite passes before any changes
+    Tool: Bash
+    Preconditions: Clean working tree (no uncommitted changes)
     Steps:
-      1. Run `bun test test/memory/schema-unit.test.ts` → 49 tests pass (same count as before)
-      2. Run `bun test test/memory/schema.test.ts` → 24 tests still pass (untouched)
-      3. Verify src/memory/schema.test.ts does not exist
-      4. Run `bun test` → all pass (full suite verification)
-    Expected Result: Both files pass independently; source file removed; full suite green
-    Evidence: .sisyphus/evidence/task-3-schema-relocated.txt
+      1. Run: bun test
+      2. Assert: exit code 0, zero failures in output
+      3. Run: bun run build
+      4. Assert: exit code 0
+      5. Run: bunx tsc --noEmit
+      6. Assert: exit code 0
+      7. Run: bun run check:legacy-memory-surface
+      8. Assert: exit code 0
+    Expected Result: All 4 commands pass with zero errors
+    Failure Indicators: Any non-zero exit code, any "FAIL" in test output
+    Evidence: .sisyphus/evidence/task-1-preflight-green.txt
+
+  Scenario: Coverage baseline captured
+    Tool: Bash
+    Preconditions: Full test suite passes
+    Steps:
+      1. Run: bun test --coverage 2>&1 | Out-File -Encoding utf8 .sisyphus/evidence/task-1-coverage-baseline.txt
+      2. Assert: file exists and is non-empty
+      3. Count test files: (Get-ChildItem -Recurse -Filter "*.test.ts" src).Count — record as src_count
+      4. Count test files: (Get-ChildItem -Recurse -Filter "*.test.ts" test).Count — record as test_count
+      5. Record: "Baseline: {src_count} src + {test_count} test = {total} total"
+    Expected Result: Coverage file saved, file counts recorded (expect 26 src + 86 test = 112)
+    Failure Indicators: Coverage file empty, counts don't match expected 112
+    Evidence: .sisyphus/evidence/task-1-coverage-baseline.txt
   ```
 
-  **Commit**: YES — C2
-  - Message: `test: relocate src/memory/*.test.ts → test/memory/`
-  - Pre-commit: `bun test`
+  **Commit**: NO (read-only task)
 
-- [ ] 4. Relocate src/memory/navigator.test.ts → test/memory/navigator-unit.test.ts
+---
+
+- [x] 2. Remove Tautology from `test/bootstrap.test.ts`
 
   **What to do**:
-  - `git mv src/memory/navigator.test.ts test/memory/navigator-unit.test.ts`
-  - Update relative imports
-
-  **Recommended Agent Profile**:
-  - **Category**: `quick`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 2 (with Tasks 3, 5, 6)
-  - **Blocks**: Task 7
-  - **Blocked By**: None
-
-  **References**:
-  - `src/memory/navigator.test.ts` — Source (27 tests)
-  - `test/memory/navigator.test.ts` — Existing file (4 tests) — NOT touched here
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Navigator unit tests relocated and passing
-    Tool: Bash (bun test)
-    Steps:
-      1. Run `bun test test/memory/navigator-unit.test.ts` → 27 tests pass
-      2. Run `bun test test/memory/navigator.test.ts` → 4 tests still pass
-      3. Verify src/memory/navigator.test.ts does not exist
-      4. Run `bun test` → all pass (full suite verification)
-    Expected Result: Both pass; source removed; full suite green
-    Evidence: .sisyphus/evidence/task-4-navigator-relocated.txt
-  ```
-
-  **Commit**: YES — C2 (grouped)
-
-- [ ] 5. Relocate remaining src/memory/*.test.ts files (batch)
-
-  **What to do**:
-  Relocate ALL remaining `src/memory/**/*.test.ts` files to `test/memory/`:
-  - `src/memory/storage.test.ts` → `test/memory/storage.test.ts`
-  - `src/memory/task-agent.test.ts` → `test/memory/task-agent.test.ts`
-  - `src/memory/retrieval.test.ts` → `test/memory/retrieval-unit.test.ts` (suffix -unit to avoid clash with `test/memory/retrieval-search.test.ts`)
-  - `src/memory/visibility-policy.test.ts` → `test/memory/visibility-policy.test.ts`
-  - `src/memory/tools.test.ts` → `test/memory/tools.test.ts`
-  - `src/memory/prompt-data.test.ts` → `test/memory/prompt-data.test.ts`
-  - `src/memory/promotion.test.ts` → `test/memory/promotion.test.ts`
-  - `src/memory/materialization.test.ts` → `test/memory/materialization.test.ts`
-  - `src/memory/embeddings.test.ts` → `test/memory/embeddings.test.ts`
-  - `src/memory/core-memory.test.ts` → `test/memory/core-memory.test.ts`
-  - `src/memory/alias.test.ts` → `test/memory/alias.test.ts`
-  - `src/memory/pinned-summary-proposal.test.ts` → `test/memory/pinned-summary-proposal.test.ts`
-  - `src/memory/stress-capability-matrix.test.ts` → `test/memory/stress-capability-matrix.test.ts`
-  - `src/memory/stress-contested-chain.test.ts` → `test/memory/stress-contested-chain.test.ts`
-  - `src/memory/stress-shared-blocks.test.ts` → `test/memory/stress-shared-blocks.test.ts`
-  - `src/memory/stress-time-slice.test.ts` → `test/memory/stress-time-slice.test.ts`
-  - `src/memory/time-slice-v3.test.ts` → `test/memory/time-slice-v3.test.ts`
-  - `src/memory/contested-chain-v3.test.ts` → `test/memory/contested-chain-v3.test.ts` *(rewritten by legacy-cleanup Task 4; pure relocation here)*
-  - `src/memory/contracts/graph-node-ref.test.ts` → `test/memory/graph-node-ref.test.ts` *(legacy assertions already updated by legacy-cleanup Task 22; pure relocation here)*
-  - `src/memory/shared-blocks/shared-blocks.test.ts` → `test/memory/shared-blocks.test.ts`
-  - `src/memory/shared-blocks/section-path-validator.test.ts` → `test/memory/section-path-validator.test.ts`
-  - Use `git mv` for each to preserve history
-  - Update all relative imports in each moved file
-  - Check for name collisions with existing `test/memory/*.test.ts` files — suffix `-unit` if collision
-  - ~~`src/memory/area-hierarchy.test.ts`~~ — REMOVED: file does not exist in repository
+  - Delete the tautological test at lines 20–22: `it("should pass a basic truth assertion", () => { expect(true).toBe(true); });`
+  - Keep the file with its 2 remaining version smoke tests (lines 9–18) — these verify `src/index.ts` exports and are genuinely useful
+  - Run targeted test, then full verification suite
 
   **Must NOT do**:
-  - MUST NOT move files DELETED by legacy-cleanup: `canonical-node-refs.test.ts`, `v3-regression.test.ts` (won't exist when this plan runs)
-  - MUST NOT change any test assertions — pure relocation only
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-    - Reason: ~20 files to move, import path updates needed for each
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 2 (with Tasks 3, 4, 6)
-  - **Blocks**: Tasks 9-15
-  - **Blocked By**: None
-
-  **References**:
-  - All `src/memory/*.test.ts` files listed above
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: All src/memory tests relocated, suite green
-    Tool: Bash (bun test) + Glob tool
-    Steps:
-      1. Glob `src/memory/**/*.test.ts` → expect 0 files (all relocated; legacy-cleanup already deleted canonical-node-refs + v3-regression)
-      2. Run `bun test` → all pass
-    Expected Result: Zero test files under src/memory/ (including contracts/, shared-blocks/, cognition/); suite passes
-    Evidence: .sisyphus/evidence/task-5-batch-relocated.txt
-  ```
-
-  **Commit**: YES — C2 (grouped)
-
-- [ ] 6. Relocate src/memory/cognition/*.test.ts files
-
-  **What to do**:
-  - `src/memory/cognition/belief-revision.test.ts` → `test/memory/belief-revision.test.ts`
-  - `src/memory/cognition/cognition-search.test.ts` → `test/memory/cognition-search.test.ts`
-  - `src/memory/cognition/memory-relation-types.test.ts` → `test/memory/memory-relation-types.test.ts`
-  - Update relative imports
+  - Delete the entire file — the version smoke tests (`version()` and `VERSION`) have no other home
+  - Modify the remaining tests in any way
+  - Add or "improve" any assertions
 
   **Recommended Agent Profile**:
   - **Category**: `quick`
+    - Reason: Single-line deletion in a small file, trivial change
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 2 (with Tasks 3, 4, 5)
-  - **Blocks**: Task 12
-  - **Blocked By**: None
+  - **Can Run In Parallel**: NO
+  - **Parallel Group**: Wave 1 (sequential position 2)
+  - **Blocks**: T3
+  - **Blocked By**: T1
+
+  **References**:
+
+  **Pattern References**:
+  - `test/bootstrap.test.ts:20-22` — The tautological test to delete: `it("should pass a basic truth assertion", () => { expect(true).toBe(true); });`
+  - `test/bootstrap.test.ts:9-18` — The 2 remaining tests to KEEP: `should import from src/index.ts without errors` and `should return the correct version`
 
   **Acceptance Criteria**:
+
+  - [ ] Lines 20–22 removed from `test/bootstrap.test.ts`
+  - [ ] File retains exactly 2 `it()` blocks
+  - [ ] `bun test test/bootstrap.test.ts` → PASS (2 tests, 0 failures)
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: Cognition tests relocated
-    Tool: Bash (bun test) + Glob tool
+  Scenario: Tautology removed, version smoke tests preserved
+    Tool: Bash
+    Preconditions: T1 completed, baseline green
     Steps:
-      1. Glob src/memory/cognition/*.test.ts → expect 0 files
-      2. Run `bun test test/memory/belief-revision.test.ts test/memory/cognition-search.test.ts test/memory/memory-relation-types.test.ts` → all pass
-      3. Run `bun test` → all pass (full suite verification)
-    Expected Result: All relocated; full suite green
-    Evidence: .sisyphus/evidence/task-6-cognition-relocated.txt
+      1. Verify line "expect(true).toBe(true)" does NOT appear in test/bootstrap.test.ts
+      2. Verify line "should import from src/index.ts without errors" DOES appear
+      3. Verify line "should return the correct version" DOES appear
+      4. Run: bun test test/bootstrap.test.ts
+      5. Assert: 2 tests pass, 0 failures
+      6. Run: bunx tsc --noEmit
+      7. Assert: exit code 0
+      8. Run: bun test
+      9. Assert: exit code 0, zero failures
+    Expected Result: File has 2 passing tests, tautology gone
+    Failure Indicators: "expect(true).toBe(true)" still present, test count != 2, any failure
+    Evidence: .sisyphus/evidence/task-2-bootstrap-trimmed.txt
   ```
 
-  **Commit**: YES — C2 (grouped)
+  **Commit**: YES
+  - Message: `test(rationalize): remove tautology from bootstrap smoke test`
+  - Body: `DELETED: it("should pass a basic truth assertion") — REASON: pure tautology (expect(true).toBe(true))`
+  - Body: `PRESERVED: version() and VERSION smoke tests remain in test/bootstrap.test.ts`
+  - Files: `test/bootstrap.test.ts`
+  - Pre-commit: `bun test test/bootstrap.test.ts`
 
-- [ ] 7. Merge test/memory/navigator.test.ts INTO navigator-unit.test.ts
+- [x] 3. Inline `tool-permissions.test.ts` into `test/runtime/bootstrap.test.ts`
 
   **What to do**:
-  - Read `test/memory/navigator.test.ts` (4 tests — explain shell: conflict query, redacted placeholders, drilldown, time-slice filter)
-  - Check each assertion against `test/memory/navigator-unit.test.ts` (27 tests)
-  - For each assertion NOT already in navigator-unit.test.ts: copy the `it(...)` block verbatim into the appropriate `describe` block
-  - For each assertion that IS a duplicate: discard
-  - Run `bun test test/memory/navigator-unit.test.ts` → verify test count = 27 + N (where N = non-duplicate assertions)
-  - Delete `test/memory/navigator.test.ts`
+  - Add 4 new imports to `test/runtime/bootstrap.test.ts`:
+    ```typescript
+    import { registerRuntimeTools } from "../../src/bootstrap/tools.js";
+    import { CoreMemoryService } from "../../src/memory/core-memory.js";
+    import { ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
+    ```
+  - Copy the entire `describe("runtime tool registration", ...)` block (lines 7–34 of `tool-permissions.test.ts`) as a NEW top-level `describe` block at the end of `test/runtime/bootstrap.test.ts`
+  - Verify the host file compiles and the inlined test passes
+  - Delete `test/runtime/tool-permissions.test.ts`
+  - Run full verification suite
+
+  **Must NOT do**:
+  - Modify the existing 5 tests in `test/runtime/bootstrap.test.ts`
+  - Rename or refactor the inlined test — copy it exactly
+  - Create a new file instead of inlining
+  - "Improve" the inlined test (no assertion modernization, no cleanup)
 
   **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
+  - **Category**: `quick`
+    - Reason: Mechanical copy-paste of one describe block + 4 imports, then delete source
   - **Skills**: []
 
   **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 3 (with Tasks 8, 9)
-  - **Blocks**: None
-  - **Blocked By**: Task 4
+  - **Can Run In Parallel**: NO
+  - **Parallel Group**: Wave 1 (sequential position 3)
+  - **Blocks**: T4
+  - **Blocked By**: T2
+
+  **References**:
+
+  **Pattern References**:
+  - `test/runtime/tool-permissions.test.ts:1-35` — The ENTIRE file to inline (1 describe, 1 it, 4 imports, ~25 lines of test body)
+  - `test/runtime/bootstrap.test.ts:1-128` — The host file (5 existing tests in `describe("bootstrapRuntime")`, 128 lines)
+
+  **API/Type References**:
+  - `src/bootstrap/tools.ts:registerRuntimeTools` — Function under test in the inlined assertion
+  - `src/memory/core-memory.ts:CoreMemoryService` — Used to verify tool execution writes
+  - `src/memory/tool-names.ts:ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES` — Constants used for schema verification
+
+  **WHY Each Reference Matters**:
+  - `tool-permissions.test.ts` is the SOLE source — copy its describe block verbatim
+  - `bootstrap.test.ts` is the SOLE target — add the new describe block AFTER the existing `describe("bootstrapRuntime")` block
+  - The 4 imports must be added to the top of the host file alongside existing imports
 
   **Acceptance Criteria**:
+
+  - [ ] `test/runtime/bootstrap.test.ts` contains a new `describe("runtime tool registration")` block
+  - [ ] All 4 new imports present at top of file
+  - [ ] Original 5 tests unchanged
+  - [ ] `bun test test/runtime/bootstrap.test.ts` → PASS (6 tests total, 0 failures)
+  - [ ] `test/runtime/tool-permissions.test.ts` deleted (file does not exist)
+  - [ ] `bunx tsc --noEmit` → exit code 0
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: Navigator tests merged, source deleted
-    Tool: Bash (bun test) + Glob tool
+  Scenario: Inlined test passes in host file
+    Tool: Bash
+    Preconditions: T2 committed, tree clean
     Steps:
-      1. Run `bun test test/memory/navigator-unit.test.ts` → expect ≥ 27 tests pass (27 original + merged unique)
-      2. Verify test/memory/navigator.test.ts does not exist
-      3. Run `bun test` → all pass
-    Expected Result: All unique assertions preserved; source deleted
-    Evidence: .sisyphus/evidence/task-7-navigator-merged.txt
+      1. Run: bun test test/runtime/bootstrap.test.ts
+      2. Assert: output contains "runtime tool registration"
+      3. Assert: 6 tests pass (5 original + 1 inlined), 0 failures
+      4. Verify: test/runtime/tool-permissions.test.ts does NOT exist
+      5. Run: bunx tsc --noEmit
+      6. Assert: exit code 0
+      7. Run: bun test
+      8. Assert: exit code 0, zero failures
+    Expected Result: Inlined test passes, source file deleted, no regressions
+    Failure Indicators: "tool-permissions.test.ts" still exists, test count != 6, any failure
+    Evidence: .sisyphus/evidence/task-3-tool-permissions-inlined.txt
+
+  Scenario: No orphaned imports after deletion
+    Tool: Bash
+    Preconditions: tool-permissions.test.ts deleted
+    Steps:
+      1. Search all files for imports of "tool-permissions": grep -r "tool-permissions" test/ src/
+      2. Assert: zero matches (no file imports the deleted file)
+    Expected Result: No remaining references to deleted file
+    Failure Indicators: Any grep match found
+    Evidence: .sisyphus/evidence/task-3-no-orphans.txt
   ```
 
-  **Commit**: YES — C3
-  - Message: `test: merge navigator duplicate tests (+N assertions merged)`
-  - Pre-commit: `bun test`
+  **Commit**: YES
+  - Message: `test(rationalize): inline tool-permissions into runtime bootstrap test`
+  - Body: `DELETED: test/runtime/tool-permissions.test.ts — REASON: thin-wrapper-inlined`
+  - Body: `PRESERVED: describe("runtime tool registration") moved to test/runtime/bootstrap.test.ts`
+  - Files: `test/runtime/bootstrap.test.ts`, `test/runtime/tool-permissions.test.ts` (deleted)
+  - Pre-commit: `bun test test/runtime/bootstrap.test.ts`
 
-- [ ] 8. Deduplicate schema-unit.test.ts + schema.test.ts overlapping describes
+---
+
+- [x] 4. Move `graph-node-ref.test.ts` + Gate Update + Import Rewrite
 
   **What to do**:
-  - Read both `test/memory/schema-unit.test.ts` (49 tests, from relocated src/) and `test/memory/schema.test.ts` (24 tests)
-  - For each `describe` block in schema-unit.test.ts, check if schema.test.ts has a describe with similar name
-  - For overlapping describes: compare `it(...)` blocks at assertion level
-    - If exact same assertion → keep ONE copy in schema.test.ts, remove from schema-unit.test.ts
-    - If different assertion → keep BOTH
-  - After deduplication, merge remaining unique tests from schema-unit.test.ts INTO schema.test.ts
-  - Delete schema-unit.test.ts
-  - Target: 73 combined → ~50-55 (remove ~15-20 true duplicates)
+  - Create directory `test/memory/contracts/` (it does not exist)
+  - Move `src/memory/contracts/graph-node-ref.test.ts` → `test/memory/contracts/graph-node-ref.test.ts`
+  - Rewrite the relative import in the moved file:
+    - OLD (line 2): `from "./graph-node-ref.js"`
+    - NEW: `from "../../../src/memory/contracts/graph-node-ref.js"`
+  - Update `test/memory/legacy-literal-gate.test.ts` ALLOWED_FILES (line 9) — this is a SET REPLACEMENT:
+    - REMOVE: `"src/memory/contracts/graph-node-ref.test.ts"`
+    - ADD: `"test/memory/contracts/graph-node-ref.test.ts"`
+  - All three changes (move + import rewrite + gate update) in ONE atomic commit
+  - Run full verification suite
+
+  **Must NOT do**:
+  - Move the file WITHOUT updating the gate — this breaks CI
+  - Update the gate WITHOUT removing the old path — makes the gate permissive to a stale path
+  - Modify any test assertions in graph-node-ref.test.ts — only the import path changes
+  - Move any other file in this task
+
+  **Recommended Agent Profile**:
+  - **Category**: `quick`
+    - Reason: File move + 2 line edits, well-defined mechanical change
+  - **Skills**: []
+
+  **Parallelization**:
+  - **Can Run In Parallel**: NO
+  - **Parallel Group**: Wave 1 (sequential position 4, final)
+  - **Blocks**: T5, T6, T7, T8, T9, T10, T11
+  - **Blocked By**: T3
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/contracts/graph-node-ref.test.ts:2-6` — Import block to rewrite: `import { type GraphNodeRef, parseGraphNodeRef, serializeGraphNodeRef } from "./graph-node-ref.js"`
+  - `src/memory/contracts/graph-node-ref.test.ts:35-37` — Legacy rejection tests (`private_event`, `private_belief`) — these contain FORBIDDEN_TOKENS by design, which is why the gate whitelist exists
+  - `test/memory/legacy-literal-gate.test.ts:6-10` — The `ALLOWED_FILES` Set that must be updated
+
+  **WHY Each Reference Matters**:
+  - The import path `"./graph-node-ref.js"` is relative to `src/memory/contracts/` — after moving to `test/memory/contracts/`, it must become `"../../../src/memory/contracts/graph-node-ref.js"`
+  - Lines 35-37 contain `private_event` and `private_belief` strings as test inputs — the gate deliberately whitelists this file so these strings don't trigger violations
+  - ALLOWED_FILES line 9 must change from `"src/memory/contracts/graph-node-ref.test.ts"` to `"test/memory/contracts/graph-node-ref.test.ts"`
+
+  **Acceptance Criteria**:
+
+  - [ ] `src/memory/contracts/graph-node-ref.test.ts` does NOT exist
+  - [ ] `test/memory/contracts/graph-node-ref.test.ts` exists with correct import path
+  - [ ] ALLOWED_FILES in gate file contains `"test/memory/contracts/graph-node-ref.test.ts"` and does NOT contain `"src/memory/contracts/graph-node-ref.test.ts"`
+  - [ ] `bun test test/memory/contracts/graph-node-ref.test.ts` → PASS
+  - [ ] `bun run check:legacy-memory-surface` → PASS
+  - [ ] `bunx tsc --noEmit` → exit code 0
+
+  **QA Scenarios (MANDATORY):**
+
+  ```
+  Scenario: Moved test passes at new location
+    Tool: Bash
+    Preconditions: T3 committed, tree clean
+    Steps:
+      1. Verify: test/memory/contracts/graph-node-ref.test.ts exists
+      2. Verify: src/memory/contracts/graph-node-ref.test.ts does NOT exist
+      3. Verify: import path in test/memory/contracts/graph-node-ref.test.ts contains "../../../src/memory/contracts/graph-node-ref.js"
+      4. Run: bun test test/memory/contracts/graph-node-ref.test.ts
+      5. Assert: all tests pass (parseGraphNodeRef, serializeGraphNodeRef, roundtrip — 6 it blocks)
+    Expected Result: All 6 test cases pass at the new location
+    Failure Indicators: File not found, import error, any test failure
+    Evidence: .sisyphus/evidence/task-4-graph-node-ref-moved.txt
+
+  Scenario: Legacy gate updated atomically
+    Tool: Bash
+    Preconditions: File moved, imports rewritten
+    Steps:
+      1. Read test/memory/legacy-literal-gate.test.ts
+      2. Assert: ALLOWED_FILES contains "test/memory/contracts/graph-node-ref.test.ts"
+      3. Assert: ALLOWED_FILES does NOT contain "src/memory/contracts/graph-node-ref.test.ts"
+      4. Run: bun run check:legacy-memory-surface
+      5. Assert: 1 test, 0 failures
+      6. Run: bunx tsc --noEmit
+      7. Assert: exit code 0
+      8. Run: bun test
+      9. Assert: exit code 0, zero failures
+    Expected Result: Gate correctly whitelists new path, all checks pass
+    Failure Indicators: Old path still in ALLOWED_FILES, gate test fails, any regression
+    Evidence: .sisyphus/evidence/task-4-gate-updated.txt
+  ```
+
+  **Commit**: YES
+  - Message: `test(rationalize): move graph-node-ref test to test/ and update legacy gate`
+  - Body: `MOVED: src/memory/contracts/graph-node-ref.test.ts → test/memory/contracts/graph-node-ref.test.ts`
+  - Body: `UPDATED: test/memory/legacy-literal-gate.test.ts ALLOWED_FILES — replaced old path with new path`
+  - Body: `REWRITTEN: import path from "./graph-node-ref.js" to "../../../src/memory/contracts/graph-node-ref.js"`
+  - Files: `test/memory/contracts/graph-node-ref.test.ts` (new), `src/memory/contracts/graph-node-ref.test.ts` (deleted), `test/memory/legacy-literal-gate.test.ts` (modified)
+  - Pre-commit: `bun run check:legacy-memory-surface && bun test test/memory/contracts/graph-node-ref.test.ts`
+
+- [x] 5. Schema-Family Audit-Then-Act
+
+  **What to do**:
+  **Phase A — Read-Only Audit:**
+  - Read `src/memory/schema.test.ts` (769 lines) and `test/memory/schema.test.ts` (1404 lines) in full
+  - List all `describe(...)` and `it(...)` blocks in both files
+  - Classify each assertion in the source (`src/`) as: `exact duplicate`, `complementary`, `historical/migration-only`, or `obsolete`
+  - Note: `test/memory/schema.test.ts` is in the legacy gate's ALLOWED_FILES — if source is merged into target, the gate entry must remain; if source is deleted entirely, verify no gate impact
+  - Save structured audit artifact to `.sisyphus/evidence/audit-schema.md`
+  - Recommend one action: `keep separate` | `prune duplicates only` | `merge source into target` | `delete source after inline`
+
+  **Phase B — Conditional Action:**
+  - Execute ONLY the Phase A recommendation
+  - If `keep separate`: no file changes
+  - If any modification: run full verification command set, commit with rationale
+
+  **Must NOT do**:
+  - Assume overlap from file names alone — the size difference (769 vs 1404) suggests different layers
+  - Modify `test/memory/legacy-literal-gate.test.ts` ALLOWED_FILES unless the source file is deleted (it currently whitelists `test/memory/schema.test.ts`)
+  - Touch `src/memory/schema.ts` (production source, out of scope)
+  - Refactor, modernize, or "clean up" any test code
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
-    - Reason: Assertion-level comparison across 73 tests, requires careful judgment
+    - Reason: Thorough line-by-line comparison of 769 + 1404 lines, assertion-level classification
   - **Skills**: []
 
   **Parallelization**:
   - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 3 (with Tasks 7, 9)
-  - **Blocks**: None
-  - **Blocked By**: Task 3
+  - **Parallel Group**: Wave 2 (with T6, T7, T8, T9, T10, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/schema.test.ts:1-769` — Source file: 769 lines, starts with `createMemorySchema` tests, includes enum coverage, `makeNodeRef`, `TransactionBatcher`, migration tests
+  - `test/memory/schema.test.ts:1-1404` — Target file: 1404 lines, imports `GraphNavigator` + `NODE_REF_KINDS`, uses `openDatabase` wrapper, includes migration and node-ref tests
+  - `test/memory/legacy-literal-gate.test.ts:7-8` — ALLOWED_FILES includes `"src/memory/schema.ts"` and `"test/memory/schema.test.ts"` — these entries exist because these files legitimately contain forbidden tokens for migration/schema purposes
+
+  **Audit Artifact Template**:
+  ```markdown
+  ## Audit: Schema Family
+  ### Source: src/memory/schema.test.ts (769 lines, N describe blocks, M it blocks)
+  ### Target: test/memory/schema.test.ts (1404 lines, N describe blocks, M it blocks)
+  ### Overlap Analysis:
+  - Exact duplicate assertions: [list with line numbers or "none"]
+  - Complementary assertions: [list]
+  - Legacy/migration-only: [list or "none"]
+  - Obsolete: [list or "none"]
+  ### Recommendation: [keep separate | prune duplicates | merge | delete after inline]
+  ### Rationale: [why]
+  ### If action recommended, specific assertions to move/delete: [list with line numbers]
+  ```
 
   **Acceptance Criteria**:
+
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-schema.md`
+  - [ ] Artifact contains complete describe/it listing for both files
+  - [ ] Every assertion classified with rationale
+  - [ ] If file changes made: `bun test` passes, `bunx tsc --noEmit` passes, `bun run check:legacy-memory-surface` passes
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: Schema tests deduplicated, single file
-    Tool: Bash (bun test)
+  Scenario: Audit artifact is complete and well-formed
+    Tool: Bash
+    Preconditions: Both files read in full
     Steps:
-      1. Run `bun test test/memory/schema.test.ts` → passes with ~50-55 tests
-      2. Verify test/memory/schema-unit.test.ts does not exist
-      3. Run `bun test` → all pass
-    Expected Result: Single schema test file; no duplicate assertions; suite green
-    Evidence: .sisyphus/evidence/task-8-schema-deduped.txt
+      1. Verify .sisyphus/evidence/audit-schema.md exists
+      2. Assert: file contains "## Audit: Schema Family"
+      3. Assert: file contains "### Recommendation:"
+      4. Assert: file contains "### Rationale:"
+      5. Assert: file lists every describe() and it() block from both files
+    Expected Result: Complete, structured audit artifact
+    Failure Indicators: Missing sections, incomplete it() listing
+    Evidence: .sisyphus/evidence/audit-schema.md
+
+  Scenario: No regression after any changes (if applicable)
+    Tool: Bash
+    Preconditions: Phase B completed (or skipped if "keep separate")
+    Steps:
+      1. Run: bun test src/memory/schema.test.ts (if still exists)
+      2. Run: bun test test/memory/schema.test.ts
+      3. Run: bun run check:legacy-memory-surface
+      4. Run: bunx tsc --noEmit
+      5. Run: bun test
+      6. Assert: all pass
+    Expected Result: Zero regressions
+    Failure Indicators: Any test failure, any type error
+    Evidence: .sisyphus/evidence/task-5-schema-verified.txt
   ```
 
-  **Commit**: YES — C4
-  - Message: `test: deduplicate schema test overlapping describes (-N duplicate assertions)`
-  - Pre-commit: `bun test`
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] schema test [domain detail]`
+  - Body: `DELETED/PRESERVED manifest per commit strategy`
+  - Pre-commit: `bun test src/memory/schema.test.ts test/memory/schema.test.ts`
 
-- [ ] 9. Deduplicate retrieval-unit.test.ts + retrieval-search.test.ts overlapping describes
+---
+
+- [x] 6. Navigator-Family Audit-Then-Act
 
   **What to do**:
-  - Read `test/memory/retrieval-unit.test.ts` (14 tests, relocated from src/) and `test/memory/retrieval-search.test.ts` (40 tests)
-  - Compare assertion-level overlap (initial audit flagged "light overlap")
-  - Merge unique assertions from retrieval-unit into retrieval-search
-  - Delete retrieval-unit.test.ts
-  - Target: 54 combined → ~45-50
+  **Phase A — Read-Only Audit:**
+  - Read `src/memory/navigator.test.ts` (839 lines) and `test/memory/navigator.test.ts` (220 lines) in full
+  - List all `describe(...)` and `it(...)` blocks in both files
+  - Classify each assertion in the SMALLER file (`test/`, 220 lines) against the LARGER file (`src/`, 839 lines)
+  - Note: the size ratio (839 vs 220) strongly suggests different coverage layers — verify this
+  - Save structured audit artifact to `.sisyphus/evidence/audit-navigator.md`
 
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 3 (with Tasks 7, 8)
-  - **Blocks**: None
-  - **Blocked By**: Task 5
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Retrieval tests deduplicated
-    Tool: Bash (bun test)
-    Steps:
-      1. Run `bun test test/memory/retrieval-search.test.ts` → passes with ~45-50 tests
-      2. Verify test/memory/retrieval-unit.test.ts does not exist
-      3. Run `bun test` → all pass
-    Expected Result: Single retrieval test file; unique assertions preserved
-    Evidence: .sisyphus/evidence/task-9-retrieval-deduped.txt
-  ```
-
-  **Commit**: YES — C5
-  - Message: `test: deduplicate retrieval test overlapping describes (-N duplicate assertions)`
-  - Pre-commit: `bun test`
-
-- [ ] 10. Merge stress-shared-blocks unique assertions into shared-blocks.test.ts, delete source
-
-  **What to do**:
-  - Read `test/memory/stress-shared-blocks.test.ts` (14 tests — 10-patch monotonicity, cross-agent interleaving, admin-grant constraints, SQL injection filter, before/after chains)
-  - Read `test/memory/shared-blocks.test.ts` (56 tests — unit tests for shared block services)
-  - For EACH of the 14 stress tests: check if shared-blocks.test.ts covers the same assertion
-  - Move all UNIQUE stress assertions into shared-blocks.test.ts under a new `describe("stress scenarios")` block
-  - Delete stress-shared-blocks.test.ts
+  **Phase B — Conditional Action:**
+  - Execute ONLY the Phase A recommendation
+  - If `keep separate`: no file changes
+  - If any modification: run full verification command set, commit with rationale
 
   **Must NOT do**:
-  - MUST NOT discard any unique assertion — every `it(...)` block from stress file must either match an existing test or be copied verbatim
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4 (with Tasks 11-16)
-  - **Blocks**: None
-  - **Blocked By**: Task 5
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Stress-shared-blocks merged into shared-blocks
-    Tool: Bash (bun test) + Glob tool
-    Steps:
-      1. Run `bun test test/memory/shared-blocks.test.ts` → passes with ≥ 56 tests (56 original + merged unique)
-      2. Verify test/memory/stress-shared-blocks.test.ts does not exist
-      3. Run `bun test` → all pass
-    Expected Result: All unique assertions preserved; source deleted
-    Evidence: .sisyphus/evidence/task-10-stress-shared-merged.txt
-  ```
-
-  **Commit**: YES — C6
-  - Message: `test: consolidate stress-shared-blocks + stress-time-slice into counterparts`
-  - Pre-commit: `bun test`
-
-- [ ] 11. Merge stress-time-slice unique assertions into time-slice-query.test.ts, delete source
-
-  **What to do**:
-  - Read `test/memory/stress-time-slice.test.ts` (16 tests — performance benchmarks 150/200 rows < 500ms, DB-level boundary conditions, genesis data persistence)
-  - Read `test/memory/time-slice-query.test.ts` (15 tests)
-  - Move all unique assertions under a new `describe("stress / boundary conditions")` block
-  - **PRESERVE** performance benchmark assertions (150 rows < 500ms) — these are the ONLY performance regression tests
-  - Delete stress-time-slice.test.ts
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4 (with Tasks 10, 12-16)
-  - **Blocks**: None
-  - **Blocked By**: Task 5
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Stress-time-slice merged into time-slice-query
-    Tool: Bash (bun test) + Grep tool
-    Steps:
-      1. Run `bun test test/memory/time-slice-query.test.ts` → passes with ≥ 15 tests
-      2. Grep "500" in test/memory/time-slice-query.test.ts → expect match (performance benchmark preserved)
-      3. Verify test/memory/stress-time-slice.test.ts does not exist
-    Expected Result: Performance benchmarks preserved; source deleted
-    Evidence: .sisyphus/evidence/task-11-stress-timeslice-merged.txt
-  ```
-
-  **Commit**: YES — C6 (grouped with Task 10)
-
-- [ ] 12. Merge validation-contested-cognition into cognition-commit.test.ts
-
-  **What to do**:
-  - Read `test/memory/validation-contested-cognition.test.ts` (6 tests)
-  - Read `test/memory/cognition-commit.test.ts` (56 tests)
-  - Move unique assertions under new `describe("contested cognition validation")` block
-  - Delete validation-contested-cognition.test.ts
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4 (with Tasks 10, 11, 13-16)
-  - **Blocks**: None
-  - **Blocked By**: Task 6
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Validation-contested-cognition merged
-    Tool: Bash (bun test)
-    Steps:
-      1. Run `bun test test/memory/cognition-commit.test.ts` → passes with ≥ 56 tests
-      2. Verify test/memory/validation-contested-cognition.test.ts does not exist
-      3. Run `bun test` → all pass (full suite verification)
-    Expected Result: Assertions preserved; source deleted; full suite green
-    Evidence: .sisyphus/evidence/task-12-validation-contested-merged.txt
-  ```
-
-  **Commit**: YES — C7
-  - Message: `test: consolidate 6 validation tests into counterpart files`
-  - Pre-commit: `bun test`
-
-- [ ] 13. Merge validation-time-model into time-slice-query.test.ts
-
-  **What to do**:
-  - Read `test/memory/validation-time-model.test.ts` (5 tests)
-  - Move unique assertions into `test/memory/time-slice-query.test.ts` under new `describe("time model validation")` block
-  - Delete validation-time-model.test.ts
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: NO — same target file as Task 11 (time-slice-query.test.ts)
-  - **Parallel Group**: Wave 4b (after Task 11 completes)
-  - **Blocks**: None
-  - **Blocked By**: Task 5, **Task 11** (file conflict: both write time-slice-query.test.ts)
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Validation-time-model merged (after stress-time-slice already merged by T11)
-    Tool: Bash (bun test)
-    Steps:
-      1. Run `bun test test/memory/time-slice-query.test.ts` → passes (includes T11 stress assertions + T13 validation assertions)
-      2. Verify test/memory/validation-time-model.test.ts does not exist
-      3. Run `bun test` → all pass
-    Expected Result: Assertions preserved; source deleted; full suite green
-    Evidence: .sisyphus/evidence/task-13-validation-time-merged.txt
-  ```
-
-  **Commit**: YES — C7 (grouped)
-
-- [ ] 14. Merge validation-explain-visibility into visibility-isolation.test.ts
-
-  **What to do**:
-  - Read `test/memory/validation-explain-visibility.test.ts` (6 tests — AuthorizationPolicy, session-scoped visibility)
-  - Move unique assertions into `test/memory/visibility-isolation.test.ts` under new `describe("explain visibility validation")` block
-  - Delete validation-explain-visibility.test.ts
-
-  **Recommended Agent Profile**:
-  - **Category**: `unspecified-high`
-  - **Skills**: []
-
-  **Parallelization**:
-  - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4
-  - **Blocks**: None
-  - **Blocked By**: Task 5
-
-  **Acceptance Criteria**:
-
-  **QA Scenarios (MANDATORY):**
-
-  ```
-  Scenario: Validation-explain-visibility merged
-    Tool: Bash (bun test)
-    Steps:
-      1. Run `bun test test/memory/visibility-isolation.test.ts` → passes with ≥ 25 tests
-      2. Verify test/memory/validation-explain-visibility.test.ts does not exist
-      3. Run `bun test` → all pass (full suite verification)
-    Expected Result: Assertions preserved; source deleted; full suite green
-    Evidence: .sisyphus/evidence/task-14-validation-visibility-merged.txt
-  ```
-
-  **Commit**: YES — C7 (grouped)
-
-- [ ] 15. Merge validation-cross-session + validation-episode-lifecycle + validation-publication-pipeline + validation-area-world-surfacing into integration.test.ts
-
-  **What to do**:
-  - Read all 4 validation files (4+5+5+7 = 21 tests total)
-  - Read `test/memory/integration.test.ts` (3 tests)
-  - For EACH of the 21 tests: check if integration.test.ts covers the same assertion
-  - Move all unique assertions into integration.test.ts under new describe blocks:
-    - `describe("cross-session durability")` — from validation-cross-session
-    - `describe("episode lifecycle")` — from validation-episode-lifecycle
-    - `describe("publication pipeline")` — from validation-publication-pipeline
-    - `describe("area/world surfacing")` — from validation-area-world-surfacing
-  - Delete all 4 validation files
-  - Note: These 4 files all use `memory-test-utils.ts` helpers — integration.test.ts may need to import them
+  - Assume the smaller file is a subset of the larger — it may cover different scenarios (e.g., explain-shell tests)
+  - Modify `src/memory/navigator.ts` (production source)
+  - Extract shared test fixtures (`freshDb`, `viewer`, `insertEntity`)
 
   **Recommended Agent Profile**:
   - **Category**: `deep`
-    - Reason: 4 source files into 1 target, need to manage shared helper imports
+    - Reason: 839 + 220 lines comparison, need to understand navigator domain semantics
   - **Skills**: []
 
   **Parallelization**:
   - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4
-  - **Blocks**: None
-  - **Blocked By**: Task 5
+  - **Parallel Group**: Wave 2 (with T5, T7, T8, T9, T10, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/navigator.test.ts:1-839` — Source: comprehensive navigator tests, imports `GRAPH_RETRIEVAL_STRATEGIES`, `NarrativeSearchServiceLike`, `CognitionSearchServiceLike`, `RetrievalService`
+  - `test/memory/navigator.test.ts:1-220` — Target: smaller focused tests, imports only `GraphNavigator`, `AliasService`, schema types
+  - Both files share helper pattern: `freshDb()`, `viewer()/viewerA()`, `insertEntity()` — but these are NOT shared code, they are independent implementations
+
+  **Audit Artifact Template**: Same structure as T5
 
   **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-navigator.md`
+  - [ ] Artifact contains complete describe/it listing for both files
+  - [ ] If file changes made: all verification commands pass
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: 4 validation files consolidated into integration.test.ts
-    Tool: Bash (bun test) + Glob tool
+  Scenario: Audit artifact is complete
+    Tool: Bash
+    Preconditions: Both files read in full
     Steps:
-      1. Run `bun test test/memory/integration.test.ts` → passes with ≥ 24 tests (3 original + 21 merged)
-      2. Glob test/memory/validation-cross-session* test/memory/validation-episode* test/memory/validation-publication* test/memory/validation-area* → expect 0 files
-      3. Run `bun test` → all pass
-    Expected Result: 4 files merged; all assertions preserved
-    Evidence: .sisyphus/evidence/task-15-validation-batch-merged.txt
+      1. Verify .sisyphus/evidence/audit-navigator.md exists
+      2. Assert: contains "### Recommendation:" and "### Rationale:"
+      3. Assert: lists all describe/it blocks from both files
+    Expected Result: Complete audit artifact
+    Evidence: .sisyphus/evidence/audit-navigator.md
+
+  Scenario: No regression after any changes
+    Tool: Bash
+    Preconditions: Phase B completed or skipped
+    Steps:
+      1. Run: bun test src/memory/navigator.test.ts (if exists)
+      2. Run: bun test test/memory/navigator.test.ts (if exists)
+      3. Run: bunx tsc --noEmit && bun test
+      4. Assert: all pass
+    Expected Result: Zero regressions
+    Evidence: .sisyphus/evidence/task-6-navigator-verified.txt
   ```
 
-  **Commit**: YES — C7 (grouped)
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] navigator test [domain detail]`
+  - Pre-commit: `bun test src/memory/navigator.test.ts test/memory/navigator.test.ts`
 
-- [ ] 16. Merge tiny CLI tests (trace-store + config-doctor → nearest CLI file)
+---
+
+- [x] 7. Retrieval-Family Audit-Then-Act
 
   **What to do**:
-  - `test/cli/trace-store.test.ts` (3 tests) → merge into `test/cli/debug-commands.test.ts` (9 tests, diagnostic domain)
-  - `test/cli/config-doctor.test.ts` (3 tests) → merge into `test/cli/config-validate.test.ts` (17 tests, config validation domain)
-  - Delete both source files
+  **Phase A — Read-Only Audit:**
+  - Read `src/memory/retrieval.test.ts` (296 lines) and `test/memory/retrieval-search.test.ts` (1783 lines) in full
+  - List all `describe(...)` and `it(...)` blocks in both files
+  - Note: extreme size difference (296 vs 1783) — the source is likely service/unit oriented while the target covers orchestration and typed retrieval surfaces
+  - Save structured audit artifact to `.sisyphus/evidence/audit-retrieval.md`
+
+  **Phase B — Conditional Action:**
+  - Execute ONLY the Phase A recommendation
+  - If `keep separate`: no file changes
+
+  **Must NOT do**:
+  - Assume overlap from both mentioning "retrieval"
+  - Modify `src/memory/retrieval.ts` (production source)
 
   **Recommended Agent Profile**:
-  - **Category**: `quick`
+  - **Category**: `deep`
+    - Reason: 296 + 1783 lines comparison, need to distinguish unit vs orchestration layers
   - **Skills**: []
 
   **Parallelization**:
   - **Can Run In Parallel**: YES
-  - **Parallel Group**: Wave 4
-  - **Blocks**: None
-  - **Blocked By**: None
+  - **Parallel Group**: Wave 2 (with T5, T6, T8, T9, T10, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/retrieval.test.ts:1-296` — Source: smaller service/unit file
+  - `test/memory/retrieval-search.test.ts:1-1783` — Target: large orchestration + typed retrieval surfaces file
+
+  **Audit Artifact Template**: Same structure as T5
 
   **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-retrieval.md`
+  - [ ] Complete describe/it listing, each assertion classified
+  - [ ] If file changes made: all verification commands pass
 
   **QA Scenarios (MANDATORY):**
 
   ```
-  Scenario: Tiny CLI tests consolidated
-    Tool: Bash (bun test) + Glob tool
+  Scenario: Audit artifact is complete
+    Tool: Bash
     Steps:
-      1. Run `bun test test/cli/debug-commands.test.ts` → passes with ≥ 12 tests
-      2. Run `bun test test/cli/config-validate.test.ts` → passes with ≥ 20 tests
-      3. Verify trace-store.test.ts and config-doctor.test.ts do not exist
-    Expected Result: Tests merged; sources deleted
-    Evidence: .sisyphus/evidence/task-16-cli-consolidated.txt
+      1. Verify .sisyphus/evidence/audit-retrieval.md exists and is well-formed
+    Expected Result: Complete audit
+    Evidence: .sisyphus/evidence/audit-retrieval.md
+
+  Scenario: No regression after any changes
+    Tool: Bash
+    Steps:
+      1. Run: bun test src/memory/retrieval.test.ts (if exists)
+      2. Run: bun test test/memory/retrieval-search.test.ts
+      3. Run: bunx tsc --noEmit && bun test
+      4. Assert: all pass
+    Expected Result: Zero regressions
+    Evidence: .sisyphus/evidence/task-7-retrieval-verified.txt
   ```
 
-  **Commit**: YES — C8
-  - Message: `test: merge tiny CLI tests into nearest file`
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] retrieval test [domain detail]`
+  - Pre-commit: `bun test src/memory/retrieval.test.ts test/memory/retrieval-search.test.ts`
+
+- [x] 8. Shared-Blocks Stress Audit-Then-Act
+
+  **What to do**:
+  **Phase A — Read-Only Audit:**
+  - Read `src/memory/stress-shared-blocks.test.ts` (409 lines) and `src/memory/shared-blocks/shared-blocks.test.ts` (871 lines) in full
+  - The stress file covers: sequential patch ordering, concurrent collision detection, permission matrix enforcement, retrieval_only exclusion, audit trail integrity
+  - The unit file covers: core shared-block CRUD operations
+  - Classify: which stress scenarios merely repeat unit coverage vs which add genuinely broader scenario testing
+  - Save structured audit artifact to `.sisyphus/evidence/audit-shared-blocks.md`
+
+  **Phase B — Conditional Action:**
+  - If `prune duplicates only`: delete specific duplicate `it()` blocks from the stress file, keeping unique stress scenarios
+  - If `keep separate`: no file changes
+
+  **Must NOT do**:
+  - Delete the entire stress file — performance/stress tests should remain standalone unless proven fully duplicated
+  - Move the stress file (both files are under `src/`, no relocation needed)
+  - Modify `src/memory/shared-blocks/` production files
+
+  **Recommended Agent Profile**:
+  - **Category**: `deep`
+    - Reason: Must distinguish unit assertions from stress scenarios in 409 + 871 lines
+  - **Skills**: []
+
+  **Parallelization**:
+  - **Can Run In Parallel**: YES
+  - **Parallel Group**: Wave 2 (with T5, T6, T7, T9, T10, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/stress-shared-blocks.test.ts:1-409` — Stress test: imports `SharedBlockRepo`, `SharedBlockPatchService`, `PatchSeqConflictError`, `SharedBlockPermissions`, `SharedBlockAttachService`, `SharedBlockAuditFacade`
+  - `src/memory/shared-blocks/shared-blocks.test.ts:1-871` — Unit test: core shared-block operations
+
+  **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-shared-blocks.md`
+  - [ ] If file changes made: `bun test src/memory/stress-shared-blocks.test.ts` passes, `bun test` passes
+
+  **QA Scenarios (MANDATORY):**
+
+  ```
+  Scenario: Audit artifact complete
+    Tool: Bash
+    Steps:
+      1. Verify .sisyphus/evidence/audit-shared-blocks.md exists and lists all describe/it blocks
+    Evidence: .sisyphus/evidence/audit-shared-blocks.md
+
+  Scenario: No regression after any changes
+    Tool: Bash
+    Steps:
+      1. Run: bun test src/memory/stress-shared-blocks.test.ts (if exists)
+      2. Run: bun test src/memory/shared-blocks/shared-blocks.test.ts
+      3. Run: bunx tsc --noEmit && bun test
+    Expected Result: Zero regressions
+    Evidence: .sisyphus/evidence/task-8-shared-blocks-verified.txt
+  ```
+
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] shared-blocks stress tests`
+  - Pre-commit: `bun test src/memory/stress-shared-blocks.test.ts`
+
+---
+
+- [x] 9. Time-Slice Stress Audit-Then-Act
+
+  **What to do**:
+  **Phase A — Read-Only Audit:**
+  - Read `src/memory/stress-time-slice.test.ts` (279 lines) and `test/memory/time-slice-query.test.ts` (294 lines) in full
+  - Both files are similar size (279 vs 294) — more likely to have real overlap than other pairs
+  - The stress file covers: dual-dimension filtering, t_valid=0 edge cases, boundary conditions, large-dataset performance, empty-result scenarios
+  - Classify: which assertions are deterministic duplicate boundary checks vs meaningful standalone stress assertions
+  - Save structured audit artifact to `.sisyphus/evidence/audit-time-slice.md`
+
+  **Phase B — Conditional Action:**
+  - Execute ONLY the Phase A recommendation
+  - Pay special attention to performance/boundary tests — these should remain even if a related unit test exists
+
+  **Must NOT do**:
+  - Delete performance-oriented tests unless proven to be exact duplicates
+  - Modify `src/memory/time-slice-query.ts` (production source)
+
+  **Recommended Agent Profile**:
+  - **Category**: `deep`
+    - Reason: Similar-size files (279 vs 294) require careful assertion-level comparison
+  - **Skills**: []
+
+  **Parallelization**:
+  - **Can Run In Parallel**: YES
+  - **Parallel Group**: Wave 2 (with T5, T6, T7, T8, T10, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/stress-time-slice.test.ts:1-279` — Stress test: imports `filterProjectionRowsByTimeSlice`, `isEdgeInTimeSlice`, `isProjectionRowInTimeSlice`, `TimeSliceQuery`, `TimeAwareProjectionRow`
+  - `test/memory/time-slice-query.test.ts:1-294` — Query test: time-slice query coverage
+
+  **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-time-slice.md`
+  - [ ] If changes made: `bun test` passes
+
+  **QA Scenarios (MANDATORY):**
+
+  ```
+  Scenario: Audit artifact complete
+    Tool: Bash
+    Steps:
+      1. Verify .sisyphus/evidence/audit-time-slice.md exists
+    Evidence: .sisyphus/evidence/audit-time-slice.md
+
+  Scenario: No regression after any changes
+    Tool: Bash
+    Steps:
+      1. Run: bun test src/memory/stress-time-slice.test.ts (if exists)
+      2. Run: bun test test/memory/time-slice-query.test.ts
+      3. Run: bunx tsc --noEmit && bun test
+    Expected Result: Zero regressions
+    Evidence: .sisyphus/evidence/task-9-time-slice-verified.txt
+  ```
+
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] time-slice stress tests`
+  - Pre-commit: `bun test src/memory/stress-time-slice.test.ts test/memory/time-slice-query.test.ts`
+
+---
+
+- [x] 10. Validation Overlap Audit-Then-Act (2 Pairs)
+
+  **What to do**:
+  **Phase A — Read-Only Audit (2 pairs in one task):**
+
+  **Pair 1**: `test/memory/validation-contested-cognition.test.ts` (339 lines) vs `test/memory/cognition-commit.test.ts` (2414 lines)
+  - Extreme size difference (339 vs 2414) — the validation file is likely a focused scenario, not a duplicate
+  - Note: `validation-contested-cognition.test.ts` may import from `memory-test-utils.ts` — verify and preserve imports if merging
+
+  **Pair 2**: `test/memory/validation-explain-visibility.test.ts` (315 lines) vs `test/memory/visibility-isolation.test.ts` (245 lines)
+  - Similar sizes (315 vs 245) — more likely to have overlap
+  - Note: `validation-explain-visibility.test.ts` may import from `memory-test-utils.ts`
+
+  - List all `describe(...)` and `it(...)` blocks in all 4 files
+  - Classify assertions per pair
+  - Save structured audit artifact to `.sisyphus/evidence/audit-validation-overlap.md`
+
+  **Phase B — Conditional Action:**
+  - Execute ONLY the Phase A recommendations (one recommendation per pair)
+  - If merging, preserve `memory-test-utils.ts` imports correctly
+
+  **Must NOT do**:
+  - Fold these into `test/memory/integration.test.ts` — that is a separate focused file
+  - Touch other validation-suite files (`validation-cross-session`, `validation-episode-lifecycle`, `validation-publication-pipeline`, `validation-area-world-surfacing`)
+
+  **Recommended Agent Profile**:
+  - **Category**: `deep`
+    - Reason: 4 files to analyze (339 + 2414 + 315 + 245 = 3313 lines total), assertion-level comparison
+  - **Skills**: []
+
+  **Parallelization**:
+  - **Can Run In Parallel**: YES
+  - **Parallel Group**: Wave 2 (with T5, T6, T7, T8, T9, T11)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `test/memory/validation-contested-cognition.test.ts:1-339` — Validation scenario for contested cognition
+  - `test/memory/cognition-commit.test.ts:1-2414` — Comprehensive cognition commit coverage (7x larger)
+  - `test/memory/validation-explain-visibility.test.ts:1-315` — Validation scenario for explain visibility
+  - `test/memory/visibility-isolation.test.ts:1-245` — Visibility isolation coverage
+
+  **External References**:
+  - `test/memory/memory-test-utils.ts` (if it exists) — shared test utility used by validation files; imports must be preserved if merging
+
+  **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-validation-overlap.md`
+  - [ ] Two separate recommendations (one per pair)
+  - [ ] If changes made: `bun test` passes
+
+  **QA Scenarios (MANDATORY):**
+
+  ```
+  Scenario: Audit artifact covers both pairs
+    Tool: Bash
+    Steps:
+      1. Verify .sisyphus/evidence/audit-validation-overlap.md exists
+      2. Assert: contains separate sections for Pair 1 and Pair 2
+      3. Assert: each pair has its own recommendation
+    Evidence: .sisyphus/evidence/audit-validation-overlap.md
+
+  Scenario: No regression after any changes
+    Tool: Bash
+    Steps:
+      1. Run: bun test test/memory/validation-contested-cognition.test.ts (if exists)
+      2. Run: bun test test/memory/cognition-commit.test.ts
+      3. Run: bun test test/memory/validation-explain-visibility.test.ts (if exists)
+      4. Run: bun test test/memory/visibility-isolation.test.ts
+      5. Run: bunx tsc --noEmit && bun test
+    Expected Result: Zero regressions
+    Evidence: .sisyphus/evidence/task-10-validation-verified.txt
+  ```
+
+  **Commit**: YES (only if Phase B modified files) | NO (if "keep separate")
+  - Message: `test(rationalize): [action] validation overlap [pair detail]`
+  - Pre-commit: `bun test test/memory/validation-contested-cognition.test.ts test/memory/cognition-commit.test.ts test/memory/validation-explain-visibility.test.ts test/memory/visibility-isolation.test.ts`
+
+- [x] 11. Legacy-Test Inventory + Classify + Conditional Removals
+
+  **What to do**:
+  **Phase A — Read-Only Inventory:**
+  - Inspect the following files that intentionally cover legacy/compatibility behavior (NOT covered by other Wave 2 audits):
+    - `src/memory/task-agent.test.ts` — task-agent behavior
+    - `test/runtime/rp-turn-contract.test.ts` — RP turn contract
+    - `test/core/models/bootstrap.test.ts` — model bootstrap
+    - `test/interaction/interaction-log.test.ts` — interaction log
+  - For each file, determine:
+    1. Does the test cover a production path that STILL EXISTS in the codebase?
+    2. Is it temporary historical coverage that will disappear after a known follow-up?
+    3. Is it truly obsolete and removable now?
+  - To verify whether a production path still exists: use `lsp_find_references` or `grep` to trace the functions/types under test back to production code
+  - Save classification to `.sisyphus/evidence/audit-legacy.md`
+
+  **Phase B — Conditional Removals:**
+  - A legacy test can be removed ONLY IF the corresponding runtime/compatibility/migration path has already been retired from production code
+  - If no tests qualify for removal: log rationale in audit artifact, no file changes — this is a valid outcome
+  - If removals are warranted: delete only the specific tests/files that cover retired paths
+
+  **Must NOT do**:
+  - Delete tests based on label alone (`legacy`, `v3`, `proposal`)
+  - Touch files covered by other Wave 2 audits (schema, navigator, retrieval, etc.)
+  - Touch the 16 non-audited `src/memory/*.test.ts` files listed in the guardrails
+  - Modify production source code even if it looks dead — production changes require a separate plan
+  - Touch `src/memory/contracts/graph-node-ref.test.ts` (already moved in T4) or migration-focused sections of `test/memory/schema.test.ts` (covered by T5)
+
+  **Recommended Agent Profile**:
+  - **Category**: `deep`
+    - Reason: Must trace test assertions back to production code to verify path existence
+  - **Skills**: []
+
+  **Parallelization**:
+  - **Can Run In Parallel**: YES
+  - **Parallel Group**: Wave 2 (with T5, T6, T7, T8, T9, T10)
+  - **Blocks**: F1–F4
+  - **Blocked By**: T4
+
+  **References**:
+
+  **Pattern References**:
+  - `src/memory/task-agent.test.ts` — Tests task-agent memory behavior; trace `TaskAgent` or equivalent to verify production usage
+  - `test/runtime/rp-turn-contract.test.ts` — Tests RP turn contract; trace the contract type to verify it's still used in runtime
+  - `test/core/models/bootstrap.test.ts` — Tests model bootstrap; trace model registration to verify it's still active
+  - `test/interaction/interaction-log.test.ts` — Tests interaction logging; trace `InteractionLog` or equivalent to verify production usage
+
+  **WHY Each Reference Matters**:
+  - Each file covers a different production domain — the agent must trace the tested code back to verify the production path is still live
+  - If the production function/type/path has been removed, the test is a valid removal candidate
+  - If the production path still exists, the test MUST stay regardless of naming
+
+  **Acceptance Criteria**:
+  - [ ] Audit artifact saved to `.sisyphus/evidence/audit-legacy.md`
+  - [ ] Every file classified as: `still required` | `temporary historical` | `obsolete/removable`
+  - [ ] For each classification: evidence provided (production path reference or proof of retirement)
+  - [ ] If file changes made: `bun test` passes, `bunx tsc --noEmit` passes
+
+  **QA Scenarios (MANDATORY):**
+
+  ```
+  Scenario: Legacy audit artifact is complete
+    Tool: Bash
+    Steps:
+      1. Verify .sisyphus/evidence/audit-legacy.md exists
+      2. Assert: contains classification for all 4 target files
+      3. Assert: each classification includes evidence (production path reference)
+    Evidence: .sisyphus/evidence/audit-legacy.md
+
+  Scenario: No regression after any removals (if applicable)
+    Tool: Bash
+    Steps:
+      1. Run: bun test (full suite)
+      2. Run: bunx tsc --noEmit
+      3. Assert: all pass
+    Expected Result: Zero regressions; only tests covering retired production paths were removed
+    Failure Indicators: Any test failure, any type error
+    Evidence: .sisyphus/evidence/task-11-legacy-verified.txt
+
+  Scenario: No forbidden files touched
+    Tool: Bash
+    Steps:
+      1. Run: git diff --name-only (check what files were modified)
+      2. Assert: no files from the 16 non-audited src/memory/*.test.ts list appear
+      3. Assert: no files from other Wave 2 audit pairs appear
+      4. Assert: no production source files (src/**/*.ts excluding *.test.ts) appear
+    Expected Result: Only the 4 target files (or subset) were modified/deleted
+    Evidence: .sisyphus/evidence/task-11-scope-check.txt
+  ```
+
+  **Commit**: YES (only if removals made) | NO (if all tests still required)
+  - Message: `test(rationalize): retire legacy-only coverage after classification`
+  - Body: `DELETED: [file] — REASON: legacy-only, production path [path] has been retired`
   - Pre-commit: `bun test`
 
 ---
 
-## Final Verification Wave (MANDATORY — after ALL implementation tasks)
+## Final Verification Wave
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
+>
+> **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 
-- [ ] F1. **Plan Compliance Audit** — `deep`
-  Read the plan. Verify each "Must Have" and "Must NOT Have". Check all files listed for deletion are actually deleted. Check all files listed as "keep" still exist. Check no legacy-cleanup files were touched.
+- [x] F1. **Plan Compliance Audit** — `oracle`
+  Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `.sisyphus/evidence/`. Verify audit artifacts exist for all 7 pairs. Verify coverage baseline and final comparison exist.
+  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-  **QA Scenarios:**
-  ```
-  Scenario: All plan constraints verified
-    Tool: Grep tool + Bash (bun test)
-    Steps:
-      1. Glob `src/memory/**/*.test.ts` → expect 0 files (recursive — covers contracts/, shared-blocks/, cognition/)
-      2. Verify import-boundaries.test.ts, local-runtime.test.ts, integration.test.ts, relation-intents.test.ts all exist
-      3. Verify stress-capability-matrix.test.ts, validation-turn-settlement.test.ts, validation-negative-cases.test.ts all exist
-      4. Run `bun test` → all pass
-    Expected Result: All constraints satisfied
-    Evidence: .sisyphus/evidence/F1-compliance.txt
-  ```
+- [x] F2. **Code Quality Review** — `unspecified-high`
+  Run `bunx tsc --noEmit` + `bun test`. Review all changed files for: orphaned imports from deleted files, broken relative paths, `as any`/`@ts-ignore` introduced by moves, commented-out code. Verify no production source files (`src/**/*.ts` excluding `*.test.ts`) were modified.
+  Output: `TypeCheck [PASS/FAIL] | Tests [N pass/N fail] | Orphans [CLEAN/N issues] | VERDICT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
-  Run `bun test`. Check no orphaned imports. Verify no duplicate describe blocks remain across merged files.
+- [x] F3. **Full Test Suite + Coverage Comparison** — `unspecified-high`
+  Run `bun test` from clean state. Compare test file count before/after. Compare coverage output against `.sisyphus/evidence/task-1-coverage-baseline.txt`. Verify no previously-covered lines became uncovered. Run `bun run check:legacy-memory-surface`.
+  Output: `Tests [N/N pass] | Files Before/After [N/N] | Coverage [preserved/regressed] | Gate [PASS/FAIL] | VERDICT`
 
-  **QA Scenarios:**
-  ```
-  Scenario: No orphans, no duplicates
-    Tool: Bash (bun test) + Grep tool
-    Steps:
-      1. Run `bun test` → 0 failures
-      2. Run `bun run build` → 0 errors
-      3. Grep "memory-test-utils" in test/ → verify all importing files exist
-    Expected Result: Clean build, no orphans
-    Evidence: .sisyphus/evidence/F2-quality.txt
-  ```
-
-- [ ] F3. **Automated End-to-End QA** — `unspecified-high`
-  Full test suite verification plus file count check.
-
-  **QA Scenarios:**
-  ```
-  Scenario: Test suite healthy, file count reduced
-    Tool: Bash (bun test) + Glob tool
-    Steps:
-      1. Run `bun test` → record total pass/fail
-      2. Use Glob **/*.test.ts → count files, expect ≤ 100
-      3. Use Glob `src/memory/**/*.test.ts` → expect 0 files (recursive)
-    Expected Result: All tests pass; ≤ 100 test files; 0 in src/memory/
-    Evidence: .sisyphus/evidence/F3-qa.txt
-  ```
-
-- [ ] F4. **Scope Fidelity Check** — `deep`
-  Verify no legacy-cleanup files were touched. Verify no production source was modified.
-
-  **QA Scenarios:**
-  ```
-  Scenario: Scope boundaries respected
-    Tool: Grep tool + Bash (git)
-    Steps:
-      1. Run `git diff --name-only` → verify ZERO non-test files changed (no *.ts outside test/ and src/memory/*.test.ts)
-      2. Grep "canonical-node-refs|v3-regression|contested-chain-v3" in git diff → expect 0 (legacy plan handles these)
-    Expected Result: Only test files changed; no legacy-plan overlap
-    Evidence: .sisyphus/evidence/F4-scope.txt
-  ```
+- [x] F4. **Scope Fidelity Check** — `deep`
+  For each task: read "What to do", read actual diff (`git log --oneline`, `git diff` from plan start). Verify 1:1 — everything in spec was done, nothing beyond spec was done. Check "Must NOT do" compliance. Verify no non-audited `src/memory/*.test.ts` files were touched. Verify no CLI/stress/validation files were modified outside explicit scope. Flag unaccounted changes.
+  Output: `Tasks [N/N compliant] | Scope [CLEAN/N violations] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
 
 ## Commit Strategy
 
-| Commit | Message | Pre-commit |
-|--------|---------|------------|
-| C1 | test: delete scaffolding tests (bootstrap, tool-permissions) | bun test |
-| C2 | test: relocate src/memory/*.test.ts → test/memory/ | bun test |
-| C3 | test: merge navigator duplicate tests (+4 assertions merged, deduplicated) | bun test |
-| C4 | test: deduplicate schema test overlapping describes (-N duplicate assertions) | bun test |
-| C5 | test: deduplicate retrieval test overlapping describes (-N duplicate assertions) | bun test |
-| C6 | test: consolidate stress-shared-blocks + stress-time-slice into counterparts | bun test |
-| C7 | test: consolidate 6 validation tests into counterpart files | bun test |
-| C8 | test: merge tiny CLI tests into nearest file | bun test |
-| C9 | test: final cleanup — verify test count + file count | bun test |
+Commits grouped by logical change, one per modification. Wave 1 sequential commits, Wave 2 one commit per audit-action pair.
+
+| Task | Commit Message | Pre-commit |
+|------|---------------|------------|
+| T2 | `test(rationalize): remove tautology from bootstrap smoke test` | `bun test test/bootstrap.test.ts` |
+| T3 | `test(rationalize): inline tool-permissions into runtime bootstrap test` | `bun test test/runtime/bootstrap.test.ts` |
+| T4 | `test(rationalize): move graph-node-ref test to test/ and update legacy gate` | `bun run check:legacy-memory-surface` |
+| T5–T10 | `test(rationalize): [audit-finding-based action] in [domain]` | `bun test [affected files]` |
+| T11 | `test(rationalize): retire legacy-only coverage after classification` | `bun test [affected files]` |
+
+> Each commit message MUST include a DELETED/PRESERVED manifest:
+> ```
+> DELETED: [file or assertion] — REASON: [useless|legacy-only|duplicate|thin-wrapper-inlined]
+> PRESERVED: [assertion] moved to [destination file]
+> ```
 
 ---
 
 ## Success Criteria
 
 ### Verification Commands
-
-Use **Bash** for test/build:
+```powershell
+bun run build                           # Expected: clean exit
+bunx tsc --noEmit                       # Expected: clean exit (includes test files)
+bun run check:legacy-memory-surface     # Expected: 1 test, 0 failures
+bun test                                # Expected: all pass, 0 failures
 ```
-bun test                    # Expected: all pass, 0 failures
-bun run build               # Expected: 0 type errors
-```
-
-Use **Grep tool** / **Glob tool** for structural checks:
-
-| Check | Tool | Pattern/Path | Expected |
-|-------|------|-------------|----------|
-| No tests anywhere under src/memory/ | Glob | `src/memory/**/*.test.ts` | 0 files (covers top-level, contracts/, shared-blocks/, cognition/) |
-| Total test files ≤ 100 | Glob | `**/*.test.ts` | ≤ 100 files |
-| No orphaned helper imports | Grep | `memory-test-utils` in test/ | All importing files exist |
 
 ### Final Checklist
-- [ ] All "Must Have" present
-- [ ] All "Must NOT Have" absent
-- [ ] All tests pass
-- [ ] Zero test files under `src/memory/` (recursive — including contracts/, shared-blocks/, cognition/)
-- [ ] File count ≤ 100
+- [ ] All "Must Have" items present
+- [ ] All "Must NOT Have" items absent
+- [ ] All tests pass (`bun test`)
+- [ ] Full type-check passes (`bunx tsc --noEmit`)
+- [ ] Legacy gate passes (`bun run check:legacy-memory-surface`)
+- [ ] Every removed test/assertion has written rationale in commit message
+- [ ] 7 audit artifacts exist in `.sisyphus/evidence/`
+- [ ] Coverage baseline exists and final coverage does not regress
+- [ ] No production source files modified
+- [ ] No non-audited `src/memory/*.test.ts` files touched

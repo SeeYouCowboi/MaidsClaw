@@ -7,8 +7,6 @@ import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
 import { RelationBuilder, type ConflictEvidence } from "./relation-builder.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
-const LEGACY_PRIVATE_BELIEF_KIND = "private_belief"; // compat: legacy kind alias
-const LEGACY_PRIVATE_EVENT_KIND = "private_event"; // compat: legacy kind alias
 
 type ConflictEvidenceItem = {
   targetRef: string;
@@ -141,7 +139,7 @@ export class CognitionSearchService {
       return parsed
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim())
-        .filter((item) => /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/.test(item)) as NodeRef[]; // compat: legacy factor refs retained for read
+        .filter((item) => /^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(item)) as NodeRef[];
     } catch {
       return [];
     }
@@ -163,14 +161,14 @@ export class CognitionSearchService {
       return null;
     }
 
-    if (kind === LEGACY_PRIVATE_BELIEF_KIND || kind === "assertion") { // compat: legacy kind reads
+    if (kind === "assertion") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ? AND kind = 'assertion'`)
         .get(id, agentId) as { "cognition_key": string | null } | null;
       return row?.cognition_key ?? null;
     }
 
-    if (kind === LEGACY_PRIVATE_EVENT_KIND || kind === "evaluation" || kind === "commitment") { // compat: legacy kind reads
+    if (kind === "evaluation" || kind === "commitment") {
       const row = this.db
         .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
         .get(id, agentId) as { "cognition_key": string | null } | null;

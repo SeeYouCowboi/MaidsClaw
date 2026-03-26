@@ -1,6 +1,7 @@
 import type { EffectClass, TraceVisibility, ToolExecutionContract } from "../core/tools/tool-definition.js";
 import type { CoreMemoryService } from "./core-memory";
 import type { RetrievalService } from "./retrieval";
+import { ALL_MEMORY_TOOL_NAMES, MEMORY_TOOL_NAMES, type MemoryToolName } from "./tool-names.js";
 import { buildTimeSliceQuery, type TimeSliceDimension } from "./time-slice-query.js";
 import type { CoreMemoryLabel, MemoryExploreInput, NavigatorResult, ViewerContext } from "./types.js";
 
@@ -77,7 +78,7 @@ function isForbiddenLabel(label: string): boolean {
 
 function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "core_memory_append",
+    name: MEMORY_TOOL_NAMES.coreMemoryAppend,
     description:
       `Append content to a Core Memory block. Blocks hold persistent agent knowledge. ` +
       `Labels: 'persona' (agent persona, identity, behavioral traits). ` +
@@ -130,7 +131,7 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
 
 function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "core_memory_replace",
+    name: MEMORY_TOOL_NAMES.coreMemoryReplace,
     description:
       `Replace content in a Core Memory block (first occurrence). ` +
       `Labels: 'persona' (agent persona, identity, behavioral traits). ` +
@@ -189,7 +190,7 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
 
 function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "memory_read",
+    name: MEMORY_TOOL_NAMES.memoryRead,
     description:
       `Read memory by pointer. Provide ONE of: entity (pointer key), topic (name), event_ids, or fact_ids. ` +
       POINTER_GUIDE,
@@ -244,7 +245,7 @@ function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// Shared narrative search handler (used by narrative_search + memory_search alias)
+// Shared narrative search handler
 // ---------------------------------------------------------------------------
 
 async function narrativeSearchHandler(
@@ -307,7 +308,7 @@ function toExplainShell(result: NavigatorResult): {
 
 function makeNarrativeSearch(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "narrative_search",
+    name: MEMORY_TOOL_NAMES.narrativeSearch,
     description:
       `Search visible narrative memory using full-text search. Returns matching events and facts scoped to your visibility. ` +
       POINTER_GUIDE,
@@ -340,7 +341,7 @@ function makeNarrativeSearch(services: MemoryToolServices): MemoryToolDefinition
 
 function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "cognition_search",
+    name: MEMORY_TOOL_NAMES.cognitionSearch,
     description:
       `Search private cognition (assertions, evaluations, commitments) for the current agent. ` +
       `Returns matching cognition hits scoped to the viewer agent. ` +
@@ -398,47 +399,12 @@ function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tool: memory_search (compatibility alias → narrative_search behavior)
-// ---------------------------------------------------------------------------
-
-function makeMemorySearch(services: MemoryToolServices): MemoryToolDefinition {
-  return {
-    name: "memory_search",
-    description:
-      `Search visible narrative memory (compatibility alias for narrative_search). ` +
-      `Returns matching events and facts scoped to your visibility. ` +
-      POINTER_GUIDE,
-    effectClass: "read_only",
-    traceVisibility: "public",
-    executionContract: {
-      effect_type: "read_only",
-      turn_phase: "any",
-      cardinality: "multiple",
-      trace_visibility: "public",
-    },
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "Search query (natural language or keywords, min 3 chars).",
-        },
-      },
-      required: ["query"],
-      additionalProperties: false,
-    },
-    handler: (args, viewerContext) => narrativeSearchHandler(services, args, viewerContext),
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Tool: memory_explore
 // ---------------------------------------------------------------------------
 
 function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
   return {
-    name: "memory_explore",
+    name: MEMORY_TOOL_NAMES.memoryExplore,
     description:
       `Explain evidence paths for why/relationship/timeline/state/conflict questions. ` +
       `Returns concise summaries with redacted placeholders for hidden steps. ` +
@@ -535,18 +501,19 @@ function makeMemoryExplore(services: MemoryToolServices): MemoryToolDefinition {
 // Registration
 // ---------------------------------------------------------------------------
 
-const TOOL_FACTORIES = [
-  makeCoreMemoryAppend,
-  makeCoreMemoryReplace,
-  makeMemoryRead,
-  makeNarrativeSearch,
-  makeCognitionSearch,
-  makeMemorySearch,
-  makeMemoryExplore,
-] as const;
+type MemoryToolFactory = (services: MemoryToolServices) => MemoryToolDefinition;
+
+const TOOL_FACTORIES: Record<MemoryToolName, MemoryToolFactory> = {
+  [MEMORY_TOOL_NAMES.coreMemoryAppend]: makeCoreMemoryAppend,
+  [MEMORY_TOOL_NAMES.coreMemoryReplace]: makeCoreMemoryReplace,
+  [MEMORY_TOOL_NAMES.memoryRead]: makeMemoryRead,
+  [MEMORY_TOOL_NAMES.narrativeSearch]: makeNarrativeSearch,
+  [MEMORY_TOOL_NAMES.cognitionSearch]: makeCognitionSearch,
+  [MEMORY_TOOL_NAMES.memoryExplore]: makeMemoryExplore,
+};
 
 export function buildMemoryTools(services: MemoryToolServices): MemoryToolDefinition[] {
-  return TOOL_FACTORIES.map((factory) => factory(services));
+  return ALL_MEMORY_TOOL_NAMES.map((toolName) => TOOL_FACTORIES[toolName](services));
 }
 
 export function registerMemoryTools(

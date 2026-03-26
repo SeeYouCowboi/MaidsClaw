@@ -18,6 +18,7 @@ import { JobQueue } from "../../src/jobs/queue.js";
 import { JobDedupEngine } from "../../src/jobs/dedup.js";
 import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobScheduler } from "../../src/jobs/scheduler.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
 
 function createInteractionHarness(): {
@@ -268,7 +269,7 @@ describe("E2E demo scenario", () => {
       },
     });
 
-    const tool = tools.find((candidate) => candidate.name === "memory_explore");
+    const tool = tools.find((candidate) => candidate.name === MEMORY_TOOL_NAMES.memoryExplore);
     expect(tool).toBeDefined();
 
     const result = await tool!.handler(

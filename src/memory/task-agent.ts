@@ -101,16 +101,14 @@ export type CreatedState = {
   changedNodeRefs: NodeRef[];
 };
 
-const legacyPrivateEventPrefix = `private_${"event"}:`;
-const legacyPrivateBeliefPrefix = `private_${"belief"}:`;
-const legacyCreatePrivateEventToolName = `create_private_${"event"}`;
-const legacyCreatePrivateBeliefToolName = `create_private_${"belief"}`;
-const episodeEventIdsKey: `private_${"event"}_ids` = `private_${"event"}_ids`;
-const assertionIdsKey: `private_${"belief"}_ids` = `private_${"belief"}_ids`;
+const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
+const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
+const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
+const ASSERTION_IDS_KEY = "assertion_ids";
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
-    name: legacyCreatePrivateEventToolName,
+    name: CREATE_EPISODE_EVENT_TOOL_NAME,
     description:
       "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
@@ -148,8 +146,8 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
-    name: legacyCreatePrivateBeliefToolName,
-    description: "Create private belief overlay edges between entities.",
+    name: UPSERT_ASSERTION_TOOL_NAME,
+    description: "Upsert private assertions between entities.",
     inputSchema: {
       type: "object",
       required: ["source", "target", "predicate", "basis", "stance"],
@@ -456,8 +454,8 @@ export class MemoryTaskAgent {
 
     return {
       batch_id: flushRequest.idempotencyKey,
-      [episodeEventIdsKey]: created.episodeEventIds,
-      [assertionIdsKey]: created.assertionIds,
+      [EPISODE_EVENT_IDS_KEY]: created.episodeEventIds,
+      [ASSERTION_IDS_KEY]: created.assertionIds,
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
@@ -582,7 +580,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === legacyCreatePrivateEventToolName) {
+      if (call.name === CREATE_EPISODE_EVENT_TOOL_NAME) {
         const primaryActor = this.resolveEntityReference(
           call.arguments.primary_actor_entity_id,
           flushRequest.agentId,
@@ -637,7 +635,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === legacyCreatePrivateBeliefToolName) {
+      if (call.name === UPSERT_ASSERTION_TOOL_NAME) {
         const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
         const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
         if (!source || !target) {
@@ -834,7 +832,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value) && !value.startsWith(legacyPrivateEventPrefix) && !value.startsWith(legacyPrivateBeliefPrefix)) {
+    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;

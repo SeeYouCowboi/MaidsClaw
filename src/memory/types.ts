@@ -422,13 +422,13 @@ export type ExtractionBatch = {
   range_end: number;
 };
 
-type PrivateEventIdsKey = `private_${"event"}_ids`;
-type PrivateBeliefIdsKey = `private_${"belief"}_ids`;
 export type MigrationResult = {
   batch_id: string;
+  episode_event_ids: number[];
+  assertion_ids: number[];
   entity_ids: number[];
   fact_ids: number[];
-} & Record<PrivateEventIdsKey, number[]> & Record<PrivateBeliefIdsKey, number[]>;
+};
 
 export type GraphOrganizerResult = {
   updated_embedding_refs: NodeRef[];
