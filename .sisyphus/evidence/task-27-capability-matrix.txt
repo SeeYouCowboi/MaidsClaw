@@ -1,5 +1,0 @@
-bun test v1.3.10 (30e609e0)
---- memory tests ---
-bun test v1.3.10 (30e609e0)
---- build ---
-BUILD OK
