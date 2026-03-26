@@ -1,7 +1,6 @@
 import { MaidsClawError } from "../../core/errors.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import { CognitionEventRepo } from "./cognition-event-repo.js";
-import { RelationBuilder } from "./relation-builder.js";
 import {
   TERMINAL_STANCES,
   assertLegalStanceTransition,
@@ -135,11 +134,9 @@ type AssertionProjectionRecord = {
 };
 
 export class CognitionRepository {
-  private readonly relationBuilder: RelationBuilder;
   private readonly eventRepo: CognitionEventRepo;
 
   constructor(private readonly db: DbLike) {
-    this.relationBuilder = new RelationBuilder(db);
     this.eventRepo = new CognitionEventRepo(db);
   }
 
@@ -262,14 +259,6 @@ export class CognitionRepository {
             sourceRefKind: "assertion",
             now,
           });
-          if (params.stance === "contested") {
-            this.relationBuilder.writeContestRelations(
-              `assertion:${projectionId}`,
-              [],
-              params.settlementId,
-              0.8,
-            );
-          }
           return { id: projectionId };
         });
       }
@@ -304,14 +293,6 @@ export class CognitionRepository {
           sourceRefKind: "assertion",
           now,
         });
-        if (params.stance === "contested") {
-          this.relationBuilder.writeContestRelations(
-            `assertion:${projectionId}`,
-            [],
-            params.settlementId,
-            0.8,
-          );
-        }
         return { id: projectionId };
       });
     }
@@ -347,14 +328,6 @@ export class CognitionRepository {
         sourceRefKind: "assertion",
         now,
       });
-      if (params.stance === "contested") {
-        this.relationBuilder.writeContestRelations(
-          `assertion:${projectionId}`,
-          [],
-          params.settlementId,
-          0.8,
-        );
-      }
       return { id: projectionId };
     });
   }
