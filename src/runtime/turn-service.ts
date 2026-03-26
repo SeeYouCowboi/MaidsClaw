@@ -8,6 +8,7 @@ import type { Chunk } from "../core/chunk.js";
 import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
+import { filterArtifactsByScope } from "../core/tools/artifact-contract-policy.js";
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -43,6 +44,7 @@ import type {
 	RpBufferedExecutionResult,
 } from "./rp-turn-contract.js";
 import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "./submit-rp-turn-tool.js";
 
 type TurnServiceAgentLoop = {
 	run(request: AgentRunRequest): AsyncIterable<Chunk>;
@@ -832,10 +834,19 @@ export class TurnService {
 			privateCognition?: { opCount?: number; kinds?: string[] };
 		};
 
+		const publicArtifactKinds = filterArtifactsByScope(
+			SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+			["world", "area", "session"],
+		);
+		const allKinds = [
+			...(redactedPayload.privateCognition?.kinds ?? []),
+			...publicArtifactKinds,
+		];
+
 		return {
 			type: "turn_settlement",
 			op_count: redactedPayload.privateCognition?.opCount,
-			kinds: redactedPayload.privateCognition?.kinds,
+			kinds: allKinds.length > 0 ? allKinds : undefined,
 		};
 	}
 }

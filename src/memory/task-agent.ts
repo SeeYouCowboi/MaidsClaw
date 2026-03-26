@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../runtime/submit-rp-turn-tool.js";
 import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
@@ -387,6 +388,8 @@ export class MemoryTaskAgent {
       await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
         agentRole: flushRequest.agentRole,
         writeTemplateOverride: flushRequest.writeTemplateOverride,
+        agentId: flushRequest.agentId,
+        artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
       });
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));

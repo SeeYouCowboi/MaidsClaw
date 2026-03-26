@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
+import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
@@ -1115,6 +1119,75 @@ describe("TurnService", () => {
     const derived = deriveEffectClass(tool.executionContract!.effect_type);
     expect(derived).toBe("read_only");
     expect(tool.effectClass).toBe("read_only");
+  });
+
+  it("trace redaction excludes private artifact kinds and includes public artifact kinds", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-trace-redaction-"));
+    const traceStore = new TraceStore(tempDir);
+
+    try {
+      const session = sessionService.createSession("rp:alice");
+      const turnService = new TurnService(
+        makeRpBufferedLoop({
+          outcome: {
+            schemaVersion: "rp_turn_outcome_v5",
+            publicReply: "Visible reply",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
+              ops: [
+                {
+                  op: "upsert",
+                  record: {
+                    kind: "assertion",
+                    key: "trace-redaction-test",
+                    proposition: {
+                      subject: { kind: "special", value: "self" },
+                      predicate: "knows",
+                      object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                    },
+                    stance: "accepted",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+        commitService,
+        store,
+        flushSelector,
+        null,
+        sessionService,
+        undefined,
+        undefined,
+        graphStorage,
+        traceStore,
+      );
+
+      await collectChunks(
+        turnService.run({
+          sessionId: session.sessionId,
+          requestId: "req-trace-redaction",
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      );
+
+      const trace = traceStore.readTrace("req-trace-redaction");
+      expect(trace).not.toBeNull();
+      const kinds = trace?.settlement?.kinds ?? [];
+
+      expect(kinds).toContain("assertion");
+      expect(kinds).toContain("publicReply");
+      expect(kinds).toContain("publications");
+      expect(kinds).toContain("pinnedSummaryProposal");
+      expect(kinds).toContain("areaStateArtifacts");
+
+      expect(kinds).not.toContain("privateCognition");
+      expect(kinds).not.toContain("privateEpisodes");
+      expect(kinds).not.toContain("relationIntents");
+      expect(kinds).not.toContain("conflictFactors");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

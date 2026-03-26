@@ -1,6 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
 import { MaidsClawError } from "../core/errors.js";
+import { enforceArtifactContracts } from "../core/tools/artifact-contract-policy.js";
+import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import type {
   AssertionBasis,
   AssertionRecordV4,
@@ -71,10 +73,20 @@ export class ExplicitSettlementProcessor {
     options?: {
       agentRole?: AgentRole;
       writeTemplateOverride?: WriteTemplate;
+      agentId?: string;
+      artifactContracts?: Record<string, ArtifactContract>;
     },
   ): Promise<void> {
     if (options?.agentRole) {
       enforceWriteTemplate(options.agentRole, "cognition", options.writeTemplateOverride);
+    }
+
+    if (options?.artifactContracts) {
+      enforceArtifactContracts(options.artifactContracts, {
+        writingAgentId: options.agentId,
+        ownerAgentId: ingest.agentId,
+        writeOperation: "append",
+      });
     }
 
     for (const explicitMeta of ingest.explicitSettlements) {

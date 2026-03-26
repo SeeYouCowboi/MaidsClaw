@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { MaidsClawError } from "../../src/core/errors.js";
 import type { AgentRole } from "../../src/agents/profile.js";
+import type { ArtifactContract } from "../../src/core/tools/tool-definition.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { InteractionStore } from "../../src/interaction/store.js";
@@ -20,6 +21,7 @@ import type {
 	MemoryFlushRequest,
 } from "../../src/memory/task-agent.js";
 import type { CognitionOp } from "../../src/runtime/rp-turn-contract.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../../src/runtime/submit-rp-turn-tool.js";
 import {
 	cleanupDb,
 	createTempDb,
@@ -99,6 +101,8 @@ async function processExplicitSettlement(params: {
 	ops: CognitionOp[];
 	agentRole?: AgentRole;
 	writeTemplateOverride?: WriteTemplate;
+	writingAgentId?: string;
+	artifactContracts?: Record<string, ArtifactContract>;
 }): Promise<void> {
 	const processor = new ExplicitSettlementProcessor(
 		params.db.raw,
@@ -168,6 +172,8 @@ async function processExplicitSettlement(params: {
 		{
 			agentRole: params.agentRole,
 			writeTemplateOverride: params.writeTemplateOverride,
+			agentId: params.writingAgentId ?? params.agentId,
+			artifactContracts: params.artifactContracts,
 		},
 	);
 }
@@ -422,6 +428,52 @@ describe("V2 validation — turn settlement sync visibility", () => {
 				["rp:alice", cognitionKey],
 			);
 			expect(row?.cognition_key).toBe(cognitionKey);
+		});
+	});
+
+	it("enforces artifact contracts in explicit settlement processor on authority mismatch", async () => {
+		await withTempMemoryDb(async ({ db, storage }) => {
+			const run = processExplicitSettlement({
+				db,
+				storage,
+				agentId: "rp:alice",
+				sessionId: "sess:validation:artifact:mismatch",
+				requestId: "req:validation:artifact:mismatch",
+				settlementId: "stl:validation:artifact:mismatch",
+				agentRole: "rp_agent",
+				writingAgentId: "rp:bob",
+				artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "validation:artifact:mismatch:assertion",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "supports",
+								object: {
+									kind: "entity",
+									ref: { kind: "pointer_key", value: "bob" },
+								},
+							},
+							stance: "accepted",
+							basis: "first_hand",
+						},
+					},
+				],
+			});
+
+			let caught: unknown;
+			try {
+				await run;
+			} catch (error) {
+				caught = error;
+			}
+
+			expect(caught).toBeDefined();
+			expect(caught instanceof MaidsClawError).toBe(true);
+			expect((caught as MaidsClawError).code).toBe("ARTIFACT_CONTRACT_DENIED");
 		});
 	});
 

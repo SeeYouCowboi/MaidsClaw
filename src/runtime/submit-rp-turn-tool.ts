@@ -2,7 +2,7 @@ import { MaidsClawError } from "../core/errors.js";
 import type { ArtifactContract, ToolDefinition } from "../core/tools/tool-definition.js";
 import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
 
-const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract> = {
+export const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract> = {
   publicReply: {
     authority_level: "agent",
     artifact_scope: "world",
