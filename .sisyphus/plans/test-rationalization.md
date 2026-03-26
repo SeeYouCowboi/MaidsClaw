@@ -424,7 +424,7 @@ Each Wave 2 task follows a strict two-phase pattern:
 
 ---
 
-- [ ] 4. Move `graph-node-ref.test.ts` + Gate Update + Import Rewrite
+- [x] 4. Move `graph-node-ref.test.ts` + Gate Update + Import Rewrite
 
   **What to do**:
   - Create directory `test/memory/contracts/` (it does not exist)
@@ -518,7 +518,7 @@ Each Wave 2 task follows a strict two-phase pattern:
   - Files: `test/memory/contracts/graph-node-ref.test.ts` (new), `src/memory/contracts/graph-node-ref.test.ts` (deleted), `test/memory/legacy-literal-gate.test.ts` (modified)
   - Pre-commit: `bun run check:legacy-memory-surface && bun test test/memory/contracts/graph-node-ref.test.ts`
 
-- [ ] 5. Schema-Family Audit-Then-Act
+- [x] 5. Schema-Family Audit-Then-Act
 
   **What to do**:
   **Phase A — Read-Only Audit:**
@@ -618,7 +618,7 @@ Each Wave 2 task follows a strict two-phase pattern:
 
 ---
 
-- [ ] 6. Navigator-Family Audit-Then-Act
+- [x] 6. Navigator-Family Audit-Then-Act
 
   **What to do**:
   **Phase A — Read-Only Audit:**
@@ -694,7 +694,7 @@ Each Wave 2 task follows a strict two-phase pattern:
 
 ---
 
-- [ ] 7. Retrieval-Family Audit-Then-Act
+- [x] 7. Retrieval-Family Audit-Then-Act
 
   **What to do**:
   **Phase A — Read-Only Audit:**
@@ -760,7 +760,7 @@ Each Wave 2 task follows a strict two-phase pattern:
   - Message: `test(rationalize): [action] retrieval test [domain detail]`
   - Pre-commit: `bun test src/memory/retrieval.test.ts test/memory/retrieval-search.test.ts`
 
-- [ ] 8. Shared-Blocks Stress Audit-Then-Act
+- [x] 8. Shared-Blocks Stress Audit-Then-Act
 
   **What to do**:
   **Phase A — Read-Only Audit:**
@@ -825,7 +825,7 @@ Each Wave 2 task follows a strict two-phase pattern:
 
 ---
 
-- [ ] 9. Time-Slice Stress Audit-Then-Act
+- [x] 9. Time-Slice Stress Audit-Then-Act
 
   **What to do**:
   **Phase A — Read-Only Audit:**
@@ -889,7 +889,7 @@ Each Wave 2 task follows a strict two-phase pattern:
 
 ---
 
-- [ ] 10. Validation Overlap Audit-Then-Act (2 Pairs)
+- [x] 10. Validation Overlap Audit-Then-Act (2 Pairs)
 
   **What to do**:
   **Phase A — Read-Only Audit (2 pairs in one task):**
@@ -968,7 +968,7 @@ Each Wave 2 task follows a strict two-phase pattern:
   - Message: `test(rationalize): [action] validation overlap [pair detail]`
   - Pre-commit: `bun test test/memory/validation-contested-cognition.test.ts test/memory/cognition-commit.test.ts test/memory/validation-explain-visibility.test.ts test/memory/visibility-isolation.test.ts`
 
-- [ ] 11. Legacy-Test Inventory + Classify + Conditional Removals
+- [x] 11. Legacy-Test Inventory + Classify + Conditional Removals
 
   **What to do**:
   **Phase A — Read-Only Inventory:**
@@ -1071,19 +1071,19 @@ Each Wave 2 task follows a strict two-phase pattern:
 >
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `.sisyphus/evidence/`. Verify audit artifacts exist for all 7 pairs. Verify coverage baseline and final comparison exist.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bunx tsc --noEmit` + `bun test`. Review all changed files for: orphaned imports from deleted files, broken relative paths, `as any`/`@ts-ignore` introduced by moves, commented-out code. Verify no production source files (`src/**/*.ts` excluding `*.test.ts`) were modified.
   Output: `TypeCheck [PASS/FAIL] | Tests [N pass/N fail] | Orphans [CLEAN/N issues] | VERDICT`
 
-- [ ] F3. **Full Test Suite + Coverage Comparison** — `unspecified-high`
+- [x] F3. **Full Test Suite + Coverage Comparison** — `unspecified-high`
   Run `bun test` from clean state. Compare test file count before/after. Compare coverage output against `.sisyphus/evidence/task-1-coverage-baseline.txt`. Verify no previously-covered lines became uncovered. Run `bun run check:legacy-memory-surface`.
   Output: `Tests [N/N pass] | Files Before/After [N/N] | Coverage [preserved/regressed] | Gate [PASS/FAIL] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (`git log --oneline`, `git diff` from plan start). Verify 1:1 — everything in spec was done, nothing beyond spec was done. Check "Must NOT do" compliance. Verify no non-audited `src/memory/*.test.ts` files were touched. Verify no CLI/stress/validation files were modified outside explicit scope. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Scope [CLEAN/N violations] | Unaccounted [CLEAN/N files] | VERDICT`
 
