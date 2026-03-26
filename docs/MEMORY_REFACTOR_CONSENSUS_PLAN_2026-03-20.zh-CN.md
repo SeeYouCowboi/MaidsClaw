@@ -1,9 +1,19 @@
 # Memory 重构共识计划清单
 
-日期: 2026-03-20  
-仓库: `MaidsClaw`  
-范围: RP 多 agent memory 系统  
+日期: 2026-03-20
+仓库: `MaidsClaw`
+范围: RP 多 agent memory 系统
 关联文档: `docs/MEMORY_REFACTOR_RESEARCH_2026-03-19.zh-CN.md`
+
+> **历史遗留清理完成通知（2026-03 legacy-cleanup 重构）**
+>
+> 本文档中 `5.3` 节所列的 `agent_fact_overlay` 与 `agent_event_overlay` 两张旧表已于 legacy-cleanup 重构中全部移除：
+> - `agent_event_overlay` 由 migration 017 删除，已替换为 `private_cognition_events` + `private_episode_events`。
+ > - `agent_fact_overlay` 由 migration 030 删除（dropped: migration 030），持久化认知数据现由 `private_cognition_events` / `private_cognition_current` 承载。
+> - `private_event` / `private_belief` 节点类型已从类型系统与全部生产代码中完全移除；仅在 legacy/compat/migration 代码中保留只读引用。
+> - 当前 canonical 表为 `private_episode_events`、``private_cognition_events` 与 `private_cognition_current`。
+>
+> `16.3`、`16.4`、`16.8` 节的 schema 草案为历史设计草稿，已被上述迁移路径取代，不再作为当前实现参考。
 
 ## 1. 目的
 
@@ -104,9 +114,11 @@
 
 ### 5.3 Persistent Cognition
 
-- 数据源:
-- `agent_fact_overlay`
-- `agent_event_overlay`
+> **已移除（legacy-cleanup 重构）**: 下列两张旧表已通过 migration 017/030 完全删除。当前 canonical 存储为 `private_cognition_events`（append-only 事件日志）与 `private_cognition_current`（可重建投影表）。
+
+- 数据源（历史草案，已废弃）:
+  - `agent_fact_overlay` — 已由 migration 030 删除 (dropped: migration 030)
+  - `agent_event_overlay` — 已由 migration 017 删除
 - 检索方式:
 - `commitment` 走结构化查询
 - `assertion` / `evaluation` 走独立 cognition 检索
@@ -718,15 +730,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_publication_scope
 - `source_pub_index`: 对应 `publications[]` 里的第几条声明，内部 0-based。
 - `source_settlement_id + source_pub_index + visibility_scope` 共同约束某次 publication 在某个作用域中只物化一次。
 
-### 16.3 assertion 持久层草案: `agent_fact_overlay_v2`
+### 16.3 assertion 持久层草案: `agent_fact_overlay_v2` (legacy, dropped — superseded by `private_cognition_events` + `private_cognition_current`)
 
 说明:
 
 - 草案用 `_v2` 表示目标形态，不强制要求物理表最终真的叫这个名字。
-- 如果继续沿用 `agent_fact_overlay`，则应通过增列与迁移让其达到等价语义。
+- 如果继续沿用 `agent_fact_overlay`（legacy, now dropped — see migration 030），则应通过增列与迁移让其达到等价语义。
 
 ```sql
-CREATE TABLE IF NOT EXISTS agent_fact_overlay_v2 (
+CREATE TABLE IF NOT EXISTS agent_fact_overlay_v2 ( -- LEGACY SCHEMA DRAFT, dropped (migration 030); actual impl: private_cognition_events
   id INTEGER PRIMARY KEY,
   agent_id TEXT NOT NULL,
   source_entity_id INTEGER NOT NULL,
@@ -769,13 +781,13 @@ CREATE TABLE IF NOT EXISTS agent_fact_overlay_v2 (
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_fact_v2_agent_stance
-  ON agent_fact_overlay_v2(agent_id, stance, updated_at DESC);
+  ON agent_fact_overlay_v2(agent_id, stance, updated_at DESC); -- legacy, dropped
 
 CREATE INDEX IF NOT EXISTS idx_agent_fact_v2_agent_basis
-  ON agent_fact_overlay_v2(agent_id, basis, updated_at DESC);
+  ON agent_fact_overlay_v2(agent_id, basis, updated_at DESC); -- legacy, dropped
 
 CREATE INDEX IF NOT EXISTS idx_agent_fact_v2_agent_predicate
-  ON agent_fact_overlay_v2(agent_id, predicate, updated_at DESC);
+  ON agent_fact_overlay_v2(agent_id, predicate, updated_at DESC); -- legacy, dropped
 ```
 
 设计说明:
@@ -1007,8 +1019,10 @@ CREATE INDEX IF NOT EXISTS idx_shared_block_patch_block_seq
 
 ### 16.8 兼容迁移建议
 
-- 兼容期保留旧 `agent_fact_overlay.confidence` 物理列，但 canonical 读路径不得再使用它。
-- 兼容期允许 `agent_event_overlay` 与 `agent_event_overlay_v2` 逻辑共存，只要 runtime repository 层对外暴露统一语义。
+> **历史备注（legacy-cleanup 重构后已废弃）**: 下列兼容期规则均已通过 migration 017–030 执行完毕。`agent_fact_overlay` 与 `agent_event_overlay` 均已删除；以下条目仅作历史记录保留，不再适用。
+
+- ~~兼容期保留旧 `agent_fact_overlay.confidence` 物理列，但 canonical 读路径不得再使用它。~~ （legacy, dropped: migration 030 removed the entire table）
+- ~~兼容期允许 `agent_event_overlay` 与 `agent_event_overlay_v2` 逻辑共存，只要 runtime repository 层对外暴露统一语义。~~ （已随 migration 017 一起删除）
 - 兼容期保留旧 `memory_search`，但内部应尽快别名到 `narrative_search`。
 
 ## 17. TypeScript 类型草案

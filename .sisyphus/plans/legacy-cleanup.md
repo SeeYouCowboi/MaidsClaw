@@ -219,7 +219,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ## TODOs
 
-- [ ] 1. Redirect createPrivateBelief → upsertAssertion
+- [x] 1. Redirect createPrivateBelief → upsertAssertion
 
   **What to do**:
   - In `src/memory/storage.ts`: Remove the `createPrivateBelief()` method body that writes directly to `agent_fact_overlay` (lines 658-705)
@@ -287,7 +287,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/storage.ts`, `src/memory/task-agent.ts`, related tests
   - Pre-commit: `bun test`
 
-- [ ] 2. Guard migration 006 with tableExists check
+- [x] 2. Guard migration 006 with tableExists check
 
   **What to do**:
   - In `src/memory/schema.ts`, find migration `memory:006:backfill-canonical-stances` (lines 231-263)
@@ -342,7 +342,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 3. Make MemoryDataSource interface methods optional
+- [x] 3. Make MemoryDataSource interface methods optional
 
   **What to do**:
   - In `src/core/prompt-data-sources.ts`: Change `getCoreMemoryBlocks(agentId: string): string;` to `getCoreMemoryBlocks?(agentId: string): string;`
@@ -388,7 +388,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/core/prompt-data-sources.ts`, `src/core/prompt-builder.ts`, `src/core/prompt-data-adapters/memory-adapter.ts`
   - Pre-commit: `bun test`
 
-- [ ] 4. Cut agent_fact_overlay writes from upsertAssertion
+- [x] 4. Cut agent_fact_overlay writes from upsertAssertion
 
   **What to do**:
   - In `src/memory/cognition/cognition-repo.ts`: Remove the `agent_fact_overlay` INSERT (lines ~326-341) and UPDATE (lines ~403-417) from `upsertAssertion()`
@@ -448,7 +448,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/cognition/cognition-repo.ts`, `src/memory/stress-contested-chain.test.ts`, `src/memory/contested-chain-v3.test.ts`, related tests
   - Pre-commit: `bun test`
 
-- [ ] 5. Cut agent_fact_overlay writes from retractCognition
+- [x] 5. Cut agent_fact_overlay writes from retractCognition
 
   **What to do**:
   - In `src/memory/cognition/cognition-repo.ts`: Find `retractCognition()` method (lines ~700-780)
@@ -485,7 +485,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C3 (grouped with Task 4)
 
-- [ ] 6. Remove legacy compat source_ref loops in cognition-repo search doc sync
+- [x] 6. Remove legacy compat source_ref loops in cognition-repo search doc sync
 
   **What to do**:
   - In `src/memory/cognition/cognition-repo.ts:1137`: Remove the `for (const sourceRef of [... , \`private_event:${row.id}\`])` loop — keep only the canonical `${refKind}:${row.id}` ref
@@ -524,7 +524,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/cognition/cognition-repo.ts`
   - Pre-commit: `bun test`
 
-- [ ] 7. Write migration to backfill unkeyed assertions from overlay to cognition_current
+- [x] 7. Write migration to backfill unkeyed assertions from overlay to cognition_current
 
   **What to do**:
   - Add new migration `memory:028:backfill-unkeyed-assertions` in `src/memory/schema.ts`
@@ -581,7 +581,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 8. Write migration to purge stored legacy node_refs from derived tables
+- [x] 8. Write migration to purge stored legacy node_refs from derived tables
 
   **What to do**:
   - Add new migration `memory:029:purge-legacy-node-refs` in `src/memory/schema.ts`
@@ -655,7 +655,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C5 (grouped with Task 7)
 
-- [ ] 9. Write migration to drop agent_fact_overlay + drop source_label_raw
+- [x] 9. Write migration to drop agent_fact_overlay + drop source_label_raw
 
   **What to do**:
   - Add new migration `memory:030:drop-agent-fact-overlay` in `src/memory/schema.ts`
@@ -710,7 +710,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 10. Remove agent_fact_overlay reads from cognition-repo
+- [x] 10. Remove agent_fact_overlay reads from cognition-repo
 
   **What to do**:
   - In `src/memory/cognition/cognition-repo.ts`:
@@ -761,7 +761,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/cognition/cognition-repo.ts`
   - Pre-commit: `bun test`
 
-- [ ] 11. Remove agent_fact_overlay reads from graph-organizer + graph-edge-view + embeddings
+- [x] 11. Remove agent_fact_overlay reads from graph-organizer + graph-edge-view + embeddings
 
   **What to do**:
   - `src/memory/graph-organizer.ts`:
@@ -804,7 +804,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C7 (grouped with Tasks 10, 12, 13)
 
-- [ ] 12. Remove agent_fact_overlay reads AND legacy node kind usage from navigator
+- [x] 12. Remove agent_fact_overlay reads AND legacy node kind usage from navigator
 
   **What to do**:
   - `src/memory/navigator.ts` has BOTH `agent_fact_overlay` SQL reads AND legacy node kind constants:
@@ -860,7 +860,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C7 (grouped)
 
-- [ ] 13. Remove agent_fact_overlay reads from relation-builder + relation-intent-resolver + cognition-search
+- [x] 13. Remove agent_fact_overlay reads from relation-builder + relation-intent-resolver + cognition-search
 
   **What to do**:
   - `src/memory/cognition/relation-builder.ts`:
@@ -901,7 +901,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C7 (grouped)
 
-- [ ] 14. Remove LEGACY_NODE_KINDS, LegacyNodeRefKind, ALL_KNOWN_NODE_REF_KINDS from types.ts + parseGraphNodeRef
+- [x] 14. Remove LEGACY_NODE_KINDS, LegacyNodeRefKind, ALL_KNOWN_NODE_REF_KINDS from types.ts + parseGraphNodeRef
 
   **What to do**:
   - In `src/memory/types.ts`:
@@ -956,7 +956,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: types.ts, graph-node-ref.ts, + all files importing AnyNodeRefKind/ALL_KNOWN_NODE_REF_KINDS
   - Pre-commit: `bun test`
 
-- [ ] 15. Remove legacy constants from navigator + graph-edge-view + visibility-policy + retrieval + graph-organizer + embeddings
+- [x] 15. Remove legacy constants from navigator + graph-edge-view + visibility-policy + retrieval + graph-organizer + embeddings
 
   **What to do**:
   - In each file, remove:
@@ -1008,7 +1008,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C8 (grouped with Task 14)
 
-- [ ] 16. Remove legacy patterns from promotion.ts + private-cognition-current.ts
+- [x] 16. Remove legacy patterns from promotion.ts + private-cognition-current.ts
 
   **What to do**:
   - `src/memory/promotion.ts`:
@@ -1050,7 +1050,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES — C8 (grouped)
 
-- [ ] 17. Rename CreatedState fields in ALL consumers
+- [x] 17. Rename CreatedState fields in ALL consumers
 
   **What to do**:
   - In `src/memory/task-agent.ts`:
@@ -1107,7 +1107,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: task-agent.ts, core-memory-index-updater.ts, test files
   - Pre-commit: `bun test`
 
-- [ ] 18. Write migration to tighten node_embeddings CHECK constraint
+- [x] 18. Write migration to tighten node_embeddings CHECK constraint
 
   **What to do**:
   - Add migration `memory:031:tighten-node-embeddings-check` in `src/memory/schema.ts`
@@ -1154,7 +1154,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 19. Remove deprecated CORE_MEMORY + MEMORY_HINTS slots + getCoreMemoryBlocks + getMemoryHints
+- [x] 19. Remove deprecated CORE_MEMORY + MEMORY_HINTS slots + getCoreMemoryBlocks + getMemoryHints
 
   **What to do**:
   - `src/core/prompt-template.ts`:
@@ -1226,7 +1226,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: prompt-template.ts, prompt-builder.ts, prompt-data.ts, prompt-data-sources.ts, memory-adapter.ts
   - Pre-commit: `bun test`
 
-- [ ] 20. Remove COMPAT_ALIAS_MAP + READ_ONLY_LABELS + tighten CoreMemoryInput types
+- [x] 20. Remove COMPAT_ALIAS_MAP + READ_ONLY_LABELS + tighten CoreMemoryInput types
 
   **What to do**:
   - `src/memory/types.ts`:
@@ -1311,7 +1311,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/types.ts`, `src/memory/core-memory.ts`, `src/memory/schema.ts` (migration 032), `src/memory/prompt-data.ts`, `src/memory/prompt-data.test.ts`, `src/memory/core-memory.test.ts`
   - Pre-commit: `bun test`
 
-- [ ] 21. Remove schema.ts makeLegacyNodeRef function
+- [x] 21. Remove schema.ts makeLegacyNodeRef function
 
   **What to do**:
   - `src/memory/schema.ts`: Remove `makeLegacyNodeRef()` function (lines 45-53)
@@ -1350,7 +1350,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/memory/schema.ts`
   - Pre-commit: `bun test`
 
-- [ ] 22. Remove legacy-ONLY test files + assertions
+- [x] 22. Remove legacy-ONLY test files + assertions
 
   **What to do**:
   Most test updates are already co-located in Tasks 1-21 (each production task updates its own tests). This task handles ONLY test files/assertions that are purely about legacy invariants with no corresponding production change:
@@ -1388,7 +1388,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `test: remove legacy-only test files + assertions`
   - Pre-commit: `bun test`
 
-- [ ] 23. Clean up legacy docs
+- [x] 23. Clean up legacy docs
 
   **What to do**:
   - `docs/MEMORY_REGRESSION_MATRIX.md`: Remove "Legacy Private Path Retirement Audit" section (lines 260-272) or update to reflect completion
@@ -1430,7 +1430,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `deep`
+- [x] F1. **Plan Compliance Audit** — `deep`
   Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
@@ -1450,7 +1450,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F1-compliance.txt
   ```
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check no legacy patterns remain.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
@@ -1466,7 +1466,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F2-quality.txt
   ```
 
-- [ ] F3. **Automated End-to-End QA** — `unspecified-high`
+- [x] F3. **Automated End-to-End QA** — `unspecified-high`
   Start from clean state. Run full `bun test`. Verify all Definition of Done criteria via Grep tool. Test assertion upsert still works correctly end-to-end.
   Output: `Scenarios [N/N pass] | Integration [N/N] | VERDICT`
 
@@ -1489,7 +1489,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     Evidence: .sisyphus/evidence/F3-qa.txt
   ```
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance. Verify private_episode_events, private_cognition_events, private_cognition_current tables are UNTOUCHED.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | VERDICT`
 

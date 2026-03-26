@@ -2,7 +2,7 @@
 import type { Db } from "../storage/database.js";
 import type { MigrationStep } from "../storage/migrations.js";
 import { runMigrations } from "../storage/migrations.js";
-import { MAX_INTEGER, NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS, type NodeRef, type NodeRefKind, type AnyNodeRefKind } from "./types.js";
+import { MAX_INTEGER, NODE_REF_KINDS, type NodeRef, type NodeRefKind } from "./types.js";
 
 export { MAX_INTEGER } from "./types.js";
 
@@ -42,16 +42,6 @@ export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   return `${kind}:${id}` as NodeRef;
 }
 
-export function makeLegacyNodeRef(kind: AnyNodeRefKind, id: number): NodeRef {
-  if (!(ALL_KNOWN_NODE_REF_KINDS as readonly string[]).includes(kind)) {
-    throw new Error(`Invalid node ref kind: ${kind}`);
-  }
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new Error(`Invalid node ref id: ${id}`);
-  }
-  return `${kind}:${id}` as NodeRef;
-}
-
 export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS _memory_runtime_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -77,12 +67,9 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner ON entity_aliases(alias, owner_agent_id)`,
   `CREATE TABLE IF NOT EXISTS pointer_redirects (id INTEGER PRIMARY KEY, old_name TEXT NOT NULL, new_name TEXT NOT NULL, redirect_type TEXT, owner_agent_id TEXT, created_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_pointer_redirect_old_owner ON pointer_redirects(old_name, owner_agent_id)`,
-  `CREATE TABLE IF NOT EXISTS agent_fact_overlay (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, source_entity_id INTEGER NOT NULL, target_entity_id INTEGER NOT NULL, predicate TEXT NOT NULL, basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')), stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')), pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')), provenance TEXT, source_label_raw TEXT, source_event_ref TEXT, cognition_key TEXT, settlement_id TEXT, op_index INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, CHECK (pre_contested_stance IS NULL OR stance = 'contested'))`,
-  `CREATE INDEX IF NOT EXISTS idx_agent_fact_overlay_agent ON agent_fact_overlay(agent_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_fact_overlay_agent_cognition_key_active ON agent_fact_overlay(agent_id, cognition_key) WHERE cognition_key IS NOT NULL`,
-  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS core_memory_blocks (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, label TEXT NOT NULL CHECK (label IN ('user', 'index', 'pinned_summary', 'pinned_index', 'persona')), description TEXT, value TEXT NOT NULL DEFAULT '', char_limit INTEGER NOT NULL, read_only INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
-  `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`, // compat: CHECK includes legacy private_event/private_belief for existing data
+  `CREATE TABLE IF NOT EXISTS node_embeddings (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')), view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
   `CREATE TABLE IF NOT EXISTS semantic_edges (id INTEGER PRIMARY KEY, source_node_ref TEXT NOT NULL, target_node_ref TEXT NOT NULL, relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')), weight REAL NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_edges_pair_type ON semantic_edges(source_node_ref, target_node_ref, relation_type)`,
@@ -137,7 +124,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS shared_block_snapshots (id INTEGER PRIMARY KEY, block_id INTEGER NOT NULL REFERENCES shared_blocks(id) ON DELETE CASCADE, snapshot_seq INTEGER NOT NULL, content_json TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE(block_id, snapshot_seq))`,
 ];
 
-const MEMORY_MIGRATIONS: MigrationStep[] = [
+export const MEMORY_MIGRATIONS: MigrationStep[] = [
   {
     id: "memory:001:create-memory-schema",
     description: "Create base memory schema",
@@ -149,6 +136,8 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:002:add-cognition-keys",
     description: "Add cognition keys and metadata columns to overlays",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       addColumnIfMissing(db, "agent_fact_overlay", "cognition_key", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "settlement_id", "TEXT");
       addColumnIfMissing(db, "agent_fact_overlay", "op_index", "INTEGER");
@@ -189,6 +178,8 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:004:add-canonical-overlay-columns",
     description: "Add canonical overlay columns to agent overlays",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       addColumnIfMissing(
         db,
         "agent_fact_overlay",
@@ -231,35 +222,37 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     id: "memory:006:backfill-canonical-stances",
     description: "Backfill canonical stance and basis columns from legacy fields",
     up: (db: Db) => {
-      if (hasColumn(db, "agent_fact_overlay", "epistemic_status")) {
-        const stanceCase = buildCaseExpression({
-          confirmed: "confirmed",
-          suspected: "tentative",
-          hypothetical: "hypothetical",
-          retracted: "rejected",
-        });
+      if (tableExists(db, "agent_fact_overlay")) {
+        if (hasColumn(db, "agent_fact_overlay", "epistemic_status")) {
+          const stanceCase = buildCaseExpression({
+            confirmed: "confirmed",
+            suspected: "tentative",
+            hypothetical: "hypothetical",
+            retracted: "rejected",
+          });
 
-        db.exec(
-          `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+          db.exec(
+            `UPDATE agent_fact_overlay SET stance = CASE epistemic_status ${stanceCase} ELSE NULL END WHERE stance IS NULL AND epistemic_status IS NOT NULL`,
+          );
+        }
+
+        if (hasColumn(db, "agent_fact_overlay", "belief_type")) {
+          const basisCase = buildCaseExpression({
+            observation: "first_hand",
+            inference: "inference",
+            suspicion: "inference",
+            intention: "introspection",
+          });
+
+          db.exec(
+            `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
+          );
+        }
+
+        db.get<{ count: number }>(
+          `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
         );
       }
-
-      if (hasColumn(db, "agent_fact_overlay", "belief_type")) {
-        const basisCase = buildCaseExpression({
-          observation: "first_hand",
-          inference: "inference",
-          suspicion: "inference",
-          intention: "introspection",
-        });
-
-        db.exec(
-          `UPDATE agent_fact_overlay SET basis = CASE belief_type ${basisCase} ELSE NULL END WHERE basis IS NULL AND belief_type IS NOT NULL`,
-        );
-      }
-
-      db.get<{ count: number }>(
-        `SELECT count(*) AS count FROM agent_fact_overlay WHERE pre_contested_stance IS NOT NULL AND stance != 'contested'`,
-      );
     },
   },
   {
@@ -444,6 +437,8 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     description:
       "Rebuild agent_fact_overlay without legacy columns: belief_type, confidence, epistemic_status",
     up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) return;
+
       // Check if old columns still exist (idempotency)
       const hasBelief = db
         .query<{ name: string }>(`PRAGMA table_info(agent_fact_overlay)`)
@@ -721,6 +716,169 @@ const MEMORY_MIGRATIONS: MigrationStep[] = [
     up: (_db: Db) => {
       // No DDL changes — this migration is a documentation-only cutover marker.
       // The compat layer lives entirely in the application layer (not schema layer).
+    },
+  },
+  {
+    id: "memory:028:backfill-unkeyed-assertions",
+    description:
+      "Backfill legacy agent_fact_overlay assertion rows without cognition_key into canonical cognition tables",
+    up: (db: Db) => {
+      if (!tableExists(db, "agent_fact_overlay")) {
+        return;
+      }
+
+      const now = Date.now();
+      const rows = db.prepare(
+        `SELECT id, agent_id, source_entity_id, target_entity_id,
+                predicate, basis, stance, pre_contested_stance,
+                provenance, created_at, updated_at
+         FROM agent_fact_overlay
+         WHERE cognition_key IS NULL`,
+      ).all() as Array<{
+        id: number;
+        agent_id: string;
+        source_entity_id: number | null;
+        target_entity_id: number | null;
+        predicate: string | null;
+        basis: string | null;
+        stance: string | null;
+        pre_contested_stance: string | null;
+        provenance: string | null;
+        created_at: number | null;
+        updated_at: number | null;
+      }>;
+
+      for (const row of rows) {
+        const cognitionKey = `legacy_backfill:${row.agent_id}:${row.id}`;
+        const recordJson = JSON.stringify({
+          predicate: row.predicate ?? "",
+          stance: row.stance ?? "proposed",
+          basis: row.basis ?? null,
+          provenance: row.provenance ?? null,
+          sourceEntityId: row.source_entity_id,
+          targetEntityId: row.target_entity_id,
+        });
+
+        const eventCommittedTime = row.updated_at ?? now;
+        const eventCreatedAt = row.created_at ?? eventCommittedTime;
+        const eventInsert = db.prepare(
+          `INSERT INTO private_cognition_events
+             (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+           VALUES (?, ?, 'assertion', 'upsert', ?, 'legacy_backfill', ?, ?)`,
+        ).run(row.agent_id, cognitionKey, recordJson, eventCommittedTime, eventCreatedAt);
+
+        db.prepare(
+          `INSERT OR IGNORE INTO private_cognition_current
+             (agent_id, cognition_key, kind, stance, basis, status,
+              pre_contested_stance, summary_text, record_json,
+              source_event_id, updated_at)
+           VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?, ?)`,
+        ).run(
+          row.agent_id,
+          cognitionKey,
+          row.stance ?? "proposed",
+          row.basis ?? null,
+          row.pre_contested_stance ?? null,
+          row.predicate ?? "",
+          recordJson,
+          Number(eventInsert.lastInsertRowid),
+          eventCommittedTime,
+        );
+      }
+    },
+  },
+  {
+    id: "memory:029:purge-legacy-node-refs",
+    description:
+      "Delete legacy private_event/private_belief refs from derived tables to allow clean rebuild from canonical cognition projections",
+    up: (db: Db) => {
+      db.prepare(
+        `DELETE FROM search_docs_cognition
+         WHERE source_ref LIKE 'private_event:%'
+            OR source_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM node_embeddings
+         WHERE node_kind IN ('private_event', 'private_belief')`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM semantic_edges
+         WHERE source_node_ref LIKE 'private_event:%'
+            OR source_node_ref LIKE 'private_belief:%'
+            OR target_node_ref LIKE 'private_event:%'
+            OR target_node_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM node_scores
+         WHERE node_ref LIKE 'private_event:%'
+            OR node_ref LIKE 'private_belief:%'`,
+      ).run();
+
+      db.prepare(
+        `DELETE FROM memory_relations
+         WHERE source_node_ref LIKE 'private_event:%'
+            OR source_node_ref LIKE 'private_belief:%'
+            OR target_node_ref LIKE 'private_event:%'
+            OR target_node_ref LIKE 'private_belief:%'`,
+      ).run();
+    },
+  },
+  {
+    id: "memory:030:drop-agent-fact-overlay",
+    description: "Drop legacy agent_fact_overlay table after canonical cognition cutover",
+    up: (db: Db) => {
+      db.prepare(`DROP TABLE IF EXISTS agent_fact_overlay`).run();
+    },
+  },
+  {
+    id: "memory:031:tighten-node-embeddings-check",
+    description: "Rebuild node_embeddings table with tightened CHECK constraint removing legacy private_event/private_belief kinds",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE node_embeddings_new (id INTEGER PRIMARY KEY, node_ref TEXT NOT NULL, node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')), node_id TEXT, view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')), model_id TEXT NOT NULL, embedding BLOB NOT NULL, updated_at INTEGER NOT NULL)`,
+      );
+      db.exec(`INSERT INTO node_embeddings_new SELECT * FROM node_embeddings WHERE node_kind NOT IN ('private_event', 'private_belief')`);
+      db.exec(`DROP TABLE node_embeddings`);
+      db.exec(`ALTER TABLE node_embeddings_new RENAME TO node_embeddings`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`,
+      );
+    },
+  },
+  {
+    id: "memory:032:migrate-character-labels",
+    description: "Migrate character → pinned_summary in core_memory_blocks and tighten CHECK to remove 'character'",
+    up: (db: Db) => {
+      // Delete character rows where the agent already has a pinned_summary row
+      // to avoid UNIQUE constraint violation on (agent_id, label).
+      db.prepare(
+        `DELETE FROM core_memory_blocks WHERE label = 'character' AND agent_id IN (
+          SELECT agent_id FROM core_memory_blocks WHERE label = 'pinned_summary'
+        )`,
+      ).run();
+      db.prepare(
+        `UPDATE core_memory_blocks SET label = 'pinned_summary' WHERE label = 'character'`,
+      ).run();
+
+      db.exec(`CREATE TABLE core_memory_blocks_new (
+        id INTEGER PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        label TEXT NOT NULL CHECK (label IN ('user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+        description TEXT,
+        value TEXT NOT NULL DEFAULT '',
+        char_limit INTEGER NOT NULL,
+        read_only INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(`INSERT OR IGNORE INTO core_memory_blocks_new SELECT * FROM core_memory_blocks`);
+      db.exec(`DROP TABLE core_memory_blocks`);
+      db.exec(`ALTER TABLE core_memory_blocks_new RENAME TO core_memory_blocks`);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`,
+      );
     },
   },
 ];

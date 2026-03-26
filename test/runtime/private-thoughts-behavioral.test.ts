@@ -183,7 +183,7 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
     expect(result).toContain("[CONTESTED: was accepted]");
     expect(result).toContain("Risk: contested (3 factors)");
     expect(result).not.toContain("Conflicts:");
-    expect(result).not.toContain("private_event:11");
+    expect(result).not.toContain("event:11");
   });
 });
 

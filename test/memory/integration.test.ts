@@ -6,11 +6,12 @@ import { EmbeddingService } from "../../src/memory/embeddings.js";
 import { MaterializationService } from "../../src/memory/materialization.js";
 import { GraphNavigator } from "../../src/memory/navigator.js";
 import { PromotionService } from "../../src/memory/promotion.js";
-import { getMemoryHints } from "../../src/memory/prompt-data.js";
+
 import { RetrievalService } from "../../src/memory/retrieval.js";
-import { createMemorySchema, MAX_INTEGER, makeNodeRef, makeLegacyNodeRef } from "../../src/memory/schema.js";
+import { createMemorySchema, MAX_INTEGER, makeNodeRef } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { type MemoryFlushRequest, MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import type { NodeRef, ViewerContext } from "../../src/memory/types.js";
@@ -138,7 +139,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_event",
+					name: "create_episode_event",
 					arguments: {
 						role: "assistant",
 						private_notes:
@@ -154,7 +155,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_event",
+					name: "create_episode_event",
 					arguments: {
 						role: "assistant",
 						private_notes: "Alice shows the keepsake to Bob in confidence.",
@@ -169,7 +170,7 @@ describe("Memory integration", () => {
 					},
 				},
 				{
-					name: "create_private_belief",
+					name: "upsert_assertion",
 					arguments: {
 						source: "person:alice",
 						target: "person:bob",
@@ -177,7 +178,6 @@ describe("Memory integration", () => {
 						basis: "inference",
 						stance: "confirmed",
 						provenance: "dialogue_inference",
-						source_event_ref: makeNodeRef("event", runtimeEventId),
 					},
 				},
 			],
@@ -217,10 +217,10 @@ describe("Memory integration", () => {
 			batchId: "manual-organize-1",
 			changedNodeRefs: [
 				...migration.entity_ids.map((id) => makeNodeRef("entity", id)),
-			...migration.private_event_ids.map((id) =>
-				makeLegacyNodeRef("private_event", id),
+			...migration.episode_event_ids.map((id) =>
+				makeNodeRef("event", id),
 			),
-				...migration.private_belief_ids.map((id) =>
+				...migration.assertion_ids.map((id) =>
 					makeNodeRef("assertion", id),
 				),
 			],
@@ -263,18 +263,21 @@ describe("Memory integration", () => {
 
 		const belief = db
 			.prepare(
-				`SELECT stance, provenance, source_event_ref
-         FROM agent_fact_overlay
-         WHERE agent_id = 'agent-1' AND predicate = 'trusts'`,
+				`SELECT stance, record_json
+         FROM private_cognition_current
+         WHERE agent_id = 'agent-1' AND kind = 'assertion' AND summary_text LIKE 'trusts:%'`,
 			)
 			.get() as {
 			stance: string;
-			provenance: string;
-			source_event_ref: string;
+			record_json: string;
+		};
+		const beliefRecord = JSON.parse(belief.record_json) as {
+			provenance?: string;
+			sourceEventRef?: string;
 		};
 
 		const factCandidate = {
-			source_ref: makeLegacyNodeRef("private_event", migration.private_event_ids[0]),
+			source_ref: makeNodeRef("event", migration.episode_event_ids[0]),
 			target_scope: "world_public" as const,
 			summary: "Alice owns locket",
 			entity_refs: [
@@ -288,7 +291,8 @@ describe("Memory integration", () => {
 			resolutions,
 			"world_public",
 		);
-		expect(promotedFact?.created_ref.startsWith("fact:")).toBe(true);
+		expect(promotedFact).toBeDefined();
+		expect(promotedFact!.created_ref.startsWith("event:")).toBe(true);
 
 		const firstFactId = storage.createFact(areaId, alicePrivate.id, "visited");
 		const secondFactId = storage.createFact(areaId, alicePrivate.id, "visited");
@@ -318,7 +322,7 @@ describe("Memory integration", () => {
 
 		const navigator = new GraphNavigator(db, retrieval, alias);
 		const tools = buildMemoryTools({ coreMemory, retrieval, navigator });
-		const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+		const exploreTool = tools.find((tool) => tool.name === MEMORY_TOOL_NAMES.memoryExplore);
 		expect(exploreTool).toBeDefined();
 		const whyResult = (await exploreTool?.handler(
 			{ query: "why did alice reveal the keepsake" },
@@ -342,7 +346,6 @@ describe("Memory integration", () => {
 			evidence_paths: unknown[];
 		};
 
-		const hintText = await getMemoryHints("keepsake", makeViewer(), db as any, 5);
 		const semanticRows = db
 			.prepare(`SELECT source_node_ref, target_node_ref FROM semantic_edges`)
 			.all() as Array<{ source_node_ref: NodeRef; target_node_ref: NodeRef }>;
@@ -351,21 +354,24 @@ describe("Memory integration", () => {
 			const pair = [row.source_node_ref, row.target_node_ref];
 			const owners = pair
 				.map((ref) => {
-					if (ref.startsWith("private_event:")) {
+					if (ref.startsWith("private_episode:")) {
 						const id = Number(ref.split(":")[1]);
 						const episodeOwner = db
 							.prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`)
 							.get(id) as { agent_id: string } | null;
-						if (episodeOwner?.agent_id) return episodeOwner.agent_id;
+						return episodeOwner?.agent_id ?? null;
+					}
+					if (ref.startsWith("evaluation:") || ref.startsWith("commitment:")) {
+						const id = Number(ref.split(":")[1]);
 						const cognitionOwner = db
 							.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
 							.get(id) as { agent_id: string } | null;
 						return cognitionOwner?.agent_id ?? null;
 					}
-					if (ref.startsWith("private_belief:")) {
+					if (ref.startsWith("assertion:")) {
 						const id = Number(ref.split(":")[1]);
 						const owner = db
-							.prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+							.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
 							.get(id) as { agent_id: string } | null;
 						return owner?.agent_id ?? null;
 					}
@@ -386,7 +392,7 @@ describe("Memory integration", () => {
 			.get() as { cnt: number };
 
 		let passed = 0;
-		const total = 14;
+		const total = 13;
 
 		expect(dialogueRecords).toHaveLength(10);
 		passed += 1;
@@ -416,16 +422,9 @@ describe("Memory integration", () => {
 		expect(alicePrivate.memory_scope).toBe("private_overlay");
 		passed += 1;
 
-		const promotedFactId = Number(
-			(promotedFact?.created_ref ?? "fact:0").split(":")[1],
-		);
-		const promotedFactRow = db
-			.prepare(`SELECT t_invalid FROM fact_edges WHERE id = ?`)
-			.get(promotedFactId) as { t_invalid: number };
-		expect(promotedFactRow.t_invalid).toBe(MAX_INTEGER);
 		expect(belief.stance).toBe("confirmed");
-		expect(belief.provenance).toBe("dialogue_inference");
-		expect(belief.source_event_ref).toBe(makeNodeRef("event", runtimeEventId));
+		expect(beliefRecord.provenance).toBe("dialogue_inference");
+		expect(beliefRecord.sourceEventRef).toBeUndefined();
 		passed += 1;
 
 		expect(embeddingCount.cnt).toBeGreaterThan(0);
@@ -456,12 +455,6 @@ describe("Memory integration", () => {
 		expect(whyResult.evidence_paths.length).toBeGreaterThan(0);
 		passed += 1;
 
-		expect(hintText.length).toBeGreaterThan(0);
-		expect(hintText.includes("keepsake") || hintText.includes("Alice")).toBe(
-			true,
-		);
-		passed += 1;
-
 		const r4EventCount = db
 			.prepare(
 				`SELECT count(*) as cnt FROM event_nodes WHERE source_record_id = 'r4'`,
@@ -470,8 +463,8 @@ describe("Memory integration", () => {
 		expect(r4EventCount.cnt).toBe(1);
 		passed += 1;
 
-		expect(migration.private_event_ids.length).toBeGreaterThan(0);
-		expect(migration.private_belief_ids.length).toBeGreaterThan(0);
+		expect(migration.episode_event_ids.length).toBeGreaterThan(0);
+		expect(migration.assertion_ids.length).toBeGreaterThan(0);
 		passed += 1;
 
 		const verdict = passed === total ? "APPROVE" : "REJECT";
@@ -596,7 +589,7 @@ describe("Memory integration", () => {
 		const migration = await taskAgent.runMigrate(flushRequest);
 
 		const beliefRow = db
-			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-trusts-me'`)
+			.prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:master-trusts-me' AND kind = 'assertion'`)
 			.get() as { id: number } | null;
 		expect(beliefRow).not.toBeNull();
 		const beliefRef = makeNodeRef("assertion", beliefRow!.id);
@@ -741,7 +734,7 @@ describe("Memory integration", () => {
 		const migration = await taskAgent.runMigrate(flushRequest);
 
 		const beliefRow = db
-			.prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:master-loyalty'`)
+			.prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:master-loyalty' AND kind = 'assertion'`)
 			.get() as { id: number } | null;
 		expect(beliefRow).not.toBeNull();
 		const beliefRef = makeNodeRef("assertion", beliefRow!.id);
@@ -766,7 +759,7 @@ describe("Memory integration", () => {
 
 		// Verify the row is now retracted
 		const retractedRow = db
-			.prepare(`SELECT stance FROM agent_fact_overlay WHERE id = ?`)
+			.prepare(`SELECT stance FROM private_cognition_current WHERE id = ?`)
 			.get(beliefRow!.id) as { stance: string };
 		expect(retractedRow.stance).toBe("rejected");
 

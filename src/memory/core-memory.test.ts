@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema, runMemoryMigrations } from "./schema.js";
-import { CoreMemoryService, resolveCanonicalLabel } from "./core-memory.js";
-import { COMPAT_ALIAS_MAP, READ_ONLY_LABELS } from "./types.js";
+import { CoreMemoryService } from "./core-memory.js";
 import { PinnedSummaryProposalService } from "./pinned-summary-proposal.js";
 import { openDatabase } from "../storage/database.js";
 
@@ -22,22 +21,16 @@ describe("CoreMemoryService", () => {
   });
 
   describe("initializeBlocks", () => {
-    it("creates 6 blocks with correct limits", () => {
+    it("creates 5 blocks with correct limits", () => {
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(6);
+      expect(blocks).toHaveLength(5);
 
-      const character = blocks.find((b) => b.label === "character")!;
       const user = blocks.find((b) => b.label === "user")!;
       const index = blocks.find((b) => b.label === "index")!;
       const pinnedSummary = blocks.find((b) => b.label === "pinned_summary")!;
       const pinnedIndex = blocks.find((b) => b.label === "pinned_index")!;
       const persona = blocks.find((b) => b.label === "persona")!;
-
-      expect(character.char_limit).toBe(4000);
-      expect(character.read_only).toBe(1);
-      expect(character.description).toBe("Agent persona and identity (legacy, read-only)");
-      expect(character.value).toBe("");
 
       expect(user.char_limit).toBe(3000);
       expect(user.read_only).toBe(1);
@@ -65,7 +58,7 @@ describe("CoreMemoryService", () => {
       svc.initializeBlocks("agent-1");
       svc.initializeBlocks("agent-1");
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(6);
+      expect(blocks).toHaveLength(5);
     });
   });
 
@@ -136,11 +129,6 @@ describe("CoreMemoryService", () => {
       if (result.success) {
         expect(result.chars_current).toBe(4000);
       }
-    });
-
-    it("rejects character block writes (read-only)", () => {
-      const result = svc.appendBlock("agent-1", "character", "some data");
-      expect(result.success).toBe(false);
     });
 
     it("rejects user block writes (read-only)", () => {
@@ -253,14 +241,6 @@ describe("CoreMemoryService", () => {
       expect(block.value).toBe("The agent likes birds and cats are great");
     });
 
-    it("rejects character block writes (read-only)", () => {
-      const result = svc.replaceBlock("agent-1", "character", "old", "new");
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.reason).toContain("read-only");
-      }
-    });
-
     it("rejects user block writes (read-only)", () => {
       const result = svc.replaceBlock("agent-1", "user", "old", "new");
       expect(result.success).toBe(false);
@@ -271,12 +251,12 @@ describe("CoreMemoryService", () => {
   });
 
   describe("getAllBlocks", () => {
-    it("returns all 6 blocks with chars_current", () => {
+    it("returns all 5 blocks with chars_current", () => {
       svc.initializeBlocks("agent-1");
       svc.appendBlock("agent-1", "persona", "Alice the maid");
 
       const blocks = svc.getAllBlocks("agent-1");
-      expect(blocks).toHaveLength(6);
+      expect(blocks).toHaveLength(5);
 
       const persona = blocks.find((b) => b.label === "persona")!;
       expect(persona.chars_current).toBe(14);
@@ -326,35 +306,6 @@ describe("CoreMemoryService", () => {
     it("replaceBlock allows pinned_index writes from task-agent", () => {
       svc.appendBlock("agent-1", "pinned_index", "old data", "task-agent");
       expect(svc.replaceBlock("agent-1", "pinned_index", "old", "new", "task-agent").success).toBe(true);
-    });
-  });
-
-  describe("compat aliases", () => {
-    it("resolveCanonicalLabel maps character to pinned_summary", () => {
-      expect(resolveCanonicalLabel("character")).toBe("pinned_summary");
-    });
-    it("resolveCanonicalLabel maps index to pinned_index", () => {
-      expect(resolveCanonicalLabel("index")).toBe("pinned_index");
-    });
-    it("resolveCanonicalLabel returns canonical labels unchanged", () => {
-      expect(resolveCanonicalLabel("pinned_summary")).toBe("pinned_summary");
-      expect(resolveCanonicalLabel("persona")).toBe("persona");
-    });
-    it("COMPAT_ALIAS_MAP has exactly character and index", () => {
-      expect(Object.keys(COMPAT_ALIAS_MAP)).toEqual(["character", "index"]);
-    });
-    it("READ_ONLY_LABELS includes index, pinned_index, character, and user", () => {
-      expect(READ_ONLY_LABELS).toContain("index");
-      expect(READ_ONLY_LABELS).toContain("pinned_index");
-      expect(READ_ONLY_LABELS).toContain("character");
-      expect(READ_ONLY_LABELS).toContain("user");
-      expect(READ_ONLY_LABELS).not.toContain("pinned_summary");
-      expect(READ_ONLY_LABELS).not.toContain("persona");
-    });
-    it("character block is still readable as compat alias", () => {
-      svc.initializeBlocks("agent-1");
-      expect(svc.getBlock("agent-1", "character").value).toBe("");
-      expect(svc.getBlock("agent-1", "character").read_only).toBe(1);
     });
   });
 

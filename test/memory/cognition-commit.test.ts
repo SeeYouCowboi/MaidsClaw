@@ -156,7 +156,7 @@ describe("CognitionOpCommitter", () => {
 			);
 
 			const row = db.get<{ stance: string | null }>(
-				"SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "alice-likes-bob"],
 			);
 			expect(row).toBeDefined();
@@ -250,7 +250,7 @@ describe("CognitionOpCommitter", () => {
 			);
 
 			const contestedRow = db.get<{ stance: string | null; pre_contested_stance: string | null }>(
-				"SELECT stance, pre_contested_stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance, pre_contested_stance FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "state:legal"],
 			);
 			expect(contestedRow).toBeDefined();
@@ -277,7 +277,7 @@ describe("CognitionOpCommitter", () => {
 			);
 
 			const row = db.get<{ stance: string | null; pre_contested_stance: string | null }>(
-				"SELECT stance, pre_contested_stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance, pre_contested_stance FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "state:legal"],
 			);
 			expect(row).toBeDefined();
@@ -590,7 +590,7 @@ describe("CognitionOpCommitter", () => {
 			);
 
 			const row = db.get<{ stance: string | null }>(
-				"SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "state:double-retract"],
 			);
 			expect(row).toBeDefined();
@@ -1024,7 +1024,7 @@ describe("CognitionOpCommitter", () => {
 				stance: string | null;
 				basis: string | null;
 			}>(
-				"SELECT stance, basis FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT stance, basis FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "assert:dual-write"],
 			);
 
@@ -1075,23 +1075,6 @@ describe("CognitionOpCommitter", () => {
 
 			const now = Date.now();
 			db.run(
-				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, cognition_key, settlement_id, op_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-				[
-					"rp:alice",
-					1,
-					4,
-					"trusts",
-					"inference",
-					"tentative",
-					"assert:keyed-read-source",
-					"stl:keyed-overlay",
-					0,
-					now,
-					now,
-				],
-			);
-
-			db.run(
 				"INSERT INTO private_cognition_current (agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance, summary_text, record_json, source_event_id, updated_at) VALUES (?, ?, 'assertion', ?, ?, 'active', NULL, ?, ?, ?, ?)",
 				[
 					"rp:alice",
@@ -1120,7 +1103,7 @@ describe("CognitionOpCommitter", () => {
 			cleanupDb(dbPath);
 		});
 
-		it("keeps unkeyed assertions on overlay read path", () => {
+		it("reads anonymous assertion projections from private_cognition_current", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -1129,27 +1112,31 @@ describe("CognitionOpCommitter", () => {
 
 			const now = Date.now();
 			db.run(
-				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, cognition_key, settlement_id, op_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO private_cognition_current (agent_id, cognition_key, kind, stance, basis, status, pre_contested_stance, summary_text, record_json, source_event_id, updated_at) VALUES (?, ?, 'assertion', ?, ?, 'active', NULL, ?, ?, ?, ?)",
 				[
 					"rp:alice",
-					1,
-					4,
-					"likes",
-					"hearsay",
+					"__anon_assertion__:stl:unkeyed:1",
 					"tentative",
-					null,
-					"stl:unkeyed",
+					"hearsay",
+					"likes: __self__ → bob",
+					JSON.stringify({
+						sourcePointerKey: "__self__",
+						predicate: "likes",
+						targetPointerKey: "bob",
+						stance: "tentative",
+						basis: "hearsay",
+					}),
 					1,
-					now,
 					now,
 				],
 			);
 
 			const assertions = repo.getAssertions("rp:alice", { activeOnly: false });
-			const unkeyed = assertions.find((row) => row.cognitionKey === null && row.predicate === "likes");
-			expect(unkeyed).toBeDefined();
-			expect(unkeyed!.stance).toBe("tentative");
-			expect(unkeyed!.basis).toBe("hearsay");
+			const projected = assertions.find((row) => row.predicate === "likes");
+			expect(projected).toBeDefined();
+			expect(projected!.cognitionKey).toContain("__anon_assertion__");
+			expect(projected!.stance).toBe("tentative");
+			expect(projected!.basis).toBe("hearsay");
 
 			db.close();
 			cleanupDb(dbPath);
@@ -1184,7 +1171,7 @@ describe("CognitionOpCommitter", () => {
 			});
 
 			const count = db.get<{ cnt: number }>(
-				"SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "assert:idem"],
 			);
 			expect(count!.cnt).toBe(1);
@@ -1352,7 +1339,7 @@ describe("CognitionOpCommitter", () => {
 		});
 	});
 
-	describe("Cognition event ledger dual-write", () => {
+	describe("Cognition event ledger + current projection", () => {
 		it("upsert assertion writes event to private_cognition_events", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -1579,7 +1566,7 @@ describe("CognitionOpCommitter", () => {
 			expect(events[1].settlement_id).toBe("stl:dw-7b");
 
 			const overlayCount = db.get<{ cnt: number }>(
-				"SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "dw:multi-upsert"],
 			);
 			expect(overlayCount!.cnt).toBe(1);
@@ -1625,7 +1612,7 @@ describe("CognitionOpCommitter", () => {
 			cleanupDb(dbPath);
 		});
 
-		it("dual-write is atomic: overlay and event ledger both succeed or both fail", () => {
+		it("dual-write is atomic: projection and event ledger both succeed or both fail", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
@@ -1652,7 +1639,7 @@ describe("CognitionOpCommitter", () => {
 			expect(threw).toBe(true);
 
 			const overlayRow = db.get<{ id: number }>(
-				"SELECT id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT id FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'",
 				["rp:alice", "dw:atomic-fail"],
 			);
 			expect(overlayRow).toBeUndefined();
@@ -2054,7 +2041,7 @@ describe("PrivateCognitionProjectionRepo", () => {
 						stance: "contested",
 						preContestedStance: "accepted",
 						conflictSummary: "contested (1 factors)",
-						conflictFactorRefs: ["private_belief:1"],
+						conflictFactorRefs: ["assertion:1"],
 					}),
 					"stl:ctm-3",
 					now,
@@ -2067,7 +2054,7 @@ describe("PrivateCognitionProjectionRepo", () => {
 			expect(current).not.toBeNull();
 			expect(current!.pre_contested_stance).toBe("accepted");
 			expect(current!.conflict_summary).toBe("contested (1 factors)");
-			expect(current!.conflict_factor_refs_json).toBe('["private_belief:1"]');
+			expect(current!.conflict_factor_refs_json).toBe('["assertion:1"]');
 
 			db.close();
 			cleanupDb(dbPath);
@@ -2108,7 +2095,7 @@ describe("PrivateCognitionProjectionRepo", () => {
 						targetPointerKey: "bob",
 						stance: "contested",
 						preContestedStance: "accepted",
-						conflictFactorRefs: ["not-a-ref", "private_event:2"],
+						conflictFactorRefs: ["not-a-ref", "event:2"],
 					}),
 					"stl:ctb-2",
 					now,
@@ -2121,7 +2108,7 @@ describe("PrivateCognitionProjectionRepo", () => {
 			expect(current).not.toBeNull();
 			expect(current!.stance).toBe("contested");
 			expect(current!.conflict_summary).toBe("contested (1 factors resolved, 1 dropped)");
-			expect(current!.conflict_factor_refs_json).toBe('["private_event:2"]');
+			expect(current!.conflict_factor_refs_json).toBe('["event:2"]');
 
 			db.close();
 			cleanupDb(dbPath);

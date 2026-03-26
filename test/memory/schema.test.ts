@@ -1,18 +1,20 @@
-import { describe, expect, it } from "bun:test";
+import { Database } from "bun:sqlite";
+import { describe, expect, it, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GraphNavigator } from "../../src/memory/navigator.js";
 import {
+	MEMORY_MIGRATIONS,
 	MAX_INTEGER,
+	createMemorySchema,
 	makeNodeRef,
-	makeLegacyNodeRef,
 	runMemoryMigrations,
 } from "../../src/memory/schema.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
-import { NODE_REF_KINDS, ALL_KNOWN_NODE_REF_KINDS } from "../../src/memory/types.js";
-import { openDatabase } from "../../src/storage/database.js";
+import { NODE_REF_KINDS } from "../../src/memory/types.js";
+import { type Db, openDatabase } from "../../src/storage/database.js";
 
 function createTempDb() {
 	const dbPath = join(tmpdir(), `maidsclaw-memory-schema-${randomUUID()}.db`);
@@ -32,6 +34,51 @@ function listColumns(db: ReturnType<typeof createTempDb>["db"], tableName: strin
 	return db.query<{ name: string }>(`PRAGMA table_info(${tableName})`).map((row) => row.name);
 }
 
+function wrapRawDatabase(raw: Database): Db {
+	return {
+		raw,
+		exec(sql: string): void {
+			raw.exec(sql);
+		},
+		query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+			const stmt = raw.prepare(sql);
+			return (params ? stmt.all(...params as []) : stmt.all()) as T[];
+		},
+		run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.run(...params as []) : stmt.run();
+			return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+		},
+		get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.get(...params as []) : stmt.get();
+			return result === null ? undefined : result as T;
+		},
+		close(): void {
+			raw.close();
+		},
+		transaction<T>(fn: () => T): T {
+			return raw.transaction(fn)();
+		},
+		prepare(sql: string) {
+			const stmt = raw.prepare(sql);
+			return {
+				run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+					const result = params.length > 0 ? stmt.run(...params as []) : stmt.run();
+					return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+				},
+				all(...params: unknown[]): unknown[] {
+					return (params.length > 0 ? stmt.all(...params as []) : stmt.all()) as unknown[];
+				},
+				get(...params: unknown[]): unknown {
+					const result = params.length > 0 ? stmt.get(...params as []) : stmt.get();
+					return result === null ? undefined : result;
+				},
+			};
+		},
+	};
+}
+
 describe("memory schema", () => {
 	it("creates all required tables, FTS5 virtual tables, and indexes", () => {
 		const { dbPath, db } = createTempDb();
@@ -41,7 +88,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(34);
+		expect(nonFtsCount?.count).toBe(33);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",
@@ -331,14 +378,6 @@ describe("memory schema", () => {
 
 		runMemoryMigrations(db);
 
-		const factColumns = listColumns(db, "agent_fact_overlay");
-		expect(factColumns.includes("basis")).toBe(true);
-		expect(factColumns.includes("stance")).toBe(true);
-		expect(factColumns.includes("pre_contested_stance")).toBe(true);
-		expect(factColumns.includes("source_label_raw")).toBe(true);
-		expect(factColumns.includes("source_event_ref")).toBe(true);
-		expect(factColumns.includes("updated_at")).toBe(true);
-
 		const episodeEventColumns = listColumns(db, "private_episode_events");
 		expect(episodeEventColumns.includes("location_entity_id")).toBe(true);
 		expect(episodeEventColumns.includes("created_at")).toBe(true);
@@ -443,48 +482,522 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("removes legacy overlay columns after rebuild migration", () => {
-		const { dbPath, db } = createTempDb();
+	it("memory:028 backfills NULL cognition_key overlay assertions into canonical cognition tables", () => {
+		const rawDb = new Database(":memory:");
+		const db = wrapRawDatabase(rawDb);
 
-		runMemoryMigrations(db);
+		db.exec(`CREATE TABLE agent_fact_overlay (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			source_entity_id INTEGER NOT NULL,
+			target_entity_id INTEGER NOT NULL,
+			predicate TEXT NOT NULL,
+			basis TEXT CHECK (basis IN ('first_hand', 'hearsay', 'inference', 'introspection', 'belief')),
+			stance TEXT CHECK (stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed', 'contested', 'rejected', 'abandoned')),
+			pre_contested_stance TEXT CHECK (pre_contested_stance IN ('hypothetical', 'tentative', 'accepted', 'confirmed')),
+			provenance TEXT,
+			source_label_raw TEXT,
+			source_event_ref TEXT,
+			cognition_key TEXT,
+			settlement_id TEXT,
+			op_index INTEGER,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			CHECK (pre_contested_stance IS NULL OR stance = 'contested')
+		)`);
+		db.exec(`CREATE TABLE private_cognition_events (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			op TEXT NOT NULL CHECK (op IN ('upsert', 'retract')),
+			record_json TEXT,
+			settlement_id TEXT NOT NULL,
+			committed_time INTEGER NOT NULL,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE private_cognition_current (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			stance TEXT,
+			basis TEXT,
+			status TEXT NOT NULL DEFAULT 'active',
+			pre_contested_stance TEXT,
+			conflict_summary TEXT,
+			conflict_factor_refs_json TEXT,
+			summary_text TEXT,
+			record_json TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
 
-		const factColumns = listColumns(db, "agent_fact_overlay");
-		expect(factColumns.includes("belief_type")).toBe(false);
-		expect(factColumns.includes("confidence")).toBe(false);
-		expect(factColumns.includes("epistemic_status")).toBe(false);
+		const now = Date.now();
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-a", 1, 2, "knows", "first_hand", "confirmed", null, "witnessed", null, now - 3, now - 3],
+		);
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-a", 3, 4, "owes", "inference", "tentative", null, "rumor", null, now - 2, now - 2],
+		);
+		db.run(
+			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, basis, stance, pre_contested_stance, provenance, cognition_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["agent-b", 5, 6, "fears", "belief", "contested", "accepted", "self-report", null, now - 1, now - 1],
+		);
+
+		const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:028:backfill-unkeyed-assertions");
+		if (!migration) {
+			throw new Error("memory:028 migration not found");
+		}
+		migration.up(db);
+
+		const backfilledCount = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current WHERE cognition_key LIKE 'legacy_backfill:%'",
+		);
+		expect(backfilledCount?.count).toBe(3);
 
 		db.close();
-		cleanupDb(dbPath);
 	});
 
-	it("stores canonical stance and basis directly after rebuild migration", () => {
-		const { dbPath, db } = createTempDb();
+	it("memory:029 purges legacy node refs from derived tables without touching source-of-truth tables", () => {
+		const rawDb = new Database(":memory:");
+		const db = wrapRawDatabase(rawDb);
 
-		runMemoryMigrations(db);
+		db.exec(`CREATE TABLE search_docs_cognition (
+			id INTEGER PRIMARY KEY,
+			doc_type TEXT NOT NULL,
+			source_ref TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			basis TEXT,
+			stance TEXT,
+			content TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE node_embeddings (
+			id INTEGER PRIMARY KEY,
+			node_ref TEXT NOT NULL,
+			node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')),
+			view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')),
+			model_id TEXT NOT NULL,
+			embedding BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE semantic_edges (
+			id INTEGER PRIMARY KEY,
+			source_node_ref TEXT NOT NULL,
+			target_node_ref TEXT NOT NULL,
+			relation_type TEXT NOT NULL CHECK (relation_type IN ('semantic_similar', 'conflict_or_update', 'entity_bridge')),
+			weight REAL NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE node_scores (
+			node_ref TEXT PRIMARY KEY,
+			salience REAL NOT NULL,
+			centrality REAL NOT NULL,
+			bridge_score REAL NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE memory_relations (
+			id INTEGER PRIMARY KEY,
+			source_node_ref TEXT NOT NULL,
+			target_node_ref TEXT NOT NULL,
+			relation_type TEXT NOT NULL CHECK (relation_type IN ('supports', 'triggered', 'conflicts_with', 'derived_from', 'supersedes', 'surfaced_as', 'published_as', 'resolved_by', 'downgraded_by')),
+			strength REAL NOT NULL DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1),
+			directness TEXT NOT NULL DEFAULT 'direct' CHECK (directness IN ('direct', 'inferred', 'indirect')),
+			source_kind TEXT NOT NULL CHECK (source_kind IN ('turn', 'job', 'agent_op', 'system')),
+			source_ref TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			CHECK (source_node_ref != target_node_ref)
+		)`);
+		db.exec(`CREATE TABLE private_episode_events (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			settlement_id TEXT NOT NULL,
+			category TEXT NOT NULL CHECK (category IN ('speech', 'action', 'observation', 'state_change')),
+			summary TEXT NOT NULL,
+			private_notes TEXT,
+			location_entity_id INTEGER,
+			location_text TEXT,
+			valid_time INTEGER,
+			committed_time INTEGER NOT NULL,
+			source_local_ref TEXT,
+			created_at INTEGER NOT NULL
+		)`);
+		db.exec(`CREATE TABLE private_cognition_current (
+			id INTEGER PRIMARY KEY,
+			agent_id TEXT NOT NULL,
+			cognition_key TEXT NOT NULL,
+			kind TEXT NOT NULL CHECK (kind IN ('assertion', 'evaluation', 'commitment')),
+			stance TEXT,
+			basis TEXT,
+			status TEXT NOT NULL DEFAULT 'active',
+			pre_contested_stance TEXT,
+			conflict_summary TEXT,
+			conflict_factor_refs_json TEXT,
+			summary_text TEXT,
+			record_json TEXT NOT NULL,
+			source_event_id INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`);
 
-		const insertResult = db.run(
-			"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, basis, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			[
-				"agent-1",
-				1,
-				2,
-				"knows",
-				"tentative",
-				"first_hand",
-				Date.now(),
-				Date.now(),
-			],
+		const now = Date.now();
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "private_event:1", "agent-1", "assertion", "belief", "tentative", "legacy event", now, now],
+		);
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "private_belief:2", "agent-1", "evaluation", "inference", "accepted", "legacy belief", now, now],
+		);
+		db.run(
+			"INSERT INTO search_docs_cognition (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["cognition", "assertion:3", "agent-1", "assertion", "first_hand", "confirmed", "canonical", now, now],
 		);
 
-		const row = db.get<{ stance: string | null; basis: string | null }>(
-			"SELECT stance, basis FROM agent_fact_overlay WHERE id = ?",
-			[Number(insertResult.lastInsertRowid)],
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_event:1", "private_event", "primary", "model-1", new Uint8Array([1, 2, 3]), now],
 		);
-		expect(row?.stance).toBe("tentative");
-		expect(row?.basis).toBe("first_hand");
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_belief:2", "private_belief", "primary", "model-1", new Uint8Array([4, 5, 6]), now],
+		);
+		db.run(
+			"INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "assertion", "primary", "model-1", new Uint8Array([7, 8, 9]), now],
+		);
+
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["private_event:1", "assertion:3", "semantic_similar", 0.9, now, now],
+		);
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "private_belief:2", "entity_bridge", 0.6, now, now],
+		);
+		db.run(
+			"INSERT INTO semantic_edges (source_node_ref, target_node_ref, relation_type, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["assertion:3", "evaluation:4", "semantic_similar", 0.3, now, now],
+		);
+
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["private_event:1", 0.9, 0.8, 0.7, now],
+		);
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["private_belief:2", 0.5, 0.4, 0.3, now],
+		);
+		db.run(
+			"INSERT INTO node_scores (node_ref, salience, centrality, bridge_score, updated_at) VALUES (?, ?, ?, ?, ?)",
+			["assertion:3", 0.2, 0.2, 0.2, now],
+		);
+
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["private_event:1", "assertion:3", "supports", 0.8, "direct", "system", "test:1", now, now],
+		);
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["assertion:3", "private_belief:2", "triggered", 0.6, "inferred", "system", "test:2", now, now],
+		);
+		db.run(
+			"INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			["assertion:3", "evaluation:4", "supports", 0.4, "direct", "system", "test:3", now, now],
+		);
+
+		db.run(
+			"INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, committed_time, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			["agent-1", "session-1", "settlement-1", "observation", "source event", now, now],
+		);
+		db.run(
+			"INSERT INTO private_cognition_current (agent_id, cognition_key, kind, record_json, source_event_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+			["agent-1", "ck-1", "assertion", '{"value":"truth"}', 1, now],
+		);
+
+		const sourceTruthBeforeEpisode = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events",
+		)?.count;
+		const sourceTruthBeforeCognition = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current",
+		)?.count;
+
+		const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:029:purge-legacy-node-refs");
+		if (!migration) {
+			throw new Error("memory:029 migration not found");
+		}
+		migration.up(db);
+
+		const legacyCognitionDocs = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM search_docs_cognition WHERE source_ref LIKE 'private_%'",
+		);
+		expect(legacyCognitionDocs?.count).toBe(0);
+
+		const legacyEmbeddings = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM node_embeddings WHERE node_kind IN ('private_event','private_belief')",
+		);
+		expect(legacyEmbeddings?.count).toBe(0);
+
+		const legacySemanticEdges = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM semantic_edges WHERE source_node_ref LIKE 'private_%' OR target_node_ref LIKE 'private_%'",
+		);
+		expect(legacySemanticEdges?.count).toBe(0);
+
+		const legacyNodeScores = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM node_scores WHERE node_ref LIKE 'private_%'",
+		);
+		expect(legacyNodeScores?.count).toBe(0);
+
+		const legacyMemoryRelations = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM memory_relations WHERE source_node_ref LIKE 'private_%' OR target_node_ref LIKE 'private_%'",
+		);
+		expect(legacyMemoryRelations?.count).toBe(0);
+
+		const sourceTruthAfterEpisode = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_episode_events",
+		)?.count;
+		const sourceTruthAfterCognition = db.get<{ count: number }>(
+			"SELECT count(*) AS count FROM private_cognition_current",
+		)?.count;
+		expect(sourceTruthAfterEpisode).toBe(sourceTruthBeforeEpisode);
+		expect(sourceTruthAfterCognition).toBe(sourceTruthBeforeCognition);
 
 		db.close();
-		cleanupDb(dbPath);
+	});
+
+  describe("memory:030 drop-agent-fact-overlay", () => {
+    test("fresh DB via createMemorySchema() has no agent_fact_overlay table", () => {
+      const db = new Database(":memory:");
+      createMemorySchema(db);
+      const row = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+      ).get() as { name: string } | null;
+      expect(row).toBeNull();
+      db.close();
+    });
+
+    test("fresh DB via runMemoryMigrations has no agent_fact_overlay table", () => {
+      const { dbPath, db } = createTempDb();
+      runMemoryMigrations(db);
+      const row = db.get<{ name: string }>(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_fact_overlay'`,
+      );
+      expect(row).toBeUndefined();
+      db.close();
+      cleanupDb(dbPath);
+    });
+  });
+
+  describe("memory:031 tighten-node-embeddings-check", () => {
+    test("fresh DB rejects node_kind='private_event' INSERT (CHECK constraint)", () => {
+      const db = new Database(":memory:");
+      createMemorySchema(db);
+      const now = Date.now();
+
+      let privateEventInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["private_event:1", "private_event", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateEventInsertFailed = true;
+      }
+      expect(privateEventInsertFailed).toBe(true);
+
+      let privateBeliefInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["private_belief:2", "private_belief", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateBeliefInsertFailed = true;
+      }
+      expect(privateBeliefInsertFailed).toBe(true);
+
+      let assertionInsertFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+          ["assertion:1", "assertion", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        assertionInsertFailed = true;
+      }
+      expect(assertionInsertFailed).toBe(false);
+
+      const count = db.prepare("SELECT count(*) as count FROM node_embeddings").get() as { count: number };
+      expect(count.count).toBe(1);
+
+      db.close();
+    });
+
+    test("migration preserves canonical node_embeddings rows", () => {
+      const rawDb = new Database(":memory:");
+      const db = wrapRawDatabase(rawDb);
+
+      db.exec(`CREATE TABLE node_embeddings (
+        id INTEGER PRIMARY KEY,
+        node_ref TEXT NOT NULL,
+        node_kind TEXT NOT NULL CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'private_event', 'private_belief')),
+        node_id TEXT,
+        view_type TEXT NOT NULL CHECK (view_type IN ('primary', 'keywords', 'context')),
+        model_id TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      db.exec(`CREATE UNIQUE INDEX ux_node_embeddings_ref_view_model ON node_embeddings(node_ref, view_type, model_id)`);
+
+      const now = Date.now();
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["event:1", "event", "1", "primary", "model-1", new Uint8Array([1, 2, 3]), now],
+      );
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["assertion:2", "assertion", "2", "primary", "model-1", new Uint8Array([4, 5, 6]), now],
+      );
+      db.run(
+        `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["private_event:3", "private_event", "3", "primary", "model-1", new Uint8Array([7, 8, 9]), now],
+      );
+
+      const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:031:tighten-node-embeddings-check");
+      if (!migration) {
+        throw new Error("memory:031 migration not found");
+      }
+      migration.up(db);
+
+      const remainingRows = db.query<{ node_ref: string }>("SELECT node_ref FROM node_embeddings ORDER BY node_ref");
+      expect(remainingRows.length).toBe(2);
+      expect(remainingRows[0].node_ref).toBe("assertion:2");
+      expect(remainingRows[1].node_ref).toBe("event:1");
+
+      let privateEventFailed = false;
+      try {
+        db.run(
+          `INSERT INTO node_embeddings (node_ref, node_kind, node_id, view_type, model_id, embedding, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ["private_event:99", "private_event", "99", "primary", "model-1", new Uint8Array(1536).fill(0), now],
+        );
+      } catch {
+        privateEventFailed = true;
+      }
+      expect(privateEventFailed).toBe(true);
+
+      db.close();
+    });
+  });
+
+	describe("memory:032 migrate-character-labels", () => {
+		test("migrates character rows to pinned_summary and tightens CHECK", () => {
+			const rawDb = new Database(":memory:");
+			const db = wrapRawDatabase(rawDb);
+
+			db.exec(`CREATE TABLE _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`);
+			db.exec(`CREATE TABLE core_memory_blocks (
+				id INTEGER PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+				description TEXT,
+				value TEXT NOT NULL DEFAULT '',
+				char_limit INTEGER NOT NULL,
+				read_only INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL
+			)`);
+			db.exec(`CREATE UNIQUE INDEX ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`);
+
+			const now = Date.now();
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "character", "Agent persona (legacy)", "I am Alice", 4000, 1, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "user", "User info", "Bob", 3000, 1, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-1", "pinned_summary", "Pinned summary", "Existing summary", 4000, 0, now],
+			);
+			db.run(
+				"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				["agent-2", "character", "Agent persona (legacy)", "I am Eve", 4000, 1, now],
+			);
+
+			const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:032:migrate-character-labels");
+			if (!migration) throw new Error("memory:032 migration not found");
+			migration.up(db);
+
+			const characterCount = db.get<{ count: number }>(
+				"SELECT count(*) AS count FROM core_memory_blocks WHERE label = 'character'",
+			);
+			expect(characterCount?.count).toBe(0);
+
+			const agent1Pinned = db.get<{ value: string }>(
+				"SELECT value FROM core_memory_blocks WHERE agent_id = 'agent-1' AND label = 'pinned_summary'",
+			);
+			expect(agent1Pinned?.value).toBe("Existing summary");
+
+			const agent2Pinned = db.get<{ value: string }>(
+				"SELECT value FROM core_memory_blocks WHERE agent_id = 'agent-2' AND label = 'pinned_summary'",
+			);
+			expect(agent2Pinned?.value).toBe("I am Eve");
+
+			const userRow = db.get<{ label: string }>(
+				"SELECT label FROM core_memory_blocks WHERE agent_id = 'agent-1' AND label = 'user'",
+			);
+			expect(userRow?.label).toBe("user");
+
+			let characterInsertFailed = false;
+			try {
+				db.run(
+					"INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					["agent-2", "character", "Should fail", "", 4000, 1, now],
+				);
+			} catch {
+				characterInsertFailed = true;
+			}
+			expect(characterInsertFailed).toBe(true);
+
+			db.close();
+		});
+
+		test("handles empty table gracefully", () => {
+			const rawDb = new Database(":memory:");
+			const db = wrapRawDatabase(rawDb);
+
+			db.exec(`CREATE TABLE _migrations (migration_id TEXT PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)`);
+			db.exec(`CREATE TABLE core_memory_blocks (
+				id INTEGER PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				label TEXT NOT NULL CHECK (label IN ('character', 'user', 'index', 'pinned_summary', 'pinned_index', 'persona')),
+				description TEXT,
+				value TEXT NOT NULL DEFAULT '',
+				char_limit INTEGER NOT NULL,
+				read_only INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL
+			)`);
+			db.exec(`CREATE UNIQUE INDEX ux_core_memory_agent_label ON core_memory_blocks(agent_id, label)`);
+
+			const migration = MEMORY_MIGRATIONS.find((step) => step.id === "memory:032:migrate-character-labels");
+			if (!migration) throw new Error("memory:032 migration not found");
+			migration.up(db);
+
+			const count = db.get<{ count: number }>(
+				"SELECT count(*) AS count FROM core_memory_blocks",
+			);
+			expect(count?.count).toBe(0);
+
+			db.close();
+		});
 	});
 
 	it("is idempotent when migrations run multiple times", () => {
@@ -496,7 +1009,7 @@ describe("memory schema", () => {
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(27);
+		expect(migrationCount?.count).toBe(32);
 
 		db.close();
 		cleanupDb(dbPath);
@@ -588,35 +1101,10 @@ describe("memory schema", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("allows contested stance without pre_contested_stance for legacy-table compatibility", () => {
-		const { dbPath, db } = createTempDb();
-
-		runMemoryMigrations(db);
-
-		let insertFailed = false;
-		try {
-			db.run(
-				"INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, stance, pre_contested_stance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				["agent-1", 1, 2, "knows", "contested", null, Date.now(), Date.now()],
-			);
-		} catch {
-			insertFailed = true;
-		}
-
-		expect(insertFailed).toBe(false);
-
-		db.close();
-		cleanupDb(dbPath);
-	});
-
 	it("keeps V1 node ref kinds unchanged and navigator importable", () => {
 		// V3: NODE_REF_KINDS is canonical-only (6 kinds)
 		expect([...NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment"]);
-		// ALL_KNOWN_NODE_REF_KINDS includes legacy compat (8 kinds)
-		expect([...ALL_KNOWN_NODE_REF_KINDS]).toEqual(["event", "entity", "fact", "assertion", "evaluation", "commitment", "private_event", "private_belief"]);
 		expect(typeof GraphNavigator).toBe("function");
-		expect(String(makeLegacyNodeRef("private_belief", 1))).toBe("private_belief:1");
-		expect(String(makeLegacyNodeRef("private_event", 1))).toBe("private_event:1");
 	});
 
 	it("creates all 6 shared_blocks tables", () => {
@@ -901,14 +1389,14 @@ describe("memory:021 extended relation types", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("migration count is 27 after all migrations", () => {
+	it("migration count matches memory migrations after all migrations", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 
 		const migrationCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM _migrations WHERE migration_id LIKE 'memory:%'",
 		);
-		expect(migrationCount?.count).toBe(27);
+		expect(migrationCount?.count).toBe(MEMORY_MIGRATIONS.length);
 
 		db.close();
 		cleanupDb(dbPath);

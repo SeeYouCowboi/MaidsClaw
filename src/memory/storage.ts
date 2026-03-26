@@ -140,8 +140,10 @@ type UpsertExplicitCommitmentInput = UpsertCommitmentParams;
 type SearchScope = "private" | "area" | "world";
 type SameEpisodeEvent = { id: number; session_id: string; topic_id: number | null; timestamp: number };
 
-const legacyPrivateEventPrefix = "private_event:";
-const legacyPrivateBeliefPrefix = "private_belief:";
+const privateEpisodeRefPrefix = "private_episode:";
+const assertionRefPrefix = "assertion:";
+const evaluationRefPrefix = "evaluation:";
+const commitmentRefPrefix = "commitment:";
 
 export class GraphStorageService {
   private readonly batcher: TransactionBatcher;
@@ -656,52 +658,29 @@ export class GraphStorageService {
   }
 
   createPrivateBelief(params: CreatePrivateBeliefInput): number {
-    const existing = this.db
-      .prepare(
-        `SELECT id FROM agent_fact_overlay
-         WHERE agent_id = ?
-           AND source_entity_id = ?
-           AND predicate = ?
-           AND target_entity_id = ?`,
-      )
-      .get(params.agentId, params.sourceEntityId, params.predicate, params.targetEntityId) as
-      | { id: number }
-      | null;
-
-    const now = Date.now();
-    if (existing) {
-      this.db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(now, existing.id);
-      return existing.id;
+    const source = this.getEntityById(params.sourceEntityId);
+    const target = this.getEntityById(params.targetEntityId);
+    if (!source || !target) {
+      throw new Error(
+        `Unable to resolve source/target entity pointer keys for private belief: ${params.sourceEntityId} -> ${params.targetEntityId}`,
+      );
     }
 
-    const result = this.db
-      .prepare(
-        `INSERT INTO agent_fact_overlay (
-          agent_id,
-          source_entity_id,
-          target_entity_id,
-          predicate,
-          basis,
-          stance,
-          provenance,
-          source_event_ref,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        params.agentId,
-        params.sourceEntityId,
-        params.targetEntityId,
-        params.predicate,
-        params.basis,
-        params.stance,
-        params.provenance ?? null,
-        params.sourceEventRef ?? null,
-        now,
-        now,
-      );
-    return Number(result.lastInsertRowid);
+    const cognitionKey = `assert:${params.agentId}:${source.pointerKey}:${params.predicate}:${target.pointerKey}`;
+    const assertion = this.cognitionRepo.upsertAssertion({
+      agentId: params.agentId,
+      cognitionKey,
+      settlementId: `storage:upsert_assertion:${params.agentId}`,
+      opIndex: 0,
+      sourcePointerKey: source.pointerKey,
+      predicate: params.predicate,
+      targetPointerKey: target.pointerKey,
+      stance: params.stance,
+      basis: params.basis,
+      provenance: params.provenance,
+    });
+
+    return assertion.id;
   }
 
   updatePrivateEventLink(_privateEventId: number, _publicEventId: number): void {
@@ -938,24 +917,21 @@ export class GraphStorageService {
   }
 
   private getPrivateNodeAgent(nodeRef: NodeRef): string | null {
-    if (nodeRef.startsWith(legacyPrivateEventPrefix)) {
-      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateEventPrefix);
+    if (nodeRef.startsWith(privateEpisodeRefPrefix)) {
+      const id = this.parseNodeRefId(nodeRef, privateEpisodeRefPrefix);
       const episodeRow = this.db.prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
-      if (episodeRow) {
-        return episodeRow.agent_id;
-      }
-
-      const cognitionRow = this.db.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`).get(id) as
-        | { agent_id: string }
-        | null;
-      return cognitionRow?.agent_id ?? null;
+      return episodeRow?.agent_id ?? null;
     }
 
-    if (nodeRef.startsWith(legacyPrivateBeliefPrefix)) {
-      const id = this.parseLegacyNodeRefId(nodeRef, legacyPrivateBeliefPrefix);
-      const row = this.db.prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`).get(id) as
+    if (
+      nodeRef.startsWith(assertionRefPrefix)
+      || nodeRef.startsWith(evaluationRefPrefix)
+      || nodeRef.startsWith(commitmentRefPrefix)
+    ) {
+      const id = this.parseNodeRefId(nodeRef, nodeRef.slice(0, nodeRef.indexOf(":") + 1));
+      const row = this.db.prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`).get(id) as
         | { agent_id: string }
         | null;
       return row?.agent_id ?? null;
@@ -975,7 +951,7 @@ export class GraphStorageService {
     }
   }
 
-  private parseLegacyNodeRefId(nodeRef: NodeRef, prefix: string): number {
+  private parseNodeRefId(nodeRef: string, prefix: string): number {
     if (!nodeRef.startsWith(prefix)) {
       throw new Error(`Invalid node ref prefix for ${prefix}: ${nodeRef}`);
     }

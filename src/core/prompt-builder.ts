@@ -224,14 +224,6 @@ export class PromptBuilder {
 		const memDs = this.getMemoryDataSource();
 		const parts: string[] = [];
 
-		const hasSplitBlocks = Boolean(memDs.getPinnedBlocks || memDs.getSharedBlocks);
-		if (!hasSplitBlocks) {
-			const legacyCore = this.readDataSource("memory.getCoreMemoryBlocks", () =>
-				memDs.getCoreMemoryBlocks(agentId),
-			);
-			if (legacyCore) parts.push(legacyCore);
-		}
-
 		if (memDs.getPinnedBlocks) {
 			const pinned = this.readDataSource("memory.getPinnedBlocks", () =>
 				memDs.getPinnedBlocks!(agentId),

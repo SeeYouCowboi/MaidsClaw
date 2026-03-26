@@ -1,11 +1,8 @@
 import type { ToolPermission } from "../profile.js";
+import { READ_ONLY_MEMORY_TOOL_NAMES } from "../../memory/tool-names.js";
 
 export const RP_AUTHORIZED_TOOLS: readonly string[] = [
-  "memory_read",
-  "memory_search",
-  "narrative_search",
-  "cognition_search",
-  "memory_explore",
+  ...READ_ONLY_MEMORY_TOOL_NAMES,
   "persona_check_drift",
   "submit_rp_turn",
 ] as const;

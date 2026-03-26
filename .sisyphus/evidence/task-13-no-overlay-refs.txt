@@ -1,0 +1,55 @@
+Task 13: Remove agent_fact_overlay READ references from cognition modules
+=========================================================================
+
+## Grep Verification
+
+### src/memory/cognition/*.ts — agent_fact_overlay matches: 0
+Command: Select-String -Path 'src\memory\cognition\*.ts' -Pattern 'agent_fact_overlay'
+Result: No matches found
+
+## Changes Made
+
+### 1. relation-builder.ts — 3 references replaced
+- resolveSourceAgentId() assertion: branch (line ~210):
+  FROM: SELECT agent_id FROM agent_fact_overlay WHERE id = ?
+  TO:   SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'
+
+- resolveSourceAgentId() private_belief: branch (line ~222):
+  FROM: SELECT agent_id FROM agent_fact_overlay WHERE id = ?
+  TO:   SELECT agent_id FROM private_cognition_current WHERE id = ?
+
+- resolveCanonicalCognitionRefByKey() (line ~289):
+  FROM: SELECT id FROM agent_fact_overlay WHERE cognition_key = ?...
+  TO:   SELECT id FROM private_cognition_current WHERE cognition_key = ? AND kind = 'assertion' ORDER BY updated_at DESC, id DESC LIMIT 1
+
+### 2. relation-intent-resolver.ts — 1 reference replaced
+- resolveFactorNodeRef() (line ~325):
+  FROM: SELECT id FROM agent_fact_overlay WHERE cognition_key = ?... LIMIT 1
+  TO:   SELECT id FROM private_cognition_current WHERE cognition_key = ? AND kind = 'assertion'... LIMIT 1
+
+### 3. cognition-search.ts — Already clean (0 references, verified)
+
+### 4. cognition-search.test.ts — 1 test reference replaced
+- Line 73: SELECT id FROM agent_fact_overlay → SELECT id FROM private_cognition_current WHERE kind = 'assertion'
+
+### 5. cognition-repo.ts — Compat patch removed
+- Removed RELATION_BUILDER_PATCH_FLAG constant
+- Removed patchRelationBuilderAssertionProjectionCompat() function (~80 lines)
+- Removed call to patchRelationBuilderAssertionProjectionCompat() from CognitionRepository constructor
+- DID NOT touch patchDbPrepareAssertionProjectionCompat (T10 already removed it)
+
+## Build Verification
+- bun run build: exit 0 (tsc clean)
+- LSP diagnostics (errors): 0 on all 3 changed source files
+
+## Test Verification
+- bun test src/memory/cognition/: 84 pass, 0 fail
+- bun test src/memory/: 544 pass, 19 fail
+  - 19 failures are all pre-existing (agent_fact_overlay table dropped by migration 030)
+  - navigator.ts (5 fails) — T12 scope
+  - storage.test.ts (3 fails) — test queries agent_fact_overlay directly
+  - task-agent.test.ts (5 fails) — test queries agent_fact_overlay directly
+  - schema.test.ts (3 fails) — stale table/migration counts
+  - retrieval.test.ts (1 fail) — test queries agent_fact_overlay directly
+  - cognition-search.test.ts: FIXED (was 1 fail, now 0 fail)
+  - Net: improved from 20 pre-existing failures to 19 (fixed 1)

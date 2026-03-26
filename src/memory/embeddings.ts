@@ -16,9 +16,6 @@ type NeighborQueryOptions = {
   limit?: number;
 };
 
-const legacyPrivateEventKind = "private_event";
-const legacyPrivateBeliefKind = "private_belief";
-
 export class EmbeddingService {
   constructor(
     private readonly db: Db,
@@ -84,7 +81,7 @@ export class EmbeddingService {
         }>);
 
     const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM private_episode_events WHERE id=?");
-    const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM agent_fact_overlay WHERE id=?");
+    const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM private_cognition_current WHERE id=?");
 
     const candidates: Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> = [];
     for (const row of rows) {
@@ -115,30 +112,20 @@ export class EmbeddingService {
     nodeRef: NodeRef,
     nodeKind: string,
     agentId: string | null,
-    privateEventOwnerStmt: ReturnType<Db["prepare"]>,
+    _privateEventOwnerStmt: ReturnType<Db["prepare"]>,
     privateBeliefOwnerStmt: ReturnType<Db["prepare"]>,
   ): boolean {
-    if (nodeKind !== legacyPrivateEventKind && nodeKind !== legacyPrivateBeliefKind) {
+    if (nodeKind !== "assertion" && nodeKind !== "evaluation" && nodeKind !== "commitment") {
       return true;
     }
 
-    // G-NEW-7: null agentId means "shared public only" — exclude all private nodes
     if (agentId === null) {
       return false;
-    }
-
-    if (nodeKind !== legacyPrivateEventKind && nodeKind !== legacyPrivateBeliefKind) {
-      return true;
     }
 
     const id = this.parseNodeRefId(nodeRef);
     if (!id) {
       return false;
-    }
-
-    if (nodeKind === legacyPrivateEventKind) {
-      const row = privateEventOwnerStmt.get(id) as { agent_id: string } | undefined;
-      return row?.agent_id === agentId;
     }
 
     const row = privateBeliefOwnerStmt.get(id) as { agent_id: string } | undefined;

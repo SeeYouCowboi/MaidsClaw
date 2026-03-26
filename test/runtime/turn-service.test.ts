@@ -322,7 +322,7 @@ describe("TurnService", () => {
     ).toHaveLength(1);
   });
 
-  it("persists full privateCommit ops without settlement overlay writes", async () => {
+  it("persists full privateCommit ops without settlement projection writes", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -440,7 +440,7 @@ describe("TurnService", () => {
     });
 
     const factCount = db.get<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ?`,
+      `SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ?`,
       ["rp:alice"],
     );
     expect(factCount!.cnt).toBe(0);
@@ -451,7 +451,7 @@ describe("TurnService", () => {
     expect(eventCount!.cnt).toBe(0);
   });
 
-  it("assertion upsert persists full op in settlement without overlay write", async () => {
+  it("assertion upsert persists full op in settlement without projection write", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -534,13 +534,13 @@ describe("TurnService", () => {
     });
 
     const row = db.get<{ cognition_key: string }>(
-      `SELECT cognition_key FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      `SELECT cognition_key FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
       ["rp:alice", "assert-1"],
     );
     expect(row).toBeUndefined();
   });
 
-  it("evaluation upsert persists full op in settlement without overlay write", async () => {
+  it("evaluation upsert persists full op in settlement without projection write", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "target:bob",
@@ -602,7 +602,7 @@ describe("TurnService", () => {
     expect(row).toBeUndefined();
   });
 
-  it("commitment upsert persists full op in settlement without overlay write", async () => {
+  it("commitment upsert persists full op in settlement without projection write", async () => {
     const session = sessionService.createSession("rp:alice");
 
     const turnService = new TurnService(
@@ -658,7 +658,7 @@ describe("TurnService", () => {
     expect(row).toBeUndefined();
   });
 
-  it("retract op persists in settlement without modifying overlay at settlement time", async () => {
+  it("retract op persists in settlement without modifying projection at settlement time", async () => {
     const session = sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -721,13 +721,13 @@ describe("TurnService", () => {
     expect(commit.ops[0]).toEqual({ op: "retract", target: { kind: "assertion", key: "assert-retract" } });
 
     const row = db.get<{ stance: string }>(
-      `SELECT stance FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+      `SELECT stance FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
       ["rp:alice", "assert-retract"],
     );
     expect(row?.stance).toBe("accepted");
   });
 
-  it("current_location assertion persists full op in settlement without overlay write", async () => {
+  it("current_location assertion persists full op in settlement without projection write", async () => {
     const session = sessionService.createSession("rp:alice");
 
     graphStorage.upsertEntity({
@@ -806,8 +806,8 @@ describe("TurnService", () => {
       currentLocationEntityId: locationEntityId,
     });
 
-    const row = db.get<{ target_entity_id: number }>(
-      `SELECT target_entity_id FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?`,
+    const row = db.get<{ id: number }>(
+      `SELECT id FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ? AND kind = 'assertion'`,
       ["rp:alice", "location-assert-1"],
     );
     expect(row).toBeUndefined();
@@ -1282,10 +1282,10 @@ describe("TurnService with ProjectionManager", () => {
     expect(currentCommitment!.kind).toBe("commitment");
 
     const overlayFactCount = db.get<{ cnt: number }>(
-      `SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = ?`,
+      `SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = ?`,
       ["rp:alice"],
     );
-    expect(overlayFactCount!.cnt).toBe(0);
+    expect(overlayFactCount!.cnt).toBe(2);
 
     const overlayEventCount = db.get<{ cnt: number }>(
       `SELECT COUNT(*) as cnt FROM private_cognition_events WHERE agent_id = ?`,

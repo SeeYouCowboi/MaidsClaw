@@ -6,16 +6,6 @@ import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
-/**
- * Get all core memory blocks formatted as XML for system prompt injection.
- * Returns all blocks (persona, pinned_summary, pinned_index, plus legacy character/user/index).
- * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
- */
-export function getCoreMemoryBlocks(agentId: string, db: Db): string {
-  const blocks = getAllCoreMemoryBlocks(agentId, db);
-  return renderCoreMemoryBlocks(blocks, "core_memory");
-}
-
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
 // Legacy compat: user blocks still exist in DB (read-only) and are surfaced as shared blocks for display
 const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
@@ -86,35 +76,6 @@ export async function getTypedRetrievalSurface(
   });
 
   return renderTypedRetrieval(typed);
-}
-
-/**
- * @deprecated Since T8 — not a canonical RP slot. Kept for non-RP consumers.
- * Get formatted memory hints as bullet list for prompt injection.
- * Returns empty string when no hints (< 3 char query, no matches).
- * ViewerContext determines which scope-partitioned FTS5 tables are queried.
- * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
- */
-export async function getMemoryHints(
-  userMessage: string,
-  viewerContext: ViewerContext,
-  db: Db,
-  limit?: number,
-  retrievalService?: RetrievalService,
-): Promise<string> {
-  const service = resolveRetrievalService(db, retrievalService);
-  const hints = await service.generateMemoryHints(userMessage, viewerContext, limit ?? 5);
-
-  if (hints.length === 0) {
-    return "";
-  }
-
-  return hints
-    .map((hint) => {
-      const nodeKind = hint.source_ref.split(":")[0];
-      return `• [${nodeKind}] ${hint.content}`;
-    })
-    .join("\n");
 }
 
 /**
@@ -352,7 +313,7 @@ function getAllCoreMemoryBlocks(agentId: string, db: Db): CoreMemoryRenderableBl
 
 function renderCoreMemoryBlocks(
   blocks: CoreMemoryRenderableBlock[],
-  tagName: "core_memory" | "pinned_block" | "shared_block",
+  tagName: "pinned_block" | "shared_block",
 ): string {
   if (blocks.length === 0) {
     return "";

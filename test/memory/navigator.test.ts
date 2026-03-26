@@ -119,11 +119,11 @@ describe("GraphNavigator explain shell", () => {
     const unsafe: EvidencePath = {
       path: {
         seed: "entity:1" as NodeRef,
-        nodes: ["entity:1" as NodeRef, "private_event:70" as NodeRef],
+        nodes: ["entity:1" as NodeRef, "private_episode:70" as NodeRef],
         edges: [
           {
             from: "entity:1" as NodeRef,
-            to: "private_event:70" as NodeRef,
+            to: "private_episode:70" as NodeRef,
             kind: "semantic_similar",
             layer: "heuristic",
             weight: 0.8,
@@ -144,7 +144,7 @@ describe("GraphNavigator explain shell", () => {
         redundancy_penalty: 0,
         path_score: 0.4,
       },
-      supporting_nodes: ["private_event:70" as NodeRef],
+      supporting_nodes: ["private_episode:70" as NodeRef],
       supporting_facts: [],
     };
 
@@ -154,8 +154,8 @@ describe("GraphNavigator explain shell", () => {
     expect(safe?.redacted_placeholders).toEqual([
       {
         type: "redacted",
-        reason: "private",
-        node_ref: "private_event:70",
+        reason: "hidden",
+        node_ref: "private_episode:70",
       },
     ]);
   });

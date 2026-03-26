@@ -95,14 +95,13 @@ describe("E2E: RP memory pipeline", () => {
 		const refs = committer.commit(ops, "stl:turn-1");
 		expect(refs).toHaveLength(1);
 
-		// Verify via direct DB query: agent_fact_overlay should have the assertion
-		const factOverlays = db.query<{ predicate: string; cognition_key: string }>(
-			"SELECT predicate, cognition_key FROM agent_fact_overlay WHERE agent_id = 'rp:alice'",
+		const factOverlays = db.query<{ summary_text: string | null; cognition_key: string }>(
+			"SELECT summary_text, cognition_key FROM private_cognition_current WHERE agent_id = 'rp:alice' AND kind = 'assertion'",
 		);
 		expect(factOverlays.length).toBeGreaterThanOrEqual(1);
 		const matchingFact = factOverlays.find((f) => f.cognition_key === "alice-likes-user");
 		expect(matchingFact).toBeDefined();
-		expect(matchingFact!.predicate).toBe("likes");
+		expect(matchingFact!.summary_text).toContain("likes");
 
 		// Verify retrieval reads the entities
 		const retrieval = new RetrievalService(db);
@@ -130,7 +129,7 @@ describe("E2E: RP memory pipeline", () => {
 		expect(userResult.success).toBe(true);
 
 		const allBlocks = cm.getAllBlocks("rp:alice");
-		expect(allBlocks).toHaveLength(6);
+		expect(allBlocks).toHaveLength(5);
 
 		const charBlock = allBlocks.find((b) => b.label === "persona");
 		expect(charBlock).toBeDefined();
@@ -569,10 +568,10 @@ describe("E2E: RP memory pipeline", () => {
 		expect(currentGoal).not.toBeNull();
 		expect(currentGoal!.kind).toBe("commitment");
 
-		const overlayFact = db.get<{ cnt: number }>(
-			"SELECT COUNT(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'rp:alice'",
+		const projectionFact = db.get<{ cnt: number }>(
+			"SELECT COUNT(*) as cnt FROM private_cognition_current WHERE agent_id = 'rp:alice'",
 		);
-		expect(overlayFact?.cnt).toBe(0);
+		expect(projectionFact?.cnt).toBe(2);
 
 		const episodeRows = db.get<{ cnt: number }>(
 			"SELECT COUNT(*) as cnt FROM private_episode_events WHERE agent_id = 'rp:alice'",
@@ -884,7 +883,7 @@ describe("E2E: RP memory pipeline", () => {
 				basis: "inference",
 				preContestedStance: "accepted",
 				conflictSummary: "contested (2 factors)",
-				conflictFactorRefs: ["private_event:11", "private_belief:7"],
+				conflictFactorRefs: ["event:11", "assertion:7"],
 			}),
 			settlementId: "stl:contested-drilldown",
 			committedTime: 10_000,
@@ -896,7 +895,7 @@ describe("E2E: RP memory pipeline", () => {
 		expect(current).not.toBeNull();
 		expect(current?.pre_contested_stance).toBe("accepted");
 		expect(current?.conflict_summary).toBe("contested (2 factors)");
-		expect(current?.conflict_factor_refs_json).toBe(JSON.stringify(["private_event:11", "private_belief:7"]));
+		expect(current?.conflict_factor_refs_json).toBe(JSON.stringify(["event:11", "assertion:7"]));
 
 		db.close();
 		cleanupDb(dbPath);

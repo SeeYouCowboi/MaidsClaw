@@ -4,10 +4,7 @@ import type { EmbeddingService } from "./embeddings.js";
 import { EmbeddingLinker, type OrganizerEmbeddingEntry, type OrganizerNode } from "./embedding-linker.js";
 import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
-import type { AnyNodeRefKind, GraphOrganizerResult, NodeRef, SemanticEdgeType } from "./types.js";
-
-const legacyPrivateEventKind = "private_event";
-const legacyPrivateBeliefKind = "private_belief";
+import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
 
 export class GraphOrganizer {
   private readonly embeddingLinker: EmbeddingLinker;
@@ -87,7 +84,7 @@ export class GraphOrganizer {
     };
   }
 
-  private parseNodeRef(nodeRef: NodeRef): { kind: AnyNodeRefKind; id: number } | undefined {
+  private parseNodeRef(nodeRef: NodeRef): { kind: NodeRefKind; id: number } | undefined {
     const [kindRaw, idRaw] = nodeRef.split(":");
     const id = Number(idRaw);
     if (!Number.isInteger(id) || id <= 0) {
@@ -97,15 +94,13 @@ export class GraphOrganizer {
       kindRaw !== "event" &&
       kindRaw !== "entity" &&
       kindRaw !== "fact" &&
-      kindRaw !== legacyPrivateEventKind &&
-      kindRaw !== legacyPrivateBeliefKind &&
       kindRaw !== "assertion" &&
       kindRaw !== "evaluation" &&
       kindRaw !== "commitment"
     ) {
       return undefined;
     }
-    return { kind: kindRaw, id };
+    return { kind: kindRaw as NodeRefKind, id };
   }
 
   private renderNodeContent(nodeRef: NodeRef): string | undefined {
@@ -144,16 +139,6 @@ export class GraphOrganizer {
       return `${row.source_entity_id} ${row.predicate} ${row.target_entity_id}`;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare(`SELECT private_notes, summary, category FROM private_episode_events WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; summary: string | null; category: string } | null;
-      if (!row) {
-        return undefined;
-      }
-      return `${row.private_notes ?? ""} ${row.summary ?? ""} ${row.category}`.trim();
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(`SELECT json_extract(record_json, '$.privateNotes') as private_notes, summary_text, kind FROM private_cognition_current WHERE id = ?`)
@@ -165,21 +150,29 @@ export class GraphOrganizer {
     }
 
     const row = this.db
-      .prepare(`SELECT predicate, provenance, stance FROM agent_fact_overlay WHERE id = ?`)
-      .get(parsed.id) as { predicate: string; provenance: string | null; stance: string | null } | null;
+      .prepare(`SELECT summary_text, record_json, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
+      .get(parsed.id) as { summary_text: string | null; record_json: string | null; stance: string | null } | null;
     if (!row) {
       return undefined;
     }
+    const predicate = row.summary_text ?? "";
+    let provenance = "";
+    if (row.record_json) {
+      try {
+        const record = JSON.parse(row.record_json);
+        provenance = record.provenance ?? "";
+      } catch { /* ignore malformed JSON */ }
+    }
     const displayStance = row.stance ?? "";
-    return `${row.predicate} ${row.provenance ?? ""} ${displayStance}`.trim();
+    return `${predicate} ${provenance} ${displayStance}`.trim();
   }
 
   private selectSemanticRelation(
     sourceRef: NodeRef,
-    sourceKind: AnyNodeRefKind,
+    sourceKind: NodeRefKind,
     sourceContent: string,
     targetRef: NodeRef,
-    targetKind: AnyNodeRefKind,
+    targetKind: NodeRefKind,
     targetContent: string,
     similarity: number,
     agentId: string,
@@ -201,7 +194,7 @@ export class GraphOrganizer {
     return null;
   }
 
-  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: AnyNodeRefKind, agentId: string): boolean {
+  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string): boolean {
     const row = this.db
       .prepare(`SELECT embedding FROM node_embeddings WHERE node_ref = ? ORDER BY updated_at DESC LIMIT 1`)
       .get(targetRef) as { embedding: Buffer | Uint8Array } | null;
@@ -217,21 +210,17 @@ export class GraphOrganizer {
     return nearest.some((candidate) => candidate.nodeRef === sourceRef || candidate.nodeRef === targetRef);
   }
 
-  private isCuratedBridgePair(a: AnyNodeRefKind, b: AnyNodeRefKind): boolean {
+  private isCuratedBridgePair(a: NodeRefKind, b: NodeRefKind): boolean {
     const key = `${a}:${b}`;
     const allowed = new Set([
       "event:entity",
       "entity:event",
-      `${legacyPrivateEventKind}:entity`,
-      `entity:${legacyPrivateEventKind}`,
       "evaluation:entity",
       "entity:evaluation",
       "commitment:entity",
       "entity:commitment",
       "fact:entity",
       "entity:fact",
-      `${legacyPrivateBeliefKind}:entity`,
-      `entity:${legacyPrivateBeliefKind}`,
       "assertion:entity",
       "entity:assertion",
     ]);
@@ -337,13 +326,6 @@ export class GraphOrganizer {
       return row?.t_created;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db.prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`).get(parsed.id) as
-        | { created_at: number }
-        | null;
-      return row?.created_at;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db.prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`).get(parsed.id) as
         | { updated_at: number }
@@ -351,7 +333,7 @@ export class GraphOrganizer {
       return row?.updated_at;
     }
 
-    const row = this.db.prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`).get(parsed.id) as
+    const row = this.db.prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`).get(parsed.id) as
       | { updated_at: number }
       | null;
     return row?.updated_at;
@@ -383,10 +365,6 @@ export class GraphOrganizer {
         | { topic_id: number | null }
         | null;
       return row?.topic_id ?? null;
-    }
-
-    if (parsed.kind === legacyPrivateEventKind) {
-      return null;
     }
 
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
@@ -446,18 +424,6 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === legacyPrivateEventKind) {
-      const row = this.db
-        .prepare(`SELECT private_notes, summary, agent_id FROM private_episode_events WHERE id = ?`)
-        .get(parsed.id) as { private_notes: string | null; summary: string | null; agent_id: string } | null;
-      if (!row) {
-        return;
-      }
-      const content = `${row.private_notes ?? ""} ${row.summary ?? ""}`.trim();
-      this.storage.syncSearchDoc("private", nodeRef, content, row.agent_id);
-      return;
-    }
-
     if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
       const row = this.db
         .prepare(`SELECT json_extract(record_json, '$.privateNotes') as private_notes, summary_text, agent_id, status FROM private_cognition_current WHERE id = ?`)
@@ -474,10 +440,10 @@ export class GraphOrganizer {
       return;
     }
 
-    if (parsed.kind === legacyPrivateBeliefKind || parsed.kind === "assertion") {
+    if (parsed.kind === "assertion") {
       const row = this.db
-        .prepare(`SELECT predicate, provenance, agent_id, stance FROM agent_fact_overlay WHERE id = ?`)
-        .get(parsed.id) as { predicate: string; provenance: string | null; agent_id: string; stance: string | null } | null;
+        .prepare(`SELECT summary_text, record_json, agent_id, stance FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
+        .get(parsed.id) as { summary_text: string | null; record_json: string | null; agent_id: string; stance: string | null } | null;
       if (!row) {
         return;
       }
@@ -485,7 +451,14 @@ export class GraphOrganizer {
         this.storage.removeSearchDoc("private", nodeRef);
         return;
       }
-      this.storage.syncSearchDoc("private", nodeRef, `${row.predicate} ${row.provenance ?? ""}`.trim(), row.agent_id);
+      let provenance = "";
+      if (row.record_json) {
+        try {
+          const record = JSON.parse(row.record_json);
+          provenance = record.provenance ?? "";
+        } catch { /* defensive: record_json may be malformed */ }
+      }
+      this.storage.syncSearchDoc("private", nodeRef, `${row.summary_text ?? ""} ${provenance}`.trim(), row.agent_id);
       return;
     }
 

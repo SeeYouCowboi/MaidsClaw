@@ -477,7 +477,7 @@ export class ExplicitSettlementProcessor {
       .getEvaluations(agentId, { activeOnly: false })
       .filter((row) => row.settlementId === settlementId);
     for (const row of evaluations) {
-      created.privateEventIds.push(row.id);
+      created.episodeEventIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("evaluation", row.id));
     }
 
@@ -485,7 +485,7 @@ export class ExplicitSettlementProcessor {
       .getCommitments(agentId, { activeOnly: false })
       .filter((row) => row.settlementId === settlementId);
     for (const row of commitments) {
-      created.privateEventIds.push(row.id);
+      created.episodeEventIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("commitment", row.id));
     }
 
@@ -493,7 +493,7 @@ export class ExplicitSettlementProcessor {
       .getAssertions(agentId, { activeOnly: false })
       .filter((row) => row.settlementId === settlementId);
     for (const row of assertions) {
-      created.privateBeliefIds.push(row.id);
+      created.assertionIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("assertion", row.id));
     }
 
@@ -504,7 +504,7 @@ export class ExplicitSettlementProcessor {
       if (op.target.kind === "assertion") {
         const row = this.cognitionRepo.getAssertionByKey(agentId, op.target.key);
         if (row) {
-          created.privateBeliefIds.push(row.id);
+          created.assertionIds.push(row.id);
           created.changedNodeRefs.push(makeNodeRef("assertion", row.id));
         }
         continue;
@@ -515,7 +515,7 @@ export class ExplicitSettlementProcessor {
           ? this.cognitionRepo.getEvaluationByKey(agentId, op.target.key)
           : this.cognitionRepo.getCommitmentByKey(agentId, op.target.key);
       if (row) {
-        created.privateEventIds.push(row.id);
+        created.episodeEventIds.push(row.id);
         created.changedNodeRefs.push(makeNodeRef(op.target.kind, row.id));
       }
     }

@@ -14,6 +14,7 @@ import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orch
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import type { CognitionHit } from "../../src/memory/cognition/cognition-search.js";
@@ -194,8 +195,8 @@ describe("RetrievalService", () => {
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
 
-			storage.syncSearchDoc("private", "private_event:1" as any, "Alice thinks Bob is suspicious", "rp:alice");
-			storage.syncSearchDoc("private", "private_event:2" as any, "Bob thinks Alice is kind", "rp:bob");
+			storage.syncSearchDoc("private", "private_episode:1" as any, "Alice thinks Bob is suspicious", "rp:alice");
+			storage.syncSearchDoc("private", "private_episode:2" as any, "Bob thinks Alice is kind", "rp:bob");
 
 			const retrieval = RetrievalService.create(db);
 			const results = await retrieval.searchVisibleNarrative("suspicious", viewer({ viewer_agent_id: "rp:alice" }));
@@ -247,7 +248,7 @@ describe("RetrievalService", () => {
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
 
-			storage.syncSearchDoc("private", "private_event:1" as any, "Alice privately recalled the moonlit garden", "rp:alice");
+			storage.syncSearchDoc("private", "private_episode:1" as any, "Alice privately recalled the moonlit garden", "rp:alice");
 			storage.syncSearchDoc("area", "event:1" as any, "The moonlit garden was peaceful", undefined, 1);
 			storage.syncSearchDoc("world", "event:2" as any, "A moonlit celebration in the town square");
 
@@ -405,8 +406,8 @@ describe("RetrievalService", () => {
 			runMemoryMigrations(db);
 			const storage = new GraphStorageService(db);
 
-			storage.syncSearchDoc("private", "private_belief:1" as any, "Alice suspects betrayal from the butler", "rp:alice");
-			storage.syncSearchDoc("private", "private_event:2" as any, "Alice evaluated the butler as untrustworthy", "rp:alice");
+			storage.syncSearchDoc("private", "assertion:1" as any, "Alice suspects betrayal from the butler", "rp:alice");
+			storage.syncSearchDoc("private", "private_episode:2" as any, "Alice evaluated the butler as untrustworthy", "rp:alice");
 			storage.syncSearchDoc("world", "event:3" as any, "The butler served tea in the parlor");
 
 			const service = new NarrativeSearchService(db);
@@ -672,7 +673,7 @@ describe("RetrievalService", () => {
 						basis: "first_hand",
 						preContestedStance: "accepted",
 						conflictSummary: "contested (1 factors)",
-						conflictFactorRefs: ["private_belief:1"],
+						conflictFactorRefs: ["assertion:1"],
 					}),
 					"stl:ev-3",
 					now,
@@ -695,7 +696,7 @@ describe("RetrievalService", () => {
 			expect(hits[0].conflictEvidence).toBeDefined();
 			expect(hits[0].conflictEvidence).toEqual([]);
 			expect(hits[0].conflictSummary).toBe("contested (1 factors)");
-			expect(hits[0].conflictFactorRefs).toEqual(["private_belief:1"]);
+			expect(hits[0].conflictFactorRefs).toEqual(["assertion:1"]);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -1034,7 +1035,7 @@ describe("RetrievalService", () => {
 				},
 			});
 
-			const exploreTool = tools.find((tool) => tool.name === "memory_explore");
+			const exploreTool = tools.find((tool) => tool.name === MEMORY_TOOL_NAMES.memoryExplore);
 			expect(exploreTool).toBeDefined();
 			const exploreResult = await exploreTool!.handler(
 				{

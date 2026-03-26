@@ -1,6 +1,8 @@
 # Memory Architecture 2026 (v4 Refactor)
 
-> Status: Updated 2026-03-24. Covers work completed in T1–T35 (V3 refactor).
+> Status: Updated 2026-03-26. Covers work completed in T1–T35 (V3 refactor) and the subsequent legacy-cleanup refactor (migrations 027–032, March 2026).
+>
+> **Legacy cleanup complete:** `agent_fact_overlay` was dropped by migration 030. `agent_event_overlay` was dropped by migration 017. `private_event` and `private_belief` node kinds are fully removed from the type system and all production code. The canonical tables for private memory are `private_episode_events`, `private_cognition_events`, and `private_cognition_current`.
 
 ---
 
@@ -52,10 +54,10 @@ Migrations are additive `MigrationStep[]` using the `addColumnIfMissing()` patte
 
 | # | Name | Adds |
 |---|------|------|
-| 001 | baseline | Core tables: `event_nodes`, `agent_fact_overlay`, `agent_event_overlay`, `logic_edges`, FTS search docs |
+| 001 | baseline | Core tables: `event_nodes`, `agent_fact_overlay` (legacy, dropped in 030), `agent_event_overlay` (legacy, dropped in 017), `logic_edges`, FTS search docs |
 | 002 | alias | `alias` and `alias_history` tables |
 | 003 | embeddings | `embedding_cache` table |
-| 004 | overlay_v2_columns | Canonical columns on `agent_fact_overlay`: `stance`, `basis`, `pre_contested_stance`, `source_label_raw`, `updated_at` |
+| 004 | overlay_v2_columns | Canonical columns on legacy `agent_fact_overlay`: `stance`, `basis`, `pre_contested_stance`, `source_label_raw`, `updated_at` |
 | 005 | event_overlay_v2 | Canonical columns on `agent_event_overlay`: `target_entity_id`, `updated_at`, `explicit_kind` |
 | 006 | publication_provenance | `source_settlement_id`, `source_pub_index`, `visibility_scope` on `event_nodes`; unique index `ux_event_nodes_publication_scope` |
 | 007 | relations_and_cognition_index | `memory_relations` table + `search_docs_cognition` / `search_docs_cognition_fts` FTS5 tables |
@@ -78,13 +80,19 @@ Migrations are additive `MigrationStep[]` using the `addColumnIfMissing()` patte
 | 024 | add-persona-to-core-memory-labels | Widen `core_memory_blocks.label` CHECK to include `persona` |
 | 025 | add-pinned-summary-proposals-table | `pinned_summary_proposals` table for persistent proposal workflow (status: `pending` / `applied` / `rejected`) |
 | 026 | add-retrieval-only-to-shared-blocks | Add `retrieval_only` flag to `shared_blocks` |
+| 027 | add-fact-edges-validity | `fact_edges` validity window columns; compat layer retirement recorded |
+| 028 | backfill-private-cognition-from-overlay | Data migration: copy surviving rows from legacy `agent_fact_overlay` into `private_cognition_events` + `private_cognition_current` |
+| 029 | backfill-private-episode-from-overlay | Data migration: copy episode rows from legacy overlays into `private_episode_events` |
+| 030 | drop-agent-fact-overlay | **Drop `agent_fact_overlay`** — table fully removed; all data already migrated to `private_cognition_events` / `private_cognition_current` |
+| 031 | tighten-private-cognition-constraints | NOT NULL constraints and CHECK tightening on `private_cognition_current` now that compat layer is gone |
+| 032 | tighten-private-episode-constraints | NOT NULL / CHECK tightening on `private_episode_events`; remove any remaining compat columns |
 
 **Backfill rules (004):**
 - `confirmed` → `confirmed`, `suspected` → `tentative`, `hypothetical` → `hypothetical`, `retracted` → `rejected`
 - `observation` → `first_hand`, `inference` → `inference`, `suspicion` → `inference`, `intention` → `introspection`
 
 **Constraints:**
-- `agent_fact_overlay`: app-layer check that `stance = 'contested'` must have `pre_contested_stance`
+- `agent_fact_overlay` (legacy, dropped by migration 030): formerly had an app-layer check that `stance = 'contested'` must have `pre_contested_stance`; this constraint no longer exists in the schema
 - `memory_relations`: `CHECK(source_node_ref != target_node_ref)` — no self-referencing relations
 - `event_nodes`: `ux_event_nodes_publication_scope` unique index for publication idempotency
 - `shared_block_attachments`: `CHECK(target_kind = 'agent')` — V1 only supports agent attachment
@@ -248,16 +256,17 @@ All services use duck-typed `DbLike` interfaces to avoid importing the concrete 
 - `PendingSettlementSweeper` forwards records without inspecting schema version; the processor handles both
 - `CognitionRepository.toCanonicalAssertion()` falls back to `EPISTEMIC_STATUS_TO_STANCE` / `BELIEF_TYPE_TO_BASIS` for legacy rows with NULL canonical columns
 
-### Old columns kept
+### Old overlay tables dropped (legacy-cleanup refactor, March 2026)
 
-Columns `belief_type`, `confidence`, `epistemic_status` remain in `agent_fact_overlay`. They are:
-- Written via dual-write in `CognitionRepository` (compat path)
-- Read only as fallback when `stance`/`basis` are NULL (legacy rows)
-- Never used as canonical input for any new write path
+`agent_fact_overlay` was dropped by migration 030. `agent_event_overlay` was dropped by migration 017. Neither table exists in any production database going forward.
+
+All cognition data that survived the compat window was migrated into `private_cognition_events` (append-only ledger) and `private_cognition_current` (rebuildable projection) before the drop. Episode data was migrated into `private_episode_events`.
+
+The columns `belief_type`, `confidence`, and `epistemic_status` no longer exist anywhere in the schema. The dual-write compat path in `CognitionRepository` has been removed. `EPISTEMIC_STATUS_TO_STANCE` / `BELIEF_TYPE_TO_BASIS` mapping constants are retained in `rp-turn-contract.ts` only to normalize any inbound v3 turn submissions that still carry the old field names.
 
 ### Graph organizer read pattern
 
-`src/memory/graph-organizer.ts` reads both `stance` and `epistemic_status`, uses `row.stance ?? row.epistemic_status` for display. Retraction check covers both: `stance === "rejected" || stance === "abandoned" || epistemic_status === "retracted"`.
+`src/memory/graph-organizer.ts` previously fell back to `row.epistemic_status` when `row.stance` was NULL. That fallback path is no longer needed now that `agent_fact_overlay` is dropped, but it remains in place as a defensive no-op guard for any in-flight DB rows that might have been written before migration 030 completed.
 
 ---
 
@@ -440,8 +449,8 @@ src/interaction/
   contracts.ts                 TurnSettlementPayload + NormalizedSettlementPayload
 
 src/memory/
-  schema.ts                    DDL, migrations 001-026
-  storage.ts                   Central write path, dual-write compat
+  schema.ts                    DDL, migrations 001-032 (026: shared-blocks; 030: legacy agent_fact_overlay dropped)
+  storage.ts                   Central write path (dual-write compat removed after migration 030)
   cognition-op-committer.ts    Legacy committer (now delegates to CognitionRepository)
   explicit-settlement-processor.ts  Settlement flush → CognitionRepository
   task-agent.ts                loadExistingContext via CognitionRepository

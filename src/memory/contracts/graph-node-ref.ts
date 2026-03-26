@@ -1,7 +1,7 @@
-import { ALL_KNOWN_NODE_REF_KINDS, type AnyNodeRefKind } from "../types.js";
+import { NODE_REF_KINDS, type NodeRefKind } from "../types.js";
 
 export type GraphNodeRef = {
-  kind: AnyNodeRefKind;
+  kind: NodeRefKind;
   id: string;
 };
 
@@ -11,10 +11,10 @@ export function parseGraphNodeRef(raw: string): GraphNodeRef {
     throw new Error(`Invalid node ref format: ${raw}`);
   }
 
-  const kind = raw.slice(0, colonIndex) as AnyNodeRefKind;
+  const kind = raw.slice(0, colonIndex) as NodeRefKind;
   const id = raw.slice(colonIndex + 1);
 
-  if (!(ALL_KNOWN_NODE_REF_KINDS as readonly string[]).includes(kind)) {
+  if (!(NODE_REF_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`Unknown node ref kind: ${kind}`);
   }
 

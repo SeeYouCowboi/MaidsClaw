@@ -94,23 +94,21 @@ export type MemoryTaskModelProvider = {
 };
 
 export type CreatedState = {
-  privateEventIds: number[];
-  privateBeliefIds: number[];
+  episodeEventIds: number[];
+  assertionIds: number[];
   entityIds: number[];
   factIds: number[];
   changedNodeRefs: NodeRef[];
 };
 
-const legacyPrivateEventPrefix = `private_${"event"}:`;
-const legacyPrivateBeliefPrefix = `private_${"belief"}:`;
-const legacyCreatePrivateEventToolName = `create_private_${"event"}`;
-const legacyCreatePrivateBeliefToolName = `create_private_${"belief"}`;
-const privateEventIdsKey: `private_${"event"}_ids` = `private_${"event"}_ids`;
-const privateBeliefIdsKey: `private_${"belief"}_ids` = `private_${"belief"}_ids`;
+const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
+const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
+const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
+const ASSERTION_IDS_KEY = "assertion_ids";
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
-    name: legacyCreatePrivateEventToolName,
+    name: CREATE_EPISODE_EVENT_TOOL_NAME,
     description:
       "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
@@ -148,8 +146,8 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
-    name: legacyCreatePrivateBeliefToolName,
-    description: "Create private belief overlay edges between entities.",
+    name: UPSERT_ASSERTION_TOOL_NAME,
+    description: "Upsert private assertions between entities.",
     inputSchema: {
       type: "object",
       required: ["source", "target", "predicate", "basis", "stance"],
@@ -373,8 +371,8 @@ export class MemoryTaskAgent {
     const ingest = this.ingestionPolicy.buildMigrateInput(flushRequest);
     const existingContext = this.loadExistingContext(flushRequest.agentId);
     const created: CreatedState = {
-      privateEventIds: [],
-      privateBeliefIds: [],
+      episodeEventIds: [],
+      assertionIds: [],
       entityIds: [],
       factIds: [],
       changedNodeRefs: [],
@@ -456,8 +454,8 @@ export class MemoryTaskAgent {
 
     return {
       batch_id: flushRequest.idempotencyKey,
-      [privateEventIdsKey]: created.privateEventIds,
-      [privateBeliefIdsKey]: created.privateBeliefIds,
+      [EPISODE_EVENT_IDS_KEY]: created.episodeEventIds,
+      [ASSERTION_IDS_KEY]: created.assertionIds,
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
@@ -542,6 +540,9 @@ export class MemoryTaskAgent {
     created_at: number;
   }> {
     const pointerToEntityId = new Map<string, number>();
+    const cognitionRepo = new CognitionRepository(this.db);
+    const beliefSettlementId = `${flushRequest.idempotencyKey}:belief`;
+    let beliefOpIndex = 0;
     const privateEvents: Array<{
       id: number;
       event_id: number | null;
@@ -579,7 +580,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === legacyCreatePrivateEventToolName) {
+      if (call.name === CREATE_EPISODE_EVENT_TOOL_NAME) {
         const primaryActor = this.resolveEntityReference(
           call.arguments.primary_actor_entity_id,
           flushRequest.agentId,
@@ -601,7 +602,7 @@ export class MemoryTaskAgent {
           projectableSummary: this.asOptionalString(call.arguments.projectable_summary) ?? undefined,
           sourceRecordId: this.asOptionalString(call.arguments.source_record_id) ?? undefined,
         });
-        created.privateEventIds.push(privateEventId);
+        created.episodeEventIds.push(privateEventId);
         created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
         const row = this.db.prepare(
           `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
@@ -634,23 +635,45 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === legacyCreatePrivateBeliefToolName) {
+      if (call.name === UPSERT_ASSERTION_TOOL_NAME) {
         const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
         const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
         if (!source || !target) {
           continue;
         }
-        const beliefId = this.storage.createPrivateBelief({
+        const sourcePointerKey =
+          typeof call.arguments.source === "string"
+            ? call.arguments.source
+            : this.storage.getEntityById(source)?.pointerKey;
+        const targetPointerKey =
+          typeof call.arguments.target === "string"
+            ? call.arguments.target
+            : this.storage.getEntityById(target)?.pointerKey;
+        if (!sourcePointerKey || !targetPointerKey) {
+          continue;
+        }
+
+        const beliefId = cognitionRepo.upsertAssertion({
           agentId: flushRequest.agentId,
-          sourceEntityId: source,
-          targetEntityId: target,
+          settlementId: beliefSettlementId,
+          opIndex: beliefOpIndex,
+          sourcePointerKey,
           predicate: this.asString(call.arguments.predicate),
+          targetPointerKey,
           basis: this.asString(call.arguments.basis) as AssertionBasis,
           stance: this.asString(call.arguments.stance) as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
-          sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
-        });
-        created.privateBeliefIds.push(beliefId);
+        }).id;
+        beliefOpIndex += 1;
+
+        const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
+        if (sourceEventRef) {
+          this.db
+            .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+            .run(sourceEventRef, Date.now(), beliefId);
+        }
+
+        created.assertionIds.push(beliefId);
         created.changedNodeRefs.push(makeNodeRef("assertion", beliefId));
         continue;
       }
@@ -809,7 +832,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value) && !value.startsWith(legacyPrivateEventPrefix) && !value.startsWith(legacyPrivateBeliefPrefix)) {
+    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;

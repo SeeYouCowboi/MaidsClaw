@@ -34,12 +34,11 @@ const AGENT_ID = "rp:alice";
 
 type AssertionRow = {
 	id: number;
-	predicate: string;
+	summary_text: string | null;
 	stance: string | null;
 	basis: string | null;
 	pre_contested_stance: string | null;
-	settlement_id: string | null;
-	op_index: number | null;
+	record_json: string;
 	updated_at: number;
 };
 
@@ -51,8 +50,8 @@ function createTestContext(): { db: Db; dbPath: string; storage: GraphStorageSer
 
 function readAssertion(db: Db, cognitionKey: string): AssertionRow | undefined {
 	return db.get<AssertionRow>(
-		`SELECT id, predicate, stance, basis, pre_contested_stance, settlement_id, op_index, updated_at
-		 FROM agent_fact_overlay
+		`SELECT id, summary_text, stance, basis, pre_contested_stance, record_json, updated_at
+		 FROM private_cognition_current
 		 WHERE agent_id = ? AND cognition_key = ?`,
 		[AGENT_ID, cognitionKey],
 	);
@@ -149,8 +148,8 @@ async function processExplicitSettlement(params: {
 	};
 
 	const created: CreatedState = {
-		privateEventIds: [],
-		privateBeliefIds: [],
+		episodeEventIds: [],
+		assertionIds: [],
 		entityIds: [],
 		factIds: [],
 		changedNodeRefs: [],
@@ -488,13 +487,13 @@ describe("V2 validation — negative/edge-case boundaries", () => {
 			}
 
 			const overlayCount = db.get<{ count: number }>(
-				"SELECT COUNT(*) as count FROM agent_fact_overlay WHERE agent_id = ? AND cognition_key = ?",
+				"SELECT COUNT(*) as count FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
 				[AGENT_ID, cognitionKey],
 			);
 			expect(overlayCount?.count).toBe(1);
 
 			const overlayRow = readAssertion(db, cognitionKey);
-			expect(overlayRow?.predicate).toBe("distrusts");
+			expect(overlayRow?.summary_text).toContain("distrusts");
 
 			const currentCount = db.get<{ count: number }>(
 				"SELECT COUNT(*) as count FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",

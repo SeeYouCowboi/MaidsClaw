@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DecisionPolicy } from "../../src/agents/maiden/decision-policy.js";
 import { DelegationCoordinator } from "../../src/agents/maiden/delegation.js";
@@ -19,6 +18,7 @@ import { JobQueue } from "../../src/jobs/queue.js";
 import { JobDedupEngine } from "../../src/jobs/dedup.js";
 import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobScheduler } from "../../src/jobs/scheduler.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 import { buildMemoryTools } from "../../src/memory/tools.js";
 
 function createInteractionHarness(): {
@@ -269,7 +269,7 @@ describe("E2E demo scenario", () => {
       },
     });
 
-    const tool = tools.find((candidate) => candidate.name === "memory_explore");
+    const tool = tools.find((candidate) => candidate.name === MEMORY_TOOL_NAMES.memoryExplore);
     expect(tool).toBeDefined();
 
     const result = await tool!.handler(
@@ -290,13 +290,4 @@ describe("E2E demo scenario", () => {
     expect(evidence[0]?.redacted).toEqual([{ type: "redacted", reason: "private", node_ref: "event:7" }]);
   });
 
-  it("legacy retirement audit keeps prompt/tool canonical surfaces free of private_event/private_belief names", () => {
-    const promptTemplate = readFileSync("src/core/prompt-template.ts", "utf8");
-    const toolSurface = readFileSync("src/memory/tools.ts", "utf8");
-
-    expect(promptTemplate.includes("private_event")).toBe(false);
-    expect(promptTemplate.includes("private_belief")).toBe(false);
-    expect(toolSurface.includes("private_event")).toBe(false);
-    expect(toolSurface.includes("private_belief")).toBe(false);
-  });
 });

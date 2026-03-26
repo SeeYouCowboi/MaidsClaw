@@ -124,18 +124,6 @@ describe("VisibilityPolicy", () => {
       expect(policy.isNodeVisible(viewer, "fact:1", {})).toBe(true);
     });
 
-    it("dispatches private_event: refs to isPrivateNodeVisible", () => {
-      const viewer = makeViewer({ viewer_agent_id: "a1" });
-      expect(policy.isNodeVisible(viewer, "private_event:1", { agent_id: "a1" })).toBe(true);
-      expect(policy.isNodeVisible(viewer, "private_event:2", { agent_id: "a2" })).toBe(false);
-    });
-
-    it("dispatches private_belief: refs to isPrivateNodeVisible", () => {
-      const viewer = makeViewer({ viewer_agent_id: "a1" });
-      expect(policy.isNodeVisible(viewer, "private_belief:1", { agent_id: "a1" })).toBe(true);
-      expect(policy.isNodeVisible(viewer, "private_belief:2", { agent_id: "a2" })).toBe(false);
-    });
-
     it("returns false for unknown node kind", () => {
       const viewer = makeViewer();
       expect(policy.isNodeVisible(viewer, "unknown:1", {})).toBe(false);

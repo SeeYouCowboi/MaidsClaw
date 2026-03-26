@@ -270,14 +270,10 @@ describe("EpisodeRepository", () => {
 		cleanupDb(dbPath);
 	});
 
-	it("writes to private_episode_events and not to agent_fact_overlay", () => {
+	it("writes to private_episode_events", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
 		const repo = new EpisodeRepository(db);
-
-		const factCountBefore = db.get<{ count: number }>(
-			"SELECT count(*) AS count FROM agent_fact_overlay",
-		);
 
 		repo.append({
 			agentId: "rp:alice",
@@ -293,11 +289,6 @@ describe("EpisodeRepository", () => {
 			["rp:alice"],
 		);
 		expect(episodeCount?.count).toBe(1);
-
-		const factCountAfter = db.get<{ count: number }>(
-			"SELECT count(*) AS count FROM agent_fact_overlay",
-		);
-		expect(factCountAfter?.count).toBe(factCountBefore?.count ?? 0);
 
 		db.close();
 		cleanupDb(dbPath);

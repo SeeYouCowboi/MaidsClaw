@@ -5,9 +5,9 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "../storage/database";
-import { parseGraphNodeRef } from "./contracts/graph-node-ref";
 import {
 	createMemorySchema,
+	MEMORY_MIGRATIONS,
 	EventCategory,
 	MAX_INTEGER,
 	MemoryScope,
@@ -28,14 +28,14 @@ function freshDb(): Database {
 // ─── 1. Schema creates all 45 tables ────────────────────────────────────────
 
 describe("createMemorySchema", () => {
-	it("creates 53 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
+	it("creates 52 non-FTS tables (core + infrastructure + FTS shadow tables)", () => {
 		const db = freshDb();
 		const result = db
 			.prepare(
 				"SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND sql NOT LIKE '%fts5%'",
 			)
 			.get() as { cnt: number };
-		expect(result.cnt).toBe(53);
+		expect(result.cnt).toBe(52);
 		db.close();
 	});
 
@@ -675,11 +675,11 @@ describe("migration:022 node_embeddings node_id", () => {
 		} catch {}
 	}
 
-	it("applies 27 migrations without error", () => {
+	it("applies all memory migrations without error", () => {
 		const { db, dbPath } = freshMigrationDb();
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(27);
+		expect(rows!.cnt).toBe(MEMORY_MIGRATIONS.length);
 		db.close();
 		cleanup(dbPath);
 	});
@@ -702,16 +702,16 @@ describe("migration:022 node_embeddings node_id", () => {
 		db.run(
 			`INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-			["private_belief:42", "private_belief", "primary", "test-model", new Uint8Array([1, 2, 3]), now],
+			["assertion:42", "assertion", "primary", "test-model", new Uint8Array([1, 2, 3]), now],
 		);
 		runMemoryMigrations(db);
 		const row = db.get<{ node_id: string; node_kind: string; node_ref: string }>(
 			"SELECT node_id, node_kind, node_ref FROM node_embeddings WHERE node_ref = ?",
-			["private_belief:42"],
+			["assertion:42"],
 		);
 		expect(row!.node_id).toBe("42");
-		expect(row!.node_kind).toBe("private_belief");
-		expect(row!.node_ref).toBe("private_belief:42");
+		expect(row!.node_kind).toBe("assertion");
+		expect(row!.node_ref).toBe("assertion:42");
 		db.close();
 		cleanup(dbPath);
 	});
@@ -720,14 +720,14 @@ describe("migration:022 node_embeddings node_id", () => {
 // ─── 14. V3 Migration Backfill Consistency ──────────────────────────────────
 
 describe("V3 migration backfill consistency", () => {
-	it("migrations are idempotent — running twice yields exactly 26 records", () => {
+	it("migrations are idempotent — running twice yields exactly MEMORY_MIGRATIONS.length records", () => {
 		const dbPath = join(tmpdir(), `maidsclaw-schema-idempotent-${randomUUID()}.db`);
 		const db = openDatabase({ path: dbPath });
 		createMemorySchema(db.raw);
 		runMemoryMigrations(db);
 		runMemoryMigrations(db);
 		const rows = db.get<{ cnt: number }>("SELECT count(*) as cnt FROM _migrations");
-		expect(rows!.cnt).toBe(27);
+		expect(rows!.cnt).toBe(MEMORY_MIGRATIONS.length);
 		db.close();
 		try {
 			rmSync(dbPath, { force: true });
@@ -767,32 +767,3 @@ describe("V3 migration backfill consistency", () => {
 	});
 });
 
-// ─── 15. parseGraphNodeRef backward compatibility ───────────────────────────
-
-describe("parseGraphNodeRef backward compat", () => {
-	it("parses legacy private_belief:42 ref", () => {
-		const ref = parseGraphNodeRef("private_belief:42");
-		expect(ref.kind).toBe("private_belief");
-		expect(ref.id).toBe("42");
-	});
-
-	it("parses legacy private_event:7 ref", () => {
-		const ref = parseGraphNodeRef("private_event:7");
-		expect(ref.kind).toBe("private_event");
-		expect(ref.id).toBe("7");
-	});
-
-	it("parses canonical assertion:100 ref", () => {
-		const ref = parseGraphNodeRef("assertion:100");
-		expect(ref.kind).toBe("assertion");
-		expect(ref.id).toBe("100");
-	});
-
-	it("throws on invalid format", () => {
-		expect(() => parseGraphNodeRef("invalid")).toThrow();
-	});
-
-	it("throws on unknown kind", () => {
-		expect(() => parseGraphNodeRef("bogus:1")).toThrow();
-	});
-});

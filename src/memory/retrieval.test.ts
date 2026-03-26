@@ -279,8 +279,8 @@ describe("RetrievalService", () => {
     const now = Date.now();
 
     db.prepare(
-      "INSERT INTO agent_fact_overlay (agent_id, source_entity_id, target_entity_id, predicate, cognition_key, settlement_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    ).run("agent-a", 0, 0, "flushed belief predicate", "flushed-belief", "stl:flushed", now, now);
+      `INSERT INTO private_cognition_current (agent_id, cognition_key, kind, stance, basis, status, summary_text, record_json, source_event_id, updated_at) VALUES (?, ?, 'assertion', 'tentative', 'inference', 'active', ?, ?, ?, ?)`,
+    ).run("agent-a", "flushed-belief", "flushed belief predicate", '{"predicate":"flushed belief predicate"}', 1, now);
 
     db.prepare(
       "INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at) VALUES (?, ?, ?, ?, ?)",

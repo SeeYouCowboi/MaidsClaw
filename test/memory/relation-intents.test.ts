@@ -89,8 +89,8 @@ describe("relation-intent resolver", () => {
       agentId: "rp:alice",
       localRefIndex: new Map([["ep:1", { kind: "episode", nodeRef: "private_episode:1" }]]),
       cognitionByKey: new Map([
-        ["cog:assert-1", { kind: "assertion", nodeRef: `private_belief:${assertion.id}` }],
-        ["cog:commit-1", { kind: "commitment", nodeRef: `private_event:${commitment.id}` }],
+        ["cog:assert-1", { kind: "assertion", nodeRef: `assertion:${assertion.id}` }],
+        ["cog:commit-1", { kind: "commitment", nodeRef: `commitment:${commitment.id}` }],
       ]),
     };
 
@@ -124,7 +124,7 @@ describe("relation-intent resolver", () => {
       settlementId: "stl:ri-hard",
       agentId: "rp:alice",
       localRefIndex: new Map([["ep:ok", { kind: "episode", nodeRef: "private_episode:1" }]]),
-      cognitionByKey: new Map([["cog:ok", { kind: "evaluation", nodeRef: "private_event:9" }]]),
+      cognitionByKey: new Map([["cog:ok", { kind: "evaluation", nodeRef: "evaluation:9" }]]),
     };
 
     const resolved = resolveLocalRefs(
@@ -204,7 +204,7 @@ describe("relation-intent resolver", () => {
 		expect(result.resolved[0].nodeRef).toBe(`commitment:${commitment.id}`);
 
     const builder = new RelationBuilder(db);
-    builder.writeContestRelations(`private_belief:${assertion.id}`, result.resolved.map((item) => item.nodeRef), "stl:ri-soft");
+    builder.writeContestRelations(`assertion:${assertion.id}`, result.resolved.map((item) => item.nodeRef), "stl:ri-soft");
 
     const relationRows = db.query<{ target_node_ref: string; relation_type: string }>(
       `SELECT target_node_ref, relation_type FROM memory_relations WHERE source_ref = 'stl:ri-soft'`,

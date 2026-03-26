@@ -26,8 +26,8 @@ export class CoreMemoryIndexUpdater {
             currentIndexText: indexBlock.value,
             createdItems: {
               entityIds: created.entityIds,
-              privateEventIds: created.privateEventIds,
-              privateBeliefIds: created.privateBeliefIds,
+              episodeEventIds: created.episodeEventIds,
+              assertionIds: created.assertionIds,
               factIds: created.factIds,
             },
           }),

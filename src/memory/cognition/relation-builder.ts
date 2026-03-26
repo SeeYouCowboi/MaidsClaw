@@ -28,7 +28,7 @@ type AgentRow = { agent_id: string };
 type AssertionIdRow = { id: number };
 type CognitionProjectionRow = { id: number; kind: string | null };
 
-const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_belief|private_event|private_episode|event):\d+$/; // compat: legacy/private ref literals allowed for parsing
+const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_episode|event):\d+$/;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export const CONFLICTS_WITH: MemoryRelationType = "conflicts_with";
@@ -49,7 +49,7 @@ export class RelationBuilder {
   /**
    * Write a `conflicts_with` relation when an assertion transitions to `contested`.
    *
-   * @param sourceNodeRef - The contested assertion ref, e.g. `"private_belief:{id}"` (legacy compat)
+   * @param sourceNodeRef - The contested assertion ref, e.g. `"assertion:{id}"`
    * @param factorNodeRefs - Stable factor refs resolved from settlement artifacts
    * @param sourceRef     - Provenance ref (e.g. settlement ID)
    * @param strength      - Relation strength (0–1), default 0.8
@@ -61,7 +61,10 @@ export class RelationBuilder {
     strength = 0.8,
   ): void {
     const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
-    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId) ?? sourceNodeRef.trim();
+    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
+    if (!canonicalSourceRef) {
+      throw new Error(`Unsupported conflict source node ref: ${sourceNodeRef}`);
+    }
 
     const targets = new Set<string>();
     let droppedInvalidRefs = 0;
@@ -145,6 +148,10 @@ export class RelationBuilder {
    */
   getConflictEvidence(sourceNodeRef: string, limit = 3): ConflictEvidence[] {
     const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
+    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
+    if (!canonicalSourceRef) {
+      throw new Error(`Unsupported conflict source node ref: ${sourceNodeRef}`);
+    }
     const rows = this.db
       .prepare(
         `SELECT target_node_ref, strength, source_kind, source_ref, created_at
@@ -153,7 +160,7 @@ export class RelationBuilder {
          ORDER BY strength DESC
          LIMIT ?`,
       )
-      .all(sourceNodeRef, CONFLICTS_WITH, limit) as ConflictEvidenceRow[];
+      .all(canonicalSourceRef, CONFLICTS_WITH, limit) as ConflictEvidenceRow[];
 
     const normalized: ConflictEvidence[] = [];
     for (const row of rows) {
@@ -180,12 +187,6 @@ export class RelationBuilder {
     }
 
     if (STABLE_FACTOR_REF_PATTERN.test(trimmed)) {
-      if (trimmed.startsWith("private_belief:")) { // compat: legacy private_belief:* -> assertion:*
-        return `assertion:${trimmed.slice("private_belief:".length)}`; // compat: legacy prefix remap
-      }
-      if (trimmed.startsWith("private_event:")) { // compat: legacy private_event:* -> canonical cognition/event refs
-        return this.resolveLegacyPrivateEventRef(trimmed, sourceAgentId);
-      }
       return trimmed;
     }
 
@@ -207,24 +208,24 @@ export class RelationBuilder {
       }
 
       const row = this.db
-        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
         .get(id) as AgentRow | null;
       return row?.agent_id ?? null;
     }
 
-    if (trimmed.startsWith("private_belief:")) { // compat: legacy private_belief:* source resolution
-      const id = Number(trimmed.slice("private_belief:".length)); // compat: legacy prefix parse
+    if (trimmed.startsWith("private_episode:")) {
+      const id = Number(trimmed.slice("private_episode:".length));
       if (!Number.isFinite(id)) {
         return null;
       }
 
       const row = this.db
-        .prepare(`SELECT agent_id FROM agent_fact_overlay WHERE id = ?`)
+        .prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`)
         .get(id) as AgentRow | null;
       return row?.agent_id ?? null;
     }
 
-    if (trimmed.startsWith("evaluation:") || trimmed.startsWith("commitment:") || trimmed.startsWith("private_event:")) { // compat: legacy private_event:* source resolution
+    if (trimmed.startsWith("evaluation:") || trimmed.startsWith("commitment:")) {
       const id = Number(trimmed.slice(trimmed.indexOf(":") + 1));
       if (!Number.isFinite(id)) {
         return null;
@@ -234,37 +235,6 @@ export class RelationBuilder {
         .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
         .get(id) as AgentRow | null;
       return row?.agent_id ?? null;
-    }
-
-    return null;
-  }
-
-  private resolveLegacyPrivateEventRef(rawNodeRef: string, sourceAgentId: string | null): string | null {
-    const id = Number(rawNodeRef.slice("private_event:".length)); // compat: legacy prefix parse
-    if (!Number.isFinite(id)) {
-      return null;
-    }
-
-    const agentFilter = sourceAgentId ? " AND agent_id = ?" : "";
-    const agentBind = sourceAgentId ? [sourceAgentId] : [];
-
-    const cognition = this.db
-      .prepare(
-        `SELECT id, kind
-         FROM private_cognition_current
-         WHERE id = ?${agentFilter}
-         LIMIT 1`,
-      )
-      .get(id, ...agentBind) as CognitionProjectionRow | null;
-    if (cognition && (cognition.kind === "evaluation" || cognition.kind === "commitment")) {
-      return `${cognition.kind}:${cognition.id}`;
-    }
-
-    const event = this.db
-      .prepare(`SELECT id FROM event_nodes WHERE id = ? LIMIT 1`)
-      .get(id) as { id: number } | null;
-    if (event) {
-      return `event:${event.id}`;
     }
 
     return null;
@@ -286,8 +256,9 @@ export class RelationBuilder {
     const assertion = this.db
       .prepare(
         `SELECT id
-         FROM agent_fact_overlay
+         FROM private_cognition_current
          WHERE cognition_key = ?${agentFilter}
+           AND kind = 'assertion'
          ORDER BY updated_at DESC, id DESC
          LIMIT 1`,
       )
