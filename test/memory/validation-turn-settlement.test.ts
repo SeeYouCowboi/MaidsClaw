@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
+import { MaidsClawError } from "../../src/core/errors.js";
+import type { AgentRole } from "../../src/agents/profile.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { InteractionStore } from "../../src/interaction/store.js";
+import type { WriteTemplate } from "../../src/memory/contracts/write-template.js";
 import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
@@ -94,6 +97,8 @@ async function processExplicitSettlement(params: {
 	requestId: string;
 	settlementId: string;
 	ops: CognitionOp[];
+	agentRole?: AgentRole;
+	writeTemplateOverride?: WriteTemplate;
 }): Promise<void> {
 	const processor = new ExplicitSettlementProcessor(
 		params.db.raw,
@@ -155,7 +160,16 @@ async function processExplicitSettlement(params: {
 		changedNodeRefs: [],
 	};
 
-	await processor.process(flushRequest, ingest, created, [] satisfies ChatToolDefinition[]);
+	await processor.process(
+		flushRequest,
+		ingest,
+		created,
+		[] satisfies ChatToolDefinition[],
+		{
+			agentRole: params.agentRole,
+			writeTemplateOverride: params.writeTemplateOverride,
+		},
+	);
 }
 
 describe("V2 validation — turn settlement sync visibility", () => {
@@ -325,6 +339,130 @@ describe("V2 validation — turn settlement sync visibility", () => {
 			expect(evaluation!.kind).toBe("evaluation");
 			expect(commitment).toBeDefined();
 			expect(commitment!.kind).toBe("commitment");
+		});
+	});
+
+	it("blocks cognition writes for maiden role with WRITE_TEMPLATE_DENIED", async () => {
+		await withTempMemoryDb(async ({ db, storage }) => {
+			const run = processExplicitSettlement({
+				db,
+				storage,
+				agentId: "rp:alice",
+				sessionId: "sess:validation:deny:maiden",
+				requestId: "req:validation:deny:maiden",
+				settlementId: "stl:validation:deny:maiden",
+				agentRole: "maiden",
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "validation:deny:maiden:assertion",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "supports",
+								object: {
+									kind: "entity",
+									ref: { kind: "pointer_key", value: "bob" },
+								},
+							},
+							stance: "accepted",
+							basis: "first_hand",
+						},
+					},
+				],
+			});
+
+			let caught: unknown;
+			try {
+				await run;
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeDefined();
+			expect(caught instanceof MaidsClawError).toBe(true);
+			expect((caught as MaidsClawError).code).toBe("WRITE_TEMPLATE_DENIED");
+		});
+	});
+
+	it("allows cognition writes for rp_agent role", async () => {
+		await withTempMemoryDb(async ({ db, storage }) => {
+			const cognitionKey = "validation:allow:rp:assertion";
+			await processExplicitSettlement({
+				db,
+				storage,
+				agentId: "rp:alice",
+				sessionId: "sess:validation:allow:rp",
+				requestId: "req:validation:allow:rp",
+				settlementId: "stl:validation:allow:rp",
+				agentRole: "rp_agent",
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: cognitionKey,
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "supports",
+								object: {
+									kind: "entity",
+									ref: { kind: "pointer_key", value: "bob" },
+								},
+							},
+							stance: "accepted",
+							basis: "first_hand",
+						},
+					},
+				],
+			});
+
+			const row = db.get<{ cognition_key: string }>(
+				"SELECT cognition_key FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", cognitionKey],
+			);
+			expect(row?.cognition_key).toBe(cognitionKey);
+		});
+	});
+
+	it("allows cognition writes for maiden when writeTemplate override enables cognition writes", async () => {
+		await withTempMemoryDb(async ({ db, storage }) => {
+			const cognitionKey = "validation:allow:override:assertion";
+			await processExplicitSettlement({
+				db,
+				storage,
+				agentId: "rp:alice",
+				sessionId: "sess:validation:allow:override",
+				requestId: "req:validation:allow:override",
+				settlementId: "stl:validation:allow:override",
+				agentRole: "maiden",
+				writeTemplateOverride: { allowCognitionWrites: true },
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: cognitionKey,
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "supports",
+								object: {
+									kind: "entity",
+									ref: { kind: "pointer_key", value: "bob" },
+								},
+							},
+							stance: "accepted",
+							basis: "first_hand",
+						},
+					},
+				],
+			});
+
+			const row = db.get<{ cognition_key: string }>(
+				"SELECT cognition_key FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
+				["rp:alice", cognitionKey],
+			);
+			expect(row?.cognition_key).toBe(cognitionKey);
 		});
 	});
 

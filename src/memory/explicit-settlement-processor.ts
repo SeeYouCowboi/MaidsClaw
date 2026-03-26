@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
 import { MaidsClawError } from "../core/errors.js";
 import type {
   AssertionBasis,
@@ -12,6 +13,7 @@ import type {
 } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
+import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { RelationBuilder } from "./cognition/relation-builder.js";
 import {
   materializeRelationIntents,
@@ -32,6 +34,7 @@ import type {
   MemoryFlushRequest,
   MemoryTaskModelProvider,
 } from "./task-agent.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 
 type ExistingContextLoader = (agentId: string) => { entities: unknown[]; privateBeliefs: unknown[] };
 type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => void;
@@ -64,7 +67,15 @@ export class ExplicitSettlementProcessor {
     ingest: IngestionInput,
     created: CreatedState,
     explicitSupportTools: ChatToolDefinition[],
+    options?: {
+      agentRole?: AgentRole;
+      writeTemplateOverride?: WriteTemplate;
+    },
   ): Promise<void> {
+    if (options?.agentRole) {
+      enforceWriteTemplate(options.agentRole, "cognition", options.writeTemplateOverride);
+    }
+
     for (const explicitMeta of ingest.explicitSettlements) {
       const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
       const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);

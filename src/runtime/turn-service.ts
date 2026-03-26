@@ -540,6 +540,8 @@ export class TurnService {
 					sessionId: effectiveRequest.sessionId,
 					locationEntityId: viewerSnapshot?.currentLocationEntityId,
 					timestamp: Date.now(),
+				}, {
+					agentRole: "rp_agent",
 				});
 			} catch (err) {
 				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -756,6 +758,7 @@ export class TurnService {
 			dialogueRecords: toDialogueRecords(records),
 			interactionRecords: records as never,
 			queueOwnerAgentId,
+			agentRole: this.resolveAssistantActorType(flushRequest.sessionId),
 		});
 
 		this.interactionStore.markProcessed(

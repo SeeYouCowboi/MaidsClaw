@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
 import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
@@ -35,6 +37,8 @@ export type MemoryFlushRequest = CoreMemoryFlushRequest & {
   dialogueRecords?: DialogueRecord[];
   queueOwnerAgentId?: string;
   interactionRecords?: InteractionRecord[];
+  agentRole?: AgentRole;
+  writeTemplateOverride?: WriteTemplate;
 };
 
 export type GraphOrganizerJob = {
@@ -380,7 +384,10 @@ export class MemoryTaskAgent {
 
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
-      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS);
+      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
+        agentRole: flushRequest.agentRole,
+        writeTemplateOverride: flushRequest.writeTemplateOverride,
+      });
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
       const dedupedIngest: IngestionInput = {

@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
+import { enforceWriteTemplate } from "./contracts/write-template.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
@@ -286,11 +289,15 @@ export class MaterializationService {
       locationEntityId?: number;
       timestamp?: number;
       sourceAgentId?: string;
+      agentRole?: AgentRole;
+      writeTemplateOverride?: WriteTemplate;
     },
   ): MaterializationResult {
     return materializePublications(this.storage, publications, settlementId, ctx, {
       projectionRepo: this.projectionRepo,
       sourceAgentId: ctx.sourceAgentId,
+      agentRole: ctx.agentRole,
+      writeTemplateOverride: ctx.writeTemplateOverride,
     });
   }
 }
@@ -307,8 +314,14 @@ export function materializePublications(
   options?: {
     projectionRepo?: AreaWorldProjectionRepo;
     sourceAgentId?: string;
+    agentRole?: AgentRole;
+    writeTemplateOverride?: WriteTemplate;
   },
 ): MaterializationResult {
+  if (options?.agentRole) {
+    enforceWriteTemplate(options.agentRole, "publication", options.writeTemplateOverride);
+  }
+
   const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
   const maxRetries = 3;
 

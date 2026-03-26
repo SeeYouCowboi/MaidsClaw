@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MaidsClawError } from "../../src/core/errors.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { MaterializationService, materializePublications } from "../../src/memory/materialization.js";
@@ -514,6 +515,48 @@ describe("MaterializationService", () => {
 });
 
 describe("Publication Materialization", () => {
+	it("blocks publication writes for task_agent role with WRITE_TEMPLATE_DENIED", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "task-deny-location",
+			displayName: "Task Deny Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Task agent should not publish this." },
+		];
+
+		try {
+			let caught: unknown;
+			try {
+				materializePublications(storage, publications, `stl:task-deny-${randomUUID()}`, {
+					sessionId: "sess-task-deny-code",
+					locationEntityId: locationId,
+					timestamp: 1235,
+				}, {
+					agentRole: "task_agent",
+				});
+			} catch (error) {
+				caught = error;
+			}
+
+			expect(caught).toBeDefined();
+			expect(caught instanceof MaidsClawError).toBe(true);
+			expect((caught as MaidsClawError).code).toBe("WRITE_TEMPLATE_DENIED");
+
+			const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+			expect(rows.length).toBe(0);
+		} finally {
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
 	it("explicit publication creates event_node with provenance columns", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);
