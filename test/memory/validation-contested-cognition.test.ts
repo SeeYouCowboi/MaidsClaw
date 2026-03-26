@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, jest } from "bun:test";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { getRecentCognition } from "../../src/memory/prompt-data.js";
@@ -333,6 +333,403 @@ describe("V2 validation: contested cognition", () => {
 			expect(row!.conflict_summary).toBeTruthy();
 			expect((row!.conflict_summary ?? "").length).toBeGreaterThan(0);
 		} finally {
+			cleanupDb(db, dbPath);
+		}
+	});
+});
+
+describe("write-time validation: conflict_factor_refs_json", () => {
+	it("invalid ref 'garbage:ref' is dropped with console.warn", async () => {
+		const { db, dbPath } = createTempDb();
+		const { locationId } = seedStandardEntities(db);
+		runInteractionMigrations(db);
+
+		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+		try {
+			const storage = new GraphStorageService(db);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: AGENT_ID,
+				cognitionKey: "v2:contest:invalid-ref",
+				settlementId: "stl:settlement:seed",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const processor = new ExplicitSettlementProcessor(
+				db.raw,
+				storage,
+				{ chat: async () => [] },
+				() => ({ entities: [], privateBeliefs: [] }),
+				() => {},
+			);
+
+			const requestId = "req:v2:invalid-ref";
+			const settlementId = "stl:v2:invalid-ref";
+			const privateCognition: PrivateCognitionCommitV4 = {
+				schemaVersion: "rp_private_cognition_v4",
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "v2:contest:invalid-ref",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "contested",
+							basis: "first_hand",
+							preContestedStance: "accepted",
+						},
+					},
+				],
+			};
+
+			const payload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: "sess:v2:invalid-ref",
+				ownerAgentId: AGENT_ID,
+				publicReply: "",
+				hasPublicReply: false,
+				viewerSnapshot: {
+					selfPointerKey: "__self__",
+					userPointerKey: "__user__",
+					currentLocationEntityId: locationId,
+				},
+				privateCognition,
+				conflictFactors: [
+					{ kind: "cognition", ref: "garbage:ref" },
+				],
+			};
+
+			const explicitMeta = {
+				settlementId,
+				requestId,
+				ownerAgentId: AGENT_ID,
+				privateCognition,
+			};
+
+			const ingestion: IngestionInput = {
+				batchId: "batch:v2:invalid-ref",
+				agentId: AGENT_ID,
+				sessionId: "sess:v2:invalid-ref",
+				dialogue: [],
+				attachments: [{
+					recordType: "turn_settlement",
+					payload,
+					committedAt: Date.now(),
+					correlatedTurnId: requestId,
+					explicitMeta,
+				}],
+				explicitSettlements: [explicitMeta],
+			};
+
+			const flushRequest: MemoryFlushRequest = {
+				sessionId: "sess:v2:invalid-ref",
+				agentId: AGENT_ID,
+				rangeStart: 1,
+				rangeEnd: 1,
+				flushMode: "manual",
+				idempotencyKey: "idem:v2:invalid-ref",
+			};
+
+			const created: CreatedState = {
+				episodeEventIds: [],
+				assertionIds: [],
+				entityIds: [],
+				factIds: [],
+				changedNodeRefs: [],
+			};
+
+			await processor.process(flushRequest, ingestion, created, []);
+
+			// Verify warning was logged
+			expect(warnSpy.mock.calls.length).toBeGreaterThan(0);
+			const relevantCall = warnSpy.mock.calls.find((call: string[]) =>
+				call[0]?.includes("dropped") && call[0]?.includes(settlementId)
+			);
+			expect(relevantCall).toBeDefined();
+
+			// Verify stored refs is empty (invalid ref was dropped)
+			const row = db.get<{ conflict_factor_refs_json: string | null }>(
+				"SELECT conflict_factor_refs_json FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
+				[AGENT_ID, "v2:contest:invalid-ref"],
+			);
+			expect(row).toBeDefined();
+			expect(row!.conflict_factor_refs_json).toBe("[]");
+		} finally {
+			warnSpy.mockRestore();
+			cleanupDb(db, dbPath);
+		}
+	});
+
+	it("valid ref 'assertion:42' is stored correctly", async () => {
+		const { db, dbPath } = createTempDb();
+		const { locationId } = seedStandardEntities(db);
+		runInteractionMigrations(db);
+
+		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+		try {
+			const storage = new GraphStorageService(db);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: AGENT_ID,
+				cognitionKey: "v2:contest:valid-ref",
+				settlementId: "stl:settlement:seed",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const processor = new ExplicitSettlementProcessor(
+				db.raw,
+				storage,
+				{ chat: async () => [] },
+				() => ({ entities: [], privateBeliefs: [] }),
+				() => {},
+			);
+
+			const requestId = "req:v2:valid-ref";
+			const settlementId = "stl:v2:valid-ref";
+			const privateCognition: PrivateCognitionCommitV4 = {
+				schemaVersion: "rp_private_cognition_v4",
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "v2:contest:valid-ref",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "contested",
+							basis: "first_hand",
+							preContestedStance: "accepted",
+						},
+					},
+				],
+			};
+
+			const payload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: "sess:v2:valid-ref",
+				ownerAgentId: AGENT_ID,
+				publicReply: "",
+				hasPublicReply: false,
+				viewerSnapshot: {
+					selfPointerKey: "__self__",
+					userPointerKey: "__user__",
+					currentLocationEntityId: locationId,
+				},
+				privateCognition,
+				conflictFactors: [
+					{ kind: "cognition", ref: "assertion:42" },
+					{ kind: "cognition", ref: "evaluation:7" },
+					{ kind: "cognition", ref: "commitment:3" },
+					{ kind: "cognition", ref: "private_episode:99" },
+					{ kind: "cognition", ref: "event:123" },
+				],
+			};
+
+			const explicitMeta = {
+				settlementId,
+				requestId,
+				ownerAgentId: AGENT_ID,
+				privateCognition,
+			};
+
+			const ingestion: IngestionInput = {
+				batchId: "batch:v2:valid-ref",
+				agentId: AGENT_ID,
+				sessionId: "sess:v2:valid-ref",
+				dialogue: [],
+				attachments: [{
+					recordType: "turn_settlement",
+					payload,
+					committedAt: Date.now(),
+					correlatedTurnId: requestId,
+					explicitMeta,
+				}],
+				explicitSettlements: [explicitMeta],
+			};
+
+			const flushRequest: MemoryFlushRequest = {
+				sessionId: "sess:v2:valid-ref",
+				agentId: AGENT_ID,
+				rangeStart: 1,
+				rangeEnd: 1,
+				flushMode: "manual",
+				idempotencyKey: "idem:v2:valid-ref",
+			};
+
+			const created: CreatedState = {
+				episodeEventIds: [],
+				assertionIds: [],
+				entityIds: [],
+				factIds: [],
+				changedNodeRefs: [],
+			};
+
+			await processor.process(flushRequest, ingestion, created, []);
+
+			// Verify no warning was logged (all refs valid)
+			const relevantCall = warnSpy.mock.calls.find((call: string[]) =>
+				call[0]?.includes(settlementId)
+			);
+			expect(relevantCall).toBeUndefined();
+
+			// Verify stored refs contains all valid refs
+			const row = db.get<{ conflict_factor_refs_json: string | null }>(
+				"SELECT conflict_factor_refs_json FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
+				[AGENT_ID, "v2:contest:valid-ref"],
+			);
+			expect(row).toBeDefined();
+			expect(row!.conflict_factor_refs_json).toBe(
+				JSON.stringify(["assertion:42", "evaluation:7", "commitment:3", "private_episode:99", "event:123"])
+			);
+		} finally {
+			warnSpy.mockRestore();
+			cleanupDb(db, dbPath);
+		}
+	});
+
+	it("empty array is stored as '[]'", async () => {
+		const { db, dbPath } = createTempDb();
+		const { locationId } = seedStandardEntities(db);
+		runInteractionMigrations(db);
+
+		const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+		try {
+			const storage = new GraphStorageService(db);
+			const repo = new CognitionRepository(db);
+
+			repo.upsertAssertion({
+				agentId: AGENT_ID,
+				cognitionKey: "v2:contest:empty-refs",
+				settlementId: "stl:settlement:seed",
+				opIndex: 0,
+				sourcePointerKey: "__self__",
+				predicate: "trusts",
+				targetPointerKey: "bob",
+				stance: "accepted",
+				basis: "first_hand",
+			});
+
+			const processor = new ExplicitSettlementProcessor(
+				db.raw,
+				storage,
+				{ chat: async () => [] },
+				() => ({ entities: [], privateBeliefs: [] }),
+				() => {},
+			);
+
+			const requestId = "req:v2:empty-refs";
+			const settlementId = "stl:v2:empty-refs";
+			const privateCognition: PrivateCognitionCommitV4 = {
+				schemaVersion: "rp_private_cognition_v4",
+				ops: [
+					{
+						op: "upsert",
+						record: {
+							kind: "assertion",
+							key: "v2:contest:empty-refs",
+							proposition: {
+								subject: { kind: "special", value: "self" },
+								predicate: "trusts",
+								object: { kind: "entity", ref: { kind: "pointer_key", value: "bob" } },
+							},
+							stance: "contested",
+							basis: "first_hand",
+							preContestedStance: "accepted",
+						},
+					},
+				],
+			};
+
+			const payload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: "sess:v2:empty-refs",
+				ownerAgentId: AGENT_ID,
+				publicReply: "",
+				hasPublicReply: false,
+				viewerSnapshot: {
+					selfPointerKey: "__self__",
+					userPointerKey: "__user__",
+					currentLocationEntityId: locationId,
+				},
+				privateCognition,
+				conflictFactors: [],
+			};
+
+			const explicitMeta = {
+				settlementId,
+				requestId,
+				ownerAgentId: AGENT_ID,
+				privateCognition,
+			};
+
+			const ingestion: IngestionInput = {
+				batchId: "batch:v2:empty-refs",
+				agentId: AGENT_ID,
+				sessionId: "sess:v2:empty-refs",
+				dialogue: [],
+				attachments: [{
+					recordType: "turn_settlement",
+					payload,
+					committedAt: Date.now(),
+					correlatedTurnId: requestId,
+					explicitMeta,
+				}],
+				explicitSettlements: [explicitMeta],
+			};
+
+			const flushRequest: MemoryFlushRequest = {
+				sessionId: "sess:v2:empty-refs",
+				agentId: AGENT_ID,
+				rangeStart: 1,
+				rangeEnd: 1,
+				flushMode: "manual",
+				idempotencyKey: "idem:v2:empty-refs",
+			};
+
+			const created: CreatedState = {
+				episodeEventIds: [],
+				assertionIds: [],
+				entityIds: [],
+				factIds: [],
+				changedNodeRefs: [],
+			};
+
+			await processor.process(flushRequest, ingestion, created, []);
+
+			// Verify stored refs is empty array
+			const row = db.get<{ conflict_factor_refs_json: string | null }>(
+				"SELECT conflict_factor_refs_json FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
+				[AGENT_ID, "v2:contest:empty-refs"],
+			);
+			expect(row).toBeDefined();
+			expect(row!.conflict_factor_refs_json).toBe("[]");
+		} finally {
+			warnSpy.mockRestore();
 			cleanupDb(db, dbPath);
 		}
 	});

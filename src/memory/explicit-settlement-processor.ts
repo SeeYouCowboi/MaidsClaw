@@ -13,6 +13,7 @@ import type {
 } from "../runtime/rp-turn-contract.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
+import { normalizeConflictFactorRefs } from "./cognition/private-cognition-current.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { RelationBuilder } from "./cognition/relation-builder.js";
 import {
@@ -335,6 +336,11 @@ export class ExplicitSettlementProcessor {
       return;
     }
 
+    const { refs: validRefs, dropped } = normalizeConflictFactorRefs(resolvedFactorNodeRefs);
+    if (dropped > 0) {
+      console.warn(`[settlement] dropped ${dropped} invalid conflict_factor_refs for settlement ${settlementId}`);
+    }
+
     const summary = unresolvedCount > 0
       ? `contested (${resolvedFactorNodeRefs.length} factors resolved, ${unresolvedCount} dropped)`
       : `contested (${resolvedFactorNodeRefs.length} factors)`;
@@ -356,7 +362,7 @@ export class ExplicitSettlementProcessor {
         )
         .run(
           summary,
-          JSON.stringify(resolvedFactorNodeRefs),
+          JSON.stringify(validRefs),
           Date.now(),
           agentId,
           assertion.cognitionKey,

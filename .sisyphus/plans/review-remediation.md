@@ -244,7 +244,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: agent-loop.ts, tool-access-policy.ts, agent-permissions.ts, tests
   - Pre-commit: `bun test`
 
-- [ ] 2. Internal type/interface cleanup (EmbeddingPurpose, legacy method names)
+- [x] 2. Internal type/interface cleanup (EmbeddingPurpose, legacy method names)
 
   **What to do**:
   - **Note**: `bun run build && bun run check:legacy-memory-surface` already passes. This task is internal type hygiene, not fixing build errors.
@@ -304,7 +304,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(models): rename EmbeddingPurpose memory_search to narrative_search`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 3. A1: WriteTemplate enforcement at settlement boundary (TDD)
+- [x] 3. A1: WriteTemplate enforcement at settlement boundary (TDD)
 
   **What to do**:
   - RED: Write tests showing maiden calling `commitCognitionOps()` → rejected with `WRITE_TEMPLATE_DENIED`; rp_agent → allowed
@@ -443,7 +443,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: explicit-settlement-processor.ts, test
   - Pre-commit: `bun test`
 
-- [ ] 5. A6: Add debug logging to navigator supplemental seeds (TDD)
+- [x] 5. A6: Add debug logging to navigator supplemental seeds (TDD)
 
   **What to do**:
   - RED: Write test: spy on `console.debug`, trigger narrative search error in `collectSupplementalSeeds()`, assert `console.debug` called with error context
