@@ -947,7 +947,7 @@ describe("Publication Materialization", () => {
 			expect(result.skipped).toBe(1);
 			expect(attemptCount).toBe(4);
 			expect(sleepCalls).toEqual([100, 200, 400]);
-			expect(warned).toBe(1);
+			expect(warned).toBe(2);
 
 			const rows = db.query<{ id: number }>(
 				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",

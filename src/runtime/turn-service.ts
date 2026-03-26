@@ -8,7 +8,7 @@ import type { Chunk } from "../core/chunk.js";
 import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
-import { filterArtifactsByScope } from "../core/tools/artifact-contract-policy.js";
+
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -547,7 +547,7 @@ export class TurnService {
 					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
 					artifactEnforcementContext: {
 						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						ownerAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayloadAfterCommit?.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
 						writeOperation: "append",
 					},
 				});
@@ -840,13 +840,22 @@ export class TurnService {
 			privateCognition?: { opCount?: number; kinds?: string[] };
 		};
 
-		const publicArtifactKinds = filterArtifactsByScope(
-			SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-			["world", "area", "session"],
-		);
+		const presentPublicArtifactKinds: string[] = [];
+		if (payload.hasPublicReply) {
+			presentPublicArtifactKinds.push("publicReply");
+		}
+		if (payload.publications && payload.publications.length > 0) {
+			presentPublicArtifactKinds.push("publications");
+		}
+		if (payload.pinnedSummaryProposal) {
+			presentPublicArtifactKinds.push("pinnedSummaryProposal");
+		}
+		if ((payload as Record<string, unknown>).areaStateArtifacts) {
+			presentPublicArtifactKinds.push("areaStateArtifacts");
+		}
 		const allKinds = [
 			...(redactedPayload.privateCognition?.kinds ?? []),
-			...publicArtifactKinds,
+			...presentPublicArtifactKinds,
 		];
 
 		return {

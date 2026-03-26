@@ -55,11 +55,15 @@ export class PublicationRecoverySweeper {
     }
 
     this.stopped = false;
-    this.sweep().catch(() => undefined);
+    this.sweep().catch((err) => {
+      console.warn("[PublicationRecoverySweeper] initial sweep failed:", err);
+    });
 
     const intervalMs = this.options.intervalMs ?? PERIODIC_INTERVAL_MS;
     this.timer = setInterval(() => {
-      void this.sweep().catch(() => undefined);
+      void this.sweep().catch((err) => {
+        console.warn("[PublicationRecoverySweeper] sweep failed:", err);
+      });
     }, intervalMs);
   }
 
@@ -85,7 +89,11 @@ export class PublicationRecoverySweeper {
         if (this.stopped) {
           return;
         }
-        this.processJob(job);
+        try {
+          this.processJob(job);
+        } catch (err) {
+          console.warn(`[PublicationRecoverySweeper] processJob(${job.id}) failed:`, err);
+        }
       }
     } finally {
       this.sweepInFlight = false;
@@ -230,12 +238,18 @@ export class PublicationRecoverySweeper {
         timestamp: parsed.timestamp,
         participants: parsed.participants,
         locationEntityId: parsed.locationEntityId,
-        eventCategory: parsed.eventCategory ?? "speech",
-        failureCount: parsed.failureCount ?? 0,
-        lastAttemptAt: parsed.lastAttemptAt ?? 0,
-        nextAttemptAt: parsed.nextAttemptAt ?? null,
-        lastErrorCode: parsed.lastErrorCode ?? null,
-        lastErrorMessage: parsed.lastErrorMessage ?? null,
+        eventCategory:
+          parsed.eventCategory === "speech" ||
+          parsed.eventCategory === "action" ||
+          parsed.eventCategory === "observation" ||
+          parsed.eventCategory === "state_change"
+            ? parsed.eventCategory
+            : "speech",
+        failureCount: typeof parsed.failureCount === "number" ? parsed.failureCount : 0,
+        lastAttemptAt: typeof parsed.lastAttemptAt === "number" ? parsed.lastAttemptAt : 0,
+        nextAttemptAt: typeof parsed.nextAttemptAt === "number" ? parsed.nextAttemptAt : null,
+        lastErrorCode: typeof parsed.lastErrorCode === "string" ? parsed.lastErrorCode : null,
+        lastErrorMessage: typeof parsed.lastErrorMessage === "string" ? parsed.lastErrorMessage : null,
       };
     } catch {
       return null;
@@ -245,8 +259,9 @@ export class PublicationRecoverySweeper {
   private calculateBackoffMs(failureCount: number, baseMs: number, maxMs: number): number {
     const attempt = Math.max(0, failureCount - 1);
     const exponential = Math.min(baseMs * Math.pow(2, attempt), maxMs);
-    const jitter = Math.floor(exponential * 0.2 * this.random());
-    return Math.min(maxMs, exponential + jitter);
+    const jitterRange = exponential * 0.2;
+    const jitter = Math.floor(jitterRange * this.random());
+    return Math.min(maxMs, exponential - jitterRange + jitter);
   }
 
   private now(): number {

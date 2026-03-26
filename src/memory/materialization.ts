@@ -500,61 +500,71 @@ function writePublicationRecoveryJob(
   error: unknown,
 ): void {
   if (!db) {
+    console.warn(
+      `[materializePublications] cannot write recovery job: db handle not provided (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+    );
     return;
   }
 
-  const now = Date.now();
-  const payload: PublicationRecoveryJobPayload = {
-    settlementId: retryContext.settlementId,
-    pubIndex: retryContext.pubIndex,
-    visibilityScope: params.visibilityScope ?? "area_visible",
-    sessionId: params.sessionId,
-    failureCount,
-    lastAttemptAt: now,
-    nextAttemptAt: now,
-    lastErrorCode: error instanceof Error ? error.name : null,
-    lastErrorMessage: error instanceof Error ? error.message : String(error),
-    summary: params.summary,
-    timestamp: params.timestamp,
-    participants: params.participants,
-    locationEntityId: params.locationEntityId,
-    eventCategory: params.eventCategory,
-  };
+  try {
+    const now = Date.now();
+    const payload: PublicationRecoveryJobPayload = {
+      settlementId: retryContext.settlementId,
+      pubIndex: retryContext.pubIndex,
+      visibilityScope: params.visibilityScope ?? "area_visible",
+      sessionId: params.sessionId,
+      failureCount,
+      lastAttemptAt: now,
+      nextAttemptAt: now,
+      lastErrorCode: error instanceof Error ? error.name : null,
+      lastErrorMessage: error instanceof Error ? error.message : String(error),
+      summary: params.summary,
+      timestamp: params.timestamp,
+      participants: params.participants,
+      locationEntityId: params.locationEntityId,
+      eventCategory: params.eventCategory,
+    };
 
-  const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
+    const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
 
-  const insertResult = db
-    .prepare(
-      `INSERT OR IGNORE INTO _memory_maintenance_jobs
-       (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      PUBLICATION_RECOVERY_JOB_TYPE,
+    const insertResult = db
+      .prepare(
+        `INSERT OR IGNORE INTO _memory_maintenance_jobs
+         (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        PUBLICATION_RECOVERY_JOB_TYPE,
+        "pending",
+        idempotencyKey,
+        JSON.stringify(payload),
+        now,
+        now,
+        payload.nextAttemptAt,
+      );
+
+    if (insertResult.changes > 0) {
+      return;
+    }
+
+    db.prepare(
+      `UPDATE _memory_maintenance_jobs
+       SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
+       WHERE job_type = ? AND idempotency_key = ?`,
+    ).run(
       "pending",
-      idempotencyKey,
       JSON.stringify(payload),
       now,
-      now,
       payload.nextAttemptAt,
+      PUBLICATION_RECOVERY_JOB_TYPE,
+      idempotencyKey,
     );
-
-  if (insertResult.changes > 0) {
-    return;
+  } catch (recoveryError) {
+    console.warn(
+      `[materializePublications] recovery job write failed (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
+      recoveryError,
+    );
   }
-
-  db.prepare(
-    `UPDATE _memory_maintenance_jobs
-     SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
-     WHERE job_type = ? AND idempotency_key = ?`,
-  ).run(
-    "pending",
-    JSON.stringify(payload),
-    now,
-    payload.nextAttemptAt,
-    PUBLICATION_RECOVERY_JOB_TYPE,
-    idempotencyKey,
-  );
 }
 
 const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {

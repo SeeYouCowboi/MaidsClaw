@@ -1177,9 +1177,11 @@ describe("TurnService", () => {
 
       expect(kinds).toContain("assertion");
       expect(kinds).toContain("publicReply");
-      expect(kinds).toContain("publications");
-      expect(kinds).toContain("pinnedSummaryProposal");
-      expect(kinds).toContain("areaStateArtifacts");
+
+      // These should only appear when actually present in the settlement payload
+      expect(kinds).not.toContain("publications");
+      expect(kinds).not.toContain("pinnedSummaryProposal");
+      expect(kinds).not.toContain("areaStateArtifacts");
 
       expect(kinds).not.toContain("privateCognition");
       expect(kinds).not.toContain("privateEpisodes");

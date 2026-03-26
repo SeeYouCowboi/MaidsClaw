@@ -354,13 +354,13 @@ export class ExplicitSettlementProcessor {
     }
 
     const summary = unresolvedCount > 0
-      ? `contested (${resolvedFactorNodeRefs.length} factors resolved, ${unresolvedCount} dropped)`
-      : `contested (${resolvedFactorNodeRefs.length} factors)`;
+      ? `contested (${validRefs.length} factors resolved, ${unresolvedCount} dropped)`
+      : `contested (${validRefs.length} factors)`;
 
     for (const assertion of contestedAssertions) {
       this.relationBuilder.writeContestRelations(
         assertion.nodeRef,
-        resolvedFactorNodeRefs,
+        validRefs,
         settlementId,
       );
 
