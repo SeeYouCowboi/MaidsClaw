@@ -295,6 +295,69 @@ describe("AgentLoop", () => {
       expect(lastChunk.code).toBe("MCP_TOOL_ERROR");
     }
   });
+
+	it("denies submit_rp_turn for maiden when execution context is enforced", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Denied if capability gate works."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const executor = new ToolExecutor();
+		let executed = false;
+		executor.registerLocal({
+			name: "submit_rp_turn",
+			description: "Synthetic settlement tool for permission regression test",
+			parameters: { type: "object", properties: {} },
+			effectClass: "read_only",
+			traceVisibility: "private_runtime",
+			executionContract: {
+				effect_type: "settlement",
+				turn_phase: "post_turn",
+				cardinality: "once",
+				capability_requirements: ["rp_settlement"],
+				trace_visibility: "private_runtime",
+			},
+			async execute() {
+				executed = true;
+				return { ok: true };
+			},
+		});
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: executor,
+		});
+
+		const chunks = await collectChunks(
+			loop.run({
+				sessionId: "session-settlement-denied",
+				requestId: "request-settlement-denied",
+				messages: [{ role: "user", content: "try to settle" }],
+			}),
+		);
+
+		const lastChunk = chunks[chunks.length - 1];
+		expect(lastChunk?.type).toBe("error");
+		if (lastChunk && lastChunk.type === "error") {
+			expect(lastChunk.code).toBe("TOOL_PERMISSION_DENIED");
+		}
+		expect(executed).toBe(false);
+	});
 });
 
 describe("AgentLoop.runBuffered", () => {
@@ -494,6 +557,41 @@ describe("AgentLoop.runBuffered", () => {
     }
     expect(executed).toBe(false);
   });
+
+	it("skips submit_rp_turn in buffered mode when role lacks rp_settlement capability", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Should be skipped for maiden."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-buffered-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: new ToolExecutor(),
+		});
+
+		const result = await loop.runBuffered({
+			sessionId: "session-buffered-settlement-denied",
+			requestId: "request-buffered-settlement-denied",
+			messages: [{ role: "user", content: "attempt settlement" }],
+		});
+
+		expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
+	});
 });
 
 describe("RunContext", () => {

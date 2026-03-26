@@ -6,6 +6,7 @@ import {
 	type RpBufferedExecutionResult,
 } from "../runtime/rp-turn-contract.js";
 import { makeSubmitRpTurnTool } from "../runtime/submit-rp-turn-tool.js";
+import { getDefaultPermissions } from "../memory/contracts/agent-permissions.js";
 import type { Chunk, TextDeltaChunk } from "./chunk.js";
 import type { ViewerContext } from "./contracts/viewer-context.js";
 import { MaidsClawError, wrapError } from "./errors.js";
@@ -135,6 +136,12 @@ export class AgentLoop {
 
 		while (true) {
 			turnIndex += 1;
+			const turnToolsUsed = new Set<string>();
+			const defaultPermissions = getDefaultPermissions(
+				this.profile.id,
+				this.profile.role,
+			);
+			const toolSchemas = this.toolExecutor.getSchemas();
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];
@@ -297,7 +304,16 @@ export class AgentLoop {
 			let activeToolCall: { id: string; name: string } | undefined;
 			try {
 				for (const toolCall of normalizedToolCalls) {
-					if (!canExecuteTool(this.profile, toolCall.name)) {
+					const toolSchema = toolSchemas.find(
+						(schema) => schema.name === toolCall.name,
+					);
+					if (
+						!canExecuteTool(this.profile, toolCall.name, {
+							schema: toolSchema,
+							permissions: defaultPermissions,
+							turnToolsUsed,
+						})
+					) {
 						yield {
 							type: "error",
 							code: "TOOL_PERMISSION_DENIED",
@@ -425,6 +441,13 @@ export class AgentLoop {
 
 		while (true) {
 			turnIndex += 1;
+			const turnToolsUsed = new Set<string>();
+			const defaultPermissions = getDefaultPermissions(
+				this.profile.id,
+				this.profile.role,
+			);
+			const baseToolSchemas = this.toolExecutor.getSchemas();
+			const bufferedToolSchemas = bufferedToolExecutor.getSchemas();
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];
@@ -603,7 +626,19 @@ export class AgentLoop {
 
 			try {
 				for (const toolCall of normalizedToolCalls) {
-					if (!canExecuteTool(this.profile, toolCall.name)) {
+					const baseToolSchema = baseToolSchemas.find(
+						(schema) => schema.name === toolCall.name,
+					);
+					const bufferedToolSchema = bufferedToolSchemas.find(
+						(schema) => schema.name === toolCall.name,
+					);
+					if (
+						!canExecuteTool(this.profile, toolCall.name, {
+							schema: baseToolSchema ?? bufferedToolSchema,
+							permissions: defaultPermissions,
+							turnToolsUsed,
+						})
+					) {
 						// Skip non-permitted tools gracefully instead of aborting
 						loopLogger?.warn(
 							"Skipping non-permitted tool in buffered RP mode",
@@ -615,20 +650,17 @@ export class AgentLoop {
 						continue;
 					}
 
-				const toolSchema = bufferedToolExecutor
-					.getSchemas()
-					.find((schema) => schema.name === toolCall.name);
-				const resolvedEffectClass = toolSchema?.executionContract
-					? deriveEffectClass(toolSchema.executionContract.effect_type)
-					: toolSchema?.effectClass;
-				const resolvedTraceVisibility = toolSchema?.executionContract
-					? toolSchema.executionContract.trace_visibility
-					: toolSchema?.traceVisibility;
-				if (
-					!toolSchema ||
+					const resolvedEffectClass = bufferedToolSchema?.executionContract
+						? deriveEffectClass(bufferedToolSchema.executionContract.effect_type)
+						: bufferedToolSchema?.effectClass;
+					const resolvedTraceVisibility = bufferedToolSchema?.executionContract
+						? bufferedToolSchema.executionContract.trace_visibility
+						: bufferedToolSchema?.traceVisibility;
+					if (
+						!bufferedToolSchema ||
 					(resolvedEffectClass !== "read_only" &&
 						resolvedTraceVisibility !== "private_runtime")
-				) {
+					) {
 						// Skip non-allowed tools gracefully instead of aborting
 						loopLogger?.warn("Skipping non-allowed tool in buffered RP mode", {
 							tool: toolCall.name,

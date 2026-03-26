@@ -45,6 +45,7 @@ function makePermissions(overrides: Partial<AgentPermissions> = {}): AgentPermis
 		canReadSharedBlocks: false,
 		canMutateSharedBlocks: false,
 		canMutateAdminRules: false,
+		canSettleRpTurn: false,
 		...overrides,
 	};
 }
@@ -84,6 +85,33 @@ function makeContext(
 // ── capability_requirements gate ────────────────────────────────────────────
 
 describe("stress: capability_requirements gate", () => {
+	it("rp_settlement capability maps to canSettleRpTurn", () => {
+		expect(CAPABILITY_MAP.rp_settlement).toBe(
+			"canSettleRpTurn" as keyof AgentPermissions,
+		);
+	});
+
+	it("rp_settlement requirement is allowed only when canSettleRpTurn=true", () => {
+		const profile = makeProfile();
+		const schema = makeSchema("settle-turn", {
+			capability_requirements: ["rp_settlement"],
+		});
+
+		const deniedPermissions = {
+			...makePermissions(),
+			canSettleRpTurn: false,
+		} as AgentPermissions & { canSettleRpTurn: boolean };
+		const deniedCtx = makeContext(schema, deniedPermissions);
+		expect(canExecuteTool(profile, "settle-turn", deniedCtx)).toBe(false);
+
+		const allowedPermissions = {
+			...makePermissions(),
+			canSettleRpTurn: true,
+		} as AgentPermissions & { canSettleRpTurn: boolean };
+		const allowedCtx = makeContext(schema, allowedPermissions);
+		expect(canExecuteTool(profile, "settle-turn", allowedCtx)).toBe(true);
+	});
+
 	it("tool with cognition_write requirement rejected for read-only agent", () => {
 		const profile = makeProfile(); // empty toolPermissions = allow-all
 		const schema = makeSchema("write-cognition", {
