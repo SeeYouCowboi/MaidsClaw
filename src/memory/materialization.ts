@@ -294,6 +294,7 @@ export class MaterializationService {
     },
   ): MaterializationResult {
     return materializePublications(this.storage, publications, settlementId, ctx, {
+      db: this.db,
       projectionRepo: this.projectionRepo,
       sourceAgentId: ctx.sourceAgentId,
       agentRole: ctx.agentRole,
@@ -312,6 +313,7 @@ export function materializePublications(
     timestamp?: number;
   },
   options?: {
+    db?: Database;
     projectionRepo?: AreaWorldProjectionRepo;
     sourceAgentId?: string;
     agentRole?: AgentRole;
@@ -377,6 +379,7 @@ export function materializePublications(
         pubIndex,
         maxRetries,
       },
+      options?.db,
     );
 
     if (publicationWriteResult === "reconciled") {
@@ -420,10 +423,30 @@ type PublicationRetryContext = {
   maxRetries: number;
 };
 
+type PublicationRecoveryJobPayload = {
+  settlementId: string;
+  pubIndex: number;
+  visibilityScope: "area_visible" | "world_public";
+  sessionId: string;
+  failureCount: number;
+  lastAttemptAt: number;
+  nextAttemptAt: number | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  summary: string;
+  timestamp: number;
+  participants: string;
+  locationEntityId: number;
+  eventCategory: PublicEventCategory;
+};
+
+const PUBLICATION_RECOVERY_JOB_TYPE = "publication_recovery";
+
 function createPublicationEventWithRetry(
   storage: GraphStorageService | null,
   params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
   retryContext: PublicationRetryContext,
+  db?: Database,
 ): PublicationWriteResult {
   if (!storage) {
     return "skipped";
@@ -449,6 +472,8 @@ function createPublicationEventWithRetry(
           `[materializePublications] failed after ${retryContext.maxRetries} retries (settlement=${retryContext.settlementId}, pubIndex=${retryContext.pubIndex})`,
           error,
         );
+
+        writePublicationRecoveryJob(db, params, retryContext, retryCount + 1, error);
         return "skipped";
       }
 
@@ -457,6 +482,71 @@ function createPublicationEventWithRetry(
       retryCount += 1;
     }
   }
+}
+
+function writePublicationRecoveryJob(
+  db: Database | undefined,
+  params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
+  retryContext: PublicationRetryContext,
+  failureCount: number,
+  error: unknown,
+): void {
+  if (!db) {
+    return;
+  }
+
+  const now = Date.now();
+  const payload: PublicationRecoveryJobPayload = {
+    settlementId: retryContext.settlementId,
+    pubIndex: retryContext.pubIndex,
+    visibilityScope: params.visibilityScope ?? "area_visible",
+    sessionId: params.sessionId,
+    failureCount,
+    lastAttemptAt: now,
+    nextAttemptAt: now,
+    lastErrorCode: error instanceof Error ? error.name : null,
+    lastErrorMessage: error instanceof Error ? error.message : String(error),
+    summary: params.summary,
+    timestamp: params.timestamp,
+    participants: params.participants,
+    locationEntityId: params.locationEntityId,
+    eventCategory: params.eventCategory,
+  };
+
+  const idempotencyKey = `publication_recovery:${retryContext.settlementId}:${retryContext.pubIndex}`;
+
+  const insertResult = db
+    .prepare(
+      `INSERT OR IGNORE INTO _memory_maintenance_jobs
+       (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      PUBLICATION_RECOVERY_JOB_TYPE,
+      "pending",
+      idempotencyKey,
+      JSON.stringify(payload),
+      now,
+      now,
+      payload.nextAttemptAt,
+    );
+
+  if (insertResult.changes > 0) {
+    return;
+  }
+
+  db.prepare(
+    `UPDATE _memory_maintenance_jobs
+     SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
+     WHERE job_type = ? AND idempotency_key = ?`,
+  ).run(
+    "pending",
+    JSON.stringify(payload),
+    now,
+    payload.nextAttemptAt,
+    PUBLICATION_RECOVERY_JOB_TYPE,
+    idempotencyKey,
+  );
 }
 
 const PUBLICATION_KIND_TO_CATEGORY: Record<string, PublicEventCategory> = {

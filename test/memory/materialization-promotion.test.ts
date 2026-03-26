@@ -894,6 +894,88 @@ describe("Publication Materialization", () => {
 		}
 	});
 
+	it("creates publication_recovery job before returning skipped when db option is provided", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-fail-with-job",
+			displayName: "Retry Fail With Job",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "This should produce a recovery job." },
+		];
+		const settlementId = `stl:retry-fail-job-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		patchedStorage.createProjectedEvent = (() => {
+			const transient = new Error("database is busy");
+			transient.name = "SQLiteError";
+			throw transient;
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = () => {
+		};
+
+		const originalWarn = console.warn;
+		console.warn = (..._args: unknown[]) => {
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-fail-job",
+				locationEntityId: locationId,
+				timestamp: 11_500,
+			}, {
+				db: db.raw,
+			});
+
+			expect(result.materialized).toBe(0);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(1);
+
+			const job = db.get<{
+				job_type: string;
+				status: string;
+				idempotency_key: string;
+				payload: string;
+			}>(
+				"SELECT job_type, status, idempotency_key, payload FROM _memory_maintenance_jobs WHERE job_type = 'publication_recovery' AND idempotency_key = ?",
+				[`publication_recovery:${settlementId}:0`],
+			);
+
+			expect(job).toBeDefined();
+			expect(job!.job_type).toBe("publication_recovery");
+			expect(job!.status).toBe("pending");
+			expect(job!.idempotency_key).toBe(`publication_recovery:${settlementId}:0`);
+
+			const payload = JSON.parse(job!.payload) as {
+				settlementId: string;
+				pubIndex: number;
+				visibilityScope: string;
+				sessionId: string;
+			};
+			expect(payload.settlementId).toBe(settlementId);
+			expect(payload.pubIndex).toBe(0);
+			expect(payload.visibilityScope).toBe("area_visible");
+			expect(payload.sessionId).toBe("sess-retry-fail-job");
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			console.warn = originalWarn;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
 	it("current_area publication is skipped when no locationEntityId is available", () => {
 		const { dbPath, db } = createTempDb();
 		runMemoryMigrations(db);

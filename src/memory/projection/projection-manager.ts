@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import type { CognitionOp, PrivateEpisodeArtifact, PublicationDeclaration } from "../../runtime/rp-turn-contract.js";
 import type { CognitionEventRepo } from "../cognition/cognition-event-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
@@ -66,6 +67,7 @@ export class ProjectionManager {
 		private readonly cognitionProjectionRepo: PrivateCognitionProjectionRepo,
 		private readonly graphStorage: GraphStorageService | null,
 		private readonly areaWorldProjectionRepo: AreaWorldProjectionRepo | null = null,
+		private readonly db?: Database,
 	) {}
 
 	/**
@@ -190,6 +192,8 @@ export class ProjectionManager {
 			sessionId: params.sessionId,
 			locationEntityId: params.viewerSnapshot?.currentLocationEntityId,
 			timestamp: Date.now(),
+		}, {
+			db: this.db,
 		});
 	}
 }
