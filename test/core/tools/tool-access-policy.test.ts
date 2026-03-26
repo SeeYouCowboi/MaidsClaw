@@ -213,10 +213,10 @@ describe("canExecuteTool — cardinality", () => {
     const turnToolsUsed = new Set<string>();
     const ctx: ToolExecutionContext = { schema, turnToolsUsed };
 
-    // First call: allowed
+    // First call: allowed (canExecuteTool is a pure check — no mutation)
     expect(canExecuteTool(profile, "settle_tool", ctx)).toBe(true);
-    // turnToolsUsed should now contain "settle_tool"
-    expect(turnToolsUsed.has("settle_tool")).toBe(true);
+    // Caller records usage post-execution (simulating AgentLoop behavior)
+    turnToolsUsed.add("settle_tool");
 
     // Second call: rejected
     expect(canExecuteTool(profile, "settle_tool", ctx)).toBe(false);
@@ -229,7 +229,7 @@ describe("canExecuteTool — cardinality", () => {
     const ctx: ToolExecutionContext = { schema, turnToolsUsed };
 
     expect(canExecuteTool(profile, "optional_tool", ctx)).toBe(true);
-    expect(turnToolsUsed.has("optional_tool")).toBe(true);
+    turnToolsUsed.add("optional_tool");
     expect(canExecuteTool(profile, "optional_tool", ctx)).toBe(false);
   });
 
@@ -251,8 +251,8 @@ describe("canExecuteTool — cardinality", () => {
     const turnToolsUsed = new Set<string>();
 
     expect(canExecuteTool(profile, "tool_a", { schema: schemaA, turnToolsUsed })).toBe(true);
+    turnToolsUsed.add("tool_a");
     expect(canExecuteTool(profile, "tool_a", { schema: schemaA, turnToolsUsed })).toBe(false);
-    // tool_b still works
     expect(canExecuteTool(profile, "tool_b", { schema: schemaB, turnToolsUsed })).toBe(true);
   });
 
@@ -297,6 +297,7 @@ describe("canExecuteTool — combined checks", () => {
     const ctx: ToolExecutionContext = { schema, permissions, turnToolsUsed };
 
     expect(canExecuteTool(profile, "cognition_once", ctx)).toBe(true);
+    turnToolsUsed.add("cognition_once");
     expect(canExecuteTool(profile, "cognition_once", ctx)).toBe(false);
   });
 });
