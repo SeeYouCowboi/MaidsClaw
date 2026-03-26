@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from "bun:test";
+import { MaidsClawError } from "../../src/core/errors.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { getRecentCognition } from "../../src/memory/prompt-data.js";
@@ -7,7 +8,7 @@ import { CognitionSearchService } from "../../src/memory/cognition/cognition-sea
 import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
 import { ExplicitSettlementProcessor } from "../../src/memory/explicit-settlement-processor.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
-import type { IngestionInput, CreatedState, MemoryFlushRequest } from "../../src/memory/task-agent.js";
+import { MemoryTaskAgent, type IngestionInput, type CreatedState, type MemoryFlushRequest } from "../../src/memory/task-agent.js";
 import type { PrivateCognitionCommitV4 } from "../../src/runtime/rp-turn-contract.js";
 import {
 	cleanupDb,
@@ -102,35 +103,62 @@ describe("V2 validation: contested cognition", () => {
 		}
 	});
 
-	it("direct contested upsert falls back to contested cognition evidence (known bug path)", () => {
+	it("legacy upsert_assertion rejects contested writes before projection commit", async () => {
 		const { db, dbPath } = createTempDb();
 		seedStandardEntities(db);
 
 		try {
-			const repo = new CognitionRepository(db);
-			const search = new CognitionSearchService(db);
-			const cognitionKey = "v2:contest:direct-fallback";
-
-			upsertAcceptedThenContested(repo, cognitionKey);
-
-			const currentRow = db.get<{ conflict_factor_refs_json: string | null }>(
-				"SELECT conflict_factor_refs_json FROM private_cognition_current WHERE agent_id = ? AND cognition_key = ?",
-				[AGENT_ID, cognitionKey],
+			const storage = new GraphStorageService(db);
+			const taskAgent = new MemoryTaskAgent(
+				db.raw,
+				storage,
+				{} as any,
+				{} as any,
+				{} as any,
+				{
+					defaultEmbeddingModelId: "test-embedding-model",
+					chat: async () => [{
+						name: "upsert_assertion",
+						arguments: {
+							source: "__self__",
+							target: "bob",
+							predicate: "trusts",
+							basis: "first_hand",
+							stance: "contested",
+						},
+					}],
+					embed: async () => [],
+				},
 			);
 
-			const hits = search.searchCognition({
-				agentId: AGENT_ID,
-				kind: "assertion",
-				stance: "contested",
-			});
+			let caught: unknown;
+			try {
+				await taskAgent.runMigrate({
+					sessionId: "sess:v2:contest:legacy-tool",
+					agentId: AGENT_ID,
+					rangeStart: 1,
+					rangeEnd: 2,
+					flushMode: "manual",
+					idempotencyKey: "idem:v2:contest:legacy-tool",
+					dialogueRecords: [
+						{ role: "user", content: "Do you trust Bob?", timestamp: 1000, recordId: "u1", recordIndex: 1 },
+						{ role: "assistant", content: "Thinking.", timestamp: 1100, recordId: "a1", recordIndex: 2 },
+					],
+				});
+			} catch (error) {
+				caught = error;
+			}
 
-			const contestedHit = hits.find((hit) => hit.cognitionKey === cognitionKey) ?? hits[0];
+			expect(caught).toBeInstanceOf(MaidsClawError);
+			const mce = caught as MaidsClawError;
+			expect(mce.code).toBe("COGNITION_OP_UNSUPPORTED");
+			expect(mce.message).toContain("submit_rp_turn");
 
-			// Known limitation: direct contested path lacks factor refs — see V2 Batch 1 validation report
-			expect(currentRow?.conflict_factor_refs_json ?? null).toBeNull();
-			expect(contestedHit).toBeDefined();
-			expect(Array.isArray(contestedHit!.conflictEvidence)).toBe(true);
-			expect(contestedHit!.conflictEvidence).toEqual([]);
+			const currentCount = db.get<{ count: number }>(
+				"SELECT COUNT(*) as count FROM private_cognition_current WHERE agent_id = ?",
+				[AGENT_ID],
+			);
+			expect(currentCount?.count ?? 0).toBe(0);
 		} finally {
 			cleanupDb(db, dbPath);
 		}

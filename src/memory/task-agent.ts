@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
+import { MaidsClawError } from "../core/errors.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
 import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../runtime/submit-rp-turn-tool.js";
@@ -161,7 +162,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
         target: { type: ["number", "string"] },
         predicate: { type: "string" },
         basis: { type: "string", enum: ["first_hand", "hearsay", "inference", "introspection", "belief"] },
-        stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "contested", "rejected", "abandoned"] },
+        stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "rejected", "abandoned"] },
         provenance: { type: ["string", "null"] },
         source_event_ref: { type: ["string", "null"] },
       },
@@ -646,6 +647,19 @@ export class MemoryTaskAgent {
       }
 
       if (call.name === UPSERT_ASSERTION_TOOL_NAME) {
+        const stance = this.asString(call.arguments.stance);
+        if (stance === "contested") {
+          throw new MaidsClawError({
+            code: "COGNITION_OP_UNSUPPORTED",
+            message:
+              "legacy upsert_assertion does not support contested writes; use submit_rp_turn with preContestedStance and conflictFactors",
+            retriable: false,
+            details: {
+              tool: UPSERT_ASSERTION_TOOL_NAME,
+              stance,
+            },
+          });
+        }
         const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
         const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
         if (!source || !target) {
@@ -671,7 +685,7 @@ export class MemoryTaskAgent {
           predicate: this.asString(call.arguments.predicate),
           targetPointerKey,
           basis: this.asString(call.arguments.basis) as AssertionBasis,
-          stance: this.asString(call.arguments.stance) as AssertionStance,
+          stance: stance as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
         }).id;
         beliefOpIndex += 1;

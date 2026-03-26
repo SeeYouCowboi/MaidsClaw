@@ -168,6 +168,57 @@ describe("MemoryTaskAgent", () => {
     expect(privateEvent.category).toBe("observation");
   });
 
+  it("omits contested from legacy upsert_assertion tool schema", async () => {
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-schema-check" }));
+
+    const upsertTool = provider.chatInputs[0]?.tools.find((tool) => tool.name === "upsert_assertion");
+    expect(upsertTool).toBeDefined();
+    const stanceSchema = (upsertTool?.inputSchema.properties as { stance?: { enum?: string[] } }).stance;
+    expect(stanceSchema?.enum).toBeDefined();
+    expect(stanceSchema?.enum).not.toContain("contested");
+  });
+
+  it("rejects contested writes from legacy upsert_assertion", async () => {
+    const provider = new MockModelProvider([[
+      {
+        name: "upsert_assertion",
+        arguments: {
+          source: "person:alice",
+          target: "person:alice",
+          predicate: "trusts",
+          basis: "first_hand",
+          stance: "contested",
+        },
+      },
+    ]]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let caughtError: unknown;
+    try {
+      await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-legacy-contested" }));
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(MaidsClawError);
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_OP_UNSUPPORTED");
+    expect(mce.retriable).toBe(false);
+    expect(mce.message).toContain("submit_rp_turn");
+
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current`)
+      .get() as { cnt: number };
+    expect(cognitionCount.cnt).toBe(0);
+  });
+
   it("explicit settlements are ingested during flush and ordinary turns still extract private beliefs", async () => {
     storage.upsertEntity({
       pointerKey: "__self__",
