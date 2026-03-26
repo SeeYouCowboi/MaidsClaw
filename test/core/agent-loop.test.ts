@@ -13,6 +13,7 @@ import { TruncateCompactor } from "../../src/core/truncate-compactor.js";
 import { getFilteredSchemas } from "../../src/core/tools/tool-access-policy.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { ToolDefinition } from "../../src/core/tools/tool-definition.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
 
 const TEST_PROFILE: AgentProfile = {
   id: "agent-maiden-1",
@@ -294,6 +295,130 @@ describe("AgentLoop", () => {
       expect(lastChunk.code).toBe("MCP_TOOL_ERROR");
     }
   });
+
+  it("enforces once-cardinality across multiple model rounds in streaming mode", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_1", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_2", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_2", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_2" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    let executions = 0;
+    executor.registerLocal({
+      name: "once_tool",
+      description: "May only execute once per turn",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "public",
+      executionContract: {
+        effect_type: "read_only",
+        turn_phase: "any",
+        cardinality: "once",
+        trace_visibility: "public",
+      },
+      async execute() {
+        executions += 1;
+        return { executions };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: {
+        ...TEST_PROFILE,
+        toolPermissions: [],
+      },
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "session-once-streaming",
+        requestId: "request-once-streaming",
+        messages: [{ role: "user", content: "run once" }],
+      }),
+    );
+
+    expect(executions).toBe(1);
+    const lastChunk = chunks[chunks.length - 1];
+    expect(lastChunk?.type).toBe("error");
+    if (lastChunk && lastChunk.type === "error") {
+      expect(lastChunk.code).toBe("TOOL_PERMISSION_DENIED");
+    }
+  });
+
+	it("denies submit_rp_turn for maiden when execution context is enforced", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Denied if capability gate works."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const executor = new ToolExecutor();
+		let executed = false;
+		executor.registerLocal({
+			name: "submit_rp_turn",
+			description: "Synthetic settlement tool for permission regression test",
+			parameters: { type: "object", properties: {} },
+			effectClass: "read_only",
+			traceVisibility: "private_runtime",
+			executionContract: {
+				effect_type: "settlement",
+				turn_phase: "post_turn",
+				cardinality: "once",
+				capability_requirements: ["rp_settlement"],
+				trace_visibility: "private_runtime",
+			},
+			async execute() {
+				executed = true;
+				return { ok: true };
+			},
+		});
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: executor,
+		});
+
+		const chunks = await collectChunks(
+			loop.run({
+				sessionId: "session-settlement-denied",
+				requestId: "request-settlement-denied",
+				messages: [{ role: "user", content: "try to settle" }],
+			}),
+		);
+
+		const lastChunk = chunks[chunks.length - 1];
+		expect(lastChunk?.type).toBe("error");
+		if (lastChunk && lastChunk.type === "error") {
+			expect(lastChunk.code).toBe("TOOL_PERMISSION_DENIED");
+		}
+		expect(executed).toBe(false);
+	});
 });
 
 describe("AgentLoop.runBuffered", () => {
@@ -317,7 +442,7 @@ describe("AgentLoop.runBuffered", () => {
         {
           type: "tool_use_delta",
           id: "call_1",
-          partialJson: '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"Your tea is ready."}',
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Your tea is ready."}',
         },
         { type: "tool_use_end", id: "call_1" },
         { type: "message_end", stopReason: "tool_use" },
@@ -339,8 +464,12 @@ describe("AgentLoop.runBuffered", () => {
 
     expect(result).toEqual({
       outcome: {
-        schemaVersion: "rp_turn_outcome_v3",
+        schemaVersion: "rp_turn_outcome_v5",
         publicReply: "Your tea is ready.",
+        privateEpisodes: [],
+        publications: [],
+        relationIntents: [],
+        conflictFactors: [],
       },
     });
     if ("outcome" in result) {
@@ -356,7 +485,7 @@ describe("AgentLoop.runBuffered", () => {
           type: "tool_use_delta",
           id: "call_2",
           partialJson:
-            '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"","privateCommit":{"schemaVersion":"rp_private_cognition_v3","ops":[{"op":"upsert","record":{"kind":"commitment","key":"k1","mode":"intent","target":{"action":"observe"},"status":"active"}}]}}',
+            '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"","privateCognition":{"schemaVersion":"rp_private_cognition_v4","ops":[{"op":"upsert","record":{"kind":"commitment","key":"k1","mode":"intent","target":{"action":"observe"},"status":"active"}}]}}',
         },
         { type: "tool_use_end", id: "call_2" },
         { type: "message_end", stopReason: "tool_use" },
@@ -378,7 +507,7 @@ describe("AgentLoop.runBuffered", () => {
     expect("outcome" in result).toBe(true);
     if ("outcome" in result) {
       expect(result.outcome.publicReply).toBe("");
-      expect(result.outcome.privateCommit?.ops.length).toBe(1);
+      expect(result.outcome.privateCognition?.ops.length).toBe(1);
     }
   });
 
@@ -489,6 +618,106 @@ describe("AgentLoop.runBuffered", () => {
     }
     expect(executed).toBe(false);
   });
+
+  it("enforces once-cardinality across multiple model rounds in buffered mode", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "tool_use_start", id: "call_1", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_1", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_2", name: "once_tool" },
+        { type: "tool_use_delta", id: "call_2", partialJson: "{}" },
+        { type: "tool_use_end", id: "call_2" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "call_3", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_3",
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"done"}',
+        },
+        { type: "tool_use_end", id: "call_3" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    let executions = 0;
+    executor.registerLocal({
+      name: "once_tool",
+      description: "May only execute once per buffered turn",
+      parameters: { type: "object", properties: {} },
+      effectClass: "read_only",
+      traceVisibility: "private_runtime",
+      executionContract: {
+        effect_type: "read_only",
+        turn_phase: "any",
+        cardinality: "once",
+        trace_visibility: "private_runtime",
+      },
+      async execute() {
+        executions += 1;
+        return { executions };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: rpProfile(["once_tool", "submit_rp_turn"]),
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const result = await loop.runBuffered({
+      sessionId: "session-once-buffered",
+      requestId: "request-once-buffered",
+      messages: [{ role: "user", content: "run once" }],
+    });
+
+    expect(executions).toBe(1);
+    expect("outcome" in result).toBe(true);
+    if ("outcome" in result) {
+      expect(result.outcome.publicReply).toBe("done");
+    }
+  });
+
+	it("skips submit_rp_turn in buffered mode when role lacks rp_settlement capability", async () => {
+		const model = new MockModelProvider([
+			[
+				{ type: "tool_use_start", id: "call_settle", name: "submit_rp_turn" },
+				{
+					type: "tool_use_delta",
+					id: "call_settle",
+					partialJson:
+						'{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Should be skipped for maiden."}',
+				},
+				{ type: "tool_use_end", id: "call_settle" },
+				{ type: "message_end", stopReason: "tool_use" },
+			],
+		]);
+
+		const loop = new AgentLoop({
+			profile: {
+				...TEST_PROFILE,
+				id: "agent-maiden-buffered-settlement",
+				role: "maiden",
+				toolPermissions: [],
+			},
+			modelProvider: model,
+			toolExecutor: new ToolExecutor(),
+		});
+
+		const result = await loop.runBuffered({
+			sessionId: "session-buffered-settlement-denied",
+			requestId: "request-buffered-settlement-denied",
+			messages: [{ role: "user", content: "attempt settlement" }],
+		});
+
+		expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
+	});
 });
 
 describe("RunContext", () => {
@@ -540,7 +769,7 @@ describe("RP tool policy filtering", () => {
 
     const executor = new ToolExecutor();
     executor.registerLocal({
-      name: "core_memory_append",
+      name: MEMORY_TOOL_NAMES.coreMemoryAppend,
       description: "Append to core memory",
       parameters: { type: "object", properties: {} },
       effectClass: "immediate_write",
@@ -548,7 +777,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "core_memory_replace",
+      name: MEMORY_TOOL_NAMES.coreMemoryReplace,
       description: "Replace core memory",
       parameters: { type: "object", properties: {} },
       effectClass: "immediate_write",
@@ -562,7 +791,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "memory_read",
+      name: MEMORY_TOOL_NAMES.memoryRead,
       description: "Read memory",
       parameters: { type: "object", properties: {} },
       effectClass: "read_only",
@@ -570,7 +799,7 @@ describe("RP tool policy filtering", () => {
       async execute() { return { success: true }; },
     });
     executor.registerLocal({
-      name: "memory_search",
+      name: MEMORY_TOOL_NAMES.narrativeSearch,
       description: "Search memory",
       parameters: { type: "object", properties: {} },
       effectClass: "read_only",
@@ -581,12 +810,12 @@ describe("RP tool policy filtering", () => {
     const filtered = getFilteredSchemas(rpProfile, executor);
     const names = filtered.map((s) => s.name);
 
-    expect(names).not.toContain("core_memory_append");
-    expect(names).not.toContain("core_memory_replace");
+    expect(names).not.toContain(MEMORY_TOOL_NAMES.coreMemoryAppend);
+    expect(names).not.toContain(MEMORY_TOOL_NAMES.coreMemoryReplace);
     expect(names).not.toContain("delegate_task");
 
-    expect(names).toContain("memory_read");
-    expect(names).toContain("memory_search");
+    expect(names).toContain(MEMORY_TOOL_NAMES.memoryRead);
+    expect(names).toContain(MEMORY_TOOL_NAMES.narrativeSearch);
   });
 });
 

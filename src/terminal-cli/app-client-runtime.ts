@@ -1,4 +1,6 @@
 import { bootstrapApp } from "../bootstrap/app-bootstrap.js";
+import { join } from "node:path";
+import { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
 import {
   createGatewayAppClients,
@@ -31,10 +33,11 @@ export function createAppClientRuntime(params: {
     enableGateway: false,
     requireAllProviders: false,
   });
+  const inspectTraceStore = new TraceStore(join(params.cwd, "data", "debug", "traces"));
 
   return {
     mode: params.mode,
-    clients: createLocalAppClients(app.runtime),
+    clients: createLocalAppClients(app.runtime, { inspectTraceStore }),
     runtime: app.runtime,
     shutdown: () => app.shutdown(),
   };

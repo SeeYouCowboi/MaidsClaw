@@ -16,8 +16,4 @@ describe("Bootstrap", () => {
     expect(version()).toBe("0.1.0");
     expect(VERSION).toBe("0.1.0");
   });
-
-  it("should pass a basic truth assertion", () => {
-    expect(true).toBe(true);
-  });
 });

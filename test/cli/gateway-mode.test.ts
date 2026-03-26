@@ -66,10 +66,10 @@ function makeSettlement(sessionId: string, requestId: string): TurnSettlementPay
 			selfPointerKey: "__self__",
 			userPointerKey: "__user__",
 		},
-		privateCommit: {
-			schemaVersion: "rp_private_cognition_v3",
+		privateCognition: {
+			schemaVersion: "rp_private_cognition_v4",
 			ops: [{ op: "retract", target: { kind: "assertion", key: "k1" } }],
-		} as unknown as TurnSettlementPayload["privateCommit"],
+		},
 	};
 }
 

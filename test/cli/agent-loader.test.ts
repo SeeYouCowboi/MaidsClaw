@@ -53,7 +53,7 @@ describe("validateAgentFile", () => {
 				personaId: "alice",
 				toolPermissions: [
 					"memory_read",
-					"memory_search",
+					"narrative_search",
 					"submit_rp_turn",
 				],
 			},
@@ -82,7 +82,7 @@ describe("validateAgentFile", () => {
 			{
 				id: "rp:bad",
 				role: "rp_agent",
-				toolPermissions: ["memory_read", "memory_search"],
+				toolPermissions: ["memory_read", "narrative_search"],
 			},
 		];
 
@@ -248,5 +248,36 @@ describe("loadFileAgents", () => {
 		expect(profile.maxDelegationDepth).toBe(0);
 		expect(profile.lorebookEnabled).toBe(false);
 		expect(profile.narrativeContextEnabled).toBe(false);
+	});
+
+	it("passes through retrievalTemplate and writeTemplate overrides", () => {
+		const tmpRoot = createTempDir();
+		const filePath = writeAgents(tmpRoot, [
+			{
+				id: "rp:templates",
+				role: "rp_agent",
+				retrievalTemplate: { cognitionEnabled: false, maxCognitionHits: 0 },
+				writeTemplate: { allowPublications: false },
+			},
+		]);
+
+		const result = loadFileAgents(filePath);
+		expect(result.agents).toHaveLength(1);
+		const profile = result.agents[0]!;
+		expect(profile.retrievalTemplate).toEqual({ cognitionEnabled: false, maxCognitionHits: 0 });
+		expect(profile.writeTemplate).toEqual({ allowPublications: false });
+	});
+
+	it("omits template fields when not specified in file entry", () => {
+		const tmpRoot = createTempDir();
+		const filePath = writeAgents(tmpRoot, [
+			{ id: "rp:no-templates", role: "rp_agent" },
+		]);
+
+		const result = loadFileAgents(filePath);
+		expect(result.agents).toHaveLength(1);
+		const profile = result.agents[0]!;
+		expect(profile.retrievalTemplate).toBeUndefined();
+		expect(profile.writeTemplate).toBeUndefined();
 	});
 });

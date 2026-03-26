@@ -1,9 +1,21 @@
 import type { Db } from "../storage/database.js";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { EmbeddingService } from "./embeddings.js";
+import { CognitionSearchService } from "./cognition/cognition-search.js";
+import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
+import { NarrativeSearchService } from "./narrative/narrative-search.js";
+import { EpisodeRepository } from "./episode/episode-repo.js";
+import {
+  RetrievalOrchestrator,
+  type RetrievalDedupContext,
+  type RetrievalQueryStrategy,
+  type TypedRetrievalResult,
+} from "./retrieval/retrieval-orchestrator.js";
 import { MAX_INTEGER } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
+import { VisibilityPolicy } from "./visibility-policy.js";
+import type { EpisodeRow } from "./episode/episode-repo.js";
 import type {
-  AgentEventOverlay,
   EntityNode,
   EventNode,
   FactEdge,
@@ -14,12 +26,6 @@ import type {
   Topic,
   ViewerContext,
 } from "./types.js";
-
-type SearchRow = {
-  source_ref: string;
-  doc_type: string;
-  content: string;
-};
 
 type SearchResult = {
   source_ref: NodeRef;
@@ -33,28 +39,65 @@ type EntityReadResult = {
   entity: EntityNode | null;
   facts: FactEdge[];
   events: EventNode[];
-  overlays: AgentEventOverlay[];
+  episodes: EpisodeRow[];
 };
 
 type TopicReadResult = {
   topic: Topic | null;
   events: EventNode[];
-  overlays: AgentEventOverlay[];
+  episodes: EpisodeRow[];
+};
+
+type RetrievalServiceDeps = {
+  db: Db;
+  embeddingService?: EmbeddingService;
+  narrativeSearch?: NarrativeSearchService;
+  cognitionSearch?: CognitionSearchService;
+  orchestrator?: RetrievalOrchestrator;
+  visibilityPolicy?: VisibilityPolicy;
 };
 
 export class RetrievalService {
+  private readonly db: Db;
   private readonly embeddingService: EmbeddingService;
+  private readonly narrativeSearch: NarrativeSearchService;
+  private readonly cognitionSearch: CognitionSearchService;
+  private readonly orchestrator: RetrievalOrchestrator;
+  private readonly visibilityPolicy: VisibilityPolicy;
 
-  constructor(private readonly db: Db) {
-    const batcher = new TransactionBatcher(db);
-    this.embeddingService = new EmbeddingService(db, batcher);
+  constructor(dbOrDeps: Db | RetrievalServiceDeps) {
+    const deps = this.resolveDeps(dbOrDeps);
+    const { db } = deps;
+    this.db = db;
+    this.embeddingService = deps.embeddingService ?? new EmbeddingService(db, new TransactionBatcher(db));
+    this.narrativeSearch = deps.narrativeSearch ?? new NarrativeSearchService(db);
+    this.cognitionSearch = deps.cognitionSearch ?? new CognitionSearchService(db);
+    this.orchestrator = deps.orchestrator
+      ?? new RetrievalOrchestrator({
+        narrativeService: this.narrativeSearch,
+        cognitionService: this.cognitionSearch,
+        currentProjectionReader: this.cognitionSearch.createCurrentProjectionReader(),
+        episodeRepository: new EpisodeRepository(db),
+      });
+    this.visibilityPolicy = deps.visibilityPolicy ?? new VisibilityPolicy();
+  }
+
+  static create(db: Db): RetrievalService {
+    return Reflect.construct(this, [db]) as RetrievalService;
+  }
+
+  private resolveDeps(dbOrDeps: Db | RetrievalServiceDeps): RetrievalServiceDeps {
+    if ("db" in dbOrDeps) {
+      return dbOrDeps;
+    }
+    return { db: dbOrDeps };
   }
 
   readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
     const resolvedPointer = this.resolveRedirect(pointerKey, viewerContext.viewer_agent_id);
     const entity = this.resolveEntityByPointer(resolvedPointer, viewerContext.viewer_agent_id);
     if (!entity) {
-      return { entity: null, facts: [], events: [], overlays: [] };
+      return { entity: null, facts: [], events: [], episodes: [] };
     }
 
     const facts = this.db
@@ -63,79 +106,47 @@ export class RetrievalService {
       )
       .all(entity.id, entity.id, MAX_INTEGER) as FactEdge[];
 
-    const events = viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(`%entity:${entity.id}%`, entity.id, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-               AND visibility_scope='world_public'`,
-          )
-          .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const events = this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE (participants LIKE ? OR primary_actor_entity_id=?)
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
 
-    const eventIds = events.map((event) => event.id);
-    const overlays = eventIds.length > 0
-      ? (this.db
-          .prepare(
-            `SELECT * FROM agent_event_overlay
-             WHERE agent_id=? AND (event_id IN (${eventIds.map(() => "?").join(",")}) OR primary_actor_entity_id=?)`,
-          )
-          .all(viewerContext.viewer_agent_id, ...eventIds, entity.id) as AgentEventOverlay[])
-      : (this.db
-          .prepare(
-            "SELECT * FROM agent_event_overlay WHERE agent_id=? AND primary_actor_entity_id=?",
-          )
-          .all(viewerContext.viewer_agent_id, entity.id) as AgentEventOverlay[]);
+    const episodes = this.db
+      .prepare(
+        `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes,
+                location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at
+         FROM private_episode_events
+         WHERE agent_id=? AND location_entity_id=?`,
+      )
+      .all(viewerContext.viewer_agent_id, entity.id) as EpisodeRow[];
 
-    return { entity, facts, events, overlays };
+    return { entity, facts, events, episodes };
   }
 
   readByTopic(name: string, viewerContext: ViewerContext): TopicReadResult {
     const resolvedName = this.resolveRedirect(name, viewerContext.viewer_agent_id);
     const topic = this.db.prepare("SELECT * FROM topics WHERE name=?").get(resolvedName) as Topic | null;
     if (!topic) {
-      return { topic: null, events: [], overlays: [] };
+      return { topic: null, events: [], episodes: [] };
     }
 
-    const events = viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE topic_id=?
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(topic.id, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE topic_id=?
-               AND visibility_scope='world_public'`,
-          )
-          .all(topic.id) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const events = this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE topic_id=?
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(topic.id) as EventNode[];
 
-    const eventIds = events.map((event) => event.id);
-    const overlays = eventIds.length === 0
-      ? []
-      : (this.db
-          .prepare(
-            `SELECT * FROM agent_event_overlay
-             WHERE agent_id=? AND event_id IN (${eventIds.map(() => "?").join(",")})`,
-          )
-          .all(viewerContext.viewer_agent_id, ...eventIds) as AgentEventOverlay[]);
+    // Private episodes have no topic FK — no correlation possible in the new schema.
+    const episodes: EpisodeRow[] = [];
 
-    return { topic, events, overlays };
+    return { topic, events, episodes };
   }
 
   readByEventIds(ids: number[], viewerContext: ViewerContext): EventNode[] {
@@ -144,24 +155,14 @@ export class RetrievalService {
     }
 
     const placeholders = ids.map(() => "?").join(",");
-    return viewerContext.current_area_id != null
-      ? this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND (
-                 visibility_scope='world_public'
-                 OR (visibility_scope='area_visible' AND location_entity_id=?)
-               )`,
-          )
-          .all(...ids, viewerContext.current_area_id) as EventNode[]
-      : this.db
-          .prepare(
-            `SELECT * FROM event_nodes
-             WHERE id IN (${placeholders})
-               AND visibility_scope='world_public'`,
-          )
-          .all(...ids) as EventNode[];
+    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    return this.db
+      .prepare(
+        `SELECT * FROM event_nodes
+         WHERE id IN (${placeholders})
+           AND ${eventVisibilityPredicate}`,
+      )
+      .all(...ids) as EventNode[];
   }
 
   readByFactIds(ids: number[], _viewerContext: ViewerContext): FactEdge[] {
@@ -176,59 +177,14 @@ export class RetrievalService {
   }
 
   async searchVisibleNarrative(query: string, viewerContext: ViewerContext): Promise<SearchResult[]> {
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
-      return [];
-    }
-
-    const safeQuery = this.escapeFtsQuery(trimmed);
-    const rawResults: SearchResult[] = [];
-
-    if (viewerContext.viewer_role === "rp_agent") {
-      const privateRows = this.db
-        .prepare(
-          `SELECT d.source_ref, d.doc_type, d.content
-           FROM search_docs_private d
-           JOIN search_docs_private_fts f ON f.rowid = d.id
-           WHERE f.content MATCH ? AND d.agent_id=?`,
-        )
-        .all(safeQuery, viewerContext.viewer_agent_id) as SearchRow[];
-      rawResults.push(...privateRows.map((row) => this.mapSearchRow(row, "private", 1.0)));
-    }
-
-    if (viewerContext.viewer_role !== "task_agent") {
-      if (viewerContext.current_area_id != null) {
-        const areaRows = this.db
-          .prepare(
-            `SELECT d.source_ref, d.doc_type, d.content
-             FROM search_docs_area d
-             JOIN search_docs_area_fts f ON f.rowid = d.id
-             WHERE f.content MATCH ? AND d.location_entity_id=?`,
-          )
-          .all(safeQuery, viewerContext.current_area_id) as SearchRow[];
-        rawResults.push(...areaRows.map((row) => this.mapSearchRow(row, "area", 0.9)));
-      }
-      const worldRows = this.db
-        .prepare(
-          `SELECT d.source_ref, d.doc_type, d.content
-           FROM search_docs_world d
-           JOIN search_docs_world_fts f ON f.rowid = d.id
-           WHERE f.content MATCH ?`,
-        )
-        .all(safeQuery) as SearchRow[];
-      rawResults.push(...worldRows.map((row) => this.mapSearchRow(row, "world", 0.8)));
-    }
-
-    const deduped = new Map<string, SearchResult>();
-    for (const result of rawResults) {
-      const key = `${result.source_ref}|${result.doc_type}`;
-      const existing = deduped.get(key);
-      if (!existing || result.score > existing.score) {
-        deduped.set(key, result);
-      }
-    }
-
-    return Array.from(deduped.values()).sort((a, b) => b.score - a.score);
+    const narrativeResults = await this.narrativeSearch.searchNarrative(query, viewerContext);
+    return narrativeResults.map((r) => ({
+      source_ref: r.source_ref,
+      doc_type: r.doc_type,
+      content: r.content,
+      scope: r.scope,
+      score: r.score,
+    }));
   }
 
   async generateMemoryHints(
@@ -236,18 +192,67 @@ export class RetrievalService {
     viewerContext: ViewerContext,
     limit = 5,
   ): Promise<MemoryHint[]> {
-    if (userMessage.trim().length < 3) {
-      return [];
+    const typed = await this.generateTypedRetrieval(
+      userMessage,
+      viewerContext,
+      undefined,
+      {
+        narrativeEnabled: true,
+        cognitionEnabled: false,
+        conflictNotesEnabled: false,
+        episodeEnabled: false,
+        narrativeBudget: limit,
+      },
+    );
+    return typed.narrative.map((segment) => ({
+      source_ref: segment.source_ref as MemoryHint["source_ref"],
+      doc_type: segment.doc_type,
+      content: segment.content,
+      scope: segment.scope,
+      score: segment.score,
+    }));
+  }
+
+  async generateTypedRetrieval(
+    query: string,
+    viewerContext: ViewerContext,
+    dedupContext?: RetrievalDedupContext,
+    retrievalTemplate?: RetrievalTemplate,
+    queryStrategy: RetrievalQueryStrategy = "default_retrieval",
+    contestedCount?: number,
+  ): Promise<TypedRetrievalResult> {
+    const result = await this.orchestrator.search(
+      query,
+      viewerContext,
+      viewerContext.viewer_role,
+      retrievalTemplate,
+      dedupContext,
+      queryStrategy,
+      contestedCount,
+    );
+    const typed = result.typed;
+    const conflictNotesBudget = retrievalTemplate?.conflictNotesBudget ?? 0;
+
+    if (conflictNotesBudget > 0 && typed.conflict_notes.length === 0) {
+      for (const hit of result.cognitionHits) {
+        if (typed.conflict_notes.length >= conflictNotesBudget) {
+          break;
+        }
+        if (hit.stance !== "contested") {
+          continue;
+        }
+        const content = hit.conflictSummary?.trim() || "contested cognition";
+        typed.conflict_notes.push({
+          source_ref: `conflict_note:${String(hit.source_ref)}`,
+          from_source_ref: String(hit.source_ref),
+          cognitionKey: hit.cognitionKey ?? null,
+          content,
+          score: hit.updated_at,
+        });
+      }
     }
 
-    const results = await this.searchVisibleNarrative(userMessage, viewerContext);
-    return results.slice(0, limit).map((result) => ({
-      source_ref: result.source_ref,
-      scope: result.scope,
-      doc_type: result.doc_type,
-      content: result.content,
-      score: result.score,
-    }));
+    return typed;
   }
 
   async localizeSeedsHybrid(
@@ -398,54 +403,21 @@ export class RetrievalService {
     return aliasedShared ?? null;
   }
 
-  private escapeFtsQuery(input: string): string {
-    const tokens = input
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3)
-      .map((token) => token.replaceAll('"', '""'));
-
-    if (tokens.length === 0) {
-      return `"${input.replaceAll('"', '""')}"`;
-    }
-
-    if (tokens.length === 1) {
-      return `"${tokens[0]}"`;
-    }
-
-    return tokens.map((token) => `"${token}"`).join(" OR ");
-  }
-
-  private mapSearchRow(row: SearchRow, scope: "private" | "area" | "world", score: number): SearchResult {
-    return {
-      source_ref: row.source_ref as NodeRef,
-      doc_type: row.doc_type,
-      content: row.content,
-      scope,
-      score,
-    };
-  }
-
   private rrf(rank: number): number {
     return 1 / (60 + rank);
   }
 
   private parseNodeRefKind(nodeRef: string): NodeRefKind | null {
-    const maybeKind = nodeRef.split(":")[0];
-    if (
-      maybeKind === "event" ||
-      maybeKind === "entity" ||
-      maybeKind === "fact" ||
-      maybeKind === "private_event" ||
-      maybeKind === "private_belief"
-    ) {
-      return maybeKind;
+    try {
+      return parseGraphNodeRef(nodeRef).kind;
+    } catch {
+      return null;
     }
-    return null;
   }
 
   private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
-    if (nodeKind === "private_event" || nodeKind === "private_belief") {
+    const kind = nodeKind as string;
+    if (kind === "assertion" || kind === "evaluation" || kind === "commitment") {
       return "private";
     }
     return "world";

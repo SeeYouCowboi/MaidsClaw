@@ -1,6 +1,9 @@
 import type { Database } from "bun:sqlite";
+import { defaultViewerCanReadAdminOnly } from "../core/contracts/viewer-context.js";
+import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
+import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
   EventNode,
   IPromotionService,
@@ -9,6 +12,7 @@ import type {
   PromotionCandidate,
   PublicEventCategory,
   ReferenceResolution,
+  ViewerContext,
 } from "./types.js";
 
 type EventCandidateCriteria = {
@@ -48,7 +52,6 @@ type EventRow = {
   location_entity_id: number;
   event_category: PublicEventCategory;
   primary_actor_entity_id: number | null;
-  visibility_scope: "area_visible" | "world_public";
 };
 
 const IDENTITY_HIDDEN_MARKERS = ["unknown", "hidden", "redacted", "anonymous", "masked"] as const;
@@ -60,17 +63,24 @@ const STABLE_FACT_PATTERNS = [
 ] as const;
 
 export class PromotionService implements IPromotionService {
+  private readonly projectionRepo: AreaWorldProjectionRepo;
+  private readonly visibilityPolicy: VisibilityPolicy;
+
   constructor(
     private readonly db: Database,
     private readonly storage: GraphStorageService,
     private readonly modelProvider?: PromotionModelProvider,
-  ) {}
+    projectionRepo?: AreaWorldProjectionRepo,
+  ) {
+    this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
+    this.visibilityPolicy = new VisibilityPolicy();
+  }
 
   identifyEventCandidates(criteria: EventCandidateCriteria = {}): EventNode[] {
     const spoken = criteria.spoken ?? true;
     const stable = criteria.stable ?? true;
 
-    const clauses = ["visibility_scope = 'area_visible'", "summary IS NOT NULL"];
+    const clauses = [this.areaOnlyEventPredicate(), "summary IS NOT NULL"];
     if (spoken) {
       clauses.push("event_category = 'speech'");
     }
@@ -88,7 +98,7 @@ export class PromotionService implements IPromotionService {
       .prepare(
         `SELECT id, summary, participants, location_entity_id
          FROM event_nodes
-         WHERE visibility_scope IN ('area_visible', 'world_public')
+         WHERE ${this.allAreaAndWorldEventPredicate()}
            AND summary IS NOT NULL
          ORDER BY timestamp ASC, id ASC`,
       )
@@ -132,12 +142,12 @@ export class PromotionService implements IPromotionService {
   }
 
   resolveReferences(candidate: PromotionCandidate): ReferenceResolution[] {
-    if (candidate.source_ref.startsWith("private_belief:")) {
+    if (candidate.source_ref.startsWith("assertion:")) {
       return [
         {
           source_ref: candidate.source_ref,
           action: "block",
-          reason: "private_belief cannot be crystallized directly",
+          reason: "assertion cannot be crystallized directly",
         },
       ];
     }
@@ -286,6 +296,17 @@ export class PromotionService implements IPromotionService {
         primaryActorEntityId: promotedPrimaryActor ?? undefined,
         sourceEventId,
       });
+      this.projectionRepo.applyPromotionProjection({
+        trigger: "promotion",
+        projectionKey: `promotion:event:${sourceEventId}`,
+        summaryText: summary,
+        payload: {
+          sourceEventId,
+          promotedEventId,
+        },
+        surfacingClassification: "public_manifestation",
+        updatedAt: sourceEvent.timestamp,
+      });
 
       return {
         target_scope: "world_public",
@@ -294,7 +315,7 @@ export class PromotionService implements IPromotionService {
       };
     }
 
-    if (candidate.source_ref.startsWith("private_belief:")) {
+    if (candidate.source_ref.startsWith("assertion:")) {
       return undefined;
     }
 
@@ -311,7 +332,19 @@ export class PromotionService implements IPromotionService {
       : undefined;
 
     const factId = this.storage.createFact(resolvedEntities[0], resolvedEntities[1], predicate, sourceEventId);
-    this.storage.syncSearchDoc("world", makeNodeRef("fact", factId), this.normalizeSummary(candidate.summary));
+    const summary = this.normalizeSummary(candidate.summary);
+    this.storage.syncSearchDoc("world", makeNodeRef("fact", factId), summary);
+    this.projectionRepo.applyPromotionProjection({
+      trigger: "promotion",
+      projectionKey: `promotion:fact:${factId}`,
+      summaryText: summary,
+      payload: {
+        sourceRef: candidate.source_ref,
+        factId,
+        predicate,
+      },
+      surfacingClassification: "public_manifestation",
+    });
 
     return {
       target_scope: "world_public",
@@ -333,11 +366,50 @@ export class PromotionService implements IPromotionService {
   private getEventById(id: number): EventRow | null {
     return this.db
       .prepare(
-        `SELECT id, session_id, summary, timestamp, participants, location_entity_id, event_category, primary_actor_entity_id, visibility_scope
-         FROM event_nodes
-         WHERE id = ?`,
+        `SELECT id, session_id, summary, timestamp, participants, location_entity_id, event_category, primary_actor_entity_id
+          FROM event_nodes
+          WHERE id = ?`,
       )
       .get(id) as EventRow | null;
+  }
+
+  private allAreaAndWorldEventPredicate(tableAlias?: string): string {
+    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
+    const areaRows = this.db
+      .prepare("SELECT DISTINCT location_entity_id FROM event_nodes ORDER BY location_entity_id ASC")
+      .all() as Array<{ location_entity_id: number }>;
+
+    if (areaRows.length === 0) {
+      return worldOnlyPredicate;
+    }
+
+    const predicates = new Set<string>();
+    predicates.add(worldOnlyPredicate);
+    for (const row of areaRows) {
+      predicates.add(
+        this.visibilityPolicy.eventVisibilityPredicate(
+          this.makePolicyViewerContext(row.location_entity_id),
+          tableAlias,
+        ),
+      );
+    }
+    return `(${Array.from(predicates).join(" OR ")})`;
+  }
+
+  private areaOnlyEventPredicate(tableAlias?: string): string {
+    const allVisiblePredicate = this.allAreaAndWorldEventPredicate(tableAlias);
+    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
+    return `(${allVisiblePredicate} AND NOT ${worldOnlyPredicate})`;
+  }
+
+  private makePolicyViewerContext(currentAreaId: number | null): ViewerContext {
+    return {
+      viewer_agent_id: "promotion-system",
+      viewer_role: "maiden",
+      can_read_admin_only: defaultViewerCanReadAdminOnly("maiden"),
+      current_area_id: currentAreaId ?? undefined,
+      session_id: "promotion",
+    };
   }
 
   private findSharedEntityByPointer(pointerKey: string): { id: number } | null {
@@ -366,7 +438,7 @@ export class PromotionService implements IPromotionService {
     }
   }
 
-  private parseNodeRefId(nodeRef: string, kind: "entity" | "event" | "private_event" | "private_belief"): number {
+  private parseNodeRefId(nodeRef: string, kind: "entity" | "event"): number {
     const prefix = `${kind}:`;
     if (!nodeRef.startsWith(prefix)) {
       throw new Error(`Invalid node ref kind for ${kind}: ${nodeRef}`);
@@ -384,10 +456,11 @@ export class PromotionService implements IPromotionService {
       return source?.timestamp ?? Date.now();
     }
 
-    if (candidate.source_ref.startsWith("private_event:")) {
+    if (candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
+      const id = Number(candidate.source_ref.split(":")[1]);
       const row = this.db
-        .prepare(`SELECT created_at FROM agent_event_overlay WHERE id = ?`)
-        .get(this.parseNodeRefId(candidate.source_ref, "private_event")) as { created_at: number } | null;
+        .prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`)
+        .get(id) as { created_at: number } | null;
       return row?.created_at ?? Date.now();
     }
 
@@ -422,10 +495,6 @@ export class PromotionService implements IPromotionService {
     if (!normalized) {
       return null;
     }
-    if (/\bprivate[_\s-]?belief\b/i.test(normalized)) {
-      return null;
-    }
-
     for (const pattern of STABLE_FACT_PATTERNS) {
       const match = normalized.match(pattern);
       if (match) {

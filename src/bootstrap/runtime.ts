@@ -30,7 +30,13 @@ import { CoreMemoryService } from "../memory/core-memory.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
+import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
+import { EpisodeRepository } from "../memory/episode/episode-repo.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
+import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
+import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
+import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../memory/schema.js";
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
@@ -452,6 +458,19 @@ export function bootstrapRuntime(
 		},
 	} as unknown as AgentLoop;
 
+	const episodeRepo = new EpisodeRepository(db);
+	const cognitionEventRepo = new CognitionEventRepo(db.raw);
+	const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
+	const areaWorldProjectionRepo = new AreaWorldProjectionRepo(db.raw);
+	const projectionManager = new ProjectionManager(
+		episodeRepo,
+		cognitionEventRepo,
+		cognitionProjectionRepo,
+		graphStorage,
+		areaWorldProjectionRepo,
+		db.raw,
+	);
+
 	const turnService = new TurnService(
 		turnServiceAgentLoop,
 		commitService,
@@ -463,6 +482,7 @@ export function bootstrapRuntime(
 		options.projectionSink,
 		graphStorage,
 		traceStore,
+		projectionManager,
 	);
 
 	const pendingSettlementSweeper = memoryTaskAgent
@@ -473,10 +493,17 @@ export function bootstrapRuntime(
 				memoryTaskAgent,
 			)
 		: null;
+	const publicationRecoverySweeper = graphStorage
+		? new PublicationRecoverySweeper(db, graphStorage, {
+				projectionRepo: areaWorldProjectionRepo,
+			})
+		: null;
 	pendingSettlementSweeper?.start();
+	publicationRecoverySweeper?.start();
 
 	const shutdown = (): void => {
 		pendingSettlementSweeper?.stop();
+		publicationRecoverySweeper?.stop();
 		closeDatabaseGracefully(db);
 	};
 

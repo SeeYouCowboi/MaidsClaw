@@ -1,6 +1,6 @@
 import type { EmbeddingService } from "./embeddings.js";
 import type { GraphStorageService } from "./storage.js";
-import type { NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
+import type { NodeRefKind, NodeRef, SemanticEdgeType } from "./types.js";
 
 export type OrganizerNode = {
   nodeRef: NodeRef;

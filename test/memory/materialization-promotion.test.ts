@@ -3,11 +3,29 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MaidsClawError } from "../../src/core/errors.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
-import { MaterializationService } from "../../src/memory/materialization.js";
-import type { AgentEventOverlay } from "../../src/memory/types.js";
+import { MaterializationService, materializePublications } from "../../src/memory/materialization.js";
+import type { PublicationDeclaration } from "../../src/runtime/rp-turn-contract.js";
 import { openDatabase } from "../../src/storage/database.js";
+
+type MaterializablePrivateEvent = {
+	id: number;
+	event_id: number | null;
+	agent_id: string;
+	role: string | null;
+	private_notes: string | null;
+	salience: number | null;
+	emotion: string | null;
+	event_category: "speech" | "action" | "thought" | "observation" | "state_change";
+	primary_actor_entity_id: number | null;
+	projection_class: "none" | "area_candidate";
+	location_entity_id: number | null;
+	projectable_summary: string | null;
+	source_record_id: string | null;
+	created_at: number;
+};
 
 function createTempDb() {
 	const dbPath = join(tmpdir(), `maidsclaw-matrl-${randomUUID()}.db`);
@@ -23,12 +41,15 @@ function cleanupDb(dbPath: string): void {
 	} catch {}
 }
 
+let overlayIdSeq = 1;
+
 function insertOverlay(
-	db: ReturnType<typeof openDatabase>,
-	overrides: Partial<AgentEventOverlay> & { agent_id: string },
-): AgentEventOverlay {
+	_db: ReturnType<typeof openDatabase>,
+	overrides: Partial<MaterializablePrivateEvent> & { agent_id: string },
+): MaterializablePrivateEvent {
 	const now = Date.now();
 	const defaults = {
+		id: overlayIdSeq++,
 		event_id: null,
 		role: null,
 		private_notes: null,
@@ -50,24 +71,7 @@ function insertOverlay(
 		...overrides,
 	};
 
-	const result = db.run(
-		`INSERT INTO agent_event_overlay
-		 (event_id, agent_id, role, private_notes, salience, emotion, event_category,
-		  primary_actor_entity_id, projection_class, location_entity_id, projectable_summary,
-		  source_record_id, cognition_key, explicit_kind, settlement_id, op_index, metadata_json,
-		  cognition_status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		[
-			defaults.event_id, defaults.agent_id, defaults.role, defaults.private_notes,
-			defaults.salience, defaults.emotion, defaults.event_category,
-			defaults.primary_actor_entity_id, defaults.projection_class, defaults.location_entity_id,
-			defaults.projectable_summary, defaults.source_record_id, defaults.cognition_key,
-			defaults.explicit_kind, defaults.settlement_id, defaults.op_index,
-			defaults.metadata_json, defaults.cognition_status, defaults.created_at,
-		],
-	);
-
-	return { id: Number(result.lastInsertRowid), ...defaults } as AgentEventOverlay;
+	return defaults;
 }
 
 describe("MaterializationService", () => {
@@ -136,16 +140,15 @@ describe("MaterializationService", () => {
 			});
 
 			const matService = new MaterializationService(db as any, storage);
-			matService.materializeDelayed([overlay], "rp:alice");
+			const result = matService.materializeDelayed([overlay], "rp:alice");
+			expect(result.materialized).toBe(1);
 
-			// Check that overlay's event_id was updated
-			const updated = db.get<{ event_id: number | null }>(
-				"SELECT event_id FROM agent_event_overlay WHERE id = ?",
-				[overlay.id],
+			const publicEvents = db.query<{ id: number; source_record_id: string }>(
+				"SELECT id, source_record_id FROM event_nodes WHERE source_record_id = ?",
+				[overlay.source_record_id!],
 			);
-			expect(updated).not.toBeNull();
-			expect(updated!.event_id).not.toBeNull();
-			expect(typeof updated!.event_id).toBe("number");
+			expect(publicEvents.length).toBe(1);
+			expect(publicEvents[0].source_record_id).toBe(overlay.source_record_id!);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -154,7 +157,7 @@ describe("MaterializationService", () => {
 
 	// ── Scenario 2: Reconciliation ───────────────────────────────────
 
-	describe("Reconciliation", () => {
+		describe("Reconciliation", () => {
 		it("second overlay with same source_record_id reconciles to existing public event", () => {
 			const { dbPath, db } = createTempDb();
 			runMemoryMigrations(db);
@@ -192,10 +195,11 @@ describe("MaterializationService", () => {
 			expect(result.materialized).toBe(1);
 			expect(result.reconciled).toBe(1);
 
-			// Both overlays should point to the same public event
-			const ov1 = db.get<{ event_id: number }>("SELECT event_id FROM agent_event_overlay WHERE id = ?", [overlay1.id]);
-			const ov2 = db.get<{ event_id: number }>("SELECT event_id FROM agent_event_overlay WHERE id = ?", [overlay2.id]);
-			expect(ov1!.event_id).toBe(ov2!.event_id);
+			const publicEvents = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_record_id = ?",
+				[sharedSourceId],
+			);
+			expect(publicEvents.length).toBe(1);
 
 			db.close();
 			cleanupDb(dbPath);
@@ -507,5 +511,631 @@ describe("MaterializationService", () => {
 			db.close();
 			cleanupDb(dbPath);
 		});
+	});
+});
+
+describe("Publication Materialization", () => {
+	it("blocks publication writes for task_agent role with WRITE_TEMPLATE_DENIED", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "task-deny-location",
+			displayName: "Task Deny Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Task agent should not publish this." },
+		];
+
+		try {
+			let caught: unknown;
+			try {
+				materializePublications(storage, publications, `stl:task-deny-${randomUUID()}`, {
+					sessionId: "sess-task-deny-code",
+					locationEntityId: locationId,
+					timestamp: 1235,
+				}, {
+					agentRole: "task_agent",
+				});
+			} catch (error) {
+				caught = error;
+			}
+
+			expect(caught).toBeDefined();
+			expect(caught instanceof MaidsClawError).toBe(true);
+			expect((caught as MaidsClawError).code).toBe("WRITE_TEMPLATE_DENIED");
+
+			const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+			expect(rows.length).toBe(0);
+		} finally {
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("allows publication writes for rp_agent role (positive case)", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "rp-allow-location",
+			displayName: "RP Allow Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "RP agent publishes successfully." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:rp-allow-${randomUUID()}`, {
+			sessionId: "sess-rp-allow",
+			locationEntityId: locationId,
+			timestamp: 2000,
+		}, {
+			agentRole: "rp_agent",
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("allows publication writes for maiden with writeTemplate override", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "maiden-override-location",
+			displayName: "Maiden Override Location",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Maiden publishes with override." },
+		];
+
+		const result = materializePublications(storage, publications, `stl:maiden-override-${randomUUID()}`, {
+			sessionId: "sess-maiden-override",
+			locationEntityId: locationId,
+			timestamp: 3000,
+		}, {
+			agentRole: "maiden",
+			writeTemplateOverride: { allowPublications: true },
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>("SELECT id FROM event_nodes");
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("explicit publication creates event_node with provenance columns", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "tavern",
+			displayName: "Tavern",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Alice announces dinner is ready." },
+		];
+		const settlementId = `stl:req-pub-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-pub-1",
+			locationEntityId: locationId,
+			timestamp: 1000,
+		});
+
+		expect(result.materialized).toBe(1);
+		expect(result.reconciled).toBe(0);
+		expect(result.skipped).toBe(0);
+
+		const row = db.get<{
+			summary: string;
+			visibility_scope: string;
+			event_origin: string;
+			event_category: string;
+			source_settlement_id: string;
+			source_pub_index: number;
+			location_entity_id: number;
+		}>(
+			"SELECT summary, visibility_scope, event_origin, event_category, source_settlement_id, source_pub_index, location_entity_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row).toBeDefined();
+		expect(row!.summary).toBe("Alice announces dinner is ready.");
+		expect(row!.visibility_scope).toBe("area_visible");
+		expect(row!.event_origin).toBe("runtime_projection");
+		expect(row!.event_category).toBe("speech");
+		expect(row!.source_settlement_id).toBe(settlementId);
+		expect(row!.source_pub_index).toBe(0);
+		expect(row!.location_entity_id).toBe(locationId);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("publicReply alone does NOT create a publication event_node", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "parlor",
+			displayName: "Parlor",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const emptyPublications: PublicationDeclaration[] = [];
+		const settlementId = `stl:req-nopub-${randomUUID()}`;
+
+		const result = materializePublications(storage, emptyPublications, settlementId, {
+			sessionId: "sess-nopub",
+			locationEntityId: locationId,
+			timestamp: 2000,
+		});
+
+		expect(result.materialized).toBe(0);
+		expect(result.reconciled).toBe(0);
+		expect(result.skipped).toBe(0);
+
+		const rows = db.query<{ id: number }>(
+			"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(rows.length).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("publication kind maps correctly: visual → observation, spoken/written → speech", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "square",
+			displayName: "Town Square",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "visual", targetScope: "current_area", summary: "A notice board displays a message." },
+			{ kind: "spoken", targetScope: "current_area", summary: "A town crier announces the news." },
+			{ kind: "written", targetScope: "current_area", summary: "A record is read aloud." },
+		];
+		const settlementId = `stl:kinds-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-kinds",
+			locationEntityId: locationId,
+			timestamp: 3000,
+		});
+
+		expect(result.materialized).toBe(3);
+
+		const rows = db.query<{ event_category: string; source_pub_index: number }>(
+			"SELECT event_category, source_pub_index FROM event_nodes WHERE source_settlement_id = ? ORDER BY source_pub_index",
+			[settlementId],
+		);
+		expect(rows.length).toBe(3);
+		expect(rows[0]!.event_category).toBe("observation");
+		expect(rows[1]!.event_category).toBe("speech");
+		expect(rows[2]!.event_category).toBe("speech");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("world_public targetScope creates world_public visibility_scope event", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "hall",
+			displayName: "Great Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "world_public", summary: "A decree is issued across the land." },
+		];
+		const settlementId = `stl:world-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-world",
+			locationEntityId: locationId,
+			timestamp: 4000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ visibility_scope: string }>(
+			"SELECT visibility_scope FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row!.visibility_scope).toBe("world_public");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("duplicate publication is reconciled via unique index (idempotency)", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "kitchen",
+			displayName: "Kitchen",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "First call." },
+		];
+		const settlementId = `stl:idempotent-${randomUUID()}`;
+
+		const result1 = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-idem",
+			locationEntityId: locationId,
+			timestamp: 5000,
+		});
+		expect(result1.materialized).toBe(1);
+
+		const result2 = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-idem",
+			locationEntityId: locationId,
+			timestamp: 5000,
+		});
+		expect(result2.reconciled).toBe(1);
+		expect(result2.materialized).toBe(0);
+
+		const rows = db.query<{ id: number }>(
+			"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(rows.length).toBe(1);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("retries transient non-unique SQLite error then succeeds", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-hall",
+			displayName: "Retry Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Retry me once." },
+		];
+		const settlementId = `stl:retry-success-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		let attemptCount = 0;
+		patchedStorage.createProjectedEvent = ((params) => {
+			attemptCount += 1;
+			if (attemptCount === 1) {
+				const transient = new Error("database is locked");
+				transient.name = "SQLiteError";
+				throw transient;
+			}
+			return originalCreateProjectedEvent(params);
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		const sleepCalls: number[] = [];
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = (ms: number) => {
+			sleepCalls.push(ms);
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-success",
+				locationEntityId: locationId,
+				timestamp: 9_000,
+			});
+
+			expect(result.materialized).toBe(1);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(0);
+			expect(attemptCount).toBe(2);
+			expect(sleepCalls).toEqual([100]);
+
+			const rows = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+				[settlementId],
+			);
+			expect(rows.length).toBe(1);
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("skips publication after 3 retries for persistent non-unique SQLite error", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-fail-hall",
+			displayName: "Retry Fail Hall",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "This keeps failing." },
+		];
+		const settlementId = `stl:retry-fail-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		let attemptCount = 0;
+		patchedStorage.createProjectedEvent = (() => {
+			attemptCount += 1;
+			const transient = new Error("database is busy");
+			transient.name = "SQLiteError";
+			throw transient;
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		const sleepCalls: number[] = [];
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = (ms: number) => {
+			sleepCalls.push(ms);
+		};
+
+		const originalWarn = console.warn;
+		let warned = 0;
+		console.warn = (..._args: unknown[]) => {
+			warned += 1;
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-fail",
+				locationEntityId: locationId,
+				timestamp: 9_500,
+			});
+
+			expect(result.materialized).toBe(0);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(1);
+			expect(attemptCount).toBe(4);
+			expect(sleepCalls).toEqual([100, 200, 400]);
+			expect(warned).toBe(2);
+
+			const rows = db.query<{ id: number }>(
+				"SELECT id FROM event_nodes WHERE source_settlement_id = ?",
+				[settlementId],
+			);
+			expect(rows.length).toBe(0);
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			console.warn = originalWarn;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("creates publication_recovery job before returning skipped when db option is provided", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "retry-fail-with-job",
+			displayName: "Retry Fail With Job",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "This should produce a recovery job." },
+		];
+		const settlementId = `stl:retry-fail-job-${randomUUID()}`;
+
+		const originalCreateProjectedEvent = storage.createProjectedEvent.bind(storage);
+		const patchedStorage = storage as unknown as {
+			createProjectedEvent: typeof storage.createProjectedEvent;
+		};
+		patchedStorage.createProjectedEvent = (() => {
+			const transient = new Error("database is busy");
+			transient.name = "SQLiteError";
+			throw transient;
+		}) as typeof storage.createProjectedEvent;
+
+		const originalSleepSync = Bun.sleepSync;
+		(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = () => {
+		};
+
+		const originalWarn = console.warn;
+		console.warn = (..._args: unknown[]) => {
+		};
+
+		try {
+			const result = materializePublications(storage, publications, settlementId, {
+				sessionId: "sess-retry-fail-job",
+				locationEntityId: locationId,
+				timestamp: 11_500,
+			}, {
+				db: db.raw,
+			});
+
+			expect(result.materialized).toBe(0);
+			expect(result.reconciled).toBe(0);
+			expect(result.skipped).toBe(1);
+
+			const job = db.get<{
+				job_type: string;
+				status: string;
+				idempotency_key: string;
+				payload: string;
+			}>(
+				"SELECT job_type, status, idempotency_key, payload FROM _memory_maintenance_jobs WHERE job_type = 'publication_recovery' AND idempotency_key = ?",
+				[`publication_recovery:${settlementId}:0`],
+			);
+
+			expect(job).toBeDefined();
+			expect(job!.job_type).toBe("publication_recovery");
+			expect(job!.status).toBe("pending");
+			expect(job!.idempotency_key).toBe(`publication_recovery:${settlementId}:0`);
+
+			const payload = JSON.parse(job!.payload) as {
+				settlementId: string;
+				pubIndex: number;
+				visibilityScope: string;
+				sessionId: string;
+			};
+			expect(payload.settlementId).toBe(settlementId);
+			expect(payload.pubIndex).toBe(0);
+			expect(payload.visibilityScope).toBe("area_visible");
+			expect(payload.sessionId).toBe("sess-retry-fail-job");
+		} finally {
+			patchedStorage.createProjectedEvent = originalCreateProjectedEvent;
+			(Bun as unknown as { sleepSync: (ms: number) => void }).sleepSync = originalSleepSync;
+			console.warn = originalWarn;
+			db.close();
+			cleanupDb(dbPath);
+		}
+	});
+
+	it("current_area publication is skipped when no locationEntityId is available", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Nobody hears this." },
+		];
+		const settlementId = `stl:noloc-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-noloc",
+			locationEntityId: undefined,
+			timestamp: 6000,
+		});
+
+		expect(result.skipped).toBe(1);
+		expect(result.materialized).toBe(0);
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("world_public publication proceeds with sentinel location when no locationEntityId", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "world_public", summary: "A global announcement." },
+		];
+		const settlementId = `stl:sentinel-${randomUUID()}`;
+
+		const result = materializePublications(storage, publications, settlementId, {
+			sessionId: "sess-sentinel",
+			locationEntityId: undefined,
+			timestamp: 7000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ visibility_scope: string; location_entity_id: number }>(
+			"SELECT visibility_scope, location_entity_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row!.visibility_scope).toBe("world_public");
+		expect(row!.location_entity_id).toBeGreaterThan(0);
+
+		const entity = db.get<{ pointer_key: string }>(
+			"SELECT pointer_key FROM entity_nodes WHERE id = ?",
+			[row!.location_entity_id],
+		);
+		expect(entity!.pointer_key).toBe("world");
+
+		db.close();
+		cleanupDb(dbPath);
+	});
+
+	it("MaterializationService.materializePublications delegates to standalone function", () => {
+		const { dbPath, db } = createTempDb();
+		runMemoryMigrations(db);
+		const storage = new GraphStorageService(db);
+
+		const locationId = storage.upsertEntity({
+			pointerKey: "foyer",
+			displayName: "Foyer",
+			entityType: "location",
+			memoryScope: "shared_public",
+		});
+
+		const publications: PublicationDeclaration[] = [
+			{ kind: "spoken", targetScope: "current_area", summary: "Welcome, everyone!" },
+		];
+		const settlementId = `stl:delegate-${randomUUID()}`;
+
+		const matService = new MaterializationService(db as any, storage);
+		const result = matService.materializePublications(publications, settlementId, {
+			sessionId: "sess-delegate",
+			locationEntityId: locationId,
+			timestamp: 8000,
+		});
+
+		expect(result.materialized).toBe(1);
+
+		const row = db.get<{ source_settlement_id: string }>(
+			"SELECT source_settlement_id FROM event_nodes WHERE source_settlement_id = ?",
+			[settlementId],
+		);
+		expect(row).toBeDefined();
+
+		db.close();
+		cleanupDb(dbPath);
 	});
 });

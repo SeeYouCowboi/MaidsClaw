@@ -1,51 +1,81 @@
 import type { Db } from "../storage/database.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
+import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
+import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
-import type { NavigatorResult, ViewerContext } from "./types";
+import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
-/**
- * Get all core memory blocks formatted as XML for system prompt injection.
- * Always returns all 3 blocks (character, user, index).
- * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
- */
-export function getCoreMemoryBlocks(agentId: string, db: Db): string {
-  const service = new CoreMemoryService(db);
-  const blocks = service.getAllBlocks(agentId);
+const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
+// Legacy compat: user blocks still exist in DB (read-only) and are surfaced as shared blocks for display
+const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
+const retrievalServiceByDb = new WeakMap<Db, RetrievalService>();
 
-  return blocks
-    .map(
-      (block) =>
-        `<core_memory label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</core_memory>`,
-    )
-    .join("\n");
+function resolveRetrievalService(db: Db, retrievalService?: RetrievalService): RetrievalService {
+  if (retrievalService) {
+    return retrievalService;
+  }
+
+  const cached = retrievalServiceByDb.get(db);
+  if (cached) {
+    return cached;
+  }
+
+  const created = RetrievalService.create(db);
+  retrievalServiceByDb.set(db, created);
+  return created;
 }
 
-/**
- * Get formatted memory hints as bullet list for prompt injection.
- * Returns empty string when no hints (< 3 char query, no matches).
- * ViewerContext determines which scope-partitioned FTS5 tables are queried.
- * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
- */
-export async function getMemoryHints(
+export function getPinnedBlocks(agentId: string, db: Db): string {
+  const blocks = getAllCoreMemoryBlocks(agentId, db);
+  const pinned = blocks.filter((b) => PINNED_LABELS.includes(b.label));
+  return renderCoreMemoryBlocks(pinned, "pinned_block");
+}
+
+export function getSharedBlocks(agentId: string, db: Db): string {
+  const blocks = getAllCoreMemoryBlocks(agentId, db);
+  const shared = blocks.filter((b) => SHARED_LABELS.includes(b.label));
+  return renderCoreMemoryBlocks(shared, "shared_block");
+}
+
+export async function getTypedRetrievalSurface(
   userMessage: string,
   viewerContext: ViewerContext,
   db: Db,
-  limit?: number,
+  retrievalService?: RetrievalService,
 ): Promise<string> {
-  const service = new RetrievalService(db);
-  const hints = await service.generateMemoryHints(userMessage, viewerContext, limit ?? 5);
-
-  if (hints.length === 0) {
+  if (userMessage.trim().length < 3) {
     return "";
   }
 
-  return hints
-    .map((hint) => {
-      const nodeKind = hint.source_ref.split(":")[0];
-      return `• [${nodeKind}] ${hint.content}`;
-    })
-    .join("\n");
+  const retrieval = resolveRetrievalService(db, retrievalService);
+  const recentEntries = getRecentCognitionEntries(
+    viewerContext.viewer_agent_id,
+    viewerContext.session_id,
+    db,
+  );
+  const recentCognitionKeys = new Set<string>();
+  for (const entry of recentEntries) {
+    const key = entry.key?.trim();
+    const kind = entry.kind?.trim();
+    if (!key || key.length === 0) {
+      continue;
+    }
+    recentCognitionKeys.add(key);
+    if (kind && kind.length > 0) {
+      recentCognitionKeys.add(`${kind}:${key}`);
+    }
+  }
+  const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
+  const conversationTexts = getConversationMessageContents(viewerContext.session_id, db);
+
+  const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
+    recentCognitionKeys,
+    recentCognitionTexts,
+    conversationTexts,
+  });
+
+  return renderTypedRetrieval(typed);
 }
 
 /**
@@ -107,6 +137,10 @@ type RecentCognitionSlotRow = {
   slot_payload: string;
 };
 
+type InteractionMessageRow = {
+  payload: string;
+};
+
 type RecentCognitionEntry = {
   settlementId: string;
   committedAt: number;
@@ -114,24 +148,15 @@ type RecentCognitionEntry = {
   key: string;
   summary: string;
   status?: "active" | "retracted";
+  stance?: string;
+  preContestedStance?: string;
+  conflictEvidence?: string[];
+  conflictSummary?: string;
+  conflictFactorRefs?: string[];
 };
 
 export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
-  const row = db.get<RecentCognitionSlotRow>(
-    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
-    [sessionId, agentId],
-  );
-
-  if (row === undefined) {
-    return "";
-  }
-
-  let entries: RecentCognitionEntry[];
-  try {
-    entries = JSON.parse(row.slot_payload) as RecentCognitionEntry[];
-  } catch {
-    return "";
-  }
+  const entries = getRecentCognitionEntries(agentId, sessionId, db);
 
   if (!Array.isArray(entries) || entries.length === 0) {
     return "";
@@ -170,9 +195,175 @@ export function getRecentCognition(agentId: string, sessionId: string, db: Db): 
   return rendered
     .map((entry) => {
       if (entry.status === "retracted") {
-        return `\u2022 [${entry.kind}:${entry.key}] (retracted)`;
+        return `• [${entry.kind}:${entry.key}] (retracted)`;
       }
-      return `\u2022 [${entry.kind}:${entry.key}] ${entry.summary}`;
+      if (entry.stance === "contested") {
+        return formatContestedEntry(entry);
+      }
+      return `• [${entry.kind}:${entry.key}] ${entry.summary}`;
     })
     .join("\n");
+}
+
+export function formatContestedEntry(entry: RecentCognitionEntry): string {
+  const preStance = entry.preContestedStance ?? "unknown";
+  const summary = entry.conflictSummary?.trim();
+  const hasConflict = (entry.conflictFactorRefs?.length ?? 0) > 0 || (entry.conflictEvidence?.length ?? 0) > 0;
+  const riskDetail = summary && summary.length > 0
+    ? summary
+    : (hasConflict ? "conflict detected" : "contested cognition");
+  const riskNote = ` | Risk: ${riskDetail} (use explain tools for details)`;
+  return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
+}
+
+function getRecentCognitionEntries(agentId: string, sessionId: string, db: Db): RecentCognitionEntry[] {
+  const row = db.get<RecentCognitionSlotRow>(
+    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
+    [sessionId, agentId],
+  );
+
+  if (row === undefined) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(row.slot_payload) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RecentCognitionEntry[];
+  } catch {
+    return [];
+  }
+}
+
+function getConversationMessageContents(sessionId: string, db: Db, limit = 12): string[] {
+  const rows = db.query<InteractionMessageRow>(
+    `SELECT payload
+     FROM interaction_records
+     WHERE session_id = ? AND record_type = 'message'
+     ORDER BY record_index DESC
+     LIMIT ?`,
+    [sessionId, limit],
+  );
+
+  const lines: string[] = [];
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload) as { content?: unknown };
+      if (typeof payload.content === "string" && payload.content.trim().length > 0) {
+        lines.push(payload.content);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return lines;
+}
+
+function renderTypedRetrieval(result: TypedRetrievalResult): string {
+  const parts: string[] = [];
+
+  if (result.cognition.length > 0) {
+    parts.push("[cognition]");
+    for (const hit of result.cognition) {
+      const key = hit.cognitionKey ? `:${hit.cognitionKey}` : "";
+      parts.push(`• [${hit.kind}${key}] ${hit.content}`);
+    }
+  }
+
+  if (result.narrative.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[narrative]");
+    for (const hit of result.narrative) {
+      parts.push(`• [${hit.doc_type}] ${hit.content}`);
+    }
+  }
+
+  if (result.conflict_notes.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[conflict_notes]");
+    for (const hit of result.conflict_notes) {
+      parts.push(`• ${hit.content}`);
+    }
+  }
+
+  if (result.episode.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[episode]");
+    for (const hit of result.episode) {
+      parts.push(`• [${hit.doc_type}] ${hit.content}`);
+    }
+  }
+
+  return parts.join("\n").trim();
+}
+
+type CoreMemoryRenderableBlock = {
+  label: CoreMemoryLabel;
+  chars_current: number;
+  char_limit: number;
+  value: string;
+};
+
+function getAllCoreMemoryBlocks(agentId: string, db: Db): CoreMemoryRenderableBlock[] {
+  const service = new CoreMemoryService(db);
+  return service.getAllBlocks(agentId);
+}
+
+function renderCoreMemoryBlocks(
+  blocks: CoreMemoryRenderableBlock[],
+  tagName: "pinned_block" | "shared_block",
+): string {
+  if (blocks.length === 0) {
+    return "";
+  }
+
+  return blocks
+    .map(
+      (block) =>
+        `<${tagName} label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</${tagName}>`,
+    )
+    .join("\n");
+}
+
+type AttachmentRow = {
+  block_id: number;
+};
+
+/**
+ * Get formatted shared blocks attached to an agent for prompt injection.
+ * Queries shared_block_attachments for the agent, fetches block title and sections,
+ * and formats as XML-like <shared_block> elements.
+ * Returns empty string if no attachments exist.
+ * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
+ */
+export function getAttachedSharedBlocks(agentId: string, db: Db): string {
+  const attachments = db.query<AttachmentRow>(
+    `SELECT block_id FROM shared_block_attachments WHERE target_kind = 'agent' AND target_id = ?`,
+    [agentId],
+  );
+
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  const repo = new SharedBlockRepo(db);
+  const blocks: string[] = [];
+
+  for (const attachment of attachments) {
+    const block = repo.getBlock(attachment.block_id);
+    if (!block) continue;
+
+    const sections = repo.getSections(attachment.block_id);
+    if (sections.length === 0) continue;
+
+    const sectionLines = sections
+      .map((s) => `${s.sectionPath}: ${s.content}`)
+      .join("\n");
+
+    blocks.push(`<shared_block title="${block.title}">\n${sectionLines}\n</shared_block>`);
+  }
+
+  return blocks.join("\n");
 }

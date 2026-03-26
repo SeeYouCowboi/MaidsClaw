@@ -11,7 +11,19 @@
       "WebFetch(domain:docs.vllm.ai)",
       "WebFetch(domain:apidog.com)",
       "Bash(MAX_TURNS=5 SKIP_JUDGE=1 TURN_DELAY=1000 bun run:*)",
-      "Bash(TURN_DELAY=1500 bun run:*)"
+      "Bash(TURN_DELAY=1500 bun run:*)",
+      "Bash(find /d/Projects/MaidsClaw -name *migration* -o -name *.sql)",
+      "Bash(find /d/Projects/MaidsClaw/src/storage -type f -name *.ts)",
+      "Bash(xargs grep:*)",
+      "Bash(wc -l /d/Projects/MaidsClaw/src/memory/*.ts)",
+      "Bash(done)",
+      "Bash(grep -r \"belief_type\\\\|epistemic_status\\\\|\\\\.confidence\" src/ --include=*.ts -l)",
+      "Bash(grep -v \"//.*confidence\\\\|confidence_score\\\\|confidence_threshold\\\\|confident\")",
+      "Bash(grep -rn viewer_role src/memory/ --include=*.ts)",
+      "Bash(wc -l .sisyphus/drafts/*.md)",
+      "Bash(cd:*)",
+      "mcp__plugin_oh-my-claudecode_t__state_list_active",
+      "mcp__plugin_oh-my-claudecode_t__state_clear"
     ]
   }
 }

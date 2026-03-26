@@ -76,6 +76,8 @@ export class ToolExecutor {
       };
       if (tool.effectClass) schema.effectClass = tool.effectClass;
       if (tool.traceVisibility) schema.traceVisibility = tool.traceVisibility;
+      if (tool.executionContract) schema.executionContract = tool.executionContract;
+      if (tool.artifactContracts) schema.artifactContracts = tool.artifactContracts;
       localSchemas.push(schema);
     }
 
@@ -95,6 +97,8 @@ export class ToolExecutor {
         };
         if (tool.effectClass) schema.effectClass = tool.effectClass;
         if (tool.traceVisibility) schema.traceVisibility = tool.traceVisibility;
+        if (tool.executionContract) schema.executionContract = tool.executionContract;
+        if (tool.artifactContracts) schema.artifactContracts = tool.artifactContracts;
         remoteSchemas.push(schema);
       }
     }

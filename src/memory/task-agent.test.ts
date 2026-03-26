@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
 import { MaidsClawError } from "../core/errors.js";
+import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryService } from "./core-memory.js";
 import { EmbeddingService } from "./embeddings.js";
 import { MaterializationService } from "./materialization.js";
@@ -116,7 +117,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "Alice looks worried",
@@ -131,13 +132,13 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_belief",
+          name: "upsert_assertion",
           arguments: {
             source: "person:alice",
             target: "person:alice",
             predicate: "seems_worried",
-            belief_type: "observation",
-            confidence: 0.82,
+            basis: "first_hand",
+            stance: "tentative",
           },
         },
       ],
@@ -152,8 +153,8 @@ describe("MemoryTaskAgent", () => {
     const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
     const result = await agent.runMigrate(makeFlushRequest());
 
-    expect(result.private_event_ids.length).toBe(1);
-    expect(result.private_belief_ids.length).toBe(1);
+    expect(result.episode_event_ids.length).toBe(1);
+    expect(result.assertion_ids.length).toBe(1);
     expect(result.entity_ids.length).toBe(1);
     expect(provider.chatCalls).toBe(2);
 
@@ -162,9 +163,60 @@ describe("MemoryTaskAgent", () => {
     expect(index.value).toContain("#worry");
 
     const privateEvent = db
-      .prepare(`SELECT projection_class FROM agent_event_overlay WHERE id = ?`)
-      .get(result.private_event_ids[0]) as { projection_class: string };
-    expect(privateEvent.projection_class).toBe("area_candidate");
+      .prepare(`SELECT category FROM private_episode_events WHERE id = ?`)
+      .get(result.episode_event_ids[0]) as { category: string };
+    expect(privateEvent.category).toBe("observation");
+  });
+
+  it("omits contested from legacy upsert_assertion tool schema", async () => {
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-schema-check" }));
+
+    const upsertTool = provider.chatInputs[0]?.tools.find((tool) => tool.name === "upsert_assertion");
+    expect(upsertTool).toBeDefined();
+    const stanceSchema = (upsertTool?.inputSchema.properties as { stance?: { enum?: string[] } }).stance;
+    expect(stanceSchema?.enum).toBeDefined();
+    expect(stanceSchema?.enum).not.toContain("contested");
+  });
+
+  it("rejects contested writes from legacy upsert_assertion", async () => {
+    const provider = new MockModelProvider([[
+      {
+        name: "upsert_assertion",
+        arguments: {
+          source: "person:alice",
+          target: "person:alice",
+          predicate: "trusts",
+          basis: "first_hand",
+          stance: "contested",
+        },
+      },
+    ]]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let caughtError: unknown;
+    try {
+      await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-legacy-contested" }));
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(MaidsClawError);
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_OP_UNSUPPORTED");
+    expect(mce.retriable).toBe(false);
+    expect(mce.message).toContain("submit_rp_turn");
+
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current`)
+      .get() as { cnt: number };
+    expect(cognitionCount.cnt).toBe(0);
   });
 
   it("explicit settlements are ingested during flush and ordinary turns still extract private beliefs", async () => {
@@ -196,13 +248,13 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_belief",
+          name: "upsert_assertion",
           arguments: {
             source: "person:carol",
             target: "person:carol",
             predicate: "seems_tired",
-            belief_type: "observation",
-            confidence: 0.7,
+            basis: "first_hand",
+            stance: "tentative",
           },
         },
       ],
@@ -261,8 +313,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -312,14 +364,14 @@ describe("MemoryTaskAgent", () => {
     expect(provider.chatCalls).toBe(3);
 
     const explicitRow = db
-      .prepare(`SELECT cognition_key FROM agent_fact_overlay WHERE cognition_key = 'assert:explicit-trust'`)
+      .prepare(`SELECT cognition_key FROM private_cognition_current WHERE cognition_key = 'assert:explicit-trust'`)
       .get() as { cognition_key: string } | null;
     expect(explicitRow?.cognition_key).toBe("assert:explicit-trust");
 
     const ordinaryBelief = db
-      .prepare(`SELECT predicate FROM agent_fact_overlay WHERE predicate = 'seems_tired'`)
-      .get() as { predicate: string } | null;
-    expect(ordinaryBelief?.predicate).toBe("seems_tired");
+      .prepare(`SELECT summary_text FROM private_cognition_current WHERE summary_text LIKE ?`)
+      .get("%seems_tired%") as { summary_text: string } | null;
+    expect(ordinaryBelief?.summary_text).toContain("seems_tired");
   });
 
   it("ordinary CALL_ONE excludes dialogue already covered by explicit settlements", async () => {
@@ -384,8 +436,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -459,7 +511,7 @@ describe("MemoryTaskAgent", () => {
     const entityCount = db
       .prepare(`SELECT count(*) as cnt FROM entity_nodes WHERE pointer_key = 'person:bob'`)
       .get() as { cnt: number };
-    const eventCount = db.prepare(`SELECT count(*) as cnt FROM agent_event_overlay`).get() as { cnt: number };
+    const eventCount = db.prepare(`SELECT (SELECT count(*) FROM private_episode_events) + (SELECT count(*) FROM private_cognition_events) as cnt`).get() as { cnt: number };
     const indexBlock = coreMemory.getBlock("agent-1", "index");
 
     expect(entityCount.cnt).toBe(0);
@@ -507,7 +559,7 @@ describe("MemoryTaskAgent", () => {
     const provider = new MockModelProvider([
       [
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked one",
@@ -520,7 +572,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked two",
@@ -533,7 +585,7 @@ describe("MemoryTaskAgent", () => {
           },
         },
         {
-          name: "create_private_event",
+          name: "create_episode_event",
           arguments: {
             role: "assistant",
             private_notes: "linked three",
@@ -723,8 +775,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -758,13 +810,13 @@ describe("MemoryTaskAgent", () => {
     await agent.runMigrate(flushRequest);
 
     expect(capturedJob).toBeDefined();
-    const beliefRefs = capturedJob!.changedNodeRefs.filter((ref) => ref.startsWith("private_belief:"));
+    const beliefRefs = capturedJob!.changedNodeRefs.filter((ref) => ref.startsWith("assertion:"));
     expect(beliefRefs.length).toBeGreaterThanOrEqual(1);
 
     const assertionRow = db
-      .prepare(`SELECT id FROM agent_fact_overlay WHERE cognition_key = 'assert:ref-test'`)
+      .prepare(`SELECT id FROM private_cognition_current WHERE cognition_key = 'assert:ref-test'`)
       .get() as { id: number };
-    expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("private_belief", assertionRow.id));
+    expect(capturedJob!.changedNodeRefs).toContain(makeNodeRef("assertion", assertionRow.id));
   });
 
   it("explicit unresolved refs roll back migrate and keep the range retryable", async () => {
@@ -816,8 +868,8 @@ describe("MemoryTaskAgent", () => {
               selfPointerKey: "__self__",
               userPointerKey: "__user__",
             },
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert",
@@ -857,10 +909,10 @@ describe("MemoryTaskAgent", () => {
     expect((mce.details as { settlementId: string }).settlementId).toBe("stl:req-unresolved");
     expect((mce.details as { unresolvedKeys: string[] }).unresolvedKeys).toContain("assert:unresolved-trust");
 
-    const overlayCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved-trust'`)
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:unresolved-trust'`)
       .get() as { cnt: number };
-    expect(overlayCount.cnt).toBe(0);
+    expect(cognitionCount.cnt).toBe(0);
   });
 
   it("exposes no onTurn or onSessionEnd trigger hooks", () => {
@@ -869,5 +921,272 @@ describe("MemoryTaskAgent", () => {
 
     expect("onTurn" in (agent as unknown as Record<string, unknown>)).toBe(false);
     expect("onSessionEnd" in (agent as unknown as Record<string, unknown>)).toBe(false);
+  });
+
+  it("loadExistingContext passes canonical stance/basis to model provider, not confidence/epistemic_status", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const cognitionRepo = new CognitionRepository(db);
+    cognitionRepo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "assert:canonical-test",
+      settlementId: "stl-canonical",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "trusts",
+      targetPointerKey: "__user__",
+      stance: "confirmed",
+      basis: "first_hand",
+    });
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-canonical-read" }));
+
+    expect(provider.chatCalls).toBeGreaterThanOrEqual(1);
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          stance?: string;
+          basis?: string;
+          confidence?: unknown;
+          epistemic_status?: unknown;
+          cognition_key?: string;
+        }>;
+      };
+    };
+
+    const canonicalBelief = parsed.existingContext.privateBeliefs.find(
+      (b) => b.cognition_key === "assert:canonical-test",
+    );
+    expect(canonicalBelief).toBeDefined();
+    expect(canonicalBelief?.stance).toBe("confirmed");
+    expect(canonicalBelief?.basis).toBe("first_hand");
+    expect(canonicalBelief?.confidence).toBeUndefined();
+    expect(canonicalBelief?.epistemic_status).toBeUndefined();
+  });
+
+  it("loadExistingContext maps legacy epistemic_status/belief_type to canonical stance/basis", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "User",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const selfId = db
+      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = '__self__' AND owner_agent_id = 'agent-1'`)
+      .get() as { id: number };
+    const userId = db
+      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = '__user__' AND owner_agent_id = 'agent-1'`)
+      .get() as { id: number };
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO private_cognition_current
+       (agent_id, cognition_key, kind, stance, basis, status,
+        summary_text, record_json, source_event_id, updated_at)
+       VALUES (?, ?, 'assertion', ?, ?, 'active', ?, ?, ?, ?)`,
+    ).run(
+      "agent-1",
+      "assert:legacy-trusts",
+      "confirmed",
+      "first_hand",
+      "legacy_trusts",
+      JSON.stringify({ predicate: "legacy_trusts", sourcePointerKey: "__self__", targetPointerKey: "__user__" }),
+      1,
+      now,
+    );
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-legacy-read" }));
+
+    expect(provider.chatCalls).toBeGreaterThanOrEqual(1);
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          predicate?: string;
+          stance?: string;
+          basis?: string;
+          confidence?: unknown;
+          epistemic_status?: unknown;
+        }>;
+      };
+    };
+
+    const legacyBelief = parsed.existingContext.privateBeliefs.find(
+      (b) => b.predicate === "legacy_trusts",
+    );
+    expect(legacyBelief).toBeDefined();
+    expect(legacyBelief?.stance).toBe("confirmed");
+    expect(legacyBelief?.basis).toBe("first_hand");
+    expect(legacyBelief?.confidence).toBeUndefined();
+    expect(legacyBelief?.epistemic_status).toBeUndefined();
+  });
+
+  it("loadExistingContext includes commitments with canonical representation", async () => {
+    storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Self",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+
+    const cognitionRepo = new CognitionRepository(db);
+    cognitionRepo.upsertCommitment({
+      agentId: "agent-1",
+      cognitionKey: "goal:test-commitment",
+      settlementId: "stl-commit",
+      opIndex: 0,
+      targetEntityId: undefined,
+      salience: 0.8,
+      mode: "goal",
+      target: { action: "help_user" },
+      status: "active",
+      priority: 1,
+      horizon: "immediate",
+    });
+
+    const provider = new MockModelProvider([
+      [],
+      [{ name: "update_index_block", arguments: { new_text: "" } }],
+    ]);
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+    await agent.runMigrate(makeFlushRequest({ idempotencyKey: "queue:batch-commitment-read" }));
+
+    const userPayload = provider.chatInputs[0]?.messages[1]?.content;
+    const parsed = JSON.parse(String(userPayload)) as {
+      existingContext: {
+        privateBeliefs: Array<{
+          kind?: string;
+          cognition_key?: string;
+          stance?: string;
+          status?: string;
+        }>;
+      };
+    };
+
+    const commitment = parsed.existingContext.privateBeliefs.find(
+      (b) => b.cognition_key === "goal:test-commitment",
+    );
+    expect(commitment).toBeDefined();
+    expect(commitment?.kind).toBe("commitment");
+    expect(commitment?.stance).toBe("accepted");
+    expect(commitment?.status).toBe("active");
+  });
+
+  it("unresolved refs backoff preserves escalating schedule after loadExistingContext upgrade", async () => {
+    const provider = new MockModelProvider([[]]);
+
+    const flushRequest = makeFlushRequest({
+      idempotencyKey: "queue:batch-backoff-verify",
+      dialogueRecords: [
+        { role: "user", content: "Test", timestamp: 1000, recordId: "u-backoff", recordIndex: 1 },
+        { role: "assistant", content: "OK", timestamp: 1100, recordId: "a-backoff", recordIndex: 2 },
+      ],
+      interactionRecords: [
+        {
+          sessionId: "session-1",
+          recordId: "u-backoff",
+          recordIndex: 1,
+          actorType: "user",
+          recordType: "message",
+          payload: { role: "user", content: "Test" },
+          correlatedTurnId: "req-backoff-verify",
+          committedAt: 1000,
+        },
+        {
+          sessionId: "session-1",
+          recordId: "stl:req-backoff-verify",
+          recordIndex: 2,
+          actorType: "rp_agent",
+          recordType: "turn_settlement",
+          payload: {
+            settlementId: "stl:req-backoff-verify",
+            requestId: "req-backoff-verify",
+            sessionId: "session-1",
+            ownerAgentId: "agent-1",
+            publicReply: "OK",
+            hasPublicReply: true,
+            viewerSnapshot: {
+              selfPointerKey: "__self__",
+              userPointerKey: "__user__",
+            },
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
+              ops: [{
+                op: "upsert",
+                record: {
+                  kind: "assertion",
+                  key: "assert:backoff-verify",
+                  proposition: {
+                    subject: { kind: "special", value: "self" },
+                    predicate: "trusts",
+                    object: { kind: "entity", ref: { kind: "special", value: "user" } },
+                  },
+                  stance: "accepted",
+                  basis: "first_hand",
+                },
+              }],
+            },
+          },
+          correlatedTurnId: "req-backoff-verify",
+          committedAt: 1150,
+        },
+      ],
+    });
+
+    const agent = new MemoryTaskAgent(db, storage, coreMemory, embeddings, materialization, provider);
+
+    let caughtError: unknown;
+    try {
+      await agent.runMigrate(flushRequest);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeDefined();
+    const mce = caughtError as MaidsClawError;
+    expect(mce.code).toBe("COGNITION_UNRESOLVED_REFS");
+    expect(mce.retriable).toBe(true);
+
+    const cognitionCount = db
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:backoff-verify'`)
+      .get() as { cnt: number };
+    expect(cognitionCount.cnt).toBe(0);
   });
 });

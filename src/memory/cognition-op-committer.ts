@@ -1,5 +1,6 @@
 import { MaidsClawError } from "../core/errors.js";
 import type {
+  AssertionBasis,
   CognitionEntityRef,
   CognitionOp,
   CognitionRecord,
@@ -7,7 +8,7 @@ import type {
   CommitmentRecord,
   EvaluationRecord,
 } from "../runtime/rp-turn-contract.js";
-import { GraphStorageService } from "./storage.js";
+import type { GraphStorageService } from "./storage.js";
 import type { NodeRef } from "./types.js";
 
 export class CognitionOpCommitter {
@@ -44,7 +45,10 @@ export class CognitionOpCommitter {
       }
 
       if (op.op === "retract" && op.target) {
-        this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind);
+        if (this.isAlreadyRetracted(op.target)) {
+          continue;
+        }
+        this.storage.retractExplicitCognition(this.agentId, op.target.key, op.target.kind, settlementId);
       }
     }
 
@@ -74,7 +78,8 @@ export class CognitionOpCommitter {
         predicate: record.proposition.predicate,
         targetPointerKey,
         stance: record.stance,
-        confidence: record.confidence,
+        basis: this.normalizeAssertionBasis(record.basis),
+        preContestedStance: "preContestedStance" in record ? record.preContestedStance : undefined,
         provenance: record.provenance,
       });
       return result.ref;
@@ -192,5 +197,45 @@ export class CognitionOpCommitter {
 
   private isCognitionSelector(value: CognitionEntityRef | CognitionSelector): value is CognitionSelector {
     return value.kind === "assertion" || value.kind === "evaluation" || value.kind === "commitment";
+  }
+
+  private normalizeAssertionBasis(value: unknown): AssertionBasis | undefined {
+    if (value === "first_hand" || value === "hearsay" || value === "inference" || value === "introspection" || value === "belief") {
+      return value;
+    }
+    if (value === "observation") {
+      return "first_hand";
+    }
+    if (value === "communication") {
+      return "hearsay";
+    }
+    if (value === "suspicion") {
+      return "inference";
+    }
+    return undefined;
+  }
+
+  private isAlreadyRetracted(target: CognitionSelector): boolean {
+    const cognitionRepo = (this.storage as unknown as {
+      cognitionRepo?: {
+        getAssertionByKey(agentId: string, cognitionKey: string): { stance: string } | null;
+        getEvaluationByKey(agentId: string, cognitionKey: string): { status: string } | null;
+        getCommitmentByKey(agentId: string, cognitionKey: string): { status: string } | null;
+      };
+    }).cognitionRepo;
+    if (!cognitionRepo) {
+      return false;
+    }
+
+    if (target.kind === "assertion") {
+      const row = cognitionRepo.getAssertionByKey(this.agentId, target.key);
+      return row !== null && (row.stance === "rejected" || row.stance === "abandoned");
+    }
+
+    const row =
+      target.kind === "evaluation"
+        ? cognitionRepo.getEvaluationByKey(this.agentId, target.key)
+        : cognitionRepo.getCommitmentByKey(this.agentId, target.key);
+    return row?.status === "retracted";
   }
 }

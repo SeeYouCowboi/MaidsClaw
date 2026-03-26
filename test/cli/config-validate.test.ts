@@ -256,7 +256,7 @@ describe("config validate", () => {
       {
         id: "rp:bad",
         role: "rp_agent",
-        toolPermissions: ["memory_read", "memory_search"],
+        toolPermissions: ["memory_read", "narrative_search"],
       },
     ]);
 

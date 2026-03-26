@@ -1,7 +1,12 @@
 import type { Database } from "bun:sqlite";
+import type { AgentRole } from "../agents/profile.js";
+import { MaidsClawError } from "../core/errors.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
-import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../runtime/submit-rp-turn-tool.js";
+import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import type { WriteTemplate } from "./contracts/write-template.js";
+import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
 import { GraphOrganizer } from "./graph-organizer.js";
@@ -10,13 +15,13 @@ import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
+import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type {
-  AgentEventOverlay,
-  BeliefType,
-  EpistemicStatus,
   GraphOrganizerResult,
   MigrationResult,
   NodeRef,
+  PrivateEventCategory,
+  ProjectionClass,
 } from "./types.js";
 
 export type { MigrationResult, GraphOrganizerResult } from "./types.js";
@@ -34,6 +39,8 @@ export type MemoryFlushRequest = CoreMemoryFlushRequest & {
   dialogueRecords?: DialogueRecord[];
   queueOwnerAgentId?: string;
   interactionRecords?: InteractionRecord[];
+  agentRole?: AgentRole;
+  writeTemplateOverride?: WriteTemplate;
 };
 
 export type GraphOrganizerJob = {
@@ -48,7 +55,7 @@ export type ExplicitSettlementMeta = {
   settlementId: string;
   requestId: string;
   ownerAgentId: string;
-  privateCommit: PrivateCognitionCommit;
+  privateCognition: PrivateCognitionCommitV4;
 };
 
 export type IngestionAttachment = {
@@ -73,6 +80,8 @@ export type ToolCallResult = {
   arguments: Record<string, unknown>;
 };
 
+
+
 export type ChatToolDefinition = {
   name: string;
   description: string;
@@ -87,22 +96,27 @@ export type ChatMessage = {
 export type MemoryTaskModelProvider = {
   readonly defaultEmbeddingModelId: string;
   chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
-  embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
+  embed(texts: string[], purpose: "memory_index" | "narrative_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
 
 export type CreatedState = {
-  privateEventIds: number[];
-  privateBeliefIds: number[];
+  episodeEventIds: number[];
+  assertionIds: number[];
   entityIds: number[];
   factIds: number[];
   changedNodeRefs: NodeRef[];
 };
 
+const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
+const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
+const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
+const ASSERTION_IDS_KEY = "assertion_ids";
+
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
-    name: "create_private_event",
+    name: CREATE_EPISODE_EVENT_TOOL_NAME,
     description:
-      "Create private cognitive events in agent_event_overlay. Use for owner-private thoughts, observations, and public-candidate emission.",
+      "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
       type: "object",
       required: ["role", "private_notes", "salience", "emotion", "event_category", "primary_actor_entity_id", "projection_class"],
@@ -138,18 +152,17 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
     },
   },
   {
-    name: "create_private_belief",
-    description: "Create private belief overlay edges between entities.",
+    name: UPSERT_ASSERTION_TOOL_NAME,
+    description: "Upsert private assertions between entities.",
     inputSchema: {
       type: "object",
-      required: ["source", "target", "predicate", "belief_type", "confidence"],
+      required: ["source", "target", "predicate", "basis", "stance"],
       properties: {
         source: { type: ["number", "string"] },
         target: { type: ["number", "string"] },
         predicate: { type: "string" },
-        belief_type: { type: ["string", "null"] },
-        confidence: { type: ["number", "null"] },
-        epistemic_status: { type: ["string", "null"] },
+        basis: { type: "string", enum: ["first_hand", "hearsay", "inference", "introspection", "belief"] },
+        stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "rejected", "abandoned"] },
         provenance: { type: ["string", "null"] },
         source_event_ref: { type: ["string", "null"] },
       },
@@ -277,12 +290,12 @@ export class MemoryIngestionPolicy {
     for (const attachment of attachments) {
       if (attachment.recordType !== "turn_settlement") continue;
       const p = attachment.payload as TurnSettlementPayload | undefined;
-      if (!p || !p.privateCommit || !p.privateCommit.ops || p.privateCommit.ops.length === 0) continue;
+      if (!p || !p.privateCognition || !p.privateCognition.ops || p.privateCognition.ops.length === 0) continue;
       const meta: ExplicitSettlementMeta = {
         settlementId: p.settlementId,
         requestId: p.requestId,
         ownerAgentId: p.ownerAgentId,
-        privateCommit: p.privateCommit,
+        privateCognition: p.privateCognition,
       };
       attachment.explicitMeta = meta;
       explicitSettlements.push(meta);
@@ -364,8 +377,8 @@ export class MemoryTaskAgent {
     const ingest = this.ingestionPolicy.buildMigrateInput(flushRequest);
     const existingContext = this.loadExistingContext(flushRequest.agentId);
     const created: CreatedState = {
-      privateEventIds: [],
-      privateBeliefIds: [],
+      episodeEventIds: [],
+      assertionIds: [],
       entityIds: [],
       factIds: [],
       changedNodeRefs: [],
@@ -373,7 +386,12 @@ export class MemoryTaskAgent {
 
     this.db.prepare("BEGIN IMMEDIATE").run();
     try {
-      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS);
+      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
+        agentRole: flushRequest.agentRole ?? "rp_agent",
+        writeTemplateOverride: flushRequest.writeTemplateOverride,
+        agentId: flushRequest.agentId,
+        artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+      });
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
       const dedupedIngest: IngestionInput = {
@@ -447,8 +465,8 @@ export class MemoryTaskAgent {
 
     return {
       batch_id: flushRequest.idempotencyKey,
-      private_event_ids: created.privateEventIds,
-      private_belief_ids: created.privateBeliefIds,
+      [EPISODE_EVENT_IDS_KEY]: created.episodeEventIds,
+      [ASSERTION_IDS_KEY]: created.assertionIds,
       entity_ids: created.entityIds,
       fact_ids: created.factIds,
     };
@@ -483,15 +501,31 @@ export class MemoryTaskAgent {
       )
       .all(agentId);
 
-    const privateBeliefs = this.db
-      .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, confidence, epistemic_status
-         FROM agent_fact_overlay
-         WHERE agent_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 200`,
-      )
-      .all(agentId);
+    const cognitionRepo = new CognitionRepository(this.db);
+    const assertions = cognitionRepo.getAssertions(agentId, { activeOnly: false }).slice(0, 150);
+    const commitments = cognitionRepo.getCommitments(agentId, { activeOnly: false }).slice(0, 50);
+
+    const privateBeliefs = [
+      ...assertions.map((row) => ({
+        kind: "assertion" as const,
+        id: row.id,
+        source_entity_id: row.sourceEntityId,
+        target_entity_id: row.targetEntityId,
+        predicate: row.predicate,
+        stance: row.stance,
+        basis: row.basis,
+        "cognition_key": row.cognitionKey,
+      })),
+      ...commitments.map((row) => ({
+        kind: "commitment" as const,
+        id: row.id,
+        target_entity_id: row.targetEntityId,
+        status: row.commitmentStatus,
+        stance: row.status === "active" ? "accepted" : "rejected",
+        basis: null,
+        "cognition_key": row.cognitionKey,
+      })),
+    ];
 
     return { entities, privateBeliefs };
   }
@@ -500,9 +534,42 @@ export class MemoryTaskAgent {
     flushRequest: MemoryFlushRequest,
     toolCalls: ToolCallResult[],
     created: CreatedState,
-  ): AgentEventOverlay[] {
+  ): Array<{
+    id: number;
+    event_id: number | null;
+    agent_id: string;
+    role: string | null;
+    private_notes: string | null;
+    salience: number | null;
+    emotion: string | null;
+    event_category: PrivateEventCategory;
+    primary_actor_entity_id: number | null;
+    projection_class: ProjectionClass;
+    location_entity_id: number | null;
+    projectable_summary: string | null;
+    source_record_id: string | null;
+    created_at: number;
+  }> {
     const pointerToEntityId = new Map<string, number>();
-    const privateEvents: AgentEventOverlay[] = [];
+    const cognitionRepo = new CognitionRepository(this.db);
+    const beliefSettlementId = `${flushRequest.idempotencyKey}:belief`;
+    let beliefOpIndex = 0;
+    const privateEvents: Array<{
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      role: string | null;
+      private_notes: string | null;
+      salience: number | null;
+      emotion: string | null;
+      event_category: PrivateEventCategory;
+      primary_actor_entity_id: number | null;
+      projection_class: ProjectionClass;
+      location_entity_id: number | null;
+      projectable_summary: string | null;
+      source_record_id: string | null;
+      created_at: number;
+    }> = [];
 
     for (const call of toolCalls) {
       if (call.name === "create_entity") {
@@ -524,7 +591,7 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      if (call.name === "create_private_event") {
+      if (call.name === CREATE_EPISODE_EVENT_TOOL_NAME) {
         const primaryActor = this.resolveEntityReference(
           call.arguments.primary_actor_entity_id,
           flushRequest.agentId,
@@ -546,32 +613,92 @@ export class MemoryTaskAgent {
           projectableSummary: this.asOptionalString(call.arguments.projectable_summary) ?? undefined,
           sourceRecordId: this.asOptionalString(call.arguments.source_record_id) ?? undefined,
         });
-        created.privateEventIds.push(privateEventId);
-        created.changedNodeRefs.push(makeNodeRef("private_event", privateEventId));
-        const row = this.db.prepare(`SELECT * FROM agent_event_overlay WHERE id = ?`).get(privateEventId) as AgentEventOverlay;
-        privateEvents.push(row);
+        created.episodeEventIds.push(privateEventId);
+        created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
+        const row = this.db.prepare(
+          `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
+        ).get(privateEventId) as {
+          id: number;
+          event_id: number | null;
+          agent_id: string;
+          category: string;
+          summary: string;
+          private_notes: string | null;
+          committed_time: number;
+          created_at: number;
+        };
+        privateEvents.push({
+          id: row.id,
+          event_id: row.event_id,
+          agent_id: row.agent_id,
+          role: call.arguments.role as string | null,
+          private_notes: row.private_notes,
+          salience: (call.arguments.salience as number) ?? null,
+          emotion: (call.arguments.emotion as string) ?? null,
+          event_category: row.category as PrivateEventCategory,
+          primary_actor_entity_id: primaryActor ?? null,
+          projection_class: call.arguments.projection_class as ProjectionClass,
+          location_entity_id: location ?? null,
+          projectable_summary: (call.arguments.projectable_summary as string) ?? null,
+          source_record_id: (call.arguments.source_record_id as string) ?? null,
+          created_at: row.created_at,
+        });
         continue;
       }
 
-      if (call.name === "create_private_belief") {
+      if (call.name === UPSERT_ASSERTION_TOOL_NAME) {
+        const stance = this.asString(call.arguments.stance);
+        if (stance === "contested") {
+          throw new MaidsClawError({
+            code: "COGNITION_OP_UNSUPPORTED",
+            message:
+              "legacy upsert_assertion does not support contested writes; use submit_rp_turn with preContestedStance and conflictFactors",
+            retriable: false,
+            details: {
+              tool: UPSERT_ASSERTION_TOOL_NAME,
+              stance,
+            },
+          });
+        }
         const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
         const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
         if (!source || !target) {
           continue;
         }
-        const beliefId = this.storage.createPrivateBelief({
+        const sourcePointerKey =
+          typeof call.arguments.source === "string"
+            ? call.arguments.source
+            : this.storage.getEntityById(source)?.pointerKey;
+        const targetPointerKey =
+          typeof call.arguments.target === "string"
+            ? call.arguments.target
+            : this.storage.getEntityById(target)?.pointerKey;
+        if (!sourcePointerKey || !targetPointerKey) {
+          continue;
+        }
+
+        const beliefId = cognitionRepo.upsertAssertion({
           agentId: flushRequest.agentId,
-          sourceEntityId: source,
-          targetEntityId: target,
+          settlementId: beliefSettlementId,
+          opIndex: beliefOpIndex,
+          sourcePointerKey,
           predicate: this.asString(call.arguments.predicate),
-          beliefType: this.asOptionalString(call.arguments.belief_type) as BeliefType | undefined,
-          confidence: this.asOptionalNumber(call.arguments.confidence) ?? undefined,
-          epistemicStatus: this.asOptionalString(call.arguments.epistemic_status) as EpistemicStatus | undefined,
+          targetPointerKey,
+          basis: this.asString(call.arguments.basis) as AssertionBasis,
+          stance: stance as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
-          sourceEventRef: this.asOptionalNodeRef(call.arguments.source_event_ref),
-        });
-        created.privateBeliefIds.push(beliefId);
-        created.changedNodeRefs.push(makeNodeRef("private_belief", beliefId));
+        }).id;
+        beliefOpIndex += 1;
+
+        const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
+        if (sourceEventRef) {
+          this.db
+            .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+            .run(sourceEventRef, Date.now(), beliefId);
+        }
+
+        created.assertionIds.push(beliefId);
+        created.changedNodeRefs.push(makeNodeRef("assertion", beliefId));
         continue;
       }
 
@@ -606,7 +733,7 @@ export class MemoryTaskAgent {
     return privateEvents;
   }
 
-  private createSameEpisodeEdgesForBatch(privateEvents: AgentEventOverlay[]): void {
+  private createSameEpisodeEdgesForBatch(privateEvents: Array<{ event_id: number | null }>): void {
     const linkedEventIds = privateEvents
       .map((event) => event.event_id)
       .filter((eventId): eventId is number => typeof eventId === "number" && eventId > 0);
@@ -729,7 +856,7 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|private_event|private_belief):[1-9]\d*$/.test(value)) {
+    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;

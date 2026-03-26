@@ -5,8 +5,10 @@ import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
+import { defaultViewerCanReadAdminOnly, type ViewerContext } from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
+
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -19,16 +21,20 @@ import type {
 } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
+import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
+import { materializePublications } from "../memory/materialization.js";
+import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
+import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
 	MemoryFlushRequest,
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
-import type { ViewerContext } from "../core/contracts/viewer-context.js";
 import type { SessionService } from "../session/service.js";
 import type {
-	AssertionRecord,
+	AssertionRecordV4,
+	CanonicalRpTurnOutcome,
 	CognitionEntityRef,
 	CognitionKind,
 	CognitionOp,
@@ -37,6 +43,8 @@ import type {
 	EvaluationRecord,
 	RpBufferedExecutionResult,
 } from "./rp-turn-contract.js";
+import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "./submit-rp-turn-tool.js";
 
 type TurnServiceAgentLoop = {
 	run(request: AgentRunRequest): AsyncIterable<Chunk>;
@@ -68,8 +76,9 @@ export class TurnService {
 			role: AgentProfile["role"];
 		}) => ViewerContext | Promise<ViewerContext>,
 		private readonly projectionSink?: RuntimeProjectionSink,
-		_graphStorage?: GraphStorageService,
+		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
+		private readonly projectionManager?: ProjectionManager,
 	) {}
 
 	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
@@ -268,7 +277,7 @@ export class TurnService {
 			return;
 		}
 
-			if ("error" in bufferedResult) {
+		if ("error" in bufferedResult) {
 			const errorChunk = {
 				code: "RP_BUFFERED_EXECUTION_FAILED",
 				message: bufferedResult.error,
@@ -295,16 +304,54 @@ export class TurnService {
 			return;
 		}
 
-		const outcome = bufferedResult.outcome;
-		const hasPrivateOps = (outcome.privateCommit?.ops.length ?? 0) > 0;
-		const hasPublicReply = outcome.publicReply.length > 0;
+		// Single normalization point: normalizeRpTurnOutcome handles v3→v4
+		// conversion, validation, and publications extraction. Failures here
+		// abort the turn — no silent fallback.
+		let canonicalOutcome: CanonicalRpTurnOutcome;
+		try {
+			canonicalOutcome = normalizeRpTurnOutcome(
+				structuredClone(bufferedResult.outcome),
+			);
+			prevalidateRelationIntents(canonicalOutcome);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP outcome normalization failed");
+			const errorChunk = {
+				code: "RP_OUTCOME_NORMALIZATION_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText:
+					typeof bufferedResult.outcome?.publicReply === "string"
+						? bufferedResult.outcome.publicReply
+						: "",
+				hasAssistantVisibleActivity: false,
+			});
+			this.traceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const publications = canonicalOutcome.publications;
+		const hasPrivateOps =
+			(canonicalOutcome.privateCognition?.ops.length ?? 0) > 0;
+		const hasPublicReply = canonicalOutcome.publicReply.length > 0;
+		const hasPublications = publications.length > 0;
 		const hasAssistantVisibleActivity = hasPublicReply;
 
-		if (!hasPublicReply && !hasPrivateOps) {
+		const hasPrivateEpisodes = canonicalOutcome.privateEpisodes.length > 0;
+		if (!hasPublicReply && !hasPrivateOps && !hasPublications && !hasPrivateEpisodes) {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
-					"empty turn: publicReply is empty and privateCommit has no ops",
+					"empty turn: publicReply is empty and privateCognition has no ops",
 			};
 			this.traceLog(requestId, "warn", "RP buffered outcome was empty");
 			yield {
@@ -317,7 +364,7 @@ export class TurnService {
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
-				assistantText: outcome.publicReply,
+				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
 			this.traceStore?.finalizeTrace(requestId);
@@ -378,10 +425,26 @@ export class TurnService {
 					sessionId: effectiveRequest.sessionId,
 					ownerAgentId:
 						this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					publicReply: outcome.publicReply,
+					publicReply: canonicalOutcome.publicReply,
 					hasPublicReply,
 					viewerSnapshot: resolvedViewerSnapshot,
-					privateCommit: hasPrivateOps ? outcome.privateCommit : undefined,
+					schemaVersion: "turn_settlement_v5",
+					privateCognition: hasPrivateOps
+						? canonicalOutcome.privateCognition
+						: undefined,
+					privateEpisodes: canonicalOutcome.privateEpisodes.length > 0
+						? canonicalOutcome.privateEpisodes
+						: undefined,
+					publications,
+					...(canonicalOutcome.pinnedSummaryProposal
+						? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+						: {}),
+					relationIntents: canonicalOutcome.relationIntents.length > 0
+						? canonicalOutcome.relationIntents
+						: undefined,
+					conflictFactors: canonicalOutcome.conflictFactors.length > 0
+						? canonicalOutcome.conflictFactors
+						: undefined,
 				};
 
 				this.commitService.commitWithId({
@@ -396,7 +459,7 @@ export class TurnService {
 				if (hasPublicReply) {
 					const assistantPayload: AssistantMessagePayloadV3 = {
 						role: "assistant",
-						content: outcome.publicReply,
+						content: canonicalOutcome.publicReply,
 						settlementId,
 					};
 
@@ -409,17 +472,40 @@ export class TurnService {
 					});
 				}
 
-				const slotEntries = buildCognitionSlotPayload(
-					outcome.privateCommit?.ops ?? [],
+			const slotEntries = buildCognitionSlotPayload(
+				canonicalOutcome.privateCognition?.ops ?? [],
+				settlementId,
+			);
+
+			if (this.projectionManager) {
+				this.projectionManager.commitSettlement({
 					settlementId,
-				);
+					sessionId: effectiveRequest.sessionId,
+					agentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
+					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+					privateEpisodes: canonicalOutcome.privateEpisodes,
+					publications,
+					areaStateArtifacts: settlementPayload.areaStateArtifacts,
+					viewerSnapshot: resolvedViewerSnapshot,
+					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
+					recentCognitionSlotJson: JSON.stringify(slotEntries),
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
+				});
+			} else {
 				this.interactionStore.upsertRecentCognitionSlot(
 					effectiveRequest.sessionId,
 					this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
 					settlementId,
 					JSON.stringify(slotEntries),
 				);
-				settlementPayloadAfterCommit = settlementPayload;
+			}
+			settlementPayloadAfterCommit = settlementPayload;
 			});
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "Turn settlement transaction failed");
@@ -437,7 +523,7 @@ export class TurnService {
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
-				assistantText: outcome.publicReply,
+				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
 			this.traceStore?.finalizeTrace(requestId);
@@ -445,20 +531,43 @@ export class TurnService {
 		}
 
 		if (settlementPayloadAfterCommit) {
+			const normalizedSettlementPayload = normalizeSettlementPayload(
+				settlementPayloadAfterCommit,
+			);
 			this.traceStore?.addSettlement(
 				requestId,
 				this.toRedactedSettlementSummary(
 					effectiveRequest.sessionId,
-					settlementPayloadAfterCommit,
+					normalizedSettlementPayload,
 				),
 			);
+		}
+
+		if (hasPublications && this.graphStorage && !this.projectionManager) {
+			try {
+			materializePublications(this.graphStorage, publications, settlementId, {
+					sessionId: effectiveRequest.sessionId,
+					locationEntityId: viewerSnapshot?.currentLocationEntityId,
+					timestamp: Date.now(),
+				}, {
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						ownerAgentId: settlementPayloadAfterCommit?.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writeOperation: "append",
+					},
+				});
+			} catch (err) {
+				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 
 		const queueOwnerAgentId =
 			this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "unknown";
 		this.projectionSink?.onProjectionEligible(
 			createProjectionAppendix({
-				publicReply: outcome.publicReply,
+				publicReply: canonicalOutcome.publicReply,
 				agentId: queueOwnerAgentId,
 				settlementId,
 				locationEntityId: String(
@@ -471,7 +580,7 @@ export class TurnService {
 		if (hasPublicReply) {
 			const textChunk: Chunk = {
 				type: "text_delta",
-				text: outcome.publicReply,
+				text: canonicalOutcome.publicReply,
 			};
 			this.traceChunk(requestId, textChunk);
 			yield textChunk;
@@ -515,12 +624,19 @@ export class TurnService {
 		role: AgentProfile["role"];
 	}): Promise<ViewerContext> {
 		if (this.viewerContextResolver) {
-			return await this.viewerContextResolver(params);
+			const resolved = await this.viewerContextResolver(params);
+			return {
+				...resolved,
+				can_read_admin_only:
+					resolved.can_read_admin_only ??
+					defaultViewerCanReadAdminOnly(resolved.viewer_role),
+			};
 		}
 
 		return {
 			viewer_agent_id: params.agentId,
 			viewer_role: params.role,
+			can_read_admin_only: defaultViewerCanReadAdminOnly(params.role),
 			session_id: params.sessionId,
 			current_area_id: undefined,
 		};
@@ -575,7 +691,10 @@ export class TurnService {
 		}
 	}
 
-	async flushOnSessionClose(sessionId: string, agentId: string): Promise<boolean> {
+	async flushOnSessionClose(
+		sessionId: string,
+		agentId: string,
+	): Promise<boolean> {
 		if (this.memoryTaskAgent === null) {
 			return false;
 		}
@@ -661,6 +780,7 @@ export class TurnService {
 			dialogueRecords: toDialogueRecords(records),
 			interactionRecords: records as never,
 			queueOwnerAgentId,
+			agentRole: this.resolveAssistantActorType(flushRequest.sessionId),
 		});
 
 		this.interactionStore.markProcessed(
@@ -731,13 +851,31 @@ export class TurnService {
 		});
 
 		const redactedPayload = redacted.payload as {
-			privateCommit?: { opCount?: number; kinds?: string[] };
+			privateCognition?: { opCount?: number; kinds?: string[] };
 		};
+
+		const presentPublicArtifactKinds: string[] = [];
+		if (payload.hasPublicReply) {
+			presentPublicArtifactKinds.push("publicReply");
+		}
+		if (payload.publications && payload.publications.length > 0) {
+			presentPublicArtifactKinds.push("publications");
+		}
+		if (payload.pinnedSummaryProposal) {
+			presentPublicArtifactKinds.push("pinnedSummaryProposal");
+		}
+		if ((payload as Record<string, unknown>).areaStateArtifacts) {
+			presentPublicArtifactKinds.push("areaStateArtifacts");
+		}
+		const allKinds = [
+			...(redactedPayload.privateCognition?.kinds ?? []),
+			...presentPublicArtifactKinds,
+		];
 
 		return {
 			type: "turn_settlement",
-			op_count: redactedPayload.privateCommit?.opCount,
-			kinds: redactedPayload.privateCommit?.kinds,
+			op_count: redactedPayload.privateCognition?.opCount,
+			kinds: allKinds.length > 0 ? allKinds : undefined,
 		};
 	}
 }
@@ -863,7 +1001,7 @@ function refValue(ref: CognitionEntityRef | CognitionSelector): string {
 	return (ref as CognitionSelector).key;
 }
 
-function summarizeAssertion(record: AssertionRecord): string {
+function summarizeAssertion(record: AssertionRecordV4): string {
 	return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
 }
 
@@ -901,7 +1039,7 @@ function buildCognitionSlotPayload(
 			let summary: string;
 			switch (record.kind) {
 				case "assertion":
-					summary = summarizeAssertion(record as AssertionRecord);
+					summary = summarizeAssertion(record as AssertionRecordV4);
 					break;
 				case "evaluation":
 					summary = summarizeEvaluation(record as EvaluationRecord);

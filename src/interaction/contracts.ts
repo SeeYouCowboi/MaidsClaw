@@ -2,7 +2,17 @@
 // These are the ONLY interaction types allowed in the system
 
 import type { ProjectionAppendix } from "../core/types.js";
-import type { PrivateCognitionCommit } from "../runtime/rp-turn-contract.js";
+import type {
+  ConflictFactor,
+  PinnedSummaryProposal,
+  PrivateCognitionCommitV4,
+  PrivateEpisodeArtifact,
+  PublicationDeclaration,
+  RelationIntent,
+} from "../runtime/rp-turn-contract.js";
+
+type SurfacingClassification = "public_manifestation" | "latent_state_update" | "private_only";
+type AreaStateSourceType = "system" | "gm" | "simulation" | "inferred_world";
 
 // Actor types — who produced an interaction record
 // EXACTLY 6 actor types allowed
@@ -93,7 +103,22 @@ export type TurnSettlementPayload = {
     userPointerKey: string;
     currentLocationEntityId?: number;
   };
-  privateCommit?: PrivateCognitionCommit;
+  schemaVersion?: "turn_settlement_v3" | "turn_settlement_v4" | "turn_settlement_v5";
+  privateCognition?: PrivateCognitionCommitV4;
+  privateEpisodes?: PrivateEpisodeArtifact[];
+  publications?: PublicationDeclaration[];
+  pinnedSummaryProposal?: PinnedSummaryProposal;
+  relationIntents?: RelationIntent[];
+  conflictFactors?: ConflictFactor[];
+  areaStateArtifacts?: Array<{
+    key: string;
+    value: unknown;
+    surfacingClassification?: SurfacingClassification;
+    sourceType?: AreaStateSourceType;
+    areaId?: number;
+    validTime?: number;
+    committedTime?: number;
+  }>;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

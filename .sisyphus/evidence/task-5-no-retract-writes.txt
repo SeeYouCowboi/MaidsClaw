@@ -1,0 +1,29 @@
+=== Task 5 Evidence: No agent_fact_overlay UPDATE writes in retractCognition ===
+
+--- Grep: agent_fact_overlay in cognition-repo.ts ---
+Only 1 match found (READ-only, line 174):
+  174: if (normalized === "select id from agent_fact_overlay where agent_id = ? and cognition_key = ? limit 1") {
+
+No UPDATE agent_fact_overlay statements exist in the file.
+Zero matches for "UPDATE agent_fact_overlay" — all write statements removed.
+
+--- Blocks Removed ---
+1. assertion-kind path (was lines 751-758): UPDATE agent_fact_overlay SET stance='rejected'
+2. untyped retraction path (was lines 799-806): UPDATE agent_fact_overlay SET stance='rejected'
+
+--- Kept Intact ---
+- private_cognition_current UPDATE in assertion path (lines 751-760)
+- private_cognition_current UPDATE in evaluation/commitment path (lines 777-784)
+- private_cognition_current UPDATE in untyped path (lines 791-799)
+
+--- bun test src/memory/cognition/ ---
+84 pass, 0 fail, 201 expect() calls
+Ran 84 tests across 3 files. [386ms]
+
+--- bun run build ---
+tsc -p tsconfig.build.json --noEmit: exit 0 (clean)
+
+--- LSP diagnostics ---
+cognition-repo.ts: No diagnostics (0 errors)
+
+Date: 2026-03-25

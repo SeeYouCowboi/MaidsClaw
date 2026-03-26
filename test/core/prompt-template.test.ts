@@ -34,20 +34,21 @@ function makeMinimalInput(): RenderInput {
 // --- Tests ---
 
 describe("PromptSectionSlot enum", () => {
-  it("has exactly 8 slots", () => {
+  it("has exactly 9 slots", () => {
     const values = Object.values(PromptSectionSlot);
-    expect(values.length).toBe(8);
+    expect(values.length).toBe(9);
   });
 
   it("canonical order matches enum values", () => {
     expect(SECTION_SLOT_ORDER).toEqual([
       PromptSectionSlot.SYSTEM_PREAMBLE,
       PromptSectionSlot.WORLD_RULES,
-      PromptSectionSlot.CORE_MEMORY,
+      PromptSectionSlot.PERSONA,
+      PromptSectionSlot.PINNED_SHARED,
       PromptSectionSlot.RECENT_COGNITION,
+      PromptSectionSlot.TYPED_RETRIEVAL,
       PromptSectionSlot.LORE_ENTRIES,
       PromptSectionSlot.OPERATIONAL_STATE,
-      PromptSectionSlot.MEMORY_HINTS,
       PromptSectionSlot.CONVERSATION,
     ]);
   });
@@ -62,10 +63,8 @@ describe("PromptRenderer", () => {
         sections: [
           makeSection(PromptSectionSlot.SYSTEM_PREAMBLE, "You are Agent X.", 10),
           makeSection(PromptSectionSlot.WORLD_RULES, "Rule 1: Be nice.\nRule 2: No violence.", 15),
-          makeSection(PromptSectionSlot.CORE_MEMORY, "User likes cats.", 8),
           makeSection(PromptSectionSlot.LORE_ENTRIES, "## Castle\nA grand castle.", 12),
           makeSection(PromptSectionSlot.OPERATIONAL_STATE, "Current mood: happy", 6),
-          makeSection(PromptSectionSlot.MEMORY_HINTS, "Mentioned pets yesterday.", 5),
           makeSection(PromptSectionSlot.CONVERSATION, makeConversationContent(SAMPLE_MESSAGES), 20),
         ],
       };
@@ -76,22 +75,20 @@ describe("PromptRenderer", () => {
       const expectedSystem = [
         "You are Agent X.",
         "Rule 1: Be nice.\nRule 2: No violence.",
-        "User likes cats.",
         "## Castle\nA grand castle.",
         "Current mood: happy",
-        "Mentioned pets yesterday.",
       ].join("\n\n");
 
       expect(output.systemPrompt).toBe(expectedSystem);
       expect(output.conversationMessages).toEqual(SAMPLE_MESSAGES);
-      expect(output.estimatedTokens).toBe(10 + 15 + 8 + 12 + 6 + 5 + 20);
+      expect(output.estimatedTokens).toBe(10 + 15 + 12 + 6 + 20);
     });
 
     it("is deterministic — same input produces same output", () => {
       const input: RenderInput = {
         sections: [
           makeSection(PromptSectionSlot.SYSTEM_PREAMBLE, "Agent Y.", 10),
-          makeSection(PromptSectionSlot.CORE_MEMORY, "Mem block.", 5),
+          makeSection(PromptSectionSlot.LORE_ENTRIES, "Lore block.", 5),
           makeSection(PromptSectionSlot.CONVERSATION, makeConversationContent(SAMPLE_MESSAGES), 20),
         ],
       };
@@ -108,7 +105,7 @@ describe("PromptRenderer", () => {
       // Provide sections out of order
       const input: RenderInput = {
         sections: [
-          makeSection(PromptSectionSlot.MEMORY_HINTS, "Hint data", 5),
+          makeSection(PromptSectionSlot.OPERATIONAL_STATE, "Op state", 5),
           makeSection(PromptSectionSlot.CONVERSATION, makeConversationContent(SAMPLE_MESSAGES), 20),
           makeSection(PromptSectionSlot.SYSTEM_PREAMBLE, "Preamble", 10),
           makeSection(PromptSectionSlot.WORLD_RULES, "World rule", 8),
@@ -117,8 +114,8 @@ describe("PromptRenderer", () => {
 
       const output = renderer.render(input);
 
-      // System prompt must follow canonical order: preamble, world_rules, ..., memory_hints
-      const expectedSystem = ["Preamble", "World rule", "Hint data"].join("\n\n");
+      // System prompt must follow canonical order: preamble, world_rules, ..., operational_state
+      const expectedSystem = ["Preamble", "World rule", "Op state"].join("\n\n");
       expect(output.systemPrompt).toBe(expectedSystem);
     });
   });
@@ -201,7 +198,7 @@ describe("PromptRenderer", () => {
         sections: [
           makeSection(PromptSectionSlot.SYSTEM_PREAMBLE, "Agent.", 5),
           makeSection(PromptSectionSlot.WORLD_RULES, "", 0),
-          makeSection(PromptSectionSlot.CORE_MEMORY, "   ", 0), // whitespace-only
+          makeSection(PromptSectionSlot.LORE_ENTRIES, "   ", 0), // whitespace-only
           makeSection(PromptSectionSlot.CONVERSATION, makeConversationContent(SAMPLE_MESSAGES), 10),
         ],
       };

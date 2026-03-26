@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createMemorySchema } from "./schema";
 import { CoreMemoryService } from "./core-memory";
-import { getCoreMemoryBlocks, getMemoryHints, formatNavigatorEvidence, getRecentCognition } from "./prompt-data";
+import { formatNavigatorEvidence, getRecentCognition, formatContestedEntry, getAttachedSharedBlocks, getPinnedBlocks } from "./prompt-data";
 import { openDatabase, closeDatabaseGracefully, type Db } from "../storage/database.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import type { ViewerContext, NavigatorResult, NodeRef } from "./types";
@@ -82,158 +82,6 @@ function insertSearchDocWorld(
     content,
   );
 }
-
-// ---------------------------------------------------------------------------
-// getCoreMemoryBlocks
-// ---------------------------------------------------------------------------
-
-describe("getCoreMemoryBlocks", () => {
-  let db: Database;
-
-  beforeEach(() => {
-    db = freshDb();
-    const service = new CoreMemoryService(db);
-    service.initializeBlocks("agent-1");
-  });
-
-  it("returns XML-wrapped blocks with chars metadata for empty blocks", () => {
-    const xml = getCoreMemoryBlocks("agent-1", db);
-
-    expect(xml).toContain('<core_memory label="character"');
-    expect(xml).toContain('<core_memory label="index"');
-    expect(xml).toContain('<core_memory label="user"');
-    expect(xml).toContain('chars_current="0"');
-    expect(xml).toContain('chars_limit="4000"');
-    expect(xml).toContain('chars_limit="3000"');
-    expect(xml).toContain('chars_limit="1500"');
-  });
-
-  it("returns all 3 blocks", () => {
-    const xml = getCoreMemoryBlocks("agent-1", db);
-    const blockCount = (xml.match(/<core_memory /g) || []).length;
-    expect(blockCount).toBe(3);
-  });
-
-  it("includes chars_current and chars_limit attributes", () => {
-    // Write some content to character block
-    const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "character", "A cheerful maid");
-
-    const xml = getCoreMemoryBlocks("agent-1", db);
-
-    // character block should show chars_current=15 (length of "A cheerful maid")
-    expect(xml).toContain('chars_current="15"');
-    expect(xml).toContain('chars_limit="4000"');
-  });
-
-  it("includes block value content inside XML tags", () => {
-    const service = new CoreMemoryService(db);
-    service.appendBlock("agent-1", "character", "Sakura is a diligent maid");
-
-    const xml = getCoreMemoryBlocks("agent-1", db);
-    expect(xml).toContain("Sakura is a diligent maid</core_memory>");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getMemoryHints
-// ---------------------------------------------------------------------------
-
-describe("getMemoryHints", () => {
-  let db: Database;
-
-  beforeEach(() => {
-    db = freshDb();
-  });
-
-  it("returns formatted bullet list from search results", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "Alice visited the coffee shop today", "entity:1", "entity_summary");
-
-    const result = await getMemoryHints("coffee shop", ctx, db);
-
-    expect(result).toContain("•");
-    expect(result).toContain("[entity]");
-    expect(result).toContain("Alice visited the coffee shop today");
-  });
-
-  it("returns empty string for short query (< 3 chars)", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "Alice visited the coffee shop today", "entity:1");
-
-    const result = await getMemoryHints("ab", ctx, db);
-    expect(result).toBe("");
-  });
-
-  it("returns empty string when no matches", async () => {
-    const ctx = makeViewerContext();
-
-    const result = await getMemoryHints("nonexistent topic xyz", ctx, db);
-    expect(result).toBe("");
-  });
-
-  it("respects limit parameter", async () => {
-    const ctx = makeViewerContext();
-    // Insert multiple area docs
-    for (let i = 0; i < 10; i++) {
-      insertSearchDocArea(db, 1, `Event about coffee number ${i}`, `event:${i + 1}`);
-    }
-
-    const result = await getMemoryHints("coffee", ctx, db, 2);
-    const bulletCount = (result.match(/•/g) || []).length;
-    expect(bulletCount).toBeLessThanOrEqual(2);
-  });
-
-  it("defaults limit to 5", async () => {
-    const ctx = makeViewerContext();
-    for (let i = 0; i < 10; i++) {
-      insertSearchDocArea(db, 1, `Event about coffee number ${i}`, `event:${i + 1}`);
-    }
-
-    const result = await getMemoryHints("coffee", ctx, db);
-    const bulletCount = (result.match(/•/g) || []).length;
-    expect(bulletCount).toBeLessThanOrEqual(5);
-  });
-
-  it("rp_agent queries private + area + world FTS5 tables", async () => {
-    const rpCtx = makeViewerContext({ viewer_role: "rp_agent", viewer_agent_id: "agent-1" });
-
-    insertSearchDocPrivate(db, "agent-1", "Private memory about coffee brewing", "private_event:1");
-    insertSearchDocArea(db, 1, "Area event about coffee ordering", "event:1");
-    insertSearchDocWorld(db, "World fact about coffee origins", "entity:1");
-
-    const result = await getMemoryHints("coffee", rpCtx, db);
-
-    expect(result).toContain("Private memory about coffee brewing");
-    expect(result).toContain("Area event about coffee ordering");
-    expect(result).toContain("World fact about coffee origins");
-  });
-
-  it("maiden queries area + world only (NOT private)", async () => {
-    const maidenCtx = makeViewerContext({
-      viewer_role: "maiden",
-      viewer_agent_id: "maiden-1",
-    });
-
-    insertSearchDocPrivate(db, "maiden-1", "Private memory about coffee brewing", "private_event:1");
-    insertSearchDocArea(db, 1, "Area event about coffee ordering", "event:1");
-    insertSearchDocWorld(db, "World fact about coffee origins", "entity:1");
-
-    const result = await getMemoryHints("coffee", maidenCtx, db);
-
-    expect(result).not.toContain("Private memory about coffee brewing");
-    expect(result).toContain("Area event about coffee ordering");
-    expect(result).toContain("World fact about coffee origins");
-  });
-
-  it("uses node kind from source_ref in bullet format", async () => {
-    const ctx = makeViewerContext();
-    insertSearchDocArea(db, 1, "A fact about tea leaves", "fact:42", "fact_triple");
-
-    const result = await getMemoryHints("tea leaves", ctx, db);
-    expect(result).toContain("[fact]");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // formatNavigatorEvidence
@@ -657,11 +505,9 @@ describe("getRecentCognition", () => {
     closeDatabaseGracefully(db);
   });
 
-  it("staged recent cognition appears before flush but NOT in getMemoryHints", async () => {
-    // Run memory migrations to ensure search_docs_private table exists
+  it("staged recent cognition appears before flush in getRecentCognition", () => {
     createMemorySchema(db as unknown as Database);
 
-    // Insert staged cognition directly into recent_cognition_slots (simulating settlement-time staging)
     const stagedEntries = [
       {
         settlementId: "stl:staged-1",
@@ -674,15 +520,222 @@ describe("getRecentCognition", () => {
     ];
     insertSlot("agent-1", "sess-1", stagedEntries);
 
-    // Verify getRecentCognition returns the staged entry (pre-flush continuity)
     const recentResult = getRecentCognition("agent-1", "sess-1", db);
     expect(recentResult).toContain("[assertion:staged-belief]");
     expect(recentResult).toContain("This is a staged belief before flush");
 
-    // Verify getMemoryHints does NOT include staged cognition (retrieval is flush-backed only)
-    const ctx = makeViewerContext({ viewer_agent_id: "agent-1", session_id: "sess-1" });
-    const hintsResult = await getMemoryHints("staged belief", ctx, db);
-    expect(hintsResult).toBe("");
+    closeDatabaseGracefully(db);
+  });
+
+  it("contested entries render with old belief + conflict evidence", () => {
+    const entries = [
+      {
+        settlementId: "stl:contest-1",
+        committedAt: 1000,
+        kind: "assertion",
+        key: "trust-bob",
+        summary: "self trusts Bob",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "accepted",
+        conflictEvidence: ["Bob lied about the key", "Contradicts earlier observation"],
+      },
+      {
+        settlementId: "stl:normal-1",
+        committedAt: 2000,
+        kind: "assertion",
+        key: "likes-tea",
+        summary: "self likes tea",
+        status: "active" as const,
+      },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("self trusts Bob");
+    expect(result).toContain("Risk:");
+    expect(result).not.toContain("Bob lied about the key");
+    expect(result).toContain("[assertion:likes-tea] self likes tea");
+
+    closeDatabaseGracefully(db);
+  });
+
+  it("contested entry without conflict evidence renders marker only", () => {
+    const entries = [
+      {
+        settlementId: "stl:contest-2",
+        committedAt: 1000,
+        kind: "assertion",
+        key: "mood-happy",
+        summary: "self is happy",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "confirmed",
+      },
+    ];
+    insertSlot("agent-1", "sess-1", entries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was confirmed]");
+    expect(result).toContain("self is happy");
+    expect(result).not.toContain("Conflicts:");
+
+    closeDatabaseGracefully(db);
+  });
+});
+
+describe("formatContestedEntry", () => {
+  it("formats contested entry with preContestedStance and short risk note (section-18 frontstage)", () => {
+    const entry = {
+      settlementId: "stl:1",
+      committedAt: 1000,
+      kind: "assertion",
+      key: "trust-bob",
+      summary: "self trusts Bob",
+      status: "active" as const,
+      stance: "contested",
+      preContestedStance: "accepted",
+      conflictEvidence: ["evidence A", "evidence B"],
+    };
+
+    const result = formatContestedEntry(entry);
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("self trusts Bob");
+    // Section-18: frontstage shows short risk note only; full conflict chain is explain-only
+    expect(result).toContain("Risk:");
+    expect(result).not.toContain("evidence A; evidence B");
+  });
+
+  it("formats contested entry without evidence", () => {
+    const entry = {
+      settlementId: "stl:2",
+      committedAt: 1000,
+      kind: "assertion",
+      key: "mood",
+      summary: "self is happy",
+      stance: "contested",
+    };
+
+    const result = formatContestedEntry(entry);
+    expect(result).toContain("[CONTESTED: was unknown]");
+    expect(result).toContain("self is happy");
+    expect(result).not.toContain("Conflicts:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAttachedSharedBlocks
+// ---------------------------------------------------------------------------
+
+describe("getAttachedSharedBlocks", () => {
+  let db: Db;
+
+  function seedSharedBlock(title: string, createdBy: string): number {
+    const now = Date.now();
+    const result = db.run(
+      `INSERT INTO shared_blocks (title, created_by_agent_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      [title, createdBy, now, now],
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  function addSection(blockId: number, sectionPath: string, content: string): void {
+    const now = Date.now();
+    db.run(
+      `INSERT INTO shared_block_sections (block_id, section_path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      [blockId, sectionPath, content, now, now],
+    );
+  }
+
+  function attachToAgent(blockId: number, agentId: string, attachedBy: string): void {
+    const now = Date.now();
+    db.run(
+      `INSERT INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at) VALUES (?, 'agent', ?, ?, ?)`,
+      [blockId, agentId, attachedBy, now],
+    );
+  }
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    createMemorySchema(db.raw);
+  });
+
+  it("returns empty string when no attachments exist", () => {
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("returns formatted shared block with sections for attached agent", () => {
+    const blockId = seedSharedBlock("Household Rules", "agent-owner");
+    addSection(blockId, "etiquette/greeting", "Always bow when greeting");
+    addSection(blockId, "etiquette/service", "Serve tea promptly");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+
+    expect(result).toContain('<shared_block title="Household Rules">');
+    expect(result).toContain("etiquette/greeting: Always bow when greeting");
+    expect(result).toContain("etiquette/service: Serve tea promptly");
+    expect(result).toContain("</shared_block>");
+  });
+
+  it("returns multiple blocks when agent has multiple attachments", () => {
+    const block1 = seedSharedBlock("Rules", "agent-owner");
+    addSection(block1, "rule-1", "Be polite");
+    attachToAgent(block1, "agent-1", "agent-owner");
+
+    const block2 = seedSharedBlock("Lore", "agent-owner");
+    addSection(block2, "world/setting", "Victorian mansion");
+    attachToAgent(block2, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+
+    expect(result).toContain('<shared_block title="Rules">');
+    expect(result).toContain('<shared_block title="Lore">');
+    expect(result).toContain("rule-1: Be polite");
+    expect(result).toContain("world/setting: Victorian mansion");
+  });
+
+  it("skips blocks with no sections", () => {
+    const blockId = seedSharedBlock("Empty Block", "agent-owner");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("does not return blocks attached to a different agent", () => {
+    const blockId = seedSharedBlock("Private Rules", "agent-owner");
+    addSection(blockId, "rule", "Secret rule");
+    attachToAgent(blockId, "agent-2", "agent-owner");
+
+    const result = getAttachedSharedBlocks("agent-1", db);
+    expect(result).toBe("");
+  });
+
+  it("shared blocks coexist with pinned memory blocks without overwriting", () => {
+    createMemorySchema(db.raw);
+    const coreMemory = new CoreMemoryService(db.raw);
+    coreMemory.initializeBlocks("agent-1");
+    coreMemory.appendBlock("agent-1", "persona", "A cheerful maid");
+
+    const blockId = seedSharedBlock("Shared Etiquette", "agent-owner");
+    addSection(blockId, "greeting", "Always curtsy");
+    attachToAgent(blockId, "agent-1", "agent-owner");
+
+    const pinnedResult = getPinnedBlocks("agent-1", db.raw);
+    const sharedResult = getAttachedSharedBlocks("agent-1", db);
+
+    expect(pinnedResult).toContain("A cheerful maid");
+    expect(pinnedResult).toContain('<pinned_block label="persona"');
+    expect(pinnedResult).not.toContain("Always curtsy");
+
+    expect(sharedResult).toContain('<shared_block title="Shared Etiquette">');
+    expect(sharedResult).toContain("greeting: Always curtsy");
+    expect(sharedResult).not.toContain("A cheerful maid");
 
     closeDatabaseGracefully(db);
   });

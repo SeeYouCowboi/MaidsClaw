@@ -977,7 +977,7 @@ describe("Real TurnService-backed gateway path", () => {
         {
           type: "tool_use_delta",
           id: "call_1",
-          partialJson: '{"schemaVersion":"rp_turn_outcome_v3","publicReply":"Welcome back, master."}',
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Welcome back, master."}',
         },
         { type: "tool_use_end", id: "call_1" },
         { type: "message_end", stopReason: "tool_use" },

@@ -2,9 +2,15 @@ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PersonaAdapter } from "../../src/core/prompt-data-adapters/persona-adapter.js";
+import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
+import { CognitionEventRepo } from "../../src/memory/cognition/cognition-event-repo.js";
+import { PrivateCognitionProjectionRepo } from "../../src/memory/cognition/private-cognition-current.js";
+import { GraphStorageService } from "../../src/memory/storage.js";
 import { runInteractionMigrations } from "../../src/interaction/schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
-import { getRecentCognition } from "../../src/memory/prompt-data.js";
+import { getRecentCognition, getTypedRetrievalSurface } from "../../src/memory/prompt-data.js";
+import { RetrievalService } from "../../src/memory/retrieval.js";
+import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { PersonaLoader } from "../../src/persona/loader.js";
 import { PersonaService } from "../../src/persona/service.js";
 import { closeDatabaseGracefully, type Db, openDatabase } from "../../src/storage/database.js";
@@ -20,6 +26,11 @@ type RecentEntry = {
   key: string;
   summary: string;
   status: "active" | "retracted";
+  stance?: string;
+  preContestedStance?: string;
+  conflictEvidence?: string[];
+  conflictSummary?: string;
+  conflictFactorRefs?: string[];
 };
 
 function insertSlot(db: Db, agentId: string, sessionId: string, entries: RecentEntry[]) {
@@ -85,63 +96,36 @@ function build40RoundEntries(): RecentEntry[] {
 // ---------------------------------------------------------------------------
 
 describe("Behavioral: Prompt assembly for RP test", () => {
-  it("Eveline system prompt contains all required infrastructure for 40-round test", () => {
+  it("Mei system prompt contains all required infrastructure for manor RP", () => {
     const adapter = loadEvelineAdapter();
-    const prompt = adapter.getSystemPrompt("eveline")!;
+    const prompt = adapter.getSystemPrompt("mei")!;
 
     expect(prompt).toBeDefined();
 
-    // Hidden objectives injection
-    expect(prompt).toContain("<hidden_objectives>");
-    expect(prompt).toContain("调查管家");
-    expect(prompt).toContain("确认庄园财务");
-    expect(prompt).toContain("维持庄园内部秩序");
-
-    // Private persona injection
-    expect(prompt).toContain("<private_persona>");
-
-    // submit_rp_turn protocol
-    expect(prompt).toContain("submit_rp_turn");
-    expect(prompt).toContain("publicReply");
-    expect(prompt).toContain("latentScratchpad");
-    expect(prompt).toContain("privateCommit");
-
-    // 7-level information filtering (L0-L6)
-    expect(prompt).toContain("完全公开");
-    expect(prompt).toContain("完整撒谎");
-    expect(prompt).toContain("信息过滤");
-
-    // CognitionOp examples
-    expect(prompt).toContain('"kind": "assertion"');
-    expect(prompt).toContain('"kind": "evaluation"');
-    expect(prompt).toContain('"kind": "commitment"');
-
-    // Behavioral principles
-    expect(prompt).toContain("表里分离");
-    expect(prompt).toContain("说辞修补");
-
-    // Address: must use 主人, NOT 少爷
     expect(prompt).toContain("主人");
     expect(prompt).not.toContain("少爷");
+
+    expect(prompt).toContain("女仆");
+    expect(prompt).toContain("管家");
+
+    expect(prompt).toContain("Alice");
   });
 });
 
 describe("Behavioral: Lore rules loaded for manor scene", () => {
-  it("config/lore.json contains manor scene entries with correct keywords", () => {
+  it("config/lore.json contains world and etiquette entries with correct keywords", () => {
     const result = loadLoreEntries("", join(process.cwd(), "config/lore.json"));
 
     expect(result.errors).toHaveLength(0);
 
     const ids = result.entries.map((e) => e.id);
-    expect(ids).toContain("manor:etiquette");
-    expect(ids).toContain("manor:hierarchy");
-    expect(ids).toContain("manor:information-protocol");
-    expect(ids).toContain("manor:financial-rules");
+    expect(ids).toContain("world-rules-001");
+    expect(ids).toContain("etiquette-001");
 
     const allKeywords = result.entries.flatMap((e) => e.keywords);
-    expect(allKeywords).toContain("账目");
-    expect(allKeywords).toContain("管家");
-    expect(allKeywords).toContain("汇报");
+    expect(allKeywords).toContain("etiquette");
+    expect(allKeywords).toContain("service");
+    expect(allKeywords).toContain("maid");
   });
 });
 
@@ -174,6 +158,175 @@ describe("Behavioral: 40-round cognition lifecycle", () => {
 
     // Retracted items show as retracted
     expect(result).toContain("[commitment:acknowledge-dual-motive] (retracted)");
+  });
+
+  it("contested cognition frontstage only shows short risk note, not full conflict chain", () => {
+    const contestedEntries = [
+      {
+        settlementId: "stl:c1",
+        committedAt: 4100,
+        kind: "assertion" as const,
+        key: "butler-accounts",
+        summary: "butler account claim is under dispute",
+        status: "active" as const,
+        stance: "contested",
+        preContestedStance: "accepted",
+        conflictSummary: "contested (3 factors)",
+        conflictFactorRefs: ["event:11", "event:12", "assertion:7"],
+      },
+    ];
+
+    insertSlot(db, "agent-1", "sess-1", contestedEntries);
+
+    const result = getRecentCognition("agent-1", "sess-1", db);
+
+    expect(result).toContain("[CONTESTED: was accepted]");
+    expect(result).toContain("Risk: contested (3 factors)");
+    expect(result).not.toContain("Conflicts:");
+    expect(result).not.toContain("event:11");
+  });
+});
+
+describe("Behavioral: typed retrieval prompt section", () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runMemoryMigrations(db);
+    runInteractionMigrations(db);
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  it("returns empty typed retrieval for too-short queries", async () => {
+    const output = await getTypedRetrievalSurface(
+      "hi",
+      {
+        viewer_agent_id: "rp:eveline",
+        viewer_role: "rp_agent",
+        current_area_id: 1,
+        session_id: "sess-typed",
+      },
+      db,
+    );
+
+    expect(output).toBe("");
+  });
+
+  it("reuses cached RetrievalService for repeated typed retrieval requests", async () => {
+    const originalCreate = RetrievalService.create;
+    let createCalls = 0;
+    Object.defineProperty(RetrievalService, "create", {
+      configurable: true,
+      value(dbArg: Db) {
+        createCalls += 1;
+        return originalCreate.call(RetrievalService, dbArg);
+      },
+    });
+
+    try {
+      await getTypedRetrievalSurface(
+        "coffee ledger",
+        {
+          viewer_agent_id: "rp:eveline",
+          viewer_role: "rp_agent",
+          current_area_id: 1,
+          session_id: "sess-typed",
+        },
+        db,
+      );
+      await getTypedRetrievalSurface(
+        "coffee service",
+        {
+          viewer_agent_id: "rp:eveline",
+          viewer_role: "rp_agent",
+          current_area_id: 1,
+          session_id: "sess-typed",
+        },
+        db,
+      );
+    } finally {
+      Object.defineProperty(RetrievalService, "create", {
+        configurable: true,
+        value: originalCreate,
+      });
+    }
+
+    expect(createCalls).toBe(1);
+  });
+
+  it("cross-session durable recall keeps cognition searchable for same agent", async () => {
+    const storage = new GraphStorageService(db);
+    const selfId = storage.upsertEntity({
+      pointerKey: "__self__",
+      displayName: "Eveline",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:eveline",
+    });
+    storage.upsertEntity({
+      pointerKey: "__user__",
+      displayName: "Master",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "rp:eveline",
+    });
+
+    const repo = new CognitionRepository(db);
+    repo.upsertAssertion({
+      agentId: "rp:eveline",
+      cognitionKey: "assert:durable-recall",
+      settlementId: "stl:session-a",
+      opIndex: 0,
+      sourcePointerKey: "__self__",
+      predicate: "remembers",
+      targetPointerKey: "__user__",
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "session-a",
+    });
+
+    const output = await getTypedRetrievalSurface(
+      "what do you remember about master",
+      {
+        viewer_agent_id: "rp:eveline",
+        viewer_role: "rp_agent",
+        current_area_id: selfId,
+        session_id: "sess-b",
+      },
+      db,
+    );
+
+    expect(output).toContain("[cognition]");
+    expect(output).toContain("[assertion]");
+    expect(output).toContain("remembers: __self__ → __user__");
+  });
+
+  it("assertion and evaluation remain separated in recent cognition rendering", () => {
+    insertSlot(db, "rp:eveline", "sess-separation", [
+      {
+        settlementId: "stl:sep-1",
+        committedAt: 10,
+        kind: "assertion",
+        key: "assert:butler-present",
+        summary: "butler is present in hall",
+        status: "active",
+      },
+      {
+        settlementId: "stl:sep-2",
+        committedAt: 11,
+        kind: "evaluation",
+        key: "eval:butler-trust",
+        summary: "eval trust:0.4",
+        status: "active",
+      },
+    ]);
+
+    const rendered = getRecentCognition("rp:eveline", "sess-separation", db);
+    expect(rendered).toContain("[assertion:assert:butler-present]");
+    expect(rendered).toContain("[evaluation:eval:butler-trust]");
   });
 });
 
@@ -242,12 +395,12 @@ describe("Behavioral: Document checkpoint scoring structure", () => {
 });
 
 describe("Behavioral: Raw persona card has no 少爷", () => {
-  it("Eveline raw card fields contain no 少爷 anywhere", () => {
+  it("Mei raw card fields contain no 少爷 anywhere", () => {
     const raw = readFileSync(join(process.cwd(), "config/personas.json"), "utf-8");
     const personas = JSON.parse(raw) as Array<Record<string, unknown>>;
-    const eveline = personas.find((p) => p.id === "eveline")!;
+    const mei = personas.find((p) => p.id === "mei")!;
 
-    const fullCard = JSON.stringify(eveline);
+    const fullCard = JSON.stringify(mei);
     expect(fullCard).not.toContain("少爷");
     expect(fullCard).toContain("主人");
   });
@@ -256,22 +409,16 @@ describe("Behavioral: Raw persona card has no 少爷", () => {
 describe("Behavioral: Process observation checks (doc §5.2)", () => {
   it("persona configuration supports all observation items", () => {
     const adapter = loadEvelineAdapter();
-    const prompt = adapter.getSystemPrompt("eveline")!;
+    const prompt = adapter.getSystemPrompt("mei")!;
 
-    // §5.2 row 1: always call user 主人
     expect(prompt).toContain("主人");
     expect(prompt).not.toContain("少爷");
 
-    // §5.2 row 3: attitude toward Alice — prompt references maids
     expect(prompt).toContain("女仆");
 
-    // §5.2 row 4: attitude toward butler
     expect(prompt).toContain("管家");
 
-    // §5.2 row 5: information filtering throughout
-    expect(prompt).toContain("信息释放");
-    expect(prompt).toContain("L0");
-    expect(prompt).toContain("L6");
+    expect(prompt).toContain("Alice");
   });
 });
 
@@ -296,22 +443,20 @@ describe("Behavioral: Internal state checkpoint structure (doc §5.3)", () => {
   });
 });
 
-describe("Behavioral: Config validation for rp:eveline", () => {
-  it("agents.json rp:eveline has correct format and tools", () => {
+describe("Behavioral: Config validation for rp:mei", () => {
+  it("agents.json rp:mei has correct format and tools", () => {
     const raw = readFileSync(join(process.cwd(), "config/agents.json"), "utf-8");
     const agents = JSON.parse(raw) as Array<Record<string, unknown>>;
-    const eveline = agents.find((a) => a.id === "rp:eveline");
+    const mei = agents.find((a) => a.id === "rp:mei");
 
-    expect(eveline).toBeDefined();
-    expect(eveline!.personaId).toBe("eveline");
-    expect(eveline!.role).toBe("rp_agent");
+    expect(mei).toBeDefined();
+    expect(mei!.personaId).toBe("mei");
+    expect(mei!.role).toBe("rp_agent");
 
-    const perms = eveline!.toolPermissions as string[];
+    const perms = mei!.toolPermissions as Array<Record<string, unknown>>;
     expect(Array.isArray(perms)).toBe(true);
-    expect(perms.every((p) => typeof p === "string")).toBe(true);
-    expect(perms).toContain("submit_rp_turn");
-    expect(perms).toContain("memory_read");
-    expect(perms).toContain("memory_search");
+    const toolNames = perms.map((p) => p.toolName);
+    expect(toolNames).toContain("submit_rp_turn");
   });
 });
 
@@ -330,5 +475,175 @@ describe("Behavioral: Scoring framework (doc §6)", () => {
 
   it("mixed: checkpoints avg 4, consistency 5, separation 4, repair 3, third-party 4 → 82", () => {
     expect(calculateScore({ checkpoints: [4, 4, 4, 4, 4, 4, 4], consistency: 5, separation: 4, repair: 3, thirdParty: 4 })).toBe(82);
+  });
+});
+
+describe("Behavioral: Cognition current projection lifecycle", () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDatabase({ path: ":memory:" });
+    runMemoryMigrations(db);
+  });
+
+  afterEach(() => {
+    closeDatabaseGracefully(db);
+  });
+
+  it("projection rebuild from events produces correct current state for multi-kind scenario", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "butler-accounts",
+      kind: "assertion",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        sourcePointerKey: "__self__",
+        predicate: "suspects",
+        targetPointerKey: "butler",
+        stance: "tentative",
+        basis: "inference",
+      }),
+      settlementId: "stl:r2",
+      committedTime: 200,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "investigate-butler",
+      kind: "commitment",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        mode: "goal",
+        target: { action: "investigate butler account anomalies" },
+        status: "active",
+        priority: 8,
+      }),
+      settlementId: "stl:r2",
+      committedTime: 201,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "eval-butler-trust",
+      kind: "evaluation",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        dimensions: [{ name: "trust", value: 0.3 }, { name: "suspicion", value: 0.7 }],
+        notes: "low trust in butler",
+      }),
+      settlementId: "stl:r11",
+      committedTime: 1100,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "butler-accounts",
+      kind: "assertion",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        sourcePointerKey: "__self__",
+        predicate: "suspects",
+        targetPointerKey: "butler",
+        stance: "accepted",
+        basis: "first_hand",
+      }),
+      settlementId: "stl:r28",
+      committedTime: 2800,
+    });
+
+    projection.rebuild("rp:eveline");
+
+    const all = projection.getAllCurrent("rp:eveline");
+    expect(all.length).toBe(3);
+
+    const assertion = projection.getCurrent("rp:eveline", "butler-accounts");
+    expect(assertion!.kind).toBe("assertion");
+    expect(assertion!.stance).toBe("accepted");
+    expect(assertion!.basis).toBe("first_hand");
+    expect(assertion!.status).toBe("active");
+
+    const commitment = projection.getCurrent("rp:eveline", "investigate-butler");
+    expect(commitment!.kind).toBe("commitment");
+    expect(commitment!.status).toBe("active");
+
+    const evaluation = projection.getCurrent("rp:eveline", "eval-butler-trust");
+    expect(evaluation!.kind).toBe("evaluation");
+    expect(evaluation!.status).toBe("active");
+    const evalParsed = JSON.parse(evaluation!.record_json);
+    expect(evalParsed.dimensions[0].value).toBe(0.3);
+  });
+
+  it("retracted commitment shows retracted status in projection", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "acknowledge-dual-motive",
+      kind: "commitment",
+      op: "upsert",
+      recordJson: JSON.stringify({
+        mode: "intent",
+        target: { action: "acknowledge both care and control motivations" },
+        status: "active",
+      }),
+      settlementId: "stl:r23",
+      committedTime: 2300,
+    });
+
+    eventRepo.append({
+      agentId: "rp:eveline",
+      cognitionKey: "acknowledge-dual-motive",
+      kind: "commitment",
+      op: "retract",
+      recordJson: null,
+      settlementId: "stl:r30",
+      committedTime: 3000,
+    });
+
+    projection.rebuild("rp:eveline");
+
+    const current = projection.getCurrent("rp:eveline", "acknowledge-dual-motive");
+    expect(current).not.toBeNull();
+    expect(current!.status).toBe("retracted");
+  });
+
+  it("incremental upsertFromEvent matches rebuild for complex event stream", () => {
+    const eventRepo = new CognitionEventRepo(db);
+    const projection = new PrivateCognitionProjectionRepo(db);
+
+    const events = [
+      { cognitionKey: "a1", kind: "assertion" as const, op: "upsert" as const, recordJson: JSON.stringify({ stance: "tentative", basis: "inference", predicate: "suspects", sourcePointerKey: "__self__", targetPointerKey: "butler" }), settlementId: "s1", committedTime: 100 },
+      { cognitionKey: "e1", kind: "evaluation" as const, op: "upsert" as const, recordJson: JSON.stringify({ dimensions: [{ name: "trust", value: 0.5 }], notes: "neutral" }), settlementId: "s2", committedTime: 200 },
+      { cognitionKey: "c1", kind: "commitment" as const, op: "upsert" as const, recordJson: JSON.stringify({ mode: "goal", target: { action: "watch" }, status: "active" }), settlementId: "s3", committedTime: 300 },
+      { cognitionKey: "a1", kind: "assertion" as const, op: "upsert" as const, recordJson: JSON.stringify({ stance: "accepted", basis: "first_hand", predicate: "suspects", sourcePointerKey: "__self__", targetPointerKey: "butler" }), settlementId: "s4", committedTime: 400 },
+      { cognitionKey: "c1", kind: "commitment" as const, op: "retract" as const, recordJson: null, settlementId: "s5", committedTime: 500 },
+    ];
+
+    for (const e of events) {
+      eventRepo.append({ agentId: "rp:eveline", ...e });
+    }
+
+    const allEvents = eventRepo.replay("rp:eveline");
+    for (const event of allEvents) {
+      projection.upsertFromEvent(event);
+    }
+    const incrementalRows = projection.getAllCurrent("rp:eveline");
+
+    projection.rebuild("rp:eveline");
+    const rebuildRows = projection.getAllCurrent("rp:eveline");
+
+    expect(incrementalRows.length).toBe(rebuildRows.length);
+    for (const rebuilt of rebuildRows) {
+      const inc = incrementalRows.find((r) => r.cognition_key === rebuilt.cognition_key);
+      expect(inc).toBeDefined();
+      expect(inc!.status).toBe(rebuilt.status);
+      expect(inc!.stance).toBe(rebuilt.stance);
+      expect(inc!.basis).toBe(rebuilt.basis);
+      expect(inc!.kind).toBe(rebuilt.kind);
+    }
   });
 });

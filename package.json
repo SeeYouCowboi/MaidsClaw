@@ -6,6 +6,9 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json --noEmit",
+    "check:legacy-memory-surface": "bun test test/memory/legacy-literal-gate.test.ts",
+    "check:sisyphus-docs": "bun run scripts/cleanup-sisyphus-docs.ts",
+    "cleanup:sisyphus-docs": "bun run scripts/cleanup-sisyphus-docs.ts --apply",
     "test": "bun test",
     "start": "bun run src/index.ts",
     "check:native": "cargo check --manifest-path native/Cargo.toml",

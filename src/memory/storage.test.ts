@@ -106,49 +106,68 @@ describe("GraphStorageService", () => {
       projectableSummary: "public-safe",
     });
 
+    // 'thought' category routes to private_cognition_events; fields are in record_json
     const row = db
-      .prepare(`SELECT projection_class, event_category, projectable_summary FROM agent_event_overlay WHERE id = ?`)
-      .get(id) as { projection_class: string; event_category: string; projectable_summary: string };
+      .prepare(`SELECT record_json FROM private_cognition_events WHERE id = ?`)
+      .get(id) as { record_json: string };
+    const record = JSON.parse(row.record_json) as { projectionClass: string; category: string; summary: string | null };
 
-    expect(row.projection_class).toBe("area_candidate");
-    expect(row.event_category).toBe("thought");
-    expect(row.projectable_summary).toBe("public-safe");
+    expect(record.projectionClass).toBe("area_candidate");
+    expect(record.category).toBe("thought");
+    expect(record.summary).toBe("public-safe");
   });
 
-  it("createPrivateBelief updates existing row for same tuple", () => {
-    const beliefId1 = storage.createPrivateBelief({
-      agentId: "agent-1",
-      sourceEntityId: 10,
-      targetEntityId: 20,
-      predicate: "likes",
-      confidence: 0.7,
+  it("createPrivateBelief delegates to cognition upsert and updates same tuple", () => {
+    const sourceEntityId = storage.upsertEntity({
+      pointerKey: "person:alice",
+      displayName: "Alice",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
+    });
+    const targetEntityId = storage.upsertEntity({
+      pointerKey: "person:bob",
+      displayName: "Bob",
+      entityType: "person",
+      memoryScope: "private_overlay",
+      ownerAgentId: "agent-1",
     });
 
-    db.prepare(`UPDATE agent_fact_overlay SET updated_at = ? WHERE id = ?`).run(1, beliefId1);
+    const beliefId1 = storage.createPrivateBelief({
+      agentId: "agent-1",
+      sourceEntityId,
+      targetEntityId,
+      predicate: "likes",
+      basis: "inference",
+      stance: "tentative",
+    });
+
+    db.prepare(`UPDATE private_cognition_current SET updated_at = ? WHERE id = ?`).run(1, beliefId1);
 
     const beliefId2 = storage.createPrivateBelief({
       agentId: "agent-1",
-      sourceEntityId: 10,
-      targetEntityId: 20,
+      sourceEntityId,
+      targetEntityId,
       predicate: "likes",
-      confidence: 0.95,
+      basis: "first_hand",
+      stance: "accepted",
     });
 
     expect(beliefId2).toBe(beliefId1);
 
     const row = db
-      .prepare(`SELECT updated_at FROM agent_fact_overlay WHERE id = ?`)
+      .prepare(`SELECT updated_at FROM private_cognition_current WHERE id = ?`)
       .get(beliefId1) as { updated_at: number };
     expect(row.updated_at).toBeGreaterThan(1);
 
     const count = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'agent-1'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1'`)
       .get() as { cnt: number };
     expect(count.cnt).toBe(1);
   });
 
   it("syncSearchDoc('private') writes to private docs and FTS", () => {
-    const sourceRef = makeNodeRef("private_event", 1);
+    const sourceRef = makeNodeRef("evaluation", 1);
     const docId = storage.syncSearchDoc("private", sourceRef, "secret maid memory", "agent-1");
 
     const doc = db
@@ -372,7 +391,7 @@ describe("GraphStorageService", () => {
     });
     expect(assertionResult).not.toBeNull();
     expect(assertionResult!.id).toBeGreaterThan(0);
-    expect(assertionResult!.ref).toBe(makeNodeRef("private_belief", assertionResult!.id));
+    expect(assertionResult!.ref).toBe(makeNodeRef("assertion", assertionResult!.id));
 
     const evalResult = storage.upsertExplicitEvaluation({
       agentId: "agent-1",
@@ -382,7 +401,7 @@ describe("GraphStorageService", () => {
       dimensions: [{ name: "valence", value: 0.8 }],
     });
     expect(evalResult.id).toBeGreaterThan(0);
-    expect(evalResult.ref).toBe(makeNodeRef("private_event", evalResult.id));
+    expect(evalResult.ref).toBe(makeNodeRef("evaluation", evalResult.id));
 
     const commitResult = storage.upsertExplicitCommitment({
       agentId: "agent-1",
@@ -394,7 +413,7 @@ describe("GraphStorageService", () => {
       status: "active",
     });
     expect(commitResult.id).toBeGreaterThan(0);
-    expect(commitResult.ref).toBe(makeNodeRef("private_event", commitResult.id));
+    expect(commitResult.ref).toBe(makeNodeRef("commitment", commitResult.id));
 
     // Non-keyed assertion also returns ref
     const nonKeyedResult = storage.upsertExplicitAssertion({
@@ -407,7 +426,7 @@ describe("GraphStorageService", () => {
       stance: "tentative",
     });
     expect(nonKeyedResult).not.toBeNull();
-    expect(nonKeyedResult!.ref).toBe(makeNodeRef("private_belief", nonKeyedResult!.id));
+    expect(nonKeyedResult!.ref).toBe(makeNodeRef("assertion", nonKeyedResult!.id));
   });
 
   it("explicit cognition re-upsert preserves stable node refs", () => {
@@ -436,7 +455,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "accepted",
-      confidence: 0.5,
     });
     const a2 = storage.upsertExplicitAssertion({
       agentId: "agent-1",
@@ -447,7 +465,6 @@ describe("GraphStorageService", () => {
       predicate: "trusts",
       targetPointerKey: "__user__",
       stance: "tentative",
-      confidence: 0.9,
     });
     expect(a1).not.toBeNull();
     expect(a2).not.toBeNull();
@@ -456,14 +473,13 @@ describe("GraphStorageService", () => {
 
     // Verify content was updated
     const updatedRow = db
-      .prepare(`SELECT epistemic_status, confidence FROM agent_fact_overlay WHERE id = ?`)
-      .get(a1!.id) as { epistemic_status: string; confidence: number };
-    expect(updatedRow.epistemic_status).toBe("suspected");
-    expect(updatedRow.confidence).toBe(0.9);
+      .prepare(`SELECT stance FROM private_cognition_current WHERE id = ?`)
+      .get(a1!.id) as { stance: string };
+    expect(updatedRow.stance).toBe("tentative");
 
     // Only one row exists for this cognition_key
     const factCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'assert:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'assert:stable'`)
       .get() as { cnt: number };
     expect(factCount.cnt).toBe(1);
 
@@ -486,7 +502,7 @@ describe("GraphStorageService", () => {
     expect(e2.ref).toBe(e1.ref);
 
     const eventCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'eval:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'eval:stable'`)
       .get() as { cnt: number };
     expect(eventCount.cnt).toBe(1);
 
@@ -513,7 +529,7 @@ describe("GraphStorageService", () => {
     expect(c2.ref).toBe(c1.ref);
 
     const commitCount = db
-      .prepare(`SELECT count(*) as cnt FROM agent_event_overlay WHERE agent_id = 'agent-1' AND cognition_key = 'commit:stable'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE agent_id = 'agent-1' AND cognition_key = 'commit:stable'`)
       .get() as { cnt: number };
     expect(commitCount.cnt).toBe(1);
   });
@@ -546,9 +562,9 @@ describe("GraphStorageService", () => {
     expect((mce.details as { unresolvedPointerKeys: string[] }).unresolvedPointerKeys).toContain("__user__");
     expect((mce.details as { settlementId: string }).settlementId).toBe("stl-unresolved");
 
-    // Verify no overlay rows were written
+    // Verify no cognition rows were written
     const row = db
-      .prepare(`SELECT count(*) as cnt FROM agent_fact_overlay WHERE cognition_key = 'assert:unresolved'`)
+      .prepare(`SELECT count(*) as cnt FROM private_cognition_current WHERE cognition_key = 'assert:unresolved'`)
       .get() as { cnt: number };
     expect(row.cnt).toBe(0);
   });

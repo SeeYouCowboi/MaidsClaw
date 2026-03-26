@@ -21,15 +21,21 @@ export type RenderOutput = {
   estimatedTokens: number;
 };
 
-/** Slots that contribute to the system prompt (everything except CONVERSATION). */
+/**
+ * Slots that contribute to the system prompt (everything except CONVERSATION).
+ *
+ * NOTE: PERSONA is intentionally omitted — its content is already carried by
+ * SYSTEM_PREAMBLE for RP agents (PromptBuilder sets both to the same value).
+ * Adding PERSONA here would duplicate persona text in the rendered prompt.
+ */
 const SYSTEM_SLOTS = new Set<PromptSectionSlot>([
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
-  PromptSectionSlot.CORE_MEMORY,
+  PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,
+  PromptSectionSlot.TYPED_RETRIEVAL,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,
-  PromptSectionSlot.MEMORY_HINTS,
 ]);
 
 /**

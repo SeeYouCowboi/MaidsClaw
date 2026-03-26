@@ -1,6 +1,10 @@
 import type { Blackboard } from "../state/blackboard.js";
 import { getAgentLocation } from "../state/location-helpers.js";
-import type { ViewerContext, ViewerRole } from "../core/contracts/viewer-context.js";
+import {
+  defaultViewerCanReadAdminOnly,
+  type ViewerContext,
+  type ViewerRole,
+} from "../core/contracts/viewer-context.js";
 
 // Settlement translation contract:
 // `current_area_id` is the live runtime field (numeric area entity ID from the blackboard).
@@ -17,6 +21,7 @@ export function resolveViewerContext(
   return {
     viewer_agent_id: agentId,
     viewer_role: options.role,
+    can_read_admin_only: defaultViewerCanReadAdminOnly(options.role),
     current_area_id: areaId,
     session_id: options.sessionId,
   };

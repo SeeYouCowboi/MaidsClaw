@@ -150,6 +150,7 @@ describe("runtime prompt integration", () => {
     expect(buildInputs[0]?.viewerContext).toEqual({
       viewer_agent_id: RP_PROFILE.id,
       viewer_role: RP_PROFILE.role,
+      can_read_admin_only: false,
       current_area_id: 42,
       session_id: "session-live",
     });
@@ -218,10 +219,14 @@ describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
       async runBuffered(): Promise<RpBufferedExecutionResult> {
         return {
           outcome: {
-            schemaVersion: "rp_turn_outcome_v3",
+            schemaVersion: "rp_turn_outcome_v5",
             publicReply: "I see.",
-            privateCommit: {
-              schemaVersion: "rp_private_cognition_v3",
+            privateEpisodes: [],
+            publications: [],
+            relationIntents: [],
+            conflictFactors: [],
+            privateCognition: {
+              schemaVersion: "rp_private_cognition_v4",
               ops: [
                 {
                   op: "upsert" as const,

@@ -22,7 +22,7 @@ class MockChatProvider implements ChatModelProvider {
 class MockEmbeddingProvider implements EmbeddingProvider {
   public calls: Array<{ texts: string[]; purpose: string; modelId: string }> = [];
 
-  async embed(texts: string[], purpose: "memory_index" | "memory_search" | "query_expansion", modelId: string): Promise<Float32Array[]> {
+  async embed(texts: string[], purpose: "memory_index" | "narrative_search" | "query_expansion", modelId: string): Promise<Float32Array[]> {
     this.calls.push({ texts, purpose, modelId });
     return texts.map(() => new Float32Array([1, 2, 3]));
   }

@@ -13,9 +13,11 @@ export type LoreDataSource = {
 };
 
 export type MemoryDataSource = {
-  getCoreMemoryBlocks(agentId: string): string;
+  getPinnedBlocks?(agentId: string): string;
+  getSharedBlocks?(agentId: string): string;
   getRecentCognition(viewerContext: ViewerContext): string;
-  getMemoryHints(userMessage: string, viewerContext: ViewerContext): Promise<string>;
+  getAttachedSharedBlocks?(agentId: string): string;
+  getTypedRetrievalSurface?(userMessage: string, viewerContext: ViewerContext): string | Promise<string>;
 };
 
 export type OperationalDataSource = {

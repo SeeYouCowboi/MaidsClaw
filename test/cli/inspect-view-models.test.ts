@@ -75,7 +75,7 @@ describe("inspect view models", () => {
 		expect(view.request_id).toBe(requestId);
 		expect(view.session_id).toBe(session.sessionId);
 		expect(typeof view.has_public_reply).toBe("boolean");
-		expect(typeof view.private_commit_count).toBe("number");
+		expect(typeof view.private_cognition_count).toBe("number");
 		expect(typeof view.memory_flush.requested).toBe("boolean");
 		expect(typeof view.pending_sweep_state).toBe("object");
 	});
@@ -102,10 +102,10 @@ describe("inspect view models", () => {
 		expect(settlement).toBeDefined();
 		const payload = settlement?.payload as {
 			viewerSnapshot?: { redacted?: boolean };
-			privateCommit?: { redacted?: boolean };
+			privateCognition?: { redacted?: boolean };
 		};
 		expect(payload.viewerSnapshot?.redacted).toBe(true);
-		expect(payload.privateCommit?.redacted).toBe(true);
+		expect(payload.privateCognition?.redacted).toBe(true);
 	});
 
 	it("raw mode shows tool/status records", () => {
@@ -208,9 +208,9 @@ function makeSettlementPayload(
 			selfPointerKey: "__self__",
 			userPointerKey: "__user__",
 		},
-		privateCommit: {
-			schemaVersion: "rp_private_cognition_v3",
+		privateCognition: {
+			schemaVersion: "rp_private_cognition_v4",
 			ops: [{ op: "retract", target: { kind: "assertion", key: "k1" } }],
-		} as unknown as TurnSettlementPayload["privateCommit"],
+		} as unknown as TurnSettlementPayload["privateCognition"],
 	};
 }

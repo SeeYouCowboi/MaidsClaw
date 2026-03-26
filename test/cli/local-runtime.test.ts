@@ -39,9 +39,9 @@ function assertValidTurnExecutionResultShape(result: TurnExecutionResult): void 
   expect(typeof result.request_id).toBe("string");
   expect(typeof result.assistant_text).toBe("string");
   expect(typeof result.has_public_reply).toBe("boolean");
-  expect(typeof result.private_commit.present).toBe("boolean");
-  expect(typeof result.private_commit.op_count).toBe("number");
-  expect(Array.isArray(result.private_commit.kinds)).toBe(true);
+  expect(typeof result.private_cognition.present).toBe("boolean");
+  expect(typeof result.private_cognition.op_count).toBe("number");
+  expect(Array.isArray(result.private_cognition.kinds)).toBe(true);
   expect(typeof result.recovery_required).toBe("boolean");
   expect(Array.isArray(result.public_chunks)).toBe(true);
   expect(Array.isArray(result.tool_events)).toBe(true);
@@ -70,12 +70,16 @@ describe("LocalRuntime", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "",
-          privateCommit: {
-            schemaVersion: "rp_private_cognition_v3",
+          privateCognition: {
+            schemaVersion: "rp_private_cognition_v4",
             ops: [{ op: "retract", target: { kind: "assertion", key: "quiet-step" } }],
           },
+          privateEpisodes: [],
+          publications: [],
+          relationIntents: [],
+          conflictFactors: [],
         },
       }),
       commitService,
@@ -105,7 +109,7 @@ describe("LocalRuntime", () => {
     expect(result.mode).toBe("local");
     expect(result.assistant_text).toBe("");
     expect(result.has_public_reply).toBe(false);
-    expect(result.private_commit).toEqual({
+    expect(result.private_cognition).toEqual({
       present: true,
       op_count: 1,
       kinds: ["assertion"],
@@ -122,8 +126,12 @@ describe("LocalRuntime", () => {
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
-          schemaVersion: "rp_turn_outcome_v3",
+          schemaVersion: "rp_turn_outcome_v5",
           publicReply: "Good evening, master.",
+          privateEpisodes: [],
+          publications: [],
+          relationIntents: [],
+          conflictFactors: [],
         },
       }),
       commitService,
@@ -153,7 +161,7 @@ describe("LocalRuntime", () => {
     expect(result.mode).toBe("local");
     expect(result.assistant_text).toBe("Good evening, master.");
     expect(result.has_public_reply).toBe(true);
-    expect(result.private_commit).toEqual({
+    expect(result.private_cognition).toEqual({
       present: false,
       op_count: 0,
       kinds: [],

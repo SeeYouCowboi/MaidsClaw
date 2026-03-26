@@ -70,10 +70,12 @@ function makeDataSources(): {
 			],
 		},
 		memory: {
-			getCoreMemoryBlocks: (agentId: string) =>
-				`<core_memory>${agentId}</core_memory>`,
+			getPinnedBlocks: (_agentId: string) =>
+				`<pinned_block label="pinned_summary">core persona rails</pinned_block>`,
+			getSharedBlocks: (_agentId: string) =>
+				`<shared_block label="user">shared relationship facts</shared_block>`,
 			getRecentCognition: () => `\u2022 [assertion] Alice trusts Bob (accepted)\n\u2022 [evaluation] eval Bob [trust:8, warmth:7]`,
-			getMemoryHints: async (userMessage: string) => `hint for ${userMessage}`,
+			getTypedRetrievalSurface: async () => "",
 		},
 		operational: {
 			getExcerpt: (_keys: string[]) => ({
@@ -109,16 +111,13 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(true);
-		expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(false);
-		expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(false);
-
 		const operational =
 			getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ??
 			"";
 		expect(operational.length > 0).toBe(true);
 	});
 
-	it("builds rp-agent prompt with core-memory/memory-hints/world/lore and without operational-state", async () => {
+	it("builds rp-agent prompt with four frontstage surfaces and without legacy memory slots", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -131,9 +130,10 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		expect(slots.includes(PromptSectionSlot.CORE_MEMORY)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.PERSONA)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.PINNED_SHARED)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(true);
-		expect(slots.includes(PromptSectionSlot.MEMORY_HINTS)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(false);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);
@@ -141,6 +141,35 @@ describe("PromptBuilder", () => {
 		const recentCognitionContent = getSectionContent(output.sections, PromptSectionSlot.RECENT_COGNITION);
 		expect(recentCognitionContent).toContain("\u2022 [assertion]");
 		expect(recentCognitionContent).toContain("\u2022 [evaluation]");
+
+		const pinnedShared =
+			getSectionContent(output.sections, PromptSectionSlot.PINNED_SHARED) ?? "";
+		expect(pinnedShared).toContain("pinned_summary");
+		expect(pinnedShared).toContain("shared relationship facts");
+		expect(pinnedShared).not.toContain("<core_memory>");
+		expect(pinnedShared).not.toContain("privateEpisodes");
+	});
+
+	it("rp-agent keeps deterministic four-surface slot order", async () => {
+		const dataSources = makeDataSources();
+		const builder = new PromptBuilder(dataSources);
+
+		const output = await builder.build({
+			profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+			viewerContext: BASE_VIEWER_CONTEXT,
+			userMessage: "remember this",
+			conversationMessages: CONVERSATION,
+			budget: BASE_BUDGET,
+		});
+
+		const slots = output.sections.map((section) => section.slot);
+		const personaIndex = slots.indexOf(PromptSectionSlot.PERSONA);
+		const pinnedSharedIndex = slots.indexOf(PromptSectionSlot.PINNED_SHARED);
+		const recentCognitionIndex = slots.indexOf(PromptSectionSlot.RECENT_COGNITION);
+
+		expect(personaIndex).toBeGreaterThan(-1);
+		expect(pinnedSharedIndex).toBeGreaterThan(personaIndex);
+		expect(recentCognitionIndex).toBeGreaterThan(pinnedSharedIndex);
 	});
 
 	it("omits RECENT_COGNITION slot when getRecentCognition returns empty string", async () => {

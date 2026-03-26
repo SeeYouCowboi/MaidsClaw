@@ -1,5 +1,4 @@
-import { VIEWER_ROLES } from "../core/contracts/viewer-context.js";
-import type { ViewerContext, ViewerRole } from "../core/contracts/viewer-context.js";
+import { VIEWER_ROLES, type ViewerContext, type ViewerRole } from "../core/contracts/viewer-context.js";
 
 export { VIEWER_ROLES };
 export type { ViewerContext, ViewerRole };
@@ -30,8 +29,26 @@ export type SemanticEdgeType = (typeof SEMANTIC_EDGE_TYPES)[number];
 export const EMBEDDING_VIEW_TYPES = ["primary", "keywords", "context"] as const;
 export type EmbeddingViewType = (typeof EMBEDDING_VIEW_TYPES)[number];
 
-export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state"] as const;
+export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state", "conflict"] as const;
 export type QueryType = (typeof QUERY_TYPES)[number];
+
+export const EDGE_LAYERS = ["state", "symbolic", "heuristic"] as const;
+export type EdgeLayer = (typeof EDGE_LAYERS)[number];
+
+export const EXPLORE_MODES = ["why", "timeline", "relationship", "state", "conflict"] as const;
+export type ExploreMode = (typeof EXPLORE_MODES)[number];
+
+export const EXPLAIN_DETAIL_LEVELS = ["concise", "standard", "audit"] as const;
+export type ExplainDetailLevel = (typeof EXPLAIN_DETAIL_LEVELS)[number];
+
+export const REDACTION_REASONS = ["hidden", "private", "admin_only"] as const;
+export type RedactionReason = (typeof REDACTION_REASONS)[number];
+
+export type RedactedPlaceholder = {
+  type: "redacted";
+  reason: RedactionReason;
+  node_ref: string;
+};
 
 export const NAVIGATOR_EDGE_KINDS = [
   "causal",
@@ -50,23 +67,33 @@ export type NavigatorEdgeKind = (typeof NAVIGATOR_EDGE_KINDS)[number];
 export const PROMOTION_ACTIONS = ["reuse", "promote_full", "promote_placeholder", "block"] as const;
 export type PromotionAction = (typeof PROMOTION_ACTIONS)[number];
 
-export const BELIEF_TYPES = ["observation", "inference", "suspicion", "intention"] as const;
-export type BeliefType = (typeof BELIEF_TYPES)[number];
-
 export const PROJECTION_CLASSES = ["none", "area_candidate"] as const;
 export type ProjectionClass = (typeof PROJECTION_CLASSES)[number];
 
 export const PROMOTION_CLASSES = ["none", "world_candidate"] as const;
 export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
 
-export const EPISTEMIC_STATUSES = ["confirmed", "suspected", "hypothetical", "retracted"] as const;
-export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
-
-export const CORE_MEMORY_LABELS = ["character", "user", "index"] as const;
+/**
+ * All valid core memory block labels.
+ * - `persona`: canonical writable label for agent identity (T21 forward)
+ * - `pinned_summary` / `pinned_index`: canonical labels (T7 forward)
+ * - `user`: legacy label, read-only
+ * - `index`: read-only (managed by core-memory-index-updater)
+ */
+export const CORE_MEMORY_LABELS = ["user", "index", "pinned_summary", "pinned_index", "persona"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
-export const NODE_REF_KINDS = ["event", "entity", "fact", "private_event", "private_belief"] as const;
+/** Canonical labels introduced by T7 — the preferred write targets. */
+export const CANONICAL_PINNED_LABELS = ["pinned_summary", "pinned_index"] as const;
+export type CanonicalPinnedLabel = (typeof CANONICAL_PINNED_LABELS)[number];
+
+export const CANONICAL_NODE_KINDS = ["event", "entity", "fact", "assertion", "evaluation", "commitment"] as const;
+export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
+
+export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS] as const;
 export type NodeRefKind = (typeof NODE_REF_KINDS)[number];
+
+export const CANONICAL_NODE_REF_KINDS = CANONICAL_NODE_KINDS;
 
 type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
@@ -170,34 +197,37 @@ export type PointerRedirect = {
   created_at: number;
 };
 
-export type AgentEventOverlay = {
-  id: number;
-  event_id: number | null;
-  agent_id: string;
-  role: string | null;
-  private_notes: string | null;
-  salience: number | null;
-  emotion: string | null;
-  event_category: PrivateEventCategory;
-  primary_actor_entity_id: number | null;
-  projection_class: ProjectionClass;
-  location_entity_id: number | null;
-  projectable_summary: string | null;
-  source_record_id: string | null;
-  created_at: number;
-};
-
 export type AgentFactOverlay = {
   id: number;
   agent_id: string;
   source_entity_id: number;
   target_entity_id: number;
   predicate: string;
-  belief_type: BeliefType | null;
-  confidence: number | null;
-  epistemic_status: EpistemicStatus | null;
   provenance: string | null;
   source_event_ref: NodeRef | null;
+  created_at: number;
+  updated_at: number;
+};
+
+// Memory relation types - extracted from schema.ts CHECK constraints
+export const MEMORY_RELATION_TYPES = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes", "surfaced_as", "published_as", "resolved_by", "downgraded_by"] as const;
+export type MemoryRelationType = (typeof MEMORY_RELATION_TYPES)[number];
+
+export const RELATION_DIRECTNESS_VALUES = ["direct", "inferred", "indirect"] as const;
+export type RelationDirectness = (typeof RELATION_DIRECTNESS_VALUES)[number];
+
+export const RELATION_SOURCE_KINDS = ["turn", "job", "agent_op", "system"] as const;
+export type RelationSourceKind = (typeof RELATION_SOURCE_KINDS)[number];
+
+export type MemoryRelationRecord = {
+  id: number;
+  source_node_ref: string;
+  target_node_ref: string;
+  relation_type: MemoryRelationType;
+  strength: number;
+  directness: RelationDirectness;
+  source_kind: RelationSourceKind;
+  source_ref: string;
   created_at: number;
   updated_at: number;
 };
@@ -288,6 +318,7 @@ export type BeamEdge = {
   from: NodeRef;
   to: NodeRef;
   kind: NavigatorEdgeKind;
+  layer: EdgeLayer;
   weight: number;
   timestamp: number | null;
   summary: string | null;
@@ -317,11 +348,29 @@ export type EvidencePath = {
   score: PathScore;
   supporting_nodes: NodeRef[];
   supporting_facts: number[];
+  redacted_placeholders?: RedactedPlaceholder[];
+  summary?: string;
 };
 
 export type NavigatorResult = {
   query: string;
   query_type: QueryType;
+  summary?: string;
+  drilldown?: {
+    mode?: ExploreMode;
+    focus_ref?: NodeRef;
+    focus_cognition_key?: string;
+    as_of_valid_time?: number;
+    as_of_committed_time?: number;
+    time_sliced_paths?: Array<{
+      seed: NodeRef;
+      depth: number;
+      edge_count: number;
+      omitted_edges: number;
+      has_valid_cut: boolean;
+      has_committed_cut: boolean;
+    }>;
+  };
   evidence_paths: EvidencePath[];
 };
 
@@ -334,12 +383,12 @@ export type MemoryHint = {
 };
 
 export type CoreMemoryAppendInput = {
-  label: "character" | "user";
+  label: "user" | "pinned_summary";
   content: string;
 };
 
 export type CoreMemoryReplaceInput = {
-  label: "character" | "user";
+  label: "user" | "pinned_summary";
   old_content: string;
   new_content: string;
 };
@@ -357,6 +406,12 @@ export type MemorySearchInput = {
 
 export type MemoryExploreInput = {
   query: string;
+  mode?: ExploreMode;
+  focusRef?: NodeRef;
+  focusCognitionKey?: string;
+  asOfValidTime?: number;
+  asOfCommittedTime?: number;
+  detailLevel?: ExplainDetailLevel;
 };
 
 export type ExtractionBatch = {
@@ -369,8 +424,8 @@ export type ExtractionBatch = {
 
 export type MigrationResult = {
   batch_id: string;
-  private_event_ids: number[];
-  private_belief_ids: number[];
+  episode_event_ids: number[];
+  assertion_ids: number[];
   entity_ids: number[];
   fact_ids: number[];
 };
@@ -439,7 +494,7 @@ export interface IGraphNavigator {
 }
 
 export interface IMaterializationService {
-  materializeDelayed(privateEvents: AgentEventOverlay[], agentId: string): number[];
+  materializeDelayed(privateEvents: unknown[], agentId: string): number[];
 }
 
 export interface IPromotionService {

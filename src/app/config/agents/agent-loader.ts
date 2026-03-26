@@ -188,6 +188,8 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 		narrativeContextEnabled:
 			entry.narrativeContextEnabled ?? defaults.narrativeContextEnabled,
 		contextBudget: entry.contextBudget,
+		retrievalTemplate: entry.retrievalTemplate,
+		writeTemplate: entry.writeTemplate,
 	};
 }
 

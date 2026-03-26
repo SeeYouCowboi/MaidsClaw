@@ -18,6 +18,8 @@ import { JobQueue } from "../../src/jobs/queue.js";
 import { JobDedupEngine } from "../../src/jobs/dedup.js";
 import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobScheduler } from "../../src/jobs/scheduler.js";
+import { MEMORY_TOOL_NAMES } from "../../src/memory/tool-names.js";
+import { buildMemoryTools } from "../../src/memory/tools.js";
 
 function createInteractionHarness(): {
   db: Db;
@@ -212,4 +214,80 @@ describe("E2E demo scenario", () => {
     expect(secondSubmit).toBeNull();
     expect(queue.size()).toBe(1);
   });
+
+  it("contested summary explain returns drilldown with redaction placeholders", async () => {
+    const tools = buildMemoryTools({
+      coreMemory: {} as any,
+      retrieval: {} as any,
+      navigator: {
+        async explore() {
+          return {
+            query: "why butler claim changed",
+            query_type: "conflict",
+            summary: "Explain conflict: 1 evidence path (1 redacted)",
+            drilldown: {
+              mode: "conflict",
+              focus_cognition_key: "assert:butler-accounts",
+              time_sliced_paths: [
+                {
+                  seed: "assertion:1",
+                  depth: 1,
+                  edge_count: 1,
+                  omitted_edges: 0,
+                  has_valid_cut: false,
+                  has_committed_cut: false,
+                },
+              ],
+            },
+            evidence_paths: [
+              {
+                path: {
+                  seed: "assertion:1",
+                  nodes: ["assertion:1"],
+                  edges: [],
+                  depth: 0,
+                },
+                score: {
+                  seed_score: 0.9,
+                  edge_type_score: 0.8,
+                  temporal_consistency: 1,
+                  query_intent_match: 1,
+                  support_score: 0.7,
+                  recency_score: 0.6,
+                  hop_penalty: 0,
+                  redundancy_penalty: 0,
+                  path_score: 0.88,
+                },
+                supporting_nodes: [],
+                supporting_facts: [3],
+                redacted_placeholders: [{ type: "redacted", reason: "private", node_ref: "event:7" }],
+                summary: "1 visible step, 1 supporting fact",
+              },
+            ],
+          } as any;
+        },
+      },
+    });
+
+    const tool = tools.find((candidate) => candidate.name === MEMORY_TOOL_NAMES.memoryExplore);
+    expect(tool).toBeDefined();
+
+    const result = await tool!.handler(
+      { query: "why butler claim changed", mode: "conflict", focusCognitionKey: "assert:butler-accounts" },
+      {
+        viewer_agent_id: "rp:alice",
+        viewer_role: "rp_agent",
+        current_area_id: 1,
+        session_id: "sess-demo-conflict",
+      },
+    ) as Record<string, unknown>;
+
+    expect(result.summary).toBe("Explain conflict: 1 evidence path (1 redacted)");
+    expect(result.drilldown).toBeDefined();
+    const drilldown = result.drilldown as Record<string, unknown>;
+    expect(drilldown.focus_cognition_key).toBe("assert:butler-accounts");
+    const evidence = result.evidence_paths as Array<Record<string, unknown>>;
+    expect(evidence[0]?.redacted).toEqual([{ type: "redacted", reason: "private", node_ref: "event:7" }]);
+  });
+
 });
