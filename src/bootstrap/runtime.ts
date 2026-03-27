@@ -38,6 +38,7 @@ import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweep
 import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import { runMemoryMigrations } from "../memory/schema.js";
+import { SqliteSettlementLedger } from "../memory/settlement-ledger.js";
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
 import { TransactionBatcher } from "../memory/transaction-batcher.js";
@@ -255,6 +256,7 @@ export function bootstrapRuntime(
 	const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
+	const settlementLedger = new SqliteSettlementLedger(db.raw);
 	let memoryTaskAgent: MemoryTaskAgent | null = null;
 	let memoryPipelineReady = false;
 	let memoryPipelineStatus: MemoryPipelineStatus = "missing_embedding_model";
@@ -308,6 +310,7 @@ export function bootstrapRuntime(
 						embeddings,
 						materialization,
 						provider,
+						settlementLedger,
 					);
 					memoryPipelineReady = true;
 					memoryPipelineStatus = "ready";
@@ -491,6 +494,9 @@ export function bootstrapRuntime(
 				interactionStore,
 				flushSelector,
 				memoryTaskAgent,
+				{
+					settlementLedger,
+				},
 			)
 		: null;
 	const publicationRecoverySweeper = graphStorage

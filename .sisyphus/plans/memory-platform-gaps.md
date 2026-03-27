@@ -308,7 +308,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `docs(memory): w0-t3 area/world events schema definition`
 
-- [ ] 4. Durable Job Persistence
+- [x] 4. Durable Job Persistence
 
   **What to do**:
   - 定义 `JobPersistence` interface（enqueue, claim, complete, fail, retry, listPending）
@@ -408,7 +408,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w1-t4 durable job persistence with storage interface`
 
-- [ ] 5. Organizer Durable Pipeline
+- [x] 5. Organizer Durable Pipeline
 
   **What to do**:
   - 将 `task-agent.ts:456` 的 fire-and-forget `void Promise.resolve().then(() => this.runOrganize(...))` 改为通过 `JobPersistence.enqueue()` 提交
@@ -533,7 +533,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w1-t6 embedding versioning and dimension safety`
 
-- [ ] 7. Search/FTS Authority + Repair (Durable Job Kind)
+- [x] 7. Search/FTS Authority + Repair (Durable Job Kind)
 
   **What to do**:
   - 在 `src/jobs/types.ts` 中注册 `search.rebuild` 为独立 `JobKind`，拥有自己的 retry config 和 concurrency cap（gap analysis :131-132 要求独立 durable job kind，不绑定在 `memory.organize` 下）
@@ -627,7 +627,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `refactor(memory): w1-t8 unify node_ref parsing contract`
 
-- [ ] 9. Settlement Processing Ledger
+- [x] 9. Settlement Processing Ledger
 
   **What to do**:
   - 新建独立 `settlement_processing_ledger` 表（不复用 `_memory_maintenance_jobs`，因为后者已有通用 `status` 列，叠加 settlement 专用状态会形成双状态源）
