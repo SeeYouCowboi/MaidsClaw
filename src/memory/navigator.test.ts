@@ -592,6 +592,45 @@ describe("GraphNavigator", () => {
     expect(outgoing.map((edge) => edge.summary)).toContain("current-predicate");
   });
 
+  it("time-sliced explore does not let post-cutoff private assertion reads suppress in-slice semantic paths", async () => {
+    insertPrivateCognitionAssertionCurrent(db, {
+      id: 102,
+      agentId: "agent-a",
+      cognitionKey: "assert:key-102",
+      sourcePointerKey: "alice",
+      targetPointerKey: "garden",
+      sourceEntityId: 1,
+      targetEntityId: 3,
+      predicate: "learned-after-cutoff",
+    });
+
+    db.prepare("UPDATE private_cognition_current SET updated_at = ? WHERE id = ?").run(2_000, 102);
+    insertSemantic(db, "assertion:102" as NodeRef, "entity:2" as NodeRef, "semantic_similar");
+    db.prepare("UPDATE semantic_edges SET created_at = ? WHERE source_node_ref = ? AND target_node_ref = ?").run(
+      1_000,
+      "assertion:102",
+      "entity:2",
+    );
+
+    const retrieval = new StubRetrieval([seed("assertion:102" as NodeRef, "assertion")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+
+    const result = await navigator.explore("relationship", viewerA(), {
+      query: "relationship",
+      maxDepth: 1,
+      beamWidth: 1,
+      maxCandidates: 20,
+      asOfCommittedTime: 1_500,
+    } as MemoryExploreInput);
+
+    const depthOnePaths = result.evidence_paths.filter((path) => path.path.depth === 1);
+    const semanticPath = depthOnePaths.find((path) =>
+      path.path.edges.some((edge) => edge.kind === "semantic_similar" && edge.to === ("entity:2" as NodeRef)),
+    );
+    expect(semanticPath).toBeDefined();
+    expect(semanticPath?.path.edges.every((edge) => (edge.timestamp ?? 0) <= 1_500)).toBe(true);
+  });
+
   it("uses memory_relations as relation-edge traversal authority", async () => {
     insertEvent(db, 1, "world_public", 1, "[]", "event one");
     insertEvent(db, 2, "world_public", 1, "[]", "event two");
@@ -719,6 +758,35 @@ describe("GraphNavigator", () => {
 
     const allNodes = conflictResult.evidence_paths.flatMap((p) => p.path.nodes);
     expect(allNodes).toContain("event:2");
+  });
+
+  it("memory relation edge scoring is above floor (0.1) in path scores", async () => {
+    insertEvent(db, 1, "world_public", 1, "[]", "event one");
+    insertEvent(db, 2, "world_public", 1, "[]", "event two");
+
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO memory_relations (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("event:1", "event:2", "conflicts_with", 0.9, "direct", "system", "test", now);
+
+    const retrieval = new StubRetrieval([seed("event:1" as NodeRef, "event")]);
+    const navigator = new GraphNavigator(db, retrieval as unknown as RetrievalService, alias);
+    const result = await navigator.explore(
+      "what happened",
+      viewerA(),
+      { maxDepth: 1, maxCandidates: 20 },
+      GRAPH_RETRIEVAL_STRATEGIES.conflict_exploration,
+    );
+
+    const pathsWithConflict = result.evidence_paths.filter((p) =>
+      p.path.edges.some((e) => String(e.kind) === "conflicts_with"),
+    );
+    expect(pathsWithConflict.length).toBeGreaterThan(0);
+
+    for (const ep of pathsWithConflict) {
+      expect(ep.score.edge_type_score).toBeGreaterThan(0.1);
+    }
   });
 
   it("deep_explain strategy has wider effective beam than default", async () => {

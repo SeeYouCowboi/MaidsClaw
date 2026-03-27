@@ -99,27 +99,6 @@ type Brand<T, Name extends string> = T & { readonly __brand: Name };
 type NodeRefLiteral = `${NodeRefKind}:${number}`;
 export type NodeRef = Brand<NodeRefLiteral, "NodeRef">;
 
-export type MemoryMigration = {
-  migration_id: string;
-  description: string;
-  applied_at: number;
-};
-
-export type MemoryRuntimeState = {
-  key: string;
-  value: string;
-  updated_at: number;
-};
-
-export type MemoryMaintenanceJob = {
-  id: number;
-  job_type: string;
-  status: string;
-  payload: string | null;
-  created_at: number;
-  updated_at: number;
-};
-
 export type EventNode = {
   id: number;
   session_id: string;
@@ -195,18 +174,6 @@ export type PointerRedirect = {
   redirect_type: string | null;
   owner_agent_id: string | null;
   created_at: number;
-};
-
-export type AgentFactOverlay = {
-  id: number;
-  agent_id: string;
-  source_entity_id: number;
-  target_entity_id: number;
-  predicate: string;
-  provenance: string | null;
-  source_event_ref: NodeRef | null;
-  created_at: number;
-  updated_at: number;
 };
 
 // Memory relation types - extracted from schema.ts CHECK constraints
@@ -317,7 +284,7 @@ export type SeedCandidate = {
 export type BeamEdge = {
   from: NodeRef;
   to: NodeRef;
-  kind: NavigatorEdgeKind;
+  kind: NavigatorEdgeKind | MemoryRelationType;
   layer: EdgeLayer;
   weight: number;
   timestamp: number | null;

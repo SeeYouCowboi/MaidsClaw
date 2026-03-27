@@ -2,14 +2,15 @@
 
 本文档收纳当前已在 V2 共识中识别、但不建议继续压入当前轮次主实施面的增强项。
 
-> **实施状态总览（2026-03-26）**
+> **实施状态总览（2026-03-27）**
 >
-> 以下条目中，部分已在 `refactor/memory-system` 分支中**提前实现**（标记为 **DONE**），其余仍为延后候选（标记为 **DEFERRED**）。
+> 以下条目中，部分已在 `refactor/memory-system` 分支中**提前实现**（标记为 **DONE**）；部分原本归在 V3 的“基础加固子问题”已被吸收进当前 `.sisyphus/plans/memory-v3-hardening-cutover.md`（标记为 **CUTOVER-SCOPED**，表示**已完成计划收口，但尚未因此视为代码完成**）；其余仍为延后候选（标记为 **DEFERRED**）。
 >
 > | 状态 | 条目 |
 > |------|------|
 > | **DONE** | §1 检索主链接管、§2 Durable Cognition/Episodic Recall、§4 Current Projection/Historical Log、§9 Visibility/Redaction/Authorization、§18 共识计划未完成条目、§20 Tool Contract/Capability Matrix |
-> | **DEFERRED** | §3 Area State、§5 Time-Slice Query、§6 边模型统一读取层、§7 Symbolic Relation Layer、§8 Graph Node Registry、§10 Persona/Pinned/Shared 替换旧 Core Memory、§11/§11.1 Shared Blocks 多 Agent 协作、§12 Publication 一致性增强、§13 Contested Evidence 完善、§14 Projection 构建责任重构、§15 DB 健全性强化、§16 Graph Retrieval 策略优化、§17 外部参考吸收、§19 兼容迁移/删旧配套、§21-28 各候选扩展 |
+> | **CUTOVER-SCOPED** | §5 的 in-scope time-slice read closure + current-only 边界、§6 的 `memory_relations` 语义保真收尾、§12 的既有 pipeline 一致性收敛、§14 的 authority matrix / replay scope / cache 分类子问题、§15 的 audit-proven integrity hardening、§19 的 residual replay/verify/checklist/test cleanup |
+> | **DEFERRED** | §3 Area State、§5 的完整产品化与历史 projection、§6 的全链统一读取层收敛、§7 Symbolic Relation Layer、§8 Graph Node Registry、§10 Persona/Pinned/Shared 替换旧 Core Memory、§11/§11.1 Shared Blocks 多 Agent 协作、§12 的更大补偿/repair 框架、§13 Contested Evidence 完善、§14 的 durable organizer / search repair / 单时钟等平台重构、§15 的完整 FK/约束计划、§16 Graph Retrieval 策略优化、§17 外部参考吸收、§19 的离线对照/回滚演练与最终命名清扫、§21-28 各候选扩展 |
 
 定位原则:
 
@@ -56,7 +57,7 @@
 
 ## 5. Time-Slice Query 正式产品化
 
-> **DEFERRED**: `src/memory/time-slice-query.ts` 已存在辅助实现；`valid_time` + `committed_time` 列已通过 migration 020 加入 projection 表。但 time-slice query 尚未作为正式产品能力接入 `memory_explore` 或统一工具。
+> **PARTIAL / CUTOVER-SCOPED（2026-03-27）**: `src/memory/time-slice-query.ts` 已存在辅助实现；`valid_time` + `committed_time` 列已通过 migration 020 加入 projection 表。当前 cutover 计划已吸收两项基础收尾：`memory_explore` 运行时路径的 time-slice read closure，以及 `area/world projection` 的 **current-only** 能力边界冻结。完整产品化与历史 projection 能力仍为 V3 延后项。
 
 - 支持明确区分:
 - “那时世界是什么状态”
@@ -67,9 +68,36 @@
 - Graphiti: <https://github.com/getzep/graphiti>
 - Graphiti 介绍: <https://blog.getzep.com/graphiti-knowledge-graphs-for-agents/>
 
+### 5.1 代码库现状补充：helper 已在，projection 历史真值模型未完成（2026-03-27）
+
+这条候选方向**已被文档提到**，但需要补充一个更明确的代码级结论：当前仓库已经具备 time-slice helper 和部分调用面，**不等于** `area/world projection` 已经具备真正可重建的历史切片能力。
+
+- `src/memory/time-slice-query.ts` 已实现 `buildTimeSliceQuery()`、`isEdgeInTimeSlice()`、`isProjectionRowInTimeSlice()` 与 `filterEvidencePathsByTimeSlice()`，说明“时间切片语义”在 helper 层已经成立。
+- `src/memory/tools.ts` 中 `memory_explore` 也已经把 `asOfTime + timeDimension` 转换成 `asOfValidTime` / `asOfCommittedTime` 传给 navigator，说明工具面已经开始接这套语义。
+- 但 `src/memory/projection/area-world-projection-repo.ts` 的 `upsertAreaStateCurrent()` / `upsertWorldStateCurrent()` 仍是 `ON CONFLICT ... DO UPDATE` 的覆盖式 current 写入；对应读取端也只有 `getAreaStateCurrent()` / `getWorldStateCurrent()` / `getAreaNarrativeCurrent()` / `getWorldNarrativeCurrent()` 这类 current getter，没有 `asOf*` 参数。
+- `src/memory/schema.ts` 的 migration 020 只是给 `area_state_current` / `world_state_current` current 表补了 `valid_time` / `committed_time` 列，没有新增 append-only history / ledger 表；因此旧值仍会被覆盖，不能仅凭 current 表回答任意历史切片。
+- 此外，`src/memory/navigator.ts` 仍存在直接读取 `private_cognition_current` 的 current-table 路径（如 `expandPrivateBeliefFrontier()`），说明“工具层支持时间参数”和“底层所有读取路径都真正尊重时间切片”目前还不是同一件事。
+
+因此，当前 `memory-v3-hardening-cutover.md` 中的 §5 更适合被理解为:
+
+- 修补 query-time bypass
+- 让现有 current/projection 读取尊重时间切片条件
+- 证明现有 helper 与 query/read path 一致
+- 明确冻结 `area/world projection = current-only` 的能力边界，避免工具层继续做伪历史承诺
+
+而**不应**在这一轮 audit-first cutover 中直接扩成:
+
+- 为 `area/world projection` 引入完整历史 ledger
+- 为 narrative/state projection 建立完整 replayable 历史重建模型
+
+后者仍然是本文档所记录的**未来实施方向**。如果后续要把 `area/world state` 做成真正的 temporal projection，应明确二选一:
+
+- 新增 append-only projection history / ledger，并让 current 只是最新快照
+- 或明确降级为 current-only projection，并在 explain / retrieval / tool contract 中写明其历史切片能力边界
+
 ## 6. 边模型统一读取层
 
-> **PARTIAL / DEFERRED**: `src/memory/graph-edge-view.ts`（430 行）已实现 `GraphEdgeView` 统一读取抽象，含 `readMemoryRelations()` / `readLogicEdges()` / `readSemanticEdges()` / `readFactEdges()`。但上层 GraphNavigator、retrieval、time-slice query 尚未全部共享同一套边视图。
+> **PARTIAL / CUTOVER-SCOPED（2026-03-27）**: `src/memory/graph-edge-view.ts`（430 行）已实现 `GraphEdgeView` 统一读取抽象，含 `readMemoryRelations()` / `readLogicEdges()` / `readSemanticEdges()` / `readFactEdges()`。当前 cutover 计划已吸收一个较窄的 §6 收尾项：修复 `memory_relations -> BeamEdge.kind` 在 navigator 路径上的类型/评分错位。更大范围的“全链统一边视图收敛”仍为 V3 延后项。
 
 - 建立正式的 `GraphEdgeView` 统一读取抽象。
 - 将 `logic_edges / memory_relations / semantic_edges / fact_edges` 的上层读取统一到共享接口。
@@ -183,7 +211,7 @@ canViewAdminOnly(viewerContext: ViewerContext): boolean {
 
 ## 12. Publication / Materialization 一致性增强
 
-> **PARTIAL / DEFERRED**: `PublicationRecoverySweeper`（`src/memory/publication-recovery-sweeper.ts`）已实现 pending→retrying→reconciled|exhausted 状态流与重试。但完整补偿逻辑与 promotion 一致性增强仍为 V3 延后项。
+> **PARTIAL / CUTOVER-SCOPED（2026-03-27）**: `PublicationRecoverySweeper`（`src/memory/publication-recovery-sweeper.ts`）已实现 pending→retrying→reconciled|exhausted 状态流与重试。当前 cutover 计划已吸收“在既有 `turn-service -> projection-manager -> materialization -> publication-recovery-sweeper` pipeline 内收敛 live/recovery observable outcome”的收尾项；更大范围的补偿框架与 promotion 语义扩展仍为 V3 延后项。
 
 - 将 publication materialization 从“事务外最终一致”提升到更可控的一致性模型。
 - 明确失败重试、幂等键、补偿逻辑、重建逻辑。
@@ -207,7 +235,7 @@ canViewAdminOnly(viewerContext: ViewerContext): boolean {
 
 ## 14. Current Projection 构建责任重构
 
-> **DEFERRED**: `ProjectionManager`（`src/memory/projection/projection-manager.ts`）已存在，但 projection 构建责任仍分散在 `TurnService` / `ExplicitSettlementProcessor` / `GraphOrganizer` / `storage` 中，统一收敛尚未完成。
+> **PARTIAL / CUTOVER-SCOPED（2026-03-27）**: `ProjectionManager`（`src/memory/projection/projection-manager.ts`）已存在，但 projection 构建责任仍分散在 `TurnService` / `ExplicitSettlementProcessor` / `GraphOrganizer` / `storage` 中。当前 cutover 计划已吸收与此直接相关的基础收尾：`Surface Authority Matrix`、replay/verify scope freeze、`recent_cognition_slots` prompt-cache 定位、`area/world projection` current-only 边界文档化。durable organizer、search repair、单时钟 enforcement 仍为 V3 延后项。
 
 - 重新划分 projection 的构建责任:
 - settlement-time 同步投影
@@ -216,9 +244,130 @@ canViewAdminOnly(viewerContext: ViewerContext): boolean {
 - graph-derived metrics 更新
 - 明确哪些 projection 必须同步可用，哪些允许异步延迟。
 
+### 14.1 代码库现状补充：organizer 仍是事务后 fire-and-forget，而非 durable rebuild 面（2026-03-27）
+
+这条候选方向**已被文档提到**，但当前实现的关键风险需要写得更具体。
+
+- `src/memory/task-agent.ts` 中，`MemoryTaskAgent.runMigrateInternal()` 在 `COMMIT` 之后才构造 `GraphOrganizerJob`，随后直接以 `Promise.resolve().then(() => this.runOrganize(...))` 的方式后台执行；失败只记日志，不进入 `_memory_maintenance_jobs`。
+- `src/memory/graph-organizer.ts` 里的 organizer 并不是“可有可无的小优化”，它实际负责 embeddings、semantic edge 构建、node score 更新，以及 `search_docs_private/area/world` 的搜索投影同步。
+- 这意味着当前 memory stack 已经形成一类明确的“事务后异步派生面”:
+- `node_embeddings`
+- `semantic_edges`
+- `node_scores`
+- `search_docs_private/area/world`
+
+而这些派生面当前并没有像 `publication_recovery` 或 `pending_settlement_flush` 那样接入 `_memory_maintenance_jobs` 的 durable repair plane。
+
+更重要的是，代码库本身已经存在通用 job runtime:
+
+- `src/jobs/types.ts` 已定义 `memory.organize`
+- `src/jobs/dispatcher.ts` 已为 `memory.organize` 提供全局并发控制
+
+这说明问题不在于“系统没有 job 基础设施”，而在于 memory organizer 这条链路**尚未真正接入**该基础设施。
+
+同时，当前 `scripts/memory-replay.ts` / `scripts/memory-verify.ts` 只覆盖 `private_cognition_current`，并不覆盖 organizer 派生面；因此“durable cognition replay 可做”不等于“整个 memory derived surface 可重建”。
+
+与当前 `memory-v3-hardening-cutover.md` 的关系:
+
+- 当前 cutover 计划**已经吸收了分类层面的收口**：Task 1 authority matrix 必须把 organizer-only outputs 记录为 `async derived / not durable`
+- Task 6 也会把 replay/verify 的覆盖边界与这份 authority matrix 对齐
+- 但若要真正把 organizer 变成 durable / replayable / repairable subsystem，应视为本文档记录的**未来实施方向**
+
+### 14.2 Search / FTS authority 与 repair contract 需要显式化（2026-03-27）
+
+这条方向在原文中只以“search index 同步”一句带过，仍不够具体；当前代码库里，search surface 的 authority 已经明显分裂，需要单独记录。
+
+- `src/memory/storage.ts` 的 `GraphStorageService.syncSearchDoc()` 负责写 `search_docs_private` / `search_docs_area` / `search_docs_world`，并同步 FTS sidecar。
+- 但同文件中的 `syncFtsRow()` 在 FTS 写入失败时只记录日志，不会抛出 repair signal，也不会自动入 durable job。
+- `src/memory/graph-organizer.ts` 的 `syncSearchProjection()` 又会在 organizer 阶段重新同步 event/entity/assertion/evaluation/commitment 对应的 search 文档。
+- `src/memory/cognition/cognition-repo.ts` 还独立维护 `search_docs_cognition` 与 `search_docs_cognition_fts`。
+
+因此当前 search 体系并不是“一个模块同步维护所有搜索面”，而是混合了:
+
+- 同步写入
+- organizer 异步刷新
+- FTS sidecar 复制
+- cognition 独立 search surface
+
+这本身不是 bug，但它意味着 V3 后续如果要强化底层框架，需要补齐以下契约:
+
+- 每类 `search_docs_*` 的 single source of truth 是谁
+- FTS 失败是允许静默退化，还是必须入 repair queue
+- 是否需要统一 doctor / rebuild / reindex 命令
+- verify 脚本应如何检查 row table 与 FTS sidecar 的一致性
+
+这一方向目前**已部分进入**当前 cutover 计划：Task 1 authority matrix 需要逐表记录 `search_docs_*` 的写路径与分类，Task 6 需要据此冻结 replay/verify 边界；但 unified repair contract 本身仍属于本文档记录的未来实施方向。
+
+### 14.3 `recent_cognition_slots` 应被明确归类为 cache 还是 projection（2026-03-27）
+
+这条方向原文**未被显式提到**，但从代码库看已经有必要单独记入候选清单。
+
+- `src/interaction/schema.ts` 创建了 `recent_cognition_slots(session_id, agent_id, last_settlement_id, slot_payload, updated_at)`。
+- `src/interaction/store.ts` 的 `upsertRecentCognitionSlot()` 实现方式是“读取旧 JSON -> append 新 entries -> trim 到 64 -> 整体覆盖写回”，这更像 prompt cache，而不是 append-only ledger 或严格 projection。
+- 但 `src/memory/prompt-data.ts` 中的 `getTypedRetrievalSurface()` 与 `getRecentCognition()` 又直接读取该表，说明它已经是 prompt 质量上的关键运行时依赖，而不是无关紧要的附属缓存。
+
+目前的问题不在于它“已经坏了”，而在于它缺少明确定义:
+
+- 如果它只是 cache，应明确声明 canonical source 在别处，允许丢失后重建
+- 如果它被当作 prompt-critical projection，则应拥有与 `private_cognition_current` 类似的 rebuild / verify contract
+
+当前代码库里，`private_cognition_current` 已有 `rebuild()` 路径，而 `recent_cognition_slots` 没有同等级的 replay / doctor / invariant 说明。因此这条方向有必要补入 V3 候选项。
+
+与当前 cutover 计划的关系:
+
+- 当前 cutover 计划**已经吸收了分类层面的收口**：Task 1 authority matrix 需明确把它标成 prompt cache，而非 canonical projection
+- Task 6 也会把 replay/verify coverage 与这一定位对齐
+- 但若要真正收口为可重建 projection，应放到未来实施阶段
+
+### 14.4 Settlement 单时钟 / commit timestamp contract（2026-03-27）
+
+这条方向原文**未被显式提到**，但代码库已经显示出“同一次 settlement 在多条链路上各自取时”的现实，值得单列为未来候选。
+
+- `src/memory/projection/projection-manager.ts` 的 `commitSettlement()` 先生成一个 `now`，用于 episode append、cognition event append、`private_cognition_current` upsert，以及 area-state artifacts。
+- 但同文件 `materializePublicationsSafe()` 调用 `materializePublications()` 时又传入新的 `Date.now()`，没有复用同一个 settlement clock。
+- `src/runtime/turn-service.ts` 的 `buildCognitionSlotPayload()` 自己再生成一份 `committedAt`。
+- `src/interaction/store.ts` 在落 `recent_cognition_slots.updated_at` 时又取了一次新的 `Date.now()`。
+
+这不会自动变成用户可见 bug，但它意味着当前系统并没有显式承诺:
+
+- 一个 settlement 是否应该拥有单一 canonical commit timestamp
+- publication event / cognition event / projection row / slot cache 的时间戳是否必须同源
+- replay / explain / time-slice / audit 是否允许这些面出现毫秒级漂移
+
+当前 cutover 计划**已吸收了分类层面的收口**：Task 1 authority matrix 需要记录各 surface 的 `clock source / time semantics`，把多时钟现实冻结成审计产物；但单时钟 enforcement 仍不属于本轮 cutover，而是未来 phase 的候选方向。
+
+### 14.5 Authority / Derived / Cache 分类契约仍未被显式文档化（2026-03-27）
+
+这条方向原文**未被显式提到**，但它其实是前面几条长期反复出现的共同根因。
+
+从当前 schema 可以清楚看出 memory 数据已经分成多种面:
+
+- canonical ledger: `private_cognition_events`, `private_episode_events`
+- sync projection: `private_cognition_current`, `area_state_current`, `world_state_current`
+- async derived surface: `node_embeddings`, `semantic_edges`, `node_scores`, `search_docs_private/area/world`
+- cache / prompt convenience surface: `recent_cognition_slots`
+- repair plane: `_memory_maintenance_jobs`
+
+当前 cutover 计划已经开始通过 `Surface Authority Matrix` 把这些面显式收口，但更完整的平台契约仍未完成。当前仍需要系统化定义:
+
+- 谁是 authority
+- 谁可以丢失后重建
+- 谁必须严格同步
+- 谁允许最终一致
+- 每类表的 verify invariant / repair command 是什么
+
+如果没有这层契约，后续 hardening 计划就很容易把“收尾 cutover”与“平台级重构”混在一起，导致范围膨胀或验证失焦。
+
+因此，这条方向现在已属于 **PARTIAL / CUTOVER-SCOPED**：本轮 cutover 会先把分类、replay scope、clock semantics 写死；更深的 durable / repair / rebuild 平台化工作仍建议作为 V3 后续 phase 的总纲性候选保留，并优先服务于:
+
+- organizer durable 化
+- search/FTS repair
+- slot cache 重建策略
+- projection/history/time model 的边界澄清
+
 ## 15. 底层约束与 DB 健全性强化
 
-> **PARTIAL / DEFERRED**: append-only triggers 已实现（migration 019）；`private_cognition_current` / `private_episode_events` 的 NOT NULL/CHECK 约束已收紧（migration 031/032）。但完整 FK、projection 唯一性约束、图边幂等性仍为 V3 延后项。
+> **PARTIAL / CUTOVER-SCOPED（2026-03-27）**: append-only triggers 已实现（migration 019）；`private_cognition_current` / `private_episode_events` 的 NOT NULL/CHECK 约束已收紧（migration 031/032）。当前 cutover 计划已吸收“仅对 audit-proven gap 做 integrity/idempotency hardening”的收尾项；完整 FK、projection 唯一性约束、图边幂等性计划仍为 V3 延后项。
 
 - 为核心表补全更多 FK、唯一约束、幂等键。
 - 为 append-only event log 加入物理不可变保护。
@@ -307,7 +456,7 @@ canViewAdminOnly(viewerContext: ViewerContext): boolean {
 
 ## 19. 兼容迁移 / 删旧配套工程
 
-> **MOSTLY DONE**: 核心删旧已完成（migration 017 drop `agent_event_overlay`；migration 028/029 backfill；migration 030 drop `agent_fact_overlay`；migration 031/032 tighten constraints）。`private_event` / `private_belief` 已从生产代码移除。backfill 脚本见 `scripts/memory-backfill.ts`、`scripts/memory-replay.ts`、`scripts/memory-verify.ts`。剩余延后项：离线对照校验、回滚演练、`private_event` / `private_belief` 命名残留的最终清扫。
+> **MOSTLY DONE / CUTOVER-SCOPED（2026-03-27）**: 核心删旧已完成（migration 017 drop `agent_event_overlay`；migration 028/029 backfill；migration 030 drop `agent_fact_overlay`；migration 031/032 tighten constraints）。`private_event` / `private_belief` 已从生产代码移除。backfill 脚本见 `scripts/memory-backfill.ts`、`scripts/memory-replay.ts`、`scripts/memory-verify.ts`。当前 cutover 计划已吸收残余 §19 收尾：replay/verify coverage audit、delete-readiness checklist、dead compat cleanup、legacy-dependent test alignment。仍延后的部分包括：离线对照校验、回滚演练、`private_event` / `private_belief` 命名残留的最终清扫。
 
 - 为旧 `private_event / private_belief / overlay` 数据准备:
 - 一次性 backfill 脚本
