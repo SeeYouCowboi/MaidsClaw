@@ -482,7 +482,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w1-t5 organizer durable pipeline with crash recovery`
 
-- [ ] 6. Embedding Versioning + Dimension Safety
+- [x] 6. Embedding Versioning + Dimension Safety
 
   **What to do**:
   - `upsertNodeEmbedding()` 写入时校验维度与当前模型期望维度一致
