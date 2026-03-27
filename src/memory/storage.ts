@@ -1,4 +1,5 @@
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import type { Db } from "../storage/database.js";
 import {
   CognitionRepository,
@@ -6,6 +7,7 @@ import {
   type UpsertEvaluationParams,
 } from "./cognition/cognition-repo.js";
 import { MAX_INTEGER, makeNodeRef } from "./schema.js";
+import type { SearchRebuildPayload } from "./search-rebuild-job.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
   EventOrigin,
@@ -47,6 +49,13 @@ const PRIVATE_EVENT_CATEGORY_SET = new Set<PrivateEventCategory>([
 ]);
 
 const PROJECTION_CLASS_SET = new Set<ProjectionClass>(["none", "area_candidate"]);
+
+const FTS_TABLE_TO_REBUILD_SCOPE: Record<string, "private" | "area" | "world" | "cognition" | undefined> = {
+  search_docs_private_fts: "private",
+  search_docs_area_fts: "area",
+  search_docs_world_fts: "world",
+  search_docs_cognition_fts: "cognition",
+};
 
 type CreateProjectedEventInput = {
   sessionId: string;
@@ -147,10 +156,12 @@ const commitmentRefPrefix = "commitment:";
 export class GraphStorageService {
   private readonly batcher: TransactionBatcher;
   private readonly cognitionRepo: CognitionRepository;
+  private readonly jobPersistence?: JobPersistence;
 
-  constructor(private readonly db: Db) {
+  constructor(private readonly db: Db, jobPersistence?: JobPersistence) {
     this.batcher = new TransactionBatcher(db);
     this.cognitionRepo = new CognitionRepository(db);
+    this.jobPersistence = jobPersistence;
   }
 
   createProjectedEvent(params: CreateProjectedEventInput): number {
@@ -912,6 +923,30 @@ export class GraphStorageService {
         contentLength: content.length,
         error: error instanceof Error ? error.message : String(error),
       });
+      this.enqueueSearchRebuildOnFtsFailure(tableName);
+    }
+  }
+
+  private enqueueSearchRebuildOnFtsFailure(ftsTableName: string): void {
+    if (!this.jobPersistence) {
+      return;
+    }
+    const scope = FTS_TABLE_TO_REBUILD_SCOPE[ftsTableName];
+    if (!scope) {
+      return;
+    }
+    try {
+      const payload: SearchRebuildPayload = { agentId: "_fts_repair", scope };
+      this.jobPersistence.enqueue({
+        id: `search.rebuild:${scope}:fts_repair`,
+        jobType: "search.rebuild",
+        payload,
+        status: "pending",
+        maxAttempts: 3,
+        nextAttemptAt: Date.now(),
+      });
+    } catch {
+      void 0;
     }
   }
 

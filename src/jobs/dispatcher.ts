@@ -231,6 +231,16 @@ export class JobDispatcher {
       return !this.inFlightByKey.has(key);
     }
 
+    if (job.kind === "search.rebuild") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("search.rebuild:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.search_rebuild_global;
+    }
+
     return true;
   }
 
@@ -243,6 +253,10 @@ export class JobDispatcher {
 
     if (job.kind === "memory.organize") {
       return "memory.organize:global";
+    }
+
+    if (job.kind === "search.rebuild") {
+      return "search.rebuild:global";
     }
 
     const parentRunId =

@@ -1,10 +1,11 @@
-export type JobKind = "memory.migrate" | "memory.organize" | "task.run";
+export type JobKind = "memory.migrate" | "memory.organize" | "task.run" | "search.rebuild";
 
 export type ExecutionClass =
   | "interactive.user_turn"
   | "interactive.delegated_task"
   | "background.memory_migrate"
   | "background.memory_organize"
+  | "background.search_rebuild"
   | "background.autonomy";
 
 export type JobKey = string;
@@ -35,12 +36,14 @@ export const JOB_MAX_ATTEMPTS: Record<JobKind, number> = {
   "memory.migrate": 2,
   "memory.organize": 4,
   "task.run": 1,
+  "search.rebuild": 3,
 };
 
 export const CONCURRENCY_CAPS = {
   memory_migrate_per_agent_session: 1,
   memory_organize_global: 2,
   task_run_per_parent: 1,
+  search_rebuild_global: 1,
   chat_completions_global: 4,
   embedding_batches_global: 2,
 } as const;
@@ -50,6 +53,7 @@ export const EXECUTION_CLASS_PRIORITY: Record<ExecutionClass, number> = {
   "interactive.delegated_task": 2,
   "background.memory_migrate": 3,
   "background.memory_organize": 4,
+  "background.search_rebuild": 4,
   "background.autonomy": 5,
 };
 
