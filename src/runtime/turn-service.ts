@@ -412,6 +412,7 @@ export class TurnService {
 			return;
 		}
 
+		const committedAt = Date.now();
 		try {
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
 				effectiveRequest.sessionId,
@@ -475,6 +476,7 @@ export class TurnService {
 			const slotEntries = buildCognitionSlotPayload(
 				canonicalOutcome.privateCognition?.ops ?? [],
 				settlementId,
+				committedAt,
 			);
 
 			if (this.projectionManager) {
@@ -496,6 +498,7 @@ export class TurnService {
 						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
 						writeOperation: "append",
 					},
+					committedAt,
 				});
 			} else {
 				this.interactionStore.upsertRecentCognitionSlot(
@@ -548,7 +551,7 @@ export class TurnService {
 			materializePublications(this.graphStorage, publications, settlementId, {
 					sessionId: effectiveRequest.sessionId,
 					locationEntityId: viewerSnapshot?.currentLocationEntityId,
-					timestamp: Date.now(),
+					timestamp: committedAt,
 				}, {
 					agentRole: "rp_agent",
 					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
@@ -1029,8 +1032,8 @@ function summarizeCommitment(record: CommitmentRecord): string {
 function buildCognitionSlotPayload(
 	ops: CognitionOp[],
 	settlementId: string,
+	committedAt: number,
 ): RecentCognitionEntry[] {
-	const committedAt = Date.now();
 	const items: RecentCognitionEntry[] = [];
 
 	for (const op of ops) {

@@ -47,6 +47,8 @@ export type SettlementProjectionParams = {
 	writeTemplateOverride?: WriteTemplate;
 	artifactContracts?: Record<string, ArtifactContract>;
 	artifactEnforcementContext?: ArtifactEnforcementContext;
+	/** Optional pre-generated settlement timestamp. When provided, all sync projections use this value instead of calling Date.now(). */
+	committedAt?: number;
 };
 
 /**
@@ -87,7 +89,7 @@ export class ProjectionManager {
 	 * {@link GraphOrganizerJob} dispatched from MemoryTaskAgent.
 	 */
 	commitSettlement(params: SettlementProjectionParams): void {
-		const now = Date.now();
+		const now = params.committedAt ?? Date.now();
 
 		this.appendEpisodes(params, now);
 		this.appendCognitionEvents(params, now);
@@ -101,7 +103,7 @@ export class ProjectionManager {
 
 		this.upsertAreaStateArtifacts(params, now);
 
-		this.materializePublicationsSafe(params);
+		this.materializePublicationsSafe(params, now);
 	}
 
 	private upsertAreaStateArtifacts(params: SettlementProjectionParams, now: number): void {
@@ -191,7 +193,7 @@ export class ProjectionManager {
 	 *
 	 * Safety guard: when `graphStorage` is null, publication materialization is silently skipped.
 	 */
-	private materializePublicationsSafe(params: SettlementProjectionParams): void {
+	private materializePublicationsSafe(params: SettlementProjectionParams, committedAt: number): void {
 		if (params.publications.length === 0 || !this.graphStorage) {
 			return;
 		}
@@ -199,7 +201,7 @@ export class ProjectionManager {
 		materializePublications(this.graphStorage, params.publications, params.settlementId, {
 			sessionId: params.sessionId,
 			locationEntityId: params.viewerSnapshot?.currentLocationEntityId,
-			timestamp: Date.now(),
+			timestamp: committedAt,
 		}, {
 			db: this.db,
 			projectionRepo: this.areaWorldProjectionRepo ?? undefined,
