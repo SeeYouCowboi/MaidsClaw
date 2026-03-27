@@ -1,0 +1,24 @@
+# Task 5 - Publication/Recovery Convergence
+Generated: 2026-03-27T05:31:52Z
+
+## Baseline
+bun run build: PASS
+bun run check:legacy-memory-surface: PASS
+
+## Test Suite Results
+bun test validation-publication-pipeline.test.ts: PASS
+bun test materialization-promotion.test.ts: PASS
+bun test validation-turn-settlement.test.ts: PASS
+bun test publication-recovery-sweeper.test.ts: PASS
+  - orphan recovery test (:87): PASS
+  - unique-constraint reconciliation (:160): PASS
+  - job payload replay (:233): PASS
+
+## §12 Final Classification
+Status: GREEN
+All required publication and recovery suites passed, including the primary sweeper gate that exercises orphan reconciliation, unique-constraint reconciliation, and recovery payload replay paths.
+No code changes were required.
+
+## Idempotency Rule
+Live publication writes use idempotent settlement/publication keys (`source_settlement_id` + `source_pub_index`) and reconcile duplicate inserts as non-fatal.
+Recovery path replays the same key tuple and converges by treating unique-constraint collisions as reconciled while applying the same projection key (`publication:{settlementId}:{pubIndex}`) update semantics.

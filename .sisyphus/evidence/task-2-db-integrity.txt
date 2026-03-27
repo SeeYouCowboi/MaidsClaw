@@ -1,0 +1,26 @@
+# Task 2 - DB Integrity Verification (Evidence-Only)
+Generated: 2026-03-27T05:26:45Z
+
+## Baseline Commands
+bun run build: PASS
+bun run check:legacy-memory-surface: PASS
+bun test test/memory/schema.test.ts: PASS
+
+## §15 Classification
+Status: GREEN (per Task 1 audit)
+Classification: no-code-change-needed
+Explicit confirmation: append-only triggers remain intact, no integrity gaps found in §15 scope.
+
+## Integrity Invariants Confirmed
+- Highest migration: memory:032 (`memory:032:migrate-character-labels` in `src/memory/schema.ts`)
+- `memory:019` migration exists with append-only trigger definitions for both ledgers:
+  - `trg_private_cognition_events_no_update` protects `private_cognition_events`
+  - `trg_private_cognition_events_no_delete` protects `private_cognition_events`
+  - `trg_private_episode_events_no_update` protects `private_episode_events`
+  - `trg_private_episode_events_no_delete` protects `private_episode_events`
+- Current schema DDL still includes the same append-only triggers for `private_cognition_events` and `private_episode_events`.
+- Task 1 audit result confirms §15 is GREEN with baseline schema/validation tests already passing.
+
+## Decision
+No migration needed — §15 GREEN per Task 1 audit.
+No migration added. This task is evidence-only.
