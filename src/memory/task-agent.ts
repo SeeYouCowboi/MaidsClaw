@@ -11,6 +11,9 @@ import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
 import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
+import { SqliteSettlementLedger, type SettlementLedger } from "./settlement-ledger.js";
+import type { JobPersistence } from "../jobs/persistence.js";
+import { JOB_MAX_ATTEMPTS } from "../jobs/types.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
@@ -111,6 +114,7 @@ const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
 const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
 const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
 const ASSERTION_IDS_KEY = "assertion_ids";
+export const ORGANIZER_CHUNK_SIZE = 50;
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
@@ -318,6 +322,7 @@ export class MemoryTaskAgent {
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
   private readonly coreMemoryIndexUpdater: CoreMemoryIndexUpdater;
   private readonly graphOrganizer: GraphOrganizer;
+  private readonly jobPersistence?: JobPersistence;
   private migrateTail: Promise<unknown> = Promise.resolve();
   private organizeTail: Promise<unknown> = Promise.resolve();
 
@@ -328,6 +333,8 @@ export class MemoryTaskAgent {
     private readonly embeddings: EmbeddingService,
     private readonly materialization: MaterializationService,
     modelProvider?: MemoryTaskModelProvider,
+    settlementLedger?: SettlementLedger,
+    jobPersistence?: JobPersistence,
   ) {
     this.modelProvider =
       modelProvider ??
@@ -349,6 +356,7 @@ export class MemoryTaskAgent {
       (request, toolCalls, created) => {
         this.applyCallOneToolCalls(request, toolCalls, created);
       },
+      settlementLedger ?? new SqliteSettlementLedger(this.db),
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
@@ -358,6 +366,7 @@ export class MemoryTaskAgent {
       this.embeddings,
       this.modelProvider,
     );
+    this.jobPersistence = jobPersistence;
   }
 
   runMigrate(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
@@ -453,15 +462,22 @@ export class MemoryTaskAgent {
       embeddingModelId: this.modelProvider.defaultEmbeddingModelId,
     };
 
-    void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
-      console.error("[MemoryTaskAgent] background organize failed", {
-        batchId: organizeJob.batchId,
-        sessionId: organizeJob.sessionId,
-        agentId: organizeJob.agentId,
-        embeddingModelId: organizeJob.embeddingModelId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
+    if (this.jobPersistence) {
+      try {
+        this.enqueueOrganizerJobs(flushRequest.agentId, flushRequest.idempotencyKey, created.changedNodeRefs);
+      } catch (err) {
+        console.error("[MemoryTaskAgent] durable organizer enqueue failed, falling back to background organize", {
+          batchId: organizeJob.batchId,
+          sessionId: organizeJob.sessionId,
+          agentId: organizeJob.agentId,
+          embeddingModelId: organizeJob.embeddingModelId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.launchBackgroundOrganize(organizeJob);
+      }
+    } else {
+      this.launchBackgroundOrganize(organizeJob);
+    }
 
     return {
       batch_id: flushRequest.idempotencyKey,
@@ -473,6 +489,53 @@ export class MemoryTaskAgent {
   }
   private async runOrganizeInternal(job: GraphOrganizerJob): Promise<GraphOrganizerResult> {
     return this.graphOrganizer.run(job);
+  }
+
+  private launchBackgroundOrganize(organizeJob: GraphOrganizerJob): void {
+    void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
+      console.error("[MemoryTaskAgent] background organize failed", {
+        batchId: organizeJob.batchId,
+        sessionId: organizeJob.sessionId,
+        agentId: organizeJob.agentId,
+        embeddingModelId: organizeJob.embeddingModelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  private enqueueOrganizerJobs(agentId: string, settlementId: string, changedNodeRefs: NodeRef[]): void {
+    if (!this.jobPersistence) {
+      return;
+    }
+
+    const uniqueNodeRefs = Array.from(new Set(changedNodeRefs));
+    if (uniqueNodeRefs.length === 0) {
+      return;
+    }
+
+    const chunkCount = Math.ceil(uniqueNodeRefs.length / ORGANIZER_CHUNK_SIZE);
+    const now = Date.now();
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+      const start = chunkIndex * ORGANIZER_CHUNK_SIZE;
+      const chunkNodeRefs = uniqueNodeRefs.slice(start, start + ORGANIZER_CHUNK_SIZE);
+      if (chunkNodeRefs.length === 0) {
+        continue;
+      }
+
+      const ordinal = String(chunkIndex + 1).padStart(4, "0");
+      this.jobPersistence.enqueue({
+        id: `memory.organize:${settlementId}:chunk:${ordinal}`,
+        jobType: "memory.organize",
+        payload: {
+          agentId,
+          chunkNodeRefs,
+          settlementId,
+        },
+        status: "pending",
+        maxAttempts: JOB_MAX_ATTEMPTS["memory.organize"],
+        nextAttemptAt: now,
+      });
+    }
   }
 
   private assertQueueOwnership(flushRequest: MemoryFlushRequest): void {
