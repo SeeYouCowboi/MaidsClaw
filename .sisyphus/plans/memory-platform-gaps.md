@@ -986,7 +986,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w2-t12 data retention and vacuum scheduling`
 
-- [ ] 13. Area/World Current Projection Verify
+- [x] 13. Area/World Current Projection Verify
 
   **What to do**:
   - 扩展 `scripts/memory-verify.ts` 支持 `--surface area` 和 `--surface world`
