@@ -30,11 +30,12 @@ export class EmbeddingLinker {
       targetContent: string,
       similarity: number,
       agentId: string,
+      modelId?: string,
     ) => SemanticEdgeType | null,
     private readonly addOneHopNeighbors: (nodeRef: NodeRef, output: Set<NodeRef>) => void,
   ) {}
 
-  link(entries: OrganizerEmbeddingEntry[], nodes: OrganizerNode[], agentId: string): { semanticEdgeCount: number; scoreTargets: Set<NodeRef> } {
+  link(entries: OrganizerEmbeddingEntry[], nodes: OrganizerNode[], agentId: string, modelId?: string): { semanticEdgeCount: number; scoreTargets: Set<NodeRef> } {
     let semanticEdgeCount = 0;
     const scoreTargets = new Set<NodeRef>();
 
@@ -45,6 +46,7 @@ export class EmbeddingLinker {
         nodeKind: source.nodeKind,
         agentId,
         limit: 20,
+        modelId,
       });
 
       let similarCount = 0;
@@ -66,6 +68,7 @@ export class EmbeddingLinker {
           targetContent,
           neighbor.similarity,
           agentId,
+          modelId,
         );
 
         if (!relation) {

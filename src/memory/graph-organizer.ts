@@ -20,8 +20,8 @@ export class GraphOrganizer {
       this.storage,
       this.embeddings,
       (nodeRef) => this.renderNodeContent(nodeRef),
-      (sourceRef, sourceKind, sourceContent, targetRef, targetKind, targetContent, similarity, agentId) =>
-        this.selectSemanticRelation(sourceRef, sourceKind, sourceContent, targetRef, targetKind, targetContent, similarity, agentId),
+      (sourceRef, sourceKind, sourceContent, targetRef, targetKind, targetContent, similarity, agentId, modelId) =>
+        this.selectSemanticRelation(sourceRef, sourceKind, sourceContent, targetRef, targetKind, targetContent, similarity, agentId, modelId),
       (nodeRef, output) => this.addOneHopNeighbors(nodeRef, output),
     );
   }
@@ -66,7 +66,7 @@ export class GraphOrganizer {
 
     this.embeddings.batchStoreEmbeddings(entries);
     this.shadowRegisterNodes(nodes);
-    const { semanticEdgeCount, scoreTargets } = this.embeddingLinker.link(entries, nodes, job.agentId);
+    const { semanticEdgeCount, scoreTargets } = this.embeddingLinker.link(entries, nodes, job.agentId, job.embeddingModelId);
 
     const scoreRefs = Array.from(scoreTargets);
     for (const nodeRef of scoreRefs) {
@@ -195,12 +195,13 @@ export class GraphOrganizer {
     targetContent: string,
     similarity: number,
     agentId: string,
+    modelId?: string,
   ): SemanticEdgeType | null {
     if (sourceKind === targetKind && similarity >= 0.9 && this.hasStructuralOverlap(sourceContent, targetContent)) {
       return "conflict_or_update";
     }
 
-    if (sourceKind === targetKind && similarity >= 0.82 && this.isMutualTopFive(sourceRef, targetRef, sourceKind, agentId)) {
+    if (sourceKind === targetKind && similarity >= 0.82 && this.isMutualTopFive(sourceRef, targetRef, sourceKind, agentId, modelId)) {
       return "semantic_similar";
     }
 
@@ -213,7 +214,7 @@ export class GraphOrganizer {
     return null;
   }
 
-  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string): boolean {
+  private isMutualTopFive(sourceRef: NodeRef, targetRef: NodeRef, nodeKind: NodeRefKind, agentId: string, modelId?: string): boolean {
     const row = this.db
       .prepare(`SELECT embedding FROM node_embeddings WHERE node_ref = ? ORDER BY updated_at DESC LIMIT 1`)
       .get(targetRef) as { embedding: Buffer | Uint8Array } | null;
@@ -225,6 +226,7 @@ export class GraphOrganizer {
       nodeKind,
       agentId,
       limit: 5,
+      modelId,
     });
     return nearest.some((candidate) => candidate.nodeRef === sourceRef || candidate.nodeRef === targetRef);
   }
