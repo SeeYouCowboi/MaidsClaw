@@ -755,7 +755,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w1-t9 settlement processing ledger with idempotency`
 
-- [ ] 10. Settlement Single-Clock
+- [x] 10. Settlement Single-Clock
 
   **What to do**:
   - 在 `commitSettlement()` 入口生成唯一 `const committedAt = Date.now()`
@@ -945,7 +945,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w2-t11 area/world history ledger with replay`
 
-- [ ] 12. Data Retention + VACUUM
+- [x] 12. Data Retention + VACUUM
 
   **What to do**:
   - 实现 `scripts/memory-maintenance.ts` CLI：
