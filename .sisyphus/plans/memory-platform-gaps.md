@@ -1023,7 +1023,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w2-t13 area/world projection verification`
 
-- [ ] 14. Graph Node Registry (Shadow)
+- [x] 14. Graph Node Registry (Shadow)
 
   **What to do**:
   - 添加 migration: `graph_nodes(id, node_kind, node_id, created_at, updated_at)` + unique index on `(node_kind, node_id)`
@@ -1117,7 +1117,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w3-t14 graph node registry shadow mode`
 
-- [ ] 15. Contested Evidence Lifecycle
+- [x] 15. Contested Evidence Lifecycle
 
   **What to do**:
 
@@ -1188,7 +1188,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w3-t15 contested evidence lifecycle with write contract`
 
-- [ ] 16. Area/World Time-Slice Read API
+- [x] 16. Area/World Time-Slice Read API
 
   **What to do**:
   - 在 `AreaWorldProjectionRepo` 中添加 `getAreaStateAsOf(agentId, areaId, key, asOfCommittedTime)` 方法
