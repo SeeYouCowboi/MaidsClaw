@@ -795,7 +795,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `fix(memory): w2-t10 settlement single-clock timestamp`
 
-- [ ] 11. Area/World History Ledger + Replay
+- [x] 11. Area/World History Ledger + Replay
 
   **What to do**:
   - 基于 T3 schema 定义，添加 migration: `area_state_events`, `world_state_events`（append-only，含 valid_time + committed_time）
