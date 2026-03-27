@@ -36,15 +36,15 @@ const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
 };
 
 const MEMORY_RELATION_CONTRACTS: Record<MemoryRelationType, RelationContract> = {
-  supports: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  triggered: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  conflicts_with: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  derived_from: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  supersedes: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  surfaced_as: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  published_as: { source_family: "unknown", target_family: "unknown", truth_bearing: true, heuristic_only: false },
-  resolved_by: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
-  downgraded_by: { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+  supports: { source_family: "event", target_family: "assertion", truth_bearing: true, heuristic_only: false },
+  triggered: { source_family: "event", target_family: "evaluation", truth_bearing: true, heuristic_only: false },
+  conflicts_with: { source_family: "assertion", target_family: "assertion", truth_bearing: true, heuristic_only: false },
+  derived_from: { source_family: "fact", target_family: "assertion", truth_bearing: true, heuristic_only: false },
+  supersedes: { source_family: "assertion", target_family: "assertion", truth_bearing: true, heuristic_only: false },
+  surfaced_as: { source_family: "assertion", target_family: "event", truth_bearing: true, heuristic_only: false },
+  published_as: { source_family: "event", target_family: "entity", truth_bearing: true, heuristic_only: false },
+  resolved_by: { source_family: "assertion", target_family: "fact", truth_bearing: false, heuristic_only: true },
+  downgraded_by: { source_family: "assertion", target_family: "evaluation", truth_bearing: false, heuristic_only: true },
 };
 
 const RELATION_CONTRACTS: Record<string, RelationContract> = {

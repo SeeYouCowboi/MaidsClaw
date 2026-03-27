@@ -7,6 +7,7 @@
  */
 
 import type { MemoryRelationType, RelationDirectness, RelationSourceKind } from "../types.js";
+import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -28,7 +29,6 @@ type AgentRow = { agent_id: string };
 type AssertionIdRow = { id: number };
 type CognitionProjectionRow = { id: number; kind: string | null };
 
-const STABLE_FACTOR_REF_PATTERN = /^(assertion|evaluation|commitment|private_episode|event):\d+$/;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export const CONFLICTS_WITH: MemoryRelationType = "conflicts_with";
@@ -186,8 +186,14 @@ export class RelationBuilder {
       return null;
     }
 
-    if (STABLE_FACTOR_REF_PATTERN.test(trimmed)) {
+    if (trimmed.startsWith("private_episode:")) {
       return trimmed;
+    }
+    try {
+      parseGraphNodeRef(trimmed);
+      return trimmed;
+    } catch {
+      // not a direct node ref, try cognition key resolution
     }
 
     const cognitionKey = this.extractCognitionKey(trimmed);

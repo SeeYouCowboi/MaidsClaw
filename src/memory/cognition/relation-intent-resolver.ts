@@ -1,5 +1,6 @@
 import { MaidsClawError } from "../../core/errors.js";
 import type { CanonicalRpTurnOutcome, CognitionKind, ConflictFactor, RelationIntent } from "../../runtime/rp-turn-contract.js";
+import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -300,8 +301,14 @@ function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
-  if (/^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(raw)) {
+  if (raw.startsWith("private_episode:")) {
     return raw;
+  }
+  try {
+    parseGraphNodeRef(raw);
+    return raw;
+  } catch {
+    // not a direct node ref, try cognition key lookup
   }
 
   const cognitionRef = raw.startsWith(COGNITION_KEY_PREFIX)
