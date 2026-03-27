@@ -32,6 +32,15 @@ type AreaNarrativeRow = {
   updated_at: number;
 };
 
+type AreaStateAsOfRow = {
+  key: string;
+  value_json: string;
+  surfacing_classification: SurfacingClassification;
+  source_type: AreaStateSourceType;
+  valid_time: number | null;
+  committed_time: number | null;
+};
+
 type WorldStateRow = {
   key: string;
   value_json: string;
@@ -45,6 +54,15 @@ type WorldNarrativeRow = {
   id: number;
   summary_text: string;
   updated_at: number;
+};
+
+type WorldStateAsOfRow = {
+  key: string;
+  value_json: string;
+  surfacing_classification: SurfacingClassification;
+  source_type: AreaStateSourceType;
+  valid_time: number | null;
+  committed_time: number | null;
 };
 
 export type UpsertAreaStateInput = {
@@ -165,6 +183,21 @@ export class AreaWorldProjectionRepo {
       .get(agentId, areaId, key) as AreaStateRow | null;
   }
 
+  getAreaStateAsOf(agentId: string, areaId: number, key: string, asOfCommittedTime: number): AreaStateAsOfRow | null {
+    return this.db
+      .prepare(
+        `SELECT key, value_json, surfacing_classification, source_type, valid_time, committed_time
+         FROM area_state_events
+         WHERE agent_id = ?
+           AND area_id = ?
+           AND key = ?
+           AND committed_time <= ?
+         ORDER BY committed_time DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(agentId, areaId, key, asOfCommittedTime) as AreaStateAsOfRow | null;
+  }
+
   upsertAreaNarrativeCurrent(input: {
     agentId: string;
     areaId: number;
@@ -263,6 +296,19 @@ export class AreaWorldProjectionRepo {
           WHERE key = ?`,
       )
       .get(key) as WorldStateRow | null;
+  }
+
+  getWorldStateAsOf(key: string, asOfCommittedTime: number): WorldStateAsOfRow | null {
+    return this.db
+      .prepare(
+        `SELECT key, value_json, surfacing_classification, source_type, valid_time, committed_time
+         FROM world_state_events
+         WHERE key = ?
+           AND committed_time <= ?
+         ORDER BY committed_time DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(key, asOfCommittedTime) as WorldStateAsOfRow | null;
   }
 
   upsertWorldNarrativeCurrent(input: { summaryText: string; updatedAt?: number }): void {

@@ -1,0 +1,31 @@
+Task 16 Evidence - Area/World Time-Slice Read API
+Date: 2026-03-27
+
+1) Historical state query scenario
+Command: bun test test/memory/area-world-timeslice.test.ts
+Result:
+- 5 pass
+- 0 fail
+- Covers:
+  - area t=100->20, t=200->25, asOf=150 returns 20, asOf=250 returns 25
+  - asOf before first area event returns null
+  - world time-slice query returns historical values
+  - tool-layer routing uses asOf methods when asOfCommittedTime is provided
+
+2) Regression checks for touched surfaces
+Command: bun test src/memory/tools.test.ts test/memory/area-world-history-ledger.test.ts test/memory/validation-area-world-surfacing.test.ts
+Result:
+- 42 pass
+- 0 fail
+
+3) Build verification
+Command: bun run build
+Result:
+- PASS (tsc -p tsconfig.build.json --noEmit)
+
+4) Full suite status in current worktree
+Command: bun test
+Result:
+- 1853 pass
+- 7 fail
+- Failures are in pre-existing unrelated WIP areas (graph node registry/schema expectations), not in Task 16 files.
