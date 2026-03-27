@@ -18,6 +18,8 @@ const FORBIDDEN_TOKENS = [
   "private_belief_ids",
   "private_event",
   "private_belief",
+  "agent_fact_overlay",
+  "AgentFactOverlay",
 ] as const;
 
 const BINARY_EXTENSIONS = new Set([".sqlite", ".db", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".wasm"]);
@@ -45,7 +47,7 @@ function isLikelyBinary(relativePath: string): boolean {
 }
 
 describe("legacy literal gate", () => {
-  it("rejects forbidden legacy memory literals outside the approved history files", () => {
+  it("rejects forbidden legacy memory literals and dropped overlay names outside the approved history files", () => {
     const violations: string[] = [];
 
     for (const relativePath of listTrackedFiles()) {

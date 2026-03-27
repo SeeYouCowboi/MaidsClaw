@@ -12,24 +12,25 @@ import {
   type TimeSliceQuery,
 } from "./time-slice-query.js";
 import { VisibilityPolicy } from "./visibility-policy.js";
-import type {
-  BeamEdge,
-  BeamPath,
-  EvidencePath,
-  ExplainDetailLevel,
-  ExploreMode,
-  MemoryExploreInput,
-  MemoryRelationType,
-  NavigatorEdgeKind,
-  NavigatorResult,
-  EventNode,
-  NodeRef,
-  NodeRefKind,
-  PathScore,
-  QueryType,
-  RedactedPlaceholder,
-  SeedCandidate,
-  ViewerContext,
+import {
+  MEMORY_RELATION_TYPES,
+  type BeamEdge,
+  type BeamPath,
+  type EvidencePath,
+  type ExplainDetailLevel,
+  type ExploreMode,
+  type MemoryExploreInput,
+  type MemoryRelationType,
+  type NavigatorEdgeKind,
+  type NavigatorResult,
+  type EventNode,
+  type NodeRef,
+  type NodeRefKind,
+  type PathScore,
+  type QueryType,
+  type RedactedPlaceholder,
+  type SeedCandidate,
+  type ViewerContext,
 } from "./types.js";
 
 type ModelProviderClientLike = {
@@ -1040,13 +1041,18 @@ export class GraphNavigator {
       return resolved;
     };
 
+    const committedCutoffClause = timeSlice.asOfCommittedTime != null ? " AND updated_at <= ?" : "";
     const currentRows = this.db
       .prepare(
         `SELECT id, summary_text, record_json, updated_at
          FROM private_cognition_current
-         WHERE agent_id = ? AND kind = 'assertion' AND id IN (${placeholders})`,
+         WHERE agent_id = ? AND kind = 'assertion' AND id IN (${placeholders})${committedCutoffClause}`,
       )
-      .all(viewerContext.viewer_agent_id, ...ids) as Array<{
+      .all(
+        viewerContext.viewer_agent_id,
+        ...ids,
+        ...(timeSlice.asOfCommittedTime != null ? [timeSlice.asOfCommittedTime] : []),
+      ) as Array<{
       id: number;
       summary_text: string | null;
       record_json: string;
@@ -1124,7 +1130,7 @@ export class GraphNavigator {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
         to: edge.target_ref,
-        kind: edge.relation_type as NavigatorEdgeKind,
+        kind: edge.relation_type as MemoryRelationType,
         layer: edge.layer,
         weight: edge.weight,
         timestamp: edge.timestamp,
@@ -1331,13 +1337,17 @@ export class GraphNavigator {
     return row ? (`entity:${row.id}` as NodeRef) : null;
   }
 
-  private edgePriorityScore(kind: NavigatorEdgeKind, queryType: QueryType): number {
+  private edgePriorityScore(kind: NavigatorEdgeKind | MemoryRelationType, queryType: QueryType): number {
     const ordered = QUERY_TYPE_PRIORITY[queryType];
-    const index = (ordered as readonly NavigatorEdgeKind[]).indexOf(kind);
-    if (index === -1) {
-      return 0.1;
+    const index = (ordered as readonly string[]).indexOf(kind);
+    if (index !== -1) {
+      return 1 - index / Math.max(ordered.length, 1);
     }
-    return 1 - index / Math.max(ordered.length, 1);
+    // Memory relation edges get a non-floor base score (0.3) rather than the default 0.1
+    if ((MEMORY_RELATION_TYPES as readonly string[]).includes(kind)) {
+      return 0.3;
+    }
+    return 0.1;
   }
 
   private preliminaryPathScore(path: InternalBeamPath, seedScores: Map<NodeRef, number>, queryType: QueryType, strategy?: GraphRetrievalStrategy): number {
@@ -1485,7 +1495,7 @@ export class GraphNavigator {
     if (edges.length === 0) {
       return 0.4;
     }
-    const topKinds = new Set<NavigatorEdgeKind>(QUERY_TYPE_PRIORITY[queryType].slice(0, 2));
+    const topKinds = new Set<NavigatorEdgeKind | MemoryRelationType>(QUERY_TYPE_PRIORITY[queryType].slice(0, 2));
     const matched = edges.filter((edge) => topKinds.has(edge.kind)).length;
     return matched / edges.length;
   }
@@ -1726,7 +1736,7 @@ export class GraphNavigator {
     map.set(from, list);
   }
 
-  private inferEdgeLayer(kind: NavigatorEdgeKind): InternalBeamEdge["layer"] {
+  private inferEdgeLayer(kind: NavigatorEdgeKind | MemoryRelationType): InternalBeamEdge["layer"] {
     if (kind === "semantic_similar" || kind === "entity_bridge" || kind === "conflict_or_update") {
       return "heuristic";
     }

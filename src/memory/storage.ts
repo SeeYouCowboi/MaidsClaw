@@ -8,7 +8,6 @@ import {
 import { MAX_INTEGER, makeNodeRef } from "./schema.js";
 import { TransactionBatcher } from "./transaction-batcher.js";
 import type {
-  AgentFactOverlay,
   EventOrigin,
   LogicEdgeType,
   MemoryScope,
@@ -117,7 +116,7 @@ type CreatePrivateBeliefInput = {
   basis: AssertionBasis;
   stance: AssertionStance;
   provenance?: string;
-  sourceEventRef?: AgentFactOverlay["source_event_ref"];
+  sourceEventRef?: NodeRef | null;
 };
 
 type UpsertExplicitAssertionInput = {
