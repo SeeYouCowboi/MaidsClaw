@@ -357,7 +357,7 @@ describe("area/world projection verification", () => {
       const report = formatVerifyReport(results);
 
       expect(report).toContain("[PASS] area");
-      expect(report).toContain("Overall: PASS");
+      expect(report).toContain("1 PASS / 0 FAIL");
     });
 
     it("formats FAIL report with diff details", () => {
@@ -375,7 +375,7 @@ describe("area/world projection verification", () => {
 
       expect(report).toContain("[FAIL] world");
       expect(report).toContain('key="season"');
-      expect(report).toContain("Overall: FAIL");
+      expect(report).toContain("0 PASS / 1 FAIL");
       expect(report).toContain("memory-replay.ts");
     });
   });
