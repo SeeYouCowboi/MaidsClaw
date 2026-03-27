@@ -4,7 +4,7 @@ import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
-import { RelationBuilder, type ConflictEvidence } from "./relation-builder.js";
+import { RelationBuilder, type ConflictEvidence, type ConflictHistoryEntry } from "./relation-builder.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
@@ -25,6 +25,11 @@ type CognitionSearchParams = {
   limit?: number;
 };
 
+type ConflictResolution = {
+  type: "resolved_by" | "downgraded_by";
+  by_node_ref: string;
+};
+
 type CognitionHit = {
   kind: CognitionKind;
   basis: AssertionBasis | null;
@@ -36,6 +41,7 @@ type CognitionHit = {
   conflictEvidence?: ConflictEvidenceItem[];
   conflictSummary?: string | null;
   conflictFactorRefs?: NodeRef[];
+  resolution?: ConflictResolution | null;
 };
 
 type CognitionSearchDocRow = {
@@ -103,8 +109,23 @@ export class CognitionSearchService {
       hit.conflictSummary = summary;
       hit.conflictFactorRefs = factorRefs;
       hit.conflictEvidence = this.toConflictEvidenceItems(evidence);
+      hit.resolution = this.extractResolution(String(hit.source_ref));
     }
     return hits;
+  }
+
+  private extractResolution(nodeRef: string): ConflictResolution | null {
+    const history = this.relationBuilder.getConflictHistory(nodeRef, 5);
+    for (let i = history.length - 1; i >= 0; i--) {
+      const entry = history[i] as ConflictHistoryEntry;
+      if (
+        (entry.relation_type === "resolved_by" || entry.relation_type === "downgraded_by") &&
+        entry.source_node_ref === nodeRef
+      ) {
+        return { type: entry.relation_type, by_node_ref: entry.target_node_ref };
+      }
+    }
+    return null;
   }
 
   private toConflictEvidenceItems(evidence: ConflictEvidence[]): ConflictEvidenceItem[] {
@@ -415,4 +436,4 @@ export class CurrentProjectionReader {
   }
 }
 
-export type { CognitionHit, CognitionSearchParams, CognitionCurrentRow, ConflictEvidenceItem };
+export type { CognitionHit, CognitionSearchParams, CognitionCurrentRow, ConflictEvidenceItem, ConflictResolution };

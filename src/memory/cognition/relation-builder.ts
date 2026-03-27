@@ -25,6 +25,13 @@ type ConflictEvidenceRow = {
   created_at: number;
 };
 
+type ConflictHistoryRow = {
+  relation_type: string;
+  source_node_ref: string;
+  target_node_ref: string;
+  created_at: number;
+};
+
 type AgentRow = { agent_id: string };
 type AssertionIdRow = { id: number };
 type CognitionProjectionRow = { id: number; kind: string | null };
@@ -41,6 +48,13 @@ export type ConflictEvidence = {
   sourceKind: RelationSourceKind;
   sourceRef: string;
   createdAt: number;
+};
+
+export type ConflictHistoryEntry = {
+  relation_type: "conflicts_with" | "resolved_by" | "downgraded_by";
+  source_node_ref: string;
+  target_node_ref: string;
+  created_at: number;
 };
 
 export class RelationBuilder {
@@ -178,6 +192,31 @@ export class RelationBuilder {
     }
 
     return normalized;
+  }
+
+  /**
+   * Query the conflict/resolution chain for a given node ref, ordered by time (ASC).
+   * Returns `conflicts_with`, `resolved_by`, and `downgraded_by` relations
+   * where the node appears as either source or target.
+   */
+  getConflictHistory(nodeRef: string, limit = 20): ConflictHistoryEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT relation_type, source_node_ref, target_node_ref, created_at
+         FROM memory_relations
+         WHERE (source_node_ref = ? OR target_node_ref = ?)
+           AND relation_type IN ('conflicts_with', 'resolved_by', 'downgraded_by')
+         ORDER BY created_at ASC
+         LIMIT ?`,
+      )
+      .all(nodeRef, nodeRef, limit) as ConflictHistoryRow[];
+
+    return rows.map((row) => ({
+      relation_type: row.relation_type as ConflictHistoryEntry["relation_type"],
+      source_node_ref: row.source_node_ref,
+      target_node_ref: row.target_node_ref,
+      created_at: row.created_at,
+    }));
   }
 
   private resolveTargetNodeRef(rawNodeRef: string, sourceAgentId: string | null): string | null {

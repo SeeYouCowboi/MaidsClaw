@@ -1,0 +1,44 @@
+T15 Evidence: Conflict History
+
+## getConflictHistory(nodeRef, limit) — RelationBuilder
+
+File: src/memory/cognition/relation-builder.ts
+
+New method `getConflictHistory` queries `memory_relations` for conflict lifecycle 
+relations (conflicts_with, resolved_by, downgraded_by) involving a node ref as 
+either source or target, ordered by created_at ASC.
+
+Interface:
+  ConflictHistoryEntry {
+    relation_type: 'conflicts_with' | 'resolved_by' | 'downgraded_by';
+    source_node_ref: string;
+    target_node_ref: string;
+    created_at: number;
+  }
+
+SQL query:
+  SELECT relation_type, source_node_ref, target_node_ref, created_at
+  FROM memory_relations
+  WHERE (source_node_ref = ? OR target_node_ref = ?)
+    AND relation_type IN ('conflicts_with', 'resolved_by', 'downgraded_by')
+  ORDER BY created_at ASC
+  LIMIT ?
+
+Tests (test/memory/contested-evidence.test.ts):
+- "returns chronological chain: assertion → conflicts_with → resolved_by" — PASS
+- "limits results to the requested count" — PASS
+- "returns entries from both source and target perspective" — PASS
+
+## Contested Hit Resolution Enrichment — CognitionSearchService
+
+File: src/memory/cognition/cognition-search.ts
+
+New type `ConflictResolution` added to CognitionHit:
+  resolution?: { type: 'resolved_by' | 'downgraded_by'; by_node_ref: string } | null
+
+The `enrichContestedHits` method now calls `extractResolution(nodeRef)` which 
+uses `getConflictHistory` to find the most recent resolved_by or downgraded_by 
+relation where the node is the source.
+
+Build: bun run build — PASS (zero errors)
+Tests: 9 new tests pass, 1847 total pass
