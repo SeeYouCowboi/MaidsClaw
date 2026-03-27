@@ -13,6 +13,7 @@ type EmbeddingEntry = {
 type NeighborQueryOptions = {
   nodeKind?: string;
   agentId: string | null;
+  modelId?: string;
   limit?: number;
 };
 
@@ -24,6 +25,7 @@ export class EmbeddingService {
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
+      console.warn(`cosineSimilarity: dimension mismatch (${a.length} vs ${b.length}), returning 0`);
       return 0;
     }
 
@@ -70,15 +72,22 @@ export class EmbeddingService {
     options: NeighborQueryOptions,
   ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
     const limit = options.limit ?? 20;
-    const rows = options.nodeKind
-      ? (this.db
-          .prepare("SELECT node_ref, node_kind, embedding FROM node_embeddings WHERE node_kind=?")
-          .all(options.nodeKind) as Array<{ node_ref: string; node_kind: string; embedding: Buffer | Uint8Array }>)
-      : (this.db.prepare("SELECT node_ref, node_kind, embedding FROM node_embeddings").all() as Array<{
-          node_ref: string;
-          node_kind: string;
-          embedding: Buffer | Uint8Array;
-        }>);
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (options.nodeKind) {
+      conditions.push("node_kind = ?");
+      params.push(options.nodeKind);
+    }
+    if (options.modelId) {
+      conditions.push("model_id = ?");
+      params.push(options.modelId);
+    }
+
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT node_ref, node_kind, embedding FROM node_embeddings${whereClause}`)
+      .all(...params) as Array<{ node_ref: string; node_kind: string; embedding: Buffer | Uint8Array }>;
 
     const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM private_episode_events WHERE id=?");
     const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM private_cognition_current WHERE id=?");

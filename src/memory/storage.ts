@@ -804,6 +804,20 @@ export class GraphStorageService {
     modelId: string,
     embedding: Float32Array,
   ): void {
+    if (embedding.length === 0) {
+      throw new Error(`Embedding dimension is 0 for node ${nodeRef} (model: ${modelId})`);
+    }
+
+    const existingRow = this.db
+      .prepare(`SELECT LENGTH(embedding) / 4 AS dim FROM node_embeddings WHERE model_id = ? LIMIT 1`)
+      .get(modelId) as { dim: number } | undefined;
+
+    if (existingRow && existingRow.dim !== embedding.length) {
+      throw new Error(
+        `Embedding dimension mismatch for model "${modelId}": expected ${existingRow.dim}, got ${embedding.length} (node: ${nodeRef})`,
+      );
+    }
+
     this.db
       .prepare(
         `INSERT OR REPLACE INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at)
@@ -972,6 +986,17 @@ export class GraphStorageService {
     }
 
     return null;
+  }
+
+  getEmbeddingStatsByModel(): Array<{ model_id: string; count: number; dimension: number }> {
+    return this.db
+      .prepare(
+        `SELECT model_id, COUNT(*) AS count, (LENGTH(embedding) / 4) AS dimension
+         FROM node_embeddings
+         GROUP BY model_id
+         ORDER BY count DESC`,
+      )
+      .all() as Array<{ model_id: string; count: number; dimension: number }>;
   }
 
   private assertPrivateAgentCompatibility(sourceRef: NodeRef, targetRef: NodeRef): void {

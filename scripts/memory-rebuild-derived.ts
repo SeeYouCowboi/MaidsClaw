@@ -9,6 +9,7 @@ import { openDatabase } from "../src/storage/database.js";
 type CliArgs = {
   agentId: string;
   dryRun: boolean;
+  reEmbed: boolean;
 };
 
 type NodeRefRow = {
@@ -19,6 +20,7 @@ type RebuildPayload = {
   agentId: string;
   chunkNodeRefs: string[];
   settlementId: string;
+  forceReEmbed?: boolean;
 };
 
 const argv = process.argv.slice(2);
@@ -38,6 +40,9 @@ try {
   console.log(`Node refs: ${nodeRefs.length}`);
   console.log(`Chunk size: ${ORGANIZER_CHUNK_SIZE}`);
   console.log(`Chunk jobs: ${chunks.length}`);
+  if (args.reEmbed) {
+    console.log(`Mode: re-embed (forceReEmbed: true)`);
+  }
 
   if (args.dryRun) {
     console.log("Dry run: no jobs enqueued.");
@@ -52,6 +57,7 @@ try {
         agentId: args.agentId,
         chunkNodeRefs,
         settlementId,
+        ...(args.reEmbed ? { forceReEmbed: true } : {}),
       };
       const ordinal = String(index + 1).padStart(4, "0");
       persistence.enqueue({
@@ -74,12 +80,18 @@ try {
 function parseArgs(input: string[]): CliArgs {
   let agentId = "";
   let dryRun = false;
+  let reEmbed = false;
 
   for (let index = 0; index < input.length; index += 1) {
     const token = input[index];
 
     if (token === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+
+    if (token === "--re-embed") {
+      reEmbed = true;
       continue;
     }
 
@@ -100,12 +112,12 @@ function parseArgs(input: string[]): CliArgs {
     failWithUsage("Missing required --agent <agentId>");
   }
 
-  return { agentId, dryRun };
+  return { agentId, dryRun, reEmbed };
 }
 
 function failWithUsage(message: string): never {
   console.error(message);
-  console.error("Usage: bun run scripts/memory-rebuild-derived.ts --agent <agentId> [--dry-run]");
+  console.error("Usage: bun run scripts/memory-rebuild-derived.ts --agent <agentId> [--dry-run] [--re-embed]");
   process.exit(1);
 }
 
