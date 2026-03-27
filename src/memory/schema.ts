@@ -881,6 +881,22 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
       );
     },
   },
+  {
+    id: "memory:033:extend-maintenance-jobs-for-durable-queue",
+    description: "Add durable queue lifecycle columns to memory maintenance jobs",
+    up: (db: Db) => {
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "attempt_count", "INTEGER NOT NULL DEFAULT 0");
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "max_attempts", "INTEGER NOT NULL DEFAULT 4");
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "error_message", "TEXT");
+      addColumnIfMissing(db, "_memory_maintenance_jobs", "claimed_at", "INTEGER");
+
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_jobs_status_next
+         ON _memory_maintenance_jobs(status, next_attempt_at)
+         WHERE status IN ('pending', 'retryable')`,
+      );
+    },
+  },
 ];
 
 function escapeSqlLiteral(value: string): string {
