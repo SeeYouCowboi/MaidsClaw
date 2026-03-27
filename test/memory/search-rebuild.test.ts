@@ -150,6 +150,54 @@ describe("SearchRebuildJob", () => {
     }
   });
 
+  it("rebuilds cognition search docs for all agents with _all_agents sentinel", () => {
+    const { db, dbPath } = createTempDb();
+
+    try {
+      const now = Date.now();
+      db.run(
+        `INSERT INTO private_cognition_current
+         (agent_id, cognition_key, kind, stance, basis, status, summary_text, record_json, source_event_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          AGENT_ID,
+          "cog:all-agents:alice",
+          "assertion",
+          "accepted",
+          "first_hand",
+          "active",
+          "Alice keeps a private silver key",
+          JSON.stringify({ provenance: "first hand" }),
+          1,
+          now,
+        ],
+      );
+
+      db.exec("DELETE FROM search_docs_cognition_fts");
+      db.exec("DELETE FROM search_docs_cognition");
+
+      executeSearchRebuild(db, { agentId: "_all_agents", scope: "cognition" });
+
+      const row = db.get<{ agent_id: string; content: string }>(
+        `SELECT agent_id, content
+         FROM search_docs_cognition
+         WHERE agent_id = ?
+         ORDER BY id ASC
+         LIMIT 1`,
+        [AGENT_ID],
+      );
+      expect(row?.agent_id).toBe(AGENT_ID);
+      expect(row?.content).toContain("silver key");
+
+      const count = db.get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM search_docs_cognition_fts",
+      );
+      expect(count?.count).toBeGreaterThan(0);
+    } finally {
+      cleanupDb(db, dbPath);
+    }
+  });
+
   it("scope=all rebuilds all four search_docs tables", () => {
     const { db, dbPath } = createTempDb();
 

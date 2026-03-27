@@ -158,6 +158,117 @@ async function processSettlement(params: {
 }
 
 describe("settlement processing ledger", () => {
+  it("exposes full 8-state status transitions via rawStatus()", () => {
+    const { db, dbPath } = createTempDb();
+
+    try {
+      const clock = () => 1_710_100_000_000;
+
+      const pendingLedger = new SqliteSettlementLedger(db.raw, clock);
+      const pendingId = "stl:raw:pending";
+      pendingLedger.markPending(pendingId, "rp:alice");
+      expect(pendingLedger.rawStatus(pendingId)).toBe("pending");
+
+      const claimedLedger = new SqliteSettlementLedger(db.raw, clock);
+      const claimedId = "stl:raw:claimed";
+      claimedLedger.markPending(claimedId, "rp:alice");
+      claimedLedger.markClaimed(claimedId, "worker-1");
+      expect(claimedLedger.rawStatus(claimedId)).toBe("claimed");
+
+      const applyingLedger = new SqliteSettlementLedger(db.raw, clock);
+      const applyingId = "stl:raw:applying";
+      applyingLedger.markPending(applyingId, "rp:alice");
+      applyingLedger.markApplying(applyingId, "rp:alice");
+      expect(applyingLedger.rawStatus(applyingId)).toBe("applying");
+
+      const appliedLedger = new SqliteSettlementLedger(db.raw, clock);
+      const appliedId = "stl:raw:applied";
+      appliedLedger.markPending(appliedId, "rp:alice");
+      appliedLedger.markApplied(appliedId);
+      expect(appliedLedger.rawStatus(appliedId)).toBe("applied");
+
+      const replayedLedger = new SqliteSettlementLedger(db.raw, clock);
+      const replayedId = "stl:raw:replayed";
+      replayedLedger.markPending(replayedId, "rp:alice");
+      replayedLedger.markReplayedNoop(replayedId);
+      expect(replayedLedger.rawStatus(replayedId)).toBe("replayed_noop");
+
+      const conflictLedger = new SqliteSettlementLedger(db.raw, clock);
+      const conflictId = "stl:raw:conflict";
+      conflictLedger.markPending(conflictId, "rp:alice");
+      conflictLedger.markConflict(conflictId, "hash conflict");
+      expect(conflictLedger.rawStatus(conflictId)).toBe("conflict");
+
+      const retryableFailLedger = new SqliteSettlementLedger(db.raw, clock);
+      const retryableId = "stl:raw:failed-retryable";
+      retryableFailLedger.markPending(retryableId, "rp:alice");
+      retryableFailLedger.markFailed(retryableId, "temporary", true);
+      expect(retryableFailLedger.rawStatus(retryableId)).toBe("failed_retryable");
+
+      const terminalFailLedger = new SqliteSettlementLedger(db.raw, clock);
+      const terminalId = "stl:raw:failed-terminal";
+      terminalFailLedger.markPending(terminalId, "rp:alice");
+      terminalFailLedger.markFailed(terminalId, "fatal", false);
+      expect(terminalFailLedger.rawStatus(terminalId)).toBe("failed_terminal");
+    } finally {
+      cleanupDb(db, dbPath);
+    }
+  });
+
+  it("keeps check() simplified mapping while rawStatus() returns exact status", () => {
+    const { db, dbPath } = createTempDb();
+
+    try {
+      const ledger = new SqliteSettlementLedger(db.raw, () => 1_710_200_000_000);
+
+      const pendingId = "stl:check:pending";
+      ledger.markPending(pendingId, "rp:alice");
+      expect(ledger.rawStatus(pendingId)).toBe("pending");
+      expect(ledger.check(pendingId)).toBe("pending");
+
+      const claimedId = "stl:check:claimed";
+      ledger.markPending(claimedId, "rp:alice");
+      ledger.markClaimed(claimedId, "worker-1");
+      expect(ledger.rawStatus(claimedId)).toBe("claimed");
+      expect(ledger.check(claimedId)).toBe("pending");
+
+      const appliedId = "stl:check:applied";
+      ledger.markPending(appliedId, "rp:alice");
+      ledger.markApplied(appliedId);
+      expect(ledger.rawStatus(appliedId)).toBe("applied");
+      expect(ledger.check(appliedId)).toBe("applied");
+
+      const replayedId = "stl:check:replayed";
+      ledger.markPending(replayedId, "rp:alice");
+      ledger.markReplayedNoop(replayedId);
+      expect(ledger.rawStatus(replayedId)).toBe("replayed_noop");
+      expect(ledger.check(replayedId)).toBe("applied");
+
+      const failedRetryableId = "stl:check:failed-retryable";
+      ledger.markPending(failedRetryableId, "rp:alice");
+      ledger.markFailed(failedRetryableId, "retry later", true);
+      expect(ledger.rawStatus(failedRetryableId)).toBe("failed_retryable");
+      expect(ledger.check(failedRetryableId)).toBe("pending");
+
+      const conflictId = "stl:check:conflict";
+      ledger.markPending(conflictId, "rp:alice");
+      ledger.markConflict(conflictId, "conflict found");
+      expect(ledger.rawStatus(conflictId)).toBe("conflict");
+      expect(ledger.check(conflictId)).toBe("failed");
+
+      const terminalId = "stl:check:terminal";
+      ledger.markPending(terminalId, "rp:alice");
+      ledger.markFailed(terminalId, "fatal", false);
+      expect(ledger.rawStatus(terminalId)).toBe("failed_terminal");
+      expect(ledger.check(terminalId)).toBe("failed");
+
+      expect(ledger.rawStatus("stl:check:not-found")).toBeNull();
+      expect(ledger.check("stl:check:not-found")).toBe("not_found");
+    } finally {
+      cleanupDb(db, dbPath);
+    }
+  });
+
   it("applies explicit settlement idempotently (second process skips)", async () => {
     const { db, dbPath } = createTempDb();
     seedStandardEntities(db);

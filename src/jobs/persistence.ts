@@ -26,6 +26,7 @@ export interface JobPersistence {
   claim(jobId: string, claimedBy: string, leaseDurationMs: number): boolean;
   complete(jobId: string): void;
   fail(jobId: string, errorMessage: string, retryable: boolean): void;
+  retry(jobId: string): boolean;
   listPending(limit?: number): JobEntry[];
   listRetryable(beforeTime: number, limit?: number): JobEntry[];
 }
@@ -120,6 +121,21 @@ export class SqliteJobPersistence implements JobPersistence {
        WHERE idempotency_key = ?`,
       [canRetry ? "retryable" : "exhausted", nextAttemptCount, errorMessage, canRetry ? now : null, now, jobId],
     );
+  }
+
+  retry(jobId: string): boolean {
+    const now = this.clock();
+    const result = this.db.run(
+      `UPDATE _memory_maintenance_jobs
+       SET status = 'pending',
+           claimed_at = NULL,
+           error_message = NULL,
+           updated_at = ?
+       WHERE idempotency_key = ?
+         AND status IN ('retryable', 'exhausted')`,
+      [now, jobId],
+    );
+    return result.changes > 0;
   }
 
   listPending(limit = 100): JobEntry[] {

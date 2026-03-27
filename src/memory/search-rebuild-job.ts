@@ -19,6 +19,8 @@ export type SearchRebuildPayload = {
   scope: SearchRebuildScope;
 };
 
+const ALL_AGENTS_SENTINEL = "_all_agents";
+
 export function executeSearchRebuild(db: Db, payload: SearchRebuildPayload): void {
   const { scope } = payload;
 
@@ -67,6 +69,30 @@ function insertWithFts(db: Db, ftsTable: string, insertSql: string, insertParams
 }
 
 function rebuildPrivate(db: Db, agentId: string): void {
+  if (agentId === ALL_AGENTS_SENTINEL) {
+    const agents = db.query<{ agent_id: string }>(
+      `SELECT DISTINCT agent_id
+       FROM (
+         SELECT agent_id AS agent_id
+         FROM private_cognition_current
+         UNION
+         SELECT owner_agent_id AS agent_id
+         FROM entity_nodes
+         WHERE memory_scope = 'private_overlay'
+       )
+       WHERE agent_id IS NOT NULL`,
+    );
+
+    for (const row of agents) {
+      rebuildPrivateForAgent(db, row.agent_id);
+    }
+    return;
+  }
+
+  rebuildPrivateForAgent(db, agentId);
+}
+
+function rebuildPrivateForAgent(db: Db, agentId: string): void {
   db.transaction(() => {
     clearFtsAndMain(db, "search_docs_private", "search_docs_private_fts", "agent_id = ?", [agentId]);
     const now = Date.now();
@@ -224,6 +250,21 @@ function rebuildWorld(db: Db): void {
 }
 
 function rebuildCognition(db: Db, agentId: string): void {
+  if (agentId === ALL_AGENTS_SENTINEL) {
+    const agents = db.query<{ agent_id: string }>(
+      `SELECT DISTINCT agent_id
+       FROM private_cognition_current`,
+    );
+    for (const row of agents) {
+      rebuildCognitionForAgent(db, row.agent_id);
+    }
+    return;
+  }
+
+  rebuildCognitionForAgent(db, agentId);
+}
+
+function rebuildCognitionForAgent(db: Db, agentId: string): void {
   db.transaction(() => {
     clearFtsAndMain(db, "search_docs_cognition", "search_docs_cognition_fts", "agent_id = ?", [agentId]);
     const now = Date.now();

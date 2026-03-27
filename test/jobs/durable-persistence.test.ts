@@ -115,4 +115,70 @@ describe("SqliteJobPersistence", () => {
       cleanupDb(db, dbPath);
     }
   });
+
+  it("retries a retryable job back to pending with explicit retry()", () => {
+    const { db, dbPath } = createTempDb();
+
+    try {
+      const persistence = new SqliteJobPersistence(db);
+      const jobId = "retry-contract-job";
+
+      persistence.enqueue({
+        id: jobId,
+        jobType: "memory.organize",
+        payload: { batchId: "b-retry" },
+        status: "pending",
+        maxAttempts: 4,
+        nextAttemptAt: Date.now(),
+      });
+
+      expect(persistence.claim(jobId, "worker-1", 30_000)).toBe(true);
+      persistence.fail(jobId, "transient failure", true);
+
+      const retryableRow = db.get<{ status: string }>(
+        "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
+        [jobId],
+      );
+      expect(retryableRow?.status).toBe("retryable");
+
+      expect(persistence.retry(jobId)).toBe(true);
+
+      const pendingRow = db.get<{ status: string }>(
+        "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
+        [jobId],
+      );
+      expect(pendingRow?.status).toBe("pending");
+    } finally {
+      cleanupDb(db, dbPath);
+    }
+  });
+
+  it("returns false when retry() is called on reconciled job", () => {
+    const { db, dbPath } = createTempDb();
+
+    try {
+      const persistence = new SqliteJobPersistence(db);
+      const jobId = "retry-contract-reconciled";
+
+      persistence.enqueue({
+        id: jobId,
+        jobType: "memory.organize",
+        payload: { batchId: "b-reconciled" },
+        status: "pending",
+        maxAttempts: 4,
+        nextAttemptAt: Date.now(),
+      });
+      persistence.complete(jobId);
+
+      expect(persistence.retry(jobId)).toBe(false);
+
+      const row = db.get<{ status: string }>(
+        "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
+        [jobId],
+      );
+      expect(row?.status).toBe("reconciled");
+    } finally {
+      cleanupDb(db, dbPath);
+    }
+  });
 });

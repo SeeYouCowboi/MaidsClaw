@@ -1,5 +1,5 @@
-import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { JobPersistence } from "../jobs/persistence.js";
+import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { Db } from "../storage/database.js";
 import {
   CognitionRepository,
@@ -950,7 +950,7 @@ export class GraphStorageService {
       return;
     }
     try {
-      const payload: SearchRebuildPayload = { agentId: "_fts_repair", scope };
+      const payload: SearchRebuildPayload = { agentId: "_all_agents", scope };
       this.jobPersistence.enqueue({
         id: `search.rebuild:${scope}:fts_repair`,
         jobType: "search.rebuild",
