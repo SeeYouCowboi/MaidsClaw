@@ -48,6 +48,8 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS _memory_maintenance_jobs (id INTEGER PRIMARY KEY, job_type TEXT NOT NULL, status TEXT NOT NULL, idempotency_key TEXT, payload TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, next_attempt_at INTEGER)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_maintenance_job_type_key ON _memory_maintenance_jobs(job_type, idempotency_key) WHERE idempotency_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_job_type_next_attempt ON _memory_maintenance_jobs(job_type, next_attempt_at)`,
+  `CREATE TABLE IF NOT EXISTS settlement_processing_ledger (settlement_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, payload_hash TEXT, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'claimed', 'applying', 'applied', 'replayed_noop', 'conflict', 'failed_retryable', 'failed_terminal')), attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 4, claimed_by TEXT, claimed_at INTEGER, applied_at INTEGER, error_message TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_settlement_ledger_status ON settlement_processing_ledger(status, created_at) WHERE status IN ('pending', 'applying')`,
   `CREATE TABLE IF NOT EXISTS event_nodes (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, raw_text TEXT, summary TEXT, timestamp INTEGER NOT NULL, created_at INTEGER NOT NULL, participants TEXT, emotion TEXT, topic_id INTEGER, visibility_scope TEXT NOT NULL DEFAULT 'area_visible' CHECK (visibility_scope IN ('area_visible', 'world_public')), location_entity_id INTEGER NOT NULL, event_category TEXT NOT NULL CHECK (event_category IN ('speech', 'action', 'observation', 'state_change')), primary_actor_entity_id INTEGER, promotion_class TEXT NOT NULL DEFAULT 'none' CHECK (promotion_class IN ('none', 'world_candidate')), source_record_id TEXT, source_settlement_id TEXT, source_pub_index INTEGER, event_origin TEXT NOT NULL CHECK (event_origin IN ('runtime_projection', 'delayed_materialization', 'promotion')))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_area_source_record ON event_nodes(source_record_id) WHERE source_record_id IS NOT NULL AND visibility_scope = 'area_visible'`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_nodes_publication_scope ON event_nodes(source_settlement_id, source_pub_index, visibility_scope) WHERE source_settlement_id IS NOT NULL AND source_pub_index IS NOT NULL`,
@@ -894,6 +896,39 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
         `CREATE INDEX IF NOT EXISTS idx_memory_maintenance_jobs_status_next
          ON _memory_maintenance_jobs(status, next_attempt_at)
          WHERE status IN ('pending', 'retryable')`,
+      );
+    },
+  },
+  {
+    id: "memory:034:create-settlement-processing-ledger",
+    description: "Create settlement processing ledger for explicit settlement idempotency",
+    up: (db: Db) => {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS settlement_processing_ledger (
+          settlement_id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          payload_hash TEXT,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN (
+              'pending', 'claimed', 'applying', 'applied',
+              'replayed_noop', 'conflict',
+              'failed_retryable', 'failed_terminal'
+            )),
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          max_attempts INTEGER NOT NULL DEFAULT 4,
+          claimed_by TEXT,
+          claimed_at INTEGER,
+          applied_at INTEGER,
+          error_message TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      );
+
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_settlement_ledger_status
+         ON settlement_processing_ledger(status, created_at)
+         WHERE status IN ('pending', 'applying')`,
       );
     },
   },

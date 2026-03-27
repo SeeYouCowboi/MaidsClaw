@@ -244,9 +244,6 @@ function rebuildCognition(db: Db, agentId: string): void {
 
     for (const row of rows) {
       const sourceRef = `${row.kind}:${row.id}`;
-      if (sourceRef.startsWith("private_event:") || sourceRef.startsWith("private_belief:")) {
-        continue;
-      }
 
       const content = row.summary_text ?? "";
       insertWithFts(

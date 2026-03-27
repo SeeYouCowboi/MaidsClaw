@@ -3,6 +3,7 @@ import type { InteractionRecord } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
 import type { Db } from "../storage/database.js";
+import type { SettlementLedger } from "./settlement-ledger.js";
 import type { MemoryTaskAgent, MemoryFlushRequest } from "./task-agent.js";
 
 const JOB_TYPE = "pending_settlement_flush";
@@ -13,6 +14,8 @@ const TRANSIENT_MAX_BACKOFF_MS = 15 * 60_000;
 const UNRESOLVED_BASE_BACKOFF_MS = 5 * 60_000;
 const UNRESOLVED_MAX_BACKOFF_MS = 6 * 60 * 60_000;
 const UNRESOLVED_BLOCK_AFTER_FAILURES = 5;
+const SWEEP_LOCK_SETTLEMENT_ID = "__sweeper__:pending_settlement_flush";
+const SWEEP_LOCK_AGENT_ID = "system:pending_settlement_sweeper";
 
 type JobStatus = "retry_scheduled" | "succeeded" | "blocked_manual" | "failed_hard";
 
@@ -50,6 +53,7 @@ export class PendingSettlementSweeper {
       periodicStaleCutoffMs?: number;
       now?: () => number;
       random?: () => number;
+      settlementLedger?: SettlementLedger;
     } = {},
   ) {}
 
@@ -78,11 +82,15 @@ export class PendingSettlementSweeper {
   }
 
   private async runSweep(params: { includeAllPending: boolean }): Promise<void> {
-    if (this.sweepInFlight || this.stopped) {
+    if (this.stopped) {
       return;
     }
 
-    this.sweepInFlight = true;
+    const releaseSweepGuard = this.tryAcquireSweepGuard();
+    if (!releaseSweepGuard) {
+      return;
+    }
+
     try {
       const staleCutoffMs = params.includeAllPending
         ? -1
@@ -96,8 +104,58 @@ export class PendingSettlementSweeper {
         await this.processSession(session.sessionId, session.agentId);
       }
     } finally {
-      this.sweepInFlight = false;
+      releaseSweepGuard();
     }
+  }
+
+  private tryAcquireSweepGuard(): (() => void) | null {
+    if (!this.options.settlementLedger) {
+      if (this.sweepInFlight) {
+        return null;
+      }
+
+      this.sweepInFlight = true;
+      return () => {
+        this.sweepInFlight = false;
+      };
+    }
+
+    const now = this.now();
+    this.db.run(
+      `INSERT OR IGNORE INTO settlement_processing_ledger
+       (settlement_id, agent_id, status, attempt_count, max_attempts, created_at, updated_at)
+       VALUES (?, ?, 'pending', 0, 1, ?, ?)`,
+      [SWEEP_LOCK_SETTLEMENT_ID, SWEEP_LOCK_AGENT_ID, now, now],
+    );
+
+    const claimResult = this.db.run(
+      `UPDATE settlement_processing_ledger
+       SET status = 'applying',
+           claimed_by = ?,
+           claimed_at = ?,
+           attempt_count = attempt_count + 1,
+           updated_at = ?
+       WHERE settlement_id = ? AND status = 'pending'`,
+      [SWEEP_LOCK_AGENT_ID, now, now, SWEEP_LOCK_SETTLEMENT_ID],
+    );
+
+    if (claimResult.changes <= 0) {
+      return null;
+    }
+
+    return () => {
+      const releasedAt = this.now();
+      this.db.run(
+        `UPDATE settlement_processing_ledger
+         SET status = 'pending',
+             claimed_by = NULL,
+             claimed_at = NULL,
+             error_message = NULL,
+             updated_at = ?
+         WHERE settlement_id = ?`,
+        [releasedAt, SWEEP_LOCK_SETTLEMENT_ID],
+      );
+    };
   }
 
   private async processSession(sessionId: string, agentId: string): Promise<void> {

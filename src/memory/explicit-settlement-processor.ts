@@ -27,6 +27,7 @@ import {
   type SettledArtifacts,
 } from "./cognition/relation-intent-resolver.js";
 import { makeNodeRef } from "./schema.js";
+import type { SettlementLedger } from "./settlement-ledger.js";
 import type { GraphStorageService } from "./storage.js";
 import type { NodeRef } from "./types.js";
 import type {
@@ -60,6 +61,7 @@ export class ExplicitSettlementProcessor {
     private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
     private readonly loadExistingContext: ExistingContextLoader,
     private readonly applyCallOneToolCalls: CallOneApplier,
+    private readonly settlementLedger?: SettlementLedger,
   ) {
     this.cognitionRepo = new CognitionRepository(db);
     this.relationBuilder = new RelationBuilder(db);
@@ -91,74 +93,94 @@ export class ExplicitSettlementProcessor {
     }
 
     for (const explicitMeta of ingest.explicitSettlements) {
-      const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
-      const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
-      const explicitSupportCall = await this.modelProvider.chat(
-        [
-          {
-            role: "system",
-            content:
-              "You are a memory migration support engine for authoritative explicit cognition. Use tools only to resolve canonical entities and aliases needed by authoritative explicit ops. Do not invent or rewrite private beliefs/events. Create only supporting entities, aliases, and logic edges when strictly necessary.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({ ingest: explicitIngest, existingContext: explicitContext }),
-          },
-        ],
-        explicitSupportTools,
-      );
-
-      this.applyCallOneToolCalls(
-        {
-          ...flushRequest,
-          agentId: explicitMeta.ownerAgentId,
-        },
-        explicitSupportCall,
-        created,
-      );
-
-      const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
-      const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
-      const commitResult = this.commitCognitionOps(
-        explicitMeta.ownerAgentId,
-        explicitMeta.privateCognition.ops,
-        explicitMeta.settlementId,
-        currentLocationEntityId,
-      );
-      created.changedNodeRefs.push(...commitResult.refs);
-
-      if (settlementPayload) {
-        const settledArtifacts = this.buildSettledArtifacts(
-          settlementPayload,
-          explicitMeta.ownerAgentId,
-          explicitMeta.settlementId,
-          commitResult,
-        );
-        const resolvedRefs = resolveLocalRefs(settlementPayload, settledArtifacts);
-        const relationIntents = settlementPayload.relationIntents ?? [];
-        validateRelationIntents(relationIntents, resolvedRefs);
-        materializeRelationIntents(relationIntents, resolvedRefs, this.db);
-
-        const conflictResult = resolveConflictFactors(
-          settlementPayload.conflictFactors ?? [],
-          this.db,
-          {
-            settledRefs: resolvedRefs,
-            settlementId: explicitMeta.settlementId,
-            agentId: explicitMeta.ownerAgentId,
-          },
-        );
-
-        this.applyContestConflictFactors(
-          explicitMeta.ownerAgentId,
-          explicitMeta.settlementId,
-          commitResult.contestedAssertions,
-          conflictResult.resolved.map((factor) => factor.nodeRef),
-          conflictResult.unresolved.length,
-        );
+      const ledgerState = this.settlementLedger?.check(explicitMeta.settlementId);
+      if (ledgerState === "applied" || ledgerState === "failed") {
+        continue;
       }
 
-      this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCognition.ops, created);
+      this.settlementLedger?.markApplying(
+        explicitMeta.settlementId,
+        explicitMeta.ownerAgentId,
+      );
+
+      try {
+        const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
+        const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
+        const explicitSupportCall = await this.modelProvider.chat(
+          [
+            {
+              role: "system",
+              content:
+                "You are a memory migration support engine for authoritative explicit cognition. Use tools only to resolve canonical entities and aliases needed by authoritative explicit ops. Do not invent or rewrite private beliefs/events. Create only supporting entities, aliases, and logic edges when strictly necessary.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({ ingest: explicitIngest, existingContext: explicitContext }),
+            },
+          ],
+          explicitSupportTools,
+        );
+
+        this.applyCallOneToolCalls(
+          {
+            ...flushRequest,
+            agentId: explicitMeta.ownerAgentId,
+          },
+          explicitSupportCall,
+          created,
+        );
+
+        const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
+        const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
+        const commitResult = this.commitCognitionOps(
+          explicitMeta.ownerAgentId,
+          explicitMeta.privateCognition.ops,
+          explicitMeta.settlementId,
+          currentLocationEntityId,
+        );
+        created.changedNodeRefs.push(...commitResult.refs);
+
+        if (settlementPayload) {
+          const settledArtifacts = this.buildSettledArtifacts(
+            settlementPayload,
+            explicitMeta.ownerAgentId,
+            explicitMeta.settlementId,
+            commitResult,
+          );
+          const resolvedRefs = resolveLocalRefs(settlementPayload, settledArtifacts);
+          const relationIntents = settlementPayload.relationIntents ?? [];
+          validateRelationIntents(relationIntents, resolvedRefs);
+          materializeRelationIntents(relationIntents, resolvedRefs, this.db);
+
+          const conflictResult = resolveConflictFactors(
+            settlementPayload.conflictFactors ?? [],
+            this.db,
+            {
+              settledRefs: resolvedRefs,
+              settlementId: explicitMeta.settlementId,
+              agentId: explicitMeta.ownerAgentId,
+            },
+          );
+
+          this.applyContestConflictFactors(
+            explicitMeta.ownerAgentId,
+            explicitMeta.settlementId,
+            commitResult.contestedAssertions,
+            conflictResult.resolved.map((factor) => factor.nodeRef),
+            conflictResult.unresolved.length,
+          );
+        }
+
+        this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCognition.ops, created);
+        this.settlementLedger?.markApplied(explicitMeta.settlementId);
+      } catch (error) {
+        this.settlementLedger?.markFailed(
+          explicitMeta.settlementId,
+          error instanceof Error ? error.message : String(error),
+          error instanceof MaidsClawError ? error.retriable : false,
+        );
+        throw error;
+      }
     }
   }
 
