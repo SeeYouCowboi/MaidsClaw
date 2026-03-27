@@ -88,7 +88,7 @@ describe("memory schema", () => {
 		const nonFtsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE '%fts%'",
 		);
-		expect(nonFtsCount?.count).toBe(36);
+		expect(nonFtsCount?.count).toBe(37);
 
 		const ftsCount = db.get<{ count: number }>(
 			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND sql LIKE '%fts5%'",

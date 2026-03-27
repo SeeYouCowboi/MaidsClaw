@@ -957,6 +957,29 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
       }
     },
   },
+  {
+    id: "memory:036:create-graph-node-registry",
+    description: "Create shadow graph_nodes registry for tracking all graph node registrations",
+    up: (db: Db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS graph_nodes (
+          id INTEGER PRIMARY KEY,
+          node_kind TEXT NOT NULL
+            CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')),
+          node_id INTEGER NOT NULL,
+          node_ref TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_graph_nodes_kind_id ON graph_nodes(node_kind, node_id)`,
+      );
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS ux_graph_nodes_ref ON graph_nodes(node_ref)`,
+      );
+    },
+  },
 ];
 
 function escapeSqlLiteral(value: string): string {

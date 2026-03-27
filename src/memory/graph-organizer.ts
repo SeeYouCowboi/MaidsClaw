@@ -65,6 +65,7 @@ export class GraphOrganizer {
     }));
 
     this.embeddings.batchStoreEmbeddings(entries);
+    this.shadowRegisterNodes(nodes);
     const { semanticEdgeCount, scoreTargets } = this.embeddingLinker.link(entries, nodes, job.agentId);
 
     const scoreRefs = Array.from(scoreTargets);
@@ -82,6 +83,24 @@ export class GraphOrganizer {
       updated_semantic_edge_count: semanticEdgeCount,
       updated_score_refs: scoreRefs,
     };
+  }
+
+  private shadowRegisterNodes(nodes: OrganizerNode[]): void {
+    try {
+      const now = Date.now();
+      const stmt = this.db.prepare(
+        `INSERT INTO graph_nodes (node_kind, node_id, node_ref, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (node_kind, node_id) DO UPDATE SET updated_at = excluded.updated_at`,
+      );
+      for (const node of nodes) {
+        const parsed = this.parseNodeRef(node.nodeRef);
+        if (!parsed) continue;
+        stmt.run(parsed.kind, parsed.id, node.nodeRef, now, now);
+      }
+    } catch {
+      // shadow mode: table may not exist before migration 036
+    }
   }
 
   private parseNodeRef(nodeRef: NodeRef): { kind: NodeRefKind; id: number } | undefined {
