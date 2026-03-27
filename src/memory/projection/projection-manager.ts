@@ -127,6 +127,7 @@ export class ProjectionManager {
 				updatedAt: now,
 				validTime: artifact.validTime,
 				committedTime: artifact.committedTime ?? now,
+				settlementId: params.settlementId,
 			});
 		}
 	}

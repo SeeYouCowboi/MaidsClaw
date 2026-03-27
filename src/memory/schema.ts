@@ -32,6 +32,21 @@ const AREA_WORLD_PROJECTION_DDL: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS world_narrative_current (id INTEGER PRIMARY KEY CHECK (id = 1), summary_text TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
 ];
 
+const AREA_WORLD_EVENTS_DDL: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS area_state_events (id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, area_id INTEGER NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), source_type TEXT NOT NULL DEFAULT 'system' CHECK (source_type IN ('system', 'gm', 'simulation', 'inferred_world')), valid_time INTEGER, committed_time INTEGER NOT NULL, settlement_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_area_state_events_agent_area_key ON area_state_events(agent_id, area_id, key, committed_time DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_area_state_events_settlement ON area_state_events(settlement_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_area_state_events_valid_time ON area_state_events(agent_id, area_id, valid_time DESC)`,
+  `CREATE TABLE IF NOT EXISTS world_state_events (id INTEGER PRIMARY KEY, key TEXT NOT NULL, value_json TEXT NOT NULL, surfacing_classification TEXT NOT NULL CHECK (surfacing_classification IN ('public_manifestation', 'latent_state_update', 'private_only')), source_type TEXT NOT NULL DEFAULT 'system' CHECK (source_type IN ('system', 'gm', 'simulation', 'inferred_world')), valid_time INTEGER, committed_time INTEGER NOT NULL, settlement_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_world_state_events_key_committed ON world_state_events(key, committed_time DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_world_state_events_settlement ON world_state_events(settlement_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_world_state_events_valid_time ON world_state_events(key, valid_time DESC)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_area_state_events_no_update BEFORE UPDATE ON area_state_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on area_state_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_area_state_events_no_delete BEFORE DELETE ON area_state_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on area_state_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_world_state_events_no_update BEFORE UPDATE ON world_state_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on world_state_events'); END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_world_state_events_no_delete BEFORE DELETE ON world_state_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on world_state_events'); END`,
+];
+
 export function makeNodeRef(kind: NodeRefKind, id: number): NodeRef {
   if (!(NODE_REF_KINDS as readonly string[]).includes(kind)) {
     throw new Error(`Invalid node ref kind: ${kind}`);
@@ -113,6 +128,7 @@ export const MEMORY_DDL: readonly string[] = [
   `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_update BEFORE UPDATE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: updates not allowed on private_episode_events'); END`,
   `CREATE TRIGGER IF NOT EXISTS trg_private_episode_events_no_delete BEFORE DELETE ON private_episode_events BEGIN SELECT RAISE(ABORT, 'append-only: deletes not allowed on private_episode_events'); END`,
 
+  ...AREA_WORLD_EVENTS_DDL,
   ...AREA_WORLD_PROJECTION_DDL,
 
   // ── Shared Blocks V1 ──
@@ -930,6 +946,15 @@ export const MEMORY_MIGRATIONS: MigrationStep[] = [
          ON settlement_processing_ledger(status, created_at)
          WHERE status IN ('pending', 'applying')`,
       );
+    },
+  },
+  {
+    id: "memory:035:create-area-world-state-events",
+    description: "Create append-only area/world state event ledgers for replayable current projections",
+    up: (db: Db) => {
+      for (const ddl of AREA_WORLD_EVENTS_DDL) {
+        db.exec(ddl);
+      }
     },
   },
 ];

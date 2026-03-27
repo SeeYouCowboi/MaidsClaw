@@ -446,6 +446,7 @@ export function applyPublicationProjectionUpdate(
     targetScope: input.targetScope,
     agentId: input.sourceAgentId,
     areaId: input.locationEntityId,
+    settlementId: input.settlementId,
     projectionKey: `publication:${input.settlementId}:${input.pubIndex}`,
     summaryText: input.summary,
     payload: {
