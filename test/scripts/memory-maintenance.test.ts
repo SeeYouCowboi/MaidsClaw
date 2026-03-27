@@ -4,6 +4,8 @@ import {
   REPORT_TABLES,
   getTableRowCount,
   runRetention,
+  runIntegrityCheck,
+  gatherReportRows,
 } from "../../scripts/memory-maintenance.js";
 import { createTempDb, cleanupDb, type Db } from "../helpers/memory-test-utils.js";
 
@@ -114,6 +116,28 @@ describe("memory-maintenance", () => {
     });
   });
 
+  describe("canonical protection", () => {
+    it("CANONICAL_LEDGER_TABLES includes area_state_events and world_state_events", () => {
+      expect(CANONICAL_LEDGER_TABLES).toContain("area_state_events");
+      expect(CANONICAL_LEDGER_TABLES).toContain("world_state_events");
+    });
+
+    it("CANONICAL_LEDGER_TABLES includes settlement_processing_ledger", () => {
+      expect(CANONICAL_LEDGER_TABLES).toContain("settlement_processing_ledger");
+    });
+
+    it("CANONICAL_LEDGER_TABLES includes original private ledgers", () => {
+      expect(CANONICAL_LEDGER_TABLES).toContain("private_cognition_events");
+      expect(CANONICAL_LEDGER_TABLES).toContain("private_episode_events");
+    });
+
+    it("all canonical tables are in REPORT_TABLES", () => {
+      for (const table of CANONICAL_LEDGER_TABLES) {
+        expect((REPORT_TABLES as readonly string[]).includes(table)).toBe(true);
+      }
+    });
+  });
+
   describe("report", () => {
     it("returns row counts for known tables", () => {
       const count = getTableRowCount(db, "_memory_maintenance_jobs");
@@ -125,15 +149,46 @@ describe("memory-maintenance", () => {
       expect(count).toBeNull();
     });
 
-    it("REPORT_TABLES includes all canonical ledger tables", () => {
-      for (const table of CANONICAL_LEDGER_TABLES) {
-        expect((REPORT_TABLES as readonly string[]).includes(table)).toBe(true);
-      }
+    it("REPORT_TABLES includes area_state_events and world_state_events", () => {
+      expect((REPORT_TABLES as readonly string[]).includes("area_state_events")).toBe(true);
+      expect((REPORT_TABLES as readonly string[]).includes("world_state_events")).toBe(true);
     });
 
-    it("marks canonical tables as protected", () => {
-      expect(CANONICAL_LEDGER_TABLES).toContain("private_cognition_events");
-      expect(CANONICAL_LEDGER_TABLES).toContain("private_episode_events");
+    it("gatherReportRows returns structured data for all tables", () => {
+      const rows = gatherReportRows(db);
+      expect(rows.length).toBe(REPORT_TABLES.length);
+
+      for (const row of rows) {
+        expect(typeof row.table).toBe("string");
+        expect(typeof row.isProtected).toBe("boolean");
+      }
+
+      // then: canonical tables are marked protected
+      const protectedRows = rows.filter((r) => r.isProtected);
+      expect(protectedRows.length).toBe(CANONICAL_LEDGER_TABLES.length);
+    });
+
+    it("gatherReportRows shows oldest record when created_at exists", () => {
+      const ts = Date.now() - 86_400_000;
+      db.run(
+        `INSERT INTO _memory_maintenance_jobs
+         (job_type, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
+        ["test.job", "pending", ts, ts],
+      );
+
+      const rows = gatherReportRows(db);
+      const jobsRow = rows.find((r) => r.table === "_memory_maintenance_jobs");
+      expect(jobsRow).toBeDefined();
+      expect(jobsRow!.rows).toBe(1);
+      expect(jobsRow!.oldestRecord).toBeTruthy();
+    });
+  });
+
+  describe("integrity check", () => {
+    it("returns true for a healthy database", () => {
+      const result = runIntegrityCheck(db);
+      expect(result).toBe(true);
     });
   });
 });

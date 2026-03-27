@@ -8,7 +8,9 @@ import type { Db } from "../src/storage/database.js";
 const CANONICAL_LEDGER_TABLES = [
   "private_cognition_events",
   "private_episode_events",
-  // Future: area_state_events, world_state_events
+  "area_state_events",
+  "world_state_events",
+  "settlement_processing_ledger",
 ] as const;
 
 // ── All tables to report on (order: internal → ledger → projection → search) ──
@@ -39,6 +41,8 @@ const REPORT_TABLES = [
   "search_docs_area",
   "search_docs_world",
   "search_docs_cognition",
+  "area_state_events",
+  "world_state_events",
 ] as const;
 
 type CliArgs = {
@@ -46,6 +50,7 @@ type CliArgs = {
   vacuum: boolean;
   report: boolean;
   reportOnly: boolean;
+  integrityCheck: boolean;
 };
 
 // ── Main ──
@@ -59,6 +64,11 @@ const db = openDatabase({ path: dbPath });
 try {
   runMemoryMigrations(db);
   console.log(`Database: ${dbPath}`);
+
+  if (args.integrityCheck) {
+    const ok = runIntegrityCheck(db);
+    if (!ok) process.exitCode = 1;
+  }
 
   if (!args.reportOnly) {
     const deleted = runRetention(db, args.days);
@@ -93,21 +103,133 @@ export function runRetention(db: Db, days: number): number {
   return result.changes;
 }
 
+// ── Integrity check ──
+
+export function runIntegrityCheck(db: Db): boolean {
+  console.log("\nRunning PRAGMA integrity_check...");
+  const rows: { integrity_check: string }[] = db.query("PRAGMA integrity_check");
+  if (rows.length === 1 && rows[0].integrity_check === "ok") {
+    console.log("  Result: ok");
+    return true;
+  }
+  console.error("  INTEGRITY CHECK FAILED:");
+  for (const row of rows) {
+    console.error(`    ${row.integrity_check}`);
+  }
+  return false;
+}
+
 // ── Report logic ──
 
-export function printReport(db: Db): void {
-  console.log("\nTable Statistics:");
+export type TableReportRow = {
+  table: string;
+  rows: number | null;
+  sizeBytes: number | null;
+  oldestRecord: string | null;
+  isProtected: boolean;
+};
+
+export function gatherReportRows(db: Db): TableReportRow[] {
+  const results: TableReportRow[] = [];
+  const pageSize = getPageSize(db);
 
   for (const table of REPORT_TABLES) {
     const isProtected = (CANONICAL_LEDGER_TABLES as readonly string[]).includes(table);
     const count = getTableRowCount(db, table);
-    if (count === null) {
-      console.log(`  ${table}: (table not found)`);
-    } else {
-      const suffix = isProtected ? " (PROTECTED - never cleaned)" : "";
-      console.log(`  ${table}: ${count} rows${suffix}`);
-    }
+    const pages = getTablePageCount(db, table);
+    const sizeBytes = pages !== null && pageSize !== null ? pages * pageSize : null;
+    const oldest = getOldestRecord(db, table);
+    results.push({ table, rows: count, sizeBytes, oldestRecord: oldest, isProtected });
   }
+  return results;
+}
+
+export function printReport(db: Db): void {
+  const rows = gatherReportRows(db);
+  const dbSizeInfo = getDatabaseSize(db);
+
+  console.log("\n┌─────────────────────────────────────────────────────────────────────────────────────────────────┐");
+  console.log("│ Table Report                                                                                    │");
+  console.log("├─────────────────────────────────────┬──────────┬────────────┬─────────────────────┬─────────────┤");
+  console.log("│ Table                               │     Rows │       Size │ Oldest Record       │ Status      │");
+  console.log("├─────────────────────────────────────┼──────────┼────────────┼─────────────────────┼─────────────┤");
+
+  for (const r of rows) {
+    const name = r.table.padEnd(35);
+    const rowStr = r.rows !== null ? String(r.rows).padStart(8) : "     N/A";
+    const sizeStr = r.sizeBytes !== null ? formatBytes(r.sizeBytes).padStart(10) : "       N/A";
+    const oldestStr = (r.oldestRecord ?? "—").padEnd(19);
+    const statusStr = r.rows === null ? "NOT FOUND   " : r.isProtected ? "PROTECTED   " : "            ";
+    console.log(`│ ${name} │ ${rowStr} │ ${sizeStr} │ ${oldestStr} │ ${statusStr}│`);
+  }
+
+  console.log("├─────────────────────────────────────┴──────────┴────────────┴─────────────────────┴─────────────┤");
+  if (dbSizeInfo) {
+    console.log(`│ Database: page_size=${dbSizeInfo.pageSize}, page_count=${dbSizeInfo.pageCount}, total=${formatBytes(dbSizeInfo.totalBytes).padEnd(52)}│`);
+  }
+  console.log("└─────────────────────────────────────────────────────────────────────────────────────────────────┘");
+}
+
+function getPageSize(db: Db): number | null {
+  try {
+    const row = db.get<{ page_size: number }>("PRAGMA page_size");
+    return row?.page_size ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getTablePageCount(db: Db, table: string): number | null {
+  if (!(REPORT_TABLES as readonly string[]).includes(table)) return null;
+  try {
+    // dbstat virtual table may not exist; fall back gracefully
+    const row = db.get<{ pages: number }>(
+      `SELECT SUM(pageno) as pages FROM dbstat WHERE name = ?`,
+      [table],
+    );
+    return row?.pages ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getDatabaseSize(db: Db): { pageSize: number; pageCount: number; totalBytes: number } | null {
+  try {
+    const ps = db.get<{ page_size: number }>("PRAGMA page_size");
+    const pc = db.get<{ page_count: number }>("PRAGMA page_count");
+    if (ps && pc) {
+      return { pageSize: ps.page_size, pageCount: pc.page_count, totalBytes: ps.page_size * pc.page_count };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getOldestRecord(db: Db, table: string): string | null {
+  if (!(REPORT_TABLES as readonly string[]).includes(table)) return null;
+  try {
+    // Check if table has a created_at column
+    const cols = db.query<{ name: string }>(`PRAGMA table_info("${table}")`);
+    const hasCreatedAt = cols.some((c: { name: string }) => c.name === "created_at");
+    if (!hasCreatedAt) return null;
+
+    const row = db.get<{ oldest: number | null }>(
+      `SELECT MIN(created_at) as oldest FROM "${table}"`,
+    );
+    if (!row?.oldest) return null;
+    return new Date(row.oldest).toISOString().slice(0, 19).replace("T", " ");
+  } catch {
+    return null;
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const val = bytes / 1024 ** i;
+  return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 export function getTableRowCount(db: Db, table: string): number | null {
@@ -133,6 +255,7 @@ function parseArgs(input: string[]): CliArgs {
   let vacuum = false;
   let report = false;
   let reportOnly = false;
+  let integrityCheck = false;
 
   const hasCleanFlags = input.some(
     (t) => t === "--days" || t === "--vacuum",
@@ -165,20 +288,25 @@ function parseArgs(input: string[]): CliArgs {
       continue;
     }
 
+    if (token === "--integrity-check") {
+      integrityCheck = true;
+      continue;
+    }
+
     failWithUsage(`Unknown argument: ${token}`);
   }
 
-  if (report && !hasCleanFlags && !vacuum) {
+  if (report && !hasCleanFlags && !vacuum && !integrityCheck) {
     reportOnly = true;
   }
 
-  return { days, vacuum, report, reportOnly };
+  return { days, vacuum, report, reportOnly, integrityCheck };
 }
 
 function failWithUsage(message: string): never {
   console.error(message);
   console.error(
-    "Usage: bun run scripts/memory-maintenance.ts [--days N] [--vacuum] [--report]",
+    "Usage: bun run scripts/memory-maintenance.ts [--days N] [--vacuum] [--report] [--integrity-check]",
   );
   process.exit(1);
 }
