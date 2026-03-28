@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import type {
   CancelResult,
@@ -135,6 +136,83 @@ type AdvisoryLockRow = {
 type RunningCountRow = {
   running_count: number;
 };
+
+type FenceLookupRow = Pick<PgJobCurrentRow, "status" | "claim_version">;
+
+type FenceMissOutcome = "not_found" | "stale_claim" | "not_running";
+
+const DEFAULT_HEARTBEAT_LEASE_EXTENSION_MS = 30_000;
+
+function normalizeJsonValue<T>(value: T): T | unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function buildSearchRebuildSuccessorJobKey(jobFamilyKey: string): string {
+  const prefix = "search.rebuild:";
+  const familyFragment = jobFamilyKey.startsWith(prefix)
+    ? jobFamilyKey.slice(prefix.length)
+    : jobFamilyKey;
+  return `search.rebuild:${familyFragment}:req:${randomUUID()}`;
+}
+
+function buildSearchRebuildSuccessorFamilyState(value: unknown): SearchRebuildFamilyState {
+  const current = normalizeSearchRebuildFamilyState(value);
+  return {
+    rerunRequested: false,
+    coalescedRequestCount: 0,
+    ...(current.latestRequestedAt !== undefined && { latestRequestedAt: current.latestRequestedAt }),
+    triggerSourceCounts: { ...current.triggerSourceCounts },
+    triggerReasonCounts: { ...current.triggerReasonCounts },
+  };
+}
+
+async function classifyFenceMiss(
+  sqltx: postgres.Sql,
+  jobKey: string,
+  claimVersion: number,
+): Promise<FenceMissOutcome> {
+  const rows = (await sqltx`
+    SELECT status, claim_version
+    FROM jobs_current
+    WHERE job_key = ${jobKey}
+    LIMIT 1
+  `) as FenceLookupRow[];
+
+  const row = rows[0];
+  if (!row) {
+    return "not_found";
+  }
+
+  if (Number(row.claim_version) !== claimVersion) {
+    return "stale_claim";
+  }
+
+  return "not_running";
+}
+
+async function markAttemptLeaseLost(
+  sqltx: postgres.Sql,
+  jobKey: string,
+  claimVersion: number,
+  nowMs: number,
+): Promise<void> {
+  await sqltx`
+    UPDATE job_attempts
+    SET outcome = 'lease_lost',
+        finished_at = ${nowMs}
+    WHERE job_key = ${jobKey}
+      AND claim_version = ${claimVersion}
+      AND outcome = 'running'
+  `;
+}
 
 function getConcurrencyCap(concurrencyKey: string): number {
   return CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
@@ -508,20 +586,321 @@ export class PgJobStore implements DurableJobStore {
     });
   }
 
-  async heartbeat(_job_key: string, _cv: number, _now: number): Promise<HeartbeatResult> {
-    throw new Error("not yet implemented");
+  async heartbeat(job_key: string, claim_version: number, nowMs: number): Promise<HeartbeatResult> {
+    const leaseExpiresAt = nowMs + DEFAULT_HEARTBEAT_LEASE_EXTENSION_MS;
+
+    type HeartbeatRow = Pick<PgJobCurrentRow, "job_key" | "claim_version" | "lease_expires_at">;
+
+    return this.sql.begin(async (tx) => {
+      const sqltx = tx as unknown as postgres.Sql;
+      const updated = (await sqltx`
+        UPDATE jobs_current
+        SET last_heartbeat_at = ${nowMs},
+            lease_expires_at = ${leaseExpiresAt},
+            updated_at = ${nowMs}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND status = 'running'
+        RETURNING job_key, claim_version, lease_expires_at
+      `) as HeartbeatRow[];
+
+      const row = updated[0];
+      if (row) {
+        await sqltx`
+          UPDATE job_attempts
+          SET last_heartbeat_at = ${nowMs},
+              lease_expires_at = ${leaseExpiresAt}
+          WHERE job_key = ${job_key}
+            AND claim_version = ${claim_version}
+            AND outcome = 'running'
+        `;
+
+        return {
+          outcome: "renewed" as const,
+          job_key,
+          claim_version,
+          lease_expires_at: Number(row.lease_expires_at ?? leaseExpiresAt),
+          heartbeat_at: nowMs,
+        };
+      }
+
+      const outcome = await classifyFenceMiss(sqltx, job_key, claim_version);
+      if (outcome === "stale_claim") {
+        await markAttemptLeaseLost(sqltx, job_key, claim_version, nowMs);
+      }
+
+      return {
+        outcome,
+        job_key,
+        claim_version,
+      };
+    });
   }
 
-  async complete(_job_key: string, _cv: number): Promise<CompleteResult> {
-    throw new Error("not yet implemented");
+  async complete(job_key: string, claim_version: number, _resultJson?: unknown): Promise<CompleteResult> {
+    const nowMs = Date.now();
+
+    return this.sql.begin(async (tx) => {
+      const sqltx = tx as unknown as postgres.Sql;
+      const updated = (await sqltx`
+        UPDATE jobs_current
+        SET status = 'succeeded',
+            terminal_at = ${nowMs},
+            claimed_by = NULL,
+            claimed_at = NULL,
+            lease_expires_at = NULL,
+            last_heartbeat_at = NULL,
+            updated_at = ${nowMs}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND status = 'running'
+        RETURNING *
+      `) as PgJobCurrentRow[];
+
+      const completed = updated[0];
+      if (!completed) {
+        const outcome = await classifyFenceMiss(sqltx, job_key, claim_version);
+        if (outcome === "stale_claim") {
+          await markAttemptLeaseLost(sqltx, job_key, claim_version, nowMs);
+        }
+
+        return {
+          outcome,
+          job_key,
+          claim_version,
+        };
+      }
+
+      const normalized = normalizePgJobCurrentRow(completed);
+
+      await sqltx`
+        UPDATE job_attempts
+        SET outcome = 'succeeded',
+            finished_at = ${nowMs}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND outcome = 'running'
+      `;
+
+      if (normalized.job_type === "search.rebuild" && normalized.job_family_key) {
+        const familyState = normalizeSearchRebuildFamilyState(normalized.family_state_json);
+
+        if (familyState.rerunRequested) {
+          const successorKey = buildSearchRebuildSuccessorJobKey(normalized.job_family_key);
+          const successorFamilyState = buildSearchRebuildSuccessorFamilyState(normalized.family_state_json);
+
+          await sqltx`
+            INSERT INTO jobs_current (
+              job_key,
+              job_type,
+              job_family_key,
+              execution_class,
+              concurrency_key,
+              status,
+              payload_schema_version,
+              payload_json,
+              family_state_json,
+              claim_version,
+              attempt_count,
+              max_attempts,
+              next_attempt_at,
+              created_at,
+              updated_at
+            ) VALUES (
+              ${successorKey},
+              ${normalized.job_type},
+              ${normalized.job_family_key},
+              ${normalized.execution_class},
+              ${normalized.concurrency_key},
+              ${"pending"},
+              ${normalized.payload_schema_version},
+              ${JSON.stringify(normalizeJsonValue(normalized.payload_json))},
+              ${JSON.stringify(successorFamilyState)},
+              ${0},
+              ${0},
+              ${normalized.max_attempts},
+              ${nowMs},
+              ${nowMs},
+              ${nowMs}
+            )
+          `;
+        }
+      }
+
+      return {
+        outcome: "succeeded" as const,
+        job_key,
+        claim_version,
+        terminal_at: nowMs,
+      };
+    });
   }
 
-  async fail(_job_key: string, _cv: number, _err: PgJobFailInput): Promise<FailResult> {
-    throw new Error("not yet implemented");
+  async fail(job_key: string, claim_version: number, error: PgJobFailInput): Promise<FailResult> {
+    const retryDelayMs = error.retry_delay_ms ?? 5_000;
+    const nextAttemptAt = error.now_ms + retryDelayMs;
+
+    type RunningFailRow = Pick<PgJobCurrentRow, "attempt_count" | "max_attempts">;
+
+    return this.sql.begin(async (tx) => {
+      const sqltx = tx as unknown as postgres.Sql;
+      const runningRows = (await sqltx`
+        SELECT attempt_count, max_attempts
+        FROM jobs_current
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND status = 'running'
+        FOR UPDATE
+        LIMIT 1
+      `) as RunningFailRow[];
+
+      const running = runningRows[0];
+      if (!running) {
+        const outcome = await classifyFenceMiss(sqltx, job_key, claim_version);
+        if (outcome === "stale_claim") {
+          await markAttemptLeaseLost(sqltx, job_key, claim_version, error.now_ms);
+        }
+
+        return {
+          outcome,
+          job_key,
+          claim_version,
+        };
+      }
+
+      const currentAttemptCount = Number(running.attempt_count);
+      const maxAttempts = Number(running.max_attempts);
+      const isRetry = currentAttemptCount < maxAttempts;
+
+      if (isRetry) {
+        await sqltx`
+          UPDATE jobs_current
+          SET status = 'pending',
+              next_attempt_at = ${nextAttemptAt},
+              terminal_at = NULL,
+              claimed_by = NULL,
+              claimed_at = NULL,
+              lease_expires_at = NULL,
+              last_heartbeat_at = NULL,
+              last_error_code = ${error.error_code ?? null},
+              last_error_message = ${error.error_message},
+              last_error_at = ${error.now_ms},
+              updated_at = ${error.now_ms}
+          WHERE job_key = ${job_key}
+            AND claim_version = ${claim_version}
+            AND status = 'running'
+        `;
+
+        await sqltx`
+          UPDATE job_attempts
+          SET outcome = 'failed_retryable',
+              finished_at = ${error.now_ms},
+              error_code = ${error.error_code ?? null},
+              error_message = ${error.error_message},
+              backoff_until = ${nextAttemptAt}
+          WHERE job_key = ${job_key}
+            AND claim_version = ${claim_version}
+            AND outcome = 'running'
+        `;
+
+        return {
+          outcome: "retry_scheduled" as const,
+          job_key,
+          claim_version,
+          next_attempt_at: nextAttemptAt,
+        };
+      }
+
+      const terminalRows = (await sqltx`
+        UPDATE jobs_current
+        SET status = 'failed_terminal',
+            terminal_at = ${error.now_ms},
+            claimed_by = NULL,
+            claimed_at = NULL,
+            lease_expires_at = NULL,
+            last_heartbeat_at = NULL,
+            last_error_code = ${error.error_code ?? null},
+            last_error_message = ${error.error_message},
+            last_error_at = ${error.now_ms},
+            updated_at = ${error.now_ms}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND status = 'running'
+        RETURNING terminal_at
+      `) as Array<Pick<PgJobCurrentRow, "terminal_at">>;
+
+      await sqltx`
+        UPDATE job_attempts
+        SET outcome = 'failed_terminal',
+            finished_at = ${error.now_ms},
+            error_code = ${error.error_code ?? null},
+            error_message = ${error.error_message}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND outcome = 'running'
+      `;
+
+      return {
+        outcome: "failed_terminal" as const,
+        job_key,
+        claim_version,
+        terminal_at: Number(terminalRows[0]?.terminal_at ?? error.now_ms),
+      };
+    });
   }
 
-  async cancel(_job_key: string, _cv: number): Promise<CancelResult> {
-    throw new Error("not yet implemented");
+  async cancel(job_key: string, claim_version: number): Promise<CancelResult> {
+    const nowMs = Date.now();
+
+    type CancelRow = Pick<PgJobCurrentRow, "terminal_at">;
+
+    return this.sql.begin(async (tx) => {
+      const sqltx = tx as unknown as postgres.Sql;
+      const updated = (await sqltx`
+        UPDATE jobs_current
+        SET status = 'cancelled',
+            terminal_at = ${nowMs},
+            claimed_by = NULL,
+            claimed_at = NULL,
+            lease_expires_at = NULL,
+            last_heartbeat_at = NULL,
+            updated_at = ${nowMs}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND status = 'running'
+        RETURNING terminal_at
+      `) as CancelRow[];
+
+      const row = updated[0];
+      if (!row) {
+        const outcome = await classifyFenceMiss(sqltx, job_key, claim_version);
+        if (outcome === "stale_claim") {
+          await markAttemptLeaseLost(sqltx, job_key, claim_version, nowMs);
+        }
+
+        return {
+          outcome,
+          job_key,
+          claim_version,
+        };
+      }
+
+      await sqltx`
+        UPDATE job_attempts
+        SET outcome = 'cancelled',
+            finished_at = ${nowMs}
+        WHERE job_key = ${job_key}
+          AND claim_version = ${claim_version}
+          AND outcome = 'running'
+      `;
+
+      return {
+        outcome: "cancelled" as const,
+        job_key,
+        claim_version,
+        terminal_at: Number(row.terminal_at ?? nowMs),
+      };
+    });
   }
 
   async inspect(_job_key: string): Promise<PgJobCurrentRow | undefined> {
