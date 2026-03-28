@@ -124,7 +124,8 @@ describe("pg enqueue", () => {
 			const familyState = typeof rows[0].family_state_json === "string"
 				? JSON.parse(rows[0].family_state_json)
 				: rows[0].family_state_json;
-			expect(familyState).toEqual({});
+			expect(familyState.rerunRequested).toBe(false);
+			expect(familyState.coalescedRequestCount).toBe(0);
 		});
 
 		it("only one row exists for this job_key", async () => {
