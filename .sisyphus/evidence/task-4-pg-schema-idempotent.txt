@@ -1,0 +1,99 @@
+bun test v1.3.10 (30e609e0)
+
+test\jobs\pg-schema.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 2 other objects",
+  detail: "drop cascades to table jobs_current\ndrop cascades to table job_attempts",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"jobs_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"job_attempts\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_job_attempts_job_key_claim_version\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_jobs_current_status_next_attempt\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_jobs_current_family_active\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_jobs_current_concurrency_running\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_jobs_current_lease_expiry\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_jobs_current_terminal\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_job_attempts_job_key\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+
+ 1 pass
+ 15 filtered out
+ 0 fail
+Ran 1 test across 1 file. [317.00ms]
