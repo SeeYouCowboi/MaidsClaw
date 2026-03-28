@@ -163,7 +163,7 @@ describe("pg fencing mutations", () => {
       LIMIT 1
     `;
 
-    expect(attempt.outcome).toBe("failed_retryable");
+    expect(attempt.outcome).toBe("failed_retry_scheduled");
     expect(attempt.finished_at).toBeTruthy();
   });
 

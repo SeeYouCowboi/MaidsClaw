@@ -216,6 +216,7 @@
 - embedding 模型版本化、维度变更与双模型迁移策略。
 - graph registry 落地时的 backfill、兼容 join、约束增量上线顺序。
 - contested lifecycle 的时间切片 explain、resolved / downgrade 边如何进入统一 explain API。
+- PostgreSQL 全量迁移的 async storage boundary、backend split、search/index/vector 方案以及 cutover/rollback contract。
 
 ### B.3 Superseded Options（已废弃选项）
 
@@ -233,6 +234,7 @@
 - 把 organizer durable 粒度固定为“一个 settlement 一个单体大 job”。
 - 继续把自由文本 `node_ref` 视为 graph identity 的长期终局。
 - 把 contested lifecycle 重写成一套独立 conflict object 子系统，脱离 cognition current state 与 relation evidence 链。
+- 把 PostgreSQL 第一阶段 generic jobs plane 视为“全库数据库迁移已经完成”。
 
 ---
 
@@ -256,7 +258,8 @@
 7. 运维级验证、回滚、离线对照、完整约束计划还不完备
 8. embedding 模型版本化与维度安全还没有落地
 9. settlement 处理缺少数据库级幂等性保证
-10. 数据保留与增长控制机制不存在
+10. 全面数据库迁移路径尚未收口
+11. 数据保留与增长控制机制不存在
 
 因此，**当前系统不是“不稳定”，而是“稳定但未完备”**。
 
@@ -335,6 +338,7 @@
 | P1 | Graph 语义层未完全收敛 | relation taxonomy 与 node registry 还未定型 | 当前可用，但不利于长期图能力扩展 |
 | P1 | Contested evidence 链未完备 | 冲突证据可查，但不能完整追踪冲突/解决链 | 当前解释能力有限 |
 | P1 | Settlement 幂等性 | 缺少数据库级串行化保证 | 单进程不受影响，多实例部署是 blocker |
+| P1 | 全面数据库迁移缺口 | 存储边界仍深度绑定 SQLite，同步 API / 方言 / FTS / cutover 方案未收口 | 不是当前 blocker，但若要以 PostgreSQL 作为长期主库，这是 blocker |
 | P1-P2 | 数据保留与增长控制 | 所有 append-only 表无限增长，无 TTL/归档 | 长期运行会导致性能退化 |
 | P2 | 运维级完备性不足 | 离线对照、rollback drill、完整约束计划还不够 | 不影响当前功能，但影响长期演进安全性 |
 
@@ -1009,6 +1013,110 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
 
 ---
 
+### 5.11 全面数据库迁移缺口
+
+### 问题是什么
+
+截至当前收口，项目已经把 PostgreSQL 第一阶段 `generic durable jobs plane` 的边界和 schema 草案单独钉住，但这**不等于**项目已经具备“把 authority truth、settlement ledger、search/index、脚本与测试体系整体迁到 PostgreSQL”的条件。
+
+真正尚未收口的缺口至少包括以下六类:
+
+1. **同步 `bun:sqlite` 边界仍未拆开**
+   - `src/storage/database.ts` 直接暴露同步 `Db` 包装和 `raw: Database`
+   - `src/bootstrap/types.ts`、`src/memory/task-agent.ts`、`src/memory/settlement-ledger.ts`、`src/memory/projection/area-world-projection-repo.ts` 等路径仍直接吃 `Database`
+   - 这意味着当前大量业务路径默认依赖“本地同步 SQLite 句柄”，而不是 async-friendly storage boundary
+2. **SQLite 方言深度嵌入业务路径**
+   - `src/memory/task-agent.ts:396`、`src/memory/transaction-batcher.ts:27/41/52` 直接使用 `BEGIN IMMEDIATE`
+   - `src/jobs/persistence.ts`、`src/memory/storage.ts`、`src/memory/settlement-ledger.ts` 广泛依赖 `INSERT OR IGNORE` / `INSERT OR REPLACE`
+   - 大量写路径把 `lastInsertRowid` 当成主契约返回值
+   - `src/storage/database.ts`、`src/memory/schema.ts`、`scripts/memory-maintenance.ts`、测试用例仍大量依赖 `PRAGMA`
+3. **Search / FTS 仍是 SQLite 专用实现**
+   - `src/memory/schema.ts:100-109` 直接创建 FTS5 virtual tables，并写死 `tokenize='trigram'`
+   - `src/memory/search-rebuild-job.ts:59-76`、`src/memory/storage.ts:721-764, 931-932` 都以 sidecar `rowid` 为主同步语义
+   - `scripts/memory-verify.ts:588-617` 直接按 FTS `rowid` 对齐校验 drift
+   - 这意味着当前 search repair / verify / rebuild contract 不是“可直接换后端”的抽象，而是 SQLite FTS5 contract
+4. **`authority truth` 与 `settlement_processing_ledger` 仍共享同库事务语义**
+   - `src/memory/task-agent.ts:396-454` 在同一 `BEGIN IMMEDIATE` 事务中跑 settlement apply 主链
+   - `src/memory/settlement-ledger.ts` 默认直接写同库 `settlement_processing_ledger`
+   - 这意味着 settlement ledger 不能在 truth plane 仍留在 SQLite 时被轻率拆到 PostgreSQL，否则会立即进入跨库一致性问题
+5. **迁移框架、脚本和测试仍默认 SQLite-only**
+   - `src/memory/schema.ts` 是面向 SQLite 的 schema/migration 文件，不是 backend-neutral migration layer
+   - `scripts/search-rebuild.ts`、`scripts/memory-replay.ts`、`scripts/memory-verify.ts`、`scripts/memory-maintenance.ts` 都默认 `openDatabase()` + SQLite 行为
+   - 大量测试依赖 `openDatabase({ path: ':memory:' })` 或直接 new `Database(':memory:')`
+   - 这意味着“数据库后端切换”不仅是 runtime 代码问题，还会波及脚本、维护命令和测试基座
+6. **缺少全库 cutover protocol**
+   - 当前仓库里还看不到 authority truth 全量 export/import、shadow compare、dual-write/shadow-read、分阶段回切、回滚演练的正式实现
+   - `memory-verify` / `memory-replay` 目前也不承担“跨后端全量一致性验收”职责
+
+换句话说，**PostgreSQL generic jobs phase** 和 **全面数据库迁移** 是两个不同问题:
+
+- 前者解决多进程 durable execution plane
+- 后者要解决 truth plane、SQL 方言、search/index、迁移工具链和 cutover 风险
+
+### 在哪些情况会存在问题
+
+以下场景会把这个缺口放大:
+
+1. 试图把 authority truth 表直接迁到 PostgreSQL，但上层业务代码仍然要求同步 `Database`
+2. 只改驱动、不改 SQL 方言，结果马上撞上 `BEGIN IMMEDIATE`、`INSERT OR REPLACE`、`lastInsertRowid`、`PRAGMA`
+3. 想保留当前 search / FTS 设计原样迁移，却发现 FTS5 virtual table / `rowid` sidecar 没有一比一落点
+4. 先迁 settlement ledger、后迁 truth plane，导致 ledger 与 truth 分裂到两个数据库而缺少补偿协议
+5. runtime 看似能起，但脚本、doctor/verify、测试基座仍全部绑定 SQLite，导致迁移后无法稳定验证与维护
+6. 没有 cutover / rollback contract，就无法证明新库与旧库在权威数据面上的一致性，也不敢在生产切换
+
+### 需要解决的需求是什么
+
+这里真正需要解决的不是“把 SQLite SQL 文本改成 PostgreSQL SQL”这么简单，而是至少六个工作包:
+
+1. **async-friendly storage boundary**
+   - 让业务代码逐步摆脱对同步 `Database` / `Db.raw` 的直接依赖
+   - 把事务、查询、写入、批处理边界提升为后端可替换的 contract
+2. **backend-aware SQL / migration layer**
+   - 清理 `BEGIN IMMEDIATE`、`INSERT OR IGNORE`、`INSERT OR REPLACE`、`lastInsertRowid`、`PRAGMA` 等 SQLite 专有契约
+   - 把 schema migration 从单一 SQLite 文件演化为后端感知或后端拆分的 migration layer
+3. **truth + settlement ledger 同批迁移设计**
+   - `settlement_processing_ledger` 与 authority truth 共同定义迁移批次、事务边界、replay / conflict 口径
+   - 避免进入长时间的 ledger/truth 跨库悬空过渡期
+4. **search / index / vector 替代方案**
+   - 明确 PostgreSQL 上 `search_docs_*`、全文检索、向量/embedding 检索的落点
+   - 保留 repair / verify / rebuild contract，而不是只完成“能查”
+5. **全量数据迁移与切换协议**
+   - export / import
+   - backfill
+   - parity verify
+   - 可选 dual-write / shadow-read
+   - cutover / rollback drill
+6. **脚本与测试基座迁移**
+   - replay / verify / maintenance / rebuild 脚本必须跟着后端边界重构
+   - 测试不能长期只覆盖 SQLite `:memory:` happy path
+
+最小正确路线不应是一口气“全库直切 PostgreSQL”，而应至少分成:
+
+1. PG generic durable jobs phase
+2. async storage boundary + SQLite 方言清理
+3. authority truth + settlement ledger 联动迁移
+4. search / index / vector 与脚本/测试体系迁移
+5. 数据校验、切换与回滚
+
+### 当前的项目现状是什么
+
+- `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md` 已把 PostgreSQL 第一阶段职责边界收口为 generic durable jobs plane
+- `docs/DATABASE_REFACTOR_SCHEMA_DRAFT_2026-03-28.zh-CN.md` 已把该平面的 current/history schema、lease/fencing、payload contract 写成草案
+- 但当前实际代码库仍然以 SQLite 为中心:
+  - runtime 默认打开本地 SQLite
+  - authority truth 写路径、settlement ledger、search rebuild、verify/maintenance scripts 都默认吃 SQLite
+  - 测试基座也以 SQLite `:memory:` 为主
+- 因此，全面数据库迁移目前还没有进入“实现后半程”，而仍处于**post-phase-1 的独立主线**阶段
+
+### 当前判断
+
+- 这不是当前产品功能的 blocker
+- 这也不是 PostgreSQL 第一阶段 generic jobs plane 的 blocker
+- 但如果长期目标是让 PostgreSQL 承担完整主库职责，并支撑多进程/多实例直接写入 authority truth，那么它是一个**必须单独立项、单独验收**的平台级 blocker
+- 后续不应再把“generic jobs 已进 PostgreSQL”表述成“数据库迁移已完成”
+
+---
+
 ## 6. 这些问题之间的依赖关系
 
 这些剩余问题不是彼此独立的，它们有明显依赖结构。但这个结构不是严格线性链，而是部分并行拓扑。
@@ -1026,6 +1134,10 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
   - 共享 `memory_relations` 表和 `MEMORY_RELATION_CONTRACTS`
   - 但 node ref 解析有两套独立实现（graph-node-ref.ts vs relation-builder.ts 自有 regex）
   - 需要前置"契约对齐"任务，然后各自推进
+- **全面数据库迁移（5.11）不能等同于 generic jobs PostgreSQL 化**
+  - `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md` 已确认 PostgreSQL 第一阶段只承载 generic durable jobs
+  - authority truth 与 `settlement_processing_ledger` 未来必须按同一迁移批次推进
+  - 因此 5.11 是一条横切主线，而不是“Wave 1 做完就自然完成”的副产物
 
 ### 依赖拓扑
 
@@ -1059,6 +1171,14 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
 
 6. **Wave 5: 运维**（支撑后续更激进的底层收敛）
    - 运维级完备性（5.7）
+
+补充:
+
+- **全面数据库迁移（5.11）是一条横切 Wave 1-5 的独立主线**
+  - 以 Wave 1 已冻结的 generic jobs contract 为前置
+  - 以 async storage boundary / SQLite 方言清理为进入点
+  - 以 authority truth + settlement ledger 联动迁移为核心风险点
+  - 以 search/index/vector、脚本与测试基座迁移、cutover/rollback 为后续闭环
 
 ---
 
@@ -1104,6 +1224,14 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
 3. 完整 FK / 约束计划
 4. 命名残留最终清扫
 
+### 横切主线（P1）：全面数据库迁移（5.11）
+
+1. 明确 PostgreSQL 第一阶段 generic jobs plane 不等于“全库迁移完成”
+2. 抽象 async-friendly storage / transaction boundary，逐步移除对 `bun:sqlite` `Database` 的直依赖
+3. 清理 `BEGIN IMMEDIATE`、`INSERT OR IGNORE`、`INSERT OR REPLACE`、`lastInsertRowid`、`PRAGMA`、FTS5、`rowid` 等 SQLite 专有契约
+4. 设计 authority truth + `settlement_processing_ledger` 同批迁移与 search/index/vector 替代方案
+5. 补 export/import、parity verify、可选 dual-write / shadow-read、cutover / rollback drill，再进入最终切换
+
 ---
 
 ## 8. 最终判断
@@ -1118,7 +1246,7 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
 - 主链稳定
 - 基础加固完成
 - 架构边界清楚
-- 10 个平台级缺口已被识别
+- 11 个平台级缺口已被识别
 - 每个缺口都有明确的代码依据和实施路径
 - 派生面可版本化重建的基础已经存在，但尚未接入
 - 但“可重建、可修复、可时间追溯、可长期演进”的能力仍未完全做完
@@ -1155,4 +1283,6 @@ cutover 已经把最关键的一处 runtime semantic drift 修掉了:
 - `docs/MEMORY_ARCHITECTURE_2026.md`
 - `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
 - `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md`（§18.13, §18.15, §18.20, §18.21）
+- `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md`
+- `docs/DATABASE_REFACTOR_SCHEMA_DRAFT_2026-03-28.zh-CN.md`
 - `.sisyphus/plans/memory-v3-hardening-cutover.md`

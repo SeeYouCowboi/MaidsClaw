@@ -202,7 +202,7 @@ describe("PgJobRunner", () => {
 		expect(attempts[0].error_message).toContain("No worker registered");
 
 		// memory.organize has max_attempts=4, so first fail is retryable
-		expect(attempts[0].outcome).toBe("failed_retryable");
+		expect(attempts[0].outcome).toBe("failed_retry_scheduled");
 		expect(row.status).toBe("pending");
 	});
 });

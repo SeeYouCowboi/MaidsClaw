@@ -793,7 +793,7 @@ export class PgJobStore implements DurableJobStore {
 
         await sqltx`
           UPDATE job_attempts
-          SET outcome = 'failed_retryable',
+          SET outcome = 'failed_retry_scheduled',
               finished_at = ${error.now_ms},
               error_code = ${error.error_code ?? null},
               error_message = ${error.error_message},

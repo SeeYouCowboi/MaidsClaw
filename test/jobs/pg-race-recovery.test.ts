@@ -228,7 +228,7 @@ describe("pg race recovery semantics", () => {
     `;
     expect(attempts.length).toBe(2);
     expect(Number(attempts[0].claim_version)).toBe(1);
-    expect(attempts[0].outcome).toBe("failed_retryable");
+    expect(attempts[0].outcome).toBe("failed_retry_scheduled");
     expect(Number(attempts[0].backoff_until)).toBe(failNow + 5_000);
     expect(Number(attempts[1].claim_version)).toBe(2);
     expect(attempts[1].outcome).toBe("running");

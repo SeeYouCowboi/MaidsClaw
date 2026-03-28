@@ -1228,7 +1228,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w3-t16 area/world time-slice read API`
 
-- [ ] 17. Extended Verify Coverage
+- [x] 17. Extended Verify Coverage
 
   **What to do**:
   - 扩展 `scripts/memory-verify.ts` 覆盖 search surface：验证每张 `search_docs_*` 与 canonical source 一致
@@ -1265,7 +1265,7 @@ Max Concurrent: 6 (Wave 1)
 
   **Commit**: YES — `feat(memory): w4-t17 extended verification coverage`
 
-- [ ] 18. Retention Safety + Ops Tooling
+- [x] 18. Retention Safety + Ops Tooling
 
   **What to do**:
   - 在 `scripts/memory-maintenance.ts` 中添加 `--report` 模式：输出所有表的行数、大小、最旧记录
@@ -1307,19 +1307,19 @@ Max Concurrent: 6 (Wave 1)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist in `.sisyphus/evidence/`. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code. Check AI slop: excessive comments, over-abstraction, generic names.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real QA** — `unspecified-high`
+- [x] F3. **Real QA** — `unspecified-high`
   Execute EVERY QA scenario from EVERY task. Test cross-task integration. Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 compliance. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Unaccounted [CLEAN/N files] | VERDICT`
 

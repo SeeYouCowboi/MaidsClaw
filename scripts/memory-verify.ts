@@ -1,5 +1,13 @@
 #!/usr/bin/env bun
 import { openDatabase, type Db } from "../src/storage/database.js";
+import {
+  buildAreaSearchAuthorityRows,
+  buildCognitionSearchAuthorityRows,
+  buildPrivateSearchAuthorityRows,
+  buildWorldSearchAuthorityRows,
+  listCognitionSearchAuthorityAgentIds,
+  listPrivateSearchAuthorityAgentIds,
+} from "../src/memory/search-authority.js";
 import { runMemoryMigrations } from "../src/memory/schema.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -299,122 +307,209 @@ export function verifyWorldSurface(db: Db): SurfaceVerifyResult {
 
 // ── Search surface ───────────────────────────────────────────────────
 
-/**
- * Authority matrix (from search-rebuild-job.ts):
- *   search_docs_cognition: private_cognition_current
- *   search_docs_private:   entity_nodes (private_overlay) + private_cognition_current (active, non-rejected/abandoned)
- *   search_docs_area:      event_nodes (area_visible, summary IS NOT NULL)
- *   search_docs_world:     event_nodes (world_public, summary IS NOT NULL) + entity_nodes (shared_public) + fact_edges
- */
+type SearchComparablePrimitive = string | number | null;
 
-type SearchTableCheck = {
+type SearchComparableRow = Record<string, SearchComparablePrimitive>;
+
+type SearchExpectedRow = {
+  key: string;
+  comparable: SearchComparableRow;
+};
+
+type SearchActualRow = SearchExpectedRow & {
+  id: number;
+};
+
+type SearchTableDiff = {
   table: string;
-  expectedCount: number;
-  actualCount: number;
+  checkedRows: number;
+  missing: number;
+  extra: number;
+  drift: number;
+  ftsGaps: number;
+  mismatches: KeyMismatch[];
   pass: boolean;
 };
 
 export function verifySearchSurface(db: Db): SurfaceVerifyResult {
-  const mismatches: KeyMismatch[] = [];
-  const checks: SearchTableCheck[] = [];
+  const cognitionExpected = listCognitionSearchAuthorityAgentIds(db).flatMap(
+    (agentId) =>
+      buildCognitionSearchAuthorityRows(db, agentId).map<SearchExpectedRow>(
+        (row) => ({
+          key: `${row.agentId}|${row.sourceRef}`,
+          comparable: {
+            agent_id: row.agentId,
+            source_ref: row.sourceRef,
+            doc_type: row.docType,
+            kind: row.kind,
+            basis: row.basis,
+            stance: row.stance,
+            content: row.content,
+            updated_at: row.updatedAt,
+          },
+        }),
+      ),
+  );
+  const cognitionActual = db.query<{
+    id: number;
+    agent_id: string;
+    source_ref: string;
+    doc_type: string;
+    kind: string;
+    basis: string | null;
+    stance: string | null;
+    content: string;
+    updated_at: number;
+  }>(
+    `SELECT id, agent_id, source_ref, doc_type, kind, basis, stance, content, updated_at
+     FROM search_docs_cognition
+     ORDER BY agent_id ASC, source_ref ASC, id ASC`,
+  ).map<SearchActualRow>((row) => ({
+    id: row.id,
+    key: `${row.agent_id}|${row.source_ref}`,
+    comparable: {
+      agent_id: row.agent_id,
+      source_ref: row.source_ref,
+      doc_type: row.doc_type,
+      kind: row.kind,
+      basis: row.basis,
+      stance: row.stance,
+      content: row.content,
+      updated_at: row.updated_at,
+    },
+  }));
 
-  // ── search_docs_cognition vs private_cognition_current ──
-  const cognitionExpected =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM private_cognition_current",
-    )?.count ?? 0;
-  const cognitionActual =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM search_docs_cognition",
-    )?.count ?? 0;
-  checks.push({
-    table: "search_docs_cognition",
-    expectedCount: cognitionExpected,
-    actualCount: cognitionActual,
-    pass: cognitionActual === cognitionExpected,
-  });
+  const areaExpected = buildAreaSearchAuthorityRows(db).map<SearchExpectedRow>(
+    (row) => ({
+      key: row.sourceRef,
+      comparable: {
+        source_ref: row.sourceRef,
+        doc_type: row.docType,
+        location_entity_id: row.locationEntityId,
+        content: row.content,
+      },
+    }),
+  );
+  const areaActual = db.query<{
+    id: number;
+    source_ref: string;
+    doc_type: string;
+    location_entity_id: number;
+    content: string;
+  }>(
+    `SELECT id, source_ref, doc_type, location_entity_id, content
+     FROM search_docs_area
+     ORDER BY source_ref ASC, id ASC`,
+  ).map<SearchActualRow>((row) => ({
+    id: row.id,
+    key: row.source_ref,
+    comparable: {
+      source_ref: row.source_ref,
+      doc_type: row.doc_type,
+      location_entity_id: row.location_entity_id,
+      content: row.content,
+    },
+  }));
 
-  // ── search_docs_area vs event_nodes (area_visible) ──
-  const areaExpected =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM event_nodes WHERE visibility_scope = 'area_visible' AND summary IS NOT NULL",
-    )?.count ?? 0;
-  const areaActual =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM search_docs_area",
-    )?.count ?? 0;
-  checks.push({
-    table: "search_docs_area",
-    expectedCount: areaExpected,
-    actualCount: areaActual,
-    pass: areaActual === areaExpected,
-  });
+  const worldExpected = buildWorldSearchAuthorityRows(db).map<SearchExpectedRow>(
+    (row) => ({
+      key: row.sourceRef,
+      comparable: {
+        source_ref: row.sourceRef,
+        doc_type: row.docType,
+        content: row.content,
+      },
+    }),
+  );
+  const worldActual = db.query<{
+    id: number;
+    source_ref: string;
+    doc_type: string;
+    content: string;
+  }>(
+    `SELECT id, source_ref, doc_type, content
+     FROM search_docs_world
+     ORDER BY source_ref ASC, id ASC`,
+  ).map<SearchActualRow>((row) => ({
+    id: row.id,
+    key: row.source_ref,
+    comparable: {
+      source_ref: row.source_ref,
+      doc_type: row.doc_type,
+      content: row.content,
+    },
+  }));
 
-  // ── search_docs_world vs event_nodes (world_public) + entity_nodes (shared_public) + fact_edges ──
-  const worldEventCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM event_nodes WHERE visibility_scope = 'world_public' AND summary IS NOT NULL",
-    )?.count ?? 0;
-  const worldEntityCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM entity_nodes WHERE memory_scope = 'shared_public'",
-    )?.count ?? 0;
-  const worldFactCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM fact_edges",
-    )?.count ?? 0;
-  const worldExpected = worldEventCount + worldEntityCount + worldFactCount;
-  const worldActual =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM search_docs_world",
-    )?.count ?? 0;
-  checks.push({
-    table: "search_docs_world",
-    expectedCount: worldExpected,
-    actualCount: worldActual,
-    pass: worldActual === worldExpected,
-  });
+  const privateExpected = listPrivateSearchAuthorityAgentIds(db).flatMap(
+    (agentId) =>
+      buildPrivateSearchAuthorityRows(db, agentId).map<SearchExpectedRow>(
+        (row) => ({
+          key: `${row.agentId}|${row.sourceRef}`,
+          comparable: {
+            agent_id: row.agentId,
+            source_ref: row.sourceRef,
+            doc_type: row.docType,
+            content: row.content,
+          },
+        }),
+      ),
+  );
+  const privateActual = db.query<{
+    id: number;
+    agent_id: string;
+    source_ref: string;
+    doc_type: string;
+    content: string;
+  }>(
+    `SELECT id, agent_id, source_ref, doc_type, content
+     FROM search_docs_private
+     ORDER BY agent_id ASC, source_ref ASC, id ASC`,
+  ).map<SearchActualRow>((row) => ({
+    id: row.id,
+    key: `${row.agent_id}|${row.source_ref}`,
+    comparable: {
+      agent_id: row.agent_id,
+      source_ref: row.source_ref,
+      doc_type: row.doc_type,
+      content: row.content,
+    },
+  }));
 
-  // ── search_docs_private vs entity_nodes (private_overlay) + private_cognition_current (active, filtered) ──
-  const privateEntityCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM entity_nodes WHERE memory_scope = 'private_overlay'",
-    )?.count ?? 0;
-  const privateEvalCommitCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM private_cognition_current WHERE kind IN ('evaluation', 'commitment') AND status != 'retracted'",
-    )?.count ?? 0;
-  const privateAssertionCount =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM private_cognition_current WHERE kind = 'assertion' AND (stance IS NULL OR stance NOT IN ('rejected', 'abandoned'))",
-    )?.count ?? 0;
-  const privateExpected = privateEntityCount + privateEvalCommitCount + privateAssertionCount;
-  const privateActual =
-    db.get<{ count: number }>(
-      "SELECT count(*) AS count FROM search_docs_private",
-    )?.count ?? 0;
-  checks.push({
-    table: "search_docs_private",
-    expectedCount: privateExpected,
-    actualCount: privateActual,
-    pass: privateActual === privateExpected,
-  });
+  const diffs: SearchTableDiff[] = [
+    compareSearchTable(
+      db,
+      "search_docs_cognition",
+      "search_docs_cognition_fts",
+      cognitionExpected,
+      cognitionActual,
+    ),
+    compareSearchTable(
+      db,
+      "search_docs_area",
+      "search_docs_area_fts",
+      areaExpected,
+      areaActual,
+    ),
+    compareSearchTable(
+      db,
+      "search_docs_world",
+      "search_docs_world_fts",
+      worldExpected,
+      worldActual,
+    ),
+    compareSearchTable(
+      db,
+      "search_docs_private",
+      "search_docs_private_fts",
+      privateExpected,
+      privateActual,
+    ),
+  ];
 
-  for (const check of checks) {
-    if (!check.pass) {
-      const delta = check.actualCount - check.expectedCount;
-      mismatches.push({
-        key: check.table,
-        expectedValue: String(check.expectedCount),
-        actualValue: String(check.actualCount),
-        kind: delta < 0 ? "missing_from_current" : "extra_in_current",
-      });
-    }
-  }
-
+  const mismatches = diffs.flatMap((diff) => diff.mismatches);
   const pass = mismatches.length === 0;
-  const totalChecked = checks.reduce((sum, c) => sum + c.expectedCount, 0);
-  const failedTables = checks.filter((c) => !c.pass);
+  const totalChecked = diffs.reduce((sum, diff) => sum + diff.checkedRows, 0);
+  const failedTables = diffs.filter((diff) => !diff.pass);
 
   return {
     surface: "search",
@@ -422,11 +517,152 @@ export function verifySearchSurface(db: Db): SurfaceVerifyResult {
     checkedKeys: totalChecked,
     mismatches,
     summary: pass
-      ? `All 4 search tables match canonical sources (${totalChecked} total rows).`
+      ? `All 4 search tables and FTS sidecars match canonical sources (${totalChecked} canonical rows).`
       : failedTables
-          .map((c) => `${c.table} missing ${c.expectedCount - c.actualCount} rows`)
+          .map(
+            (diff) =>
+              `${diff.table} drift=${diff.drift} missing=${diff.missing} extra=${diff.extra} fts=${diff.ftsGaps}`,
+          )
           .join("; "),
   };
+}
+
+function compareSearchTable(
+  db: Db,
+  table: string,
+  ftsTable: string,
+  expectedRows: SearchExpectedRow[],
+  actualRows: SearchActualRow[],
+): SearchTableDiff {
+  const mismatches: KeyMismatch[] = [];
+  const expectedIndex = indexSearchRows(expectedRows, table, "expected");
+  const actualIndex = indexSearchRows(actualRows, table, "actual");
+  mismatches.push(...expectedIndex.duplicates, ...actualIndex.duplicates);
+
+  let missing = 0;
+  let extra = 0;
+  let drift = 0;
+  let ftsGaps = 0;
+
+  for (const [key, expected] of expectedIndex.map.entries()) {
+    const actual = actualIndex.map.get(key);
+    if (!actual) {
+      missing += 1;
+      mismatches.push({
+        key: `${table}:${key}`,
+        expectedValue: serializeComparable(expected.comparable),
+        actualValue: null,
+        kind: "missing_from_current",
+      });
+      continue;
+    }
+
+    const expectedSerialized = serializeComparable(expected.comparable);
+    const actualSerialized = serializeComparable(actual.comparable);
+    if (expectedSerialized !== actualSerialized) {
+      drift += 1;
+      mismatches.push({
+        key: `${table}:${key}`,
+        expectedValue: expectedSerialized,
+        actualValue: actualSerialized,
+        kind: "value_mismatch",
+      });
+    }
+  }
+
+  for (const [key, actual] of actualIndex.map.entries()) {
+    if (expectedIndex.map.has(key)) {
+      continue;
+    }
+
+    extra += 1;
+    mismatches.push({
+      key: `${table}:${key}`,
+      expectedValue: "(no canonical row exists)",
+      actualValue: serializeComparable(actual.comparable),
+      kind: "extra_in_current",
+    });
+  }
+
+  const mainRowIds = new Set(actualRows.map((row) => row.id));
+  const ftsRowIds = new Set(
+    db
+      .query<{ rowid: number }>(
+        `SELECT rowid FROM ${ftsTable} ORDER BY rowid ASC`,
+      )
+      .map((row) => row.rowid),
+  );
+
+  for (const rowId of mainRowIds) {
+    if (ftsRowIds.has(rowId)) {
+      continue;
+    }
+
+    ftsGaps += 1;
+    mismatches.push({
+      key: `${ftsTable}:rowid:${rowId}`,
+      expectedValue: "present in FTS sidecar",
+      actualValue: null,
+      kind: "missing_from_current",
+    });
+  }
+
+  for (const rowId of ftsRowIds) {
+    if (mainRowIds.has(rowId)) {
+      continue;
+    }
+
+    ftsGaps += 1;
+    mismatches.push({
+      key: `${ftsTable}:rowid:${rowId}`,
+      expectedValue: "(no main table row exists)",
+      actualValue: String(rowId),
+      kind: "extra_in_current",
+    });
+  }
+
+  return {
+    table,
+    checkedRows: expectedRows.length,
+    missing,
+    extra,
+    drift,
+    ftsGaps,
+    mismatches,
+    pass: mismatches.length === 0,
+  };
+}
+
+function indexSearchRows<T extends SearchExpectedRow>(
+  rows: T[],
+  table: string,
+  source: "expected" | "actual",
+): { map: Map<string, T>; duplicates: KeyMismatch[] } {
+  const map = new Map<string, T>();
+  const duplicates: KeyMismatch[] = [];
+
+  for (const row of rows) {
+    const existing = map.get(row.key);
+    if (!existing) {
+      map.set(row.key, row);
+      continue;
+    }
+
+    duplicates.push({
+      key: `${table}:${row.key}`,
+      expectedValue: source === "expected"
+        ? serializeComparable(existing.comparable)
+        : "unique key",
+      actualValue: serializeComparable(row.comparable),
+      kind: "value_mismatch",
+    });
+  }
+
+  return { map, duplicates };
+}
+
+function serializeComparable(row: SearchComparableRow): string {
+  return JSON.stringify(row);
 }
 
 // ── Graph registry surface ───────────────────────────────────────────

@@ -82,7 +82,7 @@ export type PgJobCurrentRow<K extends JobKind = JobKind> = {
 export type PgJobAttemptOutcome =
   | "running"
   | "succeeded"
-  | "failed_retryable"
+  | "failed_retry_scheduled"
   | "failed_terminal"
   | "cancelled"
   | "lease_lost";

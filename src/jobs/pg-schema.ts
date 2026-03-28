@@ -73,7 +73,7 @@ export async function bootstrapPgJobsSchema(sql: postgres.Sql): Promise<void> {
                                   CHECK (outcome IN (
                                     'running',
                                     'succeeded',
-                                    'failed_retryable',
+                                    'failed_retry_scheduled',
                                     'failed_terminal',
                                     'cancelled',
                                     'lease_lost'
