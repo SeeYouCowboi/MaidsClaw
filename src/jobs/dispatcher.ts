@@ -375,7 +375,7 @@ export class JobDispatcher {
 }
 
 function isJobKind(value: string | undefined): value is JobKind {
-  return value === "memory.migrate" || value === "memory.organize" || value === "task.run";
+  return value === "memory.migrate" || value === "memory.organize" || value === "task.run" || value === "search.rebuild";
 }
 
 function isExecutionClass(value: string | undefined): value is Job["executionClass"] {
@@ -384,6 +384,7 @@ function isExecutionClass(value: string | undefined): value is Job["executionCla
     || value === "interactive.delegated_task"
     || value === "background.memory_migrate"
     || value === "background.memory_organize"
+    || value === "background.search_rebuild"
     || value === "background.autonomy"
   );
 }
@@ -394,6 +395,9 @@ function defaultExecutionClass(kind: JobKind): Job["executionClass"] {
   }
   if (kind === "memory.organize") {
     return "background.memory_organize";
+  }
+  if (kind === "search.rebuild") {
+    return "background.search_rebuild";
   }
   return "background.autonomy";
 }
