@@ -903,23 +903,111 @@ export class PgJobStore implements DurableJobStore {
     });
   }
 
-  async inspect(_job_key: string): Promise<PgJobCurrentRow | undefined> {
-    throw new Error("not yet implemented");
+  async inspect(job_key: string): Promise<PgJobCurrentRow | undefined> {
+    const rows = (await this.sql`
+      SELECT * FROM jobs_current WHERE job_key = ${job_key} LIMIT 1
+    `) as PgJobCurrentRow[];
+
+    const row = rows[0];
+    if (!row) return undefined;
+
+    return normalizePgJobCurrentRow(row);
   }
 
   async listActive(): Promise<PgJobCurrentRow[]> {
-    throw new Error("not yet implemented");
+    const rows = (await this.sql`
+      SELECT * FROM jobs_current
+      WHERE status IN ('pending', 'running')
+      ORDER BY next_attempt_at ASC
+    `) as PgJobCurrentRow[];
+
+    return rows.map(normalizePgJobCurrentRow);
   }
 
-  async listExpiredLeases(_nowMs: number): Promise<PgJobCurrentRow[]> {
-    throw new Error("not yet implemented");
+  async listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]> {
+    const rows = (await this.sql`
+      SELECT * FROM jobs_current
+      WHERE status = 'running'
+        AND lease_expires_at < ${nowMs}
+    `) as PgJobCurrentRow[];
+
+    return rows.map(normalizePgJobCurrentRow);
   }
 
   async countByStatus(): Promise<PgStatusCount> {
-    throw new Error("not yet implemented");
+    type CountRow = { status: string; cnt: number };
+    const rows = (await this.sql`
+      SELECT status, COUNT(*)::int AS cnt FROM jobs_current GROUP BY status
+    `) as CountRow[];
+
+    const result: PgStatusCount = {
+      pending: 0,
+      running: 0,
+      succeeded: 0,
+      failed_terminal: 0,
+      cancelled: 0,
+    };
+
+    for (const row of rows) {
+      if (row.status in result) {
+        result[row.status as keyof PgStatusCount] = Number(row.cnt);
+      }
+    }
+
+    return result;
   }
 
-  async getHistory(_job_key: string): Promise<PgJobAttemptHistoryRow[]> {
-    throw new Error("not yet implemented");
+  async getHistory(job_key: string): Promise<PgJobAttemptHistoryRow[]> {
+    const rows = (await this.sql`
+      SELECT * FROM job_attempts
+      WHERE job_key = ${job_key}
+      ORDER BY started_at DESC
+    `) as PgJobAttemptHistoryRow[];
+
+    return rows;
+  }
+
+  async cleanupTerminal(
+    defaultWindowMs: number,
+    familyOverrides?: Record<string, number>,
+  ): Promise<number> {
+    const nowMs = Date.now();
+    const defaultCutoff = nowMs - defaultWindowMs;
+    let totalDeleted = 0;
+
+    const overrideKeys = familyOverrides ? Object.keys(familyOverrides) : [];
+
+    if (overrideKeys.length > 0) {
+      const deleted = await this.sql`
+        DELETE FROM jobs_current
+        WHERE status IN ('succeeded', 'failed_terminal', 'cancelled')
+          AND terminal_at < ${defaultCutoff}
+          AND (
+            job_family_key IS NULL
+            OR job_family_key NOT IN ${this.sql(overrideKeys)}
+          )
+      `;
+      totalDeleted += deleted.count;
+
+      for (const [familyKey, windowMs] of Object.entries(familyOverrides!)) {
+        const familyCutoff = nowMs - windowMs;
+        const familyDeleted = await this.sql`
+          DELETE FROM jobs_current
+          WHERE status IN ('succeeded', 'failed_terminal', 'cancelled')
+            AND terminal_at < ${familyCutoff}
+            AND job_family_key = ${familyKey}
+        `;
+        totalDeleted += familyDeleted.count;
+      }
+    } else {
+      const deleted = await this.sql`
+        DELETE FROM jobs_current
+        WHERE status IN ('succeeded', 'failed_terminal', 'cancelled')
+          AND terminal_at < ${defaultCutoff}
+      `;
+      totalDeleted += deleted.count;
+    }
+
+    return totalDeleted;
   }
 }
