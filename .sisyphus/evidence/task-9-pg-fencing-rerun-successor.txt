@@ -1,0 +1,9 @@
+Scenario: Successful search.rebuild completion with rerunRequested spawns next generation
+Command: bun test test/jobs/pg-fencing.test.ts
+Observed: test suite passed (3 pass, 0 fail); includes case "rerun requested successor: successful search.rebuild with rerunRequested spawns next generation".
+Assertions covered by the scenario test:
+- original row transitions to status "succeeded" with terminal_at set
+- exactly one successor row is inserted with status "pending"
+- successor has a new job_key and same job_family_key
+- successor family_state_json resets rerunRequested=false and coalescedRequestCount=0
+- trigger counters are carried forward onto successor family_state_json

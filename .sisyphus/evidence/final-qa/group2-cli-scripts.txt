@@ -1,0 +1,21 @@
+== Group 2: CLI Script Verification ==
+Date: 2026-03-27
+
+--- memory-maintenance.ts --report ---
+Database: D:\ACodingWorkSpace\MaidsClaw\data\maidsclaw.db
+Table Report: 28 tables listed
+All tables present with correct status flags (PROTECTED on settlement_processing_ledger, private_cognition_events, private_episode_events, area_state_events, world_state_events)
+Database: page_size=4096, page_count=190, total=760.0 KB
+EXIT: SUCCESS (no errors)
+
+--- memory-verify.ts --all ---
+[PASS] cognition: No agents in private_cognition_current — nothing to verify.
+[PASS] area: No area state data — nothing to verify.
+[PASS] world: No world state data — nothing to verify.
+[PASS] search: All 4 search tables match canonical sources (0 total rows).
+[PASS] graph-registry: No recent node_embeddings (last 7 days) — nothing to verify.
+[PASS] contested: No conflicts_with relations — nothing to verify.
+Summary: 6 PASS / 0 FAIL
+EXIT: SUCCESS (no errors)
+
+VERDICT: PASS

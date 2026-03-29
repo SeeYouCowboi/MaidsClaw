@@ -1,0 +1,7 @@
+Scenario: Stale worker complete is fenced off after newer claim
+Command: bun test test/jobs/pg-fencing.test.ts
+Observed: test suite passed (3 pass, 0 fail); includes case "stale worker: stale worker complete is fenced after newer claim".
+Assertions covered by the scenario test:
+- stale complete() returns outcome "stale_claim"
+- jobs_current row remains under newer claim_version and running state
+- job_attempts row for stale claim_version is marked outcome "lease_lost"

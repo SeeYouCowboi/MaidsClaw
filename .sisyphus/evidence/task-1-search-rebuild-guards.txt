@@ -1,0 +1,27 @@
+Task: Fix search.rebuild runtime guard helpers
+Date: Sun Mar 29 2026
+
+Changes Made:
+1. Updated src/jobs/dispatcher.ts isJobKind() to include "search.rebuild"
+2. Updated src/jobs/dispatcher.ts isExecutionClass() to include "background.search_rebuild"
+3. Updated src/jobs/dispatcher.ts defaultExecutionClass() to return "background.search_rebuild" for "search.rebuild"
+4. Added test coverage in test/jobs/job-runtime.test.ts for search.rebuild recovery
+
+Test Results:
+bun test test/jobs/job-runtime.test.ts
+bun test v1.3.10 (30e609e0)
+ 8 pass
+ 0 fail
+ 33 expect() calls
+Ran 8 tests across 1 file. [72.00ms]
+
+Build Results:
+bun run build
+$ tsc -p tsconfig.build.json --noEmit
+(no errors)
+
+Verification:
+- All 3 guard functions now recognize search.rebuild / background.search_rebuild
+- 3 new test cases verify recovered job handling for search.rebuild
+- Tests verify correct execution class mapping
+- Tests verify job is not silently dropped on recovery
