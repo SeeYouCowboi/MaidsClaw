@@ -460,30 +460,32 @@ export class TurnService {
 				committedAt,
 			);
 
-			if (this.settlementUnitOfWork) {
-				await this.settlementUnitOfWork.run(async (repos) => {
-					await this.commitSettlementRecordsWithRepos({
-						repos,
-						sessionId: effectiveRequest.sessionId,
-						requestId,
-						settlementId,
-						settlementPayload,
-						hasPublicReply,
-						publicReply: canonicalOutcome.publicReply,
-					});
-					await this.commitSettlementProjectionWithRepos({
-						repos,
-						effectiveRequest,
-						settlementId,
-						settlementPayload,
-						resolvedViewerSnapshot,
-						ownerAgentId,
-						publications,
-						slotEntries,
-						committedAt,
-						canonicalOutcome,
-					});
+		if (this.settlementUnitOfWork) {
+			await this.settlementUnitOfWork.run(async (repos) => {
+				await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
+				await this.commitSettlementRecordsWithRepos({
+					repos,
+					sessionId: effectiveRequest.sessionId,
+					requestId,
+					settlementId,
+					settlementPayload,
+					hasPublicReply,
+					publicReply: canonicalOutcome.publicReply,
 				});
+				await this.commitSettlementProjectionWithRepos({
+					repos,
+					effectiveRequest,
+					settlementId,
+					settlementPayload,
+					resolvedViewerSnapshot,
+					ownerAgentId,
+					publications,
+					slotEntries,
+					committedAt,
+					canonicalOutcome,
+				});
+				await repos.settlementLedger.markApplied(settlementId);
+			});
 			} else {
 				await this.interactionStore.runInTransactionAsync(async () => {
 					this.commitService.commitWithId({
