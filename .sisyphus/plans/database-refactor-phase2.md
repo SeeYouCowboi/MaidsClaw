@@ -291,7 +291,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ### ═══ Phase 2A: Storage Contract & PG Schema Foundation ═══
 
-- [ ] 1. PG connection pool factory + docker-compose pgvector extension
+- [x] 1. PG connection pool factory + docker-compose pgvector extension
 
   **What to do**:
   - Create `src/storage/pg-pool.ts`: centralized PG connection pool factory with explicit `max`, `connect_timeout`, `idle_timeout`, `max_lifetime` config (§3.74)
@@ -334,7 +334,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(storage): add centralized pg connection pool factory`
 
-- [ ] 2. Domain repository interfaces — Settlement UoW + all async repos
+- [x] 2. Domain repository interfaces — Settlement UoW + all async repos
 
   **What to do**:
   - Define `SettlementUnitOfWork` interface: accepts PG transaction handle, provides transaction-scoped repo accessors for all repos involved in settlement apply (§3.32, §3.78)
@@ -397,7 +397,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(storage): define async domain repo interfaces and settlement UoW`
 
-- [ ] 3. Backend type definitions + backend selection contract
+- [x] 3. Backend type definitions + backend selection contract
 
   **What to do**:
   - Define `BackendType = 'sqlite' | 'pg'` and `BackendConfig` types in `src/storage/backend-types.ts`
@@ -430,7 +430,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(storage): add backend type definitions and selection contract`
 
-- [ ] 4. PG app schema DDL — truth plane tables
+- [x] 4. PG app schema DDL — truth plane tables
 
   **What to do**:
   - Create `src/storage/pg-app-schema-truth.ts` with idempotent DDL for:
@@ -481,7 +481,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): add truth plane application schema`
 
-- [ ] 5. PG app schema DDL — operational tables
+- [x] 5. PG app schema DDL — operational tables
 
   **What to do**:
   - Create `src/storage/pg-app-schema-ops.ts` with DDL for:
@@ -519,7 +519,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): add operational tables application schema`
 
-- [ ] 6. PG app schema DDL — projection/search/derived tables (pg_trgm + pgvector)
+- [x] 6. PG app schema DDL — projection/search/derived tables (pg_trgm + pgvector)
 
   **What to do**:
   - Create `src/storage/pg-app-schema-derived.ts` with DDL for:
@@ -566,7 +566,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): add projection/search/derived schema with pg_trgm and pgvector`
 
-- [ ] 7. Backend-aware runtime composition skeleton
+- [x] 7. Backend-aware runtime composition skeleton
 
   **What to do**:
   - Modify `src/bootstrap/runtime.ts` to support backend selection via `BackendFactory`
@@ -601,7 +601,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(runtime): add backend-aware composition skeleton`
 
-- [ ] 8. Phase 2A verification gate
+- [x] 8. Phase 2A verification gate
 
   **What to do**:
   - Create `test/pg-app/phase2a-gate.test.ts` that verifies Phase 2A completion:
@@ -634,7 +634,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ### ═══ Phase 2B: Repository Implementation & Migration ═══
 
-- [ ] 9. PG settlement ledger repo
+- [x] 9. PG settlement ledger repo
 
   **What to do**:
   - Implement `PgSettlementLedgerRepo` against `SettlementLedgerRepo` interface
@@ -656,7 +656,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement settlement ledger repository`
 
-- [ ] 10. PG episode + cognition event repo
+- [x] 10. PG episode + cognition event repo
 
   **What to do**:
   - Implement `PgEpisodeRepo` (append to `private_episode_events`) and `PgCognitionEventRepo` (append to `private_cognition_events`)
@@ -677,7 +677,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement episode and cognition event repositories`
 
-- [ ] 11. PG cognition/area/world current projection repo
+- [x] 11. PG cognition/area/world current projection repo
 
   **What to do**:
   - Implement `PgCognitionProjectionRepo`, `PgAreaWorldProjectionRepo`
@@ -700,7 +700,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement current truth projection repositories`
 
-- [ ] 12. PG interaction + session + recent_cognition_slots repo
+- [x] 12. PG interaction + session + recent_cognition_slots repo
 
   **What to do**:
   - Implement `PgInteractionRepo` (including `runInTransaction` method), `PgSessionRepo`, `PgRecentCognitionSlotRepo`
@@ -723,7 +723,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement interaction, session, and cache repositories`
 
-- [ ] 13. PG pending settlement flush recovery repo (§3.80)
+- [x] 13. PG pending settlement flush recovery repo (§3.80)
 
   **What to do**:
   - Implement `PgPendingFlushRecoveryRepo` against new interface
@@ -746,7 +746,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement pending settlement flush recovery repository`
 
-- [ ] 14. PG graph mutable store repos (event_nodes, entity_nodes, fact_edges, memory_relations)
+- [x] 14. PG graph mutable store repos (event_nodes, entity_nodes, fact_edges, memory_relations)
 
   **What to do**:
   - Implement `PgGraphMutableStoreRepo` covering the 4 canonical mutable tables
@@ -772,7 +772,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement graph mutable store repositories`
 
-- [ ] 15. PG core/shared memory blocks repo
+- [x] 15. PG core/shared memory blocks repo
 
   **What to do**:
   - Implement `PgCoreMemoryBlockRepo` and `PgSharedBlockRepo`
@@ -793,7 +793,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement core and shared memory block repositories`
 
-- [ ] 16. PG search projection repo (pg_trgm FTS)
+- [x] 16. PG search projection repo (pg_trgm FTS)
 
   **What to do**:
   - Implement `PgSearchProjectionRepo` for `search_docs_*` tables
@@ -820,7 +820,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement search projection repo with pg_trgm`
 
-- [ ] 17. PG embedding/vector repo (pgvector + model epoch)
+- [x] 17. PG embedding/vector repo (pgvector + model epoch)
 
   **What to do**:
   - Implement `PgEmbeddingRepo` for `node_embeddings` using pgvector
