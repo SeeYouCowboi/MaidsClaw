@@ -847,7 +847,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement embedding repo with pgvector and model epoch`
 
-- [ ] 18. Settlement UoW PG implementation + ProjectionManager integration
+- [x] 18. Settlement UoW PG implementation + ProjectionManager integration
 
   **What to do**:
   - Implement `PgSettlementUnitOfWork` using `sql.begin(async (tx) => {...})`
@@ -889,7 +889,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement settlement UoW with ProjectionManager integration`
 
-- [ ] 19. SQLite export tool (manifest + JSONL per surface)
+- [x] 19. SQLite export tool (manifest + JSONL per surface)
 
   **What to do**:
   - Create `src/migration/sqlite-exporter.ts` and `scripts/sqlite-export.ts`
@@ -915,7 +915,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(migration): implement sqlite export tool`
 
-- [ ] 20. PG import tool (streaming, checkpoint, sequence reset)
+- [x] 20. PG import tool (streaming, checkpoint, sequence reset)
 
   **What to do**:
   - Create `src/migration/pg-importer.ts` and `scripts/pg-import.ts`
@@ -940,7 +940,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(migration): implement pg import tool with streaming and sequence reset`
 
-- [ ] 21. Current truth projection replay/rebuild on PG
+- [x] 21. Current truth projection replay/rebuild on PG
 
   **What to do**:
   - Implement replay logic for PG:
@@ -964,7 +964,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement current truth projection replay/rebuild`
 
-- [ ] 22. Phase 2B verification gate
+- [x] 22. Phase 2B verification gate
 
   **What to do**:
   - Test: all PG repos work, Settlement UoW atomic, export→import pipeline works, replay matches
@@ -982,7 +982,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ### ═══ Phase 2C: Integration, Verification & Cutover Readiness ═══
 
-- [ ] 23. GraphStorageService decomposition + thin adapter bridge
+- [x] 23. GraphStorageService decomposition + thin adapter bridge
 
   **What to do**:
   - Replace internal GraphStorageService method implementations with delegation to domain repos
@@ -1007,7 +1007,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(memory): decompose GraphStorageService into domain repo delegation`
 
-- [ ] 24. TurnService/settlement chain async migration
+- [x] 24. TurnService/settlement chain async migration
 
   **What to do**:
   - Migrate `TurnService.runRpBufferedTurn()` settlement chain from sync to async

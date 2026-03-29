@@ -1,33 +1,34 @@
 import type { Db } from "../../storage/database.js";
 import {
-  getAttachedSharedBlocks,
-  getPinnedBlocks,
-  getRecentCognition,
-  getSharedBlocks,
-  getTypedRetrievalSurface,
+  getAttachedSharedBlocksAsync,
+  getPinnedBlocksAsync,
+  getRecentCognitionAsync,
+  getSharedBlocksAsync,
+  getTypedRetrievalSurfaceAsync,
+  type PromptDataRepos,
 } from "../../memory/prompt-data.js";
 import type { MemoryDataSource, ViewerContext } from "../prompt-data-sources.js";
 
 export class MemoryAdapter implements MemoryDataSource {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: Db, private readonly repos: PromptDataRepos) {}
 
-  getPinnedBlocks(agentId: string): string {
-    return getPinnedBlocks(agentId, this.db);
+  async getPinnedBlocks(agentId: string): Promise<string> {
+    return getPinnedBlocksAsync(agentId, this.repos);
   }
 
-  getSharedBlocks(agentId: string): string {
-    return getSharedBlocks(agentId, this.db);
+  async getSharedBlocks(agentId: string): Promise<string> {
+    return getSharedBlocksAsync(agentId, this.repos);
   }
 
-  getRecentCognition(viewerContext: ViewerContext): string {
-    return getRecentCognition(viewerContext.viewer_agent_id, viewerContext.session_id, this.db);
+  async getRecentCognition(viewerContext: ViewerContext): Promise<string> {
+    return getRecentCognitionAsync(viewerContext.viewer_agent_id, viewerContext.session_id, this.repos);
   }
 
-  getAttachedSharedBlocks(agentId: string): string {
-    return getAttachedSharedBlocks(agentId, this.db);
+  async getAttachedSharedBlocks(agentId: string): Promise<string> {
+    return getAttachedSharedBlocksAsync(agentId, this.repos);
   }
 
   async getTypedRetrievalSurface(userMessage: string, viewerContext: ViewerContext): Promise<string> {
-    return getTypedRetrievalSurface(userMessage, viewerContext, this.db);
+    return getTypedRetrievalSurfaceAsync(userMessage, viewerContext, this.db, this.repos);
   }
 }

@@ -60,6 +60,12 @@ import {
 	resolveStoragePaths,
 } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
+import { SqlitePendingFlushRecoveryRepoAdapter } from "../storage/domain-repos/sqlite/pending-flush-recovery-repo.js";
+import { SqliteCoreMemoryBlockRepoAdapter } from "../storage/domain-repos/sqlite/core-memory-block-repo.js";
+import { SqliteInteractionRepoAdapter } from "../storage/domain-repos/sqlite/interaction-repo.js";
+import { SqliteRecentCognitionSlotRepoAdapter } from "../storage/domain-repos/sqlite/recent-cognition-slot-repo.js";
+import { SqliteSharedBlockRepoAdapter } from "../storage/domain-repos/sqlite/shared-block-repo.js";
+import { SharedBlockRepo as SqliteSharedBlockRepoImpl } from "../memory/shared-blocks/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 import { registerRuntimeTools } from "./tools.js";
 import type {
@@ -261,6 +267,12 @@ export function bootstrapRuntime(
 	const flushSelector = new FlushSelector(interactionStore);
 	const graphStorage = new GraphStorageService(db);
 
+	const coreMemoryService = new CoreMemoryService(db);
+	const interactionRepo = new SqliteInteractionRepoAdapter(interactionStore);
+	const coreMemoryBlockRepo = new SqliteCoreMemoryBlockRepoAdapter(coreMemoryService);
+	const recentCognitionSlotRepo = new SqliteRecentCognitionSlotRepoAdapter(interactionStore, db);
+	const sharedBlockRepo = new SqliteSharedBlockRepoAdapter(new SqliteSharedBlockRepoImpl(db.raw as never), db);
+
 	registerRuntimeTools(toolExecutor, runtimeServices);
 
 	const memoryMigrationModelId =
@@ -299,7 +311,6 @@ export function bootstrapRuntime(
 				}
 
 				if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
-					const coreMemory = new CoreMemoryService(db);
 					const embeddings = new EmbeddingService(
 						db,
 						new TransactionBatcher(db),
@@ -316,9 +327,9 @@ export function bootstrapRuntime(
 						organizerEmbeddingModelId,
 					);
 					memoryTaskAgent = new MemoryTaskAgent(
-						db.raw,
+						db,
 						graphStorage,
-						coreMemory,
+						coreMemoryService,
 						embeddings,
 						materialization,
 						provider,
@@ -364,7 +375,12 @@ export function bootstrapRuntime(
 
 	const personaAdapter = new PersonaAdapter(personaService);
 	const loreAdapter = new LoreAdapter(loreService);
-	const memoryAdapter = new MemoryAdapter(db);
+	const memoryAdapter = new MemoryAdapter(db, {
+		coreMemoryBlockRepo,
+		recentCognitionSlotRepo,
+		interactionRepo,
+		sharedBlockRepo,
+	});
 	const operationalAdapter = new BlackboardOperationalDataSource(blackboard);
 
 	const promptBuilder = new PromptBuilder({
@@ -514,15 +530,13 @@ export function bootstrapRuntime(
 		settlementUnitOfWork,
 	);
 
+	const pendingFlushRepo = new SqlitePendingFlushRecoveryRepoAdapter(db);
 	const pendingSettlementSweeper = memoryTaskAgent
 		? new PendingSettlementSweeper(
-				db,
+				pendingFlushRepo,
 				interactionStore,
 				flushSelector,
 				memoryTaskAgent,
-				{
-					settlementLedger,
-				},
 			)
 		: null;
 	const publicationRecoverySweeper = graphStorage
@@ -562,6 +576,10 @@ export function bootstrapRuntime(
 		backendType,
 		pgFactory,
 		settlementUnitOfWork,
+		interactionRepo,
+		coreMemoryBlockRepo,
+		recentCognitionSlotRepo,
+		sharedBlockRepo,
 		shutdown,
 	};
 }

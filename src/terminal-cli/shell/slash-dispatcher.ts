@@ -137,7 +137,7 @@ async function handleSummary(ctx: SlashDispatchContext, args: string[]): Promise
 			const view = await requireGatewayClient(ctx).getSummary(inspectCtx.requestId!);
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadSummaryView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadSummaryView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading summary: ${err instanceof Error ? err.message : String(err)}`);
@@ -151,7 +151,7 @@ async function handleTranscript(ctx: SlashDispatchContext, args: string[]): Prom
 			const view = await requireGatewayClient(ctx).getTranscript(ctx.state.sessionId, ctx.state.rawMode);
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadTranscriptView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadTranscriptView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading transcript: ${err instanceof Error ? err.message : String(err)}`);
@@ -170,7 +170,7 @@ async function handlePrompt(ctx: SlashDispatchContext, args: string[]): Promise<
 			const view = await requireGatewayClient(ctx).getPrompt(inspectCtx.requestId!);
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadPromptView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadPromptView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading prompt: ${err instanceof Error ? err.message : String(err)}`);
@@ -189,7 +189,7 @@ async function handleChunks(ctx: SlashDispatchContext, args: string[]): Promise<
 			const view = await requireGatewayClient(ctx).getChunks(inspectCtx.requestId!);
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadChunksView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadChunksView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading chunks: ${err instanceof Error ? err.message : String(err)}`);
@@ -208,7 +208,7 @@ async function handleLogs(ctx: SlashDispatchContext, args: string[]): Promise<Sl
 			});
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadLogsView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadLogsView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading logs: ${err instanceof Error ? err.message : String(err)}`);
@@ -226,7 +226,7 @@ async function handleMemory(ctx: SlashDispatchContext, args: string[]): Promise<
 			);
 			writeText(renderText(view));
 		} else {
-			writeText(renderText(loadMemoryView(buildViewParams(ctx, args))));
+			writeText(renderText(await loadMemoryView(buildViewParams(ctx, args))));
 		}
 	} catch (err) {
 		writeText(`Error loading memory: ${err instanceof Error ? err.message : String(err)}`);
@@ -246,7 +246,7 @@ async function handleDiagnose(ctx: SlashDispatchContext, args: string[]): Promis
 			writeText(renderText(entry));
 		} else {
 			const runtime = requireRuntime(ctx);
-			const entry = diagnose({
+			const entry = await diagnose({
 				runtime,
 				traceStore: runtime.traceStore,
 				context: inspectCtx,
@@ -270,7 +270,7 @@ async function handleTrace(ctx: SlashDispatchContext, args: string[]): Promise<S
 			const view = await requireGatewayClient(ctx).getTrace(inspectCtx.requestId!);
 			writeText(renderJson(view));
 		} else {
-			writeText(renderJson(loadTraceView(buildViewParams(ctx, args), false)));
+			writeText(renderJson(await loadTraceView(buildViewParams(ctx, args), false)));
 		}
 	} catch (err) {
 		writeText(`Error loading trace: ${err instanceof Error ? err.message : String(err)}`);

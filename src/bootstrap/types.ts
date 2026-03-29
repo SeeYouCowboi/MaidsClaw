@@ -17,6 +17,10 @@ import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
 import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
 import type { Db } from "../storage/database.js";
+import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
+import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
+import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
+import type { SharedBlockRepo } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
@@ -92,6 +96,10 @@ export type RuntimeBootstrapResult = {
 	backendType: BackendType;
 	pgFactory: PgBackendFactory | null;
 	settlementUnitOfWork: SettlementUnitOfWork | null;
+	interactionRepo: InteractionRepo;
+	coreMemoryBlockRepo: CoreMemoryBlockRepo;
+	recentCognitionSlotRepo: RecentCognitionSlotRepo;
+	sharedBlockRepo: SharedBlockRepo;
 	shutdown: () => void;
 };
 

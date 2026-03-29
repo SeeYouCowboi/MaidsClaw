@@ -1,10 +1,21 @@
 import type { Db } from "../storage/database.js";
+import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
+import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
+import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
+import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
 import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
 import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
+
+export type PromptDataRepos = {
+  coreMemoryBlockRepo: CoreMemoryBlockRepo;
+  recentCognitionSlotRepo: RecentCognitionSlotRepo;
+  interactionRepo: InteractionRepo;
+  sharedBlockRepo: SharedBlockRepoContract;
+};
 
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
 // Legacy compat: user blocks still exist in DB (read-only) and are surfaced as shared blocks for display
@@ -157,7 +168,26 @@ type RecentCognitionEntry = {
 
 export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
   const entries = getRecentCognitionEntries(agentId, sessionId, db);
+  return formatRecentCognitionEntries(entries);
+}
 
+export function formatRecentCognitionFromPayload(slotPayload: string | undefined): string {
+  if (!slotPayload) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(slotPayload) as unknown;
+    if (!Array.isArray(parsed)) {
+      return "";
+    }
+    return formatRecentCognitionEntries(parsed as RecentCognitionEntry[]);
+  } catch {
+    return "";
+  }
+}
+
+function formatRecentCognitionEntries(entries: RecentCognitionEntry[]): string {
   if (!Array.isArray(entries) || entries.length === 0) {
     return "";
   }
@@ -366,4 +396,109 @@ export function getAttachedSharedBlocks(agentId: string, db: Db): string {
   }
 
   return blocks.join("\n");
+}
+
+export async function getPinnedBlocksAsync(agentId: string, repos: PromptDataRepos): Promise<string> {
+  const blocks = await repos.coreMemoryBlockRepo.getAllBlocks(agentId);
+  const pinned = blocks.filter((b) => PINNED_LABELS.includes(b.label));
+  return renderCoreMemoryBlocks(pinned, "pinned_block");
+}
+
+export async function getSharedBlocksAsync(agentId: string, repos: PromptDataRepos): Promise<string> {
+  const blocks = await repos.coreMemoryBlockRepo.getAllBlocks(agentId);
+  const shared = blocks.filter((b) => SHARED_LABELS.includes(b.label));
+  return renderCoreMemoryBlocks(shared, "shared_block");
+}
+
+export async function getRecentCognitionAsync(agentId: string, sessionId: string, repos: PromptDataRepos): Promise<string> {
+  const payload = await repos.recentCognitionSlotRepo.getSlotPayload(sessionId, agentId);
+  return formatRecentCognitionFromPayload(payload);
+}
+
+export async function getAttachedSharedBlocksAsync(agentId: string, repos: PromptDataRepos): Promise<string> {
+  const blockIds = await repos.sharedBlockRepo.getAttachedBlockIds("agent", agentId);
+  if (blockIds.length === 0) {
+    return "";
+  }
+
+  const renderedBlocks: string[] = [];
+
+  for (const blockId of blockIds) {
+    const block = await repos.sharedBlockRepo.getBlock(blockId);
+    if (!block) continue;
+
+    const sections = await repos.sharedBlockRepo.getSections(blockId);
+    if (sections.length === 0) continue;
+
+    const sectionLines = sections
+      .map((s) => `${s.sectionPath}: ${s.content}`)
+      .join("\n");
+
+    renderedBlocks.push(`<shared_block title="${block.title}">\n${sectionLines}\n</shared_block>`);
+  }
+
+  return renderedBlocks.join("\n");
+}
+
+export async function getTypedRetrievalSurfaceAsync(
+  userMessage: string,
+  viewerContext: ViewerContext,
+  db: Db,
+  repos: PromptDataRepos,
+  retrievalService?: RetrievalService,
+): Promise<string> {
+  if (userMessage.trim().length < 3) {
+    return "";
+  }
+
+  const retrieval = resolveRetrievalService(db, retrievalService);
+  const payload = await repos.recentCognitionSlotRepo.getSlotPayload(
+    viewerContext.session_id,
+    viewerContext.viewer_agent_id,
+  );
+  const recentEntries = parseRecentCognitionPayload(payload);
+  const recentCognitionKeys = new Set<string>();
+  for (const entry of recentEntries) {
+    const key = entry.key?.trim();
+    const kind = entry.kind?.trim();
+    if (!key || key.length === 0) {
+      continue;
+    }
+    recentCognitionKeys.add(key);
+    if (kind && kind.length > 0) {
+      recentCognitionKeys.add(`${kind}:${key}`);
+    }
+  }
+  const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
+  const messageRecords = await repos.interactionRepo.getMessageRecords(viewerContext.session_id);
+  const conversationTexts = messageRecords
+    .slice(-12)
+    .map((record) => {
+      const p = record.payload as { content?: unknown };
+      return typeof p.content === "string" ? p.content : "";
+    })
+    .filter((text) => text.trim().length > 0);
+
+  const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
+    recentCognitionKeys,
+    recentCognitionTexts,
+    conversationTexts,
+  });
+
+  return renderTypedRetrieval(typed);
+}
+
+function parseRecentCognitionPayload(slotPayload: string | undefined): RecentCognitionEntry[] {
+  if (!slotPayload) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(slotPayload) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RecentCognitionEntry[];
+  } catch {
+    return [];
+  }
 }
