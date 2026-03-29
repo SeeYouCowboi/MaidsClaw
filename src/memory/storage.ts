@@ -1,6 +1,20 @@
+import type { Database } from "bun:sqlite";
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { Db } from "../storage/database.js";
+import type {
+  AreaWorldProjectionRepo,
+  CognitionEventRepo,
+  CognitionProjectionRepo,
+  CoreMemoryBlockRepo,
+  EmbeddingRepo,
+  EpisodeRepo,
+  GraphMutableStoreRepo,
+  NodeScoreRepo,
+  SearchProjectionRepo,
+  SemanticEdgeRepo,
+  SharedBlockRepo,
+} from "../storage/domain-repos/contracts/index.js";
 import {
   CognitionRepository,
   type UpsertCommitmentParams,
@@ -153,7 +167,21 @@ const assertionRefPrefix = "assertion:";
 const evaluationRefPrefix = "evaluation:";
 const commitmentRefPrefix = "commitment:";
 
-export class GraphStorageService {
+export type GraphStorageDomainRepoRegistry = {
+  graphStoreRepo: GraphMutableStoreRepo;
+  searchProjectionRepo: SearchProjectionRepo;
+  embeddingRepo: EmbeddingRepo;
+  semanticEdgeRepo: SemanticEdgeRepo;
+  nodeScoreRepo: NodeScoreRepo;
+  coreMemoryBlockRepo?: CoreMemoryBlockRepo;
+  sharedBlockRepo?: SharedBlockRepo;
+  episodeRepo?: EpisodeRepo;
+  cognitionEventRepo?: CognitionEventRepo;
+  cognitionProjectionRepo?: CognitionProjectionRepo;
+  areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+};
+
+class SqliteGraphStorageLegacyImpl {
   private readonly batcher: TransactionBatcher;
   private readonly cognitionRepo: CognitionRepository;
   private readonly jobPersistence?: JobPersistence;
@@ -1020,4 +1048,402 @@ export class GraphStorageService {
     }
     return rawId;
   }
+}
+
+type GraphStorageDelegateRegistry = {
+  graphStoreRepo: {
+    createProjectedEvent: (params: CreateProjectedEventInput) => number | Promise<number>;
+    createPromotedEvent: (params: CreatePromotedEventInput) => number | Promise<number>;
+    createLogicEdge: (sourceEventId: number, targetEventId: number, relationType: LogicEdgeType) => number | Promise<number>;
+    createTopic: (name: string, description?: string) => number | Promise<number>;
+    upsertEntity: (params: UpsertEntityInput) => number | Promise<number>;
+    resolveEntityByPointerKey: (pointerKey: string, agentId: string) => number | null | Promise<number | null>;
+    getEntityById: (id: number) => { pointerKey: string } | null | Promise<{ pointerKey: string } | null>;
+    upsertExplicitAssertion: (params: UpsertExplicitAssertionInput) => { id: number; ref: NodeRef } | Promise<{ id: number; ref: NodeRef }>;
+    upsertExplicitEvaluation: (params: UpsertExplicitEvaluationInput) => { id: number; ref: NodeRef } | Promise<{ id: number; ref: NodeRef }>;
+    upsertExplicitCommitment: (params: UpsertExplicitCommitmentInput) => { id: number; ref: NodeRef } | Promise<{ id: number; ref: NodeRef }>;
+    retractExplicitCognition: (
+      agentId: string,
+      cognitionKey: string,
+      kind: "assertion" | "evaluation" | "commitment",
+      settlementId?: string,
+    ) => void | Promise<void>;
+    createEntityAlias: (canonicalId: number, alias: string, aliasType?: string, ownerAgentId?: string) => number | Promise<number>;
+    createRedirect: (oldName: string, newName: string, redirectType?: string, ownerAgentId?: string) => number | Promise<number>;
+    createFact: (sourceEntityId: number, targetEntityId: number, predicate: string, sourceEventId?: number) => number | Promise<number>;
+    invalidateFact: (factId: number) => void | Promise<void>;
+    createPrivateEvent: (params: CreatePrivateEventInput) => number | Promise<number>;
+    createPrivateBelief: (params: CreatePrivateBeliefInput) => number | Promise<number>;
+    updatePrivateEventLink: (privateEventId: number, publicEventId: number) => void | Promise<void>;
+    createSameEpisodeEdges: (events: SameEpisodeEvent[]) => void | Promise<void>;
+    runBatch: (fn: () => void) => void | Promise<void>;
+  };
+  searchProjectionRepo: {
+    syncSearchDoc: (
+      scope: SearchScope,
+      sourceRef: NodeRef,
+      content: string,
+      agentId?: string,
+      locationEntityId?: number,
+    ) => number | Promise<number>;
+    removeSearchDoc: (scope: SearchScope, sourceRef: NodeRef) => void | Promise<void>;
+  };
+  embeddingRepo: {
+    upsert: (
+      nodeRef: NodeRef,
+      nodeKind: NodeRefKind,
+      viewType: "primary" | "keywords" | "context",
+      modelId: string,
+      embedding: Float32Array,
+    ) => void | Promise<void>;
+  };
+  semanticEdgeRepo: {
+    upsert: (sourceRef: NodeRef, targetRef: NodeRef, relationType: SemanticEdgeType, weight: number) => void | Promise<void>;
+  };
+  nodeScoreRepo: {
+    upsert: (nodeRef: NodeRef, salience: number, centrality: number, bridgeScore: number) => void | Promise<void>;
+    getEmbeddingStatsByModel: () => Array<{ model_id: string; count: number; dimension: number }> | Promise<Array<{ model_id: string; count: number; dimension: number }>>;
+  };
+};
+
+export class GraphStorageService {
+  readonly db: Db;
+  private readonly delegates: GraphStorageDelegateRegistry;
+
+  constructor(db: Db | Database, jobPersistence?: JobPersistence, repoRegistry?: GraphStorageDomainRepoRegistry) {
+    this.db = normalizeDbInput(db);
+    this.delegates = repoRegistry
+      ? {
+          graphStoreRepo: repoRegistry.graphStoreRepo,
+          searchProjectionRepo: repoRegistry.searchProjectionRepo,
+          embeddingRepo: repoRegistry.embeddingRepo,
+          semanticEdgeRepo: repoRegistry.semanticEdgeRepo,
+          nodeScoreRepo: repoRegistry.nodeScoreRepo,
+        }
+      : createDefaultSqliteDelegateRegistry(this.db, jobPersistence);
+  }
+
+  static withDomainRepos(
+    db: Db | Database,
+    repoRegistry: GraphStorageDomainRepoRegistry,
+    jobPersistence?: JobPersistence,
+  ): GraphStorageService {
+    return new GraphStorageService(db, jobPersistence, repoRegistry);
+  }
+
+  createProjectedEvent(params: CreateProjectedEventInput): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createProjectedEvent(params));
+  }
+
+  createPromotedEvent(params: CreatePromotedEventInput): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createPromotedEvent(params));
+  }
+
+  createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType));
+  }
+
+  createTopic(name: string, description?: string): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createTopic(name, description));
+  }
+
+  upsertEntity(params: UpsertEntityInput): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.upsertEntity(params));
+  }
+
+  resolveEntityByPointerKey(pointerKey: string, agentId: string): number | null {
+    return this.resolveNow(this.delegates.graphStoreRepo.resolveEntityByPointerKey(pointerKey, agentId));
+  }
+
+  getEntityById(id: number): { pointerKey: string } | null {
+    return this.resolveNow(this.delegates.graphStoreRepo.getEntityById(id));
+  }
+
+  upsertExplicitAssertion(params: UpsertExplicitAssertionInput): { id: number; ref: NodeRef } {
+    return this.resolveNow(this.delegates.graphStoreRepo.upsertExplicitAssertion(params));
+  }
+
+  upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput): { id: number; ref: NodeRef } {
+    return this.resolveNow(this.delegates.graphStoreRepo.upsertExplicitEvaluation(params));
+  }
+
+  upsertExplicitCommitment(params: UpsertExplicitCommitmentInput): { id: number; ref: NodeRef } {
+    return this.resolveNow(this.delegates.graphStoreRepo.upsertExplicitCommitment(params));
+  }
+
+  retractExplicitCognition(
+    agentId: string,
+    cognitionKey: string,
+    kind: "assertion" | "evaluation" | "commitment",
+    settlementId?: string,
+  ): void {
+    this.resolveNow(this.delegates.graphStoreRepo.retractExplicitCognition(agentId, cognitionKey, kind, settlementId));
+  }
+
+  createEntityAlias(canonicalId: number, alias: string, aliasType?: string, ownerAgentId?: string): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createEntityAlias(canonicalId, alias, aliasType, ownerAgentId));
+  }
+
+  createRedirect(oldName: string, newName: string, redirectType?: string, ownerAgentId?: string): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createRedirect(oldName, newName, redirectType, ownerAgentId));
+  }
+
+  createFact(sourceEntityId: number, targetEntityId: number, predicate: string, sourceEventId?: number): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createFact(sourceEntityId, targetEntityId, predicate, sourceEventId));
+  }
+
+  invalidateFact(factId: number): void {
+    this.resolveNow(this.delegates.graphStoreRepo.invalidateFact(factId));
+  }
+
+  createPrivateEvent(params: CreatePrivateEventInput): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createPrivateEvent(params));
+  }
+
+  createPrivateBelief(params: CreatePrivateBeliefInput): number {
+    return this.resolveNow(this.delegates.graphStoreRepo.createPrivateBelief(params));
+  }
+
+  updatePrivateEventLink(privateEventId: number, publicEventId: number): void {
+    this.resolveNow(this.delegates.graphStoreRepo.updatePrivateEventLink(privateEventId, publicEventId));
+  }
+
+  syncSearchDoc(
+    scope: SearchScope,
+    sourceRef: NodeRef,
+    content: string,
+    agentId?: string,
+    locationEntityId?: number,
+  ): number {
+    return this.resolveNow(this.delegates.searchProjectionRepo.syncSearchDoc(scope, sourceRef, content, agentId, locationEntityId));
+  }
+
+  removeSearchDoc(scope: SearchScope, sourceRef: NodeRef): void {
+    this.resolveNow(this.delegates.searchProjectionRepo.removeSearchDoc(scope, sourceRef));
+  }
+
+  upsertNodeEmbedding(
+    nodeRef: NodeRef,
+    nodeKind: NodeRefKind,
+    viewType: "primary" | "keywords" | "context",
+    modelId: string,
+    embedding: Float32Array,
+  ): void {
+    this.resolveNow(this.delegates.embeddingRepo.upsert(nodeRef, nodeKind, viewType, modelId, embedding));
+  }
+
+  upsertSemanticEdge(
+    sourceRef: NodeRef,
+    targetRef: NodeRef,
+    relationType: SemanticEdgeType,
+    weight: number,
+  ): void {
+    this.resolveNow(this.delegates.semanticEdgeRepo.upsert(sourceRef, targetRef, relationType, weight));
+  }
+
+  upsertNodeScores(nodeRef: NodeRef, salience: number, centrality: number, bridgeScore: number): void {
+    this.resolveNow(this.delegates.nodeScoreRepo.upsert(nodeRef, salience, centrality, bridgeScore));
+  }
+
+  createSameEpisodeEdges(events: SameEpisodeEvent[]): void {
+    this.resolveNow(this.delegates.graphStoreRepo.createSameEpisodeEdges(events));
+  }
+
+  runBatch(fn: () => void): void {
+    this.resolveNow(this.delegates.graphStoreRepo.runBatch(fn));
+  }
+
+  getEmbeddingStatsByModel(): Array<{ model_id: string; count: number; dimension: number }> {
+    return this.resolveNow(this.delegates.nodeScoreRepo.getEmbeddingStatsByModel());
+  }
+
+  private resolveNow<T>(value: Promise<T> | T): T {
+    if (!(value instanceof Promise)) {
+      return value;
+    }
+
+    const settledValue = Bun.peek(value);
+    if (settledValue instanceof Promise) {
+      throw new Error(
+        "GraphStorageService sync facade received unresolved async repo result. "
+          + "Inject SQLite adapter-style repos (Promise.resolve wrappers) for this sync API.",
+      );
+    }
+    return settledValue as T;
+  }
+}
+
+function createDefaultSqliteDelegateRegistry(db: Db, jobPersistence?: JobPersistence): GraphStorageDelegateRegistry {
+  const legacy = new SqliteGraphStorageLegacyImpl(db, jobPersistence);
+
+  const graphStoreRepo = {
+    createProjectedEvent(params: CreateProjectedEventInput) {
+      return legacy.createProjectedEvent(params);
+    },
+    createPromotedEvent(params: CreatePromotedEventInput) {
+      return legacy.createPromotedEvent(params);
+    },
+    createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType) {
+      return legacy.createLogicEdge(sourceEventId, targetEventId, relationType);
+    },
+    createTopic(name: string, description?: string) {
+      return legacy.createTopic(name, description);
+    },
+    upsertEntity(params: UpsertEntityInput) {
+      return legacy.upsertEntity(params);
+    },
+    resolveEntityByPointerKey(pointerKey: string, agentId: string) {
+      return legacy.resolveEntityByPointerKey(pointerKey, agentId);
+    },
+    getEntityById(id: number) {
+      return legacy.getEntityById(id);
+    },
+    upsertExplicitAssertion(params: UpsertExplicitAssertionInput) {
+      return legacy.upsertExplicitAssertion(params);
+    },
+    upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput) {
+      return legacy.upsertExplicitEvaluation(params);
+    },
+    upsertExplicitCommitment(params: UpsertExplicitCommitmentInput) {
+      return legacy.upsertExplicitCommitment(params);
+    },
+    retractExplicitCognition(
+      agentId: string,
+      cognitionKey: string,
+      kind: "assertion" | "evaluation" | "commitment",
+      settlementId?: string,
+    ) {
+      legacy.retractExplicitCognition(agentId, cognitionKey, kind, settlementId);
+    },
+    createEntityAlias(canonicalId: number, alias: string, aliasType?: string, ownerAgentId?: string) {
+      return legacy.createEntityAlias(canonicalId, alias, aliasType, ownerAgentId);
+    },
+    createRedirect(oldName: string, newName: string, redirectType?: string, ownerAgentId?: string) {
+      return legacy.createRedirect(oldName, newName, redirectType, ownerAgentId);
+    },
+    createFact(sourceEntityId: number, targetEntityId: number, predicate: string, sourceEventId?: number) {
+      return legacy.createFact(sourceEntityId, targetEntityId, predicate, sourceEventId);
+    },
+    invalidateFact(factId: number) {
+      legacy.invalidateFact(factId);
+    },
+    createPrivateEvent(params: CreatePrivateEventInput) {
+      return legacy.createPrivateEvent(params);
+    },
+    createPrivateBelief(params: CreatePrivateBeliefInput) {
+      return legacy.createPrivateBelief(params);
+    },
+    updatePrivateEventLink(privateEventId: number, publicEventId: number) {
+      legacy.updatePrivateEventLink(privateEventId, publicEventId);
+    },
+    createSameEpisodeEdges(events: SameEpisodeEvent[]) {
+      legacy.createSameEpisodeEdges(events);
+    },
+    runBatch(fn: () => void) {
+      legacy.runBatch(fn);
+    },
+  };
+
+  const searchProjectionRepo = {
+    syncSearchDoc(
+      scope: SearchScope,
+      sourceRef: NodeRef,
+      content: string,
+      agentId?: string,
+      locationEntityId?: number,
+    ) {
+      return legacy.syncSearchDoc(scope, sourceRef, content, agentId, locationEntityId);
+    },
+    removeSearchDoc(scope: SearchScope, sourceRef: NodeRef) {
+      legacy.removeSearchDoc(scope, sourceRef);
+    },
+  };
+
+  const embeddingRepo = {
+    upsert(
+      nodeRef: NodeRef,
+      nodeKind: NodeRefKind,
+      viewType: "primary" | "keywords" | "context",
+      modelId: string,
+      embedding: Float32Array,
+    ) {
+      legacy.upsertNodeEmbedding(nodeRef, nodeKind, viewType, modelId, embedding);
+    },
+  };
+
+  const semanticEdgeRepo = {
+    upsert(sourceRef: NodeRef, targetRef: NodeRef, relationType: SemanticEdgeType, weight: number) {
+      legacy.upsertSemanticEdge(sourceRef, targetRef, relationType, weight);
+    },
+  };
+
+  const nodeScoreRepo = {
+    upsert(nodeRef: NodeRef, salience: number, centrality: number, bridgeScore: number) {
+      legacy.upsertNodeScores(nodeRef, salience, centrality, bridgeScore);
+    },
+    getEmbeddingStatsByModel() {
+      return legacy.getEmbeddingStatsByModel();
+    },
+  };
+
+  return {
+    graphStoreRepo,
+    searchProjectionRepo,
+    embeddingRepo,
+    semanticEdgeRepo,
+    nodeScoreRepo,
+  };
+}
+
+function normalizeDbInput(db: Db | Database): Db {
+  if (isDb(db)) {
+    return db;
+  }
+
+  return {
+    raw: db,
+    exec(sql: string): void {
+      db.exec(sql);
+    },
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      const stmt = db.prepare(sql);
+      return (params ? stmt.all(...params as []) : stmt.all()) as T[];
+    },
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.run(...params as []) : stmt.run();
+      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+    },
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.get(...params as []) : stmt.get();
+      return result === null ? undefined : result as T;
+    },
+    close(): void {
+      db.close();
+    },
+    transaction<T>(fn: () => T): T {
+      return db.transaction(fn)();
+    },
+    prepare(sql: string) {
+      const stmt = db.prepare(sql);
+      return {
+        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+          const result = params.length > 0 ? stmt.run(...params as []) : stmt.run();
+          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+        },
+        all(...params: unknown[]): unknown[] {
+          return (params.length > 0 ? stmt.all(...params as []) : stmt.all()) as unknown[];
+        },
+        get(...params: unknown[]): unknown {
+          const result = params.length > 0 ? stmt.get(...params as []) : stmt.get();
+          return result === null ? undefined : result;
+        },
+      };
+    },
+  };
+}
+
+function isDb(db: Db | Database): db is Db {
+  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }
