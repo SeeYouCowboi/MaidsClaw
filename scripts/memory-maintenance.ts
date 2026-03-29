@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import { loadConfig } from "../src/core/config.js";
 import { runMemoryMigrations } from "../src/memory/schema.js";
+import { PgBackendFactory } from "../src/storage/backend-types.js";
 import { openDatabase } from "../src/storage/database.js";
 import type { Db } from "../src/storage/database.js";
+import type postgres from "postgres";
 
 // ── Canonical ledger tables — NEVER cleaned ──
 const CANONICAL_LEDGER_TABLES = [
@@ -45,49 +47,99 @@ const REPORT_TABLES = [
   "world_state_events",
 ] as const;
 
+// ── SQLite-only tables (skipped gracefully for PG) ──
+const SQLITE_ONLY_TABLES = new Set(["_memory_maintenance_jobs"]);
+
 type CliArgs = {
   days: number;
   vacuum: boolean;
   report: boolean;
   reportOnly: boolean;
   integrityCheck: boolean;
+  backend: "sqlite" | "pg";
+  pgUrl: string | undefined;
 };
 
 // ── Main ──
 
 const argv = process.argv.slice(2);
 const args = parseArgs(argv);
-const dbPath = resolveDatabasePath();
 
-const db = openDatabase({ path: dbPath });
+if (args.backend === "pg") {
+  await runPgMaintenance(args);
+} else {
+  runSqliteMaintenance(args);
+}
 
-try {
-  runMemoryMigrations(db);
-  console.log(`Database: ${dbPath}`);
+// ── SQLite path (original behavior) ──
 
-  if (args.integrityCheck) {
-    const ok = runIntegrityCheck(db);
-    if (!ok) process.exitCode = 1;
+function runSqliteMaintenance(args: CliArgs): void {
+  const dbPath = resolveDatabasePath();
+  const db = openDatabase({ path: dbPath });
+
+  try {
+    runMemoryMigrations(db);
+    console.log(`Database: ${dbPath}`);
+
+    if (args.integrityCheck) {
+      const ok = runIntegrityCheck(db);
+      if (!ok) process.exitCode = 1;
+    }
+
+    if (!args.reportOnly) {
+      const deleted = runRetention(db, args.days);
+      console.log(`\nRetention cleanup (--days ${args.days}):`);
+      console.log(`  Deleted ${deleted} expired job(s) from _memory_maintenance_jobs`);
+    }
+
+    if (args.vacuum) {
+      console.log("\nRunning PRAGMA optimize + VACUUM...");
+      db.exec("PRAGMA optimize");
+      db.exec("VACUUM");
+      console.log("  Done.");
+    }
+
+    if (args.report) {
+      printReport(db);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+// ── PG path ──
+
+async function runPgMaintenance(args: CliArgs): Promise<void> {
+  const pgUrl = args.pgUrl ?? process.env.PG_APP_URL;
+  if (!pgUrl) {
+    console.error("PG requires --pg-url <url> or PG_APP_URL environment variable");
+    process.exit(1);
   }
 
-  if (!args.reportOnly) {
-    const deleted = runRetention(db, args.days);
-    console.log(`\nRetention cleanup (--days ${args.days}):`);
-    console.log(`  Deleted ${deleted} expired job(s) from _memory_maintenance_jobs`);
-  }
+  const factory = new PgBackendFactory();
+  try {
+    await factory.initialize({ type: "pg", pg: { url: pgUrl } });
+    const pool = factory.getPool();
+    console.log("Backend: PostgreSQL");
 
-  if (args.vacuum) {
-    console.log("\nRunning PRAGMA optimize + VACUUM...");
-    db.exec("PRAGMA optimize");
-    db.exec("VACUUM");
-    console.log("  Done.");
-  }
+    if (args.integrityCheck) {
+      console.log("\nSkipping PRAGMA integrity_check (SQLite-only operation).");
+    }
 
-  if (args.report) {
-    printReport(db);
+    if (!args.reportOnly) {
+      console.log("\nSkipping retention cleanup (SQLite-only _memory_maintenance_jobs table).");
+    }
+
+    if (args.vacuum) {
+      console.log("\nSkipping VACUUM (PostgreSQL uses auto-vacuum).");
+    }
+
+    if (args.report) {
+      await printPgReport(pool);
+    }
+  } finally {
+    await factory.close();
   }
-} finally {
-  db.close();
 }
 
 // ── Retention logic ──
@@ -119,7 +171,7 @@ export function runIntegrityCheck(db: Db): boolean {
   return false;
 }
 
-// ── Report logic ──
+// ── Report logic (SQLite) ──
 
 export type TableReportRow = {
   table: string;
@@ -169,6 +221,84 @@ export function printReport(db: Db): void {
   }
   console.log("└─────────────────────────────────────────────────────────────────────────────────────────────────┘");
 }
+
+// ── Report logic (PG) ──
+
+export type PgTableReportRow = {
+  table: string;
+  rows: number | null;
+  isProtected: boolean;
+  exists: boolean;
+};
+
+export async function gatherPgReportRows(sql: postgres.Sql): Promise<PgTableReportRow[]> {
+  const existingTables = await getPgExistingTables(sql);
+  const results: PgTableReportRow[] = [];
+
+  for (const table of REPORT_TABLES) {
+    if (SQLITE_ONLY_TABLES.has(table)) {
+      results.push({ table, rows: null, isProtected: false, exists: false });
+      continue;
+    }
+    const isProtected = (CANONICAL_LEDGER_TABLES as readonly string[]).includes(table);
+    const exists = existingTables.has(table);
+    const count = exists ? await getPgTableRowCount(sql, table) : null;
+    results.push({ table, rows: count, isProtected, exists });
+  }
+
+  return results;
+}
+
+async function getPgExistingTables(sql: postgres.Sql): Promise<Set<string>> {
+  const rows = await sql<{ table_name: string }[]>`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_type = 'BASE TABLE'
+  `;
+  return new Set(rows.map((r) => r.table_name));
+}
+
+export async function getPgTableRowCount(sql: postgres.Sql, table: string): Promise<number | null> {
+  if (!(REPORT_TABLES as readonly string[]).includes(table)) return null;
+  if (SQLITE_ONLY_TABLES.has(table)) return null;
+  try {
+    const rows = await sql.unsafe(`SELECT COUNT(*)::int as count FROM "${table}"`);
+    return rows[0]?.count ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function printPgReport(sql: postgres.Sql): Promise<void> {
+  const rows = await gatherPgReportRows(sql);
+
+  console.log("\n┌──────────────────────────────────────────────────────────────────────────┐");
+  console.log("│ Table Report (PostgreSQL)                                                │");
+  console.log("├─────────────────────────────────────┬──────────┬──────────────────────────┤");
+  console.log("│ Table                               │     Rows │ Status                   │");
+  console.log("├─────────────────────────────────────┼──────────┼──────────────────────────┤");
+
+  for (const r of rows) {
+    const name = r.table.padEnd(35);
+    const rowStr = r.rows !== null ? String(r.rows).padStart(8) : "     N/A";
+    let statusStr: string;
+    if (SQLITE_ONLY_TABLES.has(r.table)) {
+      statusStr = "SQLITE-ONLY              ";
+    } else if (!r.exists) {
+      statusStr = "NOT FOUND                ";
+    } else if (r.isProtected) {
+      statusStr = "PROTECTED                ";
+    } else {
+      statusStr = "                         ";
+    }
+    console.log(`│ ${name} │ ${rowStr} │ ${statusStr}│`);
+  }
+
+  console.log("└─────────────────────────────────────┴──────────┴──────────────────────────┘");
+}
+
+// ── SQLite helpers ──
 
 function getPageSize(db: Db): number | null {
   try {
@@ -256,6 +386,8 @@ function parseArgs(input: string[]): CliArgs {
   let report = false;
   let reportOnly = false;
   let integrityCheck = false;
+  let backend: "sqlite" | "pg" = "sqlite";
+  let pgUrl: string | undefined;
 
   const hasCleanFlags = input.some(
     (t) => t === "--days" || t === "--vacuum",
@@ -288,8 +420,34 @@ function parseArgs(input: string[]): CliArgs {
       continue;
     }
 
+    if (token === "--report-only") {
+      report = true;
+      reportOnly = true;
+      continue;
+    }
+
     if (token === "--integrity-check") {
       integrityCheck = true;
+      continue;
+    }
+
+    if (token === "--backend") {
+      const value = input[index + 1];
+      if (value !== "sqlite" && value !== "pg") {
+        failWithUsage(`Invalid --backend value: ${value}. Must be 'sqlite' or 'pg'.`);
+      }
+      backend = value;
+      index += 1;
+      continue;
+    }
+
+    if (token === "--pg-url") {
+      const value = input[index + 1];
+      if (!value || value.startsWith("--")) {
+        failWithUsage("Missing value for --pg-url");
+      }
+      pgUrl = value;
+      index += 1;
       continue;
     }
 
@@ -300,13 +458,13 @@ function parseArgs(input: string[]): CliArgs {
     reportOnly = true;
   }
 
-  return { days, vacuum, report, reportOnly, integrityCheck };
+  return { days, vacuum, report, reportOnly, integrityCheck, backend, pgUrl };
 }
 
 function failWithUsage(message: string): never {
   console.error(message);
   console.error(
-    "Usage: bun run scripts/memory-maintenance.ts [--days N] [--vacuum] [--report] [--integrity-check]",
+    "Usage: bun run scripts/memory-maintenance.ts [--backend sqlite|pg] [--pg-url <url>] [--days N] [--vacuum] [--report] [--report-only] [--integrity-check]",
   );
   process.exit(1);
 }
