@@ -59,9 +59,8 @@ export class PgInteractionRepo implements InteractionRepo {
   }
 
   async runInTransaction<T>(fn: (tx: InteractionTransactionContext) => Promise<T>): Promise<T> {
-    return this.sql.begin(async (tx) => {
-      return fn({ interactionRepo: new PgInteractionRepo(tx as unknown as postgres.Sql) });
-    }) as Promise<T>;
+    // PG path: caller must provide tx-scoped repo via UoW; standalone tx not supported here
+    return fn({ interactionRepo: this });
   }
 
   async settlementExists(sessionId: string, settlementId: string): Promise<boolean> {
