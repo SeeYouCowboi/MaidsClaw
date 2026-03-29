@@ -104,8 +104,19 @@ function buildCoalescedSearchRebuildFamilyState(
   const triggerReasonCounts = { ...current.triggerReasonCounts };
   triggerReasonCounts[payload.triggerReason] = (triggerReasonCounts[payload.triggerReason] ?? 0) + 1;
 
+  // Per consensus decision 015 + Phase 1 latest-truth convergence (decision 016):
+  // Only set rerunRequested when the incoming request introduces a triggerReason
+  // not already tracked by the current run. Same-reason requests are absorbed.
+  let rerunRequested = current.rerunRequested;
+  if (status === "running" && !rerunRequested) {
+    const alreadyCovered = (current.triggerReasonCounts[payload.triggerReason] ?? 0) > 0;
+    if (!alreadyCovered) {
+      rerunRequested = true;
+    }
+  }
+
   return {
-    rerunRequested: status === "running",
+    rerunRequested,
     coalescedRequestCount: current.coalescedRequestCount + 1,
     latestRequestedAt: Math.max(current.latestRequestedAt ?? incomingRequestedAt, incomingRequestedAt),
     triggerSourceCounts,
@@ -113,12 +124,12 @@ function buildCoalescedSearchRebuildFamilyState(
   };
 }
 
-function initialSearchRebuildFamilyState(): SearchRebuildFamilyState {
+function initialSearchRebuildFamilyState(payload: DurableSearchRebuildPayload): SearchRebuildFamilyState {
   return {
     rerunRequested: false,
     coalescedRequestCount: 0,
-    triggerSourceCounts: {},
-    triggerReasonCounts: {},
+    triggerSourceCounts: { [payload.triggerSource]: 1 },
+    triggerReasonCounts: { [payload.triggerReason]: 1 },
   };
 }
 
@@ -327,7 +338,7 @@ export class PgJobStore implements DurableJobStore {
             ${"pending"},
             ${searchInput.payload_schema_version},
             ${JSON.stringify(searchInput.payload_json)},
-            ${JSON.stringify(initialSearchRebuildFamilyState())},
+            ${JSON.stringify(initialSearchRebuildFamilyState(searchInput.payload_json))},
             ${0},
             ${0},
             ${searchInput.max_attempts},
@@ -472,117 +483,123 @@ export class PgJobStore implements DurableJobStore {
 
     return this.sql.begin(async (tx) => {
       const sqltx = tx as unknown as postgres.Sql;
+      let offset = 0;
 
-      const candidates = (await sqltx`
-        SELECT *
-        FROM jobs_current
-        WHERE status = 'pending'
-          AND next_attempt_at <= ${input.now_ms}
-        ORDER BY
-          CASE execution_class
-            WHEN 'interactive.user_turn' THEN 1
-            WHEN 'interactive.delegated_task' THEN 2
-            WHEN 'background.memory_migrate' THEN 3
-            WHEN 'background.memory_organize' THEN 4
-            WHEN 'background.search_rebuild' THEN 4
-            WHEN 'background.autonomy' THEN 5
-            ELSE 9
-          END ASC,
-          next_attempt_at ASC
-        LIMIT ${CLAIM_SCAN_BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED
-      `) as PgJobCurrentRow[];
-
-      for (const candidate of candidates) {
-        const cap = getConcurrencyCap(candidate.concurrency_key);
-
-        const lockRows = (await sqltx`
-          SELECT pg_try_advisory_xact_lock(hashtext(${candidate.concurrency_key})::bigint) AS locked
-        `) as AdvisoryLockRow[];
-
-        if (!lockRows[0]?.locked) {
-          continue;
-        }
-
-        const runningCountRows = (await sqltx`
-          SELECT COUNT(*)::int AS running_count
+      while (true) {
+        const candidates = (await sqltx`
+          SELECT *
           FROM jobs_current
-          WHERE concurrency_key = ${candidate.concurrency_key}
-            AND status = 'running'
-        `) as RunningCountRow[];
-
-        const runningCount = Number(runningCountRows[0]?.running_count ?? 0);
-        if (runningCount >= cap) {
-          continue;
-        }
-
-        const claimedRows = (await sqltx`
-          UPDATE jobs_current
-          SET status = 'running',
-              claim_version = claim_version + 1,
-              claimed_by = ${input.worker_id},
-              claimed_at = ${input.now_ms},
-              lease_expires_at = ${leaseExpiresAt},
-              last_heartbeat_at = ${input.now_ms},
-              attempt_count = attempt_count + 1,
-              updated_at = ${input.now_ms}
-          WHERE job_key = ${candidate.job_key}
-            AND status = 'pending'
-          RETURNING *
+          WHERE status = 'pending'
+            AND next_attempt_at <= ${input.now_ms}
+          ORDER BY
+            CASE execution_class
+              WHEN 'interactive.user_turn' THEN 1
+              WHEN 'interactive.delegated_task' THEN 2
+              WHEN 'background.memory_migrate' THEN 3
+              WHEN 'background.memory_organize' THEN 4
+              WHEN 'background.search_rebuild' THEN 4
+              WHEN 'background.autonomy' THEN 5
+              ELSE 9
+            END ASC,
+            next_attempt_at ASC
+          LIMIT ${CLAIM_SCAN_BATCH_SIZE}
+          OFFSET ${offset}
+          FOR UPDATE SKIP LOCKED
         `) as PgJobCurrentRow[];
 
-        const claimed = claimedRows[0];
-        if (!claimed) {
-          continue;
+        if (candidates.length === 0) {
+          return { outcome: "none_ready" as const };
         }
 
-        const normalizedClaimed = normalizePgJobCurrentRow(claimed);
+        for (const candidate of candidates) {
+          const cap = getConcurrencyCap(candidate.concurrency_key);
 
-        await sqltx`
-          INSERT INTO job_attempts (
-            job_key,
-            job_type,
-            job_family_key,
-            execution_class,
-            concurrency_key,
-            claim_version,
-            attempt_no,
-            worker_id,
-            outcome,
-            payload_schema_version,
-            payload_snapshot_json,
-            family_state_snapshot_json,
-            started_at,
-            last_heartbeat_at,
-            lease_expires_at
-          ) VALUES (
-            ${normalizedClaimed.job_key},
-            ${normalizedClaimed.job_type},
-            ${normalizedClaimed.job_family_key ?? null},
-            ${normalizedClaimed.execution_class},
-            ${normalizedClaimed.concurrency_key},
-            ${normalizedClaimed.claim_version},
-            ${normalizedClaimed.attempt_count},
-            ${input.worker_id},
-            ${"running"},
-            ${normalizedClaimed.payload_schema_version},
-            ${JSON.stringify(normalizedClaimed.payload_json)},
-            ${JSON.stringify(normalizedClaimed.family_state_json)},
-            ${input.now_ms},
-            ${input.now_ms},
-            ${leaseExpiresAt}
-          )
-        `;
+          const lockRows = (await sqltx`
+            SELECT pg_try_advisory_xact_lock(hashtext(${candidate.concurrency_key})::bigint) AS locked
+          `) as AdvisoryLockRow[];
 
-        return {
-          outcome: "claimed",
-          job: normalizedClaimed,
-        };
+          if (!lockRows[0]?.locked) {
+            continue;
+          }
+
+          const runningCountRows = (await sqltx`
+            SELECT COUNT(*)::int AS running_count
+            FROM jobs_current
+            WHERE concurrency_key = ${candidate.concurrency_key}
+              AND status = 'running'
+          `) as RunningCountRow[];
+
+          const runningCount = Number(runningCountRows[0]?.running_count ?? 0);
+          if (runningCount >= cap) {
+            continue;
+          }
+
+          const claimedRows = (await sqltx`
+            UPDATE jobs_current
+            SET status = 'running',
+                claim_version = claim_version + 1,
+                claimed_by = ${input.worker_id},
+                claimed_at = ${input.now_ms},
+                lease_expires_at = ${leaseExpiresAt},
+                last_heartbeat_at = ${input.now_ms},
+                attempt_count = attempt_count + 1,
+                updated_at = ${input.now_ms}
+            WHERE job_key = ${candidate.job_key}
+              AND status = 'pending'
+            RETURNING *
+          `) as PgJobCurrentRow[];
+
+          const claimed = claimedRows[0];
+          if (!claimed) {
+            continue;
+          }
+
+          const normalizedClaimed = normalizePgJobCurrentRow(claimed);
+
+          await sqltx`
+            INSERT INTO job_attempts (
+              job_key,
+              job_type,
+              job_family_key,
+              execution_class,
+              concurrency_key,
+              claim_version,
+              attempt_no,
+              worker_id,
+              outcome,
+              payload_schema_version,
+              payload_snapshot_json,
+              family_state_snapshot_json,
+              started_at,
+              last_heartbeat_at,
+              lease_expires_at
+            ) VALUES (
+              ${normalizedClaimed.job_key},
+              ${normalizedClaimed.job_type},
+              ${normalizedClaimed.job_family_key ?? null},
+              ${normalizedClaimed.execution_class},
+              ${normalizedClaimed.concurrency_key},
+              ${normalizedClaimed.claim_version},
+              ${normalizedClaimed.attempt_count},
+              ${input.worker_id},
+              ${"running"},
+              ${normalizedClaimed.payload_schema_version},
+              ${JSON.stringify(normalizedClaimed.payload_json)},
+              ${JSON.stringify(normalizedClaimed.family_state_json)},
+              ${input.now_ms},
+              ${input.now_ms},
+              ${leaseExpiresAt}
+            )
+          `;
+
+          return {
+            outcome: "claimed" as const,
+            job: normalizedClaimed,
+          };
+        }
+
+        offset += candidates.length;
       }
-
-      return {
-        outcome: "none_ready",
-      };
     });
   }
 
@@ -900,6 +917,46 @@ export class PgJobStore implements DurableJobStore {
         claim_version,
         terminal_at: Number(row.terminal_at ?? nowMs),
       };
+    });
+  }
+
+  async reclaimExpiredLeases(nowMs: number): Promise<number> {
+    type ExpiredRow = Pick<PgJobCurrentRow, "job_key" | "claim_version">;
+
+    return this.sql.begin(async (tx) => {
+      const sqltx = tx as unknown as postgres.Sql;
+
+      const expired = (await sqltx`
+        SELECT job_key, claim_version
+        FROM jobs_current
+        WHERE status = 'running'
+          AND lease_expires_at < ${nowMs}
+        FOR UPDATE
+      `) as ExpiredRow[];
+
+      if (expired.length === 0) {
+        return 0;
+      }
+
+      for (const row of expired) {
+        await markAttemptLeaseLost(sqltx, row.job_key, Number(row.claim_version), nowMs);
+
+        await sqltx`
+          UPDATE jobs_current
+          SET status = 'pending',
+              next_attempt_at = ${nowMs},
+              claimed_by = NULL,
+              claimed_at = NULL,
+              lease_expires_at = NULL,
+              last_heartbeat_at = NULL,
+              updated_at = ${nowMs}
+          WHERE job_key = ${row.job_key}
+            AND status = 'running'
+            AND claim_version = ${Number(row.claim_version)}
+        `;
+      }
+
+      return expired.length;
     });
   }
 

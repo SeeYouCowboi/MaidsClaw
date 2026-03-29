@@ -148,10 +148,11 @@ describe("pg search.rebuild enqueue coalescing", () => {
 
     expect(state.coalescedRequestCount).toBe(2);
     expect(state.triggerSourceCounts).toEqual({
+      manual_cli: 2,
       doctor_verify: 1,
-      manual_cli: 1,
     });
     expect(state.triggerReasonCounts).toEqual({
+      fts_repair: 1,
       verify_mismatch: 1,
       full_rebuild: 1,
     });
@@ -176,7 +177,7 @@ describe("pg search.rebuild enqueue coalescing", () => {
     expect(state.rerunRequested).toBe(false);
   });
 
-  it("running: same-family while running sets rerunRequested = true", async () => {
+  it("running: same-reason request while running stays rerunRequested = false", async () => {
     const first = buildInput({ requestedAt: 1_700_000_003_000, nowMs: 1_700_000_003_000 });
     const second = buildInput({ requestedAt: 1_700_000_003_100, nowMs: 1_700_000_003_100 });
 
@@ -188,6 +189,44 @@ describe("pg search.rebuild enqueue coalescing", () => {
           claimed_at = ${1_700_000_003_010},
           lease_expires_at = ${1_700_000_063_010},
           updated_at = ${1_700_000_003_010}
+      WHERE job_key = ${first.job_key}
+    `;
+
+    const coalesced = await store.enqueue(second);
+    expect(coalesced.outcome).toBe("coalesced");
+
+    const [row] = await sql<CurrentRow[]>`
+      SELECT job_key, status, family_state_json
+      FROM jobs_current
+      WHERE job_key = ${first.job_key}
+    `;
+
+    expect(row.status).toBe("running");
+    const state = parseFamilyState(row.family_state_json);
+    expect(state.rerunRequested).toBe(false);
+    expect(state.coalescedRequestCount).toBe(1);
+  });
+
+  it("running: different triggerReason while running sets rerunRequested = true", async () => {
+    const first = buildInput({
+      triggerReason: "fts_repair",
+      requestedAt: 1_700_000_005_000,
+      nowMs: 1_700_000_005_000,
+    });
+    const second = buildInput({
+      triggerReason: "full_rebuild",
+      requestedAt: 1_700_000_005_100,
+      nowMs: 1_700_000_005_100,
+    });
+
+    await store.enqueue(first);
+    await sql`
+      UPDATE jobs_current
+      SET status = 'running',
+          claimed_by = 'worker-1',
+          claimed_at = ${1_700_000_005_010},
+          lease_expires_at = ${1_700_000_065_010},
+          updated_at = ${1_700_000_005_010}
       WHERE job_key = ${first.job_key}
     `;
 

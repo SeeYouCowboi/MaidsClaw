@@ -250,6 +250,8 @@ export interface DurableJobStore {
   fail(job_key: string, claim_version: number, error: PgJobFailInput): Promise<FailResult>;
   cancel(job_key: string, claim_version: number): Promise<CancelResult>;
 
+  reclaimExpiredLeases(nowMs: number): Promise<number>;
+
   inspect(job_key: string): Promise<PgJobCurrentRow | undefined>;
   listActive(): Promise<PgJobCurrentRow[]>;
   listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]>;

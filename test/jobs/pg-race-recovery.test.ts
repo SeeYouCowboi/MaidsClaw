@@ -70,20 +70,8 @@ describe("pg race recovery semantics", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     const reaperNow = Date.now();
-    const reaped = await sql`
-      UPDATE jobs_current
-      SET status = 'pending',
-          next_attempt_at = ${reaperNow - 1},
-          lease_expires_at = ${reaperNow - 1},
-          claimed_by = NULL,
-          claimed_at = NULL,
-          last_heartbeat_at = NULL,
-          updated_at = ${reaperNow}
-      WHERE job_key = ${enqueueInput.job_key}
-        AND status = 'running'
-        AND lease_expires_at < ${reaperNow}
-    `;
-    expect(reaped.count).toBe(1);
+    const reclaimedCount = await store.reclaimExpiredLeases(reaperNow);
+    expect(reclaimedCount).toBe(1);
 
     const workerBClaim = await store.claimNext({
       worker_id: "worker-b",
