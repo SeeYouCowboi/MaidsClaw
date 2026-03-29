@@ -1031,7 +1031,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(runtime): migrate settlement chain to async UoW`
 
-- [ ] 25. MemoryTaskAgent + PendingSettlementSweeper + FlushSelector migration
+- [x] 25. MemoryTaskAgent + PendingSettlementSweeper + FlushSelector migration
 
   **What to do**:
   - Migrate these services to depend on domain repos instead of SQLite-specific contracts
@@ -1046,7 +1046,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(runtime): migrate memory task agent and sweeper to domain repos`
 
-- [ ] 26. Inspect/prompt-data/viewer-context service migration
+- [x] 26. Inspect/prompt-data/viewer-context service migration
 
   **What to do**:
   - Migrate inspect, prompt-data, and viewer-context services to domain repos
@@ -1061,7 +1061,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(app): migrate inspect and prompt services to domain repos`
 
-- [ ] 27. Search rebuild contract on PG (pg_trgm rebuild)
+- [x] 27. Search rebuild contract on PG (pg_trgm rebuild)
 
   **What to do**:
   - Implement `search.rebuild` worker that operates on PG search_docs_* + pg_trgm
@@ -1078,7 +1078,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement search rebuild contract with pg_trgm`
 
-- [ ] 28. Embedding rebuild contract on PG (pgvector + model epoch)
+- [x] 28. Embedding rebuild contract on PG (pgvector + model epoch)
 
   **What to do**:
   - Implement embedding/semantic/score rebuild on PG
@@ -1095,7 +1095,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(pg): implement embedding rebuild contract with model epoch`
 
-- [ ] 29. Parity verify tool — truth plane + current projection
+- [x] 29. Parity verify tool — truth plane + current projection
 
   **What to do**:
   - Create `src/migration/parity/truth-parity.ts` and `scripts/parity-verify.ts`
@@ -1118,7 +1118,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(migration): implement truth plane parity verify tool`
 
-- [ ] 30. Parity verify tool — search docs + derived surfaces
+- [x] 30. Parity verify tool — search docs + derived surfaces
 
   **What to do**:
   - Extend parity tool for search_docs_* (authority source + doc identity match, §3.75)
@@ -1134,7 +1134,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `feat(migration): implement derived surface parity verify`
 
-- [ ] 31. Script migration: memory-verify + memory-replay
+- [x] 31. Script migration: memory-verify + memory-replay
 
   **What to do**:
   - Add `--backend pg` flag to memory-verify and memory-replay scripts
@@ -1151,7 +1151,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(scripts): migrate memory-verify and memory-replay to backend-neutral`
 
-- [ ] 32. Script migration: search-rebuild + doctor/maintenance
+- [x] 32. Script migration: search-rebuild + doctor/maintenance
 
   **What to do**:
   - Same pattern as T31 for search-rebuild, doctor, maintenance scripts
@@ -1166,7 +1166,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `refactor(scripts): migrate search-rebuild and maintenance to backend-neutral`
 
-- [ ] 33. End-to-end integration test: export→import→parity→boot→turn
+- [x] 33. End-to-end integration test: export→import→parity→boot→turn
 
   **What to do**:
   - Create `test/pg-app/e2e-migration.test.ts`
@@ -1194,7 +1194,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **Commit**: YES | `test(pg): add end-to-end migration integration test`
 
-- [ ] 34. Phase 2C verification gate
+- [x] 34. Phase 2C verification gate
 
   **What to do**:
   - Final verification: `bun run build` + `bun test` (all tests including PG)
@@ -1216,21 +1216,25 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the consensus document (§3.29–§3.81) end-to-end. For each frozen decision: verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files in `.sisyphus/evidence/`. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT`
+  **VERDICT: APPROVE — 11/11 Must Have PASS | 6/6 Must NOT Have CLEAN | 17/17 Tasks PRESENT**
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, `console.log` in prod, raw SQL injection risks, missing error handling on PG operations, connection leak risks.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
+  **VERDICT: APPROVE**
 
-- [ ] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill if UI)
+- [x] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill if UI)
   Execute export→import→parity pipeline from scratch. Boot backend-aware runtime with `--backend pg`. Execute a user turn through TurnService. Verify settlement, projection, search all function on PG.
   Output: `Migration [PASS/FAIL] | Boot [PASS/FAIL] | Turn [PASS/FAIL] | VERDICT`
+  **VERDICT: APPROVE**
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read spec, read actual diff. Verify 1:1 — everything in spec was built, nothing beyond spec was added. Check guardrails: no GraphStorageService wholesale port, no saga/outbox, no default backend switch, no ORM.
   Output: `Tasks [N/N compliant] | Guardrails [N/N clean] | VERDICT`
+  **VERDICT: APPROVE — 4/4 Guardrails CLEAN | 10/10 Tasks COMPLIANT**
 
 ---
 
