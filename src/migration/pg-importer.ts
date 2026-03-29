@@ -18,6 +18,39 @@ const JSON_COLUMNS_BY_SURFACE = new Map(
   EXPORT_SURFACES.map((surface) => [surface.name, new Set(surface.jsonColumns ?? [])]),
 );
 
+const SEQUENCE_RESET_CANDIDATE_TABLES = [
+  "settlement_processing_ledger",
+  "private_episode_events",
+  "private_cognition_events",
+  "area_state_events",
+  "world_state_events",
+  "event_nodes",
+  "entity_nodes",
+  "entity_aliases",
+  "pointer_redirects",
+  "logic_edges",
+  "fact_edges",
+  "memory_relations",
+  "topics",
+  "core_memory_blocks",
+  "shared_blocks",
+  "shared_block_sections",
+  "shared_block_admins",
+  "shared_block_attachments",
+  "shared_block_patch_log",
+  "shared_block_snapshots",
+  "interaction_records",
+  "recent_cognition_slots",
+  "pending_settlement_recovery",
+  "node_embeddings",
+  "semantic_edges",
+  "node_scores",
+  "search_docs_private",
+  "search_docs_area",
+  "search_docs_world",
+  "search_docs_cognition",
+] as const;
+
 export interface PgImportOptions {
   manifestPath: string;
   pgUrl?: string;
@@ -185,9 +218,7 @@ export class PgImporter {
       this.log(`[ok] Imported ${surface.name}: +${importedRows} rows`);
     }
 
-    const sequenceTablesReset = await this.resetSequences(
-      surfaces.map((surface) => surface.name),
-    );
+    const sequenceTablesReset = await this.resetSequences();
 
     if (existsSync(this.checkpointPath)) {
       rmSync(this.checkpointPath, { force: true });
@@ -412,11 +443,10 @@ export class PgImporter {
     );
   }
 
-  private async resetSequences(surfaceNames: string[]): Promise<string[]> {
-    const uniqueSurfaceNames = [...new Set(surfaceNames)];
+  private async resetSequences(): Promise<string[]> {
     const resetTables: string[] = [];
 
-    for (const tableName of uniqueSurfaceNames) {
+    for (const tableName of SEQUENCE_RESET_CANDIDATE_TABLES) {
       const hasId = await this.sql<{ present: number }[]>`
         SELECT 1 AS present
         FROM information_schema.columns
