@@ -2,8 +2,14 @@
  * Backend type definitions for MaidsClaw storage layer.
  *
  * Phase 2A: Type definitions and backend selection contract.
- * Full factory implementations deferred to Phase 2B (T7).
+ * Phase 2B (T7): PgBackendFactory fully implemented.
  */
+
+import type postgres from "postgres";
+import { bootstrapDerivedSchema } from "./pg-app-schema-derived.js";
+import { bootstrapOpsSchema } from "./pg-app-schema-ops.js";
+import { bootstrapTruthSchema } from "./pg-app-schema-truth.js";
+import { createPgPool } from "./pg-pool.js";
 
 export type BackendType = "sqlite" | "pg";
 
@@ -38,8 +44,7 @@ export function resolveBackendType(): BackendType {
 }
 
 /**
- * Placeholder interface for backend factories.
- * Full implementation deferred to T7.
+ * Backend factory interface.
  */
 export interface BackendFactory {
 	readonly type: BackendType;
@@ -51,7 +56,8 @@ export interface BackendFactory {
 
 /**
  * Placeholder SQLite backend factory.
- * Full implementation deferred to T7.
+ * SQLite bootstrap is handled directly in runtime.ts (sync path).
+ * This factory exists for interface symmetry — full implementation deferred.
  */
 export class SqliteBackendFactory implements BackendFactory {
 	readonly type = "sqlite" as const;
@@ -66,17 +72,31 @@ export class SqliteBackendFactory implements BackendFactory {
 }
 
 /**
- * Placeholder PostgreSQL backend factory.
- * Full implementation deferred to T7.
+ * PostgreSQL backend factory — creates a PG connection pool and
+ * bootstraps all three app schema layers (truth, ops, derived).
  */
 export class PgBackendFactory implements BackendFactory {
 	readonly type = "pg" as const;
+	private pool: postgres.Sql | null = null;
 
-	async initialize(_config: BackendConfig): Promise<void> {
-		throw new Error("PgBackendFactory not yet implemented (T7)");
+	async initialize(config: BackendConfig): Promise<void> {
+		if (!config.pg) throw new Error("PgBackendFactory requires config.pg");
+		const { url, ...poolConfig } = config.pg;
+		this.pool = createPgPool(url, poolConfig);
+		await bootstrapTruthSchema(this.pool);
+		await bootstrapOpsSchema(this.pool);
+		await bootstrapDerivedSchema(this.pool);
 	}
 
 	async close(): Promise<void> {
-		throw new Error("PgBackendFactory not yet implemented (T7)");
+		if (this.pool) {
+			await this.pool.end();
+			this.pool = null;
+		}
+	}
+
+	getPool(): postgres.Sql {
+		if (!this.pool) throw new Error("PgBackendFactory not initialized");
+		return this.pool;
 	}
 }

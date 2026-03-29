@@ -1,9 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
-	resolveBackendType,
-	type BackendType,
-	SqliteBackendFactory,
 	PgBackendFactory,
+	SqliteBackendFactory,
+	resolveBackendType,
 } from "../../src/storage/backend-types.js";
 
 describe("backend-selection", () => {
@@ -72,11 +71,11 @@ describe("backend-selection", () => {
 			);
 		});
 
-		it("PgBackendFactory.initialize throws not implemented", async () => {
+		it("PgBackendFactory.initialize rejects without config.pg", async () => {
 			const factory = new PgBackendFactory();
-			await expect(factory.initialize({ type: "pg", pg: { url: "" } })).rejects.toThrow(
-				"PgBackendFactory not yet implemented (T7)",
-			);
+			await expect(
+				factory.initialize({ type: "pg" }),
+			).rejects.toThrow("PgBackendFactory requires config.pg");
 		});
 	});
 });

@@ -50,6 +50,10 @@ import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { runSessionMigrations } from "../session/migrations.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
+import {
+	PgBackendFactory,
+	resolveBackendType,
+} from "../storage/backend-types.js";
 import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
 import {
 	ensureDirectoryExists,
@@ -193,6 +197,12 @@ function buildAgentRegistry(
 export function bootstrapRuntime(
 	options: RuntimeBootstrapOptions = {},
 ): RuntimeBootstrapResult {
+	const backendType = resolveBackendType();
+	let pgFactory: PgBackendFactory | null = null;
+	if (backendType === "pg") {
+		pgFactory = new PgBackendFactory();
+	}
+
 	const runtimeCwd = resolveRuntimeCwd(options);
 	const databasePath = resolveDatabasePath(options, runtimeCwd);
 	ensureDirectoryExists(dirname(databasePath));
@@ -533,6 +543,25 @@ export function bootstrapRuntime(
 		healthChecks,
 		migrationStatus,
 		traceStore,
+		backendType,
+		pgFactory,
 		shutdown,
 	};
+}
+
+/**
+ * Async PG backend initialization — call after bootstrapRuntime() when
+ * backendType is 'pg'. Creates a PG pool, bootstraps all three schema
+ * layers (truth, ops, derived), and stores the pool on the factory.
+ *
+ * No-op if the runtime's pgFactory is null (i.e. SQLite backend).
+ */
+export async function initializePgBackendForRuntime(
+	result: RuntimeBootstrapResult,
+): Promise<void> {
+	if (!result.pgFactory) return;
+	await result.pgFactory.initialize({
+		type: "pg",
+		pg: { url: process.env.PG_APP_URL ?? "" },
+	});
 }

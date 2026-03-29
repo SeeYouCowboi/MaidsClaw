@@ -15,6 +15,7 @@ import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
+import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
 import type { Db } from "../storage/database.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
@@ -87,6 +88,8 @@ export type RuntimeBootstrapResult = {
 	healthChecks: Record<string, RuntimeHealthStatus>;
 	migrationStatus: RuntimeMigrationStatus;
 	traceStore?: TraceStore;
+	backendType: BackendType;
+	pgFactory: PgBackendFactory | null;
 	shutdown: () => void;
 };
 
