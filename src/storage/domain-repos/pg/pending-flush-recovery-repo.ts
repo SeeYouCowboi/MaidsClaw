@@ -113,15 +113,48 @@ export class PgPendingFlushRecoveryRepo implements PendingFlushRecoveryRepo {
     return rows.map(rowToRecord);
   }
 
-  async markHardFail(sessionId: string, lastError: string): Promise<void> {
+  async markHardFail(sessionId: string, lastError: string, failureCount?: number): Promise<void> {
     const now = Date.now();
-    await this.sql`
-      UPDATE pending_settlement_recovery
-      SET status     = 'hard_failed',
-          last_error = ${lastError},
-          updated_at = ${now}
-      WHERE session_id = ${sessionId}
-        AND status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[1]})
-    `;
+    if (failureCount != null) {
+      await this.sql`
+        UPDATE pending_settlement_recovery
+        SET status        = 'hard_failed',
+            failure_count = ${failureCount},
+            last_error    = ${lastError},
+            updated_at    = ${now}
+        WHERE session_id = ${sessionId}
+          AND status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[1]})
+      `;
+    } else {
+      await this.sql`
+        UPDATE pending_settlement_recovery
+        SET status     = 'hard_failed',
+            last_error = ${lastError},
+            updated_at = ${now}
+        WHERE session_id = ${sessionId}
+          AND status IN (${ACTIVE_STATUSES[0]}, ${ACTIVE_STATUSES[1]})
+      `;
+    }
   }
+
+  async getBySession(sessionId: string): Promise<PendingFlushRecoveryRecord | null> {
+    const rows = await this.sql<RecoveryRow[]>`
+      SELECT session_id, agent_id, flush_range_start, flush_range_end,
+             failure_count, backoff_ms, next_attempt_at, last_error, status, updated_at
+      FROM pending_settlement_recovery
+      WHERE session_id = ${sessionId}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return rowToRecord(rows[0]);
+  }
+
+  async trySweepLock(_claimant: string): Promise<boolean> {
+    return true;
+  }
+
+  async releaseSweepLock(): Promise<void> {}
 }

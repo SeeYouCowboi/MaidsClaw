@@ -25,6 +25,7 @@ import {
   type MemoryFlushRequest,
 } from "../../src/memory/task-agent.js";
 import { PendingSettlementSweeper } from "../../src/memory/pending-settlement-sweeper.js";
+import { SqlitePendingFlushRecoveryRepoAdapter } from "../../src/storage/domain-repos/sqlite/pending-flush-recovery-repo.js";
 import type { PrivateCognitionCommitV4, CognitionOp } from "../../src/runtime/rp-turn-contract.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
@@ -1811,9 +1812,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: Date.now(),
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 10_000,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 10_000, });
       sweeper.start();
 
       await waitFor(() => migrateCalls.length === 1);
@@ -1848,9 +1847,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       });
 
       const nowMs = Date.now();
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 20,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 20, });
       sweeper.start();
       await sleep(30);
 
@@ -1906,11 +1903,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: nowMs - 130_000,
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 20,
-        now: () => nowMs,
-        random: () => 0,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 20,
+      now: () => nowMs,
+      random: () => 0, });
       sweeper.start();
 
       await waitFor(() => attempts === 1);
@@ -1964,11 +1959,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: nowMs - 130_000,
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 20,
-        now: () => nowMs,
-        random: () => 0,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 20,
+      now: () => nowMs,
+      random: () => 0, });
       sweeper.start();
 
       await waitFor(() => attempts === 1);
@@ -1983,7 +1976,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
          WHERE job_type = 'pending_settlement_flush' AND idempotency_key = ?`,
         ["pending_flush:sess-block"],
       );
-      expect(job?.status).toBe("blocked_manual");
+      expect(job?.status).toBe("failed_hard");
       const payload = JSON.parse(job!.payload) as { failureCount: number; nextAttemptAt: number | null };
       expect(payload.failureCount).toBe(5);
       expect(payload.nextAttemptAt).toBeNull();
@@ -2022,9 +2015,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: Date.now() - 130_000,
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 20,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 20, });
       sweeper.start();
 
       await waitFor(() => attempts === 1);
@@ -2073,11 +2064,9 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: nowMs - 130_000,
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 20,
-        now: () => nowMs,
-        random: () => 0,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 20,
+      now: () => nowMs,
+      random: () => 0, });
       sweeper.start();
 
       await waitFor(() => attempts === 1);
@@ -2252,9 +2241,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
         committedAt: Date.now() - 190_000 + 1,
       });
 
-      const sweeper = new PendingSettlementSweeper(runtime.db, interactionStore, flushSelector, memoryTaskAgent, {
-        intervalMs: 10_000,
-      });
+      const sweeper = new PendingSettlementSweeper(new SqlitePendingFlushRecoveryRepoAdapter(runtime.db), interactionStore, flushSelector, memoryTaskAgent, { intervalMs: 10_000, });
       sweeper.start();
 
       await waitFor(() => migrateCalls.length === 1);

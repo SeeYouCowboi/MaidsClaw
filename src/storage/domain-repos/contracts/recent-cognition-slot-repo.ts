@@ -5,4 +5,6 @@ export interface RecentCognitionSlotRepo {
     settlementId: string,
     newEntriesJson?: string,
   ): Promise<void>;
+
+  getSlotPayload(sessionId: string, agentId: string): Promise<string | undefined>;
 }

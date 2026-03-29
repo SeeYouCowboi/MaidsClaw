@@ -202,4 +202,12 @@ export class PgSharedBlockRepo implements SharedBlockRepo {
       WHERE id = ${blockId}
     `;
   }
+
+  async getAttachedBlockIds(targetKind: string, targetId: string): Promise<number[]> {
+    const rows = await this.sql<{ block_id: string }[]>`
+      SELECT block_id FROM shared_block_attachments
+      WHERE target_kind = ${targetKind} AND target_id = ${targetId}
+    `;
+    return rows.map((r) => Number(r.block_id));
+  }
 }

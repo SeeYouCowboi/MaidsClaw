@@ -76,6 +76,16 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     };
   }
 
+  async getSlotPayload(sessionId: string, agentId: string): Promise<string | undefined> {
+    const rows = await this.sql`
+      SELECT slot_payload FROM recent_cognition_slots
+      WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+    `;
+    if (rows.length === 0) return undefined;
+    const payload = rows[0].slot_payload;
+    return typeof payload === "string" ? payload : JSON.stringify(payload);
+  }
+
   async deleteBySession(sessionId: string): Promise<void> {
     await this.sql`
       DELETE FROM recent_cognition_slots WHERE session_id = ${sessionId}

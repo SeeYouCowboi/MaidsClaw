@@ -15,4 +15,5 @@ export interface SharedBlockRepo {
   sectionExists(blockId: number, sectionPath: string): Promise<boolean>;
   buildSnapshotJson(blockId: number): Promise<string>;
   writeSnapshot(blockId: number, snapshotSeq: number): Promise<void>;
+  getAttachedBlockIds(targetKind: string, targetId: string): Promise<number[]>;
 }

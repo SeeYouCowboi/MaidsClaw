@@ -26,6 +26,8 @@ type PendingPayload = {
 };
 
 const JOB_TYPE = "pending_settlement_flush";
+const SWEEP_LOCK_SETTLEMENT_ID = "__sweeper__:pending_settlement_flush";
+const SWEEP_LOCK_AGENT_ID = "system:pending_settlement_sweeper";
 
 export class SqlitePendingFlushRecoveryRepoAdapter implements PendingFlushRecoveryRepo {
   constructor(private readonly db: Db) {}
@@ -77,13 +79,14 @@ export class SqlitePendingFlushRecoveryRepoAdapter implements PendingFlushRecove
       return Promise.resolve();
     }
 
+    const [errorCode, errorMessage] = splitError(input.lastError ?? null);
     const updated: PendingPayload = {
       ...payload,
       failureCount: input.failureCount,
       backoffMs: input.backoffMs,
       nextAttemptAt: input.nextAttemptAt,
-      lastErrorCode: input.lastError ?? null,
-      lastErrorMessage: input.lastError ?? null,
+      lastErrorCode: errorCode,
+      lastErrorMessage: errorMessage,
     };
 
     this.db.run(
@@ -138,7 +141,7 @@ export class SqlitePendingFlushRecoveryRepoAdapter implements PendingFlushRecove
     return Promise.resolve(mapped);
   }
 
-  async markHardFail(sessionId: string, lastError: string): Promise<void> {
+  async markHardFail(sessionId: string, lastError: string, failureCount?: number): Promise<void> {
     const job = this.loadBySession(sessionId);
     if (!job) {
       return Promise.resolve();
@@ -149,10 +152,12 @@ export class SqlitePendingFlushRecoveryRepoAdapter implements PendingFlushRecove
       return Promise.resolve();
     }
 
+    const [errorCode, errorMessage] = splitError(lastError);
     const updated: PendingPayload = {
       ...payload,
-      lastErrorCode: "hard_failed",
-      lastErrorMessage: lastError,
+      failureCount: failureCount ?? payload.failureCount,
+      lastErrorCode: errorCode,
+      lastErrorMessage: errorMessage,
       nextAttemptAt: null,
     };
 
@@ -161,6 +166,67 @@ export class SqlitePendingFlushRecoveryRepoAdapter implements PendingFlushRecove
        SET status = 'failed_hard', payload = ?, updated_at = ?, next_attempt_at = NULL
        WHERE job_type = ? AND idempotency_key = ?`,
       [JSON.stringify(updated), Date.now(), JOB_TYPE, `pending_flush:${sessionId}`],
+    );
+    return Promise.resolve();
+  }
+
+  async getBySession(sessionId: string): Promise<PendingFlushRecoveryRecord | null> {
+    const row = this.loadBySession(sessionId);
+    if (!row) {
+      return Promise.resolve(null);
+    }
+    const payload = parsePayload(row.payload);
+    if (!payload) {
+      return Promise.resolve(null);
+    }
+    return Promise.resolve({
+      session_id: payload.sessionId,
+      agent_id: payload.agentId,
+      flush_range_start: payload.rangeStart,
+      flush_range_end: payload.rangeEnd,
+      failure_count: payload.failureCount,
+      backoff_ms: payload.backoffMs ?? 0,
+      next_attempt_at: row.next_attempt_at,
+      last_error: payload.lastErrorMessage ?? null,
+      status: mapStatus(row.status),
+      updated_at: row.updated_at,
+    });
+  }
+
+  async trySweepLock(claimant: string): Promise<boolean> {
+    const now = Date.now();
+    this.db.run(
+      `INSERT OR IGNORE INTO settlement_processing_ledger
+       (settlement_id, agent_id, status, attempt_count, max_attempts, created_at, updated_at)
+       VALUES (?, ?, 'pending', 0, 1, ?, ?)`,
+      [SWEEP_LOCK_SETTLEMENT_ID, SWEEP_LOCK_AGENT_ID, now, now],
+    );
+
+    const claimResult = this.db.run(
+      `UPDATE settlement_processing_ledger
+       SET status = 'applying',
+           claimed_by = ?,
+           claimed_at = ?,
+           attempt_count = attempt_count + 1,
+           updated_at = ?
+       WHERE settlement_id = ? AND status = 'pending'`,
+      [claimant, now, now, SWEEP_LOCK_SETTLEMENT_ID],
+    );
+
+    return Promise.resolve(claimResult.changes > 0);
+  }
+
+  async releaseSweepLock(): Promise<void> {
+    const now = Date.now();
+    this.db.run(
+      `UPDATE settlement_processing_ledger
+       SET status = 'pending',
+           claimed_by = NULL,
+           claimed_at = NULL,
+           error_message = NULL,
+           updated_at = ?
+       WHERE settlement_id = ?`,
+      [now, SWEEP_LOCK_SETTLEMENT_ID],
     );
     return Promise.resolve();
   }
@@ -201,4 +267,15 @@ function mapStatus(status: string): PendingFlushRecoveryStatus {
     return "resolved";
   }
   return "hard_failed";
+}
+
+function splitError(error: string | null): [string | null, string | null] {
+  if (!error) {
+    return [null, null];
+  }
+  const colonIndex = error.indexOf(": ");
+  if (colonIndex > 0) {
+    return [error.slice(0, colonIndex), error.slice(colonIndex + 2)];
+  }
+  return [error, error];
 }

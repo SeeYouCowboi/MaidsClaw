@@ -30,5 +30,15 @@ export interface PendingFlushRecoveryRepo {
   }): Promise<void>;
   markResolved(sessionId: string): Promise<void>;
   queryActive(nowMs: number): Promise<PendingFlushRecoveryRecord[]>;
-  markHardFail(sessionId: string, lastError: string): Promise<void>;
+  markHardFail(sessionId: string, lastError: string, failureCount?: number): Promise<void>;
+  getBySession(sessionId: string): Promise<PendingFlushRecoveryRecord | null>;
+  /**
+   * Attempt to acquire an exclusive sweep lock.
+   * Returns true if the lock was acquired, false if already held.
+   */
+  trySweepLock(claimant: string): Promise<boolean>;
+  /**
+   * Release the sweep lock previously acquired via trySweepLock.
+   */
+  releaseSweepLock(): Promise<void>;
 }

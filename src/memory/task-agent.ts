@@ -19,6 +19,7 @@ import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
+import type { Db } from "../storage/database.js";
 import type {
   GraphOrganizerResult,
   MigrationResult,
@@ -317,6 +318,8 @@ export class MemoryIngestionPolicy {
 }
 
 export class MemoryTaskAgent {
+  private readonly db: Db;
+  private readonly rawDb: Database;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
@@ -327,7 +330,7 @@ export class MemoryTaskAgent {
   private organizeTail: Promise<unknown> = Promise.resolve();
 
   constructor(
-    private readonly db: Database,
+    dbInput: Db | Database,
     private readonly storage: GraphStorageService,
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
@@ -336,6 +339,8 @@ export class MemoryTaskAgent {
     settlementLedger?: SettlementLedger,
     jobPersistence?: JobPersistence,
   ) {
+    this.db = normalizeDbInput(dbInput);
+    this.rawDb = this.db.raw;
     this.modelProvider =
       modelProvider ??
       ({
@@ -349,18 +354,18 @@ export class MemoryTaskAgent {
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
-      this.db,
+      this.rawDb,
       this.storage,
       this.modelProvider,
       (agentId) => this.loadExistingContext(agentId),
       (request, toolCalls, created) => {
         this.applyCallOneToolCalls(request, toolCalls, created);
       },
-      settlementLedger ?? new SqliteSettlementLedger(this.db),
+      settlementLedger ?? new SqliteSettlementLedger(this.rawDb),
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
-      this.db,
+      this.rawDb,
       this.storage,
       this.coreMemory,
       this.embeddings,
@@ -393,7 +398,7 @@ export class MemoryTaskAgent {
       changedNodeRefs: [],
     };
 
-    this.db.prepare("BEGIN IMMEDIATE").run();
+      this.db.exec("BEGIN IMMEDIATE");
     try {
       await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
         agentRole: flushRequest.agentRole ?? "rp_agent",
@@ -448,9 +453,9 @@ export class MemoryTaskAgent {
 
       await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
 
-      this.db.prepare("COMMIT").run();
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.db.prepare("ROLLBACK").run();
+      this.db.exec("ROLLBACK");
       throw error;
     }
 
@@ -942,4 +947,57 @@ export class MemoryTaskAgent {
     }
     return "causal";
   }
+}
+
+function normalizeDbInput(db: Db | Database): Db {
+  if (isDb(db)) {
+    return db;
+  }
+
+  return {
+    raw: db,
+    exec(sql: string): void {
+      db.exec(sql);
+    },
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      const stmt = db.prepare(sql);
+      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
+    },
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.run(...(params as [])) : stmt.run();
+      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+    },
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.get(...(params as [])) : stmt.get();
+      return result === null ? undefined : (result as T);
+    },
+    close(): void {
+      db.close();
+    },
+    transaction<T>(fn: () => T): T {
+      return db.transaction(fn)();
+    },
+    prepare(sql: string) {
+      const stmt = db.prepare(sql);
+      return {
+        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
+          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+        },
+        all(...params: unknown[]): unknown[] {
+          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
+        },
+        get(...params: unknown[]): unknown {
+          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
+          return result === null ? undefined : result;
+        },
+      };
+    },
+  };
+}
+
+function isDb(db: Db | Database): db is Db {
+  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }
