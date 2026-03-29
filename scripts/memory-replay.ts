@@ -3,33 +3,71 @@ import { openDatabase } from "../src/storage/database.js";
 import { runMemoryMigrations } from "../src/memory/schema.js";
 import { PrivateCognitionProjectionRepo } from "../src/memory/cognition/private-cognition-current.js";
 import { AreaWorldProjectionRepo } from "../src/memory/projection/area-world-projection-repo.js";
+import type { BackendType } from "../src/storage/backend-types.js";
 
 type ReplaySurface = "cognition" | "area" | "world";
 
 type CliArgs = {
   dbPath?: string;
   surface: ReplaySurface;
+  backend: BackendType;
+  pgUrl?: string;
 };
 
 const args = parseArgs(process.argv.slice(2));
-const dbPath = args.dbPath ?? process.env.MAIDSCLAW_DB_PATH;
-if (!dbPath) {
-  failWithUsage("Missing database path.");
-}
 
-const db = openDatabase({ path: dbPath });
-runMemoryMigrations(db);
-
-try {
-  if (args.surface === "cognition") {
-    replayCognitionSurface(db);
-  } else if (args.surface === "area") {
-    replayAreaSurface(db);
-  } else {
-    replayWorldSurface(db);
+if (args.backend === "pg") {
+  const pgUrl = args.pgUrl ?? process.env.PG_APP_URL;
+  if (!pgUrl) {
+    failWithUsage("PG backend requires --pg-url <url> or PG_APP_URL env.");
   }
-} finally {
-  db.close();
+
+  const { PgBackendFactory } = await import("../src/storage/backend-types.js");
+  const { PgProjectionRebuilder } = await import("../src/migration/pg-projection-rebuild.js");
+
+  const factory = new PgBackendFactory();
+  await factory.initialize({ type: "pg", pg: { url: pgUrl } });
+  const pool = factory.getPool();
+
+  try {
+    const rebuilder = new PgProjectionRebuilder(pool);
+
+    if (args.surface === "cognition") {
+      console.log("Rebuilding cognition projection on PG...");
+      await rebuilder.rebuildCognitionCurrent();
+      console.log("Cognition projection rebuild complete.");
+    } else if (args.surface === "area") {
+      console.log("Rebuilding area state projection on PG...");
+      await rebuilder.rebuildAreaStateCurrent();
+      console.log("Area state projection rebuild complete.");
+    } else {
+      console.log("Rebuilding world state projection on PG...");
+      await rebuilder.rebuildWorldStateCurrent();
+      console.log("World state projection rebuild complete.");
+    }
+  } finally {
+    await factory.close();
+  }
+} else {
+  const dbPath = args.dbPath ?? process.env.MAIDSCLAW_DB_PATH;
+  if (!dbPath) {
+    failWithUsage("Missing database path.");
+  }
+
+  const db = openDatabase({ path: dbPath });
+  runMemoryMigrations(db);
+
+  try {
+    if (args.surface === "cognition") {
+      replayCognitionSurface(db);
+    } else if (args.surface === "area") {
+      replayAreaSurface(db);
+    } else {
+      replayWorldSurface(db);
+    }
+  } finally {
+    db.close();
+  }
 }
 
 function replayCognitionSurface(dbHandle: ReturnType<typeof openDatabase>): void {
@@ -135,9 +173,45 @@ function replayWorldSurface(dbHandle: ReturnType<typeof openDatabase>): void {
 function parseArgs(input: string[]): CliArgs {
   let dbPath: string | undefined;
   let surface: ReplaySurface = "cognition";
+  let backend: BackendType = "sqlite";
+  let pgUrl: string | undefined;
 
   for (let index = 0; index < input.length; index += 1) {
     const token = input[index];
+
+    if (token === "--backend") {
+      const value = input[index + 1];
+      if (value !== "sqlite" && value !== "pg") {
+        failWithUsage("--backend must be 'sqlite' or 'pg'.");
+      }
+      backend = value;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--backend=")) {
+      const value = token.slice("--backend=".length);
+      if (value !== "sqlite" && value !== "pg") {
+        failWithUsage("--backend must be 'sqlite' or 'pg'.");
+      }
+      backend = value;
+      continue;
+    }
+
+    if (token === "--pg-url") {
+      const value = input[index + 1];
+      if (!value || value.startsWith("--")) {
+        failWithUsage("Missing value for --pg-url.");
+      }
+      pgUrl = value;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--pg-url=")) {
+      pgUrl = token.slice("--pg-url=".length);
+      continue;
+    }
 
     if (token === "--surface") {
       const value = input[index + 1];
@@ -164,7 +238,7 @@ function parseArgs(input: string[]): CliArgs {
     dbPath = token;
   }
 
-  return { dbPath, surface };
+  return { dbPath, surface, backend, pgUrl };
 }
 
 function parseSurface(value: string): ReplaySurface {
@@ -176,7 +250,8 @@ function parseSurface(value: string): ReplaySurface {
 
 function failWithUsage(message: string): never {
   console.error(message);
-  console.error("Usage: bun run scripts/memory-replay.ts [db-path] [--surface cognition|area|world]");
-  console.error("  or set MAIDSCLAW_DB_PATH environment variable");
+  console.error("Usage: bun run scripts/memory-replay.ts [db-path] [--backend sqlite|pg] [--pg-url <url>] [--surface cognition|area|world]");
+  console.error("  SQLite: set db-path positional arg or MAIDSCLAW_DB_PATH env");
+  console.error("  PG:     --backend pg --pg-url <url> (or set PG_APP_URL env)");
   process.exit(1);
 }

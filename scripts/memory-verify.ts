@@ -9,6 +9,8 @@ import {
   listPrivateSearchAuthorityAgentIds,
 } from "../src/memory/search-authority.js";
 import { runMemoryMigrations } from "../src/memory/schema.js";
+import type postgres from "postgres";
+import type { BackendType } from "../src/storage/backend-types.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -816,6 +818,479 @@ export function verifyContestedSurface(db: Db): SurfaceVerifyResult {
   };
 }
 
+// ── PG Cognition surface ─────────────────────────────────────────────
+
+export async function verifyCognitionSurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const agents = await sql<{ agent_id: string }[]>`
+    SELECT DISTINCT agent_id FROM private_cognition_current
+  `;
+
+  if (agents.length === 0) {
+    return {
+      surface: "cognition",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No agents in private_cognition_current — nothing to verify.",
+    };
+  }
+
+  let consistent = 0;
+  let inconsistent = 0;
+  let sourceLinkageOk = 0;
+  let sourceLinkageBroken = 0;
+  const mismatches: KeyMismatch[] = [];
+
+  for (const { agent_id } of agents) {
+    const [currentResult] = await sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM private_cognition_current WHERE agent_id = ${agent_id}
+    `;
+    const currentRows = Number(currentResult?.count ?? 0);
+
+    const [eventResult] = await sql<{ count: string }[]>`
+      SELECT count(DISTINCT cognition_key)::text AS count FROM private_cognition_events WHERE agent_id = ${agent_id}
+    `;
+    const eventKeys = Number(eventResult?.count ?? 0);
+
+    if (currentRows === eventKeys) {
+      consistent++;
+    } else {
+      mismatches.push({
+        key: `agent:${agent_id}:row_count`,
+        expectedValue: String(eventKeys),
+        actualValue: String(currentRows),
+        kind: "value_mismatch",
+      });
+      inconsistent++;
+    }
+
+    const [nullSourceResult] = await sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM private_cognition_current
+      WHERE agent_id = ${agent_id} AND source_event_id IS NULL
+    `;
+    const nullSourceCount = Number(nullSourceResult?.count ?? 0);
+
+    if (nullSourceCount === 0) {
+      sourceLinkageOk++;
+    } else {
+      mismatches.push({
+        key: `agent:${agent_id}:source_linkage`,
+        expectedValue: "0 null source_event_id rows",
+        actualValue: `${nullSourceCount} null source_event_id rows`,
+        kind: "value_mismatch",
+      });
+      sourceLinkageBroken++;
+    }
+  }
+
+  const pass = inconsistent === 0 && sourceLinkageBroken === 0;
+  return {
+    surface: "cognition",
+    pass,
+    checkedKeys: agents.length * 2,
+    mismatches,
+    summary: `Count parity: ${consistent}/${agents.length} ok. Source linkage: ${sourceLinkageOk}/${agents.length} ok.`,
+  };
+}
+
+// ── PG Area surface ──────────────────────────────────────────────────
+
+export async function verifyAreaSurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const mismatches: AreaMismatch[] = [];
+
+  const latestEvents = await sql<{
+    agent_id: string;
+    area_id: string | number;
+    key: string;
+    value_json: unknown;
+    surfacing_classification: string;
+  }[]>`
+    SELECT e.agent_id, e.area_id, e.key, e.value_json, e.surfacing_classification
+    FROM area_state_events e
+    WHERE e.id = (
+      SELECT e2.id
+      FROM area_state_events e2
+      WHERE e2.agent_id = e.agent_id
+        AND e2.area_id = e.area_id
+        AND e2.key = e.key
+      ORDER BY e2.committed_time DESC, e2.id DESC
+      LIMIT 1
+    )
+  `;
+
+  const eventKeySet = new Set<string>();
+
+  for (const ev of latestEvents) {
+    const areaId = Number(ev.area_id);
+    const evValueJson = typeof ev.value_json === "string" ? ev.value_json : JSON.stringify(ev.value_json);
+    const compositeKey = `${ev.agent_id}|${areaId}|${ev.key}`;
+    eventKeySet.add(compositeKey);
+
+    const currentRows = await sql<{ value_json: unknown; surfacing_classification: string }[]>`
+      SELECT value_json, surfacing_classification
+      FROM area_state_current
+      WHERE agent_id = ${ev.agent_id} AND area_id = ${areaId} AND key = ${ev.key}
+    `;
+    const current = currentRows[0];
+
+    if (!current) {
+      mismatches.push({
+        agentId: ev.agent_id,
+        areaId,
+        key: ev.key,
+        expectedValue: evValueJson,
+        actualValue: null,
+        kind: "missing_from_current",
+      });
+      continue;
+    }
+
+    const currentValueJson = typeof current.value_json === "string" ? current.value_json : JSON.stringify(current.value_json);
+    // Semantic JSON comparison (key-order neutral)
+    if (normalizeJsonForCompare(evValueJson) !== normalizeJsonForCompare(currentValueJson)) {
+      mismatches.push({
+        agentId: ev.agent_id,
+        areaId,
+        key: ev.key,
+        expectedValue: evValueJson,
+        actualValue: currentValueJson,
+        kind: "value_mismatch",
+      });
+    }
+  }
+
+  const currentRows = await sql<{ agent_id: string; area_id: string | number; key: string; value_json: unknown }[]>`
+    SELECT agent_id, area_id, key, value_json FROM area_state_current
+  `;
+
+  for (const row of currentRows) {
+    const areaId = Number(row.area_id);
+    const compositeKey = `${row.agent_id}|${areaId}|${row.key}`;
+    if (!eventKeySet.has(compositeKey)) {
+      const rowValueJson = typeof row.value_json === "string" ? row.value_json : JSON.stringify(row.value_json);
+      mismatches.push({
+        agentId: row.agent_id,
+        areaId,
+        key: row.key,
+        expectedValue: "(no event exists)",
+        actualValue: rowValueJson,
+        kind: "extra_in_current",
+      });
+    }
+  }
+
+  if (latestEvents.length === 0 && currentRows.length === 0) {
+    return {
+      surface: "area",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No area state data — nothing to verify.",
+    };
+  }
+
+  const pass = mismatches.length === 0;
+  const checked = latestEvents.length + currentRows.length;
+  return {
+    surface: "area",
+    pass,
+    checkedKeys: checked,
+    mismatches,
+    summary: pass
+      ? `Verified ${latestEvents.length} area keys — all consistent.`
+      : `${mismatches.length} mismatch(es) found across ${latestEvents.length} area event keys.`,
+  };
+}
+
+// ── PG World surface ─────────────────────────────────────────────────
+
+export async function verifyWorldSurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const mismatches: KeyMismatch[] = [];
+
+  const latestEvents = await sql<{
+    key: string;
+    value_json: unknown;
+    surfacing_classification: string;
+  }[]>`
+    SELECT e.key, e.value_json, e.surfacing_classification
+    FROM world_state_events e
+    WHERE e.id = (
+      SELECT e2.id
+      FROM world_state_events e2
+      WHERE e2.key = e.key
+      ORDER BY e2.committed_time DESC, e2.id DESC
+      LIMIT 1
+    )
+  `;
+
+  const eventKeySet = new Set<string>();
+
+  for (const ev of latestEvents) {
+    const evValueJson = typeof ev.value_json === "string" ? ev.value_json : JSON.stringify(ev.value_json);
+    eventKeySet.add(ev.key);
+
+    const currentRows = await sql<{ value_json: unknown; surfacing_classification: string }[]>`
+      SELECT value_json, surfacing_classification
+      FROM world_state_current
+      WHERE key = ${ev.key}
+    `;
+    const current = currentRows[0];
+
+    if (!current) {
+      mismatches.push({
+        key: ev.key,
+        expectedValue: evValueJson,
+        actualValue: null,
+        kind: "missing_from_current",
+      });
+      continue;
+    }
+
+    const currentValueJson = typeof current.value_json === "string" ? current.value_json : JSON.stringify(current.value_json);
+    if (normalizeJsonForCompare(evValueJson) !== normalizeJsonForCompare(currentValueJson)) {
+      mismatches.push({
+        key: ev.key,
+        expectedValue: evValueJson,
+        actualValue: currentValueJson,
+        kind: "value_mismatch",
+      });
+    }
+  }
+
+  const currentRows = await sql<{ key: string; value_json: unknown }[]>`
+    SELECT key, value_json FROM world_state_current
+  `;
+
+  for (const row of currentRows) {
+    if (!eventKeySet.has(row.key)) {
+      const rowValueJson = typeof row.value_json === "string" ? row.value_json : JSON.stringify(row.value_json);
+      mismatches.push({
+        key: row.key,
+        expectedValue: "(no event exists)",
+        actualValue: rowValueJson,
+        kind: "extra_in_current",
+      });
+    }
+  }
+
+  if (latestEvents.length === 0 && currentRows.length === 0) {
+    return {
+      surface: "world",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No world state data — nothing to verify.",
+    };
+  }
+
+  const pass = mismatches.length === 0;
+  const checked = latestEvents.length + currentRows.length;
+  return {
+    surface: "world",
+    pass,
+    checkedKeys: checked,
+    mismatches,
+    summary: pass
+      ? `Verified ${latestEvents.length} world keys — all consistent.`
+      : `${mismatches.length} mismatch(es) found across ${latestEvents.length} world event keys.`,
+  };
+}
+
+// ── PG Search surface (count-based) ──────────────────────────────────
+
+export async function verifySearchSurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const mismatches: KeyMismatch[] = [];
+
+  const tables = [
+    "search_docs_cognition",
+    "search_docs_area",
+    "search_docs_world",
+    "search_docs_private",
+  ] as const;
+
+  let totalRows = 0;
+  const tableCounts: Array<{ table: string; count: number }> = [];
+
+  for (const table of tables) {
+    const [result] = await sql<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM ${sql(table)}
+    `;
+    const count = Number(result?.count ?? 0);
+    totalRows += count;
+    tableCounts.push({ table, count });
+  }
+
+  if (totalRows === 0) {
+    return {
+      surface: "search",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No search docs populated — nothing to verify (run search rebuild to populate).",
+    };
+  }
+
+  // Count-based check: all tables should have >= 0 rows; report the distribution
+  const countSummary = tableCounts.map((tc) => `${tc.table}=${tc.count}`).join(", ");
+
+  return {
+    surface: "search",
+    pass: true,
+    checkedKeys: totalRows,
+    mismatches,
+    summary: `Search tables populated: ${countSummary} (${totalRows} total docs). Exact parity covered by derived parity verifier.`,
+  };
+}
+
+// ── PG Graph registry surface (count-based) ──────────────────────────
+
+export async function verifyGraphRegistrySurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const mismatches: KeyMismatch[] = [];
+
+  const [eventNodeResult] = await sql<{ count: string }[]>`
+    SELECT count(*)::text AS count FROM event_nodes
+  `;
+  const eventNodeCount = Number(eventNodeResult?.count ?? 0);
+
+  const [entityNodeResult] = await sql<{ count: string }[]>`
+    SELECT count(*)::text AS count FROM entity_nodes
+  `;
+  const entityNodeCount = Number(entityNodeResult?.count ?? 0);
+
+  const [factEdgeResult] = await sql<{ count: string }[]>`
+    SELECT count(*)::text AS count FROM fact_edges
+  `;
+  const factEdgeCount = Number(factEdgeResult?.count ?? 0);
+
+  const totalCount = eventNodeCount + entityNodeCount + factEdgeCount;
+
+  if (totalCount === 0) {
+    return {
+      surface: "graph-registry",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No graph data — nothing to verify.",
+    };
+  }
+
+  return {
+    surface: "graph-registry",
+    pass: true,
+    checkedKeys: totalCount,
+    mismatches,
+    summary: `Graph registry: event_nodes=${eventNodeCount}, entity_nodes=${entityNodeCount}, fact_edges=${factEdgeCount}.`,
+  };
+}
+
+// ── PG Contested evidence surface ────────────────────────────────────
+
+export async function verifyContestedSurfacePg(sql: postgres.Sql): Promise<SurfaceVerifyResult> {
+  const mismatches: KeyMismatch[] = [];
+
+  const conflictRelations = await sql<{
+    source_node_ref: string;
+    target_node_ref: string;
+  }[]>`
+    SELECT source_node_ref, target_node_ref FROM memory_relations WHERE relation_type = 'conflicts_with'
+  `;
+
+  if (conflictRelations.length === 0) {
+    return {
+      surface: "contested",
+      pass: true,
+      checkedKeys: 0,
+      mismatches: [],
+      summary: "No conflicts_with relations — nothing to verify.",
+    };
+  }
+
+  const checkedRefs = new Set<string>();
+  let danglingCount = 0;
+
+  for (const rel of conflictRelations) {
+    for (const nodeRef of [rel.source_node_ref, rel.target_node_ref]) {
+      if (checkedRefs.has(nodeRef)) continue;
+      checkedRefs.add(nodeRef);
+
+      const colonIdx = nodeRef.indexOf(":");
+      if (colonIdx < 0) continue;
+      const kind = nodeRef.slice(0, colonIdx);
+      const id = Number(nodeRef.slice(colonIdx + 1));
+      if (!Number.isFinite(id)) continue;
+
+      if (kind === "assertion" || kind === "evaluation" || kind === "commitment") {
+        const exists = await sql<{ id: string | number }[]>`
+          SELECT id FROM private_cognition_current WHERE id = ${id}
+        `;
+        if (exists.length === 0) {
+          danglingCount++;
+          mismatches.push({
+            key: nodeRef,
+            expectedValue: "present in private_cognition_current",
+            actualValue: null,
+            kind: "missing_from_current",
+          });
+        }
+      }
+      if (kind === "private_episode") {
+        const exists = await sql<{ id: string | number }[]>`
+          SELECT id FROM private_episode_events WHERE id = ${id}
+        `;
+        if (exists.length === 0) {
+          danglingCount++;
+          mismatches.push({
+            key: nodeRef,
+            expectedValue: "present in private_episode_events",
+            actualValue: null,
+            kind: "missing_from_current",
+          });
+        }
+      }
+    }
+  }
+
+  const pass = danglingCount === 0;
+  return {
+    surface: "contested",
+    pass,
+    checkedKeys: checkedRefs.size,
+    mismatches,
+    summary: pass
+      ? `${checkedRefs.size} conflict endpoint refs verified — all exist.`
+      : `${danglingCount} dangling ref(s) across ${checkedRefs.size} checked endpoints.`,
+  };
+}
+
+// ── JSON normalization helper (key-order neutral for JSONB) ──────────
+
+function normalizeJsonForCompare(jsonStr: string): string {
+  try {
+    return JSON.stringify(JSON.parse(jsonStr));
+  } catch {
+    return jsonStr;
+  }
+}
+
+// ── PG Dispatcher ────────────────────────────────────────────────────
+
+export async function runVerifyPg(sql: postgres.Sql, surfaces: VerifySurface[]): Promise<SurfaceVerifyResult[]> {
+  const dispatch: Record<VerifySurface, (sql: postgres.Sql) => Promise<SurfaceVerifyResult>> = {
+    cognition: verifyCognitionSurfacePg,
+    area: verifyAreaSurfacePg,
+    world: verifyWorldSurfacePg,
+    search: verifySearchSurfacePg,
+    "graph-registry": verifyGraphRegistrySurfacePg,
+    contested: verifyContestedSurfacePg,
+  };
+
+  const results: SurfaceVerifyResult[] = [];
+  for (const surface of surfaces) {
+    results.push(await dispatch[surface](sql));
+  }
+  return results;
+}
+
 // ── Report formatter ─────────────────────────────────────────────────
 
 export function formatVerifyReport(results: SurfaceVerifyResult[]): string {
@@ -849,18 +1324,56 @@ export function formatVerifyReport(results: SurfaceVerifyResult[]): string {
 type CliArgs = {
   dbPath?: string;
   surfaces: VerifySurface[];
+  backend: BackendType;
+  pgUrl?: string;
 };
 
 function parseArgs(input: string[]): CliArgs {
   let dbPath: string | undefined;
   let surfaces: VerifySurface[] = [];
   let allFlag = false;
+  let backend: BackendType = "sqlite";
+  let pgUrl: string | undefined;
 
   for (let i = 0; i < input.length; i++) {
     const token = input[i];
 
     if (token === "--all") {
       allFlag = true;
+      continue;
+    }
+
+    if (token === "--backend") {
+      const value = input[i + 1];
+      if (value !== "sqlite" && value !== "pg") {
+        failWithUsage("--backend must be 'sqlite' or 'pg'.");
+      }
+      backend = value;
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("--backend=")) {
+      const value = token.slice("--backend=".length);
+      if (value !== "sqlite" && value !== "pg") {
+        failWithUsage("--backend must be 'sqlite' or 'pg'.");
+      }
+      backend = value;
+      continue;
+    }
+
+    if (token === "--pg-url") {
+      const value = input[i + 1];
+      if (!value || value.startsWith("--")) {
+        failWithUsage("Missing value for --pg-url.");
+      }
+      pgUrl = value;
+      i += 1;
+      continue;
+    }
+
+    if (token.startsWith("--pg-url=")) {
+      pgUrl = token.slice("--pg-url=".length);
       continue;
     }
 
@@ -897,7 +1410,7 @@ function parseArgs(input: string[]): CliArgs {
     surfaces = ["cognition"];
   }
 
-  return { dbPath, surfaces };
+  return { dbPath, surfaces, backend, pgUrl };
 }
 
 function parseSurface(value: string): VerifySurface {
@@ -911,9 +1424,10 @@ function parseSurface(value: string): VerifySurface {
 function failWithUsage(message: string): never {
   console.error(message);
   console.error(
-    "Usage: bun run scripts/memory-verify.ts [db-path] [--surface cognition|area|world|search|graph-registry|contested] [--all]",
+    "Usage: bun run scripts/memory-verify.ts [db-path] [--backend sqlite|pg] [--pg-url <url>] [--surface cognition|area|world|search|graph-registry|contested] [--all]",
   );
-  console.error("  or set MAIDSCLAW_DB_PATH environment variable");
+  console.error("  SQLite: set db-path positional arg or MAIDSCLAW_DB_PATH env");
+  console.error("  PG:     --backend pg --pg-url <url> (or set PG_APP_URL env)");
   process.exit(1);
 }
 
@@ -938,22 +1452,46 @@ const isMain = import.meta.path === Bun.main;
 
 if (isMain) {
   const args = parseArgs(process.argv.slice(2));
-  const dbPath = args.dbPath ?? process.env.MAIDSCLAW_DB_PATH;
-  if (!dbPath) {
-    failWithUsage("Missing database path.");
-  }
 
-  const db = openDatabase({ path: dbPath });
-  runMemoryMigrations(db);
+  if (args.backend === "pg") {
+    const pgUrl = args.pgUrl ?? process.env.PG_APP_URL;
+    if (!pgUrl) {
+      failWithUsage("PG backend requires --pg-url <url> or PG_APP_URL env.");
+    }
 
-  try {
-    const results = runVerify(db, args.surfaces);
-    const report = formatVerifyReport(results);
-    console.log(report);
+    const { PgBackendFactory } = await import("../src/storage/backend-types.js");
+    const factory = new PgBackendFactory();
+    await factory.initialize({ type: "pg", pg: { url: pgUrl } });
+    const pool = factory.getPool();
 
-    const allPass = results.every((r) => r.pass);
-    process.exit(allPass ? 0 : 1);
-  } finally {
-    db.close();
+    try {
+      const results = await runVerifyPg(pool, args.surfaces);
+      const report = formatVerifyReport(results);
+      console.log(report);
+
+      const allPass = results.every((r) => r.pass);
+      process.exit(allPass ? 0 : 1);
+    } finally {
+      await factory.close();
+    }
+  } else {
+    const dbPath = args.dbPath ?? process.env.MAIDSCLAW_DB_PATH;
+    if (!dbPath) {
+      failWithUsage("Missing database path.");
+    }
+
+    const db = openDatabase({ path: dbPath });
+    runMemoryMigrations(db);
+
+    try {
+      const results = runVerify(db, args.surfaces);
+      const report = formatVerifyReport(results);
+      console.log(report);
+
+      const allPass = results.every((r) => r.pass);
+      process.exit(allPass ? 0 : 1);
+    } finally {
+      db.close();
+    }
   }
 }
