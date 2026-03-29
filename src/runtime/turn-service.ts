@@ -5,7 +5,10 @@ import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
-import { defaultViewerCanReadAdminOnly, type ViewerContext } from "../core/contracts/viewer-context.js";
+import {
+	defaultViewerCanReadAdminOnly,
+	type ViewerContext,
+} from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 
@@ -23,8 +26,8 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
-import { materializePublications } from "../memory/materialization.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
+import { materializePublications } from "../memory/materialization.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
@@ -32,6 +35,10 @@ import type {
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
 import type { SessionService } from "../session/service.js";
+import type {
+	SettlementRepos,
+	SettlementUnitOfWork,
+} from "../storage/unit-of-work.js";
 import type {
 	AssertionRecordV4,
 	CanonicalRpTurnOutcome,
@@ -79,6 +86,7 @@ export class TurnService {
 		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
 		private readonly projectionManager?: ProjectionManager,
+		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
 	) {}
 
 	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
@@ -347,7 +355,12 @@ export class TurnService {
 		const hasAssistantVisibleActivity = hasPublicReply;
 
 		const hasPrivateEpisodes = canonicalOutcome.privateEpisodes.length > 0;
-		if (!hasPublicReply && !hasPrivateOps && !hasPublications && !hasPrivateEpisodes) {
+		if (
+			!hasPublicReply &&
+			!hasPrivateOps &&
+			!hasPublications &&
+			!hasPrivateEpisodes
+		) {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
@@ -372,22 +385,12 @@ export class TurnService {
 		}
 
 		const settlementId = `stl:${requestId}`;
-		if (
-			this.interactionStore.settlementExists(
-				effectiveRequest.sessionId,
-				settlementId,
-			)
-		) {
-			const existingSettlement = this.interactionStore
-				.getBySession(effectiveRequest.sessionId)
-				.find(
-					(record) =>
-						record.recordId === settlementId &&
-						record.recordType === "turn_settlement",
-				);
-			const existingPayload = existingSettlement?.payload as
-				| Partial<TurnSettlementPayload>
-				| undefined;
+		const existingPayload = await this.getExistingSettlementPayload(
+			effectiveRequest.sessionId,
+			requestId,
+			settlementId,
+		);
+		if (existingPayload) {
 			const replayPublicReply =
 				typeof existingPayload?.publicReply === "string"
 					? existingPayload.publicReply
@@ -418,60 +421,38 @@ export class TurnService {
 				effectiveRequest.sessionId,
 				"rp_agent",
 			);
+			const ownerAgentId =
+				this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "";
 			viewerSnapshot = resolvedViewerSnapshot;
-			this.interactionStore.runInTransaction(() => {
-				const settlementPayload: TurnSettlementPayload = {
-					settlementId,
-					requestId,
-					sessionId: effectiveRequest.sessionId,
-					ownerAgentId:
-						this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					publicReply: canonicalOutcome.publicReply,
-					hasPublicReply,
-					viewerSnapshot: resolvedViewerSnapshot,
-					schemaVersion: "turn_settlement_v5",
-					privateCognition: hasPrivateOps
-						? canonicalOutcome.privateCognition
-						: undefined,
-					privateEpisodes: canonicalOutcome.privateEpisodes.length > 0
+			const settlementPayload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: effectiveRequest.sessionId,
+				ownerAgentId,
+				publicReply: canonicalOutcome.publicReply,
+				hasPublicReply,
+				viewerSnapshot: resolvedViewerSnapshot,
+				schemaVersion: "turn_settlement_v5",
+				privateCognition: hasPrivateOps
+					? canonicalOutcome.privateCognition
+					: undefined,
+				privateEpisodes:
+					canonicalOutcome.privateEpisodes.length > 0
 						? canonicalOutcome.privateEpisodes
 						: undefined,
-					publications,
-					...(canonicalOutcome.pinnedSummaryProposal
-						? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
-						: {}),
-					relationIntents: canonicalOutcome.relationIntents.length > 0
+				publications,
+				...(canonicalOutcome.pinnedSummaryProposal
+					? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+					: {}),
+				relationIntents:
+					canonicalOutcome.relationIntents.length > 0
 						? canonicalOutcome.relationIntents
 						: undefined,
-					conflictFactors: canonicalOutcome.conflictFactors.length > 0
+				conflictFactors:
+					canonicalOutcome.conflictFactors.length > 0
 						? canonicalOutcome.conflictFactors
 						: undefined,
-				};
-
-				this.commitService.commitWithId({
-					sessionId: effectiveRequest.sessionId,
-					actorType: "rp_agent",
-					recordId: settlementId,
-					recordType: "turn_settlement",
-					payload: settlementPayload,
-					correlatedTurnId: requestId,
-				});
-
-				if (hasPublicReply) {
-					const assistantPayload: AssistantMessagePayloadV3 = {
-						role: "assistant",
-						content: canonicalOutcome.publicReply,
-						settlementId,
-					};
-
-					this.commitService.commit({
-						sessionId: effectiveRequest.sessionId,
-						actorType: "rp_agent",
-						recordType: "message",
-						payload: assistantPayload,
-						correlatedTurnId: requestId,
-					});
-				}
+			};
 
 			const slotEntries = buildCognitionSlotPayload(
 				canonicalOutcome.privateCognition?.ops ?? [],
@@ -479,37 +460,93 @@ export class TurnService {
 				committedAt,
 			);
 
-			if (this.projectionManager) {
-				this.projectionManager.commitSettlement({
-					settlementId,
-					sessionId: effectiveRequest.sessionId,
-					agentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
-					privateEpisodes: canonicalOutcome.privateEpisodes,
-					publications,
-					areaStateArtifacts: settlementPayload.areaStateArtifacts,
-					viewerSnapshot: resolvedViewerSnapshot,
-					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
-					recentCognitionSlotJson: JSON.stringify(slotEntries),
-					agentRole: "rp_agent",
-					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-					artifactEnforcementContext: {
-						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						writeOperation: "append",
-					},
-					committedAt,
+			if (this.settlementUnitOfWork) {
+				await this.settlementUnitOfWork.run(async (repos) => {
+					await this.commitSettlementRecordsWithRepos({
+						repos,
+						sessionId: effectiveRequest.sessionId,
+						requestId,
+						settlementId,
+						settlementPayload,
+						hasPublicReply,
+						publicReply: canonicalOutcome.publicReply,
+					});
+					await this.commitSettlementProjectionWithRepos({
+						repos,
+						effectiveRequest,
+						settlementId,
+						settlementPayload,
+						resolvedViewerSnapshot,
+						ownerAgentId,
+						publications,
+						slotEntries,
+						committedAt,
+						canonicalOutcome,
+					});
 				});
 			} else {
-				this.interactionStore.upsertRecentCognitionSlot(
-					effectiveRequest.sessionId,
-					this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					settlementId,
-					JSON.stringify(slotEntries),
-				);
+				await this.interactionStore.runInTransactionAsync(async () => {
+					this.commitService.commitWithId({
+						sessionId: effectiveRequest.sessionId,
+						actorType: "rp_agent",
+						recordId: settlementId,
+						recordType: "turn_settlement",
+						payload: settlementPayload,
+						correlatedTurnId: requestId,
+					});
+
+					if (hasPublicReply) {
+						const assistantPayload: AssistantMessagePayloadV3 = {
+							role: "assistant",
+							content: canonicalOutcome.publicReply,
+							settlementId,
+						};
+
+						this.commitService.commit({
+							sessionId: effectiveRequest.sessionId,
+							actorType: "rp_agent",
+							recordType: "message",
+							payload: assistantPayload,
+							correlatedTurnId: requestId,
+						});
+					}
+
+					if (this.projectionManager) {
+						await this.projectionManager.commitSettlement({
+							settlementId,
+							sessionId: effectiveRequest.sessionId,
+							agentId: ownerAgentId,
+							cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+							privateEpisodes: canonicalOutcome.privateEpisodes,
+							publications,
+							areaStateArtifacts: settlementPayload.areaStateArtifacts,
+							viewerSnapshot: resolvedViewerSnapshot,
+							upsertRecentCognitionSlot:
+								this.interactionStore.upsertRecentCognitionSlot.bind(
+									this.interactionStore,
+								),
+							recentCognitionSlotJson: JSON.stringify(slotEntries),
+							agentRole: "rp_agent",
+							artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+							artifactEnforcementContext: {
+								writingAgentId: ownerAgentId || undefined,
+								ownerAgentId,
+								writeOperation: "append",
+							},
+							committedAt,
+						});
+					} else {
+						this.interactionStore.upsertRecentCognitionSlot(
+							effectiveRequest.sessionId,
+							ownerAgentId,
+							settlementId,
+							JSON.stringify(slotEntries),
+						);
+					}
+				});
 			}
+
 			settlementPayloadAfterCommit = settlementPayload;
-			});
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "Turn settlement transaction failed");
 			const errorChunk = {
@@ -548,21 +585,35 @@ export class TurnService {
 
 		if (hasPublications && this.graphStorage && !this.projectionManager) {
 			try {
-			materializePublications(this.graphStorage, publications, settlementId, {
-					sessionId: effectiveRequest.sessionId,
-					locationEntityId: viewerSnapshot?.currentLocationEntityId,
-					timestamp: committedAt,
-				}, {
-					agentRole: "rp_agent",
-					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-					artifactEnforcementContext: {
-						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						ownerAgentId: settlementPayloadAfterCommit?.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						writeOperation: "append",
+				materializePublications(
+					this.graphStorage,
+					publications,
+					settlementId,
+					{
+						sessionId: effectiveRequest.sessionId,
+						locationEntityId: viewerSnapshot?.currentLocationEntityId,
+						timestamp: committedAt,
 					},
-				});
+					{
+						agentRole: "rp_agent",
+						artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+						artifactEnforcementContext: {
+							writingAgentId: this.resolveQueueOwnerAgentId(
+								effectiveRequest.sessionId,
+							),
+							ownerAgentId:
+								settlementPayloadAfterCommit?.ownerAgentId ||
+								this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+							writeOperation: "append",
+						},
+					},
+				);
 			} catch (err) {
-				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
+				this.traceLog(
+					requestId,
+					"error",
+					`Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 		}
 
@@ -597,6 +648,162 @@ export class TurnService {
 
 		await this.flushIfDue(effectiveRequest.sessionId, requestId);
 		this.traceStore?.finalizeTrace(requestId);
+	}
+
+	private async getExistingSettlementPayload(
+		sessionId: string,
+		requestId: string,
+		settlementId: string,
+	): Promise<Partial<TurnSettlementPayload> | undefined> {
+		if (this.settlementUnitOfWork) {
+			try {
+				const payload = await this.settlementUnitOfWork.run(async (repos) =>
+					repos.interactionRepo.getSettlementPayload(sessionId, requestId),
+				);
+				if (payload) {
+					return payload;
+				}
+			} catch {
+				void 0;
+			}
+		}
+
+		if (!this.interactionStore.settlementExists(sessionId, settlementId)) {
+			return undefined;
+		}
+
+		const existingSettlement = this.interactionStore
+			.getBySession(sessionId)
+			.find(
+				(record) =>
+					record.recordId === settlementId &&
+					record.recordType === "turn_settlement",
+			);
+		return existingSettlement?.payload as
+			| Partial<TurnSettlementPayload>
+			| undefined;
+	}
+
+	private async commitSettlementRecordsWithRepos(params: {
+		repos: SettlementRepos;
+		sessionId: string;
+		requestId: string;
+		settlementId: string;
+		settlementPayload: TurnSettlementPayload;
+		hasPublicReply: boolean;
+		publicReply: string;
+	}): Promise<void> {
+		const {
+			repos,
+			sessionId,
+			requestId,
+			settlementId,
+			settlementPayload,
+			hasPublicReply,
+			publicReply,
+		} = params;
+
+		const maxIndex = await repos.interactionRepo.getMaxIndex(sessionId);
+		let nextRecordIndex = maxIndex === undefined ? 0 : maxIndex + 1;
+
+		await repos.interactionRepo.commit({
+			sessionId,
+			recordId: settlementId,
+			recordIndex: nextRecordIndex,
+			actorType: "rp_agent",
+			recordType: "turn_settlement",
+			payload: settlementPayload,
+			correlatedTurnId: requestId,
+			committedAt: Date.now(),
+		});
+
+		nextRecordIndex += 1;
+
+		if (!hasPublicReply) {
+			return;
+		}
+
+		const assistantPayload: AssistantMessagePayloadV3 = {
+			role: "assistant",
+			content: publicReply,
+			settlementId,
+		};
+
+		await repos.interactionRepo.commit({
+			sessionId,
+			recordId: crypto.randomUUID(),
+			recordIndex: nextRecordIndex,
+			actorType: "rp_agent",
+			recordType: "message",
+			payload: assistantPayload,
+			correlatedTurnId: requestId,
+			committedAt: Date.now(),
+		});
+	}
+
+	private async commitSettlementProjectionWithRepos(params: {
+		repos: SettlementRepos;
+		effectiveRequest: AgentRunRequest;
+		settlementId: string;
+		settlementPayload: TurnSettlementPayload;
+		resolvedViewerSnapshot: TurnSettlementPayload["viewerSnapshot"];
+		ownerAgentId: string;
+		publications: CanonicalRpTurnOutcome["publications"];
+		slotEntries: RecentCognitionEntry[];
+		committedAt: number;
+		canonicalOutcome: CanonicalRpTurnOutcome;
+	}): Promise<void> {
+		const {
+			repos,
+			effectiveRequest,
+			settlementId,
+			settlementPayload,
+			resolvedViewerSnapshot,
+			ownerAgentId,
+			publications,
+			slotEntries,
+			committedAt,
+			canonicalOutcome,
+		} = params;
+
+		if (this.projectionManager) {
+			await this.projectionManager.commitSettlement(
+				{
+					settlementId,
+					sessionId: effectiveRequest.sessionId,
+					agentId: ownerAgentId,
+					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+					privateEpisodes: canonicalOutcome.privateEpisodes,
+					publications,
+					areaStateArtifacts: settlementPayload.areaStateArtifacts,
+					viewerSnapshot: resolvedViewerSnapshot,
+					recentCognitionSlotJson: JSON.stringify(slotEntries),
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: ownerAgentId || undefined,
+						ownerAgentId,
+						writeOperation: "append",
+					},
+					committedAt,
+				},
+				{
+					episodeRepo: repos.episodeRepo,
+					cognitionEventRepo: repos.cognitionEventRepo,
+					cognitionProjectionRepo: repos.cognitionProjectionRepo,
+					areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
+					recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
+				},
+			);
+			return;
+		}
+
+		await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
+			effectiveRequest.sessionId,
+			ownerAgentId,
+			settlementId,
+			JSON.stringify(slotEntries),
+		);
 	}
 
 	private async resolveViewerSnapshot(

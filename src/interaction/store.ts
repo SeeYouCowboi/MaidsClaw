@@ -112,6 +112,22 @@ export class InteractionStore {
     }
   }
 
+  async runInTransactionAsync<T>(fn: (store: InteractionStore) => Promise<T>): Promise<T> {
+    if (this.db.raw.inTransaction) {
+      return fn(this);
+    }
+
+    this.db.raw.prepare("BEGIN IMMEDIATE").run();
+    try {
+      const result = await fn(this);
+      this.db.raw.prepare("COMMIT").run();
+      return result;
+    } catch (error) {
+      this.db.raw.prepare("ROLLBACK").run();
+      throw error;
+    }
+  }
+
   settlementExists(sessionId: string, settlementId: string): boolean {
     const row = this.db.get<{ existing: number }>(
       `SELECT 1 AS existing

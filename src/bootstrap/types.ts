@@ -17,6 +17,7 @@ import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
 import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
 import type { Db } from "../storage/database.js";
+import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
@@ -90,6 +91,7 @@ export type RuntimeBootstrapResult = {
 	traceStore?: TraceStore;
 	backendType: BackendType;
 	pgFactory: PgBackendFactory | null;
+	settlementUnitOfWork: SettlementUnitOfWork | null;
 	shutdown: () => void;
 };
 

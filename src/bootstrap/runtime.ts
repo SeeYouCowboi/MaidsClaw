@@ -26,17 +26,17 @@ import { FlushSelector } from "../interaction/flush-selector.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import { InteractionStore } from "../interaction/store.js";
 import { createLoreService } from "../lore/service.js";
-import { CoreMemoryService } from "../memory/core-memory.js";
-import { EmbeddingService } from "../memory/embeddings.js";
-import { MaterializationService } from "../memory/materialization.js";
-import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js";
 import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
+import { CoreMemoryService } from "../memory/core-memory.js";
+import { EmbeddingService } from "../memory/embeddings.js";
 import { EpisodeRepository } from "../memory/episode/episode-repo.js";
+import { MaterializationService } from "../memory/materialization.js";
+import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
-import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
 import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
+import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
 import { runMemoryMigrations } from "../memory/schema.js";
 import { SqliteSettlementLedger } from "../memory/settlement-ledger.js";
 import { GraphStorageService } from "../memory/storage.js";
@@ -59,6 +59,8 @@ import {
 	ensureDirectoryExists,
 	resolveStoragePaths,
 } from "../storage/paths.js";
+import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
+import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 import { registerRuntimeTools } from "./tools.js";
 import type {
 	MemoryPipelineStatus,
@@ -471,6 +473,19 @@ export function bootstrapRuntime(
 		},
 	} as unknown as AgentLoop;
 
+	const settlementUnitOfWork: SettlementUnitOfWork | null =
+		backendType === "pg" && pgFactory
+			? {
+					run<T>(
+						fn: (
+							repos: import("../storage/unit-of-work.js").SettlementRepos,
+						) => Promise<T>,
+					): Promise<T> {
+						return new PgSettlementUnitOfWork(pgFactory.getPool()).run(fn);
+					},
+				}
+			: null;
+
 	const episodeRepo = new EpisodeRepository(db);
 	const cognitionEventRepo = new CognitionEventRepo(db.raw);
 	const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
@@ -496,6 +511,7 @@ export function bootstrapRuntime(
 		graphStorage,
 		traceStore,
 		projectionManager,
+		settlementUnitOfWork,
 	);
 
 	const pendingSettlementSweeper = memoryTaskAgent
@@ -545,6 +561,7 @@ export function bootstrapRuntime(
 		traceStore,
 		backendType,
 		pgFactory,
+		settlementUnitOfWork,
 		shutdown,
 	};
 }
