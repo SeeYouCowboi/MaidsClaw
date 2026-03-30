@@ -2089,7 +2089,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Results are presented to user as a consolidated report. No blocking "explicit user okay" gate — verification is autonomous, but rejection triggers automatic fix-and-rerun.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
   Specific checks: (1) All facade methods return `Promise<T>`, (2) `AppHost` facet matrix per A022 — including server role gets maintenance only when explicitly enabled, (3) `closeSession()` decision matrix per A034, (4) Zero `RuntimeBootstrapResult` in edge code, (5) No `_internal.runtime` escape hatches, (6) All 35 consensus decisions addressed or explicitly deferred, (7) `bootstrapApp()` shims to `createAppHost()` (not reverse), (8) PG tests skip without PG, (9) `getBoundPort()` works for port: 0 case — no port regression.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
@@ -2102,7 +2102,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
   Start from clean state. Execute EVERY QA scenario from EVERY task. Test cross-task integration: (1) `createAppHost({ role: "local" })` → `host.user.session.closeSession()` → verify flush decision matrix, (2) `createAppHost({ role: "server" })` → `host.start()` → HTTP endpoint works → `host.shutdown()`, (3) slash commands work without mode branching, (4) SessionShell accepts `host.user` — no raw runtime. Save evidence to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff. Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance: no TurnService flush/threshold/sweeper/settlement changes (await additions ARE allowed), no SessionService constructor change, no service implementation replacement, no test file moves (skip wrappers ARE allowed). Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
