@@ -83,7 +83,7 @@ describe("TurnService", () => {
   });
 
   it("RP success settlement writes turn_settlement and assistant message and emits synthetic text", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -127,7 +127,7 @@ describe("TurnService", () => {
   });
 
   it("RP silent-private turn settles without assistant message and without text_delta", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -165,7 +165,7 @@ describe("TurnService", () => {
   });
 
   it("RP illegal empty turn emits error and writes no turn_settlement", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -206,7 +206,7 @@ describe("TurnService", () => {
   });
 
   it("RP settlement transaction failure rolls back settlement/message and marks recovery_required", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -258,11 +258,11 @@ describe("TurnService", () => {
           (record.payload as { role?: string }).role === "assistant",
       ),
     ).toHaveLength(0);
-    expect(sessionService.isRecoveryRequired(session.sessionId)).toBe(true);
+    expect(await sessionService.isRecoveryRequired(session.sessionId)).toBe(true);
   });
 
   it("RP replay with same requestId is idempotent and produces no duplicate records", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     const turnService = new TurnService(
       makeRpBufferedLoop({
@@ -327,7 +327,7 @@ describe("TurnService", () => {
   });
 
   it("persists full privateCommit ops without settlement projection writes", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
       displayName: "Alice",
@@ -456,7 +456,7 @@ describe("TurnService", () => {
   });
 
   it("assertion upsert persists full op in settlement without projection write", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
       displayName: "Alice",
@@ -545,7 +545,7 @@ describe("TurnService", () => {
   });
 
   it("evaluation upsert persists full op in settlement without projection write", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "target:bob",
       displayName: "Bob",
@@ -607,7 +607,7 @@ describe("TurnService", () => {
   });
 
   it("commitment upsert persists full op in settlement without projection write", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     const turnService = new TurnService(
       makeRpBufferedLoop({
@@ -663,7 +663,7 @@ describe("TurnService", () => {
   });
 
   it("retract op persists in settlement without modifying projection at settlement time", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     graphStorage.upsertEntity({
       pointerKey: "__self__",
       displayName: "Alice",
@@ -732,7 +732,7 @@ describe("TurnService", () => {
   });
 
   it("current_location assertion persists full op in settlement without projection write", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     graphStorage.upsertEntity({
       pointerKey: "__self__",
@@ -818,7 +818,7 @@ describe("TurnService", () => {
   });
 
   it("touch op is rejected by normalizer — no settlement committed", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -857,7 +857,7 @@ describe("TurnService", () => {
   });
 
   it("bad relation localRef/cognitionKey rejects settlement atomically", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -914,7 +914,7 @@ describe("TurnService", () => {
   });
 
   it("latentScratchpad from outcome is not persisted in settlement payload", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = new TurnService(
       makeRpBufferedLoop({
         outcome: {
@@ -1009,7 +1009,7 @@ describe("TurnService", () => {
   });
 
   it("non-RP maiden session preserves streaming path behavior", async () => {
-    const session = sessionService.createSession("maid:violet");
+    const session = await sessionService.createSession("maid:violet");
     const streamChunks: Chunk[] = [
       { type: "text_delta", text: "Good" },
       { type: "text_delta", text: " day" },
@@ -1126,7 +1126,7 @@ describe("TurnService", () => {
     const traceStore = new TraceStore(tempDir);
 
     try {
-      const session = sessionService.createSession("rp:alice");
+      const session = await sessionService.createSession("rp:alice");
       const turnService = new TurnService(
         makeRpBufferedLoop({
           outcome: {
@@ -1249,7 +1249,7 @@ describe("TurnService with ProjectionManager", () => {
   }
 
   it("episodes go to private_episode_events ledger, not agent_event_overlay", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = makeTurnServiceWithProjection({
       outcome: {
         schemaVersion: "rp_turn_outcome_v5",
@@ -1295,7 +1295,7 @@ describe("TurnService with ProjectionManager", () => {
   });
 
   it("cognition ops write to event log and update current projection synchronously", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = makeTurnServiceWithProjection({
       outcome: {
         schemaVersion: "rp_turn_outcome_v5",
@@ -1370,7 +1370,7 @@ describe("TurnService with ProjectionManager", () => {
   });
 
   it("retract op updates current projection to retracted status", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     const turnService1 = makeTurnServiceWithProjection({
       outcome: {
@@ -1436,7 +1436,7 @@ describe("TurnService with ProjectionManager", () => {
   });
 
   it("settlement transaction rolls back all projections on failure", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
     const turnService = makeTurnServiceWithProjection({
       outcome: {
         schemaVersion: "rp_turn_outcome_v5",
@@ -1498,7 +1498,7 @@ describe("TurnService with ProjectionManager", () => {
   });
 
   it("combined episodes + cognition + publications all commit in one transaction", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     const locationEntityId = graphStorage.upsertEntity({
       pointerKey: "location:garden",

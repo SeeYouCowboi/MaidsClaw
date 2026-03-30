@@ -85,7 +85,7 @@ describe("debug commands", () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-diag-1";
 
-		seedPendingSettlementCase(tmpRoot, requestId);
+		await seedPendingSettlementCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -132,7 +132,7 @@ describe("debug commands", () => {
 	it("debug trace export is redacted by default", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-trace-redacted";
-		seedTraceCase(tmpRoot, requestId);
+		await seedTraceCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -162,7 +162,7 @@ describe("debug commands", () => {
 	it("debug trace export --unsafe-raw includes settlement payload", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-trace-raw";
-		seedTraceCase(tmpRoot, requestId);
+		await seedTraceCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -197,7 +197,7 @@ describe("debug commands", () => {
 	it("debug memory includes pending sweeper state", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-memory-1";
-		const sessionId = seedPendingSettlementCase(tmpRoot, requestId);
+		const sessionId = await seedPendingSettlementCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -231,7 +231,7 @@ describe("debug commands", () => {
 	it("debug summary returns required fields from view model", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-summary-1";
-		const sessionId = seedSummaryCase(tmpRoot, requestId);
+		const sessionId = await seedSummaryCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -274,7 +274,7 @@ describe("debug commands", () => {
 	it("debug transcript --raw shows tool records but NOT settlement payload", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-transcript-raw";
-		const sessionId = seedTranscriptCase(tmpRoot, requestId);
+		const sessionId = await seedTranscriptCase(tmpRoot, requestId);
 
 		// raw mode shows tool/status records
 		const raw = await captureStdout(async () => {
@@ -326,7 +326,7 @@ describe("debug commands", () => {
 	it("debug prompt --sections includes section breakdown", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-prompt-sect";
-		seedPromptCase(tmpRoot, requestId);
+		await seedPromptCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -361,7 +361,7 @@ describe("debug commands", () => {
 	it("debug prompt without --sections strips sections from JSON output", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-prompt-nosect";
-		seedPromptCase(tmpRoot, requestId);
+		await seedPromptCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -392,7 +392,7 @@ describe("debug commands", () => {
 	it("debug chunks preserves ordering", async () => {
 		const tmpRoot = createTempDir();
 		const requestId = "req-chunks-order";
-		seedChunksCase(tmpRoot, requestId);
+		await seedChunksCase(tmpRoot, requestId);
 
 		const raw = await captureStdout(async () => {
 			await dispatch([
@@ -440,14 +440,14 @@ describe("debug commands", () => {
 
 });
 
-function seedPendingSettlementCase(cwd: string, requestId: string): string {
+async function seedPendingSettlementCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const interactionStore = new InteractionStore(app.runtime.db);
 		const commitService = new CommitService(interactionStore);
 		const settlementPayload = makeSettlementPayload(
@@ -488,14 +488,14 @@ function seedPendingSettlementCase(cwd: string, requestId: string): string {
 	}
 }
 
-function seedTraceCase(cwd: string, requestId: string): string {
+async function seedTraceCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const interactionStore = new InteractionStore(app.runtime.db);
 		const commitService = new CommitService(interactionStore);
 		const settlementPayload = makeSettlementPayload(
@@ -528,14 +528,14 @@ function seedTraceCase(cwd: string, requestId: string): string {
 	}
 }
 
-function seedSummaryCase(cwd: string, requestId: string): string {
+async function seedSummaryCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const interactionStore = new InteractionStore(app.runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
@@ -569,14 +569,14 @@ function seedSummaryCase(cwd: string, requestId: string): string {
 	}
 }
 
-function seedTranscriptCase(cwd: string, requestId: string): string {
+async function seedTranscriptCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const interactionStore = new InteractionStore(app.runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
@@ -619,14 +619,14 @@ function seedTranscriptCase(cwd: string, requestId: string): string {
 	}
 }
 
-function seedPromptCase(cwd: string, requestId: string): string {
+async function seedPromptCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const interactionStore = new InteractionStore(app.runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
@@ -654,14 +654,14 @@ function seedPromptCase(cwd: string, requestId: string): string {
 	}
 }
 
-function seedChunksCase(cwd: string, requestId: string): string {
+async function seedChunksCase(cwd: string, requestId: string): Promise<string> {
 	const app = bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
 	});
 	try {
-		const session = app.runtime.sessionService.createSession("rp:alice");
+		const session = await app.runtime.sessionService.createSession("rp:alice");
 		const tracesPath = join(cwd, "data", "debug", "traces");
 		const traceStore = new TraceStore(tracesPath);
 		traceStore.initTrace(requestId, session.sessionId, "rp:alice");

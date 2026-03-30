@@ -1,44 +1,48 @@
-import { bootstrapApp } from "../bootstrap/app-bootstrap.js";
-import { join } from "node:path";
-import { TraceStore } from "../app/diagnostics/trace-store.js";
-import type { RuntimeBootstrapResult } from "../bootstrap/types.js";
 import {
-  createGatewayAppClients,
-  createLocalAppClients,
-  type AppClients,
+	type AppUserFacade,
+	createGatewayAppClients,
 } from "../app/clients/app-clients.js";
+import { createAppHost } from "../app/host/index.js";
 
+/**
+ * @deprecated Use `createAppHost()` directly instead. This bridge type exists
+ * only so that any remaining `createAppClientRuntime()` call sites continue to
+ * compile while migration to `AppHost` completes.
+ */
 export type AppClientRuntime = {
-  mode: "local" | "gateway";
-  clients: AppClients;
-  runtime?: RuntimeBootstrapResult;
-  shutdown: () => void;
+	mode: "local" | "gateway";
+	clients: AppUserFacade;
+	shutdown: () => void;
 };
 
-export function createAppClientRuntime(params: {
-  mode: "local" | "gateway";
-  cwd: string;
-  baseUrl?: string;
-}): AppClientRuntime {
-  if (params.mode === "gateway") {
-    return {
-      mode: params.mode,
-      clients: createGatewayAppClients(params.baseUrl ?? "http://localhost:3000"),
-      shutdown: () => {},
-    };
-  }
+export async function createAppClientRuntime(params: {
+	mode: "local" | "gateway";
+	cwd: string;
+	baseUrl?: string;
+}): Promise<AppClientRuntime> {
+	if (params.mode === "gateway") {
+		return {
+			mode: params.mode,
+			clients: createGatewayAppClients(
+				params.baseUrl ?? "http://localhost:3000",
+			),
+			shutdown: () => {},
+		};
+	}
 
-  const app = bootstrapApp({
-    cwd: params.cwd,
-    enableGateway: false,
-    requireAllProviders: false,
-  });
-  const inspectTraceStore = new TraceStore(join(params.cwd, "data", "debug", "traces"));
+	const host = await createAppHost({
+		role: "local",
+		cwd: params.cwd,
+		requireAllProviders: false,
+	});
 
-  return {
-    mode: params.mode,
-    clients: createLocalAppClients(app.runtime, { inspectTraceStore }),
-    runtime: app.runtime,
-    shutdown: () => app.shutdown(),
-  };
+	if (!host.user) {
+		throw new Error("createAppHost({ role: 'local' }) did not produce a user facade");
+	}
+
+	return {
+		mode: params.mode,
+		clients: host.user,
+		shutdown: () => void host.shutdown(),
+	};
 }

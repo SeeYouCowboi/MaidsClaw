@@ -18,6 +18,7 @@ import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js"
 import { registerChatCommand } from "../../src/terminal-cli/commands/chat.js";
 import { CliError, EXIT_USAGE } from "../../src/terminal-cli/errors.js";
 import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
+import type { AppUserFacade } from "../../src/app/host/types.js";
 import type { JsonEnvelope } from "../../src/terminal-cli/types.js";
 import type { AgentFileEntry } from "../../src/app/config/agents/agent-file-store.js";
 import { createShellState } from "../../src/terminal-cli/shell/state.js";
@@ -31,7 +32,7 @@ import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 import { InteractionStore } from "../../src/interaction/store.js";
 import { CommitService } from "../../src/interaction/commit-service.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
-import { createLocalRuntime } from "../../src/terminal-cli/local-runtime.js";
+import { executeLocalTurn } from "../../src/app/clients/local/local-turn-client.js";
 import { SessionService } from "../../src/session/service.js";
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { FlushSelector } from "../../src/interaction/flush-selector.js";
@@ -43,8 +44,9 @@ import { openDatabase, closeDatabaseGracefully, type Db } from "../../src/storag
 import type { AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { Chunk } from "../../src/core/chunk.js";
 import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contract.js";
-import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
+
 import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
+import { SqliteInteractionRepoAdapter } from "../../src/storage/domain-repos/sqlite/interaction-repo.js";
 
 // ── Shared helpers ──────────────────────────────────────────────────
 
@@ -489,13 +491,16 @@ describe("CLI Acceptance Runbook", () => {
 				graphStorage,
 			);
 
-			const session = sessionService.createSession("rp:alice");
-			const runtime = { db, turnService, sessionService } as unknown as RuntimeBootstrapResult;
+			const session = await sessionService.createSession("rp:alice");
 
-			const result = await createLocalRuntime(runtime).executeTurn({
+			const result = await executeLocalTurn({
 				sessionId: session.sessionId,
 				agentId: "rp:alice",
 				text: "hello",
+			}, {
+				sessionService,
+				turnService,
+				interactionRepo: new SqliteInteractionRepoAdapter(store),
 			});
 
 			// All documented envelope fields present
@@ -600,13 +605,16 @@ describe("CLI Acceptance Runbook", () => {
 				graphStorage,
 			);
 
-			const session = sessionService.createSession("rp:alice");
-			const runtime = { db, turnService, sessionService } as unknown as RuntimeBootstrapResult;
+			const session = await sessionService.createSession("rp:alice");
 
-			const result = await createLocalRuntime(runtime).executeTurn({
+			const result = await executeLocalTurn({
 				sessionId: session.sessionId,
 				agentId: "rp:alice",
 				text: "think quietly",
+			}, {
+				sessionService,
+				turnService,
+				interactionRepo: new SqliteInteractionRepoAdapter(store),
 			});
 
 			// Silent-private is SUCCESS, not failure
@@ -700,18 +708,20 @@ describe("CLI Acceptance Runbook", () => {
 			if (overrides?.lastRequestId !== undefined) {
 				state.lastRequestId = overrides.lastRequestId;
 			}
-			const mockRuntime = {
-				sessionService: {
-					requiresRecovery: () => false,
-					clearRecoveryRequired: () => {},
-					closeSession: (id: string) => ({ sessionId: id, closedAt: Date.now() }),
-					getSession: () => null,
-					createSession: () => ({ sessionId: "new-sess", agentId: "test-agent", createdAt: Date.now() }),
+			const mockFacade = {
+				session: {
+					requiresRecovery: () => Promise.resolve(false),
+					clearRecoveryRequired: () => Promise.resolve(),
+					closeSession: (id: string) => Promise.resolve({ session_id: id, closed_at: Date.now() }),
+					getSession: () => Promise.resolve(null),
+					createSession: () => Promise.resolve({ session_id: "new-sess", agent_id: "test-agent", created_at: Date.now() }),
 				},
-				traceStore: undefined,
-			} as unknown as SlashDispatchContext["runtime"];
+				turn: {} as AppUserFacade["turn"],
+				inspect: {} as AppUserFacade["inspect"],
+				health: {} as AppUserFacade["health"],
+			} as unknown as SlashDispatchContext["facade"];
 
-			return { state, runtime: mockRuntime };
+			return { state, facade: mockFacade };
 		}
 
 		const INSPECT_COMMANDS = ["/summary", "/inspect", "/prompt", "/chunks", "/diagnose", "/trace"];
@@ -761,7 +771,7 @@ describe("CLI Acceptance Runbook", () => {
 			// Seed a pending settlement scenario
 			const app = bootstrapApp({ cwd: tmpRoot, enableGateway: false, requireAllProviders: false });
 			try {
-				const session = app.runtime.sessionService.createSession("rp:alice");
+				const session = await app.runtime.sessionService.createSession("rp:alice");
 				const interactionStore = new InteractionStore(app.runtime.db);
 				const commitService = new CommitService(interactionStore);
 				const payload = makeSettlementPayload(session.sessionId, requestId, false);

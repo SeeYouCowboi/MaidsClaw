@@ -8,8 +8,8 @@
 
 import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
-import { bootstrapApp } from "../../bootstrap/app-bootstrap.js";
 import type { MemoryPipelineStatus } from "../../bootstrap/types.js";
+import { createAppHost, type AppHost } from "../../app/host/index.js";
 import type { AuthConfig } from "../../core/config-schema.js";
 import { registerCommand } from "../parser.js";
 import type { ParsedArgs } from "../parser.js";
@@ -320,19 +320,20 @@ async function handleConfigDoctor(
   let memoryPipelineStatus: MemoryPipelineStatus = "chat_model_unavailable";
   let bootstrapError: Error | undefined;
 
-  let shutdown: (() => void) | undefined;
+  let host: AppHost | undefined;
   try {
-    const app = bootstrapApp({
+    host = await createAppHost({
+      role: "local",
       cwd: ctx.cwd,
       enableGateway: false,
       requireAllProviders: false,
     });
-    shutdown = app.shutdown;
-    memoryPipelineStatus = app.runtime.memoryPipelineStatus;
+    const pipelineStatus = await host.admin.getPipelineStatus();
+    memoryPipelineStatus = pipelineStatus.memoryPipelineStatus;
   } catch (err) {
     bootstrapError = err instanceof Error ? err : new Error(String(err));
   } finally {
-    shutdown?.();
+    await host?.shutdown();
   }
 
   const normalizedMemoryModels = getNormalizedMemoryModelIds(runtimeConfigResult);

@@ -1,0 +1,36 @@
+Task 12: config.ts / agent.ts Migration to AppHostAdmin
+========================================================
+
+## Grep Verification — No raw runtime field access remains
+
+### config.ts: runtime.memoryPipelineStatus / runtime.memoryPipelineReady
+Result: 0 matches (CLEAN)
+
+### agent.ts: runtime.agentRegistry
+Result: 0 matches (CLEAN)
+
+## Changes Made
+
+### config.ts (src/terminal-cli/commands/config.ts)
+- Replaced `import { bootstrapApp }` with `import { createAppHost, type AppHost }` from `../../app/host/index.js`
+- handleConfigDoctor(): replaced `bootstrapApp({...})` with `await createAppHost({ role: "local", ...})`
+- Read `host.admin.getPipelineStatus()` → `pipelineStatus.memoryPipelineStatus` instead of `app.runtime.memoryPipelineStatus`
+- Calls `await host?.shutdown()` in finally block instead of sync `shutdown?.()`
+
+### agent.ts (src/terminal-cli/commands/agent.ts)
+- handleAgentList() runtime block: replaced dynamic `bootstrapApp` import with `createAppHost` from `../../app/host/index.js`
+  - Uses `await host.admin.listRuntimeAgents()` instead of `result.runtime.agentRegistry.getAll()`
+  - Calls `await host?.shutdown()` in finally block
+- handleAgentShow() runtime block: same pattern
+  - Uses `listRuntimeAgents()` + `.find(a => a.id === agentId)` instead of `agentRegistry.get(agentId)`
+  - Calls `await host?.shutdown()` in finally block
+
+## Build Verification
+$ bun run build
+tsc -p tsconfig.build.json --noEmit
+Exit: 0 (PASS)
+
+## Test Verification
+$ bun test test/cli/
+207 pass, 0 fail, 753 expect() calls
+Ran 207 tests across 16 files. [7.44s]

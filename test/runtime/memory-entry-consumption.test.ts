@@ -190,7 +190,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("maid:main");
+      const session = await runtime.sessionService.createSession("maid:main");
       const coreMemory = new CoreMemoryService(runtime.db);
       coreMemory.initializeBlocks("maid:main");
 
@@ -213,7 +213,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("maid:main");
+      const session = await runtime.sessionService.createSession("maid:main");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -262,7 +262,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -361,7 +361,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     }
   });
 
-  it("runtime.turnService is wired with real interaction services from bootstrap", () => {
+  it("runtime.turnService is wired with real interaction services from bootstrap", async () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
@@ -369,7 +369,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
       expect(typeof runtime.turnService.run).toBe("function");
       expect(typeof runtime.turnService.flushOnSessionClose).toBe("function");
 
-      const session = runtime.sessionService.createSession("maid:main");
+      const session = await runtime.sessionService.createSession("maid:main");
       expect(session.sessionId.length > 0).toBe(true);
       expect(session.agentId).toBe("maid:main");
     } finally {
@@ -582,7 +582,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("maid:main");
+      const session = await runtime.sessionService.createSession("maid:main");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -675,7 +675,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -870,7 +870,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -1150,7 +1150,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("task:cleanup");
+      const session = await runtime.sessionService.createSession("task:cleanup");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -1212,7 +1212,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -1696,7 +1696,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -2279,7 +2279,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const flushSelector = new FlushSelector(interactionStore);
       const migrateCalls: MemoryFlushRequest[] = [];
@@ -2422,7 +2422,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -2509,7 +2509,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -2603,7 +2603,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -2710,7 +2710,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);
@@ -2939,7 +2939,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
     const runtime = bootstrapRuntime({ databasePath: ":memory:" });
 
     try {
-      const session = runtime.sessionService.createSession("rp:alice");
+      const session = await runtime.sessionService.createSession("rp:alice");
       const interactionStore = new InteractionStore(runtime.db);
       const commitService = new CommitService(interactionStore);
       const flushSelector = new FlushSelector(interactionStore);

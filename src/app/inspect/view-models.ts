@@ -1,11 +1,11 @@
 import { formatRecentCognitionFromPayload } from "../../memory/prompt-data.js";
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import type { InteractionRecord } from "../../interaction/contracts.js";
 import { redactInteractionRecord } from "../../interaction/redaction.js";
 import type { InteractionRepo } from "../../storage/domain-repos/contracts/interaction-repo.js";
 import type { InspectContext } from "../contracts/inspect.js";
 import type { LogEntry, TraceBundle } from "../contracts/trace.js";
 import type { TraceStore } from "../diagnostics/trace-store.js";
+import type { InspectRuntimeDeps } from "./runtime-deps.js";
 import {
   getRequestEvidence,
   getSettlementRecord,
@@ -13,7 +13,7 @@ import {
 } from "./inspect-query-service.js";
 
 export type InspectViewLoadParams = {
-  runtime: RuntimeBootstrapResult;
+  runtime: InspectRuntimeDeps;
   traceStore?: TraceStore;
   context: InspectContext;
   raw?: boolean;
@@ -105,7 +105,7 @@ export type MemoryView = {
   agent_id?: string;
   memory_pipeline: {
     ready: boolean;
-    status: RuntimeBootstrapResult["memoryPipelineStatus"];
+    status: InspectRuntimeDeps["memoryPipelineStatus"];
   };
   core_memory_summary: Array<{
     label: string;
@@ -180,7 +180,7 @@ export async function loadSummaryView(params: InspectViewLoadParams): Promise<Su
     },
     pending_sweep_state: pendingState ?? {},
     recovery_required: derivedSessionId
-      ? params.runtime.sessionService.requiresRecovery(derivedSessionId)
+      ? await params.runtime.sessionService.requiresRecovery(derivedSessionId)
       : false,
     trace_available: evidence.trace !== null,
   };
@@ -336,8 +336,8 @@ export async function loadLogsView(params: InspectViewLoadParams): Promise<LogsV
 
 export async function loadMemoryView(params: InspectViewLoadParams): Promise<MemoryView> {
   const sessionId = requireSessionId(params.context);
-  const agentId = params.context.agentId
-    ?? params.runtime.sessionService.getSession(sessionId)?.agentId;
+	const agentId = params.context.agentId
+		?? (await params.runtime.sessionService.getSession(sessionId))?.agentId;
   const interactionRepo = getInteractionRepo(params.runtime);
   const pendingState = await interactionRepo.getPendingSettlementJobState(sessionId);
 
@@ -561,14 +561,14 @@ function resolveUnsafeRawMode(
   return true;
 }
 
-function getInteractionRepo(runtime: RuntimeBootstrapResult): InteractionRepo {
+function getInteractionRepo(runtime: InspectRuntimeDeps): InteractionRepo {
   return runtime.interactionRepo;
 }
 
 async function getRecentCognitionFromRepo(
   agentId: string,
   sessionId: string,
-  runtime: RuntimeBootstrapResult,
+  runtime: InspectRuntimeDeps,
 ): Promise<string> {
   const payload = await runtime.recentCognitionSlotRepo.getSlotPayload(sessionId, agentId);
   return formatRecentCognitionFromPayload(payload);

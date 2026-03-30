@@ -1,4 +1,4 @@
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
+import type { InspectRuntimeDeps } from "./runtime-deps.js";
 import type {
 	InteractionRecord,
 	TurnSettlementPayload,
@@ -21,7 +21,7 @@ export type RequestEvidence = {
 };
 
 export async function getRecordsForRequest(
-	runtime: RuntimeBootstrapResult,
+	runtime: InspectRuntimeDeps,
 	context: InspectContext,
 	requestId: string,
 ): Promise<InteractionRecord[]> {
@@ -56,7 +56,7 @@ export function getSettlementRecord(
 }
 
 export async function getRequestEvidence(params: {
-	runtime: RuntimeBootstrapResult;
+	runtime: InspectRuntimeDeps;
 	context: InspectContext;
 	requestId: string;
 	traceStore?: TraceStore;
@@ -161,7 +161,7 @@ async function hasRequestInSession(
 }
 
 function getTraceBundle(
-	runtime: RuntimeBootstrapResult,
+	runtime: InspectRuntimeDeps,
 	requestId: string,
 	traceStore?: TraceStore,
 ): TraceBundle | null {
@@ -196,7 +196,7 @@ function resolveUnsafeRawMode(
 }
 
 function getInteractionRepo(
-	runtime: RuntimeBootstrapResult,
+	runtime: InspectRuntimeDeps,
 ): InteractionRepo {
 	return runtime.interactionRepo;
 }

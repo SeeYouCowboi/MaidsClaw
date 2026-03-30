@@ -7,14 +7,15 @@
  * If no `--session` is provided, a new session is auto-created.
  */
 
-import { registerCommand } from "../parser.js";
-import type { ParsedArgs } from "../parser.js";
+import { createGatewayAppClients } from "../../app/clients/app-clients.js";
+import { createAppHost } from "../../app/host/index.js";
 import type { CliContext } from "../context.js";
-import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
-import { writeText } from "../output.js";
+import { CliError, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { GatewayClient } from "../gateway-client.js";
-import { createShellState } from "../shell/state.js";
+import { writeText } from "../output.js";
+import { type ParsedArgs, registerCommand } from "../parser.js";
 import { SessionShell } from "../shell/session-shell.js";
+import { createShellState } from "../shell/state.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -32,10 +33,7 @@ const KNOWN_CHAT_FLAGS = new Set([
 
 // ── chat handler ─────────────────────────────────────────────────────
 
-async function handleChat(
-	ctx: CliContext,
-	args: ParsedArgs,
-): Promise<void> {
+async function handleChat(ctx: CliContext, args: ParsedArgs): Promise<void> {
 	// chat MUST NOT support --json
 	if (ctx.json) {
 		throw new CliError(
@@ -57,7 +55,7 @@ async function handleChat(
 	}
 
 	// Required: --agent
-	const agentId = args.flags["agent"];
+	const agentId = args.flags.agent;
 	if (agentId === undefined) {
 		throw new CliError(
 			"MISSING_ARGUMENT",
@@ -75,35 +73,35 @@ async function handleChat(
 
 	// Optional: --session
 	let sessionId: string | undefined;
-	if (args.flags["session"] !== undefined) {
-		if (typeof args.flags["session"] !== "string") {
+	if (args.flags.session !== undefined) {
+		if (typeof args.flags.session !== "string") {
 			throw new CliError(
 				"MISSING_FLAG_VALUE",
 				"--session requires a value",
 				EXIT_USAGE,
 			);
 		}
-		sessionId = args.flags["session"];
+		sessionId = args.flags.session;
 	}
 
 	// Optional: --mode
 	let mode: "local" | "gateway" = "local";
-	if (args.flags["mode"] !== undefined) {
-		if (typeof args.flags["mode"] !== "string") {
+	if (args.flags.mode !== undefined) {
+		if (typeof args.flags.mode !== "string") {
 			throw new CliError(
 				"MISSING_FLAG_VALUE",
 				"--mode requires a value",
 				EXIT_USAGE,
 			);
 		}
-		if (args.flags["mode"] !== "local" && args.flags["mode"] !== "gateway") {
+		if (args.flags.mode !== "local" && args.flags.mode !== "gateway") {
 			throw new CliError(
 				"INVALID_FLAG_VALUE",
-				`Invalid mode: "${args.flags["mode"]}". Must be "local" or "gateway".`,
+				`Invalid mode: "${args.flags.mode}". Must be "local" or "gateway".`,
 				EXIT_USAGE,
 			);
 		}
-		mode = args.flags["mode"] as "local" | "gateway";
+		mode = args.flags.mode as "local" | "gateway";
 	}
 
 	// Optional: --base-url
@@ -123,7 +121,9 @@ async function handleChat(
 	const saveTrace = args.flags["save-trace"] === true;
 
 	if (mode === "gateway") {
-		const client = new GatewayClient(baseUrl ?? "http://localhost:3000");
+		const gatewayBaseUrl = baseUrl ?? "http://localhost:3000";
+		const client = new GatewayClient(gatewayBaseUrl);
+		const facade = createGatewayAppClients(gatewayBaseUrl);
 		if (!sessionId) {
 			const created = await client.createSession(agentId);
 			sessionId = created.session_id;
@@ -141,7 +141,7 @@ async function handleChat(
 			baseUrl,
 		});
 
-		const shell = new SessionShell(state, undefined, {
+		const shell = new SessionShell(state, facade, {
 			saveTrace,
 			gatewayClient: client,
 		});
@@ -153,18 +153,15 @@ async function handleChat(
 		return;
 	}
 
-	const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
-	let app: ReturnType<typeof bootstrapApp>;
-	try {
-		app = bootstrapApp({
-			cwd: ctx.cwd,
-			enableGateway: false,
-			requireAllProviders: false,
-		});
-	} catch (err) {
+	const host = await createAppHost({
+		role: "local",
+		cwd: ctx.cwd,
+		requireAllProviders: false,
+	});
+	if (!host.user) {
 		throw new CliError(
 			"BOOTSTRAP_FAILED",
-			`Failed to bootstrap runtime: ${err instanceof Error ? err.message : String(err)}`,
+			"Failed to create local app user facade",
 			EXIT_RUNTIME,
 		);
 	}
@@ -172,11 +169,11 @@ async function handleChat(
 	try {
 		// Auto-create session if not provided
 		if (!sessionId) {
-			const record = app.runtime.sessionService.createSession(agentId);
-			sessionId = record.sessionId;
+			const record = await host.user.session.createSession(agentId);
+			sessionId = record.session_id;
 		} else {
 			// Validate provided session exists
-			const session = app.runtime.sessionService.getSession(sessionId);
+			const session = await host.user.session.getSession(sessionId);
 			if (!session) {
 				throw new CliError(
 					"SESSION_NOT_FOUND",
@@ -184,7 +181,7 @@ async function handleChat(
 					EXIT_RUNTIME,
 				);
 			}
-			if (session.closedAt !== undefined) {
+			if (session.closed_at !== undefined) {
 				throw new CliError(
 					"SESSION_CLOSED",
 					`Session ${sessionId} is closed. Create a new session or recover this one.`,
@@ -207,14 +204,14 @@ async function handleChat(
 			baseUrl,
 		});
 
-		const shell = new SessionShell(state, app.runtime, { saveTrace });
+		const shell = new SessionShell(state, host.user, { saveTrace });
 		await shell.run();
 
 		if (!ctx.quiet) {
 			writeText("\nGoodbye.");
 		}
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 

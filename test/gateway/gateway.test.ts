@@ -1137,7 +1137,7 @@ describe("Real TurnService-backed gateway path", () => {
       }).then((r) => r.text()); // consume body
 
       // Verify session is now recovery_required
-      expect(runtime.sessionService.isRecoveryRequired(session_id)).toBe(true);
+      expect(await runtime.sessionService.isRecoveryRequired(session_id)).toBe(true);
 
       // Call recover endpoint
       const recoverRes = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/recover`, {

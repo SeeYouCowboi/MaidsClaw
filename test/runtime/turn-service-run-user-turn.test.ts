@@ -59,9 +59,9 @@ describe("run user turn wrapper", () => {
     closeDatabaseGracefully(db);
   });
 
-  it("throws SESSION_CLOSED for closed sessions", () => {
-    const session = sessionService.createSession("maid:main");
-    sessionService.closeSession(session.sessionId);
+  it("throws SESSION_CLOSED for closed sessions", async () => {
+    const session = await sessionService.createSession("maid:main");
+    await sessionService.closeSession(session.sessionId);
     const capture: { request?: AgentRunRequest } = {};
     const turnService = new TurnService(
       makeStreamingLoop([], capture),
@@ -76,17 +76,14 @@ describe("run user turn wrapper", () => {
     );
 
     try {
-      executeUserTurn(
-        {
-          sessionId: session.sessionId,
-          userText: "hello",
-          agentId: "maid:main",
-        },
-      {
+      await executeUserTurn({
+        sessionId: session.sessionId,
+        userText: "hello",
+        agentId: "maid:main",
+      }, {
           sessionService,
           turnService,
-        },
-      );
+        });
       throw new Error("expected SESSION_CLOSED");
     } catch (error) {
       expect(error instanceof MaidsClawError).toBe(true);
@@ -94,9 +91,9 @@ describe("run user turn wrapper", () => {
     }
   });
 
-  it("throws recovery-required error when session needs recovery", () => {
-    const session = sessionService.createSession("maid:main");
-    sessionService.markRecoveryRequired(session.sessionId);
+  it("throws recovery-required error when session needs recovery", async () => {
+    const session = await sessionService.createSession("maid:main");
+    await sessionService.markRecoveryRequired(session.sessionId);
     const capture: { request?: AgentRunRequest } = {};
     const turnService = new TurnService(
       makeStreamingLoop([], capture),
@@ -111,17 +108,14 @@ describe("run user turn wrapper", () => {
     );
 
     try {
-      executeUserTurn(
-        {
-          sessionId: session.sessionId,
-          userText: "hello",
-          agentId: "maid:main",
-        },
-      {
+      await executeUserTurn({
+        sessionId: session.sessionId,
+        userText: "hello",
+        agentId: "maid:main",
+      }, {
           sessionService,
           turnService,
-        },
-      );
+        });
       throw new Error("expected recovery-required error");
     } catch (error) {
       expect(error instanceof MaidsClawError).toBe(true);
@@ -130,8 +124,8 @@ describe("run user turn wrapper", () => {
     }
   });
 
-  it("throws AGENT_OWNERSHIP_MISMATCH when requested agent differs from owner", () => {
-    const session = sessionService.createSession("maid:owner");
+  it("throws AGENT_OWNERSHIP_MISMATCH when requested agent differs from owner", async () => {
+    const session = await sessionService.createSession("maid:owner");
     const capture: { request?: AgentRunRequest } = {};
     const turnService = new TurnService(
       makeStreamingLoop([], capture),
@@ -146,17 +140,14 @@ describe("run user turn wrapper", () => {
     );
 
     try {
-      executeUserTurn(
-        {
-          sessionId: session.sessionId,
-          userText: "hello",
-          agentId: "maid:other",
-        },
-      {
+      await executeUserTurn({
+        sessionId: session.sessionId,
+        userText: "hello",
+        agentId: "maid:other",
+      }, {
           sessionService,
           turnService,
-        },
-      );
+        });
       throw new Error("expected ownership mismatch");
     } catch (error) {
       expect(error instanceof MaidsClawError).toBe(true);
@@ -165,7 +156,7 @@ describe("run user turn wrapper", () => {
   });
 
   it("streams via runUserTurn, commits user record once, and finalizes trace once", async () => {
-    const session = sessionService.createSession("maid:violet");
+    const session = await sessionService.createSession("maid:violet");
     commitService.commit({
       sessionId: session.sessionId,
       actorType: "user",
@@ -218,18 +209,15 @@ describe("run user turn wrapper", () => {
       traceProbe as never,
     );
 
-    const stream = executeUserTurn(
-      {
-        sessionId: session.sessionId,
-        userText: "latest user message",
-        requestId: "req-new",
-        agentId: "maid:violet",
-      },
-      {
-        sessionService,
-        turnService,
-      },
-    );
+    const stream = await executeUserTurn({
+      sessionId: session.sessionId,
+      userText: "latest user message",
+      requestId: "req-new",
+      agentId: "maid:violet",
+    }, {
+      sessionService,
+      turnService,
+    });
     const chunks = await collectChunks(stream);
 
     expect(chunks).toEqual([

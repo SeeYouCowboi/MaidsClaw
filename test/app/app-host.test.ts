@@ -1,0 +1,74 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { type AppHost, createAppHost } from "../../src/app/host/index.js";
+
+describe("createAppHost", () => {
+  let host: AppHost | undefined;
+
+  afterEach(async () => {
+    if (host) {
+      await host.shutdown();
+      host = undefined;
+    }
+  });
+
+  test("local role creates host with user + admin, no maintenance", async () => {
+    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    expect(host.role).toBe("local");
+    expect(host.user).toBeDefined();
+    expect(host.admin).toBeDefined();
+    expect(host.maintenance).toBeUndefined();
+  });
+
+  test("local role start/shutdown lifecycle", async () => {
+    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    await host.start();
+    await host.shutdown();
+    host = undefined;
+  });
+
+  test("admin.getHostStatus returns HostStatusDTO shape", async () => {
+    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    const status = await host.admin.getHostStatus();
+    expect(status.backendType).toBe("sqlite");
+    expect(typeof status.migrationStatus.succeeded).toBe("boolean");
+    expect(status.memoryPipelineStatus).toBeDefined();
+  });
+
+  test("server role creates host with getBoundPort", async () => {
+    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0 });
+    expect(host.role).toBe("server");
+    expect(host.user).toBeDefined();
+    expect(host.admin).toBeDefined();
+    await host.start();
+    expect(host.getBoundPort).toBeDefined();
+    const getBoundPort = host.getBoundPort;
+    if (!getBoundPort) {
+      throw new Error("Expected server host to expose getBoundPort");
+    }
+    const port = getBoundPort();
+    expect(port).toBeGreaterThan(0);
+    await host.shutdown();
+    host = undefined;
+  });
+
+  test("server role without enableMaintenance has no maintenance facet", async () => {
+    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0 });
+    await host.start();
+    expect(host.maintenance).toBeUndefined();
+    await host.shutdown();
+    host = undefined;
+  });
+
+  test("server role with enableMaintenance exposes maintenance facet", async () => {
+    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0, enableMaintenance: true });
+    await host.start();
+    expect(host.maintenance).toBeDefined();
+    const maintenance = host.maintenance;
+    if (!maintenance) {
+      throw new Error("Expected maintenance facade for enableMaintenance=true");
+    }
+    await expect(maintenance.runOnce()).rejects.toThrow("not yet implemented");
+    await host.shutdown();
+    host = undefined;
+  });
+});

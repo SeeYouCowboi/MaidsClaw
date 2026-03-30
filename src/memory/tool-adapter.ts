@@ -22,12 +22,12 @@ function resolveSessionId(context?: DispatchContext): string {
   });
 }
 
-function resolveAgentId(context: DispatchContext | undefined, services: RuntimeServices, sessionId: string): string {
+async function resolveAgentId(context: DispatchContext | undefined, services: RuntimeServices, sessionId: string): Promise<string> {
   if (typeof context?.agentId === "string" && context.agentId.length > 0) {
     return context.agentId;
   }
 
-  const session = services.sessionService.getSession(sessionId);
+  const session = await services.sessionService.getSession(sessionId);
   if (session?.agentId) {
     return session.agentId;
   }
@@ -64,7 +64,7 @@ export function adaptMemoryTool(memTool: MemoryToolDefinition, services: Runtime
     parameters: memTool.parameters,
     async execute(params: unknown, dispatchContext?: DispatchContext): Promise<unknown> {
       const sessionId = resolveSessionId(dispatchContext);
-      const agentId = resolveAgentId(dispatchContext, services, sessionId);
+      const agentId = await resolveAgentId(dispatchContext, services, sessionId);
       const role = resolveViewerRole(dispatchContext, services, agentId);
       const viewerContext = resolveViewerContext(agentId, services.blackboard, { sessionId, role });
       const args = typeof params === "object" && params !== null ? (params as Record<string, unknown>) : {};

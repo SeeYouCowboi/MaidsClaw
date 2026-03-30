@@ -425,7 +425,7 @@ export function bootstrapRuntime(
 	const turnServiceAgentLoop = {
 		async *run(request: AgentRunRequest): AsyncGenerator<Chunk> {
 			const canonicalAgentId =
-				sessionService.getSession(request.sessionId)?.agentId ??
+				(await sessionService.getSession(request.sessionId))?.agentId ??
 				MAIDEN_PROFILE.id;
 			const profile = agentRegistry.get(canonicalAgentId);
 			const loop = createAgentLoop(canonicalAgentId);
@@ -469,7 +469,7 @@ export function bootstrapRuntime(
 			request: AgentRunRequest,
 		): Promise<RpBufferedExecutionResult> {
 			const canonicalAgentId =
-				sessionService.getSession(request.sessionId)?.agentId ??
+				(await sessionService.getSession(request.sessionId))?.agentId ??
 				MAIDEN_PROFILE.id;
 			const profile = agentRegistry.get(canonicalAgentId);
 			const loop = createAgentLoop(canonicalAgentId);

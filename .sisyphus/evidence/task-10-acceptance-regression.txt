@@ -1,0 +1,15 @@
+Task 10 — acceptance regression evidence
+Date: 2026-03-30
+
+Command:
+  bun test test/cli/acceptance.test.ts
+
+Result:
+  31 pass
+  0 fail
+  Ran 31 tests across 1 file. [1101.00ms]
+
+Observed CLI noise in test output is expected for acceptance coverage:
+  - unknown command/subcommand error-path checks
+  - unsafe-raw local-only guard checks
+  - no-request-context guard messages for slash inspect commands

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { createLocalAppClients } from "../../src/app/clients/app-clients.js";
+import type { ObservationEvent } from "../../src/app/contracts/execution.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
 import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
@@ -85,11 +87,22 @@ describe("gateway mode", () => {
 		registerTurnCommands();
 
 		runtime = bootstrapRuntime({ databasePath: ":memory:", cwd: makeTempDir() });
+		const userFacade = createLocalAppClients(runtime);
+		userFacade.turn = {
+			async *streamTurn(): AsyncIterable<ObservationEvent> {
+				yield { type: "text_delta", text: "Hello from MaidsClaw." };
+				yield {
+					type: "message_end",
+					stop_reason: "end_turn",
+					usage: { input_tokens: 0, output_tokens: 10 },
+				};
+			},
+		};
 		server = new GatewayServer({
 			port: 0,
 			host: "localhost",
-			runtime,
-			sessionService: runtime.sessionService,
+			userFacade,
+			traceStore: runtime.traceStore,
 			hasAgent: (id) => runtime.agentRegistry.has(id),
 		});
 		server.start();
@@ -132,7 +145,7 @@ describe("gateway mode", () => {
 	});
 
 	it("gateway evidence endpoints return structured JSON", async () => {
-		const session = runtime.sessionService.createSession("rp:default");
+		const session = await runtime.sessionService.createSession("rp:default");
 		const requestId = "req-evidence-1";
 		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);

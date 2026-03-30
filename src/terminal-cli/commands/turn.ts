@@ -137,7 +137,7 @@ async function handleTurnSend(
 
   let runtime: AppClientRuntime;
   try {
-    runtime = createAppClientRuntime({ mode, cwd: ctx.cwd, baseUrl });
+    runtime = await createAppClientRuntime({ mode, cwd: ctx.cwd, baseUrl });
   } catch (err) {
     throw new CliError(
       "BOOTSTRAP_FAILED",

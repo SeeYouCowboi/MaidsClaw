@@ -41,11 +41,11 @@ function createInteractionHarness(): {
 }
 
 describe("E2E demo scenario", () => {
-  it("canonical turn - delegation + memory flush trigger", () => {
+	it("canonical turn - delegation + memory flush trigger", async () => {
     const { db, store, commitService, sessionService } = createInteractionHarness();
 
     try {
-      const session = sessionService.createSession("maid:main");
+      const session = await sessionService.createSession("maid:main");
       const runContext: RunContext = {
         runId: crypto.randomUUID(),
         sessionId: session.sessionId,
@@ -117,11 +117,11 @@ describe("E2E demo scenario", () => {
     }
   });
 
-  it("10-turn fixture - memory flush trigger", () => {
+	it("10-turn fixture - memory flush trigger", async () => {
     const { db, store, flushSelector, sessionService } = createInteractionHarness();
 
     try {
-      const session = sessionService.createSession("maid:main");
+      const session = await sessionService.createSession("maid:main");
       const agentId = "maid:main";
 
       for (let i = 0; i < 10; i++) {
@@ -153,11 +153,11 @@ describe("E2E demo scenario", () => {
     }
   });
 
-  it("session close flush", () => {
+	it("session close flush", async () => {
     const { db, store, flushSelector, sessionService } = createInteractionHarness();
 
     try {
-      const session = sessionService.createSession("maid:main");
+      const session = await sessionService.createSession("maid:main");
       const agentId = "maid:main";
 
       for (let i = 0; i < 3; i++) {

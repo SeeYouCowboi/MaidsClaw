@@ -138,7 +138,7 @@ export class TurnService {
 		this.traceStore?.initTrace(
 			requestId,
 			request.sessionId,
-			this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown",
+			(await this.resolveQueueOwnerAgentId(request.sessionId)) ?? "unknown",
 		);
 
 		const existingUserRecord =
@@ -161,7 +161,7 @@ export class TurnService {
 			});
 
 		const turnRangeStart = userRecord.recordIndex;
-		const assistantActorType = this.resolveAssistantActorType(
+		const assistantActorType = await this.resolveAssistantActorType(
 			effectiveRequest.sessionId,
 		);
 
@@ -231,7 +231,7 @@ export class TurnService {
 			return;
 		}
 
-		this.handleFailedTurn({
+		await this.handleFailedTurn({
 			request,
 			turnRangeStart,
 			errorChunk,
@@ -274,7 +274,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -301,7 +301,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -333,7 +333,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -373,7 +373,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -422,7 +422,7 @@ export class TurnService {
 				"rp_agent",
 			);
 			const ownerAgentId =
-				this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "";
+				(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
 			viewerSnapshot = resolvedViewerSnapshot;
 			const settlementPayload: TurnSettlementPayload = {
 				settlementId,
@@ -561,7 +561,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -598,18 +598,18 @@ export class TurnService {
 					},
 					{
 						agentRole: "rp_agent",
-						artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-						artifactEnforcementContext: {
-							writingAgentId: this.resolveQueueOwnerAgentId(
-								effectiveRequest.sessionId,
-							),
-							ownerAgentId:
-								settlementPayloadAfterCommit?.ownerAgentId ||
-								this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-							writeOperation: "append",
-						},
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: await this.resolveQueueOwnerAgentId(
+							effectiveRequest.sessionId,
+						),
+						ownerAgentId:
+							settlementPayloadAfterCommit?.ownerAgentId ||
+							(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)),
+						writeOperation: "append",
 					},
-				);
+				},
+			);
 			} catch (err) {
 				this.traceLog(
 					requestId,
@@ -620,7 +620,7 @@ export class TurnService {
 		}
 
 		const queueOwnerAgentId =
-			this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "unknown";
+			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "unknown";
 		this.projectionSink?.onProjectionEligible(
 			createProjectionAppendix({
 				publicReply: canonicalOutcome.publicReply,
@@ -812,7 +812,7 @@ export class TurnService {
 		sessionId: string,
 		role: AgentProfile["role"],
 	): Promise<TurnSettlementPayload["viewerSnapshot"]> {
-		const agentId = this.resolveQueueOwnerAgentId(sessionId) ?? "";
+		const agentId = (await this.resolveQueueOwnerAgentId(sessionId)) ?? "";
 		const viewerContext = await this.resolveViewerContext({
 			sessionId,
 			agentId,
@@ -854,13 +854,13 @@ export class TurnService {
 		};
 	}
 
-	private handleFailedTurn(params: {
+	private async handleFailedTurn(params: {
 		request: AgentRunRequest;
 		turnRangeStart: number;
 		errorChunk: { code?: string; message?: string };
 		assistantText: string;
 		hasAssistantVisibleActivity: boolean;
-	}): void {
+	}): Promise<void> {
 		const {
 			request,
 			turnRangeStart,
@@ -899,7 +899,7 @@ export class TurnService {
 			statusRecord.recordIndex,
 		);
 		if (hasAssistantVisibleActivity) {
-			this.sessionService.setRecoveryRequired(request.sessionId);
+			await this.sessionService.setRecoveryRequired(request.sessionId);
 		}
 	}
 
@@ -935,7 +935,7 @@ export class TurnService {
 			return;
 		}
 
-		const queueOwnerAgentId = this.resolveQueueOwnerAgentId(sessionId);
+		const queueOwnerAgentId = await this.resolveQueueOwnerAgentId(sessionId);
 		if (!queueOwnerAgentId) {
 			return;
 		}
@@ -992,7 +992,7 @@ export class TurnService {
 			dialogueRecords: toDialogueRecords(records),
 			interactionRecords: records as never,
 			queueOwnerAgentId,
-			agentRole: this.resolveAssistantActorType(flushRequest.sessionId),
+			agentRole: await this.resolveAssistantActorType(flushRequest.sessionId),
 		});
 
 		this.interactionStore.markProcessed(
@@ -1011,14 +1011,14 @@ export class TurnService {
 		}
 	}
 
-	private resolveQueueOwnerAgentId(sessionId: string): string | undefined {
-		return this.sessionService.getSession(sessionId)?.agentId;
+	private async resolveQueueOwnerAgentId(sessionId: string): Promise<string | undefined> {
+		return (await this.sessionService.getSession(sessionId))?.agentId;
 	}
 
-	private resolveAssistantActorType(
+	private async resolveAssistantActorType(
 		sessionId: string,
-	): "rp_agent" | "maiden" | "task_agent" {
-		const agentId = this.resolveQueueOwnerAgentId(sessionId);
+	): Promise<"rp_agent" | "maiden" | "task_agent"> {
+		const agentId = await this.resolveQueueOwnerAgentId(sessionId);
 		if (agentId?.startsWith("maid:")) {
 			return "maiden";
 		}

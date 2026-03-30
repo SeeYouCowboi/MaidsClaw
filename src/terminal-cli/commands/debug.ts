@@ -163,13 +163,13 @@ function toCliError(err: unknown): CliError {
 	return new CliError("DEBUG_COMMAND_FAILED", String(err), EXIT_RUNTIME);
 }
 
-function openClientRuntime(
+async function openClientRuntime(
 	ctx: CliContext,
 	mode: "local" | "gateway",
 	baseUrl: string,
-): AppClientRuntime {
+): Promise<AppClientRuntime> {
 	try {
-		return createAppClientRuntime({
+		return await createAppClientRuntime({
 			mode,
 			cwd: ctx.cwd,
 			baseUrl,
@@ -189,7 +189,7 @@ async function withClientRuntime<T>(
 	baseUrl: string,
 	work: (runtime: AppClientRuntime) => Promise<T>,
 ): Promise<T> {
-	const runtime = openClientRuntime(ctx, mode, baseUrl);
+	const runtime = await openClientRuntime(ctx, mode, baseUrl);
 	try {
 		return await work(runtime);
 	} finally {

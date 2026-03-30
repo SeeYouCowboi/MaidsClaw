@@ -142,7 +142,7 @@ describe("runtime tool registration", () => {
         expect(schemaNames).toContain(toolName);
       }
 
-      const session = runtime.sessionService.createSession("rp:default");
+      const session = await runtime.sessionService.createSession("rp:default");
       const coreMemory = new CoreMemoryService(runtime.db);
       coreMemory.initializeBlocks("rp:default");
 

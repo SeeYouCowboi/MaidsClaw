@@ -233,7 +233,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ### Wave 1 — Foundation Types & Async Migration
 
-- [ ] 1. AppHost Types + AppRole Definition
+- [x] 1. AppHost Types + AppRole Definition
 
   **What to do**:
   - Create `src/app/host/types.ts` with all type definitions from consensus Section 6:
@@ -330,7 +330,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 2. SessionService Async Migration
+- [x] 2. SessionService Async Migration
 
   **What to do**:
   - **Phase A — Method signatures**: In `src/session/service.ts`, change all 7 canonical methods to `async` returning `Promise<T>`. Wrap existing sync logic with `Promise.resolve()` or direct return (async functions auto-wrap). Mark `setRecoveryRequired()` and `isRecoveryRequired()` with `@deprecated` JSDoc.
@@ -467,7 +467,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 3. AppHostAdmin DTO Types
+- [x] 3. AppHostAdmin DTO Types
 
   **What to do**:
   - Add `HostStatusDTO` and `PipelineStatusDTO` to `src/app/host/types.ts` (created in Task 1) if not already included there. Ensure the types match consensus A030 exactly:
@@ -538,7 +538,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 4. SessionCloseResult / SessionRecoverResult Host-Aware Types
+- [x] 4. SessionCloseResult / SessionRecoverResult Host-Aware Types
 
   **What to do**:
   - Define `SessionCloseResult` and `SessionRecoverResult` types per consensus A021/A031/A034:
@@ -614,7 +614,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ### Wave 2 — Facade Implementations
 
-- [ ] 5. createAppHost() Factory Implementation
+- [x] 5. createAppHost() Factory Implementation
 
   **What to do**:
   - Create `src/app/host/create-app-host.ts` implementing the unified async factory:
@@ -762,7 +762,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 6. AppClients → AppUserFacade Evolution + Flush Absorption
+- [x] 6. AppClients → AppUserFacade Evolution + Flush Absorption
 
   **What to do**:
   - **Phase A — Type evolution**: Evolve `AppClients` type to `AppUserFacade` in `src/app/clients/app-clients.ts`:
@@ -887,7 +887,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 7. InteractionStore → InteractionRepo Migration in Edge Code
+- [x] 7. InteractionStore → InteractionRepo Migration in Edge Code
 
   **What to do**:
   - **local-turn-client.ts**: Change `LocalTurnDeps.interactionStore: InteractionStore` → `interactionRepo: InteractionRepo` (line 30). Update `executeLocalTurn()` at line 96: change `deps.interactionStore.getSettlementPayload(...)` → `await deps.interactionRepo.getSettlementPayload(...)` (InteractionRepo version is async)
@@ -968,7 +968,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 8. AppHostAdmin Implementation
+- [x] 8. AppHostAdmin Implementation
 
   **What to do**:
   - Implement `AppHostAdmin` methods in a new file `src/app/host/app-host-admin.ts`:
@@ -1043,7 +1043,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 9. AppMaintenanceFacade Narrow Core Skeleton
+- [x] 9. AppMaintenanceFacade Narrow Core Skeleton
 
   **What to do**:
   - Create `src/app/host/app-maintenance-facade.ts` with minimal implementation:
@@ -1119,7 +1119,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ### Wave 3 — Entry Point Migration
 
-- [ ] 10. chat.ts + SessionShell Constructor Migration to AppHost
+- [x] 10. chat.ts + SessionShell Constructor Migration to AppHost
 
   **What to do**:
   This task co-batches chat.ts migration WITH SessionShell constructor migration (previously Task 16 Phase A) to avoid needing an `_internal.runtime` escape hatch. Per A032 line 262: "`chat.ts` 改为 `createAppHost({ role: "local" })`，将 `host.user` 传入 shell"
@@ -1221,7 +1221,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 11. session.ts / turn.ts / debug.ts Migration to AppHost
+- [x] 11. session.ts / turn.ts / debug.ts Migration to AppHost
 
   **What to do**:
   - These 3 commands already use `createAppClientRuntime()` facade pattern — they are the EASIEST migration:
@@ -1292,7 +1292,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 12. config.ts / agent.ts Migration to AppHostAdmin
+- [x] 12. config.ts / agent.ts Migration to AppHostAdmin
 
   **What to do**:
   - **config.ts**: `handleConfigDoctor()` (lines 325-336) currently calls `bootstrapApp()` and reads `runtime.memoryPipelineStatus` / `runtime.memoryPipelineReady`. Change to:
@@ -1356,7 +1356,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 13. server.ts / index.ts Migration to AppHost Lifecycle
+- [x] 13. server.ts / index.ts Migration to AppHost Lifecycle
 
   **What to do**:
   - **server.ts**: Replace `bootstrapApp({ enableGateway: true, ... })` with `createAppHost({ role: "server", ... })`. Replace `app.server.start()` with `await host.start()`. Replace `app.server.getPort()` with `host.getBoundPort()` (see below). Replace admin info reads (`app.runtime.memoryPipelineStatus`) with `host.admin.getPipelineStatus()`. Replace `app.shutdown()` with `await host.shutdown()`.
@@ -1438,7 +1438,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 14. GatewayServer + Controllers Facade Migration
+- [x] 14. GatewayServer + Controllers Facade Migration
 
   **What to do**:
   - **GatewayServer**: Refactor `GatewayServerOptions` to accept `AppHost` or facade references instead of scattered params:

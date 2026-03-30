@@ -1,7 +1,7 @@
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import type { InspectContext } from "../contracts/inspect.js";
 import type { TraceStore } from "./trace-store.js";
 import { getRequestEvidence } from "../inspect/inspect-query-service.js";
+import type { InspectRuntimeDeps } from "../inspect/runtime-deps.js";
 
 export type DiagnosticEntry = {
   primary_cause: string;
@@ -25,7 +25,7 @@ export type DiagnosticEntry = {
 };
 
 export async function diagnose(params: {
-  runtime: RuntimeBootstrapResult;
+  runtime: InspectRuntimeDeps;
   traceStore?: TraceStore;
   context: InspectContext;
 }): Promise<DiagnosticEntry> {
@@ -98,7 +98,7 @@ export async function diagnose(params: {
       };
     }
 
-    if (params.runtime.sessionService.requiresRecovery(sessionId)) {
+    if (await params.runtime.sessionService.requiresRecovery(sessionId)) {
       return {
         primary_cause: "session_recovery_required",
         subsystem: "session_recovery",

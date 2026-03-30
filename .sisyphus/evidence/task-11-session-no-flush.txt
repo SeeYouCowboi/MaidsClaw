@@ -1,0 +1,30 @@
+Task 11 Evidence: session.ts no longer uses flushOnSessionClose or runtime.runtime
+====================================================================================
+
+Search: grep for "flushOnSessionClose" in src/terminal-cli/commands/session.ts
+Result: No matches found ✓
+
+Search: grep for "runtime\.runtime" in src/terminal-cli/commands/session.ts
+Result: No matches found ✓
+
+Search: grep for "runtime\.runtime" in src/terminal-cli/commands/*.ts (all CLI commands)
+Result: No matches found ✓
+
+Changes made:
+- Removed manual `flushOnSessionClose()` call from handleSessionClose (lines 155-161)
+- Removed `flushRan` local variable
+- Removed `runtime.runtime` access (the double-runtime anti-pattern)
+- `closeSession()` return value (`SessionCloseResult`) now provides `host_steps` directly
+- JSON output now emits `host_steps: { flush_on_session_close: ... }` instead of `flush_ran: boolean`
+
+turn.ts verification:
+- Only accesses `runtime.clients.turn` and `runtime.clients.inspect` — pure AppUserFacade usage ✓
+- No `runtime.runtime` references ✓
+- No changes needed ✓
+
+debug.ts verification:
+- Only accesses `runtime.clients.inspect` — pure AppUserFacade usage ✓
+- No `runtime.runtime` references ✓
+- No changes needed ✓
+
+Generated: 2026-03-30

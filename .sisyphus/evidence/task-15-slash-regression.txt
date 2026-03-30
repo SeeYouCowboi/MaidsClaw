@@ -1,0 +1,17 @@
+Task: T15 Slash-Dispatcher Mode Branch Elimination
+
+Command:
+- bun test test/cli/acceptance.test.ts
+
+Observed result:
+- bun test executed acceptance suite
+- 26 pass, 5 fail, 103 expect() calls
+- Failed cases reported in current workspace state:
+  1) Contract 6: turn send settlement-aware envelope (ReferenceError: createLocalRuntime is not defined)
+  2) Contract 7: Session persistence (CliError: runtime.shutdown is not a function)
+  3) Contract 8: Silent-private RP turn (ReferenceError: createLocalRuntime is not defined)
+  4) Contract 10: --unsafe-raw rejected in gateway mode (expected UNSAFE_RAW_LOCAL_ONLY, got DEBUG_COMMAND_FAILED)
+  5) Contract 12: debug diagnose returns concrete classification (runtime.shutdown is not a function)
+
+Notes:
+- These failures are outside slash-dispatcher.ts and occurred in existing command/test surfaces.

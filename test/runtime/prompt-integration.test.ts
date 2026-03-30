@@ -210,7 +210,7 @@ describe("cognition ops settle into RECENT_COGNITION prompt slot", () => {
   });
 
   it("settles an RP turn with cognition ops then builds next prompt with RECENT_COGNITION bullets", async () => {
-    const session = sessionService.createSession("rp:alice");
+    const session = await sessionService.createSession("rp:alice");
 
     const loop = {
       async *run(): AsyncGenerator<Chunk> {

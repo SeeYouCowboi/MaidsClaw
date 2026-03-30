@@ -17,6 +17,7 @@ import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { runSessionMigrations } from "../../src/session/migrations.js";
 import { SessionService } from "../../src/session/service.js";
 import { closeDatabaseGracefully, openDatabase, type Db } from "../../src/storage/database.js";
+import { SqliteInteractionRepoAdapter } from "../../src/storage/domain-repos/sqlite/interaction-repo.js";
 
 describe("inspect view models", () => {
 	let db: Db;
@@ -43,8 +44,8 @@ describe("inspect view models", () => {
 		rmSync(traceDir, { recursive: true, force: true });
 	});
 
-	it("loadSummaryView returns required fields", () => {
-		const session = sessionService.createSession("rp:alice");
+	it("loadSummaryView returns required fields", async () => {
+		const session = await sessionService.createSession("rp:alice");
 		const requestId = "req-summary";
 		commitService.commit({
 			sessionId: session.sessionId,
@@ -66,8 +67,8 @@ describe("inspect view models", () => {
 		traceStore.addFlushResult(requestId, { requested: true, result: "succeeded" });
 		traceStore.finalizeTrace(requestId);
 
-		const view = loadSummaryView({
-			runtime: makeRuntime(db, sessionService, traceStore),
+		const view = await loadSummaryView({
+			runtime: makeRuntime(db, sessionService, traceStore, interactionStore),
 			traceStore,
 			context: { requestId, sessionId: session.sessionId, agentId: "rp:alice" },
 		});
@@ -80,8 +81,8 @@ describe("inspect view models", () => {
 		expect(typeof view.pending_sweep_state).toBe("object");
 	});
 
-	it("loadTranscriptView redacts settlement by default", () => {
-		const session = sessionService.createSession("rp:alice");
+	it("loadTranscriptView redacts settlement by default", async () => {
+		const session = await sessionService.createSession("rp:alice");
 		const requestId = "req-redacted";
 		const settlementPayload = makeSettlementPayload(session.sessionId, requestId, true);
 		commitService.commitWithId({
@@ -93,8 +94,8 @@ describe("inspect view models", () => {
 			correlatedTurnId: requestId,
 		});
 
-		const view = loadTranscriptView({
-			runtime: makeRuntime(db, sessionService, traceStore),
+		const view = await loadTranscriptView({
+			runtime: makeRuntime(db, sessionService, traceStore, interactionStore),
 			context: { sessionId: session.sessionId },
 		});
 
@@ -108,8 +109,8 @@ describe("inspect view models", () => {
 		expect(payload.privateCognition?.redacted).toBe(true);
 	});
 
-	it("raw mode shows tool/status records", () => {
-		const session = sessionService.createSession("rp:alice");
+	it("raw mode shows tool/status records", async () => {
+		const session = await sessionService.createSession("rp:alice");
 		const requestId = "req-raw";
 		commitService.commit({
 			sessionId: session.sessionId,
@@ -126,8 +127,8 @@ describe("inspect view models", () => {
 			correlatedTurnId: requestId,
 		});
 
-		const view = loadTranscriptView({
-			runtime: makeRuntime(db, sessionService, traceStore),
+		const view = await loadTranscriptView({
+			runtime: makeRuntime(db, sessionService, traceStore, interactionStore),
 			context: { sessionId: session.sessionId },
 			raw: true,
 		});
@@ -136,8 +137,8 @@ describe("inspect view models", () => {
 		expect(view.entries.some((entry) => entry.record_type === "status")).toBe(true);
 	});
 
-	it("diagnose returns concrete subsystem and next_commands", () => {
-		const session = sessionService.createSession("rp:alice");
+	it("diagnose returns concrete subsystem and next_commands", async () => {
+		const session = await sessionService.createSession("rp:alice");
 		const requestId = "req-diagnose";
 		const settlementPayload = makeSettlementPayload(session.sessionId, requestId, false);
 		commitService.commitWithId({
@@ -166,8 +167,8 @@ describe("inspect view models", () => {
 			],
 		);
 
-		const entry = diagnose({
-			runtime: makeRuntime(db, sessionService, traceStore),
+		const entry = await diagnose({
+			runtime: makeRuntime(db, sessionService, traceStore, interactionStore),
 			traceStore,
 			context: { requestId, sessionId: session.sessionId },
 		});
@@ -181,6 +182,7 @@ function makeRuntime(
 	db: Db,
 	sessionService: SessionService,
 	traceStore: TraceStore,
+	interactionStore: InteractionStore,
 ): RuntimeBootstrapResult {
 	return {
 		db,
@@ -189,6 +191,7 @@ function makeRuntime(
 		memoryPipelineReady: true,
 		memoryPipelineStatus: "ready",
 		traceStore,
+		interactionRepo: new SqliteInteractionRepoAdapter(interactionStore),
 	} as unknown as RuntimeBootstrapResult;
 }
 

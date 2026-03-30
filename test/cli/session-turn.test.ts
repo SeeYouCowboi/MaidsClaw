@@ -18,8 +18,9 @@ import type { RpBufferedExecutionResult } from "../../src/runtime/rp-turn-contra
 import { TurnService } from "../../src/runtime/turn-service.js";
 import { SessionService } from "../../src/session/service.js";
 import { closeDatabaseGracefully, openDatabase, type Db } from "../../src/storage/database.js";
-import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
-import { createLocalRuntime } from "../../src/terminal-cli/local-runtime.js";
+
+import { SqliteInteractionRepoAdapter } from "../../src/storage/domain-repos/sqlite/interaction-repo.js";
+import { executeLocalTurn } from "../../src/app/clients/local/local-turn-client.js";
 import type { TurnExecutionResult } from "../../src/app/contracts/execution.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -222,11 +223,16 @@ describe("session commands", () => {
       const data = envelope.data as {
         session_id: string;
         closed_at: number;
-        flush_ran: boolean;
+        host_steps: {
+          flush_on_session_close: "completed" | "not_applicable" | "skipped_no_agent";
+        };
       };
       expect(data.session_id).toBe(sessionId);
       expect(typeof data.closed_at).toBe("number");
-      expect(typeof data.flush_ran).toBe("boolean");
+      expect(data.host_steps).toBeDefined();
+      expect(["completed", "not_applicable", "skipped_no_agent"]).toContain(
+        data.host_steps.flush_on_session_close,
+      );
     });
 
     it("errors on non-existent session", async () => {
@@ -328,7 +334,7 @@ describe("session commands", () => {
   });
 });
 
-// ── Turn send unit tests (using LocalRuntime directly) ───────────────
+// ── Turn send unit tests (using executeLocalTurn directly) ────────────
 
 describe("turn send", () => {
   let db: Db;
@@ -373,17 +379,16 @@ describe("turn send", () => {
       graphStorage,
     );
 
-    const session = sessionService.createSession("rp:alice");
-    const runtime = {
-      db,
-      turnService,
-      sessionService,
-    } as unknown as RuntimeBootstrapResult;
+    const session = await sessionService.createSession("rp:alice");
 
-    const result = await createLocalRuntime(runtime).executeTurn({
+    const result = await executeLocalTurn({
       sessionId: session.sessionId,
       agentId: "rp:alice",
       text: "hello",
+    }, {
+      sessionService,
+      turnService,
+      interactionRepo: new SqliteInteractionRepoAdapter(store),
     });
 
     // Validate all TurnExecutionResult fields
@@ -433,17 +438,16 @@ describe("turn send", () => {
       graphStorage,
     );
 
-    const session = sessionService.createSession("rp:alice");
-    const runtime = {
-      db,
-      turnService,
-      sessionService,
-    } as unknown as RuntimeBootstrapResult;
+    const session = await sessionService.createSession("rp:alice");
 
-    const result = await createLocalRuntime(runtime).executeTurn({
+    const result = await executeLocalTurn({
       sessionId: session.sessionId,
       agentId: "rp:alice",
       text: "think quietly",
+    }, {
+      sessionService,
+      turnService,
+      interactionRepo: new SqliteInteractionRepoAdapter(store),
     });
 
     // Silent-private is a SUCCESS, not a failure
