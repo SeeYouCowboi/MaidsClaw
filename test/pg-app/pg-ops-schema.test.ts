@@ -7,8 +7,9 @@ import {
   teardownAppPool,
 } from "../helpers/pg-app-test-utils.js";
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("pg-ops-schema bootstrap", () => {
+describe.skipIf(skipPgTests)("pg-ops-schema bootstrap", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

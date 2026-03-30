@@ -6,7 +6,7 @@ import {
 } from "../../src/jobs/pg-job-builders.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
-import { createTestPg, ensureTestDb, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type CountRow = { cnt: number };
 type CurrentJobRow = {
@@ -24,7 +24,7 @@ type AttemptRow = {
   outcome: string;
 };
 
-describe("pg claimNext lease/concurrency", () => {
+describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
   let sql: postgres.Sql;
   let storeA: PgJobStore;
   let storeB: PgJobStore;

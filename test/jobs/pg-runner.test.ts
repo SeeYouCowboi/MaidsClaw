@@ -8,7 +8,7 @@ import {
 import { PgJobRunner } from "../../src/jobs/pg-runner.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
-import { createTestPg, ensureTestDb, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type CurrentJobRow = {
 	job_key: string;
@@ -30,7 +30,7 @@ type AttemptRow = {
 const WORKER_ID = "test-worker-1";
 const LEASE_MS = 30_000;
 
-describe("PgJobRunner", () => {
+describe.skipIf(skipPgTests)("PgJobRunner", () => {
 	let sql: postgres.Sql;
 	let store: PgJobStore;
 	let runner: PgJobRunner;

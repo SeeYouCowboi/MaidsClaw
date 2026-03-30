@@ -7,8 +7,9 @@ import {
   teardownAppPool,
 } from "../helpers/pg-app-test-utils.js";
 import { createPgPool, createAppPgPool, createAppTestPgPool } from "../../src/storage/pg-pool.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("pg-pool", () => {
+describe.skipIf(skipPgTests)("pg-pool", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

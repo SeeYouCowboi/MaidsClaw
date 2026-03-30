@@ -12,7 +12,10 @@
     "test": "bun test",
     "start": "bun run src/index.ts",
     "check:native": "cargo check --manifest-path native/Cargo.toml",
-    "cli": "bun run scripts/cli.ts"
+    "cli": "bun run scripts/cli.ts",
+    "test:acceptance:app-host": "bun test test/cli/acceptance.test.ts test/cli/debug-commands.test.ts test/app/app-host.test.ts test/app/session-close-flush.test.ts test/app/facade-contract.test.ts test/architecture/import-boundaries.test.ts",
+    "test:pg:data-plane": "PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test bun test test/pg-app/ test/jobs/ test/scripts/memory-verify-pg.test.ts test/migration/parity-verify.test.ts",
+    "test:acceptance:closeout": "bun run test:acceptance:app-host && bun run test:pg:data-plane"
   },
   "devDependencies": {
     "@types/node": "^20.19.37",

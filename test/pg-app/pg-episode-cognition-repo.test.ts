@@ -9,8 +9,9 @@ import {
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { PgEpisodeRepo } from "../../src/storage/domain-repos/pg/episode-repo.js";
 import { PgCognitionEventRepo } from "../../src/storage/domain-repos/pg/cognition-event-repo.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgEpisodeRepo", () => {
+describe.skipIf(skipPgTests)("PgEpisodeRepo", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {
@@ -251,7 +252,7 @@ describe.skipIf(!process.env.PG_APP_TEST_URL)("PgEpisodeRepo", () => {
   });
 });
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgCognitionEventRepo", () => {
+describe.skipIf(skipPgTests)("PgCognitionEventRepo", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {

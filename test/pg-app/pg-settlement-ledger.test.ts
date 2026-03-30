@@ -8,8 +8,9 @@ import {
 } from "../helpers/pg-app-test-utils.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { PgSettlementLedgerRepo } from "../../src/storage/domain-repos/pg/settlement-ledger-repo.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgSettlementLedgerRepo", () => {
+describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {

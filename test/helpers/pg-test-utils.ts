@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
+/**
+ * Skip guard for PG tests.  When PG_TEST_URL is not set we assume no
+ * Postgres instance is available and every PG-dependent test file should
+ * be skipped via `describe.skipIf(skipPgTests)`.
+ */
+export const skipPgTests: boolean =
+	typeof process.env.PG_TEST_URL === "undefined";
+
 const ADMIN_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55432/postgres";
 const TEST_DB = "maidsclaw_jobs_test";
 const TEST_URL = `postgres://maidsclaw:maidsclaw@127.0.0.1:55432/${TEST_DB}`;

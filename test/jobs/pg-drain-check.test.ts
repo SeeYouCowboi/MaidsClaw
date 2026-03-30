@@ -5,6 +5,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDrainReady } from "../../src/jobs/sqlite-drain-check.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 const JOBS_TABLE_DDL = `
   CREATE TABLE _memory_maintenance_jobs (
@@ -42,7 +43,7 @@ function cleanupFile(path: string): void {
   }
 }
 
-describe("sqlite drain-gate preflight", () => {
+describe.skipIf(skipPgTests)("sqlite drain-gate preflight", () => {
   const tempPaths: string[] = [];
 
   afterEach(() => {

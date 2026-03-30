@@ -6,8 +6,9 @@ import { SqliteJobPersistence } from "../../src/jobs/persistence.js";
 import { JobQueue } from "../../src/jobs/queue.js";
 import { openDatabase } from "../../src/storage/database.js";
 import { cleanupDb, createTempDb } from "../helpers/memory-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("SqliteJobPersistence", () => {
+describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
   it("recovers pending jobs after restart and allows claim + complete", async () => {
     const { db, dbPath } = createTempDb();
 

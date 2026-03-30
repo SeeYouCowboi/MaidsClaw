@@ -6,8 +6,9 @@ import {
   resetAppSchema,
   teardownAppPool,
 } from "../helpers/pg-app-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("pgvector-available", () => {
+describe.skipIf(skipPgTests)("pgvector-available", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

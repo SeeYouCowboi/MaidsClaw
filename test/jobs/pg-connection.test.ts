@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
+	skipPgTests,
 	ensureTestDb,
 	createTestPg,
 	resetSchema,
@@ -7,7 +8,7 @@ import {
 } from "../helpers/pg-test-utils.js";
 import type postgres from "postgres";
 
-describe("pg-connection", () => {
+describe.skipIf(skipPgTests)("pg-connection", () => {
 	let sql: postgres.Sql;
 
 	beforeAll(async () => {

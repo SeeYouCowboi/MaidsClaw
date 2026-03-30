@@ -8,8 +8,9 @@ import {
 } from "../helpers/pg-app-test-utils.js";
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { PgPendingFlushRecoveryRepo } from "../../src/storage/domain-repos/pg/pending-flush-recovery-repo.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgPendingFlushRecoveryRepo", () => {
+describe.skipIf(skipPgTests)("PgPendingFlushRecoveryRepo", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

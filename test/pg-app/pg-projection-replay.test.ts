@@ -11,17 +11,14 @@ import {
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
-
-const describeWithSkipIf = describe as typeof describe & {
-  skipIf: (condition: boolean) => (name: string, fn: () => void) => void;
-};
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 async function bootstrapAll(pool: postgres.Sql): Promise<void> {
   await bootstrapTruthSchema(pool);
   await bootstrapDerivedSchema(pool);
 }
 
-describeWithSkipIf.skipIf(!process.env.PG_APP_TEST_URL)(
+describe.skipIf(skipPgTests)(
   "pg-projection-replay",
   () => {
     let sql: postgres.Sql;

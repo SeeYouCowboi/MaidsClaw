@@ -2,8 +2,9 @@
 // Does NOT require a running PG instance for module import checks
 
 import { describe, it, expect } from "bun:test";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("Phase 2C Final Verification Gate", () => {
+describe.skipIf(skipPgTests)("Phase 2C Final Verification Gate", () => {
   it("exports PgSearchRebuilder", async () => {
     const mod = await import("../../src/memory/search-rebuild-pg.js");
     expect(typeof mod.PgSearchRebuilder).toBe("function");

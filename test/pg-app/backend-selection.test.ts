@@ -4,8 +4,9 @@ import {
 	SqliteBackendFactory,
 	resolveBackendType,
 } from "../../src/storage/backend-types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("backend-selection", () => {
+describe.skipIf(skipPgTests)("backend-selection", () => {
 	let originalEnv: string | undefined;
 
 	beforeEach(() => {

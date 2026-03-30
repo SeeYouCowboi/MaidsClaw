@@ -3,8 +3,9 @@ import {
 	PgBackendFactory,
 	resolveBackendType,
 } from "../../src/storage/backend-types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("backend-aware-boot", () => {
+describe.skipIf(skipPgTests)("backend-aware-boot", () => {
 	let originalEnv: string | undefined;
 
 	beforeEach(() => {

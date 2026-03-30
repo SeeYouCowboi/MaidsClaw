@@ -10,12 +10,9 @@ import {
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-const describeWithSkipIf = describe as typeof describe & {
-  skipIf: (condition: boolean) => (name: string, fn: () => void) => void;
-};
-
-describeWithSkipIf.skipIf(!process.env.PG_APP_TEST_URL)("PgSearchRebuilder", () => {
+describe.skipIf(skipPgTests)("PgSearchRebuilder", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {

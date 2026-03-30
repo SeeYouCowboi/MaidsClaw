@@ -9,8 +9,9 @@ import {
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { PgCoreMemoryBlockRepo } from "../../src/storage/domain-repos/pg/core-memory-block-repo.js";
 import { PgSharedBlockRepo } from "../../src/storage/domain-repos/pg/shared-block-repo.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgCoreMemoryBlockRepo", () => {
+describe.skipIf(skipPgTests)("PgCoreMemoryBlockRepo", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {
@@ -175,7 +176,7 @@ describe.skipIf(!process.env.PG_APP_TEST_URL)("PgCoreMemoryBlockRepo", () => {
   });
 });
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("PgSharedBlockRepo", () => {
+describe.skipIf(skipPgTests)("PgSharedBlockRepo", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {

@@ -6,7 +6,7 @@ import {
 } from "../../src/jobs/pg-job-builders.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
-import { createTestPg, ensureTestDb, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type AttemptOutcomeRow = {
   outcome: string;
@@ -35,7 +35,7 @@ function parseJsonRecord(value: Record<string, unknown> | string): Record<string
   return value;
 }
 
-describe("pg fencing mutations", () => {
+describe.skipIf(skipPgTests)("pg fencing mutations", () => {
   let sql: postgres.Sql;
   let store: PgJobStore;
 

@@ -4,6 +4,7 @@ import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobQueue } from "../../src/jobs/queue.js";
 import type { JobEntry } from "../../src/jobs/persistence.js";
 import type { Job, JobKind } from "../../src/jobs/types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 function makeJob(overrides?: Partial<Job>): Job {
   return {
@@ -34,7 +35,7 @@ function createDispatcher(): { queue: JobQueue; dedup: JobDedupEngine; dispatche
   return { queue, dedup, dispatcher };
 }
 
-describe("JobDedupEngine", () => {
+describe.skipIf(skipPgTests)("JobDedupEngine", () => {
   it("returns coalesce/drop/noop/accept based on existing job status", () => {
     const engine = new JobDedupEngine();
     const key = "memory.migrate:session-1:0-9";
@@ -53,7 +54,7 @@ describe("JobDedupEngine", () => {
   });
 });
 
-describe("JobQueue", () => {
+describe.skipIf(skipPgTests)("JobQueue", () => {
   it("dequeues higher-priority execution class first", () => {
     const queue = new JobQueue();
 
@@ -83,7 +84,7 @@ describe("JobQueue", () => {
   });
 });
 
-describe("JobDispatcher", () => {
+describe.skipIf(skipPgTests)("JobDispatcher", () => {
   it("requeues retriable job before maxAttempts and eventually fails when exhausted", async () => {
     const { queue, dispatcher } = createDispatcher();
 
@@ -200,7 +201,7 @@ describe("JobDispatcher", () => {
   });
 });
 
-describe("search.rebuild recovery", () => {
+describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
   function createMockPersistence(entries: JobEntry[]) {
     return {
       listPending: () => entries,

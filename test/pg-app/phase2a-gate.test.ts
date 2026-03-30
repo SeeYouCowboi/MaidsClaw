@@ -2,8 +2,9 @@
 // Does NOT require a running PG instance
 
 import { describe, it, expect } from "bun:test";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("Phase 2A Foundation Gate", () => {
+describe.skipIf(skipPgTests)("Phase 2A Foundation Gate", () => {
   it("exports all domain repo contracts", async () => {
     const contracts = await import(
       "../../src/storage/domain-repos/contracts/index.js"

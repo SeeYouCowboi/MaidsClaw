@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as DurableStore from "../../src/jobs/durable-store.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 type DurableJobStore = DurableStore.DurableJobStore;
 type DurableSearchRebuildPayload = DurableStore.DurableSearchRebuildPayload;
@@ -44,7 +45,7 @@ function acceptsStoreContract<T extends DurableJobStore>(store: T): T {
 
 void acceptsStoreContract;
 
-describe("pg durable contract types", () => {
+describe.skipIf(skipPgTests)("pg durable contract types", () => {
   it("accepts valid durable search.rebuild payload shape", () => {
     const payload: unknown = {
       version: 1,

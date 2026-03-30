@@ -3,7 +3,7 @@ import type postgres from "postgres";
 import { buildSearchRebuildEnqueueInput } from "../../src/jobs/pg-job-builders.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
-import { createTestPg, ensureTestDb, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type FamilyState = {
   rerunRequested?: boolean;
@@ -66,7 +66,7 @@ function buildInput(args: {
   };
 }
 
-describe("pg search.rebuild enqueue coalescing", () => {
+describe.skipIf(skipPgTests)("pg search.rebuild enqueue coalescing", () => {
   let sql: postgres.Sql;
   let store: PgJobStore;
 

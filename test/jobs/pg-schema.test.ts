@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
-import { ensureTestDb, createTestPg, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { ensureTestDb, createTestPg, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 
-describe("pg-schema bootstrap", () => {
+describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 	let sql: postgres.Sql;
 
 	beforeAll(async () => {

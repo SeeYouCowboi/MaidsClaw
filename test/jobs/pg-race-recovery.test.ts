@@ -3,7 +3,7 @@ import type postgres from "postgres";
 import { buildOrganizeEnqueueInput } from "../../src/jobs/pg-job-builders.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
-import { createTestPg, ensureTestDb, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type AttemptRow = {
   claim_version: number | string;
@@ -20,7 +20,7 @@ type CurrentRow = {
   next_attempt_at: number | string;
 };
 
-describe("pg race recovery semantics", () => {
+describe.skipIf(skipPgTests)("pg race recovery semantics", () => {
   let sql: postgres.Sql;
   let store: PgJobStore;
 

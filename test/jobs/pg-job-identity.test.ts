@@ -6,8 +6,9 @@ import {
   type SearchRebuildJobParams,
 } from "../../src/jobs/pg-job-builders.js";
 import { JOB_MAX_ATTEMPTS } from "../../src/jobs/types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("memory.organize", () => {
+describe.skipIf(skipPgTests)("memory.organize", () => {
   it("emits exact job_key pattern with settlementId and chunkOrdinal", () => {
     const params: OrganizeJobParams = {
       settlementId: "settlement_abc123",
@@ -116,7 +117,7 @@ describe("memory.organize", () => {
   });
 });
 
-describe("search.rebuild", () => {
+describe.skipIf(skipPgTests)("search.rebuild", () => {
   it("job_key starts with search.rebuild: and contains :req:", () => {
     const params: SearchRebuildJobParams = {
       scope: "private",

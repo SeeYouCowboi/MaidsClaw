@@ -7,12 +7,9 @@ import {
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-const describeWithSkipIf = describe as typeof describe & {
-  skipIf: (condition: boolean) => (name: string, fn: () => void) => void;
-};
-
-describeWithSkipIf.skipIf(!process.env.PG_APP_TEST_URL)("pg-derived-schema bootstrap", () => {
+describe.skipIf(skipPgTests)("pg-derived-schema bootstrap", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

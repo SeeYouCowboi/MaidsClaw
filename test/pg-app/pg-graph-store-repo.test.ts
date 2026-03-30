@@ -8,14 +8,11 @@ import {
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
-
-const describeWithSkipIf = describe as typeof describe & {
-  skipIf: (condition: boolean) => (name: string, fn: () => void) => void;
-};
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 const PG_MAX_BIGINT = "9223372036854775807";
 
-describeWithSkipIf.skipIf(!process.env.PG_APP_TEST_URL)(
+describe.skipIf(skipPgTests)(
   "PgGraphMutableStoreRepo",
   () => {
     let pool: postgres.Sql;

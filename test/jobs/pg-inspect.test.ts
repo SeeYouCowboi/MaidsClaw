@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
-import { ensureTestDb, createTestPg, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { ensureTestDb, createTestPg, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
 import { buildOrganizeEnqueueInput, buildSearchRebuildEnqueueInput } from "../../src/jobs/pg-job-builders.js";
 import { inspectPgJobs } from "../../src/jobs/pg-diagnostics.js";
 
-describe("pg-inspect diagnostics", () => {
+describe.skipIf(skipPgTests)("pg-inspect diagnostics", () => {
 	let sql: postgres.Sql;
 	let store: PgJobStore;
 

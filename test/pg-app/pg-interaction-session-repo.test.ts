@@ -11,8 +11,9 @@ import { PgInteractionRepo } from "../../src/storage/domain-repos/pg/interaction
 import { PgSessionRepo } from "../../src/storage/domain-repos/pg/session-repo.js";
 import { PgRecentCognitionSlotRepo } from "../../src/storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import type { InteractionRecord } from "../../src/interaction/contracts.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(!process.env.PG_APP_TEST_URL)("pg-interaction-session-repos", () => {
+describe.skipIf(skipPgTests)("pg-interaction-session-repos", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {

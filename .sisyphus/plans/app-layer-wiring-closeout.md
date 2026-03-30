@@ -1542,7 +1542,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ### Wave 4 — Unification + Admin Paths
 
-- [ ] 15. Slash-Dispatcher Mode Branch Elimination
+- [x] 15. Slash-Dispatcher Mode Branch Elimination
 
   **What to do**:
   - Refactor `src/terminal-cli/shell/slash-dispatcher.ts` to consume a unified client interface (facade) instead of mode-branching:
@@ -1639,7 +1639,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 16. LocalRuntime Removal + SessionShell Internal Cleanup
+- [x] 16. LocalRuntime Removal + SessionShell Internal Cleanup
 
   **What to do**:
   NOTE: SessionShell constructor migration to `AppUserFacade` is now handled in Task 10 (co-batched with chat.ts). This task focuses on cleanup and deletion.
@@ -1710,7 +1710,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 17. createAppClientRuntime() Bridge Update
+- [x] 17. createAppClientRuntime() Bridge Update
 
   **What to do**:
   - Update `src/terminal-cli/app-client-runtime.ts` to use `createAppHost()` internally for local mode:

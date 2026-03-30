@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
-import { ensureTestDb, createTestPg, resetSchema, teardown } from "../helpers/pg-test-utils.js";
+import { ensureTestDb, createTestPg, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
 import {
@@ -8,7 +8,7 @@ import {
 	buildSearchRebuildEnqueueInput,
 } from "../../src/jobs/pg-job-builders.js";
 
-describe("pg enqueue", () => {
+describe.skipIf(skipPgTests)("pg enqueue", () => {
 	let sql: postgres.Sql;
 	let store: PgJobStore;
 
