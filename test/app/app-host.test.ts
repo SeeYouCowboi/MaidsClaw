@@ -29,12 +29,25 @@ describe("createAppHost", () => {
   test("admin.getHostStatus returns HostStatusDTO shape", async () => {
     host = await createAppHost({ role: "local", databasePath: ":memory:" });
     const status = await host.admin.getHostStatus();
+
     expect(status.backendType).toBe("sqlite");
     expect(typeof status.migrationStatus.succeeded).toBe("boolean");
-    expect(status.memoryPipelineStatus).toBeDefined();
+    expect(typeof status.memoryPipelineStatus).toBe("string");
   });
 
-  test("server role creates host with getBoundPort", async () => {
+  test("admin.getPipelineStatus returns PipelineStatusDTO shape", async () => {
+    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    const status = await host.admin.getPipelineStatus();
+
+    expect(typeof status.memoryPipelineStatus).toBe("string");
+    expect(typeof status.memoryPipelineReady).toBe("boolean");
+    expect(
+      status.effectiveOrganizerEmbeddingModelId === undefined ||
+        typeof status.effectiveOrganizerEmbeddingModelId === "string",
+    ).toBe(true);
+  });
+
+  test("server role start/shutdown lifecycle with getBoundPort", async () => {
     host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0 });
     expect(host.role).toBe("server");
     expect(host.user).toBeDefined();

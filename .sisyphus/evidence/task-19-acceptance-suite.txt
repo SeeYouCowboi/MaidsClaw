@@ -1,0 +1,27 @@
+$ bun test test/cli/acceptance.test.ts test/cli/debug-commands.test.ts test/app/app-host.test.ts test/app/session-close-flush.test.ts test/app/facade-contract.test.ts test/architecture/import-boundaries.test.ts
+bun test v1.3.10 (30e609e0)
+Error [UNKNOWN_COMMAND]: Unknown command: "nonexistent". Available: config
+Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "nonexistent" for "config". Available: init, validate, show, write-runtime, doctor
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  config  Scaffold config files from examples
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+{"ok":false,"command":"debug trace","error":{"code":"UNSAFE_RAW_LOCAL_ONLY","message":"--unsafe-raw is only allowed in local mode","exitCode":2}}
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /prompt. Send a message first, or use /prompt --request <id>.
+No request context available for /chunks. Send a message first, or use /chunks --request <id>.
+No request context available for /diagnose. Send a message first, or use /diagnose --request <id>.
+No request context available for /trace. Send a message first, or use /trace --request <id>.
+
+ 66 pass
+ 0 fail
+ 252 expect() calls
+Ran 66 tests across 6 files. [3.78s]
