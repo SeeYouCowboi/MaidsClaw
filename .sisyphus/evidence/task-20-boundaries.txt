@@ -1,0 +1,9 @@
+Task 20: Import Boundary Extension for Facade Leak Detection
+
+Boundary Rules Added:
+1. src/terminal-cli/commands/ and src/terminal-cli/shell/ must NOT import RuntimeBootstrapResult
+2. src/app/clients/ must NOT import InteractionStore
+3. src/gateway/controllers.ts must NOT import RuntimeBootstrapResult
+
+Test Results:
+bun test v1.3.10 (30e609e0)
