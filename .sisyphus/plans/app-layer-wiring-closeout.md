@@ -1779,7 +1779,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ### Wave 5 — Test Restructure + Acceptance
 
-- [ ] 18. package.json 4-Tier Test Scripts + PG Test Hermetic Isolation
+- [x] 18. package.json 4-Tier Test Scripts + PG Test Hermetic Isolation
 
   **What to do**:
   - **Phase A — PG test skip wrappers**: `test/jobs/*.test.ts` (15 files) and `test/pg-app/*.test.ts` (24 files) use hardcoded `127.0.0.1:55432` via `test/helpers/pg-test-utils.ts` — they FAIL (not skip) without PG. To make `bun test` a true hermetic baseline:
@@ -1881,7 +1881,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 19. App-Host Acceptance Test Suite
+- [x] 19. App-Host Acceptance Test Suite
 
   **What to do**:
   - Create comprehensive acceptance tests for the AppHost surface in `test/app/`:
@@ -1970,7 +1970,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 20. Import Boundary Extension for Facade Leak Detection
+- [x] 20. Import Boundary Extension for Facade Leak Detection
 
   **What to do**:
   - Extend `test/architecture/import-boundaries.test.ts` to verify:
@@ -2027,7 +2027,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, autonomous):
 
 ---
 
-- [ ] 21. Transition Shim Deprecation Markers
+- [x] 21. Transition Shim Deprecation Markers
 
   **What to do**:
   - Add `@deprecated` JSDoc markers to transition shims that will be removed in future rounds:

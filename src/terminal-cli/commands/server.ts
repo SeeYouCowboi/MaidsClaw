@@ -35,10 +35,10 @@ async function handleServerStart(
   let port: number | undefined;
   if (args.flags["port"] !== undefined && args.flags["port"] !== true) {
     const parsed = Number(args.flags["port"]);
-    if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 65535) {
       throw new CliError(
         "INVALID_FLAG_VALUE",
-        `Invalid port: ${String(args.flags["port"])}. Must be 1-65535.`,
+        `Invalid port: ${String(args.flags["port"])}. Must be 0-65535.`,
         EXIT_USAGE,
       );
     }
