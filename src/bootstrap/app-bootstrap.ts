@@ -1,5 +1,9 @@
 import { isAbsolute, join, resolve } from "node:path";
-import { createLocalAppClients } from "../app/clients/app-clients.js";
+import { LocalHealthClient } from "../app/clients/local/local-health-client.js";
+import { LocalInspectClient } from "../app/clients/local/local-inspect-client.js";
+import { LocalSessionClient } from "../app/clients/local/local-session-client.js";
+import { LocalTurnClient } from "../app/clients/local/local-turn-client.js";
+import { TraceStore } from "../app/diagnostics/trace-store.js";
 import { loadConfig } from "../core/config.js";
 import { GatewayServer } from "../gateway/server.js";
 import { bootstrapRuntime } from "./runtime.js";
@@ -42,6 +46,7 @@ function resolveConfigDir(options: AppBootstrapOptions): string | undefined {
 export function bootstrapApp(
 	options: AppBootstrapOptions = {},
 ): AppBootstrapResult {
+	// TODO: Replace direct call with createAppHost() delegation — T5 shim
 	const configResult = loadConfig({
 		configDir: resolveConfigDir(options),
 		cwd: options.cwd,
@@ -85,7 +90,7 @@ export function bootstrapApp(
 		host = options.host;
 	}
 
-	if (Number.isNaN(port) || port < 1 || port > 65535) {
+	if (Number.isNaN(port) || port < 0 || port > 65535) {
 		throw new Error(`Invalid port: ${port}`);
 	}
 
@@ -107,7 +112,30 @@ export function bootstrapApp(
 		]),
 	);
 
-	const userFacade = createLocalAppClients(runtime);
+	const inspectTraceStore =
+		runtime.traceStore ??
+		(dataDir
+			? new TraceStore(join(dataDir, "debug", "traces"))
+			: undefined);
+
+	const userFacade = {
+		session: new LocalSessionClient({
+			sessionService: runtime.sessionService,
+			turnService: runtime.turnService,
+			memoryTaskAgent: runtime.memoryTaskAgent,
+		}),
+		turn: new LocalTurnClient({
+			sessionService: runtime.sessionService,
+			turnService: runtime.turnService,
+			interactionRepo: runtime.interactionRepo,
+			traceStore: runtime.traceStore,
+		}),
+		inspect: new LocalInspectClient(runtime, inspectTraceStore),
+		health: new LocalHealthClient({
+			memoryPipelineReady: runtime.memoryPipelineReady,
+			healthChecks: runtime.healthChecks,
+		}),
+	};
 
 	const server = options.enableGateway
 		? new GatewayServer({

@@ -2,8 +2,11 @@ import { isAbsolute, join, resolve } from "node:path";
 import { bootstrapRuntime } from "../../bootstrap/runtime.js";
 import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
+import { LocalHealthClient } from "../clients/local/local-health-client.js";
+import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
+import { LocalSessionClient } from "../clients/local/local-session-client.js";
+import { LocalTurnClient } from "../clients/local/local-turn-client.js";
 import { TraceStore } from "../diagnostics/trace-store.js";
-import { createLocalAppClients } from "../clients/app-clients.js";
 import type {
 	AppHost,
 	AppHostAdmin,
@@ -127,7 +130,24 @@ export async function createAppHost(options: AppHostOptions): Promise<AppHost> {
 
 	const user =
 		options.role === "local" || options.role === "server"
-			? createLocalAppClients(runtime, { inspectTraceStore })
+			? {
+				session: new LocalSessionClient({
+					sessionService: runtime.sessionService,
+					turnService: runtime.turnService,
+					memoryTaskAgent: runtime.memoryTaskAgent,
+				}),
+				turn: new LocalTurnClient({
+					sessionService: runtime.sessionService,
+					turnService: runtime.turnService,
+					interactionRepo: runtime.interactionRepo,
+					traceStore: runtime.traceStore,
+				}),
+				inspect: new LocalInspectClient(runtime, inspectTraceStore),
+				health: new LocalHealthClient({
+					memoryPipelineReady: runtime.memoryPipelineReady,
+					healthChecks: runtime.healthChecks,
+				}),
+			}
 			: undefined;
 
 	const server =
