@@ -81,6 +81,7 @@ bun test
 4. Run `bun run cleanup:sisyphus-docs`.
 5. Re-run `bun run check:sisyphus-docs` until it reports zero candidates.
 6. Run `bun run build` and `bun test`.
+7. write git commit.
 
 ## Cautions
 
