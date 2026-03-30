@@ -15,6 +15,10 @@ export type AppClientRuntime = {
 	shutdown: () => void;
 };
 
+/**
+ * @deprecated Use `createAppHost()` instead. This factory remains available for
+ * backward compatibility while callers migrate to the `AppHost` API.
+ */
 export async function createAppClientRuntime(params: {
 	mode: "local" | "gateway";
 	cwd: string;

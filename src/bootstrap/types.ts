@@ -119,6 +119,10 @@ requireAllProviders?: boolean;
 traceCaptureEnabled?: boolean;
 };
 
+/**
+ * @deprecated Use `AppHost` instead. This type remains available for backward
+ * compatibility while callers migrate to the `AppHost` API.
+ */
 export type AppBootstrapResult = {
 	runtime: RuntimeBootstrapResult;
 	server?: GatewayServer;
