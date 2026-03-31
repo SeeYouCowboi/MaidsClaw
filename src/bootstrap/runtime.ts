@@ -19,9 +19,14 @@ import {
 	MemoryAdapter,
 	PersonaAdapter,
 } from "../core/prompt-data-adapters/index.js";
+import type { MemoryDataSource } from "../core/prompt-data-sources.js";
 import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { CommitService } from "../interaction/commit-service.js";
+import type {
+	InteractionRecord,
+	TurnSettlementPayload,
+} from "../interaction/contracts.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import { InteractionStore } from "../interaction/store.js";
@@ -36,11 +41,19 @@ import { EpisodeRepository } from "../memory/episode/episode-repo.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
+import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
 import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
+import {
+	getAttachedSharedBlocksAsync,
+	getPinnedBlocksAsync,
+	getRecentCognitionAsync,
+	getSharedBlocksAsync,
+} from "../memory/prompt-data.js";
 import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
 import { runMemoryMigrations } from "../memory/schema.js";
 import { SqliteSettlementLedger } from "../memory/settlement-ledger.js";
+import { SharedBlockRepo as SqliteSharedBlockRepoImpl } from "../memory/shared-blocks/shared-block-repo.js";
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
 import { TransactionBatcher } from "../memory/transaction-batcher.js";
@@ -56,18 +69,30 @@ import {
 	PgBackendFactory,
 	resolveBackendType,
 } from "../storage/backend-types.js";
-import { closeDatabaseGracefully, openDatabase } from "../storage/database.js";
+import {
+	closeDatabaseGracefully,
+	type Db,
+	openDatabase,
+} from "../storage/database.js";
+import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
+import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
+import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
+import { PgCoreMemoryBlockRepo } from "../storage/domain-repos/pg/core-memory-block-repo.js";
+import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
+import { PgInteractionRepo } from "../storage/domain-repos/pg/interaction-repo.js";
+import { PgPendingFlushRecoveryRepo } from "../storage/domain-repos/pg/pending-flush-recovery-repo.js";
+import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
+import { SqliteCoreMemoryBlockRepoAdapter } from "../storage/domain-repos/sqlite/core-memory-block-repo.js";
+import { SqliteInteractionRepoAdapter } from "../storage/domain-repos/sqlite/interaction-repo.js";
+import { SqlitePendingFlushRecoveryRepoAdapter } from "../storage/domain-repos/sqlite/pending-flush-recovery-repo.js";
+import { SqliteRecentCognitionSlotRepoAdapter } from "../storage/domain-repos/sqlite/recent-cognition-slot-repo.js";
+import { SqliteSharedBlockRepoAdapter } from "../storage/domain-repos/sqlite/shared-block-repo.js";
 import {
 	ensureDirectoryExists,
 	resolveStoragePaths,
 } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
-import { SqlitePendingFlushRecoveryRepoAdapter } from "../storage/domain-repos/sqlite/pending-flush-recovery-repo.js";
-import { SqliteCoreMemoryBlockRepoAdapter } from "../storage/domain-repos/sqlite/core-memory-block-repo.js";
-import { SqliteInteractionRepoAdapter } from "../storage/domain-repos/sqlite/interaction-repo.js";
-import { SqliteRecentCognitionSlotRepoAdapter } from "../storage/domain-repos/sqlite/recent-cognition-slot-repo.js";
-import { SqliteSharedBlockRepoAdapter } from "../storage/domain-repos/sqlite/shared-block-repo.js";
-import { SharedBlockRepo as SqliteSharedBlockRepoImpl } from "../memory/shared-blocks/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 import { registerRuntimeTools } from "./tools.js";
 import type {
@@ -204,6 +229,350 @@ function buildAgentRegistry(
 	return registry;
 }
 
+function createLazyPgRepo<T extends object>(factory: () => T): T {
+	return new Proxy({} as T, {
+		get(_target, property, receiver) {
+			const repo = factory() as Record<PropertyKey, unknown>;
+			const value = Reflect.get(repo, property, receiver);
+			if (typeof value === "function") {
+				return (value as (...args: unknown[]) => unknown).bind(repo);
+			}
+			return value;
+		},
+	});
+}
+
+function requireSqliteDb(db: Db | undefined): Db {
+	if (!db) {
+		throw new Error("SQLite database handle is unavailable");
+	}
+	return db;
+}
+
+function createPgInteractionStoreShim(): InteractionStore {
+	type StoredRecord = InteractionRecord & { isProcessed: boolean };
+
+	const recordsBySession = new Map<string, StoredRecord[]>();
+	const slotPayloadBySessionAgent = new Map<string, string>();
+
+	const getRecords = (sessionId: string): StoredRecord[] => {
+		const existing = recordsBySession.get(sessionId);
+		if (existing) {
+			return existing;
+		}
+		const created: StoredRecord[] = [];
+		recordsBySession.set(sessionId, created);
+		return created;
+	};
+
+	const getSortedRecords = (sessionId: string): StoredRecord[] =>
+		[...getRecords(sessionId)].sort((a, b) => a.recordIndex - b.recordIndex);
+
+	const sessionAgentKey = (sessionId: string, agentId: string): string =>
+		`${sessionId}::${agentId}`;
+
+	const store = {
+		commit(record: InteractionRecord): void {
+			const records = getRecords(record.sessionId);
+			const duplicate = records.find(
+				(entry) => entry.recordId === record.recordId,
+			);
+			if (duplicate) {
+				throw new Error(`Duplicate record: recordId=${record.recordId}`);
+			}
+			records.push({ ...record, isProcessed: false });
+		},
+
+		runInTransaction<T>(fn: (store: InteractionStore) => T): T {
+			return fn(store as unknown as InteractionStore);
+		},
+
+		async runInTransactionAsync<T>(
+			fn: (store: InteractionStore) => Promise<T>,
+		): Promise<T> {
+			return fn(store as unknown as InteractionStore);
+		},
+
+		settlementExists(sessionId: string, settlementId: string): boolean {
+			return getRecords(sessionId).some(
+				(entry) =>
+					entry.recordId === settlementId &&
+					entry.recordType === "turn_settlement",
+			);
+		},
+
+		findRecordByCorrelatedTurnId(
+			sessionId: string,
+			correlatedTurnId: string,
+			actorType: string,
+		): InteractionRecord | undefined {
+			return getRecords(sessionId).find(
+				(entry) =>
+					entry.correlatedTurnId === correlatedTurnId &&
+					entry.actorType === actorType,
+			);
+		},
+
+		findSessionIdByRequestId(requestId: string): string | undefined {
+			const sessionIds = new Set<string>();
+			for (const [sessionId, records] of recordsBySession.entries()) {
+				if (records.some((entry) => entry.correlatedTurnId === requestId)) {
+					sessionIds.add(sessionId);
+				}
+			}
+			if (sessionIds.size === 0) {
+				return undefined;
+			}
+			if (sessionIds.size > 1) {
+				throw new Error(
+					`Request id maps to multiple sessions: requestId=${requestId}`,
+				);
+			}
+			return [...sessionIds][0];
+		},
+
+		getSettlementPayload(
+			sessionId: string,
+			requestId: string,
+		): TurnSettlementPayload | undefined {
+			const latest = getSortedRecords(sessionId)
+				.filter(
+					(entry) =>
+						entry.recordType === "turn_settlement" &&
+						entry.correlatedTurnId === requestId,
+				)
+				.at(-1);
+			if (!latest) {
+				return undefined;
+			}
+			const payload = latest.payload;
+			if (!payload || typeof payload !== "object") {
+				return undefined;
+			}
+			return payload as TurnSettlementPayload;
+		},
+
+		getMessageRecords(sessionId: string): InteractionRecord[] {
+			return getSortedRecords(sessionId).filter(
+				(entry) => entry.recordType === "message",
+			);
+		},
+
+		upsertRecentCognitionSlot(
+			sessionId: string,
+			agentId: string,
+			_settlementId: string,
+			newEntriesJson = "[]",
+		): void {
+			const key = sessionAgentKey(sessionId, agentId);
+			const current = slotPayloadBySessionAgent.get(key);
+			let existingEntries: unknown[] = [];
+			if (current) {
+				try {
+					const parsed = JSON.parse(current) as unknown;
+					existingEntries = Array.isArray(parsed) ? parsed : [];
+				} catch {
+					existingEntries = [];
+				}
+			}
+
+			let incomingEntries: unknown[] = [];
+			try {
+				const parsed = JSON.parse(newEntriesJson) as unknown;
+				incomingEntries = Array.isArray(parsed) ? parsed : [];
+			} catch {
+				incomingEntries = [];
+			}
+
+			const merged = existingEntries.concat(incomingEntries).slice(-64);
+			slotPayloadBySessionAgent.set(key, JSON.stringify(merged));
+		},
+
+		getBySession(
+			sessionId: string,
+			options?: { fromIndex?: number; toIndex?: number; limit?: number },
+		): InteractionRecord[] {
+			let records = getSortedRecords(sessionId);
+			if (options?.fromIndex !== undefined) {
+				const fromIndex = options.fromIndex;
+				records = records.filter((entry) => entry.recordIndex >= fromIndex);
+			}
+			if (options?.toIndex !== undefined) {
+				const toIndex = options.toIndex;
+				records = records.filter((entry) => entry.recordIndex <= toIndex);
+			}
+			if (options?.limit !== undefined) {
+				records = records.slice(0, options.limit);
+			}
+			return records;
+		},
+
+		getByRange(
+			sessionId: string,
+			rangeStart: number,
+			rangeEnd: number,
+		): InteractionRecord[] {
+			return getSortedRecords(sessionId).filter(
+				(entry) =>
+					entry.recordIndex >= rangeStart && entry.recordIndex <= rangeEnd,
+			);
+		},
+
+		markProcessed(sessionId: string, upToIndex: number): void {
+			for (const entry of getRecords(sessionId)) {
+				if (entry.recordIndex <= upToIndex) {
+					entry.isProcessed = true;
+				}
+			}
+		},
+
+		markRangeProcessed(
+			sessionId: string,
+			rangeStart: number,
+			rangeEnd: number,
+		): void {
+			for (const entry of getRecords(sessionId)) {
+				if (entry.recordIndex >= rangeStart && entry.recordIndex <= rangeEnd) {
+					entry.isProcessed = true;
+				}
+			}
+		},
+
+		countUnprocessedRpTurns(sessionId: string): number {
+			return getRecords(sessionId).filter(
+				(entry) =>
+					!entry.isProcessed &&
+					entry.recordType === "message" &&
+					(entry.actorType === "user" || entry.actorType === "rp_agent"),
+			).length;
+		},
+
+		getMinMaxUnprocessedIndex(
+			sessionId: string,
+		): { min: number; max: number } | undefined {
+			const unprocessed = getRecords(sessionId)
+				.filter((entry) => !entry.isProcessed)
+				.map((entry) => entry.recordIndex);
+			if (unprocessed.length === 0) {
+				return undefined;
+			}
+			return {
+				min: Math.min(...unprocessed),
+				max: Math.max(...unprocessed),
+			};
+		},
+
+		getMaxIndex(sessionId: string): number | undefined {
+			const indices = getRecords(sessionId).map((entry) => entry.recordIndex);
+			if (indices.length === 0) {
+				return undefined;
+			}
+			return Math.max(...indices);
+		},
+
+		getPendingSettlementJobState(_sessionId: string): {
+			status?: string;
+			failure_count?: number;
+			next_attempt_at?: number | null;
+			last_error_code?: string | null;
+			last_error_message?: string | null;
+		} | null {
+			void _sessionId;
+			return null;
+		},
+
+		countUnprocessedSettlements(sessionId: string): number {
+			return getRecords(sessionId).filter(
+				(entry) => !entry.isProcessed && entry.recordType === "turn_settlement",
+			).length;
+		},
+
+		getUnprocessedSettlementRange(
+			sessionId: string,
+		): { min: number; max: number } | null {
+			const indices = getRecords(sessionId)
+				.filter(
+					(entry) =>
+						!entry.isProcessed && entry.recordType === "turn_settlement",
+				)
+				.map((entry) => entry.recordIndex);
+			if (indices.length === 0) {
+				return null;
+			}
+			return { min: Math.min(...indices), max: Math.max(...indices) };
+		},
+
+		listStalePendingSettlementSessions(staleCutoffMs: number): Array<{
+			sessionId: string;
+			agentId: string;
+			oldestSettlementAt: number;
+		}> {
+			const includeAll = staleCutoffMs < 0;
+			const cutoffTs = Date.now() - staleCutoffMs;
+			const result: Array<{
+				sessionId: string;
+				agentId: string;
+				oldestSettlementAt: number;
+			}> = [];
+
+			for (const [sessionId, records] of recordsBySession.entries()) {
+				const settlements = records.filter(
+					(entry) =>
+						!entry.isProcessed && entry.recordType === "turn_settlement",
+				);
+				if (settlements.length === 0) {
+					continue;
+				}
+
+				const newest = settlements.reduce((current, candidate) =>
+					candidate.committedAt > current.committedAt ? candidate : current,
+				);
+				if (!includeAll && newest.committedAt > cutoffTs) {
+					continue;
+				}
+
+				const payload = newest.payload as {
+					ownerAgentId?: unknown;
+				};
+				if (typeof payload.ownerAgentId !== "string") {
+					continue;
+				}
+
+				const oldestSettlementAt = settlements.reduce(
+					(min, record) => Math.min(min, record.committedAt),
+					Number.POSITIVE_INFINITY,
+				);
+				if (!Number.isFinite(oldestSettlementAt)) {
+					continue;
+				}
+
+				result.push({
+					sessionId,
+					agentId: payload.ownerAgentId,
+					oldestSettlementAt,
+				});
+			}
+
+			return result.sort((a, b) => a.oldestSettlementAt - b.oldestSettlementAt);
+		},
+
+		getUnprocessedRangeForSession(
+			sessionId: string,
+		): { rangeStart: number; rangeEnd: number } | null {
+			const range = store.getMinMaxUnprocessedIndex(sessionId);
+			if (!range) {
+				return null;
+			}
+			return {
+				rangeStart: range.min,
+				rangeEnd: range.max,
+			};
+		},
+	};
+
+	return store as unknown as InteractionStore;
+}
+
 export function bootstrapRuntime(
 	options: RuntimeBootstrapOptions = {},
 ): RuntimeBootstrapResult {
@@ -215,12 +584,17 @@ export function bootstrapRuntime(
 
 	const runtimeCwd = resolveRuntimeCwd(options);
 	const databasePath = resolveDatabasePath(options, runtimeCwd);
-	ensureDirectoryExists(dirname(databasePath));
+	if (backendType === "sqlite") {
+		ensureDirectoryExists(dirname(databasePath));
+	}
 
-	const db = openDatabase({
-		path: databasePath,
-		busyTimeoutMs: options.busyTimeoutMs,
-	});
+	const db =
+		backendType === "sqlite"
+			? openDatabase({
+					path: databasePath,
+					busyTimeoutMs: options.busyTimeoutMs,
+				})
+			: undefined;
 	const resolvedJobPersistence: JobPersistence =
 		options.jobPersistence ??
 		createJobPersistence(backendType, {
@@ -239,29 +613,43 @@ export function bootstrapRuntime(
 		succeeded: false,
 	};
 
-	try {
-		migrationStatus.interaction.appliedMigrations =
-			runInteractionMigrations(db);
+	if (backendType === "sqlite" && db) {
+		try {
+			migrationStatus.interaction.appliedMigrations =
+				runInteractionMigrations(db);
+			migrationStatus.interaction.succeeded = true;
+
+			runMemoryMigrations(db);
+			migrationStatus.memory.succeeded = true;
+
+			runSessionMigrations(db);
+			migrationStatus.succeeded = true;
+		} catch (error) {
+			closeDatabaseGracefully(db);
+			throw error;
+		}
+	} else if (backendType === "pg") {
 		migrationStatus.interaction.succeeded = true;
-
-		runMemoryMigrations(db);
 		migrationStatus.memory.succeeded = true;
-
-		runSessionMigrations(db);
 		migrationStatus.succeeded = true;
-	} catch (error) {
-		closeDatabaseGracefully(db);
-		throw error;
 	}
 
-	const sessionService = options.sessionService ?? new SessionService(db);
+	const sessionService =
+		options.sessionService ??
+		new SessionService(backendType === "sqlite" ? db : undefined);
 	const blackboard = options.blackboard ?? new Blackboard();
 	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
 	const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
 	const toolExecutor = options.toolExecutor ?? new ToolExecutor();
+	const resolvePgPool = () => {
+		if (!pgFactory) {
+			throw new Error("PG backend factory is unavailable");
+		}
+		return pgFactory.getPool();
+	};
 	const runtimeServices = {
-		db,
-		rawDb: db.raw,
+		db: backendType === "sqlite" ? db : undefined,
+		rawDb: backendType === "sqlite" ? db?.raw : undefined,
 		sessionService,
 		blackboard,
 		agentRegistry,
@@ -270,25 +658,71 @@ export function bootstrapRuntime(
 		migrationStatus,
 	};
 
-	const interactionStore = new InteractionStore(db);
+	const interactionStore =
+		backendType === "sqlite" && db
+			? new InteractionStore(db)
+			: createPgInteractionStoreShim();
 	const commitService = new CommitService(interactionStore);
 	const flushSelector = new FlushSelector(interactionStore);
-	const graphStorage = new GraphStorageService(db, resolvedJobPersistence);
+	const graphStorage =
+		backendType === "sqlite" && db
+			? new GraphStorageService(db, resolvedJobPersistence)
+			: undefined;
 
-	const coreMemoryService = new CoreMemoryService(db);
-	const interactionRepo = new SqliteInteractionRepoAdapter(interactionStore);
-	const coreMemoryBlockRepo = new SqliteCoreMemoryBlockRepoAdapter(coreMemoryService);
-	const recentCognitionSlotRepo = new SqliteRecentCognitionSlotRepoAdapter(interactionStore, db);
-	const sharedBlockRepo = new SqliteSharedBlockRepoAdapter(new SqliteSharedBlockRepoImpl(db.raw as never), db);
+	const coreMemoryService =
+		backendType === "sqlite" && db ? new CoreMemoryService(db) : undefined;
+	const sqliteDb = backendType === "sqlite" ? requireSqliteDb(db) : undefined;
+	const sqliteGraphStorage =
+		backendType === "sqlite" ? graphStorage : undefined;
+	const sqliteCoreMemoryService =
+		backendType === "sqlite" ? coreMemoryService : undefined;
 
-	registerRuntimeTools(toolExecutor, runtimeServices);
+	const requireSqliteCoreMemoryService = (): CoreMemoryService => {
+		if (!sqliteCoreMemoryService) {
+			throw new Error("SQLite core memory service is unavailable");
+		}
+		return sqliteCoreMemoryService;
+	};
+
+	const interactionRepo: RuntimeBootstrapResult["interactionRepo"] =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgInteractionRepo(resolvePgPool()))
+			: new SqliteInteractionRepoAdapter(interactionStore);
+
+	const coreMemoryBlockRepo: RuntimeBootstrapResult["coreMemoryBlockRepo"] =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgCoreMemoryBlockRepo(resolvePgPool()))
+			: new SqliteCoreMemoryBlockRepoAdapter(requireSqliteCoreMemoryService());
+
+	const recentCognitionSlotRepo: RuntimeBootstrapResult["recentCognitionSlotRepo"] =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgRecentCognitionSlotRepo(resolvePgPool()))
+			: new SqliteRecentCognitionSlotRepoAdapter(
+					interactionStore,
+					requireSqliteDb(sqliteDb),
+				);
+
+	const sharedBlockRepo: RuntimeBootstrapResult["sharedBlockRepo"] =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgSharedBlockRepo(resolvePgPool()))
+			: new SqliteSharedBlockRepoAdapter(
+					new SqliteSharedBlockRepoImpl(requireSqliteDb(sqliteDb).raw as never),
+					requireSqliteDb(sqliteDb),
+				);
+
+	if (backendType === "sqlite") {
+		registerRuntimeTools(toolExecutor, runtimeServices);
+	}
 
 	const memoryMigrationModelId =
 		options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
 	const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
-	const settlementLedger = new SqliteSettlementLedger(db.raw);
+	const settlementLedger =
+		backendType === "sqlite" && db
+			? new SqliteSettlementLedger(db.raw)
+			: undefined;
 	let memoryTaskAgent: MemoryTaskAgent | null = null;
 	let memoryPipelineReady = false;
 	let memoryPipelineStatus: MemoryPipelineStatus = "missing_embedding_model";
@@ -319,34 +753,46 @@ export function bootstrapRuntime(
 				}
 
 				if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
+					const transactionBatcher =
+						backendType === "pg"
+							? new PgTransactionBatcher()
+							: new TransactionBatcher(requireSqliteDb(sqliteDb));
 					const embeddings = new EmbeddingService(
-						db,
-						new TransactionBatcher(db),
+						(db ?? (undefined as unknown as Db)) as Db,
+						transactionBatcher,
 					);
-					const materialization = new MaterializationService(
-						db.raw,
-						graphStorage,
-					);
-					const organizerEmbeddingModelId =
-						effectiveOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
-					const provider = new MemoryTaskModelProviderAdapter(
-						modelRegistry,
-						memoryMigrationModelId,
-						organizerEmbeddingModelId,
-					);
-					memoryTaskAgent = new MemoryTaskAgent(
-						db,
-						graphStorage,
-						coreMemoryService,
-						embeddings,
-						materialization,
-						provider,
-						settlementLedger,
-						resolvedJobPersistence,
-						options.strictDurableMode,
-					);
-					memoryPipelineReady = true;
-					memoryPipelineStatus = "ready";
+					if (
+						backendType === "sqlite" &&
+						sqliteDb &&
+						sqliteGraphStorage &&
+						sqliteCoreMemoryService &&
+						settlementLedger
+					) {
+						const materialization = new MaterializationService(
+							sqliteDb.raw,
+							sqliteGraphStorage,
+						);
+						const organizerEmbeddingModelId =
+							effectiveOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
+						const provider = new MemoryTaskModelProviderAdapter(
+							modelRegistry,
+							memoryMigrationModelId,
+							organizerEmbeddingModelId,
+						);
+						memoryTaskAgent = new MemoryTaskAgent(
+							sqliteDb,
+							sqliteGraphStorage,
+							sqliteCoreMemoryService,
+							embeddings,
+							materialization,
+							provider,
+							settlementLedger,
+							resolvedJobPersistence,
+							options.strictDurableMode,
+						);
+						memoryPipelineReady = true;
+						memoryPipelineStatus = "ready";
+					}
 				}
 			} catch {
 				memoryPipelineStatus = "embedding_model_unavailable";
@@ -385,12 +831,58 @@ export function bootstrapRuntime(
 
 	const personaAdapter = new PersonaAdapter(personaService);
 	const loreAdapter = new LoreAdapter(loreService);
-	const memoryAdapter = new MemoryAdapter(db, {
-		coreMemoryBlockRepo,
-		recentCognitionSlotRepo,
-		interactionRepo,
-		sharedBlockRepo,
-	});
+	const memoryAdapter: MemoryDataSource =
+		backendType === "sqlite" && db
+			? new MemoryAdapter(db, {
+					coreMemoryBlockRepo,
+					recentCognitionSlotRepo,
+					interactionRepo,
+					sharedBlockRepo,
+				})
+			: {
+					getPinnedBlocks(agentId: string): Promise<string> {
+						return getPinnedBlocksAsync(agentId, {
+							coreMemoryBlockRepo,
+							recentCognitionSlotRepo,
+							interactionRepo,
+							sharedBlockRepo,
+						});
+					},
+					getSharedBlocks(agentId: string): Promise<string> {
+						return getSharedBlocksAsync(agentId, {
+							coreMemoryBlockRepo,
+							recentCognitionSlotRepo,
+							interactionRepo,
+							sharedBlockRepo,
+						});
+					},
+					getRecentCognition(viewerContext): Promise<string> {
+						return getRecentCognitionAsync(
+							viewerContext.viewer_agent_id,
+							viewerContext.session_id,
+							{
+								coreMemoryBlockRepo,
+								recentCognitionSlotRepo,
+								interactionRepo,
+								sharedBlockRepo,
+							},
+						);
+					},
+					getAttachedSharedBlocks(agentId: string): Promise<string> {
+						return getAttachedSharedBlocksAsync(agentId, {
+							coreMemoryBlockRepo,
+							recentCognitionSlotRepo,
+							interactionRepo,
+							sharedBlockRepo,
+						});
+					},
+					async getTypedRetrievalSurface(
+						_userMessage: string,
+						_viewerContext: unknown,
+					): Promise<string> {
+						return "";
+					},
+				};
 	const operationalAdapter = new BlackboardOperationalDataSource(blackboard);
 
 	const promptBuilder = new PromptBuilder({
@@ -512,17 +1004,33 @@ export function bootstrapRuntime(
 				}
 			: null;
 
-	const episodeRepo = new EpisodeRepository(db);
-	const cognitionEventRepo = new CognitionEventRepo(db.raw);
-	const cognitionProjectionRepo = new PrivateCognitionProjectionRepo(db.raw);
-	const areaWorldProjectionRepo = new AreaWorldProjectionRepo(db.raw);
+	const episodeRepo =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgEpisodeRepo(resolvePgPool()))
+			: new EpisodeRepository(requireSqliteDb(sqliteDb));
+	const cognitionEventRepo =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgCognitionEventRepo(resolvePgPool()))
+			: new CognitionEventRepo(requireSqliteDb(sqliteDb).raw);
+	const cognitionProjectionRepo =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgCognitionProjectionRepo(resolvePgPool()))
+			: new PrivateCognitionProjectionRepo(requireSqliteDb(sqliteDb).raw);
+	const sqliteAreaWorldProjectionRepo =
+		backendType === "sqlite"
+			? new AreaWorldProjectionRepo(requireSqliteDb(sqliteDb).raw)
+			: undefined;
+	const areaWorldProjectionRepo =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgAreaWorldProjectionRepo(resolvePgPool()))
+			: sqliteAreaWorldProjectionRepo;
 	const projectionManager = new ProjectionManager(
 		episodeRepo,
 		cognitionEventRepo,
 		cognitionProjectionRepo,
-		graphStorage,
+		graphStorage ?? null,
 		areaWorldProjectionRepo,
-		db.raw,
+		backendType === "sqlite" ? db?.raw : undefined,
 	);
 
 	const turnService = new TurnService(
@@ -540,7 +1048,10 @@ export function bootstrapRuntime(
 		settlementUnitOfWork,
 	);
 
-	const pendingFlushRepo = new SqlitePendingFlushRecoveryRepoAdapter(db);
+	const pendingFlushRepo =
+		backendType === "pg"
+			? createLazyPgRepo(() => new PgPendingFlushRecoveryRepo(resolvePgPool()))
+			: new SqlitePendingFlushRecoveryRepoAdapter(requireSqliteDb(sqliteDb));
 	const pendingSettlementSweeper = memoryTaskAgent
 		? new PendingSettlementSweeper(
 				pendingFlushRepo,
@@ -549,23 +1060,31 @@ export function bootstrapRuntime(
 				memoryTaskAgent,
 			)
 		: null;
-	const publicationRecoverySweeper = graphStorage
-		? new PublicationRecoverySweeper(db, graphStorage, {
-				projectionRepo: areaWorldProjectionRepo,
-			})
-		: null;
+	const publicationRecoverySweeper =
+		backendType === "sqlite" && db && graphStorage
+			? new PublicationRecoverySweeper(db, graphStorage, {
+					projectionRepo: sqliteAreaWorldProjectionRepo,
+				})
+			: null;
 	pendingSettlementSweeper?.start();
 	publicationRecoverySweeper?.start();
 
 	const shutdown = (): void => {
 		pendingSettlementSweeper?.stop();
 		publicationRecoverySweeper?.stop();
-		closeDatabaseGracefully(db);
+		if (db) {
+			closeDatabaseGracefully(db);
+		}
+		if (pgFactory) {
+			void pgFactory
+				.close()
+				.catch((err) => console.error("PG pool close error:", err));
+		}
 	};
 
 	return {
-		db,
-		rawDb: db.raw,
+		db: db ?? undefined,
+		rawDb: db?.raw ?? undefined,
 		sessionService,
 		blackboard,
 		agentRegistry,
