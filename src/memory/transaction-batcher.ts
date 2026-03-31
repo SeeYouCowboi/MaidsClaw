@@ -2,6 +2,9 @@ import type { Db } from "../storage/database.js";
 
 export type BatchedWrite = (db: Db) => void;
 export type SqlOperation = { sql: string; params?: unknown[] };
+export interface ITransactionBatcher {
+  runInTransaction<T>(fn: () => T): T;
+}
 
 type ExecLikeDb = {
   exec: (sql: string) => void;
@@ -9,7 +12,7 @@ type ExecLikeDb = {
   prepare?: (sql: string) => { run: (...params: unknown[]) => unknown };
 };
 
-export class TransactionBatcher {
+export class TransactionBatcher implements ITransactionBatcher {
   private readonly queue: BatchedWrite[] = [];
 
   constructor(private readonly db: ExecLikeDb) {}

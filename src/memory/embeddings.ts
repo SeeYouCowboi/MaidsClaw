@@ -1,5 +1,5 @@
 import type { Db } from "../storage/database.js";
-import type { TransactionBatcher } from "./transaction-batcher.js";
+import type { ITransactionBatcher } from "./transaction-batcher.js";
 import type { EmbeddingViewType, NodeRef } from "./types.js";
 
 type EmbeddingEntry = {
@@ -18,9 +18,16 @@ type NeighborQueryOptions = {
 };
 
 export class EmbeddingService {
+  /**
+   * PG strategy: keep this service interface stable while decoupling sqlite internals.
+   *
+   * In PostgreSQL mode this service receives `PgTransactionBatcher` (no-op) and will delegate
+   * all persistence/query work to `EmbeddingRepo` methods instead of direct `db.prepare(...)`
+   * calls during Task 14 wiring.
+   */
   constructor(
     private readonly db: Db,
-    private readonly batcher: TransactionBatcher,
+    private readonly batcher: ITransactionBatcher,
   ) {}
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -43,6 +50,12 @@ export class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
+  /**
+   * SQLite path today: performs `INSERT OR REPLACE` writes inside `batcher.runInTransaction`.
+   *
+   * PG plan (T14): route these writes through `EmbeddingRepo.upsert(...)` and retain
+   * transaction compatibility by injecting `PgTransactionBatcher` as a no-op wrapper.
+   */
   batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
     if (entries.length === 0) {
       return;
@@ -67,6 +80,13 @@ export class EmbeddingService {
     });
   }
 
+  /**
+   * SQLite path today: scans `node_embeddings` and applies private-cognition visibility checks
+   * with sqlite statements.
+   *
+   * PG plan (T14): replace this with `EmbeddingRepo.query(...)` / `EmbeddingRepo.cosineSearch(...)`
+   * so filtering and nearest-neighbor scoring run in Postgres (`pgvector` + SQL visibility logic).
+   */
   queryNearestNeighbors(
     queryEmbedding: Float32Array,
     options: NeighborQueryOptions,
@@ -117,6 +137,12 @@ export class EmbeddingService {
     return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
   }
 
+  /**
+   * SQLite helper for current read path.
+   *
+   * PG plan (T14): this visibility filtering is expected to move into repository SQL, so this
+   * method becomes legacy-only once EmbeddingRepo-backed querying is fully wired.
+   */
   private isNodeVisibleForAgent(
     nodeRef: NodeRef,
     nodeKind: string,
