@@ -10,12 +10,15 @@ import type { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { RuntimeServices } from "./types.js";
 
 export function registerRuntimeTools(toolExecutor: ToolExecutor, services: RuntimeServices): void {
+  if (!services.db || !services.rawDb) {
+    throw new Error("registerRuntimeTools requires db and rawDb (SQLite backend only)");
+  }
   const coreMemory = new CoreMemoryService(services.db);
   const retrieval = new RetrievalService(services.db);
-  const alias = new AliasService(services.rawDb);
+  const alias = new AliasService(services.rawDb as never);
   const narrativeSearch = new NarrativeSearchService(services.db);
   const cognitionSearch = new CognitionSearchService(services.db);
-  const navigator = new GraphNavigator(services.rawDb, retrieval, alias, undefined, narrativeSearch, cognitionSearch);
+  const navigator = new GraphNavigator(services.rawDb as never, retrieval, alias, undefined, narrativeSearch, cognitionSearch);
 
   const memoryTools = buildMemoryTools({
     coreMemory,

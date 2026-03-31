@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
@@ -38,8 +37,8 @@ export type RuntimeMigrationStatus = {
 };
 
 export type RuntimeServices = {
-	db: Db;
-	rawDb: Database;
+	db?: Db;
+	rawDb?: unknown;
 	sessionService: SessionService;
 	blackboard: Blackboard;
 	agentRegistry: AgentRegistry;
@@ -83,8 +82,8 @@ export type MemoryPipelineStatus =
  * to consumers outside the bootstrap layer.
  */
 export type RuntimeBootstrapResult = {
-	db: Db;
-	rawDb: Database;
+	db?: Db;
+	rawDb?: unknown;
 	sessionService: SessionService;
 	blackboard: Blackboard;
 	agentRegistry: AgentRegistry;

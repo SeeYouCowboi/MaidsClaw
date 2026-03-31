@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { createPgPool } from "../../src/storage/pg-pool.js";
+import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
+import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
+import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
+import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
 
 const ADMIN_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/postgres";
 const TEST_DB = "maidsclaw_app_test";
@@ -118,5 +122,153 @@ export async function expectTriggerReject(
     throw new Error(
       `Trigger error did not match.\n  Expected pattern: ${pattern}\n  Actual message:  ${caught.message}`,
     );
+  }
+}
+
+/**
+ * Standard seeded entity IDs returned by seedStandardPgEntities().
+ */
+export type SeededEntities = {
+  selfId: number;
+  userId: number;
+  locationId: number;
+  bobId: number;
+};
+
+/**
+ * Seed standard test entities into the PostgreSQL database.
+ * Equivalent to seedStandardEntities() from memory-test-utils.ts for SQLite.
+ *
+ * Creates:
+ * - "__self__" (Alice) - person entity
+ * - "__user__" (User) - person entity
+ * - "test-room" (Test Room) - location entity
+ * - "bob" (Bob) - person entity
+ */
+export async function seedStandardPgEntities(sql: postgres.Sql): Promise<SeededEntities> {
+  const storage = new PgGraphMutableStoreRepo(sql);
+
+  const selfId = await storage.upsertEntity({
+    pointerKey: "__self__",
+    displayName: "Alice",
+    entityType: "person",
+    memoryScope: "shared_public",
+  });
+  const userId = await storage.upsertEntity({
+    pointerKey: "__user__",
+    displayName: "User",
+    entityType: "person",
+    memoryScope: "shared_public",
+  });
+  const locationId = await storage.upsertEntity({
+    pointerKey: "test-room",
+    displayName: "Test Room",
+    entityType: "location",
+    memoryScope: "shared_public",
+  });
+  const bobId = await storage.upsertEntity({
+    pointerKey: "bob",
+    displayName: "Bob",
+    entityType: "person",
+    memoryScope: "shared_public",
+  });
+
+  return { selfId, userId, locationId, bobId };
+}
+
+/**
+ * Options for createPgTestDb() factory.
+ */
+export type CreatePgTestDbOptions = {
+  /** Embedding dimension for pgvector (default: 1536) */
+  embeddingDim?: number;
+};
+
+/**
+ * Result returned by createPgTestDb() factory.
+ */
+export type PgTestDb = {
+  /** The postgres connection pool (with isolated schema as search_path) */
+  pool: postgres.Sql;
+  /** The isolated schema name for this test database */
+  schemaName: string;
+  /** IDs of the standard seeded entities */
+  entities: SeededEntities;
+  /** Clean up the test database (drops schema and closes pool) */
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * One-stop factory to create a fully-bootstrapped PostgreSQL test database.
+ *
+ * This factory:
+ * 1. Gets a connection pool via createTestPgAppPool()
+ * 2. Creates an isolated test schema
+ * 3. Runs truth schema bootstrap
+ * 4. Runs ops schema bootstrap
+ * 5. Runs derived schema bootstrap (with optional embedding dimension)
+ * 6. Seeds standard test entities (equivalent to SQLite's seedStandardEntities())
+ * 7. Returns pool, schema name, entity IDs, and a cleanup function
+ *
+ * Usage:
+ * ```typescript
+ * import { describe, beforeAll, afterAll } from "bun:test";
+ * import { createPgTestDb } from "../helpers/pg-app-test-utils.js";
+ * import { skipPgTests } from "../helpers/pg-test-utils.js";
+ *
+ * describe.skipIf(skipPgTests)("My PG Test", () => {
+ *   let testDb: Awaited<ReturnType<typeof createPgTestDb>>;
+ *
+ *   beforeAll(async () => {
+ *     testDb = await createPgTestDb();
+ *   });
+ *
+ *   afterAll(async () => {
+ *     await testDb.cleanup();
+ *   });
+ *
+ *   it("uses the test database", async () => {
+ *     // Use testDb.pool for queries
+ *     // Access testDb.entities.selfId, userId, locationId, bobId
+ *   });
+ * });
+ * ```
+ */
+export async function createPgTestDb(options: CreatePgTestDbOptions = {}): Promise<PgTestDb> {
+  // Step 1: Ensure test database exists
+  await ensureTestPgAppDb();
+
+  // Step 2: Create connection pool with isolated schema
+  const pool = createTestPgAppPool();
+  const schemaName = schemaRegistry.get(pool);
+  if (!schemaName) {
+    throw new Error("Failed to create test pool with registered schema");
+  }
+
+  // Step 3: Create the isolated schema
+  await pool.unsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+
+  try {
+    // Step 4: Bootstrap all three schema layers
+    await bootstrapTruthSchema(pool);
+    await bootstrapOpsSchema(pool);
+    await bootstrapDerivedSchema(pool, { embeddingDim: options.embeddingDim });
+
+    // Step 5: Seed standard entities
+    const entities = await seedStandardPgEntities(pool);
+
+    // Step 6: Return the test database context with cleanup
+    return {
+      pool,
+      schemaName,
+      entities,
+      cleanup: async () => {
+        await teardownAppPool(pool);
+      },
+    };
+  } catch (error) {
+    // Cleanup on bootstrap failure
+    await teardownAppPool(pool);
+    throw error;
   }
 }
