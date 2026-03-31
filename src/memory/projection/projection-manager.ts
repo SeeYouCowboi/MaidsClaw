@@ -376,7 +376,7 @@ export class ProjectionManager {
 				timestamp: committedAt,
 			},
 			{
-				db: this.rawDb,
+				db: this.rawDb as never,
 				projectionRepo: supportsSyncPublicationProjection
 					? ((areaWorldProjectionRepo as AreaWorldProjectionRepo | null) ??
 						undefined)

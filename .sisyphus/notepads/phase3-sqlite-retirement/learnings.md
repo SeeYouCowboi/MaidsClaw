@@ -394,3 +394,31 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - For synchronous memory APIs that still require immediate results, sqlite repo methods can return already-resolved promises; when necessary, service-layer sync bridges use Bun.peek and throw explicit errors if unresolved promises leak into sync paths.
 - T13 surfaced constructor ripple effects: organizer now needs a query repo dependency, which required task-agent wiring updates and test setup updates (graph-node-registry and promotion.test).
 - Validation outcome for this checkpoint: bun run build passes; bun test fails on pre-existing non-T13 dirty-tree failures; focused bun test src/memory/promotion.test.ts passes.
+
+## [2026-04-01] Task 14: materialization + embeddings decoupled from bun:sqlite
+-  now depends on  +  instead of direct sqlite  queries; sqlite creation path moved to  helper for compatibility in tests/runtime wiring.
+- Added/expanded  to own sqlite persistence/query behavior (upsert, cosine query, visibility filtering), so service layer stays backend-agnostic while preserving algorithm behavior.
+-  constructor now accepts , normalizes internally to , and resolves entity/public-event decisions through  (sqlite impl: ) instead of inline entity SQL decision logic.
+- Runtime PG branch now injects  + ; sqlite branch injects  +  and passes  into materialization wiring.
+- T14 commit intentionally excluded T18 surfaces (, ) and left unrelated  working-tree changes untouched.
+
+## [2026-04-01] Task 14 follow-up: corrected notes
+- EmbeddingService now depends on EmbeddingRepo and ITransactionBatcher; SQLite construction path uses EmbeddingService.fromSqlite(...) for compatibility.
+- SqliteEmbeddingRepoAdapter owns SQLite embedding persistence and nearest-neighbor query filtering, keeping EmbeddingService backend-neutral.
+- MaterializationService removed direct SQLite-specific type import and routes public-entity/public-event resolution through PromotionQueryRepo (sqlite implementation injected in runtime).
+- Runtime wiring now injects PgEmbeddingRepo plus PgTransactionBatcher on PG path, and SqliteEmbeddingRepoAdapter plus TransactionBatcher on SQLite path.
+- T14 commit intentionally excluded T18 files (narrative-search.ts and area-world-projection-repo.ts).
+
+## [2026-04-01] Task 18: Narrative search + projection repo decoupling
+-  now accepts either  or ; default SQLite path wraps  via , so memory-layer search no longer embeds SQL directly.
+- Added  using FTS5  for area/world narrative surfaces with query-object support (, , , , ).
+- Added  using  (, , ) and explicit score thresholding; no SQLite /FTS5 syntax used in PG path.
+-  removed direct  type import by introducing an internal  shape for  surface compatibility.
+-  needed  at publication materialization options boundary to satisfy TS structural typing after DB-like narrowing.
+
+## [2026-04-01] Task 18 correction: escaped markdown details
+- `NarrativeSearchService` now accepts `NarrativeSearchRepo | Db`; SQLite default wiring uses `SqliteNarrativeSearchRepo` so the service no longer embeds backend-specific FTS SQL.
+- Added `SqliteNarrativeSearchRepo` with FTS5 `MATCH` queries for area/world narrative surfaces and support for `NarrativeSearchQuery` knobs (`text`, `limit`, `minScore`, `includeArea`, `includeWorld`).
+- Added `PgNarrativeSearchRepo` using `pg_trgm` operators/functions (`%`, `similarity`, `word_similarity`) with score filtering; no FTS5 `MATCH` syntax in PG implementation.
+- `src/memory/projection/area-world-projection-repo.ts` removed direct `bun:sqlite` type import via structural `DbLike` (`exec` + `prepare` surface).
+- `projection-manager.ts` keeps `db: this.rawDb as never` at the materialization call boundary to satisfy narrowed DB-like typing under strict TS checks.

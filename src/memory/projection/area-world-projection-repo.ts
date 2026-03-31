@@ -1,5 +1,13 @@
-import type { Database } from "bun:sqlite";
 import type { PublicationTargetScope } from "../../runtime/rp-turn-contract.js";
+
+type DbLike = {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+};
 
 export const SURFACING_CLASSIFICATIONS = [
   "public_manifestation",
@@ -90,7 +98,7 @@ export type UpsertWorldStateInput = {
 };
 
 export class AreaWorldProjectionRepo {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: DbLike) {}
 
   upsertAreaState(input: UpsertAreaStateInput): void {
     this.upsertAreaStateCurrent(input);
