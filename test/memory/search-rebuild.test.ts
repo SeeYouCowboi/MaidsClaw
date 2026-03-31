@@ -252,7 +252,7 @@ describe("SearchRebuildJob", () => {
     }
   });
 
-  it("durable persistence: enqueue, claim, execute, complete lifecycle", () => {
+  it("durable persistence: enqueue, claim, execute, complete lifecycle", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
@@ -277,7 +277,7 @@ describe("SearchRebuildJob", () => {
       const payload: SearchRebuildPayload = { agentId: AGENT_ID, scope: "world" };
       const jobId = `search.rebuild:world:${AGENT_ID}:durable-test`;
 
-      persistence.enqueue({
+      await persistence.enqueue({
         id: jobId,
         jobType: "search.rebuild",
         payload,
@@ -286,17 +286,17 @@ describe("SearchRebuildJob", () => {
         nextAttemptAt: Date.now(),
       });
 
-      const pending = persistence.listPending();
+      const pending = await persistence.listPending();
       expect(pending.length).toBeGreaterThanOrEqual(1);
       const found = pending.find((j) => j.id === jobId);
       expect(found).toBeDefined();
 
-      const claimed = persistence.claim(jobId, "worker-1", 30000);
+      const claimed = await persistence.claim(jobId, "worker-1", 30000);
       expect(claimed).toBe(true);
 
       executeSearchRebuild(db, payload);
 
-      persistence.complete(jobId);
+      await persistence.complete(jobId);
 
       const statusRow = db.get<{ status: string }>(
         "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
@@ -313,14 +313,14 @@ describe("SearchRebuildJob", () => {
     }
   });
 
-  it("retry: marks job retryable on transient failure", () => {
+  it("retry: marks job retryable on transient failure", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
       const persistence = new SqliteJobPersistence(db);
       const jobId = `search.rebuild:world:${AGENT_ID}:retry-test`;
 
-      persistence.enqueue({
+      await persistence.enqueue({
         id: jobId,
         jobType: "search.rebuild",
         payload: { agentId: AGENT_ID, scope: "world" },
@@ -329,9 +329,9 @@ describe("SearchRebuildJob", () => {
         nextAttemptAt: Date.now(),
       });
 
-      persistence.claim(jobId, "worker-1", 30000);
+      await persistence.claim(jobId, "worker-1", 30000);
 
-      persistence.fail(jobId, "Simulated transient error", true);
+      await persistence.fail(jobId, "Simulated transient error", true);
 
       const statusRow = db.get<{ status: string; attempt_count: number }>(
         "SELECT status, attempt_count FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
@@ -340,7 +340,7 @@ describe("SearchRebuildJob", () => {
       expect(statusRow?.status).toBe("retryable");
       expect(statusRow?.attempt_count).toBe(1);
 
-      const retryable = persistence.listRetryable(Date.now() + 1000);
+      const retryable = await persistence.listRetryable(Date.now() + 1000);
       const retryJob = retryable.find((j) => j.id === jobId);
       expect(retryJob).toBeDefined();
     } finally {
@@ -348,14 +348,14 @@ describe("SearchRebuildJob", () => {
     }
   });
 
-  it("retry: marks job exhausted after max attempts", () => {
+  it("retry: marks job exhausted after max attempts", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
       const persistence = new SqliteJobPersistence(db);
       const jobId = `search.rebuild:world:${AGENT_ID}:exhaust-test`;
 
-      persistence.enqueue({
+      await persistence.enqueue({
         id: jobId,
         jobType: "search.rebuild",
         payload: { agentId: AGENT_ID, scope: "world" },
@@ -364,11 +364,11 @@ describe("SearchRebuildJob", () => {
         nextAttemptAt: Date.now(),
       });
 
-      persistence.claim(jobId, "worker-1", 30000);
-      persistence.fail(jobId, "fail 1", true);
+      await persistence.claim(jobId, "worker-1", 30000);
+      await persistence.fail(jobId, "fail 1", true);
 
-      persistence.claim(jobId, "worker-1", 30000);
-      persistence.fail(jobId, "fail 2", true);
+      await persistence.claim(jobId, "worker-1", 30000);
+      await persistence.fail(jobId, "fail 2", true);
 
       const statusRow = db.get<{ status: string; attempt_count: number }>(
         "SELECT status, attempt_count FROM _memory_maintenance_jobs WHERE idempotency_key = ?",

@@ -35,7 +35,7 @@ function createDispatcher(): { queue: JobQueue; dedup: JobDedupEngine; dispatche
   return { queue, dedup, dispatcher };
 }
 
-describe.skipIf(skipPgTests)("JobDedupEngine", () => {
+(describe as any).skipIf(skipPgTests)("JobDedupEngine", () => {
   it("returns coalesce/drop/noop/accept based on existing job status", () => {
     const engine = new JobDedupEngine();
     const key = "memory.migrate:session-1:0-9";
@@ -54,7 +54,7 @@ describe.skipIf(skipPgTests)("JobDedupEngine", () => {
   });
 });
 
-describe.skipIf(skipPgTests)("JobQueue", () => {
+(describe as any).skipIf(skipPgTests)("JobQueue", () => {
   it("dequeues higher-priority execution class first", () => {
     const queue = new JobQueue();
 
@@ -84,7 +84,7 @@ describe.skipIf(skipPgTests)("JobQueue", () => {
   });
 });
 
-describe.skipIf(skipPgTests)("JobDispatcher", () => {
+(describe as any).skipIf(skipPgTests)("JobDispatcher", () => {
   it("requeues retriable job before maxAttempts and eventually fails when exhausted", async () => {
     const { queue, dispatcher } = createDispatcher();
 
@@ -201,7 +201,7 @@ describe.skipIf(skipPgTests)("JobDispatcher", () => {
   });
 });
 
-describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
+(describe as any).skipIf(skipPgTests)("search.rebuild recovery", () => {
   function createMockPersistence(entries: JobEntry[]) {
     return {
       listPending: () => entries,
@@ -209,7 +209,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
     };
   }
 
-  it("recovers search.rebuild job from persistence and maps to correct execution class", () => {
+  it("recovers search.rebuild job from persistence and maps to correct execution class", async () => {
     const queue = new JobQueue();
     const dedup = new JobDedupEngine();
     const mockPersistence = createMockPersistence([
@@ -231,7 +231,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
       persistence: mockPersistence as any,
     });
 
-    dispatcher.start();
+    await dispatcher.start();
 
     const recoveredJob = queue.getByKey("search-rebuild-1");
     expect(recoveredJob !== undefined).toBe(true);
@@ -241,7 +241,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
     }
   });
 
-  it("recovers search.rebuild from retryable state", () => {
+  it("recovers search.rebuild from retryable state", async () => {
     const queue = new JobQueue();
     const dedup = new JobDedupEngine();
     const mockPersistence = {
@@ -267,7 +267,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
       persistence: mockPersistence as any,
     });
 
-    dispatcher.start();
+    await dispatcher.start();
 
     const recoveredJob = queue.getByKey("search-rebuild-retry");
     expect(recoveredJob !== undefined).toBe(true);
@@ -279,7 +279,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
     }
   });
 
-  it("does NOT drop search.rebuild job on recovery (regression test)", () => {
+  it("does NOT drop search.rebuild job on recovery (regression test)", async () => {
     const queue = new JobQueue();
     const dedup = new JobDedupEngine();
     const mockPersistence = createMockPersistence([
@@ -301,7 +301,7 @@ describe.skipIf(skipPgTests)("search.rebuild recovery", () => {
       persistence: mockPersistence as any,
     });
 
-    dispatcher.start();
+    await dispatcher.start();
 
     const recoveredJob = queue.getByKey("search-rebuild-critical");
     expect(recoveredJob).toBeDefined();

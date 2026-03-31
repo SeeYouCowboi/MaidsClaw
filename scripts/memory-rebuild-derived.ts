@@ -60,7 +60,7 @@ try {
         ...(args.reEmbed ? { forceReEmbed: true } : {}),
       };
       const ordinal = String(index + 1).padStart(4, "0");
-      persistence.enqueue({
+      await persistence.enqueue({
         id: `memory.organize:${settlementId}:chunk:${ordinal}`,
         jobType: "memory.organize",
         payload,

@@ -965,11 +965,11 @@ class SqliteGraphStorageLegacyImpl {
         contentLength: content.length,
         error: error instanceof Error ? error.message : String(error),
       });
-      this.enqueueSearchRebuildOnFtsFailure(tableName);
+      void this.enqueueSearchRebuildOnFtsFailure(tableName);
     }
   }
 
-  private enqueueSearchRebuildOnFtsFailure(ftsTableName: string): void {
+  private async enqueueSearchRebuildOnFtsFailure(ftsTableName: string): Promise<void> {
     if (!this.jobPersistence) {
       return;
     }
@@ -979,7 +979,7 @@ class SqliteGraphStorageLegacyImpl {
     }
     try {
       const payload: SearchRebuildPayload = { agentId: "_all_agents", scope };
-      this.jobPersistence.enqueue({
+      await this.jobPersistence.enqueue({
         id: `search.rebuild:${scope}:fts_repair`,
         jobType: "search.rebuild",
         payload,

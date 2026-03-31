@@ -469,7 +469,7 @@ export class MemoryTaskAgent {
 
     if (this.jobPersistence) {
       try {
-        this.enqueueOrganizerJobs(flushRequest.agentId, flushRequest.idempotencyKey, created.changedNodeRefs);
+        await this.enqueueOrganizerJobs(flushRequest.agentId, flushRequest.idempotencyKey, created.changedNodeRefs);
       } catch (err) {
         console.error("[MemoryTaskAgent] durable organizer enqueue failed, falling back to background organize", {
           batchId: organizeJob.batchId,
@@ -508,7 +508,11 @@ export class MemoryTaskAgent {
     });
   }
 
-  private enqueueOrganizerJobs(agentId: string, settlementId: string, changedNodeRefs: NodeRef[]): void {
+  private async enqueueOrganizerJobs(
+    agentId: string,
+    settlementId: string,
+    changedNodeRefs: NodeRef[],
+  ): Promise<void> {
     if (!this.jobPersistence) {
       return;
     }
@@ -528,7 +532,7 @@ export class MemoryTaskAgent {
       }
 
       const ordinal = String(chunkIndex + 1).padStart(4, "0");
-      this.jobPersistence.enqueue({
+      await this.jobPersistence.enqueue({
         id: `memory.organize:${settlementId}:chunk:${ordinal}`,
         jobType: "memory.organize",
         payload: {

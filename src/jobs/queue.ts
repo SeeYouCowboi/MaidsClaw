@@ -25,7 +25,7 @@ export class JobQueue {
       this.pendingJobIds.add(job.jobId);
     }
 
-    this.persistence?.enqueue({
+    void this.persistence?.enqueue({
       id: this.persistenceId(job),
       jobType: job.kind,
       payload: this.serializeJob(job),
@@ -96,22 +96,22 @@ export class JobQueue {
     const jobId = this.persistenceId(next);
 
     if (next.status === "running") {
-      this.persistence.claim(jobId, "local-dispatcher", 0);
+      void this.persistence.claim(jobId, "local-dispatcher", 0);
       return;
     }
 
     if (next.status === "completed") {
-      this.persistence.complete(jobId);
+      void this.persistence.complete(jobId);
       return;
     }
 
     if (next.status === "failed" || next.status === "cancelled") {
-      this.persistence.fail(jobId, next.error ?? `Job ${next.status}`, false);
+      void this.persistence.fail(jobId, next.error ?? `Job ${next.status}`, false);
       return;
     }
 
     if (next.status === "pending" && previous.status === "running") {
-      this.persistence.fail(jobId, next.error ?? "Job failed", true);
+      void this.persistence.fail(jobId, next.error ?? "Job failed", true);
     }
   }
 

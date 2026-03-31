@@ -40,12 +40,12 @@ if (backend !== "sqlite" && backend !== "pg") {
 if (backend === "pg") {
   await runPgSearchRebuild(values.agent, scope as PgSearchRebuildScope);
 } else {
-  runSqliteSearchRebuild(values.agent, scope);
+  await runSqliteSearchRebuild(values.agent, scope);
 }
 
 // ── SQLite path (original behavior) ──
 
-function runSqliteSearchRebuild(agentId: string, scope: SearchRebuildScope): void {
+async function runSqliteSearchRebuild(agentId: string, scope: SearchRebuildScope): Promise<void> {
   const dbPath = process.env.MAIDSCLAW_DB_PATH;
   if (!dbPath) {
     console.error("MAIDSCLAW_DB_PATH environment variable is required");
@@ -59,7 +59,7 @@ function runSqliteSearchRebuild(agentId: string, scope: SearchRebuildScope): voi
   const payload: SearchRebuildPayload = { agentId, scope };
   const jobId = `search.rebuild:${scope}:${agentId}:${Date.now()}`;
 
-  persistence.enqueue({
+  await persistence.enqueue({
     id: jobId,
     jobType: "search.rebuild",
     payload,
@@ -72,7 +72,7 @@ function runSqliteSearchRebuild(agentId: string, scope: SearchRebuildScope): voi
   console.log(`  agent: ${agentId}`);
   console.log(`  scope: ${scope}`);
 
-  const claimed = persistence.claim(jobId, "search-rebuild-cli", 0);
+  const claimed = await persistence.claim(jobId, "search-rebuild-cli", 0);
   if (!claimed) {
     console.error("Failed to claim job — may already be processing");
     process.exit(1);
@@ -81,11 +81,11 @@ function runSqliteSearchRebuild(agentId: string, scope: SearchRebuildScope): voi
   try {
     console.log("Executing search rebuild...");
     executeSearchRebuild(db, payload);
-    persistence.complete(jobId);
+    await persistence.complete(jobId);
     console.log("Search rebuild completed successfully.");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    persistence.fail(jobId, msg, false);
+    await persistence.fail(jobId, msg, false);
     console.error("Search rebuild failed:", msg);
     process.exitCode = 1;
   }

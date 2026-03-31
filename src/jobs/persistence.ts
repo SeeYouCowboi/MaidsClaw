@@ -22,13 +22,14 @@ export interface JobEntry {
 }
 
 export interface JobPersistence {
-  enqueue(entry: Omit<JobEntry, "attemptCount" | "createdAt" | "updatedAt">): void;
-  claim(jobId: string, claimedBy: string, leaseDurationMs: number): boolean;
-  complete(jobId: string): void;
-  fail(jobId: string, errorMessage: string, retryable: boolean): void;
-  retry(jobId: string): boolean;
-  listPending(limit?: number): JobEntry[];
-  listRetryable(beforeTime: number, limit?: number): JobEntry[];
+  enqueue(entry: Omit<JobEntry, "attemptCount" | "createdAt" | "updatedAt">): Promise<void>;
+  claim(jobId: string, claimedBy: string, leaseDurationMs: number): Promise<boolean>;
+  complete(jobId: string): Promise<void>;
+  fail(jobId: string, errorMessage: string, retryable: boolean): Promise<void>;
+  retry(jobId: string): Promise<boolean>;
+  listPending(limit?: number): Promise<JobEntry[]>;
+  listRetryable(beforeTime: number, limit?: number): Promise<JobEntry[]>;
+  countByStatus(status: PersistentJobStatus): Promise<number>;
 }
 
 type JobRow = {
@@ -51,7 +52,7 @@ export class SqliteJobPersistence implements JobPersistence {
     private readonly clock: () => number = () => Date.now(),
   ) {}
 
-  enqueue(entry: Omit<JobEntry, "attemptCount" | "createdAt" | "updatedAt">): void {
+  enqueue(entry: Omit<JobEntry, "attemptCount" | "createdAt" | "updatedAt">): Promise<void> {
     const now = this.clock();
     this.db.run(
       `INSERT OR IGNORE INTO _memory_maintenance_jobs
@@ -70,9 +71,10 @@ export class SqliteJobPersistence implements JobPersistence {
         entry.nextAttemptAt ?? null,
       ],
     );
+    return Promise.resolve();
   }
 
-  claim(jobId: string, claimedBy: string, leaseDurationMs: number): boolean {
+  claim(jobId: string, claimedBy: string, leaseDurationMs: number): Promise<boolean> {
     void claimedBy;
     void leaseDurationMs;
 
@@ -83,10 +85,10 @@ export class SqliteJobPersistence implements JobPersistence {
        WHERE idempotency_key = ? AND status = 'pending'`,
       [now, now, jobId],
     );
-    return result.changes > 0;
+    return Promise.resolve(result.changes > 0);
   }
 
-  complete(jobId: string): void {
+  complete(jobId: string): Promise<void> {
     const now = this.clock();
     this.db.run(
       `UPDATE _memory_maintenance_jobs
@@ -94,15 +96,16 @@ export class SqliteJobPersistence implements JobPersistence {
        WHERE idempotency_key = ?`,
       [now, jobId],
     );
+    return Promise.resolve();
   }
 
-  fail(jobId: string, errorMessage: string, retryable: boolean): void {
+  fail(jobId: string, errorMessage: string, retryable: boolean): Promise<void> {
     const row = this.db.get<{ attempt_count: number | null; max_attempts: number | null }>(
       `SELECT attempt_count, max_attempts FROM _memory_maintenance_jobs WHERE idempotency_key = ?`,
       [jobId],
     );
     if (!row) {
-      return;
+      return Promise.resolve();
     }
 
     const nextAttemptCount = (row.attempt_count ?? 0) + 1;
@@ -121,9 +124,10 @@ export class SqliteJobPersistence implements JobPersistence {
        WHERE idempotency_key = ?`,
       [canRetry ? "retryable" : "exhausted", nextAttemptCount, errorMessage, canRetry ? now : null, now, jobId],
     );
+    return Promise.resolve();
   }
 
-  retry(jobId: string): boolean {
+  retry(jobId: string): Promise<boolean> {
     const now = this.clock();
     const result = this.db.run(
       `UPDATE _memory_maintenance_jobs
@@ -132,13 +136,13 @@ export class SqliteJobPersistence implements JobPersistence {
            error_message = NULL,
            updated_at = ?
        WHERE idempotency_key = ?
-         AND status IN ('retryable', 'exhausted')`,
+          AND status IN ('retryable', 'exhausted')`,
       [now, jobId],
     );
-    return result.changes > 0;
+    return Promise.resolve(result.changes > 0);
   }
 
-  listPending(limit = 100): JobEntry[] {
+  listPending(limit = 100): Promise<JobEntry[]> {
     const rows = this.db.query<JobRow>(
       `SELECT job_type, status, idempotency_key, payload, attempt_count, max_attempts, error_message, next_attempt_at, claimed_at, created_at, updated_at
        FROM _memory_maintenance_jobs
@@ -147,10 +151,10 @@ export class SqliteJobPersistence implements JobPersistence {
        LIMIT ?`,
       [normalizeLimit(limit)],
     );
-    return rows.map((row) => toEntry(row));
+    return Promise.resolve(rows.map((row) => toEntry(row)));
   }
 
-  listRetryable(beforeTime: number, limit = 100): JobEntry[] {
+  listRetryable(beforeTime: number, limit = 100): Promise<JobEntry[]> {
     const rows = this.db.query<JobRow>(
       `SELECT job_type, status, idempotency_key, payload, attempt_count, max_attempts, error_message, next_attempt_at, claimed_at, created_at, updated_at
        FROM _memory_maintenance_jobs
@@ -160,7 +164,15 @@ export class SqliteJobPersistence implements JobPersistence {
        LIMIT ?`,
       [beforeTime, normalizeLimit(limit)],
     );
-    return rows.map((row) => toEntry(row));
+    return Promise.resolve(rows.map((row) => toEntry(row)));
+  }
+
+  countByStatus(status: PersistentJobStatus): Promise<number> {
+    const row = this.db.get<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM _memory_maintenance_jobs WHERE status = ?`,
+      [status],
+    );
+    return Promise.resolve(row?.count ?? 0);
   }
 }
 

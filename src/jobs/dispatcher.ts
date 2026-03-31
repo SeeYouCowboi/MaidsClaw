@@ -19,7 +19,7 @@ export class JobDispatcher {
   private readonly workers = new Map<JobKind, WorkerFn>();
   private readonly jobsByKey = new Map<JobKey, Job>();
   private readonly inFlightByKey = new Set<string>();
-  private started = false;
+  private startPromise?: Promise<void>;
 
   constructor(
     private readonly deps: {
@@ -30,19 +30,28 @@ export class JobDispatcher {
     },
   ) {}
 
-  start(): void {
-    if (this.started) {
-      return;
+  start(): Promise<void> {
+    if (this.startPromise) {
+      return this.startPromise;
     }
 
-    this.started = true;
+    if (!this.deps.persistence) {
+      this.startPromise = Promise.resolve();
+      return this.startPromise;
+    }
+
+    this.startPromise = this.loadResumableJobs();
+    return this.startPromise;
+  }
+
+  private async loadResumableJobs(): Promise<void> {
     if (!this.deps.persistence) {
       return;
     }
 
     const recovered = [
-      ...this.deps.persistence.listPending(),
-      ...this.deps.persistence.listRetryable(Date.now()),
+      ...(await this.deps.persistence.listPending()),
+      ...(await this.deps.persistence.listRetryable(Date.now())),
     ];
 
     for (const entry of recovered) {
@@ -60,7 +69,7 @@ export class JobDispatcher {
   }
 
   submit(jobSpec: SubmitSpec): Job | null {
-    this.start();
+    void this.start();
 
     const existing = this.deps.queue.getByKey(jobSpec.jobKey);
     if (existing) {
@@ -93,7 +102,7 @@ export class JobDispatcher {
   }
 
   async processNext(): Promise<boolean> {
-    this.start();
+    await this.start();
 
     const next = this.selectNextRunnableJob();
     if (!next) {

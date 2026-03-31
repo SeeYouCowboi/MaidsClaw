@@ -8,13 +8,13 @@ import { openDatabase } from "../../src/storage/database.js";
 import { cleanupDb, createTempDb } from "../helpers/memory-test-utils.js";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
+(describe as any).skipIf(skipPgTests)("SqliteJobPersistence", () => {
   it("recovers pending jobs after restart and allows claim + complete", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
       const firstBoot = new SqliteJobPersistence(db);
-      firstBoot.enqueue({
+      await firstBoot.enqueue({
         id: "durable-crash-job",
         jobType: "memory.organize",
         payload: { batchId: "b-1" },
@@ -29,7 +29,7 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
       runMemoryMigrations(restartedDb);
 
       const restarted = new SqliteJobPersistence(restartedDb);
-      const pending = restarted.listPending();
+      const pending = await restarted.listPending();
       expect(pending).toHaveLength(1);
       expect(pending[0]?.id).toBe("durable-crash-job");
 
@@ -41,7 +41,7 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
         workerCalls += 1;
       });
 
-      dispatcher.start();
+      await dispatcher.start();
       const didProcess = await dispatcher.processNext();
       expect(didProcess).toBe(true);
       expect(workerCalls).toBe(1);
@@ -58,7 +58,7 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
     }
   });
 
-  it("keeps enqueue idempotent by idempotency key", () => {
+  it("keeps enqueue idempotent by idempotency key", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
@@ -72,8 +72,8 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
         nextAttemptAt: Date.now(),
       };
 
-      persistence.enqueue(entry);
-      persistence.enqueue(entry);
+      await persistence.enqueue(entry);
+      await persistence.enqueue(entry);
 
       const count = db.get<{ count: number }>(
         "SELECT COUNT(*) as count FROM _memory_maintenance_jobs WHERE job_type = ? AND idempotency_key = ?",
@@ -117,14 +117,14 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
     }
   });
 
-  it("retries a retryable job back to pending with explicit retry()", () => {
+  it("retries a retryable job back to pending with explicit retry()", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
       const persistence = new SqliteJobPersistence(db);
       const jobId = "retry-contract-job";
 
-      persistence.enqueue({
+      await persistence.enqueue({
         id: jobId,
         jobType: "memory.organize",
         payload: { batchId: "b-retry" },
@@ -133,8 +133,8 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
         nextAttemptAt: Date.now(),
       });
 
-      expect(persistence.claim(jobId, "worker-1", 30_000)).toBe(true);
-      persistence.fail(jobId, "transient failure", true);
+      expect(await persistence.claim(jobId, "worker-1", 30_000)).toBe(true);
+      await persistence.fail(jobId, "transient failure", true);
 
       const retryableRow = db.get<{ status: string }>(
         "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
@@ -142,7 +142,7 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
       );
       expect(retryableRow?.status).toBe("retryable");
 
-      expect(persistence.retry(jobId)).toBe(true);
+      expect(await persistence.retry(jobId)).toBe(true);
 
       const pendingRow = db.get<{ status: string }>(
         "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
@@ -154,14 +154,14 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
     }
   });
 
-  it("returns false when retry() is called on reconciled job", () => {
+  it("returns false when retry() is called on reconciled job", async () => {
     const { db, dbPath } = createTempDb();
 
     try {
       const persistence = new SqliteJobPersistence(db);
       const jobId = "retry-contract-reconciled";
 
-      persistence.enqueue({
+      await persistence.enqueue({
         id: jobId,
         jobType: "memory.organize",
         payload: { batchId: "b-reconciled" },
@@ -169,9 +169,9 @@ describe.skipIf(skipPgTests)("SqliteJobPersistence", () => {
         maxAttempts: 4,
         nextAttemptAt: Date.now(),
       });
-      persistence.complete(jobId);
+      await persistence.complete(jobId);
 
-      expect(persistence.retry(jobId)).toBe(false);
+      expect(await persistence.retry(jobId)).toBe(false);
 
       const row = db.get<{ status: string }>(
         "SELECT status FROM _memory_maintenance_jobs WHERE idempotency_key = ?",
