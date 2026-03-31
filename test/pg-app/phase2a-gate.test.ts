@@ -1,10 +1,10 @@
-// Phase 2A Foundation Gate — verifies all contracts compile and are importable
+// Foundation Gate — verifies all contracts compile and are importable
 // Does NOT require a running PG instance
 
 import { describe, it, expect } from "bun:test";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(skipPgTests)("Phase 2A Foundation Gate", () => {
+describe.skipIf(skipPgTests)("Foundation Gate", () => {
   it("exports all domain repo contracts", async () => {
     const contracts = await import(
       "../../src/storage/domain-repos/contracts/index.js"

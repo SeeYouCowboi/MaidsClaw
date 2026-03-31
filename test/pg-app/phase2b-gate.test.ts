@@ -1,10 +1,10 @@
-// Phase 2B Domain Repositories Gate — verifies all PG repo implementations compile and are importable
+// Domain Repositories Gate — verifies all PG repo implementations compile and are importable
 // Does NOT require a running PG instance for module import checks
 
 import { describe, it, expect } from "bun:test";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe.skipIf(skipPgTests)("Phase 2B Domain Repositories Gate", () => {
+describe.skipIf(skipPgTests)("Domain Repositories Gate", () => {
   it("exports PgSettlementLedgerRepo", async () => {
     const mod = await import(
       "../../src/storage/domain-repos/pg/settlement-ledger-repo.js"
@@ -118,14 +118,14 @@ describe.skipIf(skipPgTests)("Phase 2B Domain Repositories Gate", () => {
   });
 });
 
-describe.skipIf(skipPgTests)("Phase 2B Settlement UoW Gate", () => {
+describe.skipIf(skipPgTests)("Settlement UoW Gate", () => {
   it("exports PgSettlementUnitOfWork", async () => {
     const mod = await import("../../src/storage/pg-settlement-uow.js");
     expect(typeof mod.PgSettlementUnitOfWork).toBe("function");
   });
 });
 
-describe.skipIf(skipPgTests)("Phase 2B Migration Tools Gate", () => {
+describe.skipIf(skipPgTests)("Migration Tools Gate", () => {
   it("exports sqlite-exporter utilities", async () => {
     const mod = await import("../../src/migration/sqlite-exporter.js");
     expect(typeof mod).toBe("object");
