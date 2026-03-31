@@ -110,7 +110,7 @@ describe("V2 validation: contested cognition", () => {
 		try {
 			const storage = new GraphStorageService(db);
 			const taskAgent = new MemoryTaskAgent(
-				db.raw,
+				db,
 				storage,
 				{} as any,
 				{} as any,

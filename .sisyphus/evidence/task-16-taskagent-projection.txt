@@ -1,0 +1,44 @@
+Task 16: Decouple task-agent.ts + projection-manager.ts from bun:sqlite [GAP-C3]
+============================================================================
+
+Date: 2026-04-01
+Status: COMPLETE
+
+Goal
+----
+Remove `import type { Database } from "bun:sqlite"` from:
+  1. src/memory/task-agent.ts
+  2. src/memory/projection/projection-manager.ts
+
+Changes Made
+------------
+
+### projection-manager.ts
+- Removed `import type { Database } from "bun:sqlite"`
+- Added `import type { Db } from "../../storage/database.js"`
+- Changed constructor param: `private readonly db?: Database` → `private readonly rawDb?: Db["raw"]`
+- Updated usage at materialization call: `db: this.db` → `db: this.rawDb`
+
+### task-agent.ts
+- Removed `import type { Database } from "bun:sqlite"`
+- Removed `private readonly rawDb: Database` field
+- Added `RawDatabaseLike` structural type (duck-type for bun:sqlite Database)
+- Changed constructor signature: `dbInput: Db | Database` → `dbInput: Db | RawDatabaseLike`
+- Constructor: `ExplicitSettlementProcessor` receives `this.db` (Db, compatible via DbLike)
+- Constructor: `SqliteSettlementLedger(this.rawDb)` → `SqliteSettlementLedger(this.db.raw)`
+- Constructor: `GraphOrganizer(this.rawDb, ...)` → `GraphOrganizer(this.db.raw, ...)`
+- Added `normalizeDbInput()` and `isDb()` functions using `RawDatabaseLike` instead of `Database`
+
+### test/memory/validation-contested-cognition.test.ts
+- Changed `db.raw` → `db` in `new MemoryTaskAgent(...)` call
+
+### runtime.ts
+- No changes needed (already passes Db / Db["raw"])
+
+Verification
+------------
+1. ast_grep_search for `import type { Database } from "bun:sqlite"` in both files: NO MATCHES ✅
+2. LSP diagnostics on both files: 0 errors ✅
+3. bun run build (tsc --noEmit): PASSES ✅
+4. bun test: 1925 pass, 17 fail (all pre-existing: 4 private-thoughts-behavioral, 12 shared-blocks, 1 publication-recovery-sweeper) ✅
+5. Memory-specific tests (integration, task-agent, task-agent-strict, validation-contested-cognition): 17/17 PASS ✅

@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
@@ -317,9 +316,23 @@ export class MemoryIngestionPolicy {
   }
 }
 
+/**
+ * Structural type matching bun:sqlite Database without importing it directly.
+ * Used to support backward-compatible constructor that accepts raw Database.
+ */
+type RawDatabaseLike = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+  transaction<T>(fn: () => T): () => T;
+};
+
 export class MemoryTaskAgent {
   private readonly db: Db;
-  private readonly rawDb: Database;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
@@ -330,7 +343,7 @@ export class MemoryTaskAgent {
   private organizeTail: Promise<unknown> = Promise.resolve();
 
   constructor(
-    dbInput: Db | Database,
+    dbInput: Db | RawDatabaseLike,
     private readonly storage: GraphStorageService,
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
@@ -341,7 +354,6 @@ export class MemoryTaskAgent {
     private readonly strictDurableMode = false,
   ) {
     this.db = normalizeDbInput(dbInput);
-    this.rawDb = this.db.raw;
     this.modelProvider =
       modelProvider ??
       ({
@@ -355,18 +367,18 @@ export class MemoryTaskAgent {
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
-      this.rawDb,
+      this.db,
       this.storage,
       this.modelProvider,
       (agentId) => this.loadExistingContext(agentId),
       (request, toolCalls, created) => {
         this.applyCallOneToolCalls(request, toolCalls, created);
       },
-      settlementLedger ?? new SqliteSettlementLedger(this.rawDb),
+      settlementLedger ?? new SqliteSettlementLedger(this.db.raw),
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
-      this.rawDb,
+      this.db.raw,
       this.storage,
       this.coreMemory,
       this.embeddings,
@@ -966,13 +978,13 @@ export class MemoryTaskAgent {
   }
 }
 
-function normalizeDbInput(db: Db | Database): Db {
+function normalizeDbInput(db: Db | RawDatabaseLike): Db {
   if (isDb(db)) {
     return db;
   }
 
   return {
-    raw: db,
+    raw: db as Db["raw"],
     exec(sql: string): void {
       db.exec(sql);
     },
@@ -1015,6 +1027,6 @@ function normalizeDbInput(db: Db | Database): Db {
   };
 }
 
-function isDb(db: Db | Database): db is Db {
+function isDb(db: Db | RawDatabaseLike): db is Db {
   return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }
