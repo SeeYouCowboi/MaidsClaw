@@ -373,6 +373,11 @@ export class MemoryTaskAgent {
       this.modelProvider,
     );
     this.jobPersistence = jobPersistence;
+    if (this.strictDurableMode && !this.jobPersistence) {
+      console.warn(
+        "[MemoryTaskAgent] strictDurableMode=true but no jobPersistence provided; durable enqueue will always throw",
+      );
+    }
   }
 
   runMigrate(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
@@ -500,6 +505,10 @@ export class MemoryTaskAgent {
     return this.graphOrganizer.run(job);
   }
 
+  /**
+   * @deprecated Use durable job queue via JobPersistence instead.
+   * Preserved for backward compat when strictDurableMode is false.
+   */
   private launchBackgroundOrganize(organizeJob: GraphOrganizerJob): void {
     void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
       console.error("[MemoryTaskAgent] background organize failed", {
