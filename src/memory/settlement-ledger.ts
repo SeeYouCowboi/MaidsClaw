@@ -1,4 +1,10 @@
-import type { Database } from "bun:sqlite";
+type DbLike = {
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+};
 
 export type SettlementLedgerStatus =
   | "pending"
@@ -34,7 +40,7 @@ type LedgerIdentityRow = {
 
 export class SqliteSettlementLedger implements SettlementLedger {
   constructor(
-    private readonly db: Database,
+    private readonly db: DbLike,
     private readonly clock: () => number = () => Date.now(),
   ) {}
 

@@ -1,5 +1,13 @@
-import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
+
+type DbLike = {
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+};
+
 import { MaidsClawError } from "../core/errors.js";
 import { enforceArtifactContracts } from "../core/tools/artifact-contract-policy.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
@@ -56,7 +64,7 @@ export class ExplicitSettlementProcessor {
   private readonly relationBuilder: RelationBuilder;
 
   constructor(
-    private readonly db: Database,
+    private readonly db: DbLike,
     private readonly storage: GraphStorageService,
     private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
     private readonly loadExistingContext: ExistingContextLoader,
