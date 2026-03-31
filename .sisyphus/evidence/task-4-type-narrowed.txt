@@ -1,0 +1,17 @@
+=== PublicRuntimeBootstrapResult type definition ===
+79: * {@link PublicRuntimeBootstrapResult} instead when exposing the runtime
+112:export type PublicRuntimeBootstrapResult = Omit<
+
+=== Verify db/rawDb/sessionService are excluded (Omit) ===
+ * {@link PublicRuntimeBootstrapResult} instead when exposing the runtime
+ * to consumers outside the bootstrap layer.
+ */
+export type RuntimeBootstrapResult = {
+--
+export type PublicRuntimeBootstrapResult = Omit<
+	RuntimeBootstrapResult,
+	"db" | "rawDb" | "sessionService"
+>;
+
+=== Build passes ===
+bun run build: zero errors (tsc -p tsconfig.build.json --noEmit)

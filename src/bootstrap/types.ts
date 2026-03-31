@@ -73,6 +73,12 @@ export type MemoryPipelineStatus =
 	| "embedding_model_unavailable"
 	| "organizer_embedding_model_unavailable";
 
+/**
+ * Full runtime bootstrap result used by the internal composition root.
+ * @internal Not intended for public consumption — use
+ * {@link PublicRuntimeBootstrapResult} instead when exposing the runtime
+ * to consumers outside the bootstrap layer.
+ */
 export type RuntimeBootstrapResult = {
 	db: Db;
 	rawDb: Database;
@@ -102,6 +108,11 @@ export type RuntimeBootstrapResult = {
 	sharedBlockRepo: SharedBlockRepo;
 	shutdown: () => void;
 };
+
+export type PublicRuntimeBootstrapResult = Omit<
+	RuntimeBootstrapResult,
+	"db" | "rawDb" | "sessionService"
+>;
 
 export type AppBootstrapOptions = {
 port?: number;
