@@ -52,11 +52,12 @@ describe.skipIf(skipPgTests)("pg-derived-schema bootstrap", () => {
       await bootstrapDerivedSchema(pool, { embeddingDim: 1536 });
 
       const embedding = Array.from({ length: 1536 }, (_, i) => (i % 7) / 7);
+      const embeddingLiteral = `[${embedding.join(",")}]`;
       const now = Date.now();
 
       const [row] = await pool`
         INSERT INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at)
-        VALUES ('event:1', 'event', 'primary', 'text-embedding-3-large', ${embedding}::vector, ${now})
+        VALUES ('event:1', 'event', 'primary', 'text-embedding-3-large', ${embeddingLiteral}::vector, ${now})
         RETURNING id
       `;
       expect(Number(row.id)).toBeGreaterThan(0);

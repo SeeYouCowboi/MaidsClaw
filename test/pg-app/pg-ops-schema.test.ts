@@ -276,7 +276,7 @@ describe.skipIf(skipPgTests)("pg-ops-schema bootstrap", () => {
           SELECT id FROM interaction_records ORDER BY id
         `;
         expect(rows.length).toBe(2);
-        expect(rows[1].id).toBeGreaterThan(rows[0].id);
+        expect(Number(rows[1].id)).toBeGreaterThan(Number(rows[0].id));
       });
     });
 
@@ -298,7 +298,7 @@ describe.skipIf(skipPgTests)("pg-ops-schema bootstrap", () => {
           SELECT id FROM pending_settlement_recovery ORDER BY id
         `;
         expect(rows.length).toBe(2);
-        expect(rows[1].id).toBeGreaterThan(rows[0].id);
+        expect(Number(rows[1].id)).toBeGreaterThan(Number(rows[0].id));
       });
     });
   });
