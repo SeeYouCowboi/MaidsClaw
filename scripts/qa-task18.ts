@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
-import { openDatabase } from "../src/storage/database.js";
-import { runMemoryMigrations } from "../src/memory/schema.js";
+import { bootstrapRuntime } from "../src/bootstrap/runtime.js";
 import {
   runRetention,
   runIntegrityCheck,
@@ -19,11 +18,14 @@ const dbPath = join(dir, "qa.db");
 console.log("=== T18 QA: Retention Safety + Ops Tooling ===\n");
 console.log(`Temp DB: ${dbPath}\n`);
 
-const db = openDatabase({ path: dbPath });
+const runtime = bootstrapRuntime({ databasePath: dbPath });
+const db = runtime.db;
+if (!db) {
+  console.error("Failed to open SQLite database.");
+  process.exit(1);
+}
 
 try {
-  runMemoryMigrations(db);
-
   // Step 1: Record private_cognition_events baseline
   const beforeCognition = db.get<{ count: number }>(
     "SELECT COUNT(*) as count FROM private_cognition_events",
@@ -98,6 +100,6 @@ try {
 
   console.log("\n=== QA COMPLETE ===");
 } finally {
-  db.close();
+  runtime.shutdown();
   rmSync(dir, { recursive: true, force: true });
 }

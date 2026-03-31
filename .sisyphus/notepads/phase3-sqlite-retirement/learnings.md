@@ -428,3 +428,22 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - For shared-block attachment tests, `SharedBlockAttachService` now requires `SharedBlockRepo` contract implementation (`SqliteSharedBlockRepoAdapter`), not raw `DbLike`; tests must also `await` async attach/detach/list methods.
 - Durable organizer queue tests should not assume fixed processing order of chunk jobs; assert retryable transitions by processing until observed rather than expecting first processed job to be the fail-target.
 - Promotion/materialization entity resolution blocks names with private-existence markers (`secret`, `private`, etc.); test fixtures expecting promotion should avoid those markers unless explicitly validating block behavior.
+
+## [2026-04-01] Task 19: Remaining SQLite-coupled scripts migrated to bootstrapRuntime()
+
+### Scripts migrated
+- `scripts/memory-backfill.ts`: Replaced `openDatabase()` + `runMemoryMigrations()` with `bootstrapRuntime({ databasePath })`. Added `--backend pg` + `--pg-url` support via `PgBackendFactory`.
+- `scripts/graph-registry-coverage.ts`: Same pattern. Extracted `printReport()` helper to share between SQLite and PG branches.
+- `scripts/memory-verify.ts`: Replaced the remaining `openDatabase()` call (line 1483) with `bootstrapRuntime()`. PG branch was already working via `PgBackendFactory`. Removed `runMemoryMigrations` import (handled by bootstrap).
+- `scripts/qa-task18.ts`: Replaced `openDatabase({ path: tempPath })` with `bootstrapRuntime({ databasePath: tempPath })`. QA script is SQLite-only (creates temp DB), no PG path needed.
+
+### Pattern: bootstrapRuntime() vs createAppHost() for diagnostic scripts
+- `createAppHost()` returns `AppHost` which exposes high-level facades (`maintenance`, `admin`, `user`) but NOT the raw `db` handle.
+- Scripts that need raw SQL queries (count queries, direct inserts) must use `bootstrapRuntime()` directly to obtain `runtime.db`.
+- `bootstrapRuntime()` handles `openDatabase()` + all migrations internally, so scripts don't need to import either.
+- For PG paths in diagnostic scripts, use `PgBackendFactory` directly (same pattern as `memory-verify.ts` PG branch).
+- `runtime.shutdown()` replaces `db.close()` for proper lifecycle cleanup.
+
+### Key insight: no openDatabase imports remain in migrated scripts
+- `grep -r "openDatabase" scripts/ --include="*.ts"` returns only `parity-verify.ts` (out-of-scope parity script).
+- All 4 migrated scripts use `bootstrapRuntime()` for SQLite path and `PgBackendFactory` for PG path where applicable.

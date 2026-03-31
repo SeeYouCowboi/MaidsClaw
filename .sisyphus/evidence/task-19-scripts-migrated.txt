@@ -1,0 +1,15 @@
+=== T19: openDatabase grep check across scripts/ ===
+
+Command: grep -r 'openDatabase' scripts/ --include='*.ts'
+
+scripts/parity-verify.ts:import { closeDatabaseGracefully, openDatabase } from "../src/storage/database.js";
+scripts/parity-verify.ts:let sqliteDb: ReturnType<typeof openDatabase> | null = null;
+scripts/parity-verify.ts:  sqliteDb = openDatabase({ path: sqlitePath });
+
+=== Only parity-verify.ts retains openDatabase (expected, out of scope) ===
+
+=== Migrated scripts verified clean ===
+  memory-backfill.ts: uses bootstrapRuntime()
+  graph-registry-coverage.ts: uses bootstrapRuntime() + PgBackendFactory
+  memory-verify.ts: uses bootstrapRuntime() (SQLite) + PgBackendFactory (PG)
+  qa-task18.ts: uses bootstrapRuntime()

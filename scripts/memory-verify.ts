@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { openDatabase, type Db } from "../src/storage/database.js";
+import type { Db } from "../src/storage/database.js";
+import { bootstrapRuntime } from "../src/bootstrap/runtime.js";
 import {
   buildAreaSearchAuthorityRows,
   buildCognitionSearchAuthorityRows,
@@ -8,7 +9,6 @@ import {
   listCognitionSearchAuthorityAgentIds,
   listPrivateSearchAuthorityAgentIds,
 } from "../src/memory/search-authority.js";
-import { runMemoryMigrations } from "../src/memory/schema.js";
 import type postgres from "postgres";
 import type { BackendType } from "../src/storage/backend-types.js";
 
@@ -1480,8 +1480,12 @@ if (isMain) {
       failWithUsage("Missing database path.");
     }
 
-    const db = openDatabase({ path: dbPath });
-    runMemoryMigrations(db);
+    const runtime = bootstrapRuntime({ databasePath: dbPath });
+    const db = runtime.db;
+    if (!db) {
+      console.error("Failed to open SQLite database.");
+      process.exit(1);
+    }
 
     try {
       const results = runVerify(db, args.surfaces);
@@ -1491,7 +1495,7 @@ if (isMain) {
       const allPass = results.every((r) => r.pass);
       process.exit(allPass ? 0 : 1);
     } finally {
-      db.close();
+      runtime.shutdown();
     }
   }
 }
