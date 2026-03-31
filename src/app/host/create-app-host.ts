@@ -8,6 +8,8 @@ import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
 import { JobDedupEngine } from "../../jobs/dedup.js";
 import { JobDispatcher } from "../../jobs/dispatcher.js";
+import type { DurableJobStore } from "../../jobs/durable-store.js";
+import { LeaseReclaimSweeper } from "../../jobs/lease-reclaim-sweeper.js";
 import { PgJobRunner } from "../../jobs/pg-runner.js";
 import { JobQueue } from "../../jobs/queue.js";
 import { JobScheduler } from "../../jobs/scheduler.js";
@@ -335,6 +337,16 @@ export async function createAppHost(
 		options.role === "server" && options.enableDurableOrchestration
 			? createJobConsumer(runtime)
 			: undefined;
+	const shouldRunLeaseReclaimSweeper =
+		options.role === "worker"
+		|| options.role === "maintenance"
+		|| (options.role === "server" && options.enableDurableOrchestration === true);
+	const pgStore =
+		(runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+	const leaseReclaimSweeper =
+		runtime.backendType === "pg" && shouldRunLeaseReclaimSweeper && pgStore
+			? new LeaseReclaimSweeper(pgStore)
+			: undefined;
 
 	let started = false;
 	let stopped = false;
@@ -345,9 +357,13 @@ export async function createAppHost(
 			started = true;
 			if (serverDurableConsumer) {
 				await serverDurableConsumer.start();
+				leaseReclaimSweeper?.start();
 			}
 		} else if (options.role === "worker") {
 			await workerConsumer?.start();
+			leaseReclaimSweeper?.start();
+		} else if (options.role === "maintenance") {
+			leaseReclaimSweeper?.start();
 		}
 	};
 
@@ -361,10 +377,14 @@ export async function createAppHost(
 			if (options.role === "server") {
 				server?.stop();
 				if (serverDurableConsumer) {
+					leaseReclaimSweeper?.stop();
 					await serverDurableConsumer.stop();
 				}
 			} else if (options.role === "worker") {
+				leaseReclaimSweeper?.stop();
 				await workerConsumer?.stop();
+			} else if (options.role === "maintenance") {
+				leaseReclaimSweeper?.stop();
 			}
 		} finally {
 			runtime.shutdown();
