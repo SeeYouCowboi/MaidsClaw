@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { Db } from "../storage/database.js";
@@ -1107,11 +1106,9 @@ type GraphStorageDelegateRegistry = {
 };
 
 export class GraphStorageService {
-  readonly db: Db;
   private readonly delegates: GraphStorageDelegateRegistry;
 
-  constructor(db: Db | Database, jobPersistence?: JobPersistence, repoRegistry?: GraphStorageDomainRepoRegistry) {
-    this.db = normalizeDbInput(db);
+  constructor(db: Db, jobPersistence?: JobPersistence, repoRegistry?: GraphStorageDomainRepoRegistry) {
     this.delegates = repoRegistry
       ? {
           graphStoreRepo: repoRegistry.graphStoreRepo,
@@ -1120,15 +1117,22 @@ export class GraphStorageService {
           semanticEdgeRepo: repoRegistry.semanticEdgeRepo,
           nodeScoreRepo: repoRegistry.nodeScoreRepo,
         }
-      : createDefaultSqliteDelegateRegistry(this.db, jobPersistence);
+      : createDefaultSqliteDelegateRegistry(db, jobPersistence);
   }
 
   static withDomainRepos(
-    db: Db | Database,
     repoRegistry: GraphStorageDomainRepoRegistry,
     jobPersistence?: JobPersistence,
   ): GraphStorageService {
-    return new GraphStorageService(db, jobPersistence, repoRegistry);
+    // Create a stub Db that throws if accidentally used — all access goes through repos
+    const stubDb = new Proxy({} as Db, {
+      get(_target, property) {
+        throw new Error(
+          `GraphStorageService.withDomainRepos: stub Db accessed via .${String(property)} — all DB access should go through domain repos`,
+        );
+      },
+    });
+    return new GraphStorageService(stubDb, jobPersistence, repoRegistry);
   }
 
   createProjectedEvent(params: CreateProjectedEventInput): number {
@@ -1393,57 +1397,4 @@ function createDefaultSqliteDelegateRegistry(db: Db, jobPersistence?: JobPersist
     semanticEdgeRepo,
     nodeScoreRepo,
   };
-}
-
-function normalizeDbInput(db: Db | Database): Db {
-  if (isDb(db)) {
-    return db;
-  }
-
-  return {
-    raw: db,
-    exec(sql: string): void {
-      db.exec(sql);
-    },
-    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
-      const stmt = db.prepare(sql);
-      return (params ? stmt.all(...params as []) : stmt.all()) as T[];
-    },
-    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.run(...params as []) : stmt.run();
-      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-    },
-    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.get(...params as []) : stmt.get();
-      return result === null ? undefined : result as T;
-    },
-    close(): void {
-      db.close();
-    },
-    transaction<T>(fn: () => T): T {
-      return db.transaction(fn)();
-    },
-    prepare(sql: string) {
-      const stmt = db.prepare(sql);
-      return {
-        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-          const result = params.length > 0 ? stmt.run(...params as []) : stmt.run();
-          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-        },
-        all(...params: unknown[]): unknown[] {
-          return (params.length > 0 ? stmt.all(...params as []) : stmt.all()) as unknown[];
-        },
-        get(...params: unknown[]): unknown {
-          const result = params.length > 0 ? stmt.get(...params as []) : stmt.get();
-          return result === null ? undefined : result;
-        },
-      };
-    },
-  };
-}
-
-function isDb(db: Db | Database): db is Db {
-  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }
