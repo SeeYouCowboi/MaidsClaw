@@ -306,12 +306,22 @@ export async function createAppHost(
 			? new AppMaintenanceFacadeImpl(orchestrationService, runtime.jobPersistence)
 			: undefined;
 
+	const isOrchestrated =
+		options.role === "worker"
+		|| (options.role === "server" && options.enableDurableOrchestration === true);
+
 	const admin: AppHostAdmin = {
 		async getHostStatus() {
 			return {
 				backendType: runtime.backendType,
 				memoryPipelineStatus: runtime.memoryPipelineStatus,
 				migrationStatus: { succeeded: runtime.migrationStatus.succeeded },
+				orchestration: {
+					enabled: isOrchestrated,
+					role: options.role,
+					durableMode: options.enableDurableOrchestration ?? false,
+					leaseReclaimActive: isOrchestrated && runtime.backendType === "pg",
+				},
 			};
 		},
 		async getPipelineStatus() {
@@ -326,7 +336,13 @@ export async function createAppHost(
 			return runtime.agentRegistry.getAll();
 		},
 		async getCapabilities() {
-			return {};
+			return {
+				orchestration: {
+					durableJobProcessing: options.role === "worker" || options.role === "server",
+					leaseReclaim: runtime.backendType === "pg",
+					maintenanceFacade: !!maintenance,
+				},
+			};
 		},
 	};
 

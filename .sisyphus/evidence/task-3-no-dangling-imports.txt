@@ -1,0 +1,15 @@
+=== Task 3: No Dangling Imports Evidence ===
+
+Search for bootstrapApp:
+src/app/host/create-app-host.ts: *   deprecated {@link bootstrapApp} shim to avoid double-bootstrapping.
+
+Search for AppBootstrapResult:
+(none found)
+
+Search for AppBootstrapOptions:
+(none found)
+
+Search for app-bootstrap imports:
+(none found)
+
+Note: One comment reference in create-app-host.ts is expected (legacy documentation).

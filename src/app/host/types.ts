@@ -55,10 +55,19 @@ export type AppHostOptions = {
   enableDurableOrchestration?: boolean;
 };
 
+export type OrchestrationStatusDTO = {
+	enabled: boolean;
+	role: AppRole;
+	durableMode: boolean;
+	leaseReclaimActive: boolean;
+	drainStatus?: { draining: boolean; activeJobs: number; pendingJobs: number };
+};
+
 export type HostStatusDTO = {
-  backendType: "sqlite" | "pg";
-  memoryPipelineStatus: MemoryPipelineStatus;
-  migrationStatus: { succeeded: boolean };
+	backendType: "sqlite" | "pg";
+	memoryPipelineStatus: MemoryPipelineStatus;
+	migrationStatus: { succeeded: boolean };
+	orchestration?: OrchestrationStatusDTO;
 };
 
 export type PipelineStatusDTO = {
