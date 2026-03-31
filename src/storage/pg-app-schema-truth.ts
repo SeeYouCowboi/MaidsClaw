@@ -577,7 +577,11 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
     await sql.unsafe(`
       DO $$ BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_${table}_no_update'
+          SELECT 1 FROM pg_trigger t
+          JOIN pg_class c ON t.tgrelid = c.oid
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          WHERE t.tgname = 'trg_${table}_no_update'
+            AND n.nspname = current_schema()
         ) THEN
           CREATE TRIGGER trg_${table}_no_update
             BEFORE UPDATE ON ${table}
@@ -599,7 +603,11 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
     await sql.unsafe(`
       DO $$ BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_${table}_no_delete'
+          SELECT 1 FROM pg_trigger t
+          JOIN pg_class c ON t.tgrelid = c.oid
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          WHERE t.tgname = 'trg_${table}_no_delete'
+            AND n.nspname = current_schema()
         ) THEN
           CREATE TRIGGER trg_${table}_no_delete
             BEFORE DELETE ON ${table}

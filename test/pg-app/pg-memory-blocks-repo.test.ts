@@ -77,7 +77,14 @@ describe.skipIf(skipPgTests)("PgCoreMemoryBlockRepo", () => {
       await bootstrapTruthSchema(sql);
       const repo = new PgCoreMemoryBlockRepo(sql);
 
-      await expect(repo.getBlock("no-agent", "user")).rejects.toThrow("Block not found");
+      let caught = false;
+      try {
+        await repo.getBlock("no-agent", "user");
+      } catch (e: any) {
+        caught = true;
+        expect(e.message).toContain("Block not found");
+      }
+      expect(caught).toBe(true);
     });
   });
 

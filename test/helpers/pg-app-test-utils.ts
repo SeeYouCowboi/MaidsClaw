@@ -78,3 +78,45 @@ export async function teardownAppPool(sql: postgres.Sql): Promise<void> {
   }
   await sql.end();
 }
+
+/**
+ * Execute a raw SQL statement using the simple query protocol.
+ *
+ * The `postgres` (porsager) library uses the extended query protocol by default,
+ * which cannot propagate `RAISE EXCEPTION` errors from PG triggers — the promise
+ * never settles and the connection enters a broken state.
+ *
+ * By prepending `SELECT 1;` we force multi-statement mode, which uses the simple
+ * query protocol. In this mode trigger exceptions are correctly surfaced as
+ * rejected promises, and the pool connection remains healthy afterward.
+ */
+export function simpleProtocol(sql: postgres.Sql, statement: string): Promise<unknown> {
+  return sql.unsafe(`SELECT 1; ${statement}`);
+}
+
+/**
+ * Assert that a SQL statement is rejected by a PG trigger with a message matching `pattern`.
+ *
+ * Bun's `expect().rejects.toThrow()` hangs with the postgres library's simple-protocol
+ * error path, so this helper uses a manual try-catch instead.
+ */
+export async function expectTriggerReject(
+  sql: postgres.Sql,
+  statement: string,
+  pattern: string,
+): Promise<void> {
+  let caught: Error | null = null;
+  try {
+    await simpleProtocol(sql, statement);
+  } catch (e: any) {
+    caught = e;
+  }
+  if (!caught) {
+    throw new Error(`Expected statement to be rejected by trigger, but it resolved.\nSQL: ${statement}`);
+  }
+  if (!caught.message.includes(pattern)) {
+    throw new Error(
+      `Trigger error did not match.\n  Expected pattern: ${pattern}\n  Actual message:  ${caught.message}`,
+    );
+  }
+}

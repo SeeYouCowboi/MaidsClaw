@@ -5,6 +5,7 @@ import {
   createTestPgAppPool,
   withTestAppSchema,
   teardownAppPool,
+  expectTriggerReject,
 } from "../helpers/pg-app-test-utils.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
@@ -39,9 +40,11 @@ describe.skipIf(skipPgTests)("pg-truth-schema", () => {
         VALUES ('agent-1', 'sess-1', 'stl-1', 'speech', 'hello', ${now}, ${now})
       `);
 
-      await expect(
-        sql.unsafe(`UPDATE private_episode_events SET summary = 'changed' WHERE agent_id = 'agent-1'`),
-      ).rejects.toThrow("append-only: updates not allowed on private_episode_events");
+      await expectTriggerReject(
+        sql,
+        `UPDATE private_episode_events SET summary = 'changed' WHERE agent_id = 'agent-1'`,
+        "append-only: updates not allowed on private_episode_events",
+      );
     });
   });
 
@@ -56,9 +59,11 @@ describe.skipIf(skipPgTests)("pg-truth-schema", () => {
         VALUES ('agent-1', 1, 'pos', '"here"', 'public_manifestation', ${now}, 'stl-1', ${now})
       `);
 
-      await expect(
-        sql.unsafe(`DELETE FROM area_state_events WHERE agent_id = 'agent-1'`),
-      ).rejects.toThrow("append-only: deletes not allowed on area_state_events");
+      await expectTriggerReject(
+        sql,
+        `DELETE FROM area_state_events WHERE agent_id = 'agent-1'`,
+        "append-only: deletes not allowed on area_state_events",
+      );
     });
   });
 

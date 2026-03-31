@@ -5,6 +5,7 @@ import {
   createTestPgAppPool,
   withTestAppSchema,
   teardownAppPool,
+  expectTriggerReject,
 } from "../helpers/pg-app-test-utils.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { PgEpisodeRepo } from "../../src/storage/domain-repos/pg/episode-repo.js";
@@ -211,11 +212,11 @@ describe.skipIf(skipPgTests)("PgEpisodeRepo", () => {
         committedTime: 1000,
       });
 
-      await expect(
-        sql.unsafe(
-          `UPDATE private_episode_events SET summary = 'changed' WHERE agent_id = 'agent-trigger'`,
-        ),
-      ).rejects.toThrow("append-only");
+      await expectTriggerReject(
+        sql,
+        `UPDATE private_episode_events SET summary = 'changed' WHERE agent_id = 'agent-trigger'`,
+        "append-only",
+      );
     });
   });
 
@@ -469,11 +470,11 @@ describe.skipIf(skipPgTests)("PgCognitionEventRepo", () => {
         committedTime: 1000,
       });
 
-      await expect(
-        sql.unsafe(
-          `UPDATE private_cognition_events SET op = 'retract' WHERE agent_id = 'agent-trigger'`,
-        ),
-      ).rejects.toThrow("append-only");
+      await expectTriggerReject(
+        sql,
+        `UPDATE private_cognition_events SET op = 'retract' WHERE agent_id = 'agent-trigger'`,
+        "append-only",
+      );
     });
   });
 
@@ -492,11 +493,11 @@ describe.skipIf(skipPgTests)("PgCognitionEventRepo", () => {
         committedTime: 1000,
       });
 
-      await expect(
-        sql.unsafe(
-          `DELETE FROM private_cognition_events WHERE agent_id = 'agent-del'`,
-        ),
-      ).rejects.toThrow("append-only");
+      await expectTriggerReject(
+        sql,
+        `DELETE FROM private_cognition_events WHERE agent_id = 'agent-del'`,
+        "append-only",
+      );
     });
   });
 

@@ -283,8 +283,9 @@ describe.skipIf(skipPgTests)(
 				const agentId = "rp:alice";
 				let sessionId = "";
 
-				await expect(
-					uow.run(async (repos) => {
+			let rollbackCaught = false;
+			try {
+				await uow.run(async (repos) => {
 						const session = await repos.sessionRepo.createSession(agentId);
 						sessionId = session.sessionId;
 
@@ -365,8 +366,12 @@ describe.skipIf(skipPgTests)(
 						);
 
 						throw new Error("injected rollback");
-					}),
-				).rejects.toThrow("injected rollback");
+					});
+			} catch (e: any) {
+				rollbackCaught = true;
+				expect(e.message).toContain("injected rollback");
+			}
+			expect(rollbackCaught).toBe(true);
 
 				expect(sessionId.length).toBeGreaterThan(0);
 
