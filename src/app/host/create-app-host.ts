@@ -6,6 +6,11 @@ import {
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
+import { JobDedupEngine } from "../../jobs/dedup.js";
+import { JobDispatcher } from "../../jobs/dispatcher.js";
+import { PgJobRunner } from "../../jobs/pg-runner.js";
+import { JobQueue } from "../../jobs/queue.js";
+import { JobScheduler } from "../../jobs/scheduler.js";
 import { LocalHealthClient } from "../clients/local/local-health-client.js";
 import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
 import { LocalSessionClient } from "../clients/local/local-session-client.js";
@@ -20,6 +25,107 @@ import type {
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
+const WORKER_POLL_INTERVAL_MS = 25;
+const WORKER_LEASE_DURATION_MS = 30_000;
+
+type JobConsumer = {
+	start(): Promise<void>;
+	stop(): Promise<void>;
+};
+
+function createSqliteJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
+	const queue = new JobQueue(runtime.jobPersistence);
+	const dedup = new JobDedupEngine();
+	const dispatcher = new JobDispatcher({
+		queue,
+		dedup,
+		persistence: runtime.jobPersistence,
+	});
+	const scheduler = new JobScheduler({
+		dispatcher,
+		intervalMs: WORKER_POLL_INTERVAL_MS,
+	});
+	let started = false;
+
+	return {
+		async start(): Promise<void> {
+			if (started) {
+				return;
+			}
+			await dispatcher.start();
+			scheduler.start();
+			started = true;
+		},
+		async stop(): Promise<void> {
+			if (!started) {
+				return;
+			}
+			scheduler.stop();
+			started = false;
+		},
+	};
+}
+
+function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
+	const store = (runtime.pgFactory as { store?: unknown } | null)?.store;
+	if (!store) {
+		throw new Error("PG worker role requires pgFactory.store durable job store");
+	}
+
+	const runner = new PgJobRunner(
+		store as ConstructorParameters<typeof PgJobRunner>[0],
+		{
+			workerId: `worker-${process.pid}`,
+			leaseDurationMs: WORKER_LEASE_DURATION_MS,
+		},
+	);
+
+	let timer: ReturnType<typeof setInterval> | undefined;
+	let tickPromise: Promise<unknown> | undefined;
+
+	const runTick = (): void => {
+		if (tickPromise) {
+			return;
+		}
+
+		tickPromise = runner
+			.processNext()
+			.catch(() => undefined)
+			.finally(() => {
+				tickPromise = undefined;
+			});
+	};
+
+	return {
+		async start(): Promise<void> {
+			if (timer) {
+				return;
+			}
+
+			timer = setInterval(runTick, WORKER_POLL_INTERVAL_MS);
+			runTick();
+		},
+		async stop(): Promise<void> {
+			if (!timer) {
+				return;
+			}
+
+			clearInterval(timer);
+			timer = undefined;
+			if (tickPromise) {
+				await tickPromise;
+			}
+		},
+	};
+}
+
+function createJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
+	if (runtime.backendType === "sqlite") {
+		return createSqliteJobConsumer(runtime);
+	}
+
+	return createPgJobConsumer(runtime);
+}
 
 function resolveRootedPath(
 	pathValue: string | undefined,
@@ -219,6 +325,8 @@ export async function createAppHost(
 	const maintenance = shouldExposeMaintenance(options)
 		? maintenanceFacade
 		: undefined;
+	const workerConsumer =
+		options.role === "worker" ? createJobConsumer(runtime) : undefined;
 
 	let started = false;
 	let stopped = false;
@@ -227,6 +335,8 @@ export async function createAppHost(
 		if (options.role === "server") {
 			server?.start();
 			started = true;
+		} else if (options.role === "worker") {
+			await workerConsumer?.start();
 		}
 	};
 
@@ -239,6 +349,8 @@ export async function createAppHost(
 		try {
 			if (options.role === "server") {
 				server?.stop();
+			} else if (options.role === "worker") {
+				await workerConsumer?.stop();
 			}
 		} finally {
 			runtime.shutdown();
