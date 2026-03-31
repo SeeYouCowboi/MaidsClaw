@@ -4,7 +4,7 @@ import {
   type SharedBlockSection,
 } from "../../../memory/shared-blocks/shared-block-repo.js";
 import type { Db } from "../../database.js";
-import type { SharedBlockRepo } from "../contracts/shared-block-repo.js";
+import type { SharedBlockRepo, SharedBlockAttachment } from "../contracts/shared-block-repo.js";
 
 export class SqliteSharedBlockRepoAdapter implements SharedBlockRepo {
   constructor(
@@ -62,5 +62,94 @@ export class SqliteSharedBlockRepoAdapter implements SharedBlockRepo {
       [targetKind, targetId],
     );
     return Promise.resolve(rows.map((r) => r.block_id));
+  }
+
+  async isBlockAdmin(blockId: number, agentId: string): Promise<boolean> {
+    const ownerRow = this.db.get<{ x: number }>(
+      `SELECT 1 AS x FROM shared_blocks WHERE id = ? AND created_by_agent_id = ?`,
+      [blockId, agentId],
+    );
+    if (ownerRow !== undefined) return true;
+
+    const adminRow = this.db.get<{ x: number }>(
+      `SELECT 1 AS x FROM shared_block_admins WHERE block_id = ? AND agent_id = ?`,
+      [blockId, agentId],
+    );
+    return adminRow !== undefined;
+  }
+
+  async attachBlock(
+    blockId: number,
+    targetId: string,
+    attachedByAgentId: string,
+  ): Promise<SharedBlockAttachment> {
+    const now = Date.now();
+    const result = this.db.run(
+      `INSERT OR IGNORE INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at) VALUES (?, 'agent', ?, ?, ?)`,
+      [blockId, targetId, attachedByAgentId, now],
+    );
+
+    const id = Number(result.lastInsertRowid);
+    if (id === 0) {
+      const existing = this.db.get<{
+        id: number;
+        block_id: number;
+        target_kind: string;
+        target_id: string;
+        attached_by_agent_id: string;
+        attached_at: number;
+      }>(
+        `SELECT id, block_id, target_kind, target_id, attached_by_agent_id, attached_at FROM shared_block_attachments WHERE block_id = ? AND target_kind = 'agent' AND target_id = ?`,
+        [blockId, targetId],
+      );
+      if (!existing) throw new Error(`Attachment for block ${blockId} and target ${targetId} not found after INSERT OR IGNORE`);
+      return {
+        id: existing.id,
+        blockId: existing.block_id,
+        targetKind: "agent",
+        targetId: existing.target_id,
+        attachedByAgentId: existing.attached_by_agent_id,
+        attachedAt: existing.attached_at,
+      };
+    }
+
+    return {
+      id,
+      blockId,
+      targetKind: "agent",
+      targetId,
+      attachedByAgentId,
+      attachedAt: now,
+    };
+  }
+
+  async detachBlock(blockId: number, targetId: string): Promise<boolean> {
+    const result = this.db.run(
+      `DELETE FROM shared_block_attachments WHERE block_id = ? AND target_kind = 'agent' AND target_id = ?`,
+      [blockId, targetId],
+    );
+    return result.changes > 0;
+  }
+
+  async getAttachments(targetKind: "agent", targetId: string): Promise<SharedBlockAttachment[]> {
+    const rows = this.db.query<{
+      id: number;
+      block_id: number;
+      target_kind: string;
+      target_id: string;
+      attached_by_agent_id: string;
+      attached_at: number;
+    }>(
+      `SELECT id, block_id, target_kind, target_id, attached_by_agent_id, attached_at FROM shared_block_attachments WHERE target_kind = ? AND target_id = ?`,
+      [targetKind, targetId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      blockId: row.block_id,
+      targetKind: "agent" as const,
+      targetId: row.target_id,
+      attachedByAgentId: row.attached_by_agent_id,
+      attachedAt: row.attached_at,
+    }));
   }
 }

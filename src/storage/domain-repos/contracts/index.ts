@@ -59,4 +59,4 @@ export type { SearchProjectionRepo, SearchProjectionScope } from "./search-proje
 export type { SemanticEdgeRepo } from "./semantic-edge-repo.js";
 export type { SessionRepo } from "./session-repo.js";
 export type { SettlementLedgerRecord, SettlementLedgerRepo } from "./settlement-ledger-repo.js";
-export type { SharedBlockRepo } from "./shared-block-repo.js";
+export type { SharedBlockRepo, SharedBlockAttachment } from "./shared-block-repo.js";

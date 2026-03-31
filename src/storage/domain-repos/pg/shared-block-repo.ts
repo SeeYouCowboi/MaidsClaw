@@ -1,6 +1,7 @@
 import type postgres from "postgres";
 import type {
   SharedBlockRepo,
+  SharedBlockAttachment,
 } from "../contracts/shared-block-repo.js";
 import type {
   SharedBlock,
@@ -209,5 +210,64 @@ export class PgSharedBlockRepo implements SharedBlockRepo {
       WHERE target_kind = ${targetKind} AND target_id = ${targetId}
     `;
     return rows.map((r) => Number(r.block_id));
+  }
+
+  async isBlockAdmin(blockId: number, agentId: string): Promise<boolean> {
+    const ownerRows = await this.sql`
+      SELECT 1 FROM shared_blocks WHERE id = ${blockId} AND created_by_agent_id = ${agentId} LIMIT 1
+    `;
+    if (ownerRows.length > 0) return true;
+
+    const adminRows = await this.sql`
+      SELECT 1 FROM shared_block_admins WHERE block_id = ${blockId} AND agent_id = ${agentId} LIMIT 1
+    `;
+    return adminRows.length > 0;
+  }
+
+  async attachBlock(
+    blockId: number,
+    targetId: string,
+    attachedByAgentId: string,
+  ): Promise<SharedBlockAttachment> {
+    const now = Date.now();
+    const rows = await this.sql<{ id: string; block_id: string; target_kind: string; target_id: string; attached_by_agent_id: string; attached_at: string }[]>`
+      INSERT INTO shared_block_attachments (block_id, target_kind, target_id, attached_by_agent_id, attached_at)
+      VALUES (${blockId}, 'agent', ${targetId}, ${attachedByAgentId}, ${now})
+      ON CONFLICT (block_id, target_kind, target_id) DO UPDATE SET block_id = shared_block_attachments.block_id
+      RETURNING id, block_id, target_kind, target_id, attached_by_agent_id, attached_at
+    `;
+    const row = rows[0];
+    return {
+      id: Number(row.id),
+      blockId: Number(row.block_id),
+      targetKind: "agent",
+      targetId: row.target_id,
+      attachedByAgentId: row.attached_by_agent_id,
+      attachedAt: Number(row.attached_at),
+    };
+  }
+
+  async detachBlock(blockId: number, targetId: string): Promise<boolean> {
+    const result = await this.sql`
+      DELETE FROM shared_block_attachments
+      WHERE block_id = ${blockId} AND target_kind = 'agent' AND target_id = ${targetId}
+    `;
+    return result.count > 0;
+  }
+
+  async getAttachments(targetKind: "agent", targetId: string): Promise<SharedBlockAttachment[]> {
+    const rows = await this.sql<{ id: string; block_id: string; target_kind: string; target_id: string; attached_by_agent_id: string; attached_at: string }[]>`
+      SELECT id, block_id, target_kind, target_id, attached_by_agent_id, attached_at
+      FROM shared_block_attachments
+      WHERE target_kind = ${targetKind} AND target_id = ${targetId}
+    `;
+    return rows.map((row) => ({
+      id: Number(row.id),
+      blockId: Number(row.block_id),
+      targetKind: "agent" as const,
+      targetId: row.target_id,
+      attachedByAgentId: row.attached_by_agent_id,
+      attachedAt: Number(row.attached_at),
+    }));
   }
 }
