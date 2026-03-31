@@ -43,7 +43,7 @@ export interface BackendConfig {
  */
 export function resolveBackendType(): BackendType {
 	const val = process.env.MAIDSCLAW_BACKEND;
-	const resolvedType: BackendType = val === "pg" ? "pg" : "sqlite";
+	const resolvedType: BackendType = val === "sqlite" ? "sqlite" : "pg";
 
 	if (resolvedType === "sqlite" && isSqliteFreezeEnabled()) {
 		throw new Error(

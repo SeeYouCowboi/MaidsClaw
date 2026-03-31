@@ -509,3 +509,21 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - `scripts/rollback-drill.ts` follows explicit `[STEP N]` orchestration with per-step success/failure messages; drill flow uses existing `SqliteExporter` and `PgImporter` APIs directly (no reimplementation).
 - `--dry-run` for rollback drill is fully non-destructive: it prints the exact cutover/rollback plan and skips file copy, export/import, env mutation, and smoke writes.
 - Rollback safety window was codified in script output: rollback remains safe only before any persistent PG writes after cutover.
+
+## [2026-04-01] Task 25: Runtime switch precondition checker + smoke tests
+- `scripts/runtime-switch.ts` (382 lines) is a standalone checker/validator that does NOT change `resolveBackendType()` default (that's T26).
+- 4 precondition checks: freeze (`isSqliteFreezeEnabled()`), drain (`checkDrainReady()`), parity (reads evidence JSON from T24), rollback drill (checks evidence file existence from T24).
+- 4 PG smoke checks: table existence for `memory_blocks` (truth), `cognition_events` (ops), `narrative_search_projection` (derived), and a SELECT on `interaction_sessions` (session).
+- `--dry-run` skips all DB connections and just shows status based on env vars and evidence files; exits 0 always in dry-run mode.
+- Precondition failures block smoke checks entirely (exit 1 without attempting PG connection).
+- Parity check is SIMPLIFIED: reads the pre-existing parity evidence JSON file rather than running full parity verify inline.
+- Drain check uses dynamic `import()` of `sqlite-drain-check.ts` to avoid loading bun:sqlite when not needed (e.g., in dry-run mode).
+- Uses `createPgPool` with `{ max: 2, connect_timeout: 10 }` for lightweight smoke probing.
+- CLI pattern consistent with other scripts: manual `process.argv` parsing, `failWithUsage()` helper, explicit exit codes (0=ready, 1=not-ready, 2=error).
+
+## [2026-04-01] Task 26: formal SQLite→PG authority switch
+- `resolveBackendType()` default was switched to PG by changing resolver logic to `val === "sqlite" ? "sqlite" : "pg"`.
+- This preserves the explicit SQLite override path (`MAIDSCLAW_BACKEND=sqlite`) while making unset/invalid/empty backend values resolve to PG.
+- Freeze guard semantics remain correct without additional changes: it still only triggers for resolved SQLite mode (`resolvedType === "sqlite" && isSqliteFreezeEnabled()`).
+- `scripts/runtime-switch.ts --dry-run` requires both `--pg-url` and `--sqlite-db` even in dry-run mode; omit either and argument parsing exits with usage error.
+- Verification under `MAIDSCLAW_BACKEND=sqlite` preserved baseline suite totals (1942 pass / 422 skip / 4 fail), confirming no regression in the legacy override path while default authority moved to PG.

@@ -1,0 +1,69 @@
+Task 26 — Formal SQLite→PG Authority Switch (CONSENSUS §3.72)
+
+Date: 2026-04-01
+
+1) Freeze/Drain/Export/Import/Parity artifacts verified present
+- scripts/pg-jobs-drain-check.ts
+- scripts/sqlite-export.ts
+- scripts/pg-import.ts
+- scripts/parity-verify.ts
+- scripts/runtime-switch.ts
+
+2) Code switch applied
+File: src/storage/backend-types.ts
+Changed line in resolveBackendType():
+- before: const resolvedType: BackendType = val === "pg" ? "pg" : "sqlite";
+- after:  const resolvedType: BackendType = val === "sqlite" ? "sqlite" : "pg";
+
+3) Runtime switch smoke (dry-run)
+Command:
+MAIDSCLAW_SQLITE_FREEZE=true bun run scripts/runtime-switch.ts --pg-url "postgres://localhost:5432/postgres" --sqlite-db "data/maidsclaw.db" --dry-run
+
+Output (key lines):
+Runtime Switch Precondition Check
+[CHECK 1] SQLite freeze status...
+[CHECK 2] Drain readiness...
+[CHECK 3] Parity verification...
+[CHECK 4] Rollback drill evidence...
+✅ SQLite Freeze: MAIDSCLAW_SQLITE_FREEZE=true — freeze is active
+⏭️  Drain Ready: [dry-run] skipped — would check drain at runtime
+✅ Parity Green: Parity verified: 0 mismatches
+✅ Rollback Drill Completed: Rollback drill evidence found
+[DRY-RUN] Precondition table displayed. Smoke checks skipped.
+
+4) Build verification
+Command:
+MAIDSCLAW_BACKEND=sqlite bun run build
+
+Output:
+$ tsc -p tsconfig.build.json --noEmit
+
+Result: PASS (0 build errors)
+
+5) Test verification
+Command:
+MAIDSCLAW_BACKEND=sqlite bun test
+
+Output summary:
+1942 pass
+422 skip
+4 fail
+6169 expect() calls
+Ran 2368 tests across 185 files.
+
+Result: Matches documented baseline counts.
+
+6) resolveBackendType() behavior confirmation after switch
+Command:
+bun -e 'import { resolveBackendType } from "./src/storage/backend-types.ts"; delete process.env.MAIDSCLAW_SQLITE_FREEZE; const cases=[undefined,"sqlite","pg",""]; for (const c of cases){ if (c===undefined) delete process.env.MAIDSCLAW_BACKEND; else process.env.MAIDSCLAW_BACKEND=c; const k = c===undefined ? "<unset>" : c === "" ? "<empty>" : c; console.log(k + " => " + resolveBackendType()); }'
+
+Output:
+<unset> => pg
+sqlite => sqlite
+pg => pg
+<empty> => pg
+
+Interpretation:
+- Unset/empty defaults to pg
+- Explicit sqlite still resolves to sqlite
+- Explicit pg resolves to pg
