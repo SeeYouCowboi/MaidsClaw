@@ -5,6 +5,7 @@ import { GraphOrganizer } from "../../src/memory/graph-organizer.js";
 import { runMemoryMigrations } from "../../src/memory/schema.js";
 import { GraphStorageService } from "../../src/memory/storage.js";
 import { TransactionBatcher } from "../../src/memory/transaction-batcher.js";
+import { SqliteNodeScoringQueryRepo } from "../../src/storage/domain-repos/sqlite/node-scoring-query-repo.js";
 import type { NodeRef } from "../../src/memory/types.js";
 import { cleanupDb, createTempDb } from "../helpers/memory-test-utils.js";
 
@@ -43,15 +44,16 @@ describe("graph node registry (shadow)", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const modelProvider = makeMockModelProvider();
+      const nodeScoringQueryRepo = new SqliteNodeScoringQueryRepo(db);
 
       coreMemory.initializeBlocks(AGENT_ID);
 
       const { assertionId } = seedAssertion(db, AGENT_ID);
       const nodeRef = `assertion:${assertionId}` as NodeRef;
 
-      const organizer = new GraphOrganizer(db.raw, storage, coreMemory, embeddings, modelProvider);
+      const organizer = new GraphOrganizer(nodeScoringQueryRepo, storage, coreMemory, embeddings, modelProvider);
       await organizer.run({
         agentId: AGENT_ID,
         sessionId: "session-registry-1",
@@ -65,9 +67,12 @@ describe("graph node registry (shadow)", () => {
         [nodeRef],
       );
       expect(row).toBeDefined();
-      expect(row!.node_kind).toBe("assertion");
-      expect(row!.node_id).toBe(assertionId);
-      expect(row!.node_ref).toBe(nodeRef);
+      if (!row) {
+        throw new Error("Expected graph_nodes row to exist after organizer run");
+      }
+      expect(row.node_kind).toBe("assertion");
+      expect(row.node_id).toBe(assertionId);
+      expect(row.node_ref).toBe(nodeRef);
     } finally {
       cleanupDb(db, dbPath);
     }
@@ -78,15 +83,16 @@ describe("graph node registry (shadow)", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const modelProvider = makeMockModelProvider();
+      const nodeScoringQueryRepo = new SqliteNodeScoringQueryRepo(db);
 
       coreMemory.initializeBlocks(AGENT_ID);
 
       const { assertionId } = seedAssertion(db, AGENT_ID);
       const nodeRef = `assertion:${assertionId}` as NodeRef;
 
-      const organizer = new GraphOrganizer(db.raw, storage, coreMemory, embeddings, modelProvider);
+      const organizer = new GraphOrganizer(nodeScoringQueryRepo, storage, coreMemory, embeddings, modelProvider);
       const job = {
         agentId: AGENT_ID,
         sessionId: "session-registry-2",
@@ -103,10 +109,16 @@ describe("graph node registry (shadow)", () => {
       await organizer.run(job);
       const second = db.get<{ updated_at: number }>(`SELECT updated_at FROM graph_nodes WHERE node_ref = ?`, [nodeRef]);
       expect(second).toBeDefined();
-      expect(second!.updated_at).toBeGreaterThanOrEqual(first!.updated_at);
+      if (!first || !second) {
+        throw new Error("Expected graph_nodes timestamps for duplicate registration checks");
+      }
+      expect(second.updated_at).toBeGreaterThanOrEqual(first.updated_at);
 
       const count = db.get<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM graph_nodes WHERE node_ref = ?`, [nodeRef]);
-      expect(count!.cnt).toBe(1);
+      if (!count) {
+        throw new Error("Expected graph_nodes count query row");
+      }
+      expect(count.cnt).toBe(1);
     } finally {
       cleanupDb(db, dbPath);
     }
@@ -123,7 +135,10 @@ describe("migration 036 idempotency", () => {
         `SELECT name FROM sqlite_master WHERE type='table' AND name='graph_nodes'`,
       );
       expect(row).toBeDefined();
-      expect(row!.name).toBe("graph_nodes");
+      if (!row) {
+        throw new Error("Expected graph_nodes table to exist");
+      }
+      expect(row.name).toBe("graph_nodes");
     } finally {
       cleanupDb(db, dbPath);
     }

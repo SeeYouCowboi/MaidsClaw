@@ -4,6 +4,7 @@ import { PromotionService } from "./promotion.js";
 import { createMemorySchema, makeNodeRef } from "./schema.js";
 import { GraphStorageService } from "./storage.js";
 import type { PromotionCandidate } from "./types.js";
+import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
 
 function freshDb(): Database {
   const db = new Database(":memory:");
@@ -15,11 +16,13 @@ describe("PromotionService", () => {
   let db: Database;
   let storage: GraphStorageService;
   let service: PromotionService;
+  let queryRepo: SqlitePromotionQueryRepo;
 
   beforeEach(() => {
     db = freshDb();
     storage = new GraphStorageService(db);
-    service = new PromotionService(db, storage);
+    queryRepo = new SqlitePromotionQueryRepo(db);
+    service = new PromotionService(db, storage, undefined, undefined, queryRepo);
   });
 
   function seedSharedEntity(pointerKey: string, displayName: string, entityType = "person"): number {

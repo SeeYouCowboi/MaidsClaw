@@ -19,6 +19,8 @@ import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { Db } from "../storage/database.js";
+import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
+import { SqliteNodeScoringQueryRepo } from "../storage/domain-repos/sqlite/node-scoring-query-repo.js";
 import type {
   GraphOrganizerResult,
   MigrationResult,
@@ -352,6 +354,7 @@ export class MemoryTaskAgent {
     settlementLedger?: SettlementLedger,
     jobPersistence?: JobPersistence,
     private readonly strictDurableMode = false,
+    nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
     this.db = normalizeDbInput(dbInput);
     this.modelProvider =
@@ -378,7 +381,7 @@ export class MemoryTaskAgent {
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
-      this.db.raw,
+      nodeScoringQueryRepo ?? new SqliteNodeScoringQueryRepo(this.db),
       this.storage,
       this.coreMemory,
       this.embeddings,

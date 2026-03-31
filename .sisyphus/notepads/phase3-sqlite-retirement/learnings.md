@@ -387,3 +387,10 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - `bun run build` passes.
 - `ast-grep` confirms no `import { Database } from "bun:sqlite"` in `navigator.ts` / `graph-edge-view.ts`.
 - Full `bun test` and `bun test src/memory/` still contain pre-existing unrelated failures (embeddings/materialization/promotion/shared-blocks/runtime-behavioral baselines).
+
+## [2026-04-01] Task 13: organizer/promotion read-side decoupling
+- GraphOrganizer no longer reads sqlite tables directly; it now consumes NodeScoringQueryRepo for content rendering, embedding lookup, one-hop neighbors, recency/logic/cluster features, and search projection material.
+- PromotionService no longer reads sqlite tables directly; it now consumes PromotionQueryRepo for event/fact candidate discovery, entity decisioning, event lookup, and timestamp resolution.
+- For synchronous memory APIs that still require immediate results, sqlite repo methods can return already-resolved promises; when necessary, service-layer sync bridges use Bun.peek and throw explicit errors if unresolved promises leak into sync paths.
+- T13 surfaced constructor ripple effects: organizer now needs a query repo dependency, which required task-agent wiring updates and test setup updates (graph-node-registry and promotion.test).
+- Validation outcome for this checkpoint: bun run build passes; bun test fails on pre-existing non-T13 dirty-tree failures; focused bun test src/memory/promotion.test.ts passes.
