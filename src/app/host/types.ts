@@ -37,6 +37,7 @@ export type AppHostOptions = {
   configDir?: string;
   databasePath?: string;
   dataDir?: string;
+  pgUrl?: string;
   busyTimeoutMs?: number;
   memoryMigrationModelId?: string;
   memoryEmbeddingModelId?: string;

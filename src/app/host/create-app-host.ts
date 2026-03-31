@@ -1,5 +1,8 @@
 import { isAbsolute, join, resolve } from "node:path";
-import { bootstrapRuntime } from "../../bootstrap/runtime.js";
+import {
+	bootstrapRuntime,
+	initializePgBackendForRuntime,
+} from "../../bootstrap/runtime.js";
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
@@ -122,6 +125,13 @@ export async function createAppHost(
 		memoryOrganizerEmbeddingModelId,
 		traceCaptureEnabled: options.traceCaptureEnabled,
 	});
+
+	if (runtime.backendType === "pg") {
+		if (options.pgUrl) {
+			process.env.PG_APP_URL = options.pgUrl;
+		}
+		await initializePgBackendForRuntime(runtime);
+	}
 
 	const healthChecks = Object.fromEntries(
 		Object.entries(runtime.healthChecks).map(([name, status]) => [

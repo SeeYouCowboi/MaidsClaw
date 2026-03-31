@@ -11,6 +11,7 @@ import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { HealthCheckFn } from "../gateway/controllers.js";
 import type { GatewayServer } from "../gateway/server.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
@@ -64,6 +65,7 @@ export type RuntimeBootstrapOptions = {
 	projectionSink?: RuntimeProjectionSink;
 	traceStore?: TraceStore;
 	traceCaptureEnabled?: boolean;
+	jobPersistence?: JobPersistence;
 };
 
 export type MemoryPipelineStatus =
@@ -106,6 +108,7 @@ export type RuntimeBootstrapResult = {
 	coreMemoryBlockRepo: CoreMemoryBlockRepo;
 	recentCognitionSlotRepo: RecentCognitionSlotRepo;
 	sharedBlockRepo: SharedBlockRepo;
+	jobPersistence: JobPersistence;
 	shutdown: () => void;
 };
 

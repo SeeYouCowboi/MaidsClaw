@@ -25,6 +25,8 @@ import { CommitService } from "../interaction/commit-service.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
 import { runInteractionMigrations } from "../interaction/schema.js";
 import { InteractionStore } from "../interaction/store.js";
+import { createJobPersistence } from "../jobs/job-persistence-factory.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
 import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js";
 import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
@@ -219,6 +221,12 @@ export function bootstrapRuntime(
 		path: databasePath,
 		busyTimeoutMs: options.busyTimeoutMs,
 	});
+	const resolvedJobPersistence: JobPersistence =
+		options.jobPersistence ??
+		createJobPersistence(backendType, {
+			db,
+			pgFactory: pgFactory ?? undefined,
+		});
 
 	const migrationStatus: RuntimeMigrationStatus = {
 		interaction: {
@@ -265,7 +273,7 @@ export function bootstrapRuntime(
 	const interactionStore = new InteractionStore(db);
 	const commitService = new CommitService(interactionStore);
 	const flushSelector = new FlushSelector(interactionStore);
-	const graphStorage = new GraphStorageService(db);
+	const graphStorage = new GraphStorageService(db, resolvedJobPersistence);
 
 	const coreMemoryService = new CoreMemoryService(db);
 	const interactionRepo = new SqliteInteractionRepoAdapter(interactionStore);
@@ -334,6 +342,7 @@ export function bootstrapRuntime(
 						materialization,
 						provider,
 						settlementLedger,
+						resolvedJobPersistence,
 					);
 					memoryPipelineReady = true;
 					memoryPipelineStatus = "ready";
@@ -580,6 +589,7 @@ export function bootstrapRuntime(
 		coreMemoryBlockRepo,
 		recentCognitionSlotRepo,
 		sharedBlockRepo,
+		jobPersistence: resolvedJobPersistence,
 		shutdown,
 	};
 }
