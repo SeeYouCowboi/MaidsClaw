@@ -441,7 +441,7 @@ describe("debug commands", () => {
 });
 
 async function seedPendingSettlementCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
@@ -489,7 +489,7 @@ async function seedPendingSettlementCase(cwd: string, requestId: string): Promis
 }
 
 async function seedTraceCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
@@ -529,7 +529,7 @@ async function seedTraceCase(cwd: string, requestId: string): Promise<string> {
 }
 
 async function seedSummaryCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
@@ -570,7 +570,7 @@ async function seedSummaryCase(cwd: string, requestId: string): Promise<string> 
 }
 
 async function seedTranscriptCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
@@ -620,7 +620,7 @@ async function seedTranscriptCase(cwd: string, requestId: string): Promise<strin
 }
 
 async function seedPromptCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,
@@ -655,7 +655,7 @@ async function seedPromptCase(cwd: string, requestId: string): Promise<string> {
 }
 
 async function seedChunksCase(cwd: string, requestId: string): Promise<string> {
-	const app = bootstrapApp({
+	const app = await bootstrapApp({
 		cwd,
 		enableGateway: false,
 		requireAllProviders: false,

@@ -1,5 +1,6 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { bootstrapRuntime } from "../../bootstrap/runtime.js";
+import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
 import { LocalHealthClient } from "../clients/local/local-health-client.js";
@@ -56,7 +57,14 @@ function shouldExposeMaintenance(options: AppHostOptions): boolean {
 	return true;
 }
 
-export async function createAppHost(options: AppHostOptions): Promise<AppHost> {
+/**
+ * @param _injectedRuntime @internal Pre-bootstrapped runtime used by the
+ *   deprecated {@link bootstrapApp} shim to avoid double-bootstrapping.
+ */
+export async function createAppHost(
+	options: AppHostOptions,
+	_injectedRuntime?: RuntimeBootstrapResult,
+): Promise<AppHost> {
 	const configResult = loadConfig({
 		configDir: resolveConfigDir(options),
 		cwd: options.cwd,
@@ -104,7 +112,7 @@ export async function createAppHost(options: AppHostOptions): Promise<AppHost> {
 		throw new Error(`Invalid port: ${port}`);
 	}
 
-	const runtime = bootstrapRuntime({
+	const runtime = _injectedRuntime ?? bootstrapRuntime({
 		cwd: options.cwd,
 		databasePath,
 		dataDir,

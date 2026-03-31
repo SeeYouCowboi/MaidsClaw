@@ -1,11 +1,6 @@
 import { isAbsolute, join, resolve } from "node:path";
-import { LocalHealthClient } from "../app/clients/local/local-health-client.js";
-import { LocalInspectClient } from "../app/clients/local/local-inspect-client.js";
-import { LocalSessionClient } from "../app/clients/local/local-session-client.js";
-import { LocalTurnClient } from "../app/clients/local/local-turn-client.js";
-import { TraceStore } from "../app/diagnostics/trace-store.js";
+import { createAppHost } from "../app/host/index.js";
 import { loadConfig } from "../core/config.js";
-import { GatewayServer } from "../gateway/server.js";
 import { bootstrapRuntime } from "./runtime.js";
 import type { AppBootstrapOptions, AppBootstrapResult } from "./types.js";
 
@@ -40,13 +35,12 @@ function resolveConfigDir(options: AppBootstrapOptions): string | undefined {
 }
 
 /**
- * @deprecated Transitional shim while bootstrap callers migrate to createAppHost().
- * createAppHost() is the canonical host factory and should be preferred for new code.
+ * @deprecated Transitional shim — use {@link createAppHost} for new code.
+ * Delegates facade/server/lifecycle construction to createAppHost() internally.
  */
-export function bootstrapApp(
+export async function bootstrapApp(
 	options: AppBootstrapOptions = {},
-): AppBootstrapResult {
-	// TODO: Replace direct call with createAppHost() delegation — T5 shim
+): Promise<AppBootstrapResult> {
 	const configResult = loadConfig({
 		configDir: resolveConfigDir(options),
 		cwd: options.cwd,
@@ -105,6 +99,26 @@ export function bootstrapApp(
 		traceCaptureEnabled: options.traceCaptureEnabled,
 	});
 
+	// Delegate facade/server/lifecycle construction to createAppHost(),
+	// injecting the already-bootstrapped runtime to avoid double initialization.
+	const appHost = await createAppHost(
+		{
+			role: options.enableGateway ? "server" : "local",
+			cwd: options.cwd,
+			port,
+			host,
+			databasePath,
+			dataDir,
+			busyTimeoutMs: options.busyTimeoutMs,
+			memoryMigrationModelId,
+			memoryEmbeddingModelId,
+			memoryOrganizerEmbeddingModelId,
+			traceCaptureEnabled: options.traceCaptureEnabled,
+			requireAllProviders: options.requireAllProviders,
+		},
+		runtime,
+	);
+
 	const healthChecks = Object.fromEntries(
 		Object.entries(runtime.healthChecks).map(([name, status]) => [
 			name,
@@ -112,52 +126,10 @@ export function bootstrapApp(
 		]),
 	);
 
-	const inspectTraceStore =
-		runtime.traceStore ??
-		(dataDir
-			? new TraceStore(join(dataDir, "debug", "traces"))
-			: undefined);
-
-	const userFacade = {
-		session: new LocalSessionClient({
-			sessionService: runtime.sessionService,
-			turnService: runtime.turnService,
-			memoryTaskAgent: runtime.memoryTaskAgent,
-		}),
-		turn: new LocalTurnClient({
-			sessionService: runtime.sessionService,
-			turnService: runtime.turnService,
-			interactionRepo: runtime.interactionRepo,
-			traceStore: runtime.traceStore,
-		}),
-		inspect: new LocalInspectClient(runtime, inspectTraceStore),
-		health: new LocalHealthClient({
-			memoryPipelineReady: runtime.memoryPipelineReady,
-			healthChecks: runtime.healthChecks,
-		}),
-	};
-
-	const server = options.enableGateway
-		? new GatewayServer({
-				port,
-				host,
-				userFacade,
-				healthChecks,
-				listRuntimeAgents: async () => runtime.agentRegistry.getAll(),
-				traceStore: runtime.traceStore,
-			})
-		: undefined;
-
-	const shutdown = (): void => {
-		server?.stop();
-		runtime.shutdown();
-	};
-
 	return {
 		runtime,
-		server,
 		healthChecks,
 		configResult,
-		shutdown,
+		shutdown: () => void appHost.shutdown(),
 	};
 }

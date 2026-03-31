@@ -24,11 +24,15 @@ export type GatewayServerOptions = {
 	healthChecks?: Record<string, HealthCheckFn>;
 	listRuntimeAgents?: AppHostAdmin["listRuntimeAgents"];
 	hasAgent?: (agentId: string) => boolean;
+	/** @deprecated Test-only backward compat — pass userFacade instead */
 	sessionService?: SessionService;
+	/** @deprecated Test-only backward compat — pass userFacade instead */
 	turnService?: TurnService;
+	/** @deprecated Test-only backward compat — pass userFacade instead */
 	memoryTaskAgent?: MemoryTaskAgent | null;
 };
 
+/** @internal @deprecated Legacy bridge for tests — use userFacade.turn instead */
 function createLegacyTurnClient(
 	sessionService: SessionService,
 	turnService: Pick<TurnService, "runUserTurn"> | undefined,

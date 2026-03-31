@@ -769,7 +769,7 @@ describe("CLI Acceptance Runbook", () => {
 			const requestId = "req-diagnose-accept";
 
 			// Seed a pending settlement scenario
-			const app = bootstrapApp({ cwd: tmpRoot, enableGateway: false, requireAllProviders: false });
+			const app = await bootstrapApp({ cwd: tmpRoot, enableGateway: false, requireAllProviders: false });
 			try {
 				const session = await app.runtime.sessionService.createSession("rp:alice");
 				const interactionStore = new InteractionStore(app.runtime.db);
@@ -831,8 +831,8 @@ describe("CLI Acceptance Runbook", () => {
 	// ── Contract 13: Tool execution contracts on bootstrapped tools ──
 
 	describe("Contract 13: Tool execution contracts", () => {
-		it("bootstrapped runtime exposes executionContract on memory tool schemas", () => {
-			const app = bootstrapApp({ cwd: createTempDir("contract"), enableGateway: false, requireAllProviders: false });
+		it("bootstrapped runtime exposes executionContract on memory tool schemas", async () => {
+			const app = await bootstrapApp({ cwd: createTempDir("contract"), enableGateway: false, requireAllProviders: false });
 			try {
 				const schemas = app.runtime.toolExecutor.getSchemas();
 				const memoryNames = [...ALL_MEMORY_TOOL_NAMES];
@@ -861,8 +861,8 @@ describe("CLI Acceptance Runbook", () => {
 			expect(tool.effectClass).toBe("read_only");
 		});
 
-		it("non-memory tools do NOT have executionContract yet", () => {
-			const app = bootstrapApp({ cwd: createTempDir("contract-non-mem"), enableGateway: false, requireAllProviders: false });
+		it("non-memory tools do NOT have executionContract yet", async () => {
+			const app = await bootstrapApp({ cwd: createTempDir("contract-non-mem"), enableGateway: false, requireAllProviders: false });
 			try {
 				const schemas = app.runtime.toolExecutor.getSchemas();
 				const memoryAndSettlementNames = new Set([...ALL_MEMORY_TOOL_NAMES, "submit_rp_turn"]);
