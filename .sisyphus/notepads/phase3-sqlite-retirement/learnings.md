@@ -501,3 +501,11 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - Polling loop pattern: `while(true)` with deadline check, `setTimeout`-based sleep, and explicit exit codes (0=ready, 1=not-ready/timeout, 2=error).
 - JSON audit output includes full `DrainCheckReport` nested under `report` field plus top-level summary fields (`ready`, `activeJobs`, `pendingJobs`, `timestamp`, `polls`, `forceDrained`).
 - Original one-shot behavior (no args) preserved exactly as before — backward compatible.
+
+## [2026-04-01] Task 24: parity verify productionization + rollback drill
+- `scripts/parity-verify.ts` now emits a structured JSON payload containing `truthReport`, `derivedReport`, `combinedReport`, and explicit coverage metadata; this keeps machine-readable artifacts stable while still giving concise console summaries.
+- Coverage guard is enforced in parity CLI: truth mode/all must execute 14 surfaces (11 truth + 3 projections), derived mode/all must execute 7 surfaces (4 search + 3 invariants); coverage mismatch hard-fails the run.
+- Keep `openDatabase()` in parity verify: this script is intentionally SQLite-coupled because its core responsibility is SQLite↔PG surface comparison.
+- `scripts/rollback-drill.ts` follows explicit `[STEP N]` orchestration with per-step success/failure messages; drill flow uses existing `SqliteExporter` and `PgImporter` APIs directly (no reimplementation).
+- `--dry-run` for rollback drill is fully non-destructive: it prints the exact cutover/rollback plan and skips file copy, export/import, env mutation, and smoke writes.
+- Rollback safety window was codified in script output: rollback remains safe only before any persistent PG writes after cutover.

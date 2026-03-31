@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DerivedParityVerifier } from "../src/migration/parity/derived-parity.js";
-import type { ParityReport } from "../src/migration/parity/truth-parity.js";
+import type { ParityReport, ParitySurfaceResult } from "../src/migration/parity/truth-parity.js";
 import { TruthParityVerifier } from "../src/migration/parity/truth-parity.js";
 import { closeDatabaseGracefully, openDatabase } from "../src/storage/database.js";
 import { createPgPool } from "../src/storage/pg-pool.js";
@@ -16,6 +16,27 @@ type CliArgs = {
   outputPath?: string;
   mode: VerifyMode;
 };
+
+type CoverageSummary = {
+  expectedTruthSurfaces: number;
+  expectedDerivedSurfaces: number;
+  truthSurfacesRun: number;
+  derivedSurfacesRun: number;
+  passed: boolean;
+  errors: string[];
+};
+
+type JsonParityOutput = {
+  mode: VerifyMode;
+  generatedAt: string;
+  truthReport: ParityReport | null;
+  derivedReport: ParityReport | null;
+  combinedReport: ParityReport;
+  coverage: CoverageSummary;
+};
+
+const EXPECTED_TRUTH_SURFACE_COUNT = 14;
+const EXPECTED_DERIVED_SURFACE_COUNT = 7;
 
 function failWithUsage(message: string): never {
   console.error(message);
@@ -107,6 +128,79 @@ function combineReports(...reports: (ParityReport | null)[]): ParityReport {
   };
 }
 
+function buildCoverageSummary(
+  mode: VerifyMode,
+  truthReport: ParityReport | null,
+  derivedReport: ParityReport | null,
+): CoverageSummary {
+  const errors: string[] = [];
+  const truthSurfacesRun = truthReport?.surfaces.length ?? 0;
+  const derivedSurfacesRun = derivedReport?.surfaces.length ?? 0;
+
+  if ((mode === "truth" || mode === "all") && truthSurfacesRun !== EXPECTED_TRUTH_SURFACE_COUNT) {
+    errors.push(
+      `Truth parity coverage mismatch: expected ${EXPECTED_TRUTH_SURFACE_COUNT} surfaces, got ${truthSurfacesRun}.`,
+    );
+  }
+
+  if ((mode === "derived" || mode === "all") && derivedSurfacesRun !== EXPECTED_DERIVED_SURFACE_COUNT) {
+    errors.push(
+      `Derived parity coverage mismatch: expected ${EXPECTED_DERIVED_SURFACE_COUNT} surfaces, got ${derivedSurfacesRun}.`,
+    );
+  }
+
+  return {
+    expectedTruthSurfaces: EXPECTED_TRUTH_SURFACE_COUNT,
+    expectedDerivedSurfaces: EXPECTED_DERIVED_SURFACE_COUNT,
+    truthSurfacesRun,
+    derivedSurfacesRun,
+    passed: errors.length === 0,
+    errors,
+  };
+}
+
+function countSurfaceMismatches(surfaces: ParitySurfaceResult[]): number {
+  return surfaces.reduce((count, surface) => count + (surface.mismatchCount > 0 ? 1 : 0), 0);
+}
+
+function printSectionSummary(label: string, report: ParityReport | null): void {
+  if (!report) return;
+  const mismatchSurfaces = countSurfaceMismatches(report.surfaces);
+  console.log(
+    `  ${label}: surfaces=${report.surfaces.length}, mismatches=${report.totalMismatches}, mismatch_surfaces=${mismatchSurfaces}`,
+  );
+}
+
+function printSummary(output: JsonParityOutput, outputPath: string | null): void {
+  const { combinedReport, coverage } = output;
+  console.log("Parity verification summary");
+  console.log("-------------------------");
+  console.log(`  mode: ${output.mode}`);
+  printSectionSummary("truth", output.truthReport);
+  printSectionSummary("derived", output.derivedReport);
+  console.log(`  total_surfaces: ${combinedReport.surfaces.length}`);
+  console.log(`  total_mismatches: ${combinedReport.totalMismatches}`);
+  console.log(`  coverage_ok: ${coverage.passed}`);
+  if (!coverage.passed) {
+    for (const error of coverage.errors) {
+      console.log(`    - ${error}`);
+    }
+  }
+
+  if (combinedReport.totalMismatches > 0) {
+    console.log("  mismatch surfaces:");
+    for (const surface of combinedReport.surfaces.filter((item) => item.mismatchCount > 0)) {
+      console.log(
+        `    - ${surface.surface}: mismatchCount=${surface.mismatchCount}, sqliteCount=${surface.sqliteCount}, pgCount=${surface.pgCount}`,
+      );
+    }
+  }
+
+  if (outputPath) {
+    console.log(`  json_report: ${outputPath}`);
+  }
+}
+
 const args = parseArgs(process.argv.slice(2));
 
 let sqliteDb: ReturnType<typeof openDatabase> | null = null;
@@ -137,18 +231,28 @@ try {
     derivedReport = await verifier.generateReport();
   }
 
-  const report = combineReports(truthReport, derivedReport);
-  const output = `${JSON.stringify(report, null, 2)}\n`;
+  const combinedReport = combineReports(truthReport, derivedReport);
+  const coverage = buildCoverageSummary(args.mode, truthReport, derivedReport);
+  const outputObject: JsonParityOutput = {
+    mode: args.mode,
+    generatedAt: new Date().toISOString(),
+    truthReport,
+    derivedReport,
+    combinedReport,
+    coverage,
+  };
+  const output = `${JSON.stringify(outputObject, null, 2)}\n`;
+  let resolvedOutputPath: string | null = null;
 
   if (args.outputPath) {
-    const outputPath = resolve(args.outputPath);
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, output);
+    resolvedOutputPath = resolve(args.outputPath);
+    mkdirSync(dirname(resolvedOutputPath), { recursive: true });
+    writeFileSync(resolvedOutputPath, output);
   }
 
-  console.log(output);
+  printSummary(outputObject, resolvedOutputPath);
 
-  if (!report.passed) {
+  if (!combinedReport.passed || !coverage.passed) {
     process.exitCode = 1;
   }
 } finally {
