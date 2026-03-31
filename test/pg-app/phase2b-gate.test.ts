@@ -1,5 +1,9 @@
-// Domain Repositories Gate — verifies all PG repo implementations compile and are importable
-// Does NOT require a running PG instance for module import checks
+/**
+ * COMPILE-TIME IMPORT GATE — NOT an integration acceptance test
+ * This file verifies that Phase 2 imports resolve correctly at compile time.
+ * It does NOT connect to a database and does NOT require PG_APP_TEST_URL.
+ * Real integration acceptance is handled by test/pg-app/ integration tests (GAP-V1).
+ */
 
 import { describe, it, expect } from "bun:test";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
