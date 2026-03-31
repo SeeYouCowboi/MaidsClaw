@@ -18,6 +18,7 @@ import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
 import { LocalSessionClient } from "../clients/local/local-session-client.js";
 import { LocalTurnClient } from "../clients/local/local-turn-client.js";
 import { TraceStore } from "../diagnostics/trace-store.js";
+import { AppMaintenanceFacadeImpl } from "./maintenance-facade.js";
 import { MaintenanceOrchestrationService } from "./maintenance-orchestration-service.js";
 import type {
 	AppHost,
@@ -300,29 +301,10 @@ export async function createAppHost(
 			)
 		: undefined;
 
-	const maintenanceFacade: AppMaintenanceFacade = {
-		async runOnce() {
-			throw new Error("not yet implemented");
-		},
-		async drain() {
-			throw new Error("not yet implemented");
-		},
-		async getDrainStatus() {
-			throw new Error("not yet implemented");
-		},
-		...(orchestrationService
-			? {
-					searchRebuild: (agentId: string, scope: string) =>
-						orchestrationService.searchRebuild(agentId, scope),
-					replayProjection: (surface: string) =>
-						orchestrationService.replayProjection(surface),
-					rebuildDerived: (
-						agentId: string,
-						opts?: { dryRun?: boolean; reEmbed?: boolean },
-					) => orchestrationService.rebuildDerived(agentId, opts),
-				}
-			: {}),
-	};
+	const maintenanceFacade: AppMaintenanceFacade | undefined =
+		orchestrationService
+			? new AppMaintenanceFacadeImpl(orchestrationService, runtime.jobPersistence)
+			: undefined;
 
 	const admin: AppHostAdmin = {
 		async getHostStatus() {

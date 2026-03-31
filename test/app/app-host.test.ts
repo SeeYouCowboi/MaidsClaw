@@ -80,7 +80,7 @@ describe("createAppHost", () => {
     if (!maintenance) {
       throw new Error("Expected maintenance facade for enableMaintenance=true");
     }
-    await expect(maintenance.runOnce()).rejects.toThrow("not yet implemented");
+    await expect(maintenance.runOnce()).resolves.toBeUndefined();
     await host.shutdown();
     host = undefined;
   });
