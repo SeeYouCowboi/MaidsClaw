@@ -25,7 +25,8 @@ import { createShellState } from "../../src/terminal-cli/shell/state.js";
 import { dispatchSlashCommand } from "../../src/terminal-cli/shell/slash-dispatcher.js";
 import type { SlashDispatchContext } from "../../src/terminal-cli/shell/slash-dispatcher.js";
 import { GatewayClient } from "../../src/terminal-cli/gateway-client.js";
-import { bootstrapApp } from "../../src/bootstrap/app-bootstrap.js";
+import { createAppHost } from "../../src/app/host/create-app-host.js";
+import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";
 import type { ToolExecutionContract } from "../../src/core/tools/tool-definition.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
@@ -769,10 +770,11 @@ describe("CLI Acceptance Runbook", () => {
 			const requestId = "req-diagnose-accept";
 
 			// Seed a pending settlement scenario
-			const app = await bootstrapApp({ cwd: tmpRoot, enableGateway: false, requireAllProviders: false });
+			const runtime = bootstrapRuntime({ cwd: tmpRoot });
+			const host = await createAppHost({ role: "local", cwd: tmpRoot, requireAllProviders: false }, runtime);
 			try {
-				const session = await app.runtime.sessionService.createSession("rp:alice");
-				const interactionStore = new InteractionStore(app.runtime.db);
+				const session = await runtime.sessionService.createSession("rp:alice");
+				const interactionStore = new InteractionStore(runtime.db);
 				const commitService = new CommitService(interactionStore);
 				const payload = makeSettlementPayload(session.sessionId, requestId, false);
 				commitService.commitWithId({
@@ -784,7 +786,7 @@ describe("CLI Acceptance Runbook", () => {
 					correlatedTurnId: requestId,
 				});
 
-				app.runtime.db.run(
+				runtime.db.run(
 					`INSERT INTO _memory_maintenance_jobs (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 					[
 						"pending_settlement_flush",
@@ -797,7 +799,7 @@ describe("CLI Acceptance Runbook", () => {
 					],
 				);
 			} finally {
-				app.shutdown();
+				await host.shutdown();
 			}
 
 			const raw = await captureStdout(async () => {
@@ -832,9 +834,11 @@ describe("CLI Acceptance Runbook", () => {
 
 	describe("Contract 13: Tool execution contracts", () => {
 		it("bootstrapped runtime exposes executionContract on memory tool schemas", async () => {
-			const app = await bootstrapApp({ cwd: createTempDir("contract"), enableGateway: false, requireAllProviders: false });
+			const cwd = createTempDir("contract");
+			const runtime = bootstrapRuntime({ cwd });
+			const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 			try {
-				const schemas = app.runtime.toolExecutor.getSchemas();
+				const schemas = runtime.toolExecutor.getSchemas();
 				const memoryNames = [...ALL_MEMORY_TOOL_NAMES];
 				for (const name of memoryNames) {
 					const schema = schemas.find((s) => s.name === name);
@@ -847,7 +851,7 @@ describe("CLI Acceptance Runbook", () => {
 					expect(typeof contract.trace_visibility).toBe("string");
 				}
 			} finally {
-				app.shutdown();
+				await host.shutdown();
 			}
 		});
 
@@ -862,16 +866,18 @@ describe("CLI Acceptance Runbook", () => {
 		});
 
 		it("non-memory tools do NOT have executionContract yet", async () => {
-			const app = await bootstrapApp({ cwd: createTempDir("contract-non-mem"), enableGateway: false, requireAllProviders: false });
+			const cwd = createTempDir("contract-non-mem");
+			const runtime = bootstrapRuntime({ cwd });
+			const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 			try {
-				const schemas = app.runtime.toolExecutor.getSchemas();
+				const schemas = runtime.toolExecutor.getSchemas();
 				const memoryAndSettlementNames = new Set([...ALL_MEMORY_TOOL_NAMES, "submit_rp_turn"]);
 				const nonMemorySchemas = schemas.filter((s) => !memoryAndSettlementNames.has(s.name));
 				for (const schema of nonMemorySchemas) {
 					expect(schema.executionContract).toBeUndefined();
 				}
 			} finally {
-				app.shutdown();
+				await host.shutdown();
 			}
 		});
 

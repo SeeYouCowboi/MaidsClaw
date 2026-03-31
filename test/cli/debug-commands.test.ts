@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { bootstrapApp } from "../../src/bootstrap/app-bootstrap.js";
+import { createAppHost } from "../../src/app/host/create-app-host.js";
+import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
@@ -441,14 +442,11 @@ describe("debug commands", () => {
 });
 
 async function seedPendingSettlementCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
-		const interactionStore = new InteractionStore(app.runtime.db);
+		const session = await runtime.sessionService.createSession("rp:alice");
+		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);
 		const settlementPayload = makeSettlementPayload(
 			session.sessionId,
@@ -464,7 +462,7 @@ async function seedPendingSettlementCase(cwd: string, requestId: string): Promis
 			correlatedTurnId: requestId,
 		});
 
-		app.runtime.db.run(
+		runtime.db.run(
 			`INSERT INTO _memory_maintenance_jobs (job_type, status, idempotency_key, payload, created_at, updated_at, next_attempt_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			[
@@ -484,19 +482,16 @@ async function seedPendingSettlementCase(cwd: string, requestId: string): Promis
 
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
 async function seedTraceCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
-		const interactionStore = new InteractionStore(app.runtime.db);
+		const session = await runtime.sessionService.createSession("rp:alice");
+		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);
 		const settlementPayload = makeSettlementPayload(
 			session.sessionId,
@@ -524,19 +519,16 @@ async function seedTraceCase(cwd: string, requestId: string): Promise<string> {
 
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
 async function seedSummaryCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
-		const interactionStore = new InteractionStore(app.runtime.db);
+		const session = await runtime.sessionService.createSession("rp:alice");
+		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
 			sessionId: session.sessionId,
@@ -565,19 +557,16 @@ async function seedSummaryCase(cwd: string, requestId: string): Promise<string> 
 		traceStore.finalizeTrace(requestId);
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
 async function seedTranscriptCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
-		const interactionStore = new InteractionStore(app.runtime.db);
+		const session = await runtime.sessionService.createSession("rp:alice");
+		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
 			sessionId: session.sessionId,
@@ -615,19 +604,16 @@ async function seedTranscriptCase(cwd: string, requestId: string): Promise<strin
 		});
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
 async function seedPromptCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
-		const interactionStore = new InteractionStore(app.runtime.db);
+		const session = await runtime.sessionService.createSession("rp:alice");
+		const interactionStore = new InteractionStore(runtime.db);
 		const commitService = new CommitService(interactionStore);
 		commitService.commit({
 			sessionId: session.sessionId,
@@ -650,18 +636,15 @@ async function seedPromptCase(cwd: string, requestId: string): Promise<string> {
 		traceStore.finalizeTrace(requestId);
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
 async function seedChunksCase(cwd: string, requestId: string): Promise<string> {
-	const app = await bootstrapApp({
-		cwd,
-		enableGateway: false,
-		requireAllProviders: false,
-	});
+	const runtime = bootstrapRuntime({ cwd });
+	const host = await createAppHost({ role: "local", cwd, requireAllProviders: false }, runtime);
 	try {
-		const session = await app.runtime.sessionService.createSession("rp:alice");
+		const session = await runtime.sessionService.createSession("rp:alice");
 		const tracesPath = join(cwd, "data", "debug", "traces");
 		const traceStore = new TraceStore(tracesPath);
 		traceStore.initTrace(requestId, session.sessionId, "rp:alice");
@@ -672,7 +655,7 @@ async function seedChunksCase(cwd: string, requestId: string): Promise<string> {
 		traceStore.finalizeTrace(requestId);
 		return session.sessionId;
 	} finally {
-		app.shutdown();
+		await host.shutdown();
 	}
 }
 
