@@ -1,15 +1,26 @@
-import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
+import type { Db } from "../storage/database.js";
+import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
-import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
-import { makeNodeRef, SQL_AREA_VISIBLE } from "./schema.js";
+import type { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
+import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
 import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
+import type {
+  PromotionQueryRepo,
+} from "../storage/domain-repos/contracts/promotion-query-repo.js";
+import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
+
+type RecoveryJobDbLike = {
+  prepare: (sql: string) => {
+    run: (...params: unknown[]) => { changes?: number; lastInsertRowid?: number | bigint };
+  };
+};
 
 export type MaterializationResult = {
   materialized: number;
@@ -24,19 +35,6 @@ type EventRow = {
   topic_id: number | null;
   emotion: string | null;
 };
-
-type EntityRow = {
-  id: number;
-  pointer_key: string;
-  display_name: string;
-  entity_type: string;
-  memory_scope: "shared_public" | "private_overlay";
-  owner_agent_id: string | null;
-  canonical_entity_id: number | null;
-  summary: string | null;
-};
-
-const HIDDEN_ENTITY_MARKERS = ["unknown", "hidden", "redacted", "anonymous"] as const;
 
 // Minimal type for materializable private events (formerly AgentEventOverlay)
 type MaterializablePrivateEvent = {
@@ -54,14 +52,19 @@ type MaterializablePrivateEvent = {
 };
 
 export class MaterializationService {
-  private readonly projectionRepo: AreaWorldProjectionRepo;
+  private readonly db: Db;
+  private readonly projectionRepo: AreaWorldProjectionRepo | null;
+  private readonly promotionQueryRepo: PromotionQueryRepo;
 
   constructor(
-    private readonly db: Database,
+    dbInput: Db | Db["raw"],
     private readonly storage: GraphStorageService | null,
-    projectionRepo?: AreaWorldProjectionRepo,
+    promotionQueryRepo?: PromotionQueryRepo,
+    projectionRepo?: AreaWorldProjectionRepo | null,
   ) {
-    this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
+    this.db = normalizeDbInput(dbInput);
+    this.projectionRepo = projectionRepo ?? null;
+    this.promotionQueryRepo = promotionQueryRepo ?? new SqlitePromotionQueryRepo(this.db);
   }
 
   materializeDelayed(privateEvents: unknown[], agentId: string): MaterializationResult {
@@ -104,7 +107,7 @@ export class MaterializationService {
         : null;
 
       const participants = this.buildParticipantsJson(resolvedPrimaryActorId, resolvedLocationId);
-      const publicEventCategory = this.toPublicEventCategory(privateEvent.event_category);
+      const publicEventCategory = this.resolveNow(this.promotionQueryRepo.toPublicEventCategory(privateEvent.event_category));
       if (!publicEventCategory) {
         result.skipped += 1;
         continue;
@@ -134,7 +137,7 @@ export class MaterializationService {
           origin: "delayed_materialization",
         });
         this.linkPrivateToPublic(privateEvent.id, publicEventId);
-        this.projectionRepo.applyMaterializationProjection({
+        this.projectionRepo?.applyMaterializationProjection({
           trigger: "materialization",
           agentId,
           areaId: resolvedLocationId,
@@ -168,15 +171,15 @@ export class MaterializationService {
   }
 
   private findPublicEventBySourceRecord(sourceRecordId: string): { id: number } | null {
-    const row = this.db
-      .prepare(
-        `SELECT id
-         FROM event_nodes
-         WHERE source_record_id = ? AND ${SQL_AREA_VISIBLE}
-         LIMIT 1`,
-      )
-      .get(sourceRecordId) as { id: number } | null;
-    return row;
+    const resolved = this.resolveNow(this.promotionQueryRepo.findPublicEventBySourceRecordId(sourceRecordId));
+    if (!resolved) {
+      return null;
+    }
+    const parsed = parseGraphNodeRef(resolved);
+    if (parsed.kind !== "event") {
+      return null;
+    }
+    return { id: Number(parsed.id) };
   }
 
   private getEventById(eventId: number): EventRow | null {
@@ -195,71 +198,70 @@ export class MaterializationService {
   }
 
   private resolveEntityForPublic(entityId: number, timestamp: number, isLocation: boolean): number | null {
-    const entity = this.db
-      .prepare(
-        `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id, canonical_entity_id, summary
-         FROM entity_nodes
-         WHERE id = ?`,
-      )
-      .get(entityId) as EntityRow | null;
+    const decision = this.resolveNow(
+      this.promotionQueryRepo.resolvePublicEntityDecision({
+        sourceEntityRef: makeNodeRef("entity", entityId),
+        timestamp,
+        isLocation,
+      }),
+    );
 
-    if (!entity) {
+    if (decision.action === "block") {
       return null;
     }
 
-    if (entity.memory_scope === "shared_public") {
-      return entity.id;
-    }
-
-    const existingShared = this.db
-      .prepare(
-        `SELECT id
-         FROM entity_nodes
-         WHERE pointer_key = ? AND memory_scope = 'shared_public'
-         LIMIT 1`,
-      )
-      .get(entity.pointer_key) as { id: number } | null;
-    if (existingShared) {
-      return existingShared.id;
+    if (decision.action === "reuse_shared") {
+      const parsed = parseGraphNodeRef(decision.resolvedEntityRef);
+      if (parsed.kind !== "entity") {
+        return null;
+      }
+      return Number(parsed.id);
     }
 
     if (!this.storage) {
       return null;
     }
 
-    if (this.isPubliclyIdentifiable(entity, isLocation)) {
+    if (decision.action === "promote_full") {
+      const entity = decision.sourceEntity;
+      const canonicalParsed = entity.canonicalEntityRef
+        ? parseGraphNodeRef(entity.canonicalEntityRef)
+        : parseGraphNodeRef(entity.entityRef);
       return this.storage.upsertEntity({
-        pointerKey: entity.pointer_key,
-        displayName: entity.display_name,
-        entityType: entity.entity_type,
+        pointerKey: entity.pointerKey,
+        displayName: entity.displayName,
+        entityType: entity.entityType,
         summary: entity.summary ?? undefined,
         memoryScope: "shared_public",
-        canonicalEntityId: entity.canonical_entity_id ?? entity.id,
+        canonicalEntityId: canonicalParsed.kind === "entity" ? Number(canonicalParsed.id) : entityId,
       });
     }
 
-    return this.storage.upsertEntity({
-      pointerKey: `unknown_person@area:t${timestamp}`,
-      displayName: "Unknown person",
-      entityType: "person",
-      memoryScope: "shared_public",
-    });
+    if (decision.action === "promote_placeholder") {
+      return this.storage.upsertEntity({
+        pointerKey: decision.placeholderPointerKey,
+        displayName: decision.displayName,
+        entityType: decision.entityType,
+        memoryScope: "shared_public",
+      });
+    }
+
+    return null;
   }
 
-  private isPubliclyIdentifiable(entity: EntityRow, isLocation: boolean): boolean {
-    if (isLocation && entity.entity_type !== "person") {
-      return true;
+  private resolveNow<T>(value: Promise<T> | T): T {
+    if (!(value instanceof Promise)) {
+      return value;
     }
 
-    const pointer = entity.pointer_key.toLowerCase();
-    const display = entity.display_name.toLowerCase();
-    for (const marker of HIDDEN_ENTITY_MARKERS) {
-      if (pointer.includes(marker) || display.includes(marker)) {
-        return false;
-      }
+    const settledValue = Bun.peek(value);
+    if (settledValue instanceof Promise) {
+      throw new Error(
+        "MaterializationService sync API received unresolved async repo result. "
+          + "Inject adapter-style repos that resolve immediately for this call path.",
+      );
     }
-
-    return !pointer.startsWith("unknown_person@area:t");
+    return settledValue as T;
   }
 
   private buildParticipantsJson(primaryActorEntityId: number | null, locationEntityId: number): string {
@@ -269,19 +271,6 @@ export class MaterializationService {
       refs.add(makeNodeRef("entity", primaryActorEntityId));
     }
     return JSON.stringify(Array.from(refs));
-  }
-
-  private toPublicEventCategory(category: PrivateEventCategory): PublicEventCategory | null {
-    if (
-      category === "speech" ||
-      category === "action" ||
-      category === "observation" ||
-      category === "state_change"
-    ) {
-      return category;
-    }
-
-    return null;
   }
 
   materializePublications(
@@ -298,7 +287,7 @@ export class MaterializationService {
   ): MaterializationResult {
     return materializePublications(this.storage, publications, settlementId, ctx, {
       db: this.db,
-      projectionRepo: this.projectionRepo,
+      projectionRepo: this.projectionRepo ?? undefined,
       sourceAgentId: ctx.sourceAgentId,
       agentRole: ctx.agentRole,
       writeTemplateOverride: ctx.writeTemplateOverride,
@@ -316,7 +305,7 @@ export function materializePublications(
     timestamp?: number;
   },
   options?: {
-    db?: Database;
+    db?: RecoveryJobDbLike;
     projectionRepo?: AreaWorldProjectionRepo;
     sourceAgentId?: string;
     agentRole?: AgentRole;
@@ -479,7 +468,7 @@ function createPublicationEventWithRetry(
   storage: GraphStorageService | null,
   params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
   retryContext: PublicationRetryContext,
-  db?: Database,
+  db?: RecoveryJobDbLike,
 ): PublicationWriteResult {
   if (!storage) {
     return "skipped";
@@ -518,7 +507,7 @@ function createPublicationEventWithRetry(
 }
 
 function writePublicationRecoveryJob(
-  db: Database | undefined,
+  db: RecoveryJobDbLike | undefined,
   params: Parameters<GraphStorageService["createProjectedEvent"]>[0],
   retryContext: PublicationRetryContext,
   failureCount: number,
@@ -571,7 +560,7 @@ function writePublicationRecoveryJob(
         payload.nextAttemptAt,
       );
 
-    if (insertResult.changes > 0) {
+    if ((insertResult.changes ?? 0) > 0) {
       return;
     }
 
@@ -637,4 +626,72 @@ function isLikelySqliteError(error: unknown): boolean {
     msg.includes("database is busy") ||
     msg.includes("sql logic error")
   );
+}
+
+function normalizeDbInput(db: Db | Db["raw"]): Db {
+  if (isDb(db)) {
+    return db;
+  }
+
+  return {
+    raw: db as unknown as Db["raw"],
+    exec(sql: string): void {
+      if (typeof db.exec === "function") {
+        db.exec(sql);
+        return;
+      }
+      throw new Error("Raw sqlite handle does not expose exec(sql)");
+    },
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      const stmt = db.prepare(sql);
+      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
+    },
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.run(...(params as [])) : stmt.run();
+      return {
+        changes: Number(result.changes ?? 0),
+        lastInsertRowid: result.lastInsertRowid ?? 0,
+      };
+    },
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.get(...(params as [])) : stmt.get();
+      return result === null ? undefined : (result as T);
+    },
+    close(): void {
+      if (typeof db.close === "function") {
+        db.close();
+      }
+    },
+    transaction<T>(fn: () => T): T {
+      if (typeof db.transaction === "function") {
+        return db.transaction(fn)();
+      }
+      return fn();
+    },
+    prepare(sql: string) {
+      const stmt = db.prepare(sql);
+      return {
+        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
+          return {
+            changes: Number(result.changes ?? 0),
+            lastInsertRowid: result.lastInsertRowid ?? 0,
+          };
+        },
+        all(...params: unknown[]): unknown[] {
+          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
+        },
+        get(...params: unknown[]): unknown {
+          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
+          return result === null ? undefined : result;
+        },
+      };
+    },
+  };
+}
+
+function isDb(db: Db | Db["raw"]): db is Db {
+  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }

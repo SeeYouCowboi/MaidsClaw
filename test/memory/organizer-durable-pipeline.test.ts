@@ -121,7 +121,7 @@ describe("organizer durable per-chunk pipeline", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const persistence = new SqliteJobPersistence(db);
       const provider = new BulkEntityModelProvider(121);
@@ -162,7 +162,7 @@ describe("organizer durable per-chunk pipeline", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const persistence = new SqliteJobPersistence(db);
       const provider = new BulkEntityModelProvider(101);
@@ -226,7 +226,7 @@ describe("organizer durable per-chunk pipeline", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const persistence = new SqliteJobPersistence(db);
       const provider = new BulkEntityModelProvider(70);

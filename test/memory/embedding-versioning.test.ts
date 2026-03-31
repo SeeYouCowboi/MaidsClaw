@@ -16,7 +16,7 @@ describe("embedding versioning and dimension safety", () => {
     db = temp.db;
     dbPath = temp.dbPath;
     storage = new GraphStorageService(db);
-    embeddingService = new EmbeddingService(db, new TransactionBatcher(db));
+    embeddingService = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
   });
 
   afterEach(() => {

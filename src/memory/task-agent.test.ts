@@ -92,7 +92,7 @@ describe("MemoryTaskAgent", () => {
     db = freshDb();
     storage = new GraphStorageService(db);
     coreMemory = new CoreMemoryService(db);
-    embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+    embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
     materialization = new MaterializationService(db, storage);
     coreMemory.initializeBlocks("agent-1");
   });

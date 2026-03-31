@@ -100,7 +100,7 @@ describe("MemoryTaskAgent strict durable mode", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const provider = new MinimalModelProvider();
       const persistence = createFailingPersistence("enqueue failure strict");
@@ -145,7 +145,7 @@ describe("MemoryTaskAgent strict durable mode", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const provider = new MinimalModelProvider();
       const persistence = createFailingPersistence("enqueue failure non-strict");
@@ -188,7 +188,7 @@ describe("MemoryTaskAgent strict durable mode", () => {
     try {
       const storage = new GraphStorageService(db);
       const coreMemory = new CoreMemoryService(db);
-      const embeddings = new EmbeddingService(db, new TransactionBatcher(db));
+      const embeddings = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
       const materialization = new MaterializationService(db.raw, storage);
       const provider = new MinimalModelProvider();
 

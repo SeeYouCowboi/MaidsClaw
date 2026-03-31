@@ -1,10 +1,12 @@
 import type { Db } from "../storage/database.js";
+import { SqliteEmbeddingRepoAdapter } from "../storage/domain-repos/sqlite/embedding-repo.js";
+import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
 import type { ITransactionBatcher } from "./transaction-batcher.js";
-import type { EmbeddingViewType, NodeRef } from "./types.js";
+import type { EmbeddingViewType, NodeRef, NodeRefKind } from "./types.js";
 
 type EmbeddingEntry = {
   nodeRef: NodeRef;
-  nodeKind: string;
+  nodeKind: NodeRefKind;
   viewType: EmbeddingViewType;
   modelId: string;
   embedding: Float32Array;
@@ -26,9 +28,13 @@ export class EmbeddingService {
    * calls during Task 14 wiring.
    */
   constructor(
-    private readonly db: Db,
+    private readonly embeddingRepo: EmbeddingRepo,
     private readonly batcher: ITransactionBatcher,
   ) {}
+
+  static fromSqlite(dbInput: Db | Db["raw"], batcher: ITransactionBatcher): EmbeddingService {
+    return new EmbeddingService(new SqliteEmbeddingRepoAdapter(normalizeDbInput(dbInput)), batcher);
+  }
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
@@ -61,20 +67,16 @@ export class EmbeddingService {
       return;
     }
 
-    const now = Date.now();
-    const insert = this.db.prepare(
-      "INSERT OR REPLACE INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?,?,?,?,?,?)",
-    );
-
     this.batcher.runInTransaction(() => {
       for (const entry of entries) {
-        insert.run(
-          entry.nodeRef,
-          entry.nodeKind,
-          entry.viewType,
-          entry.modelId,
-          this.serializeEmbedding(entry.embedding),
-          now,
+        this.resolveNow(
+          this.embeddingRepo.upsert(
+            entry.nodeRef,
+            entry.nodeKind,
+            entry.viewType,
+            entry.modelId,
+            entry.embedding,
+          ),
         );
       }
     });
@@ -91,40 +93,7 @@ export class EmbeddingService {
     queryEmbedding: Float32Array,
     options: NeighborQueryOptions,
   ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
-    const limit = options.limit ?? 20;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
-
-    if (options.nodeKind) {
-      conditions.push("node_kind = ?");
-      params.push(options.nodeKind);
-    }
-    if (options.modelId) {
-      conditions.push("model_id = ?");
-      params.push(options.modelId);
-    }
-
-    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db
-      .prepare(`SELECT node_ref, node_kind, embedding FROM node_embeddings${whereClause}`)
-      .all(...params) as Array<{ node_ref: string; node_kind: string; embedding: Buffer | Uint8Array }>;
-
-    const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM private_episode_events WHERE id=?");
-    const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM private_cognition_current WHERE id=?");
-
-    const candidates: Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> = [];
-    for (const row of rows) {
-      const nodeRef = row.node_ref as NodeRef;
-      if (!this.isNodeVisibleForAgent(nodeRef, row.node_kind, options.agentId, privateEventOwnerStmt, privateBeliefOwnerStmt)) {
-        continue;
-      }
-
-      const vector = this.deserializeEmbedding(Buffer.from(row.embedding));
-      const similarity = this.cosineSimilarity(queryEmbedding, vector);
-      candidates.push({ nodeRef, similarity, nodeKind: row.node_kind });
-    }
-
-    return candidates.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+    return this.resolveNow(this.embeddingRepo.query(queryEmbedding, options));
   }
 
   deserializeEmbedding(blob: Buffer): Float32Array {
@@ -137,42 +106,86 @@ export class EmbeddingService {
     return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
   }
 
-  /**
-   * SQLite helper for current read path.
-   *
-   * PG plan (T14): this visibility filtering is expected to move into repository SQL, so this
-   * method becomes legacy-only once EmbeddingRepo-backed querying is fully wired.
-   */
-  private isNodeVisibleForAgent(
-    nodeRef: NodeRef,
-    nodeKind: string,
-    agentId: string | null,
-    _privateEventOwnerStmt: ReturnType<Db["prepare"]>,
-    privateBeliefOwnerStmt: ReturnType<Db["prepare"]>,
-  ): boolean {
-    if (nodeKind !== "assertion" && nodeKind !== "evaluation" && nodeKind !== "commitment") {
-      return true;
+  private resolveNow<T>(value: Promise<T> | T): T {
+    if (!(value instanceof Promise)) {
+      return value;
     }
 
-    if (agentId === null) {
-      return false;
+    const settledValue = Bun.peek(value);
+    if (settledValue instanceof Promise) {
+      throw new Error(
+        "EmbeddingService sync API received unresolved async repo result. "
+          + "Inject adapter-style repos that resolve immediately for this call path.",
+      );
     }
+    return settledValue as T;
+  }
+}
 
-    const id = this.parseNodeRefId(nodeRef);
-    if (!id) {
-      return false;
-    }
-
-    const row = privateBeliefOwnerStmt.get(id) as { agent_id: string } | undefined;
-    return row?.agent_id === agentId;
+function normalizeDbInput(db: Db | Db["raw"]): Db {
+  if (isDb(db)) {
+    return db;
   }
 
-  private parseNodeRefId(nodeRef: NodeRef): number | undefined {
-    const idPart = String(nodeRef).split(":")[1];
-    const id = Number(idPart);
-    if (!Number.isInteger(id) || id <= 0) {
-      return undefined;
-    }
-    return id;
-  }
+  return {
+    raw: db as unknown as Db["raw"],
+    exec(sql: string): void {
+      if (typeof db.exec === "function") {
+        db.exec(sql);
+        return;
+      }
+      throw new Error("Raw sqlite handle does not expose exec(sql)");
+    },
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      const stmt = db.prepare(sql);
+      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
+    },
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.run(...(params as [])) : stmt.run();
+      return {
+        changes: Number(result.changes ?? 0),
+        lastInsertRowid: result.lastInsertRowid ?? 0,
+      };
+    },
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+      const stmt = db.prepare(sql);
+      const result = params ? stmt.get(...(params as [])) : stmt.get();
+      return result === null ? undefined : (result as T);
+    },
+    close(): void {
+      if (typeof db.close === "function") {
+        db.close();
+      }
+    },
+    transaction<T>(fn: () => T): T {
+      if (typeof db.transaction === "function") {
+        return db.transaction(fn)();
+      }
+      return fn();
+    },
+    prepare(sql: string) {
+      const stmt = db.prepare(sql);
+      return {
+        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
+          return {
+            changes: Number(result.changes ?? 0),
+            lastInsertRowid: result.lastInsertRowid ?? 0,
+          };
+        },
+        all(...params: unknown[]): unknown[] {
+          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
+        },
+        get(...params: unknown[]): unknown {
+          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
+          return result === null ? undefined : result;
+        },
+      };
+    },
+  };
+}
+
+function isDb(db: Db | Db["raw"]): db is Db {
+  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }

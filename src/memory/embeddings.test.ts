@@ -59,7 +59,7 @@ describe("EmbeddingService", () => {
 
   beforeEach(() => {
     db = freshDb();
-    service = new EmbeddingService(db, new TransactionBatcher(db));
+    service = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
   });
 
   it("cosineSimilarity returns 1 for identical vectors", () => {

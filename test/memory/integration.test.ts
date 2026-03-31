@@ -66,7 +66,7 @@ describe("Memory integration", () => {
 		const db = freshDb();
 		const storage = new GraphStorageService(db as any);
 		const coreMemory = new CoreMemoryService(db as any);
-		const embeddings = new EmbeddingService(db as any, new TransactionBatcher(db as any));
+		const embeddings = EmbeddingService.fromSqlite(db as any, new TransactionBatcher(db as any));
 		const materialization = new MaterializationService(db, storage);
 		const retrieval = new RetrievalService(db as any);
 		const alias = new AliasService(db);
@@ -476,7 +476,7 @@ describe("Memory integration", () => {
 		const db = freshDb();
 		const storage = new GraphStorageService(db as any);
 		const coreMemory = new CoreMemoryService(db as any);
-		const embeddings = new EmbeddingService(db as any, new TransactionBatcher(db as any));
+		const embeddings = EmbeddingService.fromSqlite(db as any, new TransactionBatcher(db as any));
 		const materialization = new MaterializationService(db, storage);
 		const retrieval = new RetrievalService(db as any);
 
@@ -618,7 +618,7 @@ describe("Memory integration", () => {
 		const db = freshDb();
 		const storage = new GraphStorageService(db as any);
 		const coreMemory = new CoreMemoryService(db as any);
-		const embeddings = new EmbeddingService(db as any, new TransactionBatcher(db as any));
+		const embeddings = EmbeddingService.fromSqlite(db as any, new TransactionBatcher(db as any));
 		const materialization = new MaterializationService(db, storage);
 		const retrieval = new RetrievalService(db as any);
 

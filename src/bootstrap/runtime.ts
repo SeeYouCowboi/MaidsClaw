@@ -57,6 +57,9 @@ import { SharedBlockRepo as SqliteSharedBlockRepoImpl } from "../memory/shared-b
 import { GraphStorageService } from "../memory/storage.js";
 import { MemoryTaskAgent } from "../memory/task-agent.js";
 import { TransactionBatcher } from "../memory/transaction-batcher.js";
+import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
+import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
+import { SqliteEmbeddingRepoAdapter } from "../storage/domain-repos/sqlite/embedding-repo.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
@@ -757,10 +760,11 @@ export function bootstrapRuntime(
 						backendType === "pg"
 							? new PgTransactionBatcher()
 							: new TransactionBatcher(requireSqliteDb(sqliteDb));
-					const embeddings = new EmbeddingService(
-						(db ?? (undefined as unknown as Db)) as Db,
-						transactionBatcher,
-					);
+					const embeddingRepo =
+						backendType === "pg"
+							? createLazyPgRepo(() => new PgEmbeddingRepo(resolvePgPool()))
+							: new SqliteEmbeddingRepoAdapter(requireSqliteDb(sqliteDb));
+					const embeddings = new EmbeddingService(embeddingRepo, transactionBatcher);
 					if (
 						backendType === "sqlite" &&
 						sqliteDb &&
@@ -768,9 +772,12 @@ export function bootstrapRuntime(
 						sqliteCoreMemoryService &&
 						settlementLedger
 					) {
+						const promotionQueryRepo = new SqlitePromotionQueryRepo(sqliteDb);
 						const materialization = new MaterializationService(
-							sqliteDb.raw,
+							sqliteDb,
 							sqliteGraphStorage,
+							promotionQueryRepo,
+							new AreaWorldProjectionRepo(sqliteDb.raw),
 						);
 						const organizerEmbeddingModelId =
 							effectiveOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;

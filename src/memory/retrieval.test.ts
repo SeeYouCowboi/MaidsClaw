@@ -206,7 +206,7 @@ describe("RetrievalService", () => {
       content: "coffee at dawn",
     });
 
-    const embeddingService = new EmbeddingService(db, new TransactionBatcher(db));
+    const embeddingService = EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
     embeddingService.batchStoreEmbeddings([
       {
         nodeRef: "event:1" as NodeRef,

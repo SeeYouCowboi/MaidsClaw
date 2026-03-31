@@ -69,7 +69,7 @@ export class RetrievalService {
     const deps = this.resolveDeps(dbOrDeps);
     const { db } = deps;
     this.db = db;
-    this.embeddingService = deps.embeddingService ?? new EmbeddingService(db, new TransactionBatcher(db));
+    this.embeddingService = deps.embeddingService ?? EmbeddingService.fromSqlite(db, new TransactionBatcher(db));
     this.narrativeSearch = deps.narrativeSearch ?? new NarrativeSearchService(db);
     this.cognitionSearch = deps.cognitionSearch ?? new CognitionSearchService(db);
     this.orchestrator = deps.orchestrator

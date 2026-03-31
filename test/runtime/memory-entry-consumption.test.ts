@@ -949,7 +949,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
         runtime.db.raw,
         storage,
         coreMemory,
-        new EmbeddingService(runtime.db, new TransactionBatcher(runtime.db)),
+        EmbeddingService.fromSqlite(runtime.db, new TransactionBatcher(runtime.db)),
         new MaterializationService(runtime.db.raw, storage),
         new DeterministicMemoryModelProvider([
           [],
@@ -1755,7 +1755,7 @@ describe("memory-entry-consumption: live runtime integration", () => {
         runtime.db.raw,
         storage,
         coreMemory,
-        new EmbeddingService(runtime.db, new TransactionBatcher(runtime.db)),
+        EmbeddingService.fromSqlite(runtime.db, new TransactionBatcher(runtime.db)),
         new MaterializationService(runtime.db.raw, storage),
         new DeterministicMemoryModelProvider([
           [],
