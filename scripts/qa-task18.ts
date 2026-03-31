@@ -8,7 +8,7 @@ import {
   printReport,
   CANONICAL_LEDGER_TABLES,
   REPORT_TABLES,
-} from "./memory-maintenance.js";
+} from "../src/memory/maintenance-report.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

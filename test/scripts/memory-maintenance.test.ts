@@ -6,7 +6,7 @@ import {
   runRetention,
   runIntegrityCheck,
   gatherReportRows,
-} from "../../scripts/memory-maintenance.js";
+} from "../../src/memory/maintenance-report.js";
 import { createTempDb, cleanupDb, type Db } from "../helpers/memory-test-utils.js";
 
 describe("memory-maintenance", () => {
