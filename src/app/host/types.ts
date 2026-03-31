@@ -46,6 +46,7 @@ export type AppHostOptions = {
   requireAllProviders?: boolean;
   traceCaptureEnabled?: boolean;
   enableMaintenance?: boolean;
+  enableDurableOrchestration?: boolean;
 };
 
 export type HostStatusDTO = {

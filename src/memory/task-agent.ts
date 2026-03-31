@@ -338,6 +338,7 @@ export class MemoryTaskAgent {
     modelProvider?: MemoryTaskModelProvider,
     settlementLedger?: SettlementLedger,
     jobPersistence?: JobPersistence,
+    private readonly strictDurableMode = false,
   ) {
     this.db = normalizeDbInput(dbInput);
     this.rawDb = this.db.raw;
@@ -471,6 +472,9 @@ export class MemoryTaskAgent {
       try {
         await this.enqueueOrganizerJobs(flushRequest.agentId, flushRequest.idempotencyKey, created.changedNodeRefs);
       } catch (err) {
+        if (this.strictDurableMode) {
+          throw err;
+        }
         console.error("[MemoryTaskAgent] durable organizer enqueue failed, falling back to background organize", {
           batchId: organizeJob.batchId,
           sessionId: organizeJob.sessionId,

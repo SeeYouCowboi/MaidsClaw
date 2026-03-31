@@ -221,6 +221,9 @@ export async function createAppHost(
 		throw new Error(`Invalid port: ${port}`);
 	}
 
+	const strictDurableMode =
+		options.role === "worker" || options.enableDurableOrchestration === true;
+
 	const runtime = _injectedRuntime ?? bootstrapRuntime({
 		cwd: options.cwd,
 		databasePath,
@@ -230,6 +233,7 @@ export async function createAppHost(
 		memoryEmbeddingModelId,
 		memoryOrganizerEmbeddingModelId,
 		traceCaptureEnabled: options.traceCaptureEnabled,
+		strictDurableMode,
 	});
 
 	if (runtime.backendType === "pg") {
@@ -327,6 +331,10 @@ export async function createAppHost(
 		: undefined;
 	const workerConsumer =
 		options.role === "worker" ? createJobConsumer(runtime) : undefined;
+	const serverDurableConsumer =
+		options.role === "server" && options.enableDurableOrchestration
+			? createJobConsumer(runtime)
+			: undefined;
 
 	let started = false;
 	let stopped = false;
@@ -335,6 +343,9 @@ export async function createAppHost(
 		if (options.role === "server") {
 			server?.start();
 			started = true;
+			if (serverDurableConsumer) {
+				await serverDurableConsumer.start();
+			}
 		} else if (options.role === "worker") {
 			await workerConsumer?.start();
 		}
@@ -349,6 +360,9 @@ export async function createAppHost(
 		try {
 			if (options.role === "server") {
 				server?.stop();
+				if (serverDurableConsumer) {
+					await serverDurableConsumer.stop();
+				}
 			} else if (options.role === "worker") {
 				await workerConsumer?.stop();
 			}

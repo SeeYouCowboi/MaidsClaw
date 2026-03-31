@@ -343,6 +343,7 @@ export function bootstrapRuntime(
 						provider,
 						settlementLedger,
 						resolvedJobPersistence,
+						options.strictDurableMode,
 					);
 					memoryPipelineReady = true;
 					memoryPipelineStatus = "ready";

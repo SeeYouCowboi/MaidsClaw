@@ -66,6 +66,7 @@ export type RuntimeBootstrapOptions = {
 	traceStore?: TraceStore;
 	traceCaptureEnabled?: boolean;
 	jobPersistence?: JobPersistence;
+	strictDurableMode?: boolean;
 };
 
 export type MemoryPipelineStatus =
