@@ -493,3 +493,11 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - `MAIDSCLAW_SQLITE_FREEZE=true` remains safe for PG runtime startup because guard only applies when resolved backend is `sqlite`.
 - `AppMaintenanceFacadeImpl.drain()` now integrates freeze behavior by setting `MAIDSCLAW_SQLITE_FREEZE=true` for sqlite backend before marking drain mode, while keeping drain callable/idempotent.
 - Added `scripts/freeze-sqlite.ts` as an ops probe: prints current freeze status and exits `0` when frozen, `1` when not frozen.
+
+## [2026-04-01] Task 23: Drain Gate CLI Enhancement
+- bun:sqlite `new Database(path, { readonly: false })` causes SQLITE_MISUSE error; for write access use `new Database(path)` without options (default is read-write).
+- `forceDrain()` added to `src/jobs/sqlite-drain-check.ts`: updates pending/processing/retryable rows to 'exhausted' status (never deletes data).
+- CLI argument parsing uses manual `process.argv` iteration — no external deps needed for simple flag/value pairs.
+- Polling loop pattern: `while(true)` with deadline check, `setTimeout`-based sleep, and explicit exit codes (0=ready, 1=not-ready/timeout, 2=error).
+- JSON audit output includes full `DrainCheckReport` nested under `report` field plus top-level summary fields (`ready`, `activeJobs`, `pendingJobs`, `timestamp`, `polls`, `forceDrained`).
+- Original one-shot behavior (no args) preserved exactly as before — backward compatible.

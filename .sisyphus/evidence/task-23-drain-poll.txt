@@ -1,0 +1,75 @@
+=== Task 23: Drain Gate CLI Enhancement Evidence ===
+Date: Tue Mar 31 21:40:51 UTC 2026
+
+=== 1. Build Check ===
+$ tsc -p tsconfig.build.json --noEmit
+
+=== 2. Test Results (summary) ===
+ 1942 pass
+ 422 skip
+ 4 fail
+ 6170 expect() calls
+Ran 2368 tests across 185 files. [42.28s]
+
+=== 3. CLI --help ===
+Usage: bun run scripts/pg-jobs-drain-check.ts [options]
+
+Options:
+  --poll                Poll until drain is ready or timeout
+  --interval <seconds>  Polling interval (default: 5)
+  --timeout <seconds>   Max wait time for polling (default: 300)
+  --force-drain         Mark all pending/processing/retryable jobs as exhausted
+  --output <path>       Save JSON audit result to file
+  --help, -h            Show this help message
+
+=== 4. CLI one-shot ===
+Checking legacy SQLite drain status at: ./data/maidsclaw.db
+
+Ready:    true
+Total:    0
+Active:   pending=0, processing=0, retryable=0
+Terminal: exhausted=0, reconciled=0
+
+No active legacy rows found. This is a necessary precondition for future producer freeze / traffic switch, but runtime adoption and cutover remain out of scope.
+
+=== 5. CLI --poll --interval 2 --timeout 10 ===
+Checking legacy SQLite drain status at: ./data/maidsclaw.db
+
+Ready:    true
+Total:    0
+Active:   pending=0, processing=0, retryable=0
+Terminal: exhausted=0, reconciled=0
+
+No active legacy rows found. This is a necessary precondition for future producer freeze / traffic switch, but runtime adoption and cutover remain out of scope.
+
+✓ Drain ready after 1 poll(s), 0.0s elapsed
+
+=== 6. CLI --force-drain ===
+Checking legacy SQLite drain status at: ./data/maidsclaw.db
+
+Force-drain requested: marking all active jobs as exhausted...
+  updated: pending=0, processing=0, retryable=0 (total=0)
+
+Ready:    true
+Total:    0
+Active:   pending=0, processing=0, retryable=0
+Terminal: exhausted=0, reconciled=0
+
+No active legacy rows found. This is a necessary precondition for future producer freeze / traffic switch, but runtime adoption and cutover remain out of scope.
+
+=== 7. CLI --output test ===
+Checking legacy SQLite drain status at: ./data/maidsclaw.db
+
+Ready:    true
+Total:    0
+Active:   pending=0, processing=0, retryable=0
+Terminal: exhausted=0, reconciled=0
+
+No active legacy rows found. This is a necessary precondition for future producer freeze / traffic switch, but runtime adoption and cutover remain out of scope.
+
+Audit log saved to: .sisyphus/evidence/task-23-audit-output.json
+
+=== 8. Audit JSON content ===
+/usr/bin/bash: line 1: type: .sisyphusevidencetask-23-audit-output.json: not found
+
+=== DONE ===

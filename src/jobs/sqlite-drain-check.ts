@@ -15,6 +15,13 @@ export type DrainCheckReport = {
   message: string;
 };
 
+export type ForceDrainResult = {
+  updatedPending: number;
+  updatedProcessing: number;
+  updatedRetryable: number;
+  totalUpdated: number;
+};
+
 type StatusCountRow = {
   status: string;
   count: number;
@@ -86,6 +93,64 @@ export async function checkDrainReady(dbPath: string): Promise<DrainCheckReport>
       terminalCounts: { exhausted, reconciled },
       totalCount,
       message,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Force-drain all active (pending / processing / retryable) rows in the
+ * legacy SQLite `_memory_maintenance_jobs` table by updating their status
+ * to "exhausted". This does NOT delete any rows — it only transitions
+ * their status so they are no longer considered active.
+ *
+ * Returns a summary of how many rows were updated per original status.
+ */
+export async function forceDrain(dbPath: string): Promise<ForceDrainResult> {
+  const db = new Database(dbPath);
+
+  try {
+    const tableRow = db
+      .query<{ name: string }, []>(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='_memory_maintenance_jobs'`,
+      )
+      .get();
+
+    if (!tableRow) {
+      return { updatedPending: 0, updatedProcessing: 0, updatedRetryable: 0, totalUpdated: 0 };
+    }
+
+    const countPending = db
+      .query<{ count: number }, []>(
+        `SELECT CAST(COUNT(*) AS INTEGER) AS count FROM _memory_maintenance_jobs WHERE status = 'pending'`,
+      )
+      .get();
+    const countProcessing = db
+      .query<{ count: number }, []>(
+        `SELECT CAST(COUNT(*) AS INTEGER) AS count FROM _memory_maintenance_jobs WHERE status = 'processing'`,
+      )
+      .get();
+    const countRetryable = db
+      .query<{ count: number }, []>(
+        `SELECT CAST(COUNT(*) AS INTEGER) AS count FROM _memory_maintenance_jobs WHERE status = 'retryable'`,
+      )
+      .get();
+
+    const updatedPending = countPending?.count ?? 0;
+    const updatedProcessing = countProcessing?.count ?? 0;
+    const updatedRetryable = countRetryable?.count ?? 0;
+
+    db.run(
+      `UPDATE _memory_maintenance_jobs SET status = 'exhausted', updated_at = ? WHERE status IN ('pending', 'processing', 'retryable')`,
+      [Date.now()],
+    );
+
+    return {
+      updatedPending,
+      updatedProcessing,
+      updatedRetryable,
+      totalUpdated: updatedPending + updatedProcessing + updatedRetryable,
     };
   } finally {
     db.close();
