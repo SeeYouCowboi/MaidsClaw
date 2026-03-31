@@ -1,0 +1,11 @@
+Task 5 Evidence: no bun:sqlite types in new contracts
+Date: 2026-04-01
+
+Command: ast_grep_search pattern='import $CLAUSE from "bun:sqlite";' lang='typescript'
+Paths checked:
+- src/storage/domain-repos/contracts/graph-read-query-repo.ts
+- src/storage/domain-repos/contracts/node-scoring-query-repo.ts
+- src/storage/domain-repos/contracts/promotion-query-repo.ts
+- src/storage/domain-repos/contracts/narrative-search-repo.ts
+
+Result: No matches found
