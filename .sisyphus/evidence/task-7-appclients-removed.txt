@@ -1,0 +1,29 @@
+Task: Remove deprecated AppClients type alias
+Date: 2025-03-31
+File: src/app/clients/app-clients.ts
+
+=== VERIFICATION ===
+
+1. grep "AppClients" src/app/clients/app-clients.ts (after removal)
+   Result: Only matches in function name "createGatewayAppClients" - type alias removed
+
+2. grep -r "import.*AppClients" src/ --include="*.ts" | grep -v "node_modules\|\.d\.ts"
+   Result: No matches - no files import the deprecated type
+
+3. Build result:
+   $ tsc -p tsconfig.build.json --noEmit
+   Result: PASSED (exit code 0)
+
+4. Test result:
+   1901 pass
+   396 skip
+   0 fail
+   6055 expect() calls
+   Result: PASSED
+
+=== CHANGE SUMMARY ===
+- Removed lines 17-18 from src/app/clients/app-clients.ts:
+  - /** @deprecated Use AppUserFacade */
+  - export type AppClients = AppUserFacade;
+- File reduced from 27 lines to 24 lines
+- No breaking changes - AppUserFacade is the primary export already in use

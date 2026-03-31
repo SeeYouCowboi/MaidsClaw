@@ -133,7 +133,7 @@
 | G4 | P0 | durable orchestration | open | durable jobs plane 未接入默认 runtime 主循环 |
 | G5 | P0 | repair / ops 入口 | open | CLI 脚本仍是 repair-script / partial orchestration 形态 |
 | G6 | P1 | PG integration | open | `pg` runtime 仍不是完整后端切换路径 |
-| G7 | P1 | acceptance harness | open | phase gate 强度不足，real-PG 激活语义不一致 |
+| G7 | P1 | acceptance harness | open | acceptance harness 覆盖不足，foundation gate 强度不足，real-PG 激活语义不一致 |
 | G8 | P1 | graph identity | partial | `graph_nodes` 已写入，但读取层仍停留在 `node_ref` 文本主语义 |
 | G9 | P1 | time contract | partial | settlement 单时钟未覆盖到全部相关 surface |
 | G10 | P1 | search verify / parity | partial | search verify、parity、shadow compare 仍不是统一闭环 |
@@ -406,7 +406,7 @@
 影响：
 
 - search / derived / PG parity 工具链已经具备基础，但还不是完整验收闭环
-- 当前更接近 “operator toolbox partially ready”，不是 “phase gate ready”
+- 当前更接近 “operator toolbox partially ready”，不是 “acceptance gate ready”
 
 判断：
 
