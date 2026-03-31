@@ -1957,7 +1957,7 @@ Max Concurrent: 6 (Wave 1)
   - Files: (grouped)
   - Pre-commit: `bun run build`
 
-- [ ] 21. Add Orchestration State to Admin Introspection (R9: Observability)
+- [x] 21. Add Orchestration State to Admin Introspection (R9: Observability)
 
   **What to do**:
   - Extend `AppHostAdmin.getHostStatus()` in `create-app-host.ts:186-192` to include orchestration state:
@@ -2062,7 +2062,7 @@ Max Concurrent: 6 (Wave 1)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle` (subagent_type, not category)
+- [x] F1. **Plan Compliance Audit** — `oracle` (subagent_type, not category)
 
   **What to do**:
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
@@ -2105,7 +2105,7 @@ Max Concurrent: 6 (Wave 1)
 
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
 
   **What to do**:
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp). Verify no `bun:sqlite` imports outside allowed paths.
@@ -2138,7 +2138,7 @@ Max Concurrent: 6 (Wave 1)
 
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
 
   **What to do**:
   Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration: bootstrap with `role: "worker"` and verify job consumer starts; bootstrap with `role: "server"` + `enableDurableOrchestration: true` and verify full pipeline. Run maintenance scripts with `--dry-run`. Save to `.sisyphus/evidence/final-qa/`.
@@ -2196,7 +2196,7 @@ Max Concurrent: 6 (Wave 1)
 
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
 
   **What to do**:
   For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance. Verify no "Phase 2A/2B/2C" terminology remains, no `bootstrapApp` imports, no `local-runtime.js` imports. Flag unaccounted changes.
