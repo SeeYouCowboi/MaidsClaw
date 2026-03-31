@@ -447,3 +447,49 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 ### Key insight: no openDatabase imports remain in migrated scripts
 - `grep -r "openDatabase" scripts/ --include="*.ts"` returns only `parity-verify.ts` (out-of-scope parity script).
 - All 4 migrated scripts use `bootstrapRuntime()` for SQLite path and `PgBackendFactory` for PG path where applicable.
+
+---
+
+## T21: Remaining Test Fixture Migration (2026-04-01)
+
+### Pattern: Most SQLite test files CANNOT be mechanically migrated to PG
+- 12 out of 17 non-memory SQLite test files pass `db: Database` directly to service constructors (`InteractionStore(db)`, `TurnService(db, ...)`, `JobPersistenceFactory(db)`, etc.)
+- These constructors accept SQLite `Database` types, not PG connection objects
+- Mechanical `createTempDb()` → `createPgTestDb()` swapping is impossible without rewriting the service constructors
+- The right approach: identify COVERAGE GAPS in existing PG tests, then write NEW PG-native tests for those gaps
+
+### Pattern: Audit-first approach for test migration
+- Step 1: Grep all files using `createTempDb()`/`openDatabase()` to build complete inventory
+- Step 2: Categorize each file: (a) SQLite-coupled, (b) potentially migratable, (c) SQLite-specific
+- Step 3: Cross-reference against existing `test/pg-app/` coverage to find real gaps
+- Step 4: Write new PG tests only for genuine coverage gaps
+- This avoids wasting effort on impossible migrations and duplicate test coverage
+
+### Discovery: porsager/postgres v3.4.8 JSONB string bug
+- When storing JSONB via `${JSON.stringify(val)}::jsonb`, the library returns the value as a RAW STRING on read, not a parsed object
+- `typeof row.payload` is `"string"`, not `"object"`
+- This breaks any code that does `typeof payload !== "object"` checks or direct property access like `payload.ownerAgentId`
+- Affected methods in `PgInteractionRepo`: `getSettlementPayload()`, `listStalePendingSettlementSessions()`, `rowToRecord()`
+- The existing `pg-interaction-session-repo.test.ts` already has 5 pre-existing failures from this bug
+- Fix: either use `JSON.parse()` on read, or use postgres library's built-in JSONB handling (e.g., `sql.json(val)`)
+
+### Pattern: New PG test file follows established conventions
+- Import `skipPgTests` from `test/helpers/pg-test-utils.ts` as the skip guard
+- Use `withTestAppSchema()` from `test/helpers/pg-app-test-utils.ts` for schema setup/teardown
+- Use `createPgTestDb()` for creating the `PgTestDb` connection object
+- Create repo instances directly: `new PgInteractionRepo(testDb.sql)`
+- Use `afterAll(() => testDb.close())` for cleanup
+- Wrap each describe with `describe.skipIf(skipPgTests)(...)`
+
+### Key insight: 4 real PG coverage gaps in PgInteractionRepo
+- `getSettlementPayload` — returns latest settlement payload for session+request
+- `getMessageRecords` filtering — returns only message records, excluding status/settlement
+- `findSessionIdByRequestId` REQUEST_ID_AMBIGUOUS error path — throws when request maps to multiple sessions
+- `listStalePendingSettlementSessions` — finds sessions with stale unprocessed settlements
+- All 4 now have test coverage via `pg-interaction-request-lookup.test.ts` (7 test cases)
+
+## [2026-04-01] Task 22: SQLite producer freeze toggle
+- `resolveBackendType()` now enforces freeze guard: when backend resolves to `sqlite` and `MAIDSCLAW_SQLITE_FREEZE=true`, startup throws a hard error with explicit PG fallback guidance.
+- `MAIDSCLAW_SQLITE_FREEZE=true` remains safe for PG runtime startup because guard only applies when resolved backend is `sqlite`.
+- `AppMaintenanceFacadeImpl.drain()` now integrates freeze behavior by setting `MAIDSCLAW_SQLITE_FREEZE=true` for sqlite backend before marking drain mode, while keeping drain callable/idempotent.
+- Added `scripts/freeze-sqlite.ts` as an ops probe: prints current freeze status and exits `0` when frozen, `1` when not frozen.

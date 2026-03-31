@@ -52,6 +52,52 @@ function createOrchestrationSpy(): {
 }
 
 describe("AppMaintenanceFacadeImpl", () => {
+	test("drain enables sqlite freeze flag when backend is sqlite", async () => {
+		const { orchestrationService } = createOrchestrationSpy();
+		const { jobPersistence } = createJobPersistenceSpy();
+		const facade = new AppMaintenanceFacadeImpl(
+			orchestrationService,
+			jobPersistence,
+			"sqlite",
+		);
+		const originalFreeze = process.env.MAIDSCLAW_SQLITE_FREEZE;
+
+		delete process.env.MAIDSCLAW_SQLITE_FREEZE;
+		try {
+			await facade.drain();
+			expect(process.env.MAIDSCLAW_SQLITE_FREEZE === "true").toBe(true);
+		} finally {
+			if (originalFreeze === undefined) {
+				delete process.env.MAIDSCLAW_SQLITE_FREEZE;
+			} else {
+				process.env.MAIDSCLAW_SQLITE_FREEZE = originalFreeze;
+			}
+		}
+	});
+
+	test("drain does not set sqlite freeze flag when backend is pg", async () => {
+		const { orchestrationService } = createOrchestrationSpy();
+		const { jobPersistence } = createJobPersistenceSpy();
+		const facade = new AppMaintenanceFacadeImpl(
+			orchestrationService,
+			jobPersistence,
+			"pg",
+		);
+		const originalFreeze = process.env.MAIDSCLAW_SQLITE_FREEZE;
+
+		delete process.env.MAIDSCLAW_SQLITE_FREEZE;
+		try {
+			await facade.drain();
+			expect(process.env.MAIDSCLAW_SQLITE_FREEZE).toBeUndefined();
+		} finally {
+			if (originalFreeze === undefined) {
+				delete process.env.MAIDSCLAW_SQLITE_FREEZE;
+			} else {
+				process.env.MAIDSCLAW_SQLITE_FREEZE = originalFreeze;
+			}
+		}
+	});
+
 	test("runOnce delegates to orchestration runFullMaintenance", async () => {
 		const { orchestrationService, getRunFullMaintenanceCallCount } =
 			createOrchestrationSpy();

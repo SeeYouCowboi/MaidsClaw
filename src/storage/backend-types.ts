@@ -13,6 +13,10 @@ import { createPgPool } from "./pg-pool.js";
 
 export type BackendType = "sqlite" | "pg";
 
+export function isSqliteFreezeEnabled(): boolean {
+	return process.env.MAIDSCLAW_SQLITE_FREEZE === "true";
+}
+
 export interface PgPoolConfig {
 	url: string;
 	max?: number; // default: 10
@@ -39,8 +43,15 @@ export interface BackendConfig {
  */
 export function resolveBackendType(): BackendType {
 	const val = process.env.MAIDSCLAW_BACKEND;
-	if (val === "pg") return "pg";
-	return "sqlite"; // default
+	const resolvedType: BackendType = val === "pg" ? "pg" : "sqlite";
+
+	if (resolvedType === "sqlite" && isSqliteFreezeEnabled()) {
+		throw new Error(
+			"SQLite writes are frozen (MAIDSCLAW_SQLITE_FREEZE=true). Use MAIDSCLAW_BACKEND=pg to start in PG mode.",
+		);
+	}
+
+	return resolvedType;
 }
 
 /**

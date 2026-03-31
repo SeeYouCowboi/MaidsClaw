@@ -303,7 +303,11 @@ export async function createAppHost(
 
 	const maintenanceFacade: AppMaintenanceFacade | undefined =
 		orchestrationService
-			? new AppMaintenanceFacadeImpl(orchestrationService, runtime.jobPersistence)
+			? new AppMaintenanceFacadeImpl(
+					orchestrationService,
+					runtime.jobPersistence,
+					runtime.backendType,
+				)
 			: undefined;
 
 	const isOrchestrated =

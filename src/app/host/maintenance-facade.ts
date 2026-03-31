@@ -1,4 +1,6 @@
 import type { JobPersistence } from "../../jobs/persistence.js";
+import type { BackendType } from "../../storage/backend-types.js";
+import { isSqliteFreezeEnabled } from "../../storage/backend-types.js";
 import type { MaintenanceOrchestrationService } from "./maintenance-orchestration-service.js";
 import type { AppMaintenanceFacade } from "./types.js";
 
@@ -14,6 +16,7 @@ export class AppMaintenanceFacadeImpl implements AppMaintenanceFacade {
 	constructor(
 		private readonly orchestrationService: MaintenanceOrchestrationService,
 		private readonly jobPersistence: JobPersistence,
+		private readonly backendType: BackendType = "sqlite",
 	) {}
 
 	async runOnce(): Promise<void> {
@@ -24,6 +27,11 @@ export class AppMaintenanceFacadeImpl implements AppMaintenanceFacade {
 		if (this.isDraining) {
 			return;
 		}
+
+		if (this.backendType === "sqlite" && !isSqliteFreezeEnabled()) {
+			process.env.MAIDSCLAW_SQLITE_FREEZE = "true";
+		}
+
 		this.isDraining = true;
 	}
 
