@@ -14,9 +14,6 @@ export type AppUserFacade = {
 	health: HealthClient;
 };
 
-/** @deprecated Use AppUserFacade */
-export type AppClients = AppUserFacade;
-
 export function createGatewayAppClients(baseUrl: string): AppUserFacade {
 	return {
 		session: new GatewaySessionClient(baseUrl),
