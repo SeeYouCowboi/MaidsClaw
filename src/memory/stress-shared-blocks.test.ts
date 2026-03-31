@@ -11,6 +11,8 @@ import { SharedBlockPatchService, PatchSeqConflictError } from "./shared-blocks/
 import { SharedBlockPermissions } from "./shared-blocks/shared-block-permissions.js";
 import { SharedBlockAttachService } from "./shared-blocks/shared-block-attach-service.js";
 import { SharedBlockAuditFacade } from "./shared-blocks/shared-block-audit.js";
+import { SqliteSharedBlockRepoAdapter } from "../storage/domain-repos/sqlite/shared-block-repo.js";
+import type { Db } from "../storage/database.js";
 
 function freshDb(): Database {
 	const db = new Database(":memory:");
@@ -19,8 +21,29 @@ function freshDb(): Database {
 	return db;
 }
 
-function wrapDb(raw: Database) {
+function wrapDb(raw: Database): Db {
 	return {
+		raw,
+		exec(sql: string): void {
+			raw.exec(sql);
+		},
+		query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+			const stmt = raw.prepare(sql);
+			return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
+		},
+		run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.run(...(params as [])) : stmt.run();
+			return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+		},
+		get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+			const stmt = raw.prepare(sql);
+			const result = params ? stmt.get(...(params as [])) : stmt.get();
+			return result === null ? undefined : (result as T);
+		},
+		close(): void {
+			raw.close();
+		},
 		prepare(sql: string) {
 			const stmt = raw.prepare(sql);
 			return {
@@ -39,6 +62,10 @@ function wrapDb(raw: Database) {
 			return raw.transaction(fn)();
 		},
 	};
+}
+
+function createAttachService(db: Db): SharedBlockAttachService {
+	return new SharedBlockAttachService(new SqliteSharedBlockRepoAdapter(new SharedBlockRepo(db), db));
 }
 
 const OWNER = "agent-owner";
@@ -198,15 +225,15 @@ describe("stress: concurrent patch collision", () => {
 // ── Permission matrix ───────────────────────────────────────────────────────
 
 describe("stress: shared blocks permission matrix", () => {
-	it("owner can edit, member can read, non-member rejected — all in one block", () => {
+	it("owner can edit, member can read, non-member rejected — all in one block", async () => {
 		const rawDb = freshDb();
 		const db = wrapDb(rawDb);
 		const repo = new SharedBlockRepo(db);
 		const perms = new SharedBlockPermissions(db);
-		const attachService = new SharedBlockAttachService(db);
+		const attachService = createAttachService(db);
 		const patchService = new SharedBlockPatchService(db);
 		const block = repo.createBlock("Matrix", OWNER);
-		attachService.attachBlock(block.id, MEMBER, OWNER);
+		await attachService.attachBlock(block.id, MEMBER, OWNER);
 
 		// Owner can edit
 		expect(perms.canEdit(block.id, OWNER)).toBe(true);
@@ -247,15 +274,15 @@ describe("stress: shared blocks permission matrix", () => {
 		rawDb.close();
 	});
 
-	it("getRole returns correct role for all four agent types on same block", () => {
+	it("getRole returns correct role for all four agent types on same block", async () => {
 		const rawDb = freshDb();
 		const db = wrapDb(rawDb);
 		const repo = new SharedBlockRepo(db);
 		const perms = new SharedBlockPermissions(db);
-		const attachService = new SharedBlockAttachService(db);
+		const attachService = createAttachService(db);
 		const block = repo.createBlock("Roles", OWNER);
 		grantAdmin(rawDb, block.id, ADMIN, OWNER);
-		attachService.attachBlock(block.id, MEMBER, OWNER);
+		await attachService.attachBlock(block.id, MEMBER, OWNER);
 
 		expect(perms.getRole(block.id, OWNER)).toBe("owner");
 		expect(perms.getRole(block.id, ADMIN)).toBe("admin");

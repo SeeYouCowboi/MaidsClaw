@@ -275,12 +275,19 @@ describe("organizer durable per-chunk pipeline", () => {
 
       dispatcher.start();
 
-      const firstProcessed = await dispatcher.processNext();
-      expect(firstProcessed).toBe(true);
+      let observedRetryable = false;
+      for (let index = 0; index < initialRows.length; index += 1) {
+        const processed = await dispatcher.processNext();
+        expect(processed).toBe(true);
 
-      const afterCrash = listOrganizerRows(db);
-      const crashRow = afterCrash.find((row) => row.idempotency_key === failOnceTarget);
-      expect(crashRow?.status).toBe("retryable");
+        const crashRow = listOrganizerRows(db).find((row) => row.idempotency_key === failOnceTarget);
+        if (crashRow?.status === "retryable") {
+          observedRetryable = true;
+          break;
+        }
+      }
+
+      expect(observedRetryable).toBe(true);
 
       await processUntilDrained(dispatcher);
 

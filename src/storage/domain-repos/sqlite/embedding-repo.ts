@@ -5,18 +5,18 @@ import type { EmbeddingViewType, NodeRef, NodeRefKind } from "../../../memory/ty
 export class SqliteEmbeddingRepoAdapter implements EmbeddingRepo {
   constructor(private readonly db: Db) {}
 
-  async upsert(
+  upsert(
     nodeRef: NodeRef,
     nodeKind: NodeRefKind,
     viewType: EmbeddingViewType,
     modelId: string,
     embedding: Float32Array,
-  ): Promise<void> {
+  ): void {
     if (embedding.length === 0) {
       throw new Error(`Embedding dimension is 0 for node ${nodeRef} (model: ${modelId})`);
     }
 
-    const dimensionOk = await this.dimensionCheck(modelId, embedding.length);
+    const dimensionOk = this.dimensionCheck(modelId, embedding.length);
     if (!dimensionOk) {
       throw new Error(
         `Embedding dimension mismatch for model "${modelId}": expected existing model dimension, got ${embedding.length} (node: ${nodeRef})`,
@@ -37,10 +37,9 @@ export class SqliteEmbeddingRepoAdapter implements EmbeddingRepo {
         now,
       );
 
-    return Promise.resolve();
   }
 
-  async query(
+  query(
     queryEmbedding: Float32Array,
     options: {
       nodeKind?: string;
@@ -48,7 +47,7 @@ export class SqliteEmbeddingRepoAdapter implements EmbeddingRepo {
       modelId?: string;
       limit?: number;
     },
-  ): Promise<Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }>> {
+  ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
     const limit = options.limit ?? 20;
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -81,23 +80,23 @@ export class SqliteEmbeddingRepoAdapter implements EmbeddingRepo {
       candidates.push({ nodeRef, similarity, nodeKind: row.node_kind });
     }
 
-    return Promise.resolve(candidates.sort((a, b) => b.similarity - a.similarity).slice(0, limit));
+    return candidates.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
   }
 
-  async dimensionCheck(modelId: string, expectedDimension: number): Promise<boolean> {
+  dimensionCheck(modelId: string, expectedDimension: number): boolean {
     const row = this.db.get<{ dim: number }>(
       "SELECT LENGTH(embedding) / 4 AS dim FROM node_embeddings WHERE model_id = ? LIMIT 1",
       [modelId],
     );
-    return Promise.resolve(row ? row.dim === expectedDimension : true);
+    return row ? row.dim === expectedDimension : true;
   }
 
-  async deleteByModel(modelId: string): Promise<number> {
+  deleteByModel(modelId: string): number {
     const result = this.db.run("DELETE FROM node_embeddings WHERE model_id = ?", [modelId]);
-    return Promise.resolve(result.changes);
+    return result.changes;
   }
 
-  async cosineSearch(
+  cosineSearch(
     queryEmbedding: Float32Array,
     options: {
       nodeKind?: string;
@@ -105,7 +104,7 @@ export class SqliteEmbeddingRepoAdapter implements EmbeddingRepo {
       modelId?: string;
       limit?: number;
     },
-  ): Promise<Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }>> {
+  ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
     return this.query(queryEmbedding, options);
   }
 

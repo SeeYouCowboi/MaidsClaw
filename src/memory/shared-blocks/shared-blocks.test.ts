@@ -7,12 +7,35 @@ import { MoveTargetConflictError, PatchSeqConflictError, SharedBlockPatchService
 import { SharedBlockPermissions } from "./shared-block-permissions.js";
 import type { SharedBlockRole } from "./shared-block-permissions.js";
 import { SharedBlockRepo } from "./shared-block-repo.js";
+import { SqliteSharedBlockRepoAdapter } from "../../storage/domain-repos/sqlite/shared-block-repo.js";
+import type { Db } from "../../storage/database.js";
 
 let rawDb: Database;
 let db: ReturnType<typeof wrapDb>;
 
-function wrapDb(raw: Database) {
+function wrapDb(raw: Database): Db {
   return {
+    raw,
+    exec(sql: string): void {
+      raw.exec(sql);
+    },
+    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      const stmt = raw.prepare(sql);
+      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
+    },
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
+      const stmt = raw.prepare(sql);
+      const result = params ? stmt.run(...(params as [])) : stmt.run();
+      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+    },
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
+      const stmt = raw.prepare(sql);
+      const result = params ? stmt.get(...(params as [])) : stmt.get();
+      return result === null ? undefined : (result as T);
+    },
+    close(): void {
+      raw.close();
+    },
     prepare(sql: string) {
       const stmt = raw.prepare(sql);
       return {
@@ -47,6 +70,10 @@ afterEach(() => {
 const OWNER = "agent-owner";
 const OTHER = "agent-other";
 const ADMIN = "agent-admin";
+
+function createAttachService(): SharedBlockAttachService {
+  return new SharedBlockAttachService(new SqliteSharedBlockRepoAdapter(new SharedBlockRepo(db), db));
+}
 
 function grantAdmin(blockId: number, agentId: string, grantedBy: string) {
   rawDb
@@ -193,15 +220,15 @@ describe("SharedBlockPermissions", () => {
     expect(perms.canEdit(block.id, OTHER)).toBe(false);
   });
 
-  it("canRead returns true for attached agent or admin", () => {
+  it("canRead returns true for attached agent or admin", async () => {
     const repo = new SharedBlockRepo(db);
     const perms = new SharedBlockPermissions(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
     expect(perms.canRead(block.id, OTHER)).toBe(false);
 
-    attachService.attachBlock(block.id, OTHER, OWNER);
+    await attachService.attachBlock(block.id, OTHER, OWNER);
     expect(perms.canRead(block.id, OTHER)).toBe(true);
     expect(perms.canRead(block.id, OWNER)).toBe(true);
   });
@@ -210,72 +237,72 @@ describe("SharedBlockPermissions", () => {
 // ── SharedBlockAttachService ──
 
 describe("SharedBlockAttachService", () => {
-  it("attachBlock creates attachment (agent-only)", () => {
+  it("attachBlock creates attachment (agent-only)", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
-    const attachment = attachService.attachBlock(block.id, OTHER, OWNER);
+    const attachment = await attachService.attachBlock(block.id, OTHER, OWNER);
     expect(attachment.blockId).toBe(block.id);
     expect(attachment.targetKind).toBe("agent");
     expect(attachment.targetId).toBe(OTHER);
   });
 
-  it("attachBlock is idempotent", () => {
+  it("attachBlock is idempotent", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
-    const a1 = attachService.attachBlock(block.id, OTHER, OWNER);
-    const a2 = attachService.attachBlock(block.id, OTHER, OWNER);
+    const a1 = await attachService.attachBlock(block.id, OTHER, OWNER);
+    const a2 = await attachService.attachBlock(block.id, OTHER, OWNER);
     expect(a1.blockId).toBe(a2.blockId);
     expect(a1.targetId).toBe(a2.targetId);
   });
 
-  it("attachBlock rejects non-admin", () => {
+  it("attachBlock rejects non-admin", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
-    expect(() => attachService.attachBlock(block.id, OTHER, OTHER)).toThrow(/not admin/);
+    await expect(attachService.attachBlock(block.id, OTHER, OTHER)).rejects.toThrow(/not admin/);
   });
 
-  it("attachBlock throws for missing block", () => {
-    const attachService = new SharedBlockAttachService(db);
-    expect(() => attachService.attachBlock(999, OTHER, OWNER)).toThrow(/not found/);
+  it("attachBlock throws for missing block", async () => {
+    const attachService = createAttachService();
+    await expect(attachService.attachBlock(999, OTHER, OWNER)).rejects.toThrow(/not found/);
   });
 
-  it("detachBlock removes attachment", () => {
+  it("detachBlock removes attachment", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
-    attachService.attachBlock(block.id, OTHER, OWNER);
-    expect(attachService.detachBlock(block.id, OTHER, OWNER)).toBe(true);
+    await attachService.attachBlock(block.id, OTHER, OWNER);
+    expect(await attachService.detachBlock(block.id, OTHER, OWNER)).toBe(true);
 
     const perms = new SharedBlockPermissions(db);
     expect(perms.canRead(block.id, OTHER)).toBe(false);
   });
 
-  it("detachBlock rejects non-admin", () => {
+  it("detachBlock rejects non-admin", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
-    attachService.attachBlock(block.id, OTHER, OWNER);
+    await attachService.attachBlock(block.id, OTHER, OWNER);
 
-    expect(() => attachService.detachBlock(block.id, OTHER, OTHER)).toThrow(/not admin/);
+    await expect(attachService.detachBlock(block.id, OTHER, OTHER)).rejects.toThrow(/not admin/);
   });
 
-  it("getAttachments lists by target", () => {
+  it("getAttachments lists by target", async () => {
     const repo = new SharedBlockRepo(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const b1 = repo.createBlock("B1", OWNER);
     const b2 = repo.createBlock("B2", OWNER);
 
-    attachService.attachBlock(b1.id, OTHER, OWNER);
-    attachService.attachBlock(b2.id, OTHER, OWNER);
+    await attachService.attachBlock(b1.id, OTHER, OWNER);
+    await attachService.attachBlock(b2.id, OTHER, OWNER);
 
-    const attachments = attachService.getAttachments("agent", OTHER);
+    const attachments = await attachService.getAttachments("agent", OTHER);
     expect(attachments).toHaveLength(2);
   });
 });
@@ -687,12 +714,12 @@ describe("SharedBlockPermissions — permission matrix", () => {
     expect(perms.canGrantAdmin(block.id, ADMIN)).toBe(false);
   });
 
-  it("member can read but cannot edit or grant admin", () => {
+  it("member can read but cannot edit or grant admin", async () => {
     const repo = new SharedBlockRepo(db);
     const perms = new SharedBlockPermissions(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
-    attachService.attachBlock(block.id, MEMBER, OWNER);
+    await attachService.attachBlock(block.id, MEMBER, OWNER);
 
     expect(perms.canRead(block.id, MEMBER)).toBe(true);
     expect(perms.canEdit(block.id, MEMBER)).toBe(false);
@@ -709,13 +736,13 @@ describe("SharedBlockPermissions — permission matrix", () => {
     expect(perms.canGrantAdmin(block.id, NON_MEMBER)).toBe(false);
   });
 
-  it("isMember returns true for attached agent, false for admin-only", () => {
+  it("isMember returns true for attached agent, false for admin-only", async () => {
     const repo = new SharedBlockRepo(db);
     const perms = new SharedBlockPermissions(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
-    attachService.attachBlock(block.id, MEMBER, OWNER);
+    await attachService.attachBlock(block.id, MEMBER, OWNER);
     grantAdmin(block.id, ADMIN, OWNER);
 
     expect(perms.isMember(block.id, MEMBER)).toBe(true);
@@ -723,14 +750,14 @@ describe("SharedBlockPermissions — permission matrix", () => {
     expect(perms.isMember(block.id, NON_MEMBER)).toBe(false);
   });
 
-  it("getRole returns correct role for each agent type", () => {
+  it("getRole returns correct role for each agent type", async () => {
     const repo = new SharedBlockRepo(db);
     const perms = new SharedBlockPermissions(db);
-    const attachService = new SharedBlockAttachService(db);
+    const attachService = createAttachService();
     const block = repo.createBlock("B", OWNER);
 
     grantAdmin(block.id, ADMIN, OWNER);
-    attachService.attachBlock(block.id, MEMBER, OWNER);
+    await attachService.attachBlock(block.id, MEMBER, OWNER);
 
     expect(perms.getRole(block.id, OWNER)).toBe("owner" satisfies SharedBlockRole);
     expect(perms.getRole(block.id, ADMIN)).toBe("admin" satisfies SharedBlockRole);

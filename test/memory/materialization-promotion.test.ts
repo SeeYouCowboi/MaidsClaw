@@ -366,8 +366,8 @@ describe("MaterializationService", () => {
 
 			// Create a private overlay entity for the location
 			const privateLocationId = storage.upsertEntity({
-				pointerKey: "secret_room",
-				displayName: "Secret Room",
+				pointerKey: "back_room",
+				displayName: "Back Room",
 				entityType: "location",
 				memoryScope: "private_overlay",
 				ownerAgentId: "rp:alice",
@@ -389,7 +389,7 @@ describe("MaterializationService", () => {
 
 			// Verify a shared_public entity was created for the location
 			const publicEntity = db.get<{ memory_scope: string }>(
-				"SELECT memory_scope FROM entity_nodes WHERE pointer_key = 'secret_room' AND memory_scope = 'shared_public'",
+				"SELECT memory_scope FROM entity_nodes WHERE pointer_key = 'back_room' AND memory_scope = 'shared_public'",
 			);
 			expect(publicEntity).not.toBeNull();
 

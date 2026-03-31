@@ -422,3 +422,9 @@ export function registerRuntimeTools(toolExecutor: ToolExecutor, services: Runti
 - Added `PgNarrativeSearchRepo` using `pg_trgm` operators/functions (`%`, `similarity`, `word_similarity`) with score filtering; no FTS5 `MATCH` syntax in PG implementation.
 - `src/memory/projection/area-world-projection-repo.ts` removed direct `bun:sqlite` type import via structural `DbLike` (`exec` + `prepare` surface).
 - `projection-manager.ts` keeps `db: this.rawDb as never` at the materialization call boundary to satisfy narrowed DB-like typing under strict TS checks.
+
+## [2026-04-01] Wave 3 regression fix notes (post T12-T18)
+- `EmbeddingService` sync call paths (`batchStoreEmbeddings`, `queryNearestNeighbors`) are sensitive to unresolved Promises because `resolveNow` uses `Bun.peek()`. SQLite adapter repos should return synchronous values (or already-settled values), not async microtask-delayed results.
+- For shared-block attachment tests, `SharedBlockAttachService` now requires `SharedBlockRepo` contract implementation (`SqliteSharedBlockRepoAdapter`), not raw `DbLike`; tests must also `await` async attach/detach/list methods.
+- Durable organizer queue tests should not assume fixed processing order of chunk jobs; assert retryable transitions by processing until observed rather than expecting first processed job to be the fail-target.
+- Promotion/materialization entity resolution blocks names with private-existence markers (`secret`, `private`, etc.); test fixtures expecting promotion should avoid those markers unless explicitly validating block behavior.
