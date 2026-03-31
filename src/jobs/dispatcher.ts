@@ -250,6 +250,36 @@ export class JobDispatcher {
       return running < CONCURRENCY_CAPS.search_rebuild_global;
     }
 
+    if (job.kind === "maintenance.replay_projection") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.replay_projection:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_replay_global;
+    }
+
+    if (job.kind === "maintenance.rebuild_derived") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.rebuild_derived:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_rebuild_derived_global;
+    }
+
+    if (job.kind === "maintenance.full") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.full:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_full_global;
+    }
+
     return true;
   }
 
@@ -266,6 +296,18 @@ export class JobDispatcher {
 
     if (job.kind === "search.rebuild") {
       return "search.rebuild:global";
+    }
+
+    if (job.kind === "maintenance.replay_projection") {
+      return "maintenance.replay_projection:global";
+    }
+
+    if (job.kind === "maintenance.rebuild_derived") {
+      return "maintenance.rebuild_derived:global";
+    }
+
+    if (job.kind === "maintenance.full") {
+      return "maintenance.full:global";
     }
 
     const parentRunId =
@@ -384,7 +426,15 @@ export class JobDispatcher {
 }
 
 function isJobKind(value: string | undefined): value is JobKind {
-  return value === "memory.migrate" || value === "memory.organize" || value === "task.run" || value === "search.rebuild";
+  return (
+    value === "memory.migrate"
+    || value === "memory.organize"
+    || value === "task.run"
+    || value === "search.rebuild"
+    || value === "maintenance.replay_projection"
+    || value === "maintenance.rebuild_derived"
+    || value === "maintenance.full"
+  );
 }
 
 function isExecutionClass(value: string | undefined): value is Job["executionClass"] {
@@ -394,6 +444,9 @@ function isExecutionClass(value: string | undefined): value is Job["executionCla
     || value === "background.memory_migrate"
     || value === "background.memory_organize"
     || value === "background.search_rebuild"
+    || value === "background.maintenance_replay"
+    || value === "background.maintenance_rebuild_derived"
+    || value === "background.maintenance_full"
     || value === "background.autonomy"
   );
 }
@@ -407,6 +460,15 @@ function defaultExecutionClass(kind: JobKind): Job["executionClass"] {
   }
   if (kind === "search.rebuild") {
     return "background.search_rebuild";
+  }
+  if (kind === "maintenance.replay_projection") {
+    return "background.maintenance_replay";
+  }
+  if (kind === "maintenance.rebuild_derived") {
+    return "background.maintenance_rebuild_derived";
+  }
+  if (kind === "maintenance.full") {
+    return "background.maintenance_full";
   }
   return "background.autonomy";
 }

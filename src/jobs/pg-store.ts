@@ -138,6 +138,9 @@ const CLAIM_SCAN_BATCH_SIZE = 20;
 const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "search.rebuild:global": CONCURRENCY_CAPS.search_rebuild_global,
   "memory.organize:global": CONCURRENCY_CAPS.memory_organize_global,
+  "maintenance.replay_projection:global": CONCURRENCY_CAPS.maintenance_replay_global,
+  "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
+  "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
 };
 
 type AdvisoryLockRow = {

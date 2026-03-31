@@ -27,6 +27,12 @@ export type AppMaintenanceFacade = {
   getDrainStatus(): Promise<unknown>;
   verify?(): Promise<unknown>;
   rebuild?(): Promise<unknown>;
+  searchRebuild?: (agentId: string, scope: string) => Promise<void>;
+  replayProjection?: (surface: string) => Promise<void>;
+  rebuildDerived?: (
+    agentId: string,
+    options?: { dryRun?: boolean; reEmbed?: boolean },
+  ) => Promise<void>;
 };
 
 export type AppHostOptions = {

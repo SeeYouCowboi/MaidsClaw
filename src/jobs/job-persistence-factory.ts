@@ -172,6 +172,48 @@ export class PgJobPersistence implements JobPersistence {
       };
     }
 
+    if (entry.jobType === "maintenance.replay_projection") {
+      return {
+        job_key: entry.id,
+        job_type: "maintenance.replay_projection",
+        execution_class: "background.maintenance_replay",
+        concurrency_key: "maintenance.replay_projection:global",
+        payload_schema_version: 1,
+        payload_json: entry.payload as never,
+        max_attempts: entry.maxAttempts,
+        now_ms: Date.now(),
+        next_attempt_at: entry.nextAttemptAt,
+      };
+    }
+
+    if (entry.jobType === "maintenance.rebuild_derived") {
+      return {
+        job_key: entry.id,
+        job_type: "maintenance.rebuild_derived",
+        execution_class: "background.maintenance_rebuild_derived",
+        concurrency_key: "maintenance.rebuild_derived:global",
+        payload_schema_version: 1,
+        payload_json: entry.payload as never,
+        max_attempts: entry.maxAttempts,
+        now_ms: Date.now(),
+        next_attempt_at: entry.nextAttemptAt,
+      };
+    }
+
+    if (entry.jobType === "maintenance.full") {
+      return {
+        job_key: entry.id,
+        job_type: "maintenance.full",
+        execution_class: "background.maintenance_full",
+        concurrency_key: "maintenance.full:global",
+        payload_schema_version: 1,
+        payload_json: entry.payload as never,
+        max_attempts: entry.maxAttempts,
+        now_ms: Date.now(),
+        next_attempt_at: entry.nextAttemptAt,
+      };
+    }
+
     return {
       job_key: entry.id,
       job_type: "task.run",

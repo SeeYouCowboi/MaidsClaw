@@ -1,4 +1,11 @@
-export type JobKind = "memory.migrate" | "memory.organize" | "task.run" | "search.rebuild";
+export type JobKind =
+  | "memory.migrate"
+  | "memory.organize"
+  | "task.run"
+  | "search.rebuild"
+  | "maintenance.replay_projection"
+  | "maintenance.rebuild_derived"
+  | "maintenance.full";
 
 export type ExecutionClass =
   | "interactive.user_turn"
@@ -6,6 +13,9 @@ export type ExecutionClass =
   | "background.memory_migrate"
   | "background.memory_organize"
   | "background.search_rebuild"
+  | "background.maintenance_replay"
+  | "background.maintenance_rebuild_derived"
+  | "background.maintenance_full"
   | "background.autonomy";
 
 export type JobKey = string;
@@ -37,6 +47,9 @@ export const JOB_MAX_ATTEMPTS: Record<JobKind, number> = {
   "memory.organize": 4,
   "task.run": 1,
   "search.rebuild": 3,
+  "maintenance.replay_projection": 2,
+  "maintenance.rebuild_derived": 3,
+  "maintenance.full": 1,
 };
 
 export const CONCURRENCY_CAPS = {
@@ -44,6 +57,9 @@ export const CONCURRENCY_CAPS = {
   memory_organize_global: 2,
   task_run_per_parent: 1,
   search_rebuild_global: 1,
+  maintenance_replay_global: 1,
+  maintenance_rebuild_derived_global: 1,
+  maintenance_full_global: 1,
   chat_completions_global: 4,
   embedding_batches_global: 2,
 } as const;
@@ -54,6 +70,9 @@ export const EXECUTION_CLASS_PRIORITY: Record<ExecutionClass, number> = {
   "background.memory_migrate": 3,
   "background.memory_organize": 4,
   "background.search_rebuild": 4,
+  "background.maintenance_replay": 4,
+  "background.maintenance_rebuild_derived": 4,
+  "background.maintenance_full": 5,
   "background.autonomy": 5,
 };
 

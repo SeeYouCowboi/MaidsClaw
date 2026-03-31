@@ -51,6 +51,9 @@ export type DurablePayloadByKind = {
   "memory.organize": unknown;
   "task.run": unknown;
   "search.rebuild": DurableSearchRebuildPayload;
+  "maintenance.replay_projection": unknown;
+  "maintenance.rebuild_derived": unknown;
+  "maintenance.full": unknown;
 };
 
 export type PgJobCurrentRow<K extends JobKind = JobKind> = {
