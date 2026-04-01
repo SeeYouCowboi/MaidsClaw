@@ -5,17 +5,23 @@
 目的: 把当前已经冻结的 PostgreSQL Phase 1 共识，与 full-database migration 主线收口成一份最多 3 个 phase 的总蓝图，作为后续数据库重构的总入口文档。
 
 关联文档:
-- `docs/MEMORY_SYSTEM_POST_CUTOVER_GAP_ANALYSIS_2026-03-27.zh-CN.md`
 - `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md`
 - `docs/DATABASE_REFACTOR_SCHEMA_DRAFT_2026-03-28.zh-CN.md`
-- `.sisyphus/plans/pg-generic-durable-jobs-phase1.md`
-- `docs/MEMORY_PLATFORM_GAPS_DATABASE_ACCEPTANCE_2026-03-28.zh-CN.md`
+- `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md`
+- `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
+- `docs/MEMORY_ARCHITECTURE_2026.md`
+
+> **状态更新（2026-04-01）**
+>
+> - SQLite → PostgreSQL 迁移已经完成，runtime/backend 现为 **PG-only**。
+> - 本文档保留为“数据库重构为何按这三阶段推进”的历史总纲；其中关于 cutover / rollback drill / parity / shadow compare 的段落，应理解为**迁移期安全控制的历史记录**，而不是当前继续推进 Memory V3 的前置 blocker。
+> - 当前剩余工作应转向 **PG-native legacy cleanup** 与 `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md` 中列出的平台/能力收尾，而不是继续恢复已退役的 SQLite 迁移工具链。
 
 ---
 
 ## 1. 结论先行
 
-整个数据库重构不应再被理解成“先做 PostgreSQL jobs，再继续顺手把 SQLite 表搬完”。
+整个数据库重构在设计时不应被理解成“先做 PostgreSQL jobs，再继续顺手把 SQLite 表搬完”。
 
 更准确的理解是:
 
@@ -23,11 +29,13 @@
 2. **Phase 2** 再完成主数据平面的真正迁移: async storage boundary、authority truth、`settlement_processing_ledger`、search/index/vector 与脚本测试体系。
 3. **Phase 3** 最后做平台级切换、默认 runtime 接线、cutover / rollback drill 与 legacy 清退。
 
-因此:
+因此，在当时的迁移阶段:
 
 - PostgreSQL generic jobs phase **不是**“数据库重构已完成”
 - `authority truth` 与 `settlement_processing_ledger` **必须同批迁移**
 - runtime 默认接线 **不是** Phase 1 交付物，但它是整个数据库重构的最终完成条件之一
+
+就当前仓库状态而言，上述三阶段已经完成；后文继续保留，是为了给后续审计和 PG-native 收尾工作提供历史背景，而不是重新打开一轮 SQLite→PG 施工。
 
 ---
 
@@ -110,14 +118,12 @@
 
 ## 3. 当前代码库对整体框架的约束
 
-整体框架之所以必须按上面的顺序推进，不是抽象偏好，而是当前代码已经有明显耦合:
+整体框架之所以当时必须按上面的顺序推进，不是抽象偏好，而是当时代码存在明显耦合。就当前仓库而言，这些约束已经发生变化：
 
-- `src/storage/database.ts` 直接以 `bun:sqlite` `Database` 为底层打开主库。
-- `src/interaction/store.ts` 仍直接依赖同步事务语义，如 `BEGIN IMMEDIATE`。
-- `src/memory/task-agent.ts` 目前把 settlement apply、organizer enqueue、background organize fallback 绑在同一个 SQLite 主链上。
-- `src/memory/settlement-ledger.ts` 直接以 SQLite 表 `settlement_processing_ledger` 为领域 ledger。
-- `src/memory/search-authority.ts` 说明 `search_docs_*` 本质上是从 authority truth 派生出来的 projection，而不是主真值。
-- `src/bootstrap/runtime.ts` 目前默认仍以 SQLite truth + SQLite settlement ledger 组装 memory pipeline。
+- `src/storage/database.ts` 与 `bun:sqlite` 主库路径已移除；`src/storage/backend-types.ts` 已收口为 PG-only backend contract。
+- `src/bootstrap/runtime.ts` 已固定构造 PostgreSQL path，并在 `shutdown()` 中回收 PG pool。
+- `createAppHost()` / maintenance scripts 现默认走 PG app host，而不是再暴露 SQLite/dual-backend 启动分支。
+- 当前剩余约束已不再是“如何从 SQLite 切换到 PG”，而是 **PG-native 收尾**：graph identity、historical projection、durable organizer/search repair、legacy helper 清理与 real-PG harness。
 
 这意味着:
 

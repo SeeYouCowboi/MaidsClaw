@@ -1,7 +1,7 @@
 # Server / Worker Orchestration Wiring 缺口需求（2026-03-30）
 
 > 状态：需求草案  
-> 范围：`server` / `worker` 宿主的 durable orchestration 主路径接线、运行时自愈回路、maintenance authority、脚本入口收口、PG 迁移前的应用层宿主基础  
+> 范围：`server` / `worker` 宿主的 durable orchestration 主路径接线、运行时自愈回路、maintenance authority、脚本入口收口、PG-only 运行时后的应用层宿主基础  
 > 不在本文件内直接规定：具体任务拆分、精确类名/函数名、底层 PG schema 细节、memory domain 算法重写
 
 ## 1. 本文件目的
@@ -15,7 +15,7 @@
 已有文档已经明确两点：
 
 - 应用层共识要求 durable orchestration 的长期宿主归属 `server` 与未来独立 `worker` 角色，而不是 `local chat / local turn / debug` 之类交互路径。参见 `docs\APP_LAYER_WIRING_CONSENSUS_2026-03-30.zh-CN.md:43-59`。
-- 验收补充文档已经确认：当前默认 runtime 仍未把 durable queue、dispatcher/scheduler、lease reclaim、自愈回路真正接上主路径。参见 `docs\MEMORY_PLATFORM_GAPS_APP_CLI_ACCEPTANCE_2026-03-28.zh-CN.md:15-71`。
+- 后续平台收尾文档已经确认：当前剩余问题已不再是 SQLite/PG 迁移，而是 durable organizer / search repair / authority matrix 等 PG-native platform hardening。参见 `docs\MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md` 中 §14-§16。
 
 因此，哪怕 app-host / facade closeout 完成，项目仍然需要一轮单独的 `server / worker orchestration wiring` 收口，才能把 durable jobs 从“库能力”推进到“平台默认行为”。
 
@@ -271,3 +271,4 @@
 - 当前项目已经具备 durable jobs、dispatcher、scheduler、PG runner、lease reclaim 等底层部件，但还没有把它们统一接成 `server / worker` 的默认运行行为。
 - 因此，`server / worker orchestration wiring` 不是对现有 closeout 的重复，而是把 PG 全迁移前最后一层“平台宿主行为闭环”补齐的独立需求。
 - 在本文件定义的需求满足前，项目可以说“应用层 facade 已逐步就位”，但还不能说“durable orchestration 已成为平台默认能力”，也还不能说“为 PG 多 agent 生产运行时的宿主层准备已经完成”。
+

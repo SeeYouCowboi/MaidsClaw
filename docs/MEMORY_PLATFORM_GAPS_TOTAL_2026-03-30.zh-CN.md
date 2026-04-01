@@ -2,6 +2,12 @@
 
 日期：2026-03-30
 
+> **历史快照（2026-04-01 更新）**
+>
+> - 本文档记录的是 2026-03-30 时点的 gap 归纳。
+> - 其中关于 SQLite 主路径、PG runtime 未接线、Phase 3 迁移/验收未开始的多数条目，已被后续 **PG-only runtime** 改造关闭，不再是当前权威 backlog。
+> - 当前 remaining backlog 请以 `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md` 与 `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md` 为准；本文件仅保留作为 gap 形成过程的历史分析。
+
 ## 目的
 
 本文档用于把当前仓库里三条线索统一收口为一份总 gap 文档：
@@ -10,11 +16,11 @@
 - PostgreSQL Phase 2 数据平面完成后，尚未进入正式主路径的 integration gap
 - 验收与测试基座仍不足以支撑 Phase 3 判断的 acceptance gap
 
-本文档不替代以下专门文档，但作为当前阶段的总览与排期入口：
+本文档不替代以下专门文档，但作为历史 gap 总览保留：
 
 - `docs/MEMORY_SYSTEM_POST_CUTOVER_GAP_ANALYSIS_2026-03-27.zh-CN.md`
-- `docs/MEMORY_PLATFORM_GAPS_APP_CLI_ACCEPTANCE_2026-03-28.zh-CN.md`
-- `docs/MEMORY_PLATFORM_GAPS_DATABASE_ACCEPTANCE_2026-03-28.zh-CN.md`
+- `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md`
+- `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
 - `docs/DATABASE_REFACTOR_MASTER_BLUEPRINT_2026-03-28.zh-CN.md`
 
 ## 调查依据
@@ -24,8 +30,8 @@
 - 设计 / gap 文档复核：
   - `docs/MEMORY_ARCHITECTURE_2026.md`
   - `docs/MEMORY_SYSTEM_POST_CUTOVER_GAP_ANALYSIS_2026-03-27.zh-CN.md`
-  - `docs/MEMORY_PLATFORM_GAPS_APP_CLI_ACCEPTANCE_2026-03-28.zh-CN.md`
-  - `docs/MEMORY_PLATFORM_GAPS_DATABASE_ACCEPTANCE_2026-03-28.zh-CN.md`
+  - `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md`
+  - `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
   - `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md`
   - `docs/DATABASE_REFACTOR_MASTER_BLUEPRINT_2026-03-28.zh-CN.md`
 - 代码路径检查：
@@ -486,4 +492,5 @@
   - PostgreSQL app backend 已正式可启动
   - durable jobs 已进入默认运行语义
   - 验收工具链已足以作为 Phase 3 gate
+
 

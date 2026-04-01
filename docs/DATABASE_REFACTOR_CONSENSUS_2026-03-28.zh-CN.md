@@ -6,9 +6,14 @@
 关联文档:
 - `docs/MEMORY_REFACTOR_CONSENSUS_PLAN_2026-03-20.zh-CN.md`
 - `docs/MEMORY_SYSTEM_POST_CUTOVER_GAP_ANALYSIS_2026-03-27.zh-CN.md`
-- `docs/MEMORY_PLATFORM_GAPS_DATABASE_ACCEPTANCE_2026-03-28.zh-CN.md`
-- `docs/MEMORY_PLATFORM_GAPS_APP_CLI_ACCEPTANCE_2026-03-28.zh-CN.md`
 - `docs/DATABASE_REFACTOR_SCHEMA_DRAFT_2026-03-28.zh-CN.md`
+- `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
+
+> **状态更新（2026-04-01）**
+>
+> - 本文档中关于 Phase 1/2/3 与跨后端 cutover 的冻结约束，现主要作为**历史设计/审计记录**保留。
+> - 代码库已经完成 PG-only runtime 切换；除非未来再次引入跨后端迁移，否则不应继续把 parity verify / shadow compare / rollback drill 当成 Memory V3 的前置 blocker。
+> - 当前新增工作应优先遵循本文件中的长期约束（domain-first repository、unit-of-work、truth/projection 分层、derived rebuild 语义），而不是重新恢复迁移期脚本/流程。
 
 ## 1. 目的
 

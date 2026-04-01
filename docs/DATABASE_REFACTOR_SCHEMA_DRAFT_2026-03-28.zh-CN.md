@@ -6,7 +6,12 @@
 前置文档:
 - `docs/DATABASE_REFACTOR_CONSENSUS_2026-03-28.zh-CN.md`
 - `docs/MEMORY_SYSTEM_POST_CUTOVER_GAP_ANALYSIS_2026-03-27.zh-CN.md`
-- `docs/MEMORY_PLATFORM_GAPS_DATABASE_ACCEPTANCE_2026-03-28.zh-CN.md`
+- `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md`
+
+> **状态更新（2026-04-01）**
+>
+> - 本文档保留为 PostgreSQL jobs/data-plane 的字段级设计草案。
+> - PG-only runtime 已完成；本文件不再作为 Phase 1 runbook 或迁移待办，而只作为 schema rationale / historical reference。
 
 ## 1. 目标
 

@@ -14,6 +14,11 @@
 > - 当前 canonical 表为 `private_episode_events`、``private_cognition_events` 与 `private_cognition_current`。
 >
 > `16.3`、`16.4`、`16.8` 节的 schema 草案为历史设计草稿，已被上述迁移路径取代，不再作为当前实现参考。
+>
+> **状态更新（2026-04-01）**
+>
+> 本文档现在应视为 **Memory V2 / 基线语义的已完成共识**，不再承担 SQLite → PG 迁移待办或 platform cutover 追踪职责。
+> 运行时已经切到 PostgreSQL；剩余 backlog 应转到 `docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md` 与 PG-native legacy cleanup，而不是回到本文件补 migration/cutover 条目。
 
 ## 1. 目的
 
