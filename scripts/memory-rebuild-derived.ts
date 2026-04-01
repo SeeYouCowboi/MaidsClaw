@@ -6,17 +6,17 @@ const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     agent: { type: "string" },
-    "dry-run": { type: "boolean", default: false },
-    "re-embed": { type: "boolean", default: false },
-    backend: { type: "string", default: "sqlite" },
-    "pg-url": { type: "string" },
+	"dry-run": { type: "boolean", default: false },
+	"re-embed": { type: "boolean", default: false },
+	backend: { type: "string", default: "pg" },
+	"pg-url": { type: "string" },
   },
   strict: true,
 });
 
 if (!values.agent) {
-  console.error("Usage: bun run scripts/memory-rebuild-derived.ts --agent <agentId> [--dry-run] [--re-embed] [--backend sqlite|pg] [--pg-url <url>]");
-  process.exit(1);
+	console.error("Usage: bun run scripts/memory-rebuild-derived.ts --agent <agentId> [--dry-run] [--re-embed] [--backend pg] [--pg-url <url>]");
+	process.exit(1);
 }
 
 if (values["pg-url"]) process.env.PG_APP_URL = values["pg-url"];

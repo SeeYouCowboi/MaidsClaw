@@ -9,9 +9,9 @@ const { values } = parseArgs({
     vacuum: { type: "boolean", default: false },
     report: { type: "boolean", default: false },
     "report-only": { type: "boolean", default: false },
-    "integrity-check": { type: "boolean", default: false },
-    backend: { type: "string", default: "sqlite" },
-    "pg-url": { type: "string" },
+	"integrity-check": { type: "boolean", default: false },
+	backend: { type: "string", default: "pg" },
+	"pg-url": { type: "string" },
   },
   strict: true,
 });

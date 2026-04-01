@@ -10,7 +10,7 @@ function createMockRuntime(
 	overrides: Partial<RuntimeBootstrapResult> = {},
 ): RuntimeBootstrapResult {
 	return {
-		backendType: "sqlite",
+		backendType: "pg",
 		healthChecks: { bootstrap: "ok" },
 		traceStore: undefined,
 		sessionService: {} as RuntimeBootstrapResult["sessionService"],
@@ -37,6 +37,22 @@ function createMockRuntime(
 			listPending: async () => [],
 			listRetryable: async () => [],
 			countByStatus: async () => 0,
+		},
+		pgFactory: {
+			type: "pg",
+			initialize: async () => {},
+			close: async () => {},
+			getPool: () => null,
+			pool: null,
+			store: {
+				enqueue: async () => undefined,
+				claim: async () => null,
+				complete: async () => undefined,
+				fail: async () => undefined,
+				heartbeat: async () => undefined,
+				listPending: async () => [],
+				reclaimExpiredLeases: async () => 0,
+			},
 		},
 		shutdown: () => {},
 		...overrides,
@@ -70,7 +86,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const host = await createAppHost(
-				{ role: "server", enableDurableOrchestration: true, databasePath: ":memory:" },
+				{ role: "server", enableDurableOrchestration: true },
 				createMockRuntime(),
 			);
 			const status = await host.admin.getHostStatus();
@@ -88,7 +104,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const host = await createAppHost(
-				{ role: "server", databasePath: ":memory:" },
+				{ role: "server" },
 				createMockRuntime(),
 			);
 			const status = await host.admin.getHostStatus();
@@ -106,7 +122,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const host = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
+				{ role: "worker" },
 				createMockRuntime(),
 			);
 			const status = await host.admin.getHostStatus();
@@ -123,7 +139,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const host = await createAppHost(
-				{ role: "local", databasePath: ":memory:" },
+				{ role: "local" },
 				createMockRuntime(),
 			);
 			const status = await host.admin.getHostStatus();
@@ -136,19 +152,11 @@ describe("admin orchestration introspection", () => {
 		}
 	});
 
-	test("leaseReclaimActive is true only when orchestrated + pg backend", async () => {
+	test("leaseReclaimActive is true when orchestrated", async () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
-			const sqliteHost = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
-				createMockRuntime({ backendType: "sqlite" }),
-			);
-			const sqliteStatus = await sqliteHost.admin.getHostStatus();
-			expect(sqliteStatus.orchestration!.leaseReclaimActive).toBe(false);
-			await sqliteHost.shutdown();
-
 			const pgHost = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
+				{ role: "worker" },
 				createMockRuntime({
 					backendType: "pg",
 					pgFactory: {
@@ -174,7 +182,7 @@ describe("admin orchestration introspection", () => {
 			await pgHost.shutdown();
 
 			const pgLocalHost = await createAppHost(
-				{ role: "local", databasePath: ":memory:" },
+				{ role: "local" },
 				createMockRuntime({ backendType: "pg" }),
 			);
 			const pgLocalStatus = await pgLocalHost.admin.getHostStatus();
@@ -189,7 +197,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const serverHost = await createAppHost(
-				{ role: "server", databasePath: ":memory:" },
+				{ role: "server" },
 				createMockRuntime(),
 			);
 			const serverCaps = await serverHost.admin.getCapabilities() as {
@@ -201,12 +209,12 @@ describe("admin orchestration introspection", () => {
 			};
 			expect(serverCaps.orchestration).toBeDefined();
 			expect(serverCaps.orchestration.durableJobProcessing).toBe(true);
-			expect(serverCaps.orchestration.leaseReclaim).toBe(false);
+			expect(serverCaps.orchestration.leaseReclaim).toBe(true);
 			expect(serverCaps.orchestration.maintenanceFacade).toBe(false);
 			await serverHost.shutdown();
 
 			const workerHost = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
+				{ role: "worker" },
 				createMockRuntime(),
 			);
 			const workerCaps = await workerHost.admin.getCapabilities() as {
@@ -220,7 +228,7 @@ describe("admin orchestration introspection", () => {
 			await workerHost.shutdown();
 
 			const localHost = await createAppHost(
-				{ role: "local", databasePath: ":memory:" },
+				{ role: "local" },
 				createMockRuntime(),
 			);
 			const localCaps = await localHost.admin.getCapabilities() as {
@@ -241,7 +249,7 @@ describe("admin orchestration introspection", () => {
 		const restore = suppressLifecycleSideEffects();
 		try {
 			const host = await createAppHost(
-				{ role: "maintenance", databasePath: ":memory:" },
+				{ role: "maintenance" },
 				createMockRuntime(),
 			);
 			const caps = await host.admin.getCapabilities() as {

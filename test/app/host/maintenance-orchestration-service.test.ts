@@ -30,7 +30,7 @@ function createPersistenceSpy(): {
 describe("MaintenanceOrchestrationService", () => {
 	test("searchRebuild dispatches search.rebuild job", async () => {
 		const { jobPersistence, enqueued } = createPersistenceSpy();
-		const service = new MaintenanceOrchestrationService(jobPersistence, "sqlite");
+		const service = new MaintenanceOrchestrationService(jobPersistence, "pg");
 		const originalNow = Date.now;
 		Date.now = () => 1_700_000_000_000;
 
@@ -52,7 +52,7 @@ describe("MaintenanceOrchestrationService", () => {
 
 	test("replayProjection dispatches maintenance.replay_projection job", async () => {
 		const { jobPersistence, enqueued } = createPersistenceSpy();
-		const service = new MaintenanceOrchestrationService(jobPersistence, "sqlite");
+		const service = new MaintenanceOrchestrationService(jobPersistence, "pg");
 		const originalNow = Date.now;
 		Date.now = () => 1_700_000_000_100;
 
@@ -74,7 +74,7 @@ describe("MaintenanceOrchestrationService", () => {
 
 	test("rebuildDerived dispatches maintenance.rebuild_derived job", async () => {
 		const { jobPersistence, enqueued } = createPersistenceSpy();
-		const service = new MaintenanceOrchestrationService(jobPersistence, "sqlite");
+		const service = new MaintenanceOrchestrationService(jobPersistence, "pg");
 		const originalNow = Date.now;
 		Date.now = () => 1_700_000_000_200;
 

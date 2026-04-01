@@ -9,9 +9,6 @@ import { LocalTurnClient } from "../../src/app/clients/local/local-turn-client.j
 import type { ObservationEvent } from "../../src/app/contracts/execution.js";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 import { GatewayServer } from "../../src/gateway/server.js";
-import { CommitService } from "../../src/interaction/commit-service.js";
-import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
-import { InteractionStore } from "../../src/interaction/store.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
 import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
@@ -61,33 +58,10 @@ function parseJsonLine(raw: string): unknown {
 	return JSON.parse(raw.trim().split("\n")[0]);
 }
 
-function makeSettlement(
-	sessionId: string,
-	requestId: string,
-): TurnSettlementPayload {
-	return {
-		settlementId: `stl:${requestId}`,
-		requestId,
-		sessionId,
-		ownerAgentId: "rp:default",
-		publicReply: "hello",
-		hasPublicReply: true,
-		viewerSnapshot: {
-			selfPointerKey: "__self__",
-			userPointerKey: "__user__",
-		},
-		privateCognition: {
-			schemaVersion: "rp_private_cognition_v4",
-			ops: [{ op: "retract", target: { kind: "assertion", key: "k1" } }],
-		},
-	};
-}
-
 describe("gateway mode", () => {
 	let runtime: RuntimeRef;
 	let server: GatewayServer;
 	let baseUrl: string;
-	let _savedBackend: string | undefined;
 
 	beforeEach(() => {
 		resetCommands();
@@ -95,10 +69,7 @@ describe("gateway mode", () => {
 		registerSessionCommands();
 		registerTurnCommands();
 
-		_savedBackend = process.env.MAIDSCLAW_BACKEND;
-		process.env.MAIDSCLAW_BACKEND = "sqlite";
 		runtime = bootstrapRuntime({
-			databasePath: ":memory:",
 			cwd: makeTempDir(),
 		});
 		const userFacade: AppUserFacade = {
@@ -144,8 +115,6 @@ describe("gateway mode", () => {
 		server.stop();
 		runtime.shutdown();
 		cleanupTempDirs();
-		if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
-		else process.env.MAIDSCLAW_BACKEND = _savedBackend;
 	});
 
 	it("GatewayClient rejects remote unsafe raw", () => {
@@ -182,25 +151,6 @@ describe("gateway mode", () => {
 	it("gateway evidence endpoints return structured JSON", async () => {
 		const session = await runtime.sessionService.createSession("rp:default");
 		const requestId = "req-evidence-1";
-		const interactionStore = new InteractionStore(runtime.db);
-		const commitService = new CommitService(interactionStore);
-
-		commitService.commit({
-			sessionId: session.sessionId,
-			actorType: "user",
-			recordType: "message",
-			payload: { role: "user", content: "hello" },
-			correlatedTurnId: requestId,
-		});
-		const settlement = makeSettlement(session.sessionId, requestId);
-		commitService.commitWithId({
-			sessionId: session.sessionId,
-			actorType: "rp_agent",
-			recordType: "turn_settlement",
-			recordId: settlement.settlementId,
-			payload: settlement,
-			correlatedTurnId: requestId,
-		});
 
 		const summary = await fetch(
 			`${baseUrl}/v1/requests/${requestId}/summary`,

@@ -12,7 +12,7 @@ function createInjectedRuntime(): {
 	let shutdownCallCount = 0;
 
 	const runtime = {
-		backendType: "sqlite",
+		backendType: "pg",
 		healthChecks: { bootstrap: "ok" },
 		traceStore: undefined,
 		sessionService: {} as RuntimeBootstrapResult["sessionService"],
@@ -39,6 +39,22 @@ function createInjectedRuntime(): {
 			listPending: async () => [],
 			listRetryable: async () => [],
 			countByStatus: async () => 0,
+		},
+		pgFactory: {
+			type: "pg",
+			initialize: async () => {},
+			close: async () => {},
+			getPool: () => null,
+			pool: null,
+			store: {
+				enqueue: async () => undefined,
+				claim: async () => null,
+				complete: async () => undefined,
+				fail: async () => undefined,
+				heartbeat: async () => undefined,
+				listPending: async () => [],
+				reclaimExpiredLeases: async () => 0,
+			},
 		},
 		shutdown: () => {
 			shutdownCallCount += 1;
@@ -83,7 +99,7 @@ describe("createAppHost worker role", () => {
 
 		try {
 			const host = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
+				{ role: "worker" },
 				runtime,
 			);
 

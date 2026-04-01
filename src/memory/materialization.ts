@@ -480,13 +480,13 @@ function createPublicationEventWithRetry(
       storage.createProjectedEvent(params);
       return "materialized";
     } catch (error: unknown) {
-      if (isSqliteUniqueConstraintError(error)) {
-        return "reconciled";
-      }
+		if (isUniqueConstraintError(error)) {
+			return "reconciled";
+		}
 
-      if (!isLikelySqliteError(error)) {
-        throw error;
-      }
+		if (!isTransientStorageError(error)) {
+			throw error;
+		}
 
       if (retryCount >= retryContext.maxRetries) {
         console.warn(
@@ -603,7 +603,7 @@ function publicationScopeToVisibility(
   return targetScope === "world_public" ? "world_public" : "area_visible";
 }
 
-function isSqliteUniqueConstraintError(error: unknown): boolean {
+function isUniqueConstraintError(error: unknown): boolean {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     return msg.includes("unique constraint") || msg.includes("unique_constraint") || msg.includes("constraint failed");
@@ -611,19 +611,18 @@ function isSqliteUniqueConstraintError(error: unknown): boolean {
   return false;
 }
 
-function isLikelySqliteError(error: unknown): boolean {
+function isTransientStorageError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
 
-  const name = error.name.toLowerCase();
   const msg = error.message.toLowerCase();
   return (
-    name.includes("sqlite") ||
-    msg.includes("sqlite") ||
+    msg.includes("deadlock detected") ||
+    msg.includes("could not serialize access") ||
+    msg.includes("connection terminated") ||
     msg.includes("database is locked") ||
-    msg.includes("database is busy") ||
-    msg.includes("sql logic error")
+    msg.includes("database is busy")
   );
 }
 
@@ -631,5 +630,5 @@ function normalizeDbInput(dbInput: Db | unknown): Db {
   if (typeof (dbInput as Db).query === "function") {
     return dbInput as Db;
   }
-  throw new Error("Raw SQLite database handles are no longer supported; pass a Db-shaped object");
+  throw new Error("Raw database handles are no longer supported; pass a Db-shaped object");
 }

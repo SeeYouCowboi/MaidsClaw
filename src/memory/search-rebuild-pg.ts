@@ -1,7 +1,7 @@
 /**
  * PG search rebuild: rebuilds `search_docs_*` from canonical authority sources via DELETE+INSERT.
  *
- * Authority sources (same as SQLite search-authority-matrix):
+ * Authority sources:
  *   - search_docs_private:   entity_nodes (private_overlay) + private_cognition_current (active)
  *   - search_docs_area:      event_nodes (area_visible)
  *   - search_docs_world:     event_nodes (world_public) + entity_nodes (shared_public) + fact_edges

@@ -41,10 +41,8 @@ export type AppHostOptions = {
   host?: string;
   cwd?: string;
   configDir?: string;
-  databasePath?: string;
   dataDir?: string;
   pgUrl?: string;
-  busyTimeoutMs?: number;
   memoryMigrationModelId?: string;
   memoryEmbeddingModelId?: string;
   memoryOrganizerEmbeddingModelId?: string;
@@ -64,7 +62,7 @@ export type OrchestrationStatusDTO = {
 };
 
 export type HostStatusDTO = {
-	backendType: "sqlite" | "pg";
+	backendType: "pg";
 	memoryPipelineStatus: MemoryPipelineStatus;
 	migrationStatus: { succeeded: boolean };
 	orchestration?: OrchestrationStatusDTO;

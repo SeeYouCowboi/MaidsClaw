@@ -107,7 +107,6 @@ describe("Config loading", () => {
     
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.config.storage.databasePath).toContain("maidsclaw.db");
       expect(result.config.storage.dataDir).toContain("data");
     }
   });

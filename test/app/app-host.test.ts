@@ -1,12 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
-
-const _savedBackend = process.env.MAIDSCLAW_BACKEND;
-beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
-afterAll(() => {
-  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
-  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
-});
 
 describe("createAppHost", () => {
   let host: AppHost | undefined;
@@ -19,7 +12,7 @@ describe("createAppHost", () => {
   });
 
   test("local role creates host with user + admin, no maintenance", async () => {
-    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    host = await createAppHost({ role: "local" });
     expect(host.role).toBe("local");
     expect(host.user).toBeDefined();
     expect(host.admin).toBeDefined();
@@ -27,23 +20,23 @@ describe("createAppHost", () => {
   });
 
   test("local role start/shutdown lifecycle", async () => {
-    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    host = await createAppHost({ role: "local" });
     await host.start();
     await host.shutdown();
     host = undefined;
   });
 
   test("admin.getHostStatus returns HostStatusDTO shape", async () => {
-    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    host = await createAppHost({ role: "local" });
     const status = await host.admin.getHostStatus();
 
-    expect(status.backendType).toBe("sqlite");
+    expect(status.backendType).toBe("pg");
     expect(typeof status.migrationStatus.succeeded).toBe("boolean");
     expect(typeof status.memoryPipelineStatus).toBe("string");
   });
 
   test("admin.getPipelineStatus returns PipelineStatusDTO shape", async () => {
-    host = await createAppHost({ role: "local", databasePath: ":memory:" });
+    host = await createAppHost({ role: "local" });
     const status = await host.admin.getPipelineStatus();
 
     expect(typeof status.memoryPipelineStatus).toBe("string");
@@ -55,7 +48,7 @@ describe("createAppHost", () => {
   });
 
   test("server role start/shutdown lifecycle with getBoundPort", async () => {
-    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0 });
+    host = await createAppHost({ role: "server", port: 0 });
     expect(host.role).toBe("server");
     expect(host.user).toBeDefined();
     expect(host.admin).toBeDefined();
@@ -72,7 +65,7 @@ describe("createAppHost", () => {
   });
 
   test("server role without enableMaintenance has no maintenance facet", async () => {
-    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0 });
+    host = await createAppHost({ role: "server", port: 0 });
     await host.start();
     expect(host.maintenance).toBeUndefined();
     await host.shutdown();
@@ -80,7 +73,7 @@ describe("createAppHost", () => {
   });
 
   test("server role with enableMaintenance exposes maintenance facet", async () => {
-    host = await createAppHost({ role: "server", databasePath: ":memory:", port: 0, enableMaintenance: true });
+    host = await createAppHost({ role: "server", port: 0, enableMaintenance: true });
     await host.start();
     expect(host.maintenance).toBeDefined();
     const maintenance = host.maintenance;

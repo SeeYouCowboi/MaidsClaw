@@ -6,13 +6,9 @@ import {
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { loadConfig } from "../../core/config.js";
 import { GatewayServer } from "../../gateway/server.js";
-import { JobDedupEngine } from "../../jobs/dedup.js";
-import { JobDispatcher } from "../../jobs/dispatcher.js";
 import type { DurableJobStore } from "../../jobs/durable-store.js";
 import { LeaseReclaimSweeper } from "../../jobs/lease-reclaim-sweeper.js";
 import { PgJobRunner } from "../../jobs/pg-runner.js";
-import { JobQueue } from "../../jobs/queue.js";
-import { JobScheduler } from "../../jobs/scheduler.js";
 import { LocalHealthClient } from "../clients/local/local-health-client.js";
 import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
 import { LocalSessionClient } from "../clients/local/local-session-client.js";
@@ -36,39 +32,6 @@ type JobConsumer = {
 	start(): Promise<void>;
 	stop(): Promise<void>;
 };
-
-function createSqliteJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
-	const queue = new JobQueue(runtime.jobPersistence);
-	const dedup = new JobDedupEngine();
-	const dispatcher = new JobDispatcher({
-		queue,
-		dedup,
-		persistence: runtime.jobPersistence,
-	});
-	const scheduler = new JobScheduler({
-		dispatcher,
-		intervalMs: WORKER_POLL_INTERVAL_MS,
-	});
-	let started = false;
-
-	return {
-		async start(): Promise<void> {
-			if (started) {
-				return;
-			}
-			await dispatcher.start();
-			scheduler.start();
-			started = true;
-		},
-		async stop(): Promise<void> {
-			if (!started) {
-				return;
-			}
-			scheduler.stop();
-			started = false;
-		},
-	};
-}
 
 function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 	const store = (runtime.pgFactory as { store?: unknown } | null)?.store;
@@ -124,10 +87,6 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 }
 
 function createJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
-	if (runtime.backendType === "sqlite") {
-		return createSqliteJobConsumer(runtime);
-	}
-
 	return createPgJobConsumer(runtime);
 }
 
@@ -186,7 +145,6 @@ export async function createAppHost(
 
 	let port = DEFAULT_PORT;
 	let host = DEFAULT_HOST;
-	let databasePath = resolveRootedPath(options.databasePath, options.cwd);
 	let dataDir = resolveRootedPath(options.dataDir, options.cwd);
 	let memoryMigrationModelId = options.memoryMigrationModelId;
 	let memoryEmbeddingModelId = options.memoryEmbeddingModelId;
@@ -196,9 +154,6 @@ export async function createAppHost(
 		port = configResult.config.server.port;
 		host = configResult.config.server.host;
 
-		if (!databasePath) {
-			databasePath = configResult.config.storage.databasePath;
-		}
 		if (!dataDir) {
 			dataDir = configResult.config.storage.dataDir;
 		}
@@ -304,7 +259,6 @@ export async function createAppHost(
 			? new AppMaintenanceFacadeImpl(
 					orchestrationService,
 					runtime.jobPersistence,
-					runtime.backendType,
 				)
 			: undefined;
 

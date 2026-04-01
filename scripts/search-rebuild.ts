@@ -4,18 +4,18 @@ import { createAppHost } from "../src/app/host/create-app-host.js";
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
-  options: {
-    agent: { type: "string" },
-    scope: { type: "string", default: "all" },
-    backend: { type: "string", default: "sqlite" },
-    "pg-url": { type: "string" },
-  },
+	options: {
+		agent: { type: "string" },
+		scope: { type: "string", default: "all" },
+		backend: { type: "string", default: "pg" },
+		"pg-url": { type: "string" },
+	},
   strict: true,
 });
 
 if (!values.agent) {
-  console.error("Usage: bun run scripts/search-rebuild.ts --agent <agentId> [--scope all|private|area|world|cognition] [--backend sqlite|pg] [--pg-url <url>]");
-  process.exit(1);
+	console.error("Usage: bun run scripts/search-rebuild.ts --agent <agentId> [--scope all|private|area|world|cognition] [--backend pg] [--pg-url <url>]");
+	process.exit(1);
 }
 
 if (values["pg-url"]) process.env.PG_APP_URL = values["pg-url"];

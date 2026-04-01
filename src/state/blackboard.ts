@@ -2,7 +2,7 @@
  * Blackboard — Shared Operational State (V1)
  *
  * V1 implementation: simple `Map<string, unknown>` with namespace enforcement.
- * In-memory only — does NOT persist to SQLite (per G1 guardrail).
+ * In-memory only (per G1 guardrail).
  *
  * Future versions may add persistence, typed merge strategies, and
  * per-key ownership tracking. The interface is designed to support

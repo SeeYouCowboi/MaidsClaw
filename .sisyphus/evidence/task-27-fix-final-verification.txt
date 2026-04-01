@@ -1,0 +1,37 @@
+# Task 27 Fix Final Verification
+
+## Commands Run
+
+### 1) src sqlite scan (filtered)
+`grep -ri "sqlite" src/ --include="*.ts" | grep -v "pg-app-schema\|export-types\|// .*SQLite.*PRIMARY\|// .*equivalent of SQLite\|// .*same as SQLite"`
+
+Result: no output (no functional sqlite mentions remaining in src after cleanup).
+
+### 2) scripts sqlite scan
+`grep -ri "sqlite" scripts/ --include="*.ts"`
+
+Result:
+- scripts/cleanup-sisyphus-docs.ts contains `.sqlite-shm/.sqlite-wal` cleanup checks (intentionally retained filesystem cleanup utility).
+
+### 3) test sqlite scan (with exclusions)
+`grep -ri "sqlite" test/ --include="*.ts" | grep -v "pg-app-test-utils\|legacy-literal-gate\|cleanup-sisyphus"`
+
+Result:
+- test/scripts/freeze-sqlite.test.ts (legacy script test remains and still references freeze-sqlite naming).
+
+### 4) build
+`bun run build`
+
+Result: PASS (`tsc -p tsconfig.build.json --noEmit`).
+
+### 5) tests
+`bun test`
+
+Result: FAIL in this environment. Primary blocker is missing local PG (`ECONNREFUSED 127.0.0.1:5432` / `::1:5432`), plus expected runtime-dependent failures in suites requiring live PG/runtime behavior.
+
+## Scope Notes
+- Strict T27-fix scope completed:
+  - Removed SQLite semantic coupling in requested src/test/script/doc targets.
+  - Deleted requested historical scripts (`scripts/pg-jobs-drain-check.ts`, `scripts/runtime-switch.ts`).
+  - Kept `scripts/cleanup-sisyphus-docs.ts` per instruction.
+  - Kept `src/storage/db-types.ts` because still imported (`src/memory/maintenance-report.ts`).

@@ -9,7 +9,7 @@ import type {
   PersistentJobStatus,
 } from "./persistence.js";
 import type { JobKind } from "./types.js";
-import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
+import type { PgBackendFactory } from "../storage/backend-types.js";
 
 type PgFactoryWithStore = PgBackendFactory & { store?: DurableJobStore };
 
@@ -236,17 +236,13 @@ export class PgJobPersistence implements JobPersistence {
 }
 
 export function createJobPersistence(
-  backendType: BackendType,
+  backendType: "pg",
   options: { pgFactory?: PgBackendFactory },
 ): JobPersistence {
-  if (backendType === "pg") {
-    if (!options.pgFactory) {
-      throw new Error("PG backend requires pgFactory");
-    }
-    return new PgJobPersistence(options.pgFactory);
+  if (!options.pgFactory) {
+    throw new Error("PG backend requires pgFactory");
   }
-
-  throw new Error(`Unknown backend type: ${backendType}`);
+  return new PgJobPersistence(options.pgFactory);
 }
 
 function normalizeLimit(limit: number): number {

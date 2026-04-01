@@ -897,15 +897,6 @@ describe("Stream semantics", () => {
 // ── 11. Real TurnService-backed gateway path ─────────────────────────────
 
 describe("Real TurnService-backed gateway path", () => {
-  let _savedBackend: string | undefined;
-  beforeAll(() => {
-    _savedBackend = process.env.MAIDSCLAW_BACKEND;
-    process.env.MAIDSCLAW_BACKEND = "sqlite";
-  });
-  afterAll(() => {
-    if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
-    else process.env.MAIDSCLAW_BACKEND = _savedBackend;
-  });
 
   /** Build a ChatModelProvider that yields a fixed chunk sequence per call. */
   function makeMockProvider(chunkRef: { value: Chunk[] }): ChatModelProvider {
@@ -928,7 +919,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -996,7 +987,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1048,7 +1039,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1115,7 +1106,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1198,7 +1189,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
 
     const failingTool = {
       name: "lookup",
@@ -1267,7 +1258,7 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: throwingProvider }],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",
@@ -1316,7 +1307,7 @@ describe("Real TurnService-backed gateway path", () => {
         },
       ],
     });
-    const runtime = bootstrapRuntime({ databasePath: ":memory:", modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
       port: 0,
       host: "localhost",

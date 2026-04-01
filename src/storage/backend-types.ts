@@ -11,11 +11,7 @@ import { bootstrapOpsSchema } from "./pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "./pg-app-schema-truth.js";
 import { createPgPool } from "./pg-pool.js";
 
-export type BackendType = "sqlite" | "pg";
-
-export function isSqliteFreezeEnabled(): boolean {
-	return process.env.MAIDSCLAW_SQLITE_FREEZE === "true";
-}
+export type BackendType = "pg";
 
 export interface PgPoolConfig {
 	url: string;
@@ -29,29 +25,10 @@ export interface PgPoolConfig {
 export interface BackendConfig {
 	type: BackendType;
 	pg?: PgPoolConfig; // required when type='pg'
-	sqlite?: {
-		dbPath: string;
-	};
 }
 
-/**
- * Resolve the backend type from environment variable.
- * Defaults to 'pg' unless MAIDSCLAW_BACKEND is explicitly set to 'sqlite'.
- *
- * Env var: MAIDSCLAW_BACKEND
- * Valid values: 'sqlite', 'pg'
- */
 export function resolveBackendType(): BackendType {
-	const val = process.env.MAIDSCLAW_BACKEND;
-	const resolvedType: BackendType = val === "sqlite" ? "sqlite" : "pg";
-
-	if (resolvedType === "sqlite" && isSqliteFreezeEnabled()) {
-		throw new Error(
-			"SQLite writes are frozen (MAIDSCLAW_SQLITE_FREEZE=true). Use MAIDSCLAW_BACKEND=pg to start in PG mode.",
-		);
-	}
-
-	return resolvedType;
+	return "pg";
 }
 
 /**
@@ -63,23 +40,6 @@ export interface BackendFactory {
 	initialize(config: BackendConfig): Promise<void>;
 	/** Gracefully close the backend */
 	close(): Promise<void>;
-}
-
-/**
- * Placeholder SQLite backend factory.
- * SQLite bootstrap is handled directly in runtime.ts (sync path).
- * This factory exists for interface symmetry — full implementation deferred.
- */
-export class SqliteBackendFactory implements BackendFactory {
-	readonly type = "sqlite" as const;
-
-	async initialize(_config: BackendConfig): Promise<void> {
-		throw new Error("SqliteBackendFactory not yet implemented (T7)");
-	}
-
-	async close(): Promise<void> {
-		throw new Error("SqliteBackendFactory not yet implemented (T7)");
-	}
 }
 
 /**

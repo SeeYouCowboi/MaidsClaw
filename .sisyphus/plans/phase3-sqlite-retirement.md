@@ -2058,11 +2058,11 @@ Max Concurrent: 8 (Wave 3)
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names. Verify ZERO `bun:sqlite` imports remain in `src/` (excluding `src/storage/domain-repos/sqlite/` which should be deleted by T27).
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | bun:sqlite imports [N] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Start PG container. Boot runtime with `MAIDSCLAW_BACKEND=pg`. Execute EVERY QA scenario from EVERY task. Test cross-task integration: full turn cycle (create session → send turn → verify memory → search → inspect). Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT do" compliance (no shadow compare, no unnecessary abstractions). Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 

@@ -12,7 +12,7 @@ async function bootstrapTestEnv(): Promise<{
 	host: AppHost;
 	facade: AppUserFacade;
 }> {
-	const host = await createAppHost({ role: "local", databasePath: ":memory:" });
+	const host = await createAppHost({ role: "local" });
 	if (!host.user) {
 		throw new Error("Expected local app host to expose user facade");
 	}
@@ -47,11 +47,8 @@ function assertCloseResultShape(result: SessionCloseResult): void {
 describe("AppUserFacade acceptance contract", () => {
 	let host: AppHost | undefined;
 	let facade: AppUserFacade | undefined;
-	let _savedBackend: string | undefined;
 
 	beforeAll(async () => {
-		_savedBackend = process.env.MAIDSCLAW_BACKEND;
-		process.env.MAIDSCLAW_BACKEND = "sqlite";
 		const env = await bootstrapTestEnv();
 		host = env.host;
 		facade = env.facade;
@@ -62,8 +59,6 @@ describe("AppUserFacade acceptance contract", () => {
 			await host.shutdown();
 			host = undefined;
 		}
-		if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
-		else process.env.MAIDSCLAW_BACKEND = _savedBackend;
 	});
 
 	test("round-trip create host -> create session -> turn facade call -> close -> shutdown", async () => {

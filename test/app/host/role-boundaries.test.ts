@@ -13,7 +13,7 @@ function createMockRuntime(): {
 	let shutdownCallCount = 0;
 
 	const runtime = {
-		backendType: "sqlite",
+		backendType: "pg",
 		healthChecks: { bootstrap: "ok" },
 		traceStore: undefined,
 		sessionService: {} as RuntimeBootstrapResult["sessionService"],
@@ -40,6 +40,22 @@ function createMockRuntime(): {
 			listPending: async () => [],
 			listRetryable: async () => [],
 			countByStatus: async () => 0,
+		},
+		pgFactory: {
+			type: "pg",
+			initialize: async () => {},
+			close: async () => {},
+			getPool: () => null,
+			pool: null,
+			store: {
+				enqueue: async () => undefined,
+				claim: async () => null,
+				complete: async () => undefined,
+				fail: async () => undefined,
+				heartbeat: async () => undefined,
+				listPending: async () => [],
+				reclaimExpiredLeases: async () => 0,
+			},
 		},
 		shutdown: () => {
 			shutdownCallCount += 1;
@@ -111,7 +127,7 @@ describe("createAppHost role boundaries", () => {
 
 		try {
 			const host = await createAppHost(
-				{ role: "server", databasePath: ":memory:" },
+				{ role: "server" },
 				runtime,
 			);
 
@@ -139,7 +155,6 @@ describe("createAppHost role boundaries", () => {
 				{
 					role: "server",
 					enableDurableOrchestration: true,
-					databasePath: ":memory:",
 				},
 				runtime,
 			);
@@ -162,7 +177,7 @@ describe("createAppHost role boundaries", () => {
 
 		try {
 			const host = await createAppHost(
-				{ role: "worker", databasePath: ":memory:" },
+				{ role: "worker" },
 				runtime,
 			);
 
@@ -186,7 +201,7 @@ describe("createAppHost role boundaries", () => {
 
 		try {
 			const host = await createAppHost(
-				{ role: "local", databasePath: ":memory:" },
+				{ role: "local" },
 				runtime,
 			);
 
@@ -210,7 +225,7 @@ describe("createAppHost role boundaries", () => {
 
 		try {
 			const host = await createAppHost(
-				{ role: "maintenance", databasePath: ":memory:" },
+				{ role: "maintenance" },
 				runtime,
 			);
 
@@ -230,20 +245,19 @@ describe("createAppHost role boundaries", () => {
 
 	test("shutdown is idempotent for all roles", async () => {
 		const roleCases: Array<{ name: string; options: AppHostOptions }> = [
-			{ name: "server", options: { role: "server", databasePath: ":memory:" } },
+			{ name: "server", options: { role: "server" } },
 			{
 				name: "server durable",
 				options: {
 					role: "server",
 					enableDurableOrchestration: true,
-					databasePath: ":memory:",
 				},
 			},
-			{ name: "worker", options: { role: "worker", databasePath: ":memory:" } },
-			{ name: "local", options: { role: "local", databasePath: ":memory:" } },
+			{ name: "worker", options: { role: "worker" } },
+			{ name: "local", options: { role: "local" } },
 			{
 				name: "maintenance",
-				options: { role: "maintenance", databasePath: ":memory:" },
+				options: { role: "maintenance" },
 			},
 		];
 

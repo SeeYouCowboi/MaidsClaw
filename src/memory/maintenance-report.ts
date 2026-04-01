@@ -42,9 +42,6 @@ export const REPORT_TABLES = [
   "world_state_events",
 ] as const;
 
-// ── SQLite-only tables (skipped gracefully for PG) ──
-const SQLITE_ONLY_TABLES = new Set(["_memory_maintenance_jobs"]);
-
 // ── Retention logic ──
 
 export function runRetention(db: Db, days: number): number {
@@ -90,8 +87,6 @@ export type PgTableReportRow = {
   isProtected: boolean;
   exists: boolean;
 };
-
-// ── Report logic (SQLite) ──
 
 export function getTableRowCount(db: Db, table: string): number | null {
   if (!(REPORT_TABLES as readonly string[]).includes(table)) {
@@ -153,10 +148,6 @@ export async function gatherPgReportRows(sql: postgres.Sql): Promise<PgTableRepo
   const results: PgTableReportRow[] = [];
 
   for (const table of REPORT_TABLES) {
-    if (SQLITE_ONLY_TABLES.has(table)) {
-      results.push({ table, rows: null, isProtected: false, exists: false });
-      continue;
-    }
     const isProtected = (CANONICAL_LEDGER_TABLES as readonly string[]).includes(table);
     const exists = existingTables.has(table);
     const count = exists ? await getPgTableRowCount(sql, table) : null;
@@ -168,7 +159,6 @@ export async function gatherPgReportRows(sql: postgres.Sql): Promise<PgTableRepo
 
 export async function getPgTableRowCount(sql: postgres.Sql, table: string): Promise<number | null> {
   if (!(REPORT_TABLES as readonly string[]).includes(table)) return null;
-  if (SQLITE_ONLY_TABLES.has(table)) return null;
   try {
     const rows = await sql.unsafe(`SELECT COUNT(*)::int as count FROM "${table}"`);
     return rows[0]?.count ?? null;

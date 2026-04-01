@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
 
 const _savedBackend = process.env.MAIDSCLAW_BACKEND;
-beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "pg"; });
 afterAll(() => {
   if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
   else process.env.MAIDSCLAW_BACKEND = _savedBackend;
@@ -28,12 +28,11 @@ function createTestRegistry(): DefaultModelServiceRegistry {
 const REQUIRED_HEALTH_KEYS = ["storage", "models", "tools", "memory_pipeline"];
 
 describe("dev/prod parity", () => {
-  it("bootstrapRuntime returns createAgentLoop that resolves known agents", () => {
-    const runtime = bootstrapRuntime({
-      databasePath: ":memory:",
-      modelRegistry: createTestRegistry(),
-      agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
-    });
+	it("bootstrapRuntime returns createAgentLoop that resolves known agents", () => {
+		const runtime = bootstrapRuntime({
+			modelRegistry: createTestRegistry(),
+			agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
+		});
 
     try {
       expect(typeof runtime.createAgentLoop).toBe("function");
@@ -44,12 +43,11 @@ describe("dev/prod parity", () => {
     }
   });
 
-  it("bootstrapRuntime returns createAgentLoop that returns null for unknown agents", () => {
-    const runtime = bootstrapRuntime({
-      databasePath: ":memory:",
-      modelRegistry: createTestRegistry(),
-      agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
-    });
+	it("bootstrapRuntime returns createAgentLoop that returns null for unknown agents", () => {
+		const runtime = bootstrapRuntime({
+			modelRegistry: createTestRegistry(),
+			agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE],
+		});
 
     try {
       expect(runtime.createAgentLoop("nonexistent:agent")).toBeNull();
@@ -58,8 +56,8 @@ describe("dev/prod parity", () => {
     }
   });
 
-  it("bootstrapRuntime returns a non-null turnService", () => {
-    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+	it("bootstrapRuntime returns a non-null turnService", () => {
+		const runtime = bootstrapRuntime();
 
     try {
       expect(runtime.turnService).toBeDefined();
@@ -70,8 +68,8 @@ describe("dev/prod parity", () => {
     }
   });
 
-  it("healthChecks include all required subsystem keys", () => {
-    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+	it("healthChecks include all required subsystem keys", () => {
+		const runtime = bootstrapRuntime();
 
     try {
       for (const key of REQUIRED_HEALTH_KEYS) {
@@ -83,9 +81,9 @@ describe("dev/prod parity", () => {
     }
   });
 
-  it("two independent bootstrapRuntime calls produce the same runtime shape", () => {
-    const runtimeA = bootstrapRuntime({ databasePath: ":memory:" });
-    const runtimeB = bootstrapRuntime({ databasePath: ":memory:" });
+	it("two independent bootstrapRuntime calls produce the same runtime shape", () => {
+		const runtimeA = bootstrapRuntime();
+		const runtimeB = bootstrapRuntime();
 
     try {
       const keysA = Object.keys(runtimeA).sort();
@@ -106,8 +104,8 @@ describe("dev/prod parity", () => {
     }
   });
 
-  it("health check statuses map cleanly to gateway SubsystemStatus values", () => {
-    const runtime = bootstrapRuntime({ databasePath: ":memory:" });
+	it("health check statuses map cleanly to gateway SubsystemStatus values", () => {
+		const runtime = bootstrapRuntime();
 
     try {
       for (const [name, status] of Object.entries(runtime.healthChecks)) {

@@ -6,7 +6,7 @@
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface ExportSurfaceConfig {
-  /** SQLite table name */
+  /** Source table name */
   name: string;
   /** Columns containing JSON-encoded TEXT → parse to objects */
   jsonColumns?: readonly string[];

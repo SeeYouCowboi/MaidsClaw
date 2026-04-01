@@ -6,9 +6,8 @@ const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     surface: { type: "string", default: "cognition" },
-    backend: { type: "string", default: "sqlite" },
+	backend: { type: "string", default: "pg" },
     "pg-url": { type: "string" },
-    "db-path": { type: "string" },
   },
   strict: true,
 });
@@ -25,7 +24,6 @@ if (values.backend === "pg") process.env.MAIDSCLAW_BACKEND = "pg";
 const host = await createAppHost({
   role: "maintenance",
   pgUrl: values["pg-url"],
-  databasePath: values["db-path"],
 });
 
 try {

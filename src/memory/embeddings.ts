@@ -18,17 +18,10 @@ type NeighborQueryOptions = {
 };
 
 export class EmbeddingService {
-  /**
-   * PG strategy: keep this service interface stable while decoupling sqlite internals.
-   *
-   * In PostgreSQL mode this service receives `PgTransactionBatcher` (no-op) and will delegate
-   * all persistence/query work to `EmbeddingRepo` methods instead of direct `db.prepare(...)`
-   * calls during Task 14 wiring.
-   */
-  constructor(
-    private readonly embeddingRepo: EmbeddingRepo,
-    private readonly batcher: ITransactionBatcher,
-  ) {}
+	constructor(
+		private readonly embeddingRepo: EmbeddingRepo,
+		private readonly batcher: ITransactionBatcher,
+	) {}
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
@@ -50,13 +43,7 @@ export class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
-  /**
-   * SQLite path today: performs `INSERT OR REPLACE` writes inside `batcher.runInTransaction`.
-   *
-   * PG plan (T14): route these writes through `EmbeddingRepo.upsert(...)` and retain
-   * transaction compatibility by injecting `PgTransactionBatcher` as a no-op wrapper.
-   */
-  batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
+	batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
     if (entries.length === 0) {
       return;
     }
@@ -76,14 +63,7 @@ export class EmbeddingService {
     });
   }
 
-  /**
-   * SQLite path today: scans `node_embeddings` and applies private-cognition visibility checks
-   * with sqlite statements.
-   *
-   * PG plan (T14): replace this with `EmbeddingRepo.query(...)` / `EmbeddingRepo.cosineSearch(...)`
-   * so filtering and nearest-neighbor scoring run in Postgres (`pgvector` + SQL visibility logic).
-   */
-  queryNearestNeighbors(
+	queryNearestNeighbors(
     queryEmbedding: Float32Array,
     options: NeighborQueryOptions,
   ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
