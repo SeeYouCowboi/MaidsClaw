@@ -318,3 +318,25 @@ area_narrative_current = one row per (agent_id, area_id), overwrites on each pub
 Current-only freeze: getAreaStateCurrent() + getAreaStateAsOf() only.
 getAreaStateAsOf() queries area_state_events directly (not current projection).
 Full historical snapshot rebuild is V3 DEFERRED (§5 candidates doc).
+
+## Task 17: Trace Capture Non-stub Read Path
+
+### TraceStore storage mechanism
+- File-based: each trace stored as `{requestId}.json` in `traceDir`
+- Write path uses `mkdirSync` + `writeFileSync` (already worked)
+- `readTrace` already existed via `trace-reader.ts` (existsSync + readFileSync + JSON.parse)
+
+### Implementation approach
+- `getTrace(requestId)` is a thin alias for `readTrace(requestId)` — same underlying mechanism
+- `listTraces(sessionId?)` scans `traceDir` with `readdirSync`, parses each JSON, filters by `session_id`
+- Added `TraceSummary` type to contracts (request_id, session_id, agent_id, captured_at, counts, has_* booleans)
+- Results sorted by `captured_at` ascending
+
+### Key insight: No T15/stub markers found
+- The task description mentioned "T15" markers but none existed in code
+- The read path (`readTrace`) was already functional, just missing `getTrace` naming and `listTraces` capability
+
+### Test patterns
+- TraceStore tests are fully unit-testable (file-based, no PG needed)
+- Use `mkdtempSync` for temp dirs, cleanup with `rmSync` in `finally` blocks
+- Tests go in `test/cli/trace-store.test.ts` alongside existing trace tests

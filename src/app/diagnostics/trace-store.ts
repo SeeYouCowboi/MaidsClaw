@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ObservationEvent } from "../contracts/execution.js";
 import type { RedactedSettlement } from "../contracts/inspect.js";
@@ -7,6 +7,7 @@ import type {
   LogEntry,
   PromptCapture,
   TraceBundle,
+  TraceSummary,
 } from "../contracts/trace.js";
 import { readTrace } from "./trace-reader.js";
 
@@ -94,6 +95,43 @@ export class TraceStore {
 
   readTrace(requestId: string): TraceBundle | null {
     return readTrace(this.getTracePath(requestId));
+  }
+
+  getTrace(requestId: string): TraceBundle | null {
+    return this.readTrace(requestId);
+  }
+
+  listTraces(sessionId?: string): TraceSummary[] {
+    if (!existsSync(this.traceDir)) {
+      return [];
+    }
+
+    const files = readdirSync(this.traceDir).filter((f) => f.endsWith(".json"));
+    const summaries: TraceSummary[] = [];
+
+    for (const file of files) {
+      const bundle = readTrace(join(this.traceDir, file));
+      if (!bundle) {
+        continue;
+      }
+
+      if (sessionId && bundle.session_id !== sessionId) {
+        continue;
+      }
+
+      summaries.push({
+        request_id: bundle.request_id,
+        session_id: bundle.session_id,
+        agent_id: bundle.agent_id,
+        captured_at: bundle.captured_at,
+        log_entry_count: bundle.log_entries.length,
+        chunk_count: bundle.public_chunks.length,
+        has_prompt: bundle.prompt !== undefined,
+        has_settlement: bundle.settlement !== undefined,
+      });
+    }
+
+    return summaries.sort((a, b) => a.captured_at - b.captured_at);
   }
 
   private ensureBundle(requestId: string): TraceBundle {

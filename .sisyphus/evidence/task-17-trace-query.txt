@@ -1,0 +1,52 @@
+Task 17: G12b — Trace Capture Non-stub化
+==========================================
+
+Date: 2026-04-02
+
+## Summary
+
+Implemented non-stub trace READ path on TraceStore:
+- `getTrace(requestId)` — returns stored TraceBundle from disk (delegates to existing readTrace)
+- `listTraces(sessionId?)` — scans trace directory, reads JSON files, filters by session_id, returns TraceSummary[]
+- Added `TraceSummary` type to `src/app/contracts/trace.ts`
+
+## Storage mechanism
+
+TraceStore uses **file-based storage**: each trace is written as `{requestId}.json` in `traceDir`.
+- Write path: `initTrace()` → add* methods → `finalizeTrace()` writes JSON to disk
+- Read path: `getTrace(requestId)` reads `{requestId}.json` from traceDir
+- List path: `listTraces(sessionId?)` scans traceDir for *.json, parses each, filters by session_id
+
+## Files Changed
+
+1. `src/app/contracts/trace.ts` — Added TraceSummary type
+2. `src/app/diagnostics/trace-store.ts` — Added getTrace() and listTraces() methods, imported existsSync/readdirSync
+3. `test/cli/trace-store.test.ts` — Added 4 new tests
+
+## Test Results
+
+Trace store tests: 7 pass / 0 fail (3 existing + 4 new)
+  - getTrace returns stored trace data (non-stub read path)
+  - getTrace returns null for non-existent trace
+  - listTraces returns trace summaries for a session
+  - listTraces returns empty array when trace directory does not exist
+
+Full suite: 879 pass / 372 skip / 44 fail
+  - All failures are pre-existing (PG ECONNREFUSED, gateway/host tests)
+  - No new failures introduced
+  - Build errors are pre-existing in debug.ts (unrelated to changes)
+
+## Build Check
+
+`bun run build` — all errors are pre-existing in src/terminal-cli/commands/debug.ts
+(import resolution and type narrowing issues unrelated to trace store changes)
+
+## Checklist
+
+[x] TraceStore.getTrace(traceId) returns real data (not stub/throw)
+[x] TraceStore.listTraces(sessionId) returns a list (not stub/throw)
+[x] At least one non-stub trace read path exists in the codebase
+[x] Test: write trace → getTrace(traceId) → assert correct data returned
+[x] Test: write trace → listTraces(sessionId) → assert list contains the trace
+[x] bun run build — zero NEW type errors (pre-existing debug.ts errors unchanged)
+[x] bun test — zero new failures vs baseline

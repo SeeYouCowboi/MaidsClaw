@@ -35,3 +35,14 @@ export type TraceBundle = {
   flush?: FlushCapture;
   log_entries: LogEntry[];
 };
+
+export type TraceSummary = {
+  request_id: string;
+  session_id: string;
+  agent_id: string;
+  captured_at: number;
+  log_entry_count: number;
+  chunk_count: number;
+  has_prompt: boolean;
+  has_settlement: boolean;
+};
