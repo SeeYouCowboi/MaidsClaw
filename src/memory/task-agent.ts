@@ -503,16 +503,32 @@ export class MemoryTaskAgent {
         if (this.strictDurableMode) {
           throw err;
         }
-        console.error("[MemoryTaskAgent] durable organizer enqueue failed, falling back to background organize", {
+        console.error("[MemoryTaskAgent] organizer enqueue failed, falling back to background", {
+          operation: "runMigrateInternal",
+          jobType: "graph_organizer",
           batchId: organizeJob.batchId,
-          sessionId: organizeJob.sessionId,
           agentId: organizeJob.agentId,
-          embeddingModelId: organizeJob.embeddingModelId,
           error: err instanceof Error ? err.message : String(err),
         });
         this.launchBackgroundOrganize(organizeJob);
       }
+    } else if (this.strictDurableMode) {
+      throw new Error(
+        `[MemoryTaskAgent] strictDurableMode requires jobPersistence for organizer dispatch (batchId=${organizeJob.batchId})`,
+      );
     } else {
+      /**
+       * @deprecated Use durable job queue via JobPersistence instead.
+       * This fire-and-forget path is preserved for backward compat when
+       * no JobPersistence is configured and strictDurableMode is false.
+       * Remove when all deployments supply JobPersistence.
+       */
+      console.error("[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback", {
+        operation: "runMigrateInternal",
+        jobType: "graph_organizer",
+        batchId: organizeJob.batchId,
+        agentId: organizeJob.agentId,
+      });
       this.launchBackgroundOrganize(organizeJob);
     }
 

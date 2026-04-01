@@ -1,0 +1,24 @@
+Task 11: Non-strict fallback evidence
+======================================
+
+Test: "strictDurableMode=false: falls back to background with structured error log"
+- jobPersistence.enqueue() throws "enqueue boom"
+- strictDurableMode=false → does NOT re-throw
+- console.error called with structured log including:
+  - operation: "runMigrateInternal"
+  - jobType: "graph_organizer"
+  - batchId, agentId, error message
+- launchBackgroundOrganize called with correct organizeJob
+- runMigrate resolves successfully with result
+
+Test: "strictDurableMode=false + no jobPersistence: deprecated fallback with structured warning"
+- No jobPersistence configured, strictDurableMode=false
+- console.error called with deprecated fallback warning including:
+  - operation: "runMigrateInternal"
+  - jobType: "graph_organizer"
+  - batchId, agentId
+- launchBackgroundOrganize called with correct organizeJob
+- runMigrate resolves successfully
+
+Evidence from: bun test test/memory/organizer-enqueue-failure.test.ts
+Result: 4 pass, 0 fail, 23 expect() calls

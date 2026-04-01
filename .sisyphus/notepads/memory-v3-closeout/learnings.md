@@ -260,3 +260,23 @@ Barrel exports (index.ts) can create false positives — check if the barrel its
 - `registerMemoryTools` call placed after `coreMemoryService` creation (line ~1018)
 - Uses block scope `{ }` to contain `lazyRetrieval` variable
 - All 6 tools registered (2 write + 4 read-only)
+
+## Task 11: organizer strict mode
+
+### Changes to organizer fallback (task-agent.ts lines 499-533)
+- `strictDurableMode=true` + enqueue failure → re-throws (no background fallback). Server/worker failures are visible.
+- `strictDurableMode=true` + no jobPersistence → throws with descriptive error. Strict mode requires durable infrastructure.
+- `strictDurableMode=false` + enqueue failure → `console.error` with structured log (operation, jobType, batchId, agentId, error message) + `launchBackgroundOrganize`.
+- `strictDurableMode=false` + no jobPersistence → `console.error` with deprecation warning + `launchBackgroundOrganize`.
+- Changed from `console.warn` to `console.error` for all fallback paths (errors should be visible in log aggregation).
+
+### Backward compat path (formerly lines 512-517)
+- Split into `else if (this.strictDurableMode)` → throw, and `else` → @deprecated fallback.
+- @deprecated JSDoc block added with retirement condition: "Remove when all deployments supply JobPersistence."
+- `launchBackgroundOrganize` already had @deprecated annotation (preserved).
+
+### Test approach (organizer-enqueue-failure.test.ts)
+- 4 tests: strict+enqueue-fail, non-strict+enqueue-fail, strict+no-persistence, non-strict+no-persistence.
+- `applyCallOneToolCalls` stub must push to `created.changedNodeRefs` — otherwise `enqueueOrganizerJobs` returns early (line 573-575) and never calls `enqueue()`.
+- `makeStubAgent` accepts optional `jobPersistence` (was required before).
+- Structured log assertions verify operation, jobType, batchId, agentId, error fields.
