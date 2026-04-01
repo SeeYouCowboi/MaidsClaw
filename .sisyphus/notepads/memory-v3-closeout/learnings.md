@@ -386,3 +386,28 @@ RelationContract type + data was duplicated in 3 locations (not 2 as plan sugges
 - Consumers import and may adapt naming (e.g., camelCase wrapper)
 - Re-export or derive domain-specific narrowings (e.g., `ResolutionChainType`)
 - Add helper functions for common lookups (isKnownRelationType, getRelationContract, etc.)
+
+## Task 18: PG Regression Test Coverage Assessment
+
+### Key Finding: Existing coverage was already comprehensive
+All 5 areas specified in the task had thorough test coverage before this task:
+- Truth schema idempotency: 6 tests in pg-truth-schema.test.ts
+- Ops schema idempotency: 14 tests in pg-ops-schema.test.ts
+- Search rebuild PG: 13 tests across 2 files
+- Settlement ledger: 13 tests in pg-settlement-ledger.test.ts
+- Core memory blocks: 18 tests in pg-memory-blocks-repo.test.ts
+- Pending flush recovery: 6 tests in pg-flush-recovery-repo.test.ts
+
+### Micro-gaps filled (1 new file, 9 test cases)
+- Combined schema bootstrap (truth+ops+derived together twice) — not tested before
+- Core memory multi-agent isolation — not tested before
+- Settlement ledger entry isolation across agents — not tested before
+- Pending flush multi-retry→resolve cycle — not tested before
+
+### Bun skipIf counting behavior
+When `describe.skipIf` skips a block, Bun counts hooks (beforeAll/afterAll) as separate
+skipped tests. 4 describes × 2 hooks + 9 it blocks = 17 "skipped tests" for 9 actual cases.
+
+### LSP skipIf type gap
+`describe.skipIf()` reports LSP error "Property 'skipIf' does not exist" — this is a known
+Bun types gap present in all 24 pg-app test files. Works correctly at runtime.
