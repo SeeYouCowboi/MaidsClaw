@@ -83,13 +83,17 @@ describe("Pipeline Wiring (construct-but-gate)", () => {
 		expect(_typeCheck).toBeNull();
 	});
 
-	it("memoryPipelineReady is always false even when embedding model is provided", () => {
-		const memoryPipelineReady = false;
-		expect(memoryPipelineReady).toBe(false);
+	it("memoryPipelineReady is true when memoryTaskAgent is non-null", () => {
+		const memoryEmbeddingModelId = "text-embedding-3-small";
+		const memoryTaskAgent: MemoryTaskAgent | null = memoryEmbeddingModelId
+			? (("would-be-agent" as unknown) as MemoryTaskAgent)
+			: null;
+		const memoryPipelineReady = memoryTaskAgent !== null;
+		expect(memoryPipelineReady).toBe(true);
 
 		const _typeCheck: RuntimeBootstrapResult["memoryPipelineReady"] =
 			memoryPipelineReady;
-		expect(_typeCheck).toBe(false);
+		expect(_typeCheck).toBe(true);
 	});
 
 	it("memoryPipelineStatus is 'missing_embedding_model' when no embedding model provided", () => {
@@ -102,14 +106,23 @@ describe("Pipeline Wiring (construct-but-gate)", () => {
 		expect(status as string).not.toBe("ready");
 	});
 
-	it("memoryPipelineStatus is 'partial' (never 'ready') when embedding model is configured", () => {
+	it("memoryPipelineStatus is 'ready' when memoryTaskAgent is non-null, 'partial' as preliminary value", () => {
 		const memoryEmbeddingModelId = "text-embedding-3-small";
-		const status: MemoryPipelineStatus = !memoryEmbeddingModelId
+		const preliminaryStatus: MemoryPipelineStatus = !memoryEmbeddingModelId
 			? "missing_embedding_model"
 			: "partial";
 
-		expect(status).toBe("partial");
-		expect(status as string).not.toBe("ready");
+		expect(preliminaryStatus).toBe("partial");
+
+		const memoryTaskAgent: MemoryTaskAgent | null = memoryEmbeddingModelId
+			? (("would-be-agent" as unknown) as MemoryTaskAgent)
+			: null;
+		const memoryPipelineReady = memoryTaskAgent !== null;
+		const finalStatus: MemoryPipelineStatus = memoryPipelineReady
+			? "ready"
+			: preliminaryStatus;
+
+		expect(finalStatus).toBe("ready");
 	});
 
 	it("TurnService.flushOnSessionClose returns false when memoryPipelineReady=false and agent=null", async () => {

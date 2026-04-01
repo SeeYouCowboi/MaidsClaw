@@ -732,27 +732,30 @@ export function bootstrapRuntime(
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
 	let memoryPipelineReady = false;
-	const memoryPipelineStatus: MemoryPipelineStatus = (() => {
+	const memoryPipelineStatusPreliminary: MemoryPipelineStatus = (() => {
 		if (!memoryEmbeddingModelId) {
 			return "missing_embedding_model";
 		}
 
 		try {
 			modelRegistry.resolveChat(memoryMigrationModelId);
-		} catch {
+		} catch (error) {
+			console.error("[memoryPipelineStatus] chat model unavailable:", error);
 			return "chat_model_unavailable";
 		}
 
 		try {
 			modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
-		} catch {
+		} catch (error) {
+			console.error("[memoryPipelineStatus] embedding model unavailable:", error);
 			return "embedding_model_unavailable";
 		}
 
 		if (effectiveOrganizerEmbeddingModelId) {
 			try {
 				modelRegistry.resolveEmbedding(effectiveOrganizerEmbeddingModelId);
-			} catch {
+			} catch (error) {
+				console.error("[memoryPipelineStatus] organizer embedding model unavailable:", error);
 				return "organizer_embedding_model_unavailable";
 			}
 		}
@@ -1016,10 +1019,15 @@ export function bootstrapRuntime(
 	const coreMemoryService = new CoreMemoryService(throwingLegacyDbAdapter);
 
 	{
+		// RetrievalService is not yet wired in PG bootstrap runtime.
+		// Tools that depend on it (cognition_search, memory_explore, narrative_search)
+		// are registered for schema visibility but will return an error if called
+		// before RetrievalService is available. This is an intentional deferral,
+		// not an "unimplemented" stub.
 		const lazyRetrieval = createLazyPgRepo<RetrievalService>(
 			() => {
 				throw new Error(
-					"RetrievalService not available in PG bootstrap runtime",
+					"RetrievalService is not yet available in this runtime configuration",
 				);
 			},
 		);
@@ -1109,6 +1117,9 @@ export function bootstrapRuntime(
 			)
 		: null;
 	memoryPipelineReady = memoryTaskAgent !== null;
+	const memoryPipelineStatus: MemoryPipelineStatus = memoryPipelineReady
+		? "ready"
+		: memoryPipelineStatusPreliminary;
 	healthChecks.memory_pipeline = memoryPipelineReady ? "ok" : "degraded";
 
 	const turnService = new TurnService(

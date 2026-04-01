@@ -219,8 +219,8 @@ describeWithSkip.skipIf(skipPgTests)("memory pipeline e2e wiring (PG)", () => {
 
 	it("bootstraps with mock embedding model and constructs the memory pipeline wiring", () => {
 		expect(runtime.memoryTaskAgent).not.toBeNull();
-		expect(runtime.memoryPipelineStatus).toBe("partial");
-		expect(runtime.memoryPipelineReady).toBe(false);
+		expect(runtime.memoryPipelineStatus).toBe("ready");
+		expect(runtime.memoryPipelineReady).toBe(true);
 		expect(sweeperStartSpy.mock.calls.length).toBe(1);
 	});
 
