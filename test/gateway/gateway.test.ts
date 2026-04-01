@@ -897,6 +897,16 @@ describe("Stream semantics", () => {
 // ── 11. Real TurnService-backed gateway path ─────────────────────────────
 
 describe("Real TurnService-backed gateway path", () => {
+  let _savedBackend: string | undefined;
+  beforeAll(() => {
+    _savedBackend = process.env.MAIDSCLAW_BACKEND;
+    process.env.MAIDSCLAW_BACKEND = "sqlite";
+  });
+  afterAll(() => {
+    if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+    else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+  });
+
   /** Build a ChatModelProvider that yields a fixed chunk sequence per call. */
   function makeMockProvider(chunkRef: { value: Chunk[] }): ChatModelProvider {
     return {

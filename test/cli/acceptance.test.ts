@@ -5,7 +5,7 @@
  * Each test maps to a specific normative contract from the CLI implementation plan.
  * All tests use bun:test — no second runner is introduced.
  */
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -132,6 +132,7 @@ let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
 let savedMoonshotKey: string | undefined;
 let savedBailianKey: string | undefined;
+let _savedBackend: string | undefined;
 
 function saveEnvKeys(): void {
 	savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -150,6 +151,14 @@ function restoreEnvKeys(): void {
 	if (savedBailianKey !== undefined) process.env.BAILIAN_API_KEY = savedBailianKey;
 	else delete process.env.BAILIAN_API_KEY;
 }
+
+// Force SQLite backend for tests that use in-memory SQLite databases
+_savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+	if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+	else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 
 // ═════════════════════════════════════════════════════════════════════
 // ACCEPTANCE RUNBOOK

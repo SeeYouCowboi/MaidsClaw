@@ -14,6 +14,7 @@ import { InteractionStore } from "../../src/interaction/store.js";
 const tempRoots: string[] = [];
 let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
+let _savedBackend: string | undefined;
 
 function createTempDir(): string {
 	const tempRoot = join(
@@ -64,12 +65,16 @@ describe("debug commands", () => {
 		registerDebugCommands();
 		savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
 		savedOpenAIKey = process.env.OPENAI_API_KEY;
+		_savedBackend = process.env.MAIDSCLAW_BACKEND;
+		process.env.MAIDSCLAW_BACKEND = "sqlite";
 		process.env.OPENAI_API_KEY = "sk-openai-test";
 		delete process.env.ANTHROPIC_API_KEY;
 	});
 
 	afterEach(() => {
 		cleanupTempDirs();
+		if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+		else process.env.MAIDSCLAW_BACKEND = _savedBackend;
 		if (savedOpenAIKey !== undefined) {
 			process.env.OPENAI_API_KEY = savedOpenAIKey;
 		} else {

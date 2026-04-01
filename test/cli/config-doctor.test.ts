@@ -1,8 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
+
+const _savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 
 type ConfigDoctorResponse = {
   ok: boolean;

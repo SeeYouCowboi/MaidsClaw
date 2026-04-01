@@ -87,6 +87,7 @@ describe("gateway mode", () => {
 	let runtime: RuntimeRef;
 	let server: GatewayServer;
 	let baseUrl: string;
+	let _savedBackend: string | undefined;
 
 	beforeEach(() => {
 		resetCommands();
@@ -94,6 +95,8 @@ describe("gateway mode", () => {
 		registerSessionCommands();
 		registerTurnCommands();
 
+		_savedBackend = process.env.MAIDSCLAW_BACKEND;
+		process.env.MAIDSCLAW_BACKEND = "sqlite";
 		runtime = bootstrapRuntime({
 			databasePath: ":memory:",
 			cwd: makeTempDir(),
@@ -141,6 +144,8 @@ describe("gateway mode", () => {
 		server.stop();
 		runtime.shutdown();
 		cleanupTempDirs();
+		if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+		else process.env.MAIDSCLAW_BACKEND = _savedBackend;
 	});
 
 	it("GatewayClient rejects remote unsafe raw", () => {

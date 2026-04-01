@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
@@ -91,7 +91,10 @@ let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
 
 describe("session commands", () => {
+  let _savedBackend: string | undefined;
   beforeEach(() => {
+    _savedBackend = process.env.MAIDSCLAW_BACKEND;
+    process.env.MAIDSCLAW_BACKEND = "sqlite";
     resetCommands();
     registerSessionCommands();
 
@@ -101,6 +104,8 @@ describe("session commands", () => {
 
   afterEach(() => {
     cleanupTempDirs();
+    if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+    else process.env.MAIDSCLAW_BACKEND = _savedBackend;
     if (savedAnthropicKey !== undefined) {
       process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
     } else {

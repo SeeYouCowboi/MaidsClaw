@@ -1,5 +1,12 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+
+const _savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 import { MaidsClawError } from "../../src/core/errors.js";
 import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
 import { deriveEffectClass } from "../../src/core/tools/tool-definition.js";

@@ -23,10 +23,10 @@ describe.skipIf(skipPgTests)("backend-selection", () => {
 	});
 
 	describe("resolveBackendType", () => {
-		it("returns 'sqlite' when no env var is set", () => {
+		it("returns 'pg' when no env var is set", () => {
 			delete process.env.MAIDSCLAW_BACKEND;
 			const result = resolveBackendType();
-			expect(result).toBe("sqlite");
+			expect(result).toBe("pg");
 		});
 
 		it("returns 'pg' when MAIDSCLAW_BACKEND=pg", () => {
@@ -41,16 +41,16 @@ describe.skipIf(skipPgTests)("backend-selection", () => {
 			expect(result).toBe("sqlite");
 		});
 
-		it("defaults to 'sqlite' for invalid values", () => {
+		it("defaults to 'pg' for invalid values", () => {
 			process.env.MAIDSCLAW_BACKEND = "invalid";
 			const result = resolveBackendType();
-			expect(result).toBe("sqlite");
+			expect(result).toBe("pg");
 
 			process.env.MAIDSCLAW_BACKEND = "postgres";
-			expect(resolveBackendType()).toBe("sqlite");
+			expect(resolveBackendType()).toBe("pg");
 
 			process.env.MAIDSCLAW_BACKEND = "";
-			expect(resolveBackendType()).toBe("sqlite");
+			expect(resolveBackendType()).toBe("pg");
 		});
 	});
 

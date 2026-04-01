@@ -27,10 +27,10 @@ describe.skipIf(skipPgTests)("Foundation Gate", () => {
     expect(typeof pool.createPgPool).toBe("function");
   });
 
-  it("exports backend types with resolveBackendType defaulting to sqlite", async () => {
+  it("exports backend types with resolveBackendType defaulting to pg", async () => {
     const bt = await import("../../src/storage/backend-types.js");
     delete process.env.MAIDSCLAW_BACKEND;
-    expect(bt.resolveBackendType()).toBe("sqlite");
+    expect(bt.resolveBackendType()).toBe("pg");
   });
 
   it("exports all three PG schema bootstrap functions", async () => {

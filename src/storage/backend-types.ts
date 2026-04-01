@@ -36,7 +36,7 @@ export interface BackendConfig {
 
 /**
  * Resolve the backend type from environment variable.
- * Defaults to 'sqlite' if not set or invalid.
+ * Defaults to 'pg' unless MAIDSCLAW_BACKEND is explicitly set to 'sqlite'.
  *
  * Env var: MAIDSCLAW_BACKEND
  * Valid values: 'sqlite', 'pg'

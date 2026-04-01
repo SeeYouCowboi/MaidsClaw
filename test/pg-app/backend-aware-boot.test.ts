@@ -21,9 +21,9 @@ describe.skipIf(skipPgTests)("backend-aware-boot", () => {
 		}
 	});
 
-	it("resolveBackendType returns 'sqlite' when MAIDSCLAW_BACKEND is unset", () => {
+	it("resolveBackendType returns 'pg' when MAIDSCLAW_BACKEND is unset", () => {
 		delete process.env.MAIDSCLAW_BACKEND;
-		expect(resolveBackendType()).toBe("sqlite");
+		expect(resolveBackendType()).toBe("pg");
 	});
 
 	it("resolveBackendType returns 'pg' when MAIDSCLAW_BACKEND='pg'", () => {

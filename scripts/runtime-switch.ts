@@ -366,7 +366,7 @@ async function main(): Promise<void> {
 	if (allSmokePassed) {
 		console.log("\n✅ READY FOR SWITCH");
 		console.log("All preconditions met and all PG smoke checks passed.");
-		console.log("Proceed with T26 to change resolveBackendType() default from 'sqlite' to 'pg'.");
+		console.log("PG runtime checks are green. Proceed with the next PG-only rollout step.");
 		process.exit(0);
 	} else {
 		const failures = smokeResults.filter((s) => !s.passed);

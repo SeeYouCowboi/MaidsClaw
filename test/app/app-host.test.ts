@@ -1,5 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
+
+const _savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 
 describe("createAppHost", () => {
   let host: AppHost | undefined;

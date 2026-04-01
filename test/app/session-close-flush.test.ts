@@ -1,7 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { GatewaySessionClient } from "../../src/app/clients/gateway/gateway-session-client.js";
 import { LocalSessionClient } from "../../src/app/clients/local/local-session-client.js";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
+
+const _savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import type { TurnService } from "../../src/runtime/turn-service.js";
 import {

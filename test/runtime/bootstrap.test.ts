@@ -1,5 +1,12 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+
+const _savedBackend = process.env.MAIDSCLAW_BACKEND;
+beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "sqlite"; });
+afterAll(() => {
+  if (_savedBackend === undefined) delete process.env.MAIDSCLAW_BACKEND;
+  else process.env.MAIDSCLAW_BACKEND = _savedBackend;
+});
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
 import type { AgentProfile } from "../../src/agents/profile.js";
