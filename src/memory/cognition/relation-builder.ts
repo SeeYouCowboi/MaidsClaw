@@ -7,6 +7,7 @@
  */
 
 import type { MemoryRelationType, RelationDirectness, RelationSourceKind } from "../types.js";
+import type { ResolutionChainType } from "../contracts/relation-contract.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 
 type DbLike = {
@@ -51,7 +52,7 @@ export type ConflictEvidence = {
 };
 
 export type ConflictHistoryEntry = {
-  relation_type: "conflicts_with" | "resolved_by" | "downgraded_by";
+  relation_type: ResolutionChainType;
   source_node_ref: string;
   target_node_ref: string;
   created_at: number;

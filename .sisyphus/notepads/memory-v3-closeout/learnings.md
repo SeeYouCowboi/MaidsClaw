@@ -340,3 +340,49 @@ Full historical snapshot rebuild is V3 DEFERRED (§5 candidates doc).
 - TraceStore tests are fully unit-testable (file-based, no PG needed)
 - Use `mkdtempSync` for temp dirs, cleanup with `rmSync` in `finally` blocks
 - Tests go in `test/cli/trace-store.test.ts` alongside existing trace tests
+
+## Task 16: Differentiate Explain Audit Detail Level
+
+### Key findings
+- `ExplainDetailLevel` was only consumed in `navigator.ts` — two points: `effectiveMaxCandidates` bypass and `applyDetailLevel` method
+- Before this task, `audit` was functionally identical to `standard` except it removed the maxCandidates cap
+- Provenance data for audit enrichment is naturally available from: SeedCandidate.source_scope (surface), edge timestamps (committed_time), PathScore.path_score (confidence), and conflict_or_update edges (conflict history)
+- `applyDetailLevel` is the correct single point to inject audit enrichment — it's a filter/transform step after assembly
+
+### Pattern: detail level differentiation
+- `concise` → truncate (slice first 3)
+- `standard` → pass through unchanged
+- `audit` → enrich with provenance metadata + attach result-level audit_summary
+- Each level is a strict superset: audit ⊃ standard ⊃ concise
+
+### Testing pattern for navigator
+- GraphNavigator requires heavy mocking: GraphReadQueryRepo (14 methods), RetrievalService (localizeSeedsHybrid), AliasService (resolveAlias)
+- Minimal stubs returning empty arrays work for beam search exploration since it degrades gracefully
+- Seeds are the key test lever — providing seeds with different `source_scope` values exercises the provenance surface tracking
+- No PG dependency needed for navigator unit tests — pure in-memory mocking works
+
+## Task 14: Centralize RelationContract + Platform Contract Doc
+
+### Three-file duplication discovered
+RelationContract type + data was duplicated in 3 locations (not 2 as plan suggested):
+1. `src/memory/graph-edge-view.ts` — snake_case properties
+2. `src/storage/domain-repos/pg/graph-read-query-repo.ts` — camelCase properties
+3. `KNOWN_NODE_KINDS` duplicated in both above files
+
+### Naming convention mismatch
+- graph-edge-view.ts uses snake_case: `source_family`, `truth_bearing`, `heuristic_only`
+- pg/graph-read-query-repo.ts uses camelCase: `sourceFamily`, `truthBearing`, `heuristicOnly`
+- Caused by `GraphReadEdgeRecord` contract type using camelCase in its interface
+- Solution: centralized contract uses snake_case (canonical), PG repo maps via `toPgContract()` adapter
+
+### relation-builder.ts integration
+- Does NOT define RelationContract type/data — only uses relation type string literals
+- `ConflictHistoryEntry.relation_type` was typed as inline union `"conflicts_with" | "resolved_by" | "downgraded_by"`
+- Replaced with `ResolutionChainType` from centralized contract
+- SQL queries still use string literals (can't be replaced without changing runtime behavior)
+
+### Centralization pattern for contracts
+- Define canonical type + data in `src/memory/contracts/`
+- Consumers import and may adapt naming (e.g., camelCase wrapper)
+- Re-export or derive domain-specific narrowings (e.g., `ResolutionChainType`)
+- Add helper functions for common lookups (isKnownRelationType, getRelationContract, etc.)

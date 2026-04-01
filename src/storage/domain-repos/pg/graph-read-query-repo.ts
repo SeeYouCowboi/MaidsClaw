@@ -1,5 +1,10 @@
 import type postgres from "postgres";
 import { parseGraphNodeRef } from "../../../memory/contracts/graph-node-ref.js";
+import {
+  RELATION_CONTRACTS as CANONICAL_RELATION_CONTRACTS,
+  KNOWN_NODE_KINDS,
+  type RelationContract as CanonicalRelationContract,
+} from "../../../memory/contracts/relation-contract.js";
 import { isEdgeInTimeSlice, type TimeSliceQuery } from "../../../memory/time-slice-query.js";
 import {
   MEMORY_RELATION_TYPES,
@@ -24,50 +29,27 @@ import type {
 
 type EndpointFamily = NodeRefKind | "unknown";
 
-type RelationContract = {
+type PgRelationContract = {
   sourceFamily: EndpointFamily;
   targetFamily: EndpointFamily;
   truthBearing: boolean;
   heuristicOnly: boolean;
 };
 
-const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
-  "event",
-  "entity",
-  "fact",
-  "assertion",
-  "evaluation",
-  "commitment",
-]);
+function toPgContract(c: CanonicalRelationContract): PgRelationContract {
+  return {
+    sourceFamily: c.source_family,
+    targetFamily: c.target_family,
+    truthBearing: c.truth_bearing,
+    heuristicOnly: c.heuristic_only,
+  };
+}
+
+const RELATION_CONTRACTS: Record<string, PgRelationContract> = Object.fromEntries(
+  Object.entries(CANONICAL_RELATION_CONTRACTS).map(([k, v]) => [k, toPgContract(v)]),
+);
 
 const PG_MAX_BIGINT = "9223372036854775807";
-
-const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
-  causal: { sourceFamily: "event", targetFamily: "event", truthBearing: true, heuristicOnly: false },
-  temporal_prev: { sourceFamily: "event", targetFamily: "event", truthBearing: true, heuristicOnly: false },
-  temporal_next: { sourceFamily: "event", targetFamily: "event", truthBearing: true, heuristicOnly: false },
-  same_episode: { sourceFamily: "event", targetFamily: "event", truthBearing: true, heuristicOnly: false },
-  semantic_similar: { sourceFamily: "unknown", targetFamily: "unknown", truthBearing: false, heuristicOnly: true },
-  conflict_or_update: { sourceFamily: "unknown", targetFamily: "unknown", truthBearing: false, heuristicOnly: true },
-  entity_bridge: { sourceFamily: "unknown", targetFamily: "unknown", truthBearing: false, heuristicOnly: true },
-};
-
-const MEMORY_RELATION_CONTRACTS: Record<MemoryRelationType, RelationContract> = {
-  supports: { sourceFamily: "event", targetFamily: "assertion", truthBearing: true, heuristicOnly: false },
-  triggered: { sourceFamily: "event", targetFamily: "evaluation", truthBearing: true, heuristicOnly: false },
-  conflicts_with: { sourceFamily: "assertion", targetFamily: "assertion", truthBearing: true, heuristicOnly: false },
-  derived_from: { sourceFamily: "fact", targetFamily: "assertion", truthBearing: true, heuristicOnly: false },
-  supersedes: { sourceFamily: "assertion", targetFamily: "assertion", truthBearing: true, heuristicOnly: false },
-  surfaced_as: { sourceFamily: "assertion", targetFamily: "event", truthBearing: true, heuristicOnly: false },
-  published_as: { sourceFamily: "event", targetFamily: "entity", truthBearing: true, heuristicOnly: false },
-  resolved_by: { sourceFamily: "assertion", targetFamily: "fact", truthBearing: false, heuristicOnly: true },
-  downgraded_by: { sourceFamily: "assertion", targetFamily: "evaluation", truthBearing: false, heuristicOnly: true },
-};
-
-const RELATION_CONTRACTS: Record<string, RelationContract> = {
-  ...LOGIC_EDGE_CONTRACTS,
-  ...MEMORY_RELATION_CONTRACTS,
-};
 
 const MEMORY_RELATION_TYPE_SET = new Set<string>(MEMORY_RELATION_TYPES);
 
