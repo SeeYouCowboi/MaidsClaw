@@ -1,0 +1,597 @@
+bun test v1.3.10 (30e609e0)
+
+test\app\app-host.test.ts:
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > local role creates host with user + admin, no maintenance [62.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > local role start/shutdown lifecycle [16.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > admin.getHostStatus returns HostStatusDTO shape [15.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > admin.getPipelineStatus returns PipelineStatusDTO shape [16.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > server role start/shutdown lifecycle with getBoundPort [16.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > server role without enableMaintenance has no maintenance facet [15.00ms]
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) createAppHost > server role with enableMaintenance exposes maintenance facet [16.00ms]
+
+test\app\facade-contract.test.ts:
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) AppUserFacade acceptance contract > (unnamed) [16.00ms]
+
+test\app\session-close-flush.test.ts:
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED 127.0.0.1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "127.0.0.1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+1170 |   afterConnect(status, self._handle, req, readable, writable);
+1171 | }
+1172 | function createConnectionError(req, status) {
+1173 |   let details;
+1174 |   if (req.localAddress && req.localPort)
+1175 |   let ex = new ExceptionWithHostPort(status, "connect", req.address, req.port);
+                  ^
+error: connect ECONNREFUSED ::1:5432
+   errno: -4078,
+ syscall: "connect",
+    port: 5432,
+ address: "::1",
+    code: "ECONNREFUSED"
+
+      at createConnectionError (node:net:1175:12)
+      at afterConnectMultiple (node:net:1164:35)
+      at connectError (node:net:350:48)
+(fail) LocalSessionClient.closeSession flush decision matrix > returns not_applicable when closing via app host with no memory agent [31.00ms]
+{"ok":false,"command":"agent list","error":{"code":"INVALID_FLAG_VALUE","message":"--source must be \"file\" or \"runtime\", got \"invalid\"","exitCode":2}}
+Available slash commands:
+  /summary, /inspect    - View summary for last request
+  /transcript           - View session transcript
+  /prompt               - View prompt for last request
+  /chunks               - View public chunks for last request
+  /logs                 - View logs for session/request
+  /memory               - View memory state for session
+  /diagnose             - Run diagnostic for last request
+  /trace                - Export trace for last request
+  /raw on|off           - Toggle raw observation mode
+  /recover              - Recover current session
+  /close                - Close session and exit
+  /mode local|gateway   - Switch operating mode
+  /exit, /quit          - Exit shell
+  /help                 - Show this help
+
+Inspect commands accept --request <id> to override the implicit last request.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /prompt. Send a message first, or use /prompt --request <id>.
+No request context available for /chunks. Send a message first, or use /chunks --request <id>.
+No request context available for /diagnose. Send a message first, or use /diagnose --request <id>.
+No request context available for /trace. Send a message first, or use /trace --request <id>.
+Raw observation mode: ON
+Raw observation mode: OFF
+Mode: local
+Mode: gateway
+Unknown slash command: /nonexistent. Type /help for available commands.
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat command does not support --json mode","exitCode":2}}
+Error [MISSING_ARGUMENT]: chat requires --agent <agent_id>
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "chat": --bogus
+
+test\cli\config-doctor.test.ts:
+151 |     });
+152 |
+153 |     const result = await runDoctor(tmpRoot);
+154 |
+155 |     expect(result.ok).toBe(true);
+156 |     expect(result.data.status).toBe("ready");
+                                     ^
+error: expect(received).toBe(expected)
+
+Expected: "ready"
+Received: "blocked"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:156:32)
+(fail) config doctor > returns ready for minimal valid runtime-ready config [31.00ms]
+169 |     });
+170 |
+171 |     const result = await runDoctor(tmpRoot);
+172 |
+173 |     expect(result.ok).toBe(true);
+174 |     expect(result.data.status).toBe("degraded");
+                                     ^
+error: expect(received).toBe(expected)
+
+Expected: "degraded"
+Received: "blocked"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:174:32)
+(fail) config doctor > returns explicit memory_pipeline_status for missing embedding model [31.00ms]
+
+test\cli\debug-commands.test.ts:
+173 |			mode,
+174 |			cwd: ctx.cwd,
+175 |			baseUrl,
+176 |		});
+177 |	} catch (err) {
+178 |		throw new CliError(
+              ^
+CliError: Failed to bootstrap runtime: 
+ exitCode: 4,
+     code: "BOOTSTRAP_FAILED"
+
+      at openClientRuntime (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\debug.ts:178:9)
+      at async withClientRuntime (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\debug.ts:192:24)
+      at async handleDebugTrace (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\debug.ts:359:21)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\debug.ts:503:11)
+      at async dispatch (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\parser.ts:225:17)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\debug-commands.test.ts:83:10)
+      at async captureStdout (D:\ACodingWorkSpace\MaidsClaw\test\cli\debug-commands.test.ts:40:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\debug-commands.test.ts:82:21)
+(fail) debug commands > debug trace export rejects --unsafe-raw without local context [31.00ms]
+{"ok":false,"command":"debug trace","error":{"code":"UNSAFE_RAW_LOCAL_ONLY","message":"--unsafe-raw is only allowed in local mode","exitCode":2}}
+
+test\cli\gateway-mode.test.ts:
+153 |		const requestId = "req-evidence-1";
+154 |
+155 |		const summary = await fetch(
+156 |			`${baseUrl}/v1/requests/${requestId}/summary`,
+157 |		).then((r) => r.json());
+158 |		expect(summary.request_id).toBe(requestId);
+                                   ^
+error: expect(received).toBe(expected)
+
+Expected: "req-evidence-1"
+Received: undefined
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:158:30)
+(fail) gateway mode > gateway evidence endpoints return structured JSON [15.00ms]
+227 |     if (err instanceof CliError) {
+228 |       writeError(ctx, err, commandName);
+229 |       throw err;
+230 |     }
+231 |     // Wrap unknown errors
+232 |     const cliErr = new CliError(
+                         ^
+CliError: Unexpected server error
+ exitCode: 4,
+     code: "INTERNAL_ERROR"
+
+      at dispatch (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\parser.ts:232:20)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:218:10)
+      at async captureStdout (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:50:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:217:25)
+(fail) gateway mode > session and turn commands run in gateway mode
+Error [UNKNOWN_COMMAND]: Unknown command: "unknown". Available: known
+Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "bad" for "config". Available: show
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_SUBCOMMAND]: "config" requires a subcommand. Available: show
+Error [MISSING_CWD_VALUE]: --cwd requires a path argument
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat does not support --json","exitCode":2}}
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "server start": --bogus
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--port requires a numeric value","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: 99999. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: abc. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--host requires a value","exitCode":2}}
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "health": --bogus
+{"ok":false,"command":"health","error":{"code":"MISSING_FLAG_VALUE","message":"--base-url requires a URL value","exitCode":2}}
+{"ok":false,"command":"health","error":{"code":"CONNECTION_FAILED","message":"Failed to connect to server at http://127.0.0.1:19999: Unable to connect. Is the computer able to access the url?","exitCode":4}}
+
+test\gateway\gateway.test.ts:
+1018 |         }),
+1019 |       });
+1020 |
+1021 |       expect(res.status).toBe(200);
+1022 |       const events = parseSseEvents(await res.text());
+1023 |       expect(events.map((event) => event.type)).toEqual(["status", "delta", "done"]);
+                                                       ^
+error: expect(received).toEqual(expected)
+
+@@ -2,4 +2,3 @@
+    "status",
+-   "delta",
+-   "done",
++   "error",
+  ]
+
+- Expected  - 2
++ Received  + 1
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1023:49)
+(fail) Real TurnService-backed gateway path > real-path RP session emits status, full delta, then done [15.00ms]
+
+test\app\host\role-boundaries.test.ts:
+160 |			);
+161 |
+162 |			await host.start();
+163 |
+164 |			expect(spies.getGatewayStartCallCount()).toBe(1);
+165 |			expect(spies.getDispatcherStartCallCount()).toBe(1);
+                                                     ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:165:48)
+(fail) createAppHost role boundaries > server role (durable) starts gateway and consumer
+183 |
+184 |			expect(host.user).toBeUndefined();
+185 |
+186 |			await host.start();
+187 |
+188 |			expect(spies.getDispatcherStartCallCount()).toBe(1);
+                                                     ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:188:48)
+(fail) createAppHost role boundaries > worker role starts consumer only and does not expose user facade
+276 |
+277 |				expect(getShutdownCallCount()).toBe(1);
+278 |			}
+279 |
+280 |			expect(spies.getGatewayStopCallCount()).toBe(2);
+281 |			expect(spies.getSchedulerStopCallCount()).toBe(2);
+                                                   ^
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:281:46)
+(fail) createAppHost role boundaries > shutdown is idempotent for all roles
+
+test\app\host\server-durable.test.ts:
+100 |			);
+101 |
+102 |			await host.start();
+103 |
+104 |			expect(gatewayStartCallCount).toBe(1);
+105 |			expect(dispatcherStartCallCount).toBe(1);
+                                          ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\server-durable.test.ts:105:37)
+(fail) createAppHost server durable mode > starts job consumer in addition to gateway when durable mode is enabled
+183 |			await host.start();
+184 |			await host.shutdown();
+185 |			await host.shutdown();
+186 |
+187 |			expect(gatewayStopCallCount).toBe(1);
+188 |			expect(schedulerStopCallCount).toBe(1);
+                                        ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\server-durable.test.ts:188:35)
+(fail) createAppHost server durable mode > stops both gateway and consumer on shutdown when durable mode is enabled
+
+test\app\host\worker-role.test.ts:
+113 |				"getBoundPort is only available for server role",
+114 |			);
+115 |
+116 |			await host.start();
+117 |
+118 |			expect(dispatcherStartCallCount).toBe(1);
+                                          ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\worker-role.test.ts:118:37)
+(fail) createAppHost worker role > starts durable consumer on start and stops it on shutdown
+
+test\core\models\experimental\codex-adapter.test.ts:
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+
+ 868 pass
+ 349 skip
+ 21 fail
+ 2190 expect() calls
+Ran 1238 tests across 101 files. [2.93s]
