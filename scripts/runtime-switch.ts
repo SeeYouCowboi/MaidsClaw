@@ -137,14 +137,10 @@ async function checkDrain(sqliteDb: string, skip: boolean): Promise<Precondition
 	}
 
 	try {
-		const { checkDrainReady } = await import("../src/jobs/sqlite-drain-check.js");
-		const report = await checkDrainReady(sqlitePath);
 		return {
 			name: "Drain Ready",
-			passed: report.ready,
-			message: report.ready
-				? `Drain is ready — no active legacy jobs (total rows: ${report.totalCount})`
-				: `NOT READY: pending=${report.activeCounts.pending}, processing=${report.activeCounts.processing}, retryable=${report.activeCounts.retryable}`,
+			passed: true,
+			message: "SQLite drain check retired — SQLite was fully decommissioned in Phase 3. Drain is implicitly complete.",
 			skipped: false,
 		};
 	} catch (error) {
@@ -181,13 +177,13 @@ function checkParityPrecondition(skip: boolean): PreconditionResult {
 		};
 	}
 
-	// Parity evidence produced by scripts/parity-verify.ts
+	// Parity evidence produced during T26 formal switch (scripts/parity-verify.ts was retired in T27)
 	const parityJsonPath = resolve(".sisyphus/evidence/task-24-parity-zero.json");
 	if (!existsSync(parityJsonPath)) {
 		return {
 			name: "Parity Green",
 			passed: false,
-			message: `No parity evidence at ${parityJsonPath} — run scripts/parity-verify.ts first`,
+			message: `No parity evidence at ${parityJsonPath} — parity was verified during T26 formal switch. Evidence file should have been produced then.`,
 			skipped: false,
 		};
 	}
