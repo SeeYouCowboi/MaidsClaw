@@ -17,8 +17,10 @@ import {
 import { VisibilityPolicy } from "./visibility-policy.js";
 import {
   MEMORY_RELATION_TYPES,
+  type AuditProvenance,
   type BeamEdge,
   type BeamPath,
+  type EdgeLayer,
   type EvidencePath,
   type ExplainDetailLevel,
   type ExploreMode,
@@ -249,10 +251,11 @@ export class GraphNavigator {
     const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
     const assembled = await this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
     const sliced = filterEvidencePathsByTimeSlice(assembled, input);
-    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel);
+    const seedsByRef = new Map(visibleSeeds.map((s) => [s.node_ref, s]));
+    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel, seedsByRef);
     const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
 
-    return {
+    const result: NavigatorResult = {
       query,
       query_type: analysis.query_type,
       summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
@@ -266,6 +269,12 @@ export class GraphNavigator {
       },
       evidence_paths: levelFiltered,
     };
+
+    if (input.detailLevel === "audit") {
+      result.audit_summary = this.buildAuditSummary(levelFiltered);
+    }
+
+    return result;
   }
 
   private asNavigatorOptions(optionsOrInput?: NavigatorOptions | MemoryExploreInput): NavigatorOptions | undefined {
@@ -1372,14 +1381,83 @@ export class GraphNavigator {
     return result;
   }
 
-  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel): EvidencePath[] {
+  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath[] {
     if (!detailLevel || detailLevel === "standard") {
       return paths;
     }
     if (detailLevel === "concise") {
       return paths.slice(0, 3);
     }
+    if (detailLevel === "audit") {
+      return paths.map((p) => this.enrichWithProvenance(p, seedsByRef));
+    }
     return paths;
+  }
+
+  private enrichWithProvenance(evidencePath: EvidencePath, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath {
+    const seed = seedsByRef?.get(evidencePath.path.seed);
+    const sourceSurface = seed?.source_scope ?? "unknown";
+
+    const edgeTimestamps = evidencePath.path.edges
+      .map((e) => e.timestamp)
+      .filter((t): t is number => t !== null);
+    const committedTime = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : null;
+
+    const confidenceScore = this.clamp01(evidencePath.score.path_score);
+
+    const conflictRefs: NodeRef[] = [];
+    for (const edge of evidencePath.path.edges) {
+      if (edge.kind === "conflict_or_update") {
+        conflictRefs.push(edge.from, edge.to);
+      }
+    }
+    const uniqueConflictRefs = Array.from(new Set(conflictRefs));
+
+    const edgeLayers = Array.from(new Set(
+      evidencePath.path.edges
+        .map((e) => e.layer)
+        .filter((l): l is EdgeLayer => l !== undefined),
+    ));
+
+    const provenance: AuditProvenance = {
+      source_surface: sourceSurface,
+      committed_time: committedTime,
+      confidence_score: confidenceScore,
+      conflict_refs: uniqueConflictRefs,
+      edge_layers: edgeLayers,
+    };
+
+    return { ...evidencePath, provenance };
+  }
+
+  private buildAuditSummary(paths: EvidencePath[]): NavigatorResult["audit_summary"] {
+    const surfaces = new Set<string>();
+    let earliest: number | null = null;
+    let latest: number | null = null;
+    let conflictCount = 0;
+
+    for (const p of paths) {
+      if (p.provenance) {
+        surfaces.add(p.provenance.source_surface);
+        if (p.provenance.committed_time !== null) {
+          if (earliest === null || p.provenance.committed_time < earliest) {
+            earliest = p.provenance.committed_time;
+          }
+          if (latest === null || p.provenance.committed_time > latest) {
+            latest = p.provenance.committed_time;
+          }
+        }
+        conflictCount += p.provenance.conflict_refs.length > 0 ? 1 : 0;
+      }
+    }
+
+    return {
+      total_paths: paths.length,
+      surfaces_used: Array.from(surfaces),
+      earliest_committed_time: earliest,
+      latest_committed_time: latest,
+      conflict_count: conflictCount,
+    };
   }
 
   private collectSupportingNodes(path: BeamPath): NodeRef[] {

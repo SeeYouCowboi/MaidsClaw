@@ -316,6 +316,24 @@ export type PathScore = {
   path_score: number;
 };
 
+/**
+ * Provenance metadata attached to evidence paths at `audit` detail level.
+ * Provides observability into WHERE a memory fact came from, WHEN it was committed,
+ * confidence, and any conflict history — for operator/developer traceability.
+ */
+export type AuditProvenance = {
+  /** Which authority surface the seed originated from (e.g. "private", "area", "world"). */
+  source_surface: string;
+  /** Timestamp (epoch ms) when the evidence was committed/created, if available. */
+  committed_time: number | null;
+  /** Confidence score of the evidence path (normalized 0–1). */
+  confidence_score: number;
+  /** Node refs involved in conflict/update edges within this path, if any. */
+  conflict_refs: NodeRef[];
+  /** Edge layers traversed (e.g. ["state", "symbolic", "heuristic"]). */
+  edge_layers: EdgeLayer[];
+};
+
 export type EvidencePath = {
   path: BeamPath;
   score: PathScore;
@@ -323,12 +341,21 @@ export type EvidencePath = {
   supporting_facts: number[];
   redacted_placeholders?: RedactedPlaceholder[];
   summary?: string;
+  /** Present only when detailLevel is "audit". */
+  provenance?: AuditProvenance;
 };
 
 export type NavigatorResult = {
   query: string;
   query_type: QueryType;
   summary?: string;
+  audit_summary?: {
+    total_paths: number;
+    surfaces_used: string[];
+    earliest_committed_time: number | null;
+    latest_committed_time: number | null;
+    conflict_count: number;
+  };
   drilldown?: {
     mode?: ExploreMode;
     focus_ref?: NodeRef;
