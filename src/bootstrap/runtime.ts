@@ -32,6 +32,8 @@ import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
+import { registerMemoryTools } from "../memory/tools.js";
+import type { RetrievalService } from "../memory/retrieval.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
@@ -1012,6 +1014,47 @@ export function bootstrapRuntime(
 		resolvedJobPersistence,
 	);
 	const coreMemoryService = new CoreMemoryService(throwingLegacyDbAdapter);
+
+	{
+		const lazyRetrieval = createLazyPgRepo<RetrievalService>(
+			() => {
+				throw new Error(
+					"RetrievalService not available in PG bootstrap runtime",
+				);
+			},
+		);
+		registerMemoryTools(
+			{
+				registerLocal(memTool) {
+					toolExecutor.registerLocal({
+						name: memTool.name,
+						description: memTool.description,
+						parameters: memTool.parameters,
+						effectClass: memTool.effectClass,
+						traceVisibility: memTool.traceVisibility,
+						executionContract: memTool.executionContract,
+						async execute(params, context) {
+							const vc = context?.viewerContext;
+							if (!vc) {
+								throw new Error(
+									`Memory tool '${memTool.name}' requires viewerContext in DispatchContext`,
+								);
+							}
+							return memTool.handler(
+								params as Record<string, unknown>,
+								vc,
+							);
+						},
+					});
+				},
+			},
+			{
+				coreMemory: coreMemoryService,
+				retrieval: lazyRetrieval,
+			},
+		);
+	}
+
 	const embeddingService = new EmbeddingService(
 		embeddingRepo,
 		new PgTransactionBatcher(),

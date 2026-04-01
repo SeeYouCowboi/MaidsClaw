@@ -242,3 +242,21 @@ Barrel exports (index.ts) can create false positives — check if the barrel its
 - PendingSettlementSweeper `isEnabled` gate at line 67: `!this.options.isEnabled?.() && this.options.isEnabled !== undefined`
 - TS narrows IIFE return type — `expect(status).not.toBe("ready")` fails typecheck; use `status as string`
 - 10 tests, 0 failures, no PG required
+
+## Task 10: Register memory tools in ToolExecutor
+
+### Key type mismatch: MemoryToolDefinition vs ToolDefinition
+- `MemoryToolDefinition` uses `handler(args: Record<string, unknown>, viewerContext: ViewerContext)`
+- `ToolDefinition` uses `execute(params: unknown, context?: DispatchContext)`
+- Cannot pass `ToolExecutor` directly to `registerMemoryTools` — need adapter wrapper
+- Adapter extracts `context?.viewerContext` and delegates to `handler`
+
+### RetrievalService stub
+- `RetrievalService` has private class members → cannot `as RetrievalService` on plain object
+- `createLazyPgRepo<RetrievalService>(() => throw)` works because generic type params bypass private member checks
+- Services only invoked at handler execution time, not registration time — stubs safe for schema visibility
+
+### Placement in runtime.ts
+- `registerMemoryTools` call placed after `coreMemoryService` creation (line ~1018)
+- Uses block scope `{ }` to contain `lazyRetrieval` variable
+- All 6 tools registered (2 write + 4 read-only)
