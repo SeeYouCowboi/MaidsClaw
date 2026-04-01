@@ -27,16 +27,31 @@ import type {
 	TurnSettlementPayload,
 } from "../interaction/contracts.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
-import { InteractionStore } from "../interaction/store.js";
+import type { InteractionStore } from "../interaction/store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
+import { CoreMemoryService } from "../memory/core-memory.js";
+import { EmbeddingService } from "../memory/embeddings.js";
+import { MaterializationService } from "../memory/materialization.js";
+import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
+import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
+import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
+import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import {
 	getAttachedSharedBlocksAsync,
 	getPinnedBlocksAsync,
 	getRecentCognitionAsync,
 	getSharedBlocksAsync,
 } from "../memory/prompt-data.js";
+import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
+import type { SettlementLedger } from "../memory/settlement-ledger.js";
+import { GraphStorageService } from "../memory/storage.js";
+import {
+	MemoryTaskAgent,
+	type MemoryTaskDbAdapter,
+	type MemoryTaskModelProvider,
+} from "../memory/task-agent.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
@@ -44,27 +59,29 @@ import { TurnService } from "../runtime/turn-service.js";
 import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
-import {
-	PgBackendFactory,
-	resolveBackendType,
-} from "../storage/backend-types.js";
+import { PgBackendFactory } from "../storage/backend-types.js";
+import type { Db } from "../storage/db-types.js";
+import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgCoreMemoryBlockRepo } from "../storage/domain-repos/pg/core-memory-block-repo.js";
 import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
+import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
 import { PgInteractionRepo } from "../storage/domain-repos/pg/interaction-repo.js";
+import { PgNodeScoreRepo } from "../storage/domain-repos/pg/node-score-repo.js";
+import { PgNodeScoringQueryRepo } from "../storage/domain-repos/pg/node-scoring-query-repo.js";
 import { PgPendingFlushRecoveryRepo } from "../storage/domain-repos/pg/pending-flush-recovery-repo.js";
+import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
+import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-repo.js";
+import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
 import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
-import {
-	resolveStoragePaths,
-} from "../storage/paths.js";
+import { resolveStoragePaths } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
-import { ProjectionManager } from "../memory/projection/projection-manager.js";
-import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import type {
 	MemoryPipelineStatus,
 	RuntimeBootstrapOptions,
@@ -185,6 +202,156 @@ function createLazyPgRepo<T extends object>(factory: () => T): T {
 			return value;
 		},
 	});
+}
+
+const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
+	exec(sql: string): void {
+		throw new Error(
+			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: exec("${sql}")`,
+		);
+	},
+	prepare(sql: string) {
+		throw new Error(
+			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: prepare("${sql}")`,
+		);
+	},
+};
+
+const throwingLegacyDbAdapter: Db = {
+	raw: null,
+	exec(sql: string): void {
+		throwingMemoryDbAdapter.exec(sql);
+	},
+	query<T = Record<string, unknown>>(sql: string, _params?: unknown[]): T[] {
+		throw new Error(
+			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: query("${sql}")`,
+		);
+	},
+	run(
+		sql: string,
+		_params?: unknown[],
+	): { changes: number; lastInsertRowid: number | bigint } {
+		throw new Error(
+			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: run("${sql}")`,
+		);
+	},
+	get<T = Record<string, unknown>>(
+		sql: string,
+		_params?: unknown[],
+	): T | undefined {
+		throw new Error(
+			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: get("${sql}")`,
+		);
+	},
+	close(): void {
+		throw new Error(
+			"[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: close()",
+		);
+	},
+	transaction<T>(_fn: () => T): T {
+		throw new Error(
+			"[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: transaction(fn)",
+		);
+	},
+	prepare(sql: string): {
+		run(...params: unknown[]): {
+			changes: number;
+			lastInsertRowid: number | bigint;
+		};
+		all(...params: unknown[]): unknown[];
+		get(...params: unknown[]): unknown;
+	} {
+		void sql;
+		return throwingMemoryDbAdapter.prepare(sql);
+	},
+};
+
+function resolveSettledNow<T>(value: Promise<T> | T, context: string): T {
+	if (!(value instanceof Promise)) {
+		return value;
+	}
+	const settled = Bun.peek(value);
+	if (settled instanceof Promise) {
+		throw new Error(
+			`[bootstrap/runtime] ${context} returned unresolved async result in sync bridge`,
+		);
+	}
+	return settled as T;
+}
+
+function createSettlementLedgerAdapter(
+	settlementLedgerRepo: SettlementLedgerRepo,
+): SettlementLedger {
+	return {
+		check(settlementId: string) {
+			return resolveSettledNow(
+				settlementLedgerRepo.check(settlementId),
+				"settlementLedger.check",
+			);
+		},
+		rawStatus(settlementId: string) {
+			return resolveSettledNow(
+				settlementLedgerRepo.rawStatus(settlementId),
+				"settlementLedger.rawStatus",
+			);
+		},
+		markPending(settlementId: string, agentId: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markPending(settlementId, agentId),
+				"settlementLedger.markPending",
+			);
+		},
+		markClaimed(settlementId: string, claimedBy: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markClaimed(settlementId, claimedBy),
+				"settlementLedger.markClaimed",
+			);
+		},
+		markApplying(settlementId: string, agentId: string, payloadHash?: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markApplying(settlementId, agentId, payloadHash),
+				"settlementLedger.markApplying",
+			);
+		},
+		markApplied(settlementId: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markApplied(settlementId),
+				"settlementLedger.markApplied",
+			);
+		},
+		markReplayedNoop(settlementId: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markReplayedNoop(settlementId),
+				"settlementLedger.markReplayedNoop",
+			);
+		},
+		markConflict(settlementId: string, errorMessage: string) {
+			resolveSettledNow(
+				settlementLedgerRepo.markConflict(settlementId, errorMessage),
+				"settlementLedger.markConflict",
+			);
+		},
+		markFailed(settlementId: string, errorMessage: string, retryable: boolean) {
+			if (retryable) {
+				resolveSettledNow(
+					settlementLedgerRepo.markFailedRetryScheduled(
+						settlementId,
+						errorMessage,
+					),
+					"settlementLedger.markFailedRetryScheduled",
+				);
+				return;
+			}
+			resolveSettledNow(
+				settlementLedgerRepo.markFailedTerminal(settlementId, errorMessage),
+				"settlementLedger.markFailedTerminal",
+			);
+		},
+	};
+}
+
+function isPublicationRecoverySchemaCompatible(): boolean {
+	return false;
 }
 
 function createPgInteractionStoreShim(): InteractionStore {
@@ -563,9 +730,33 @@ export function bootstrapRuntime(
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
 	const memoryPipelineReady = false;
-	const memoryPipelineStatus: MemoryPipelineStatus = memoryEmbeddingModelId
-		? "ready"
-		: "missing_embedding_model";
+	const memoryPipelineStatus: MemoryPipelineStatus = (() => {
+		if (!memoryEmbeddingModelId) {
+			return "missing_embedding_model";
+		}
+
+		try {
+			modelRegistry.resolveChat(memoryMigrationModelId);
+		} catch {
+			return "chat_model_unavailable";
+		}
+
+		try {
+			modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
+		} catch {
+			return "embedding_model_unavailable";
+		}
+
+		if (effectiveOrganizerEmbeddingModelId) {
+			try {
+				modelRegistry.resolveEmbedding(effectiveOrganizerEmbeddingModelId);
+			} catch {
+				return "organizer_embedding_model_unavailable";
+			}
+		}
+
+		return "partial";
+	})();
 
 	const healthCheckAgentProfile =
 		agentRegistry.get(MAIDEN_PROFILE.id) ??
@@ -760,10 +951,42 @@ export function bootstrapRuntime(
 		},
 	};
 
-	const episodeRepo = createLazyPgRepo(() => new PgEpisodeRepo(resolvePgPool()));
-	const cognitionEventRepo = createLazyPgRepo(() => new PgCognitionEventRepo(resolvePgPool()));
-	const cognitionProjectionRepo = createLazyPgRepo(() => new PgCognitionProjectionRepo(resolvePgPool()));
-	const areaWorldProjectionRepo = createLazyPgRepo(() => new PgAreaWorldProjectionRepo(resolvePgPool()));
+	const episodeRepo = createLazyPgRepo(
+		() => new PgEpisodeRepo(resolvePgPool()),
+	);
+	const cognitionEventRepo = createLazyPgRepo(
+		() => new PgCognitionEventRepo(resolvePgPool()),
+	);
+	const cognitionProjectionRepo = createLazyPgRepo(
+		() => new PgCognitionProjectionRepo(resolvePgPool()),
+	);
+	const areaWorldProjectionRepo = createLazyPgRepo(
+		() => new PgAreaWorldProjectionRepo(resolvePgPool()),
+	);
+	const graphStoreRepo = createLazyPgRepo(
+		() => new PgGraphMutableStoreRepo(resolvePgPool()),
+	);
+	const searchProjectionRepo = createLazyPgRepo(
+		() => new PgSearchProjectionRepo(resolvePgPool()),
+	);
+	const embeddingRepo = createLazyPgRepo(
+		() => new PgEmbeddingRepo(resolvePgPool()),
+	);
+	const semanticEdgeRepo = createLazyPgRepo(
+		() => new PgSemanticEdgeRepo(resolvePgPool()),
+	);
+	const nodeScoreRepo = createLazyPgRepo(
+		() => new PgNodeScoreRepo(resolvePgPool()),
+	);
+	const nodeScoringQueryRepo = createLazyPgRepo(
+		() => new PgNodeScoringQueryRepo(resolvePgPool()),
+	);
+	const promotionQueryRepo = createLazyPgRepo(
+		() => new PgPromotionQueryRepo(resolvePgPool()),
+	);
+	const settlementLedgerRepo = createLazyPgRepo(
+		() => new PgSettlementLedgerRepo(resolvePgPool()),
+	);
 	const projectionManager = new ProjectionManager(
 		episodeRepo,
 		cognitionEventRepo,
@@ -772,13 +995,83 @@ export function bootstrapRuntime(
 		areaWorldProjectionRepo,
 		undefined,
 	);
+	const graphStorageService = GraphStorageService.withDomainRepos(
+		{
+			graphStoreRepo,
+			searchProjectionRepo,
+			embeddingRepo,
+			semanticEdgeRepo,
+			nodeScoreRepo,
+			coreMemoryBlockRepo,
+			sharedBlockRepo,
+			episodeRepo,
+			cognitionEventRepo,
+			cognitionProjectionRepo,
+			areaWorldProjectionRepo,
+		},
+		resolvedJobPersistence,
+	);
+	const coreMemoryService = new CoreMemoryService(throwingLegacyDbAdapter);
+	const embeddingService = new EmbeddingService(
+		embeddingRepo,
+		new PgTransactionBatcher(),
+	);
+	const materializationService = new MaterializationService(
+		throwingLegacyDbAdapter,
+		graphStorageService,
+		promotionQueryRepo,
+		undefined,
+	);
+	const settlementLedger = createSettlementLedgerAdapter(settlementLedgerRepo);
+	const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
+		memoryEmbeddingModelId
+			? (() => {
+					try {
+						return new MemoryTaskModelProviderAdapter(
+							modelRegistry,
+							memoryMigrationModelId,
+							memoryEmbeddingModelId,
+						);
+					} catch (error) {
+						const reason =
+							error instanceof Error ? error.message : String(error);
+						return {
+							defaultEmbeddingModelId: memoryEmbeddingModelId,
+							chat: async () => {
+								throw new Error(
+									`[MemoryTaskModelProviderAdapter] chat provider unavailable: ${reason}`,
+								);
+							},
+							embed: async () => {
+								throw new Error(
+									`[MemoryTaskModelProviderAdapter] embedding provider unavailable: ${reason}`,
+								);
+							},
+						} satisfies MemoryTaskModelProvider;
+					}
+				})()
+			: undefined;
+	const memoryTaskAgent = memoryEmbeddingModelId
+		? new MemoryTaskAgent(
+				{ db: throwingMemoryDbAdapter },
+				graphStorageService,
+				coreMemoryService,
+				embeddingService,
+				materializationService,
+				memoryTaskModelProvider,
+				settlementLedger,
+				resolvedJobPersistence,
+				options.strictDurableMode ?? false,
+				nodeScoringQueryRepo,
+			)
+		: null;
 
 	const turnService = new TurnService(
 		turnServiceAgentLoop,
 		commitService,
 		interactionStore,
 		flushSelector,
-		null,
+		memoryTaskAgent,
 		sessionService,
 		viewerContextResolver,
 		options.projectionSink,
@@ -786,12 +1079,39 @@ export function bootstrapRuntime(
 		traceStore,
 		projectionManager,
 		settlementUnitOfWork,
+		memoryPipelineReady,
 	);
 
-	const pendingFlushRepo = createLazyPgRepo(() => new PgPendingFlushRecoveryRepo(resolvePgPool()));
-	const pendingSettlementSweeper = null;
+	const pendingFlushRepo = createLazyPgRepo(
+		() => new PgPendingFlushRecoveryRepo(resolvePgPool()),
+	);
+	const pendingSettlementSweeper =
+		memoryTaskAgent !== null
+			? new PendingSettlementSweeper(
+					pendingFlushRepo,
+					interactionStore,
+					flushSelector,
+					memoryTaskAgent,
+					{
+						isEnabled: () => memoryPipelineReady,
+					},
+				)
+			: null;
+	const publicationRecoverySweeper =
+		memoryTaskAgent !== null && isPublicationRecoverySchemaCompatible()
+			? new PublicationRecoverySweeper(
+					throwingLegacyDbAdapter,
+					graphStorageService,
+					undefined,
+				)
+			: null;
+
+	pendingSettlementSweeper?.start();
+	publicationRecoverySweeper?.start();
 
 	const shutdown = (): void => {
+		pendingSettlementSweeper?.stop();
+		publicationRecoverySweeper?.stop();
 		void pgFactory
 			.close()
 			.catch((err) => console.error("PG pool close error:", err));
@@ -815,7 +1135,7 @@ export function bootstrapRuntime(
 		},
 		createAgentLoop,
 		turnService,
-		memoryTaskAgent: null,
+		memoryTaskAgent,
 		memoryPipelineReady,
 		memoryPipelineStatus,
 		effectiveOrganizerEmbeddingModelId,

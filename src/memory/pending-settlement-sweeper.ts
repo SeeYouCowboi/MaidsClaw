@@ -3,7 +3,7 @@ import type { InteractionRecord } from "../interaction/contracts.js";
 import type { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
 import type { PendingFlushRecoveryRepo } from "../storage/domain-repos/contracts/pending-flush-recovery-repo.js";
-import type { MemoryTaskAgent, MemoryFlushRequest } from "./task-agent.js";
+import type { MemoryTaskAgent } from "./task-agent.js";
 
 const PERIODIC_INTERVAL_MS = 30_000;
 const PERIODIC_STALE_CUTOFF_MS = 120_000;
@@ -15,240 +15,271 @@ const UNRESOLVED_BLOCK_AFTER_FAILURES = 5;
 const SWEEP_LOCK_CLAIMANT = "system:pending_settlement_sweeper";
 
 export class PendingSettlementSweeper {
-  private timer?: ReturnType<typeof setInterval>;
-  private sweepInFlight = false;
-  private stopped = true;
+	private timer?: ReturnType<typeof setInterval>;
+	private sweepInFlight = false;
+	private stopped = true;
 
-  constructor(
-    private readonly pendingFlushRepo: PendingFlushRecoveryRepo,
-    private readonly interactionStore: InteractionStore,
-    private readonly flushSelector: FlushSelector,
-    private readonly memoryTaskAgent: MemoryTaskAgent,
-    private readonly options: {
-      intervalMs?: number;
-      periodicStaleCutoffMs?: number;
-      now?: () => number;
-      random?: () => number;
-    } = {},
-  ) {}
+	constructor(
+		private readonly pendingFlushRepo: PendingFlushRecoveryRepo,
+		private readonly interactionStore: InteractionStore,
+		private readonly flushSelector: FlushSelector,
+		private readonly memoryTaskAgent: MemoryTaskAgent,
+		private readonly options: {
+			intervalMs?: number;
+			periodicStaleCutoffMs?: number;
+			now?: () => number;
+			random?: () => number;
+			isEnabled?: () => boolean;
+		} = {},
+	) {}
 
-  start(): void {
-    if (this.timer) {
-      return;
-    }
+	start(): void {
+		if (this.timer) {
+			return;
+		}
 
-    this.stopped = false;
-    this.runSweep({ includeAllPending: true }).catch(() => undefined);
+		this.stopped = false;
+		this.runSweep({ includeAllPending: true }).catch(() => undefined);
 
-    const intervalMs = this.options.intervalMs ?? PERIODIC_INTERVAL_MS;
-    this.timer = setInterval(() => {
-      void this.runSweep({ includeAllPending: false }).catch(() => undefined);
-    }, intervalMs);
-  }
+		const intervalMs = this.options.intervalMs ?? PERIODIC_INTERVAL_MS;
+		this.timer = setInterval(() => {
+			void this.runSweep({ includeAllPending: false }).catch(() => undefined);
+		}, intervalMs);
+	}
 
-  stop(): void {
-    this.stopped = true;
-    if (!this.timer) {
-      return;
-    }
+	stop(): void {
+		this.stopped = true;
+		if (!this.timer) {
+			return;
+		}
 
-    clearInterval(this.timer);
-    this.timer = undefined;
-  }
+		clearInterval(this.timer);
+		this.timer = undefined;
+	}
 
-  private async runSweep(params: { includeAllPending: boolean }): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
+	private async runSweep(params: {
+		includeAllPending: boolean;
+	}): Promise<void> {
+		if (this.stopped) {
+			return;
+		}
 
-    const acquired = await this.tryAcquireSweepGuard();
-    if (!acquired) {
-      return;
-    }
+		if (!this.options.isEnabled?.() && this.options.isEnabled !== undefined) {
+			return;
+		}
 
-    try {
-      const staleCutoffMs = params.includeAllPending
-        ? -1
-        : this.options.periodicStaleCutoffMs ?? PERIODIC_STALE_CUTOFF_MS;
-      const sessions = this.interactionStore.listStalePendingSettlementSessions(staleCutoffMs);
+		const acquired = await this.tryAcquireSweepGuard();
+		if (!acquired) {
+			return;
+		}
 
-      for (const session of sessions) {
-        if (this.stopped) {
-          return;
-        }
-        await this.processSession(session.sessionId, session.agentId);
-      }
-    } finally {
-      await this.releaseSweepGuard();
-    }
-  }
+		try {
+			const staleCutoffMs = params.includeAllPending
+				? -1
+				: (this.options.periodicStaleCutoffMs ?? PERIODIC_STALE_CUTOFF_MS);
+			const sessions =
+				this.interactionStore.listStalePendingSettlementSessions(staleCutoffMs);
 
-  private async tryAcquireSweepGuard(): Promise<boolean> {
-    if (this.sweepInFlight) {
-      return false;
-    }
+			for (const session of sessions) {
+				if (this.stopped) {
+					return;
+				}
+				await this.processSession(session.sessionId, session.agentId);
+			}
+		} finally {
+			await this.releaseSweepGuard();
+		}
+	}
 
-    const locked = await this.pendingFlushRepo.trySweepLock(SWEEP_LOCK_CLAIMANT);
-    if (!locked) {
-      return false;
-    }
+	private async tryAcquireSweepGuard(): Promise<boolean> {
+		if (this.sweepInFlight) {
+			return false;
+		}
 
-    this.sweepInFlight = true;
-    return true;
-  }
+		const locked =
+			await this.pendingFlushRepo.trySweepLock(SWEEP_LOCK_CLAIMANT);
+		if (!locked) {
+			return false;
+		}
 
-  private async releaseSweepGuard(): Promise<void> {
-    this.sweepInFlight = false;
-    await this.pendingFlushRepo.releaseSweepLock();
-  }
+		this.sweepInFlight = true;
+		return true;
+	}
 
-  private async processSession(sessionId: string, agentId: string): Promise<void> {
-    const range = this.interactionStore.getUnprocessedRangeForSession(sessionId);
-    if (!range) {
-      return;
-    }
+	private async releaseSweepGuard(): Promise<void> {
+		this.sweepInFlight = false;
+		await this.pendingFlushRepo.releaseSweepLock();
+	}
 
-    const flushRequest = this.flushSelector.buildSessionCloseFlush(sessionId, agentId);
-    if (!flushRequest) {
-      return;
-    }
+	private async processSession(
+		sessionId: string,
+		agentId: string,
+	): Promise<void> {
+		const range =
+			this.interactionStore.getUnprocessedRangeForSession(sessionId);
+		if (!range) {
+			return;
+		}
 
-    const existingRecord = await this.pendingFlushRepo.getBySession(sessionId);
-    if (existingRecord && existingRecord.status === "hard_failed") {
-      return;
-    }
+		const flushRequest = this.flushSelector.buildSessionCloseFlush(
+			sessionId,
+			agentId,
+		);
+		if (!flushRequest) {
+			return;
+		}
 
-    const now = this.now();
-    if (
-      existingRecord?.next_attempt_at !== null &&
-      existingRecord?.next_attempt_at !== undefined &&
-      existingRecord.next_attempt_at > now
-    ) {
-      return;
-    }
+		const existingRecord = await this.pendingFlushRepo.getBySession(sessionId);
+		if (existingRecord && existingRecord.status === "hard_failed") {
+			return;
+		}
 
-    const previousFailureCount = existingRecord?.failure_count ?? 0;
-    const records = this.interactionStore.getByRange(
-      flushRequest.sessionId,
-      flushRequest.rangeStart,
-      flushRequest.rangeEnd,
-    );
+		const now = this.now();
+		if (
+			existingRecord?.next_attempt_at !== null &&
+			existingRecord?.next_attempt_at !== undefined &&
+			existingRecord.next_attempt_at > now
+		) {
+			return;
+		}
 
-    if (!existingRecord) {
-      await this.pendingFlushRepo.recordPending({
-        sessionId: flushRequest.sessionId,
-        agentId,
-        flushRangeStart: flushRequest.rangeStart,
-        flushRangeEnd: flushRequest.rangeEnd,
-        nextAttemptAt: null,
-      });
-    }
+		const previousFailureCount = existingRecord?.failure_count ?? 0;
+		const records = this.interactionStore.getByRange(
+			flushRequest.sessionId,
+			flushRequest.rangeStart,
+			flushRequest.rangeEnd,
+		);
 
-    try {
-      await this.memoryTaskAgent.runMigrate({
-        ...flushRequest,
-        dialogueRecords: toDialogueRecords(records),
-        interactionRecords: records,
-        queueOwnerAgentId: agentId,
-      });
+		if (!existingRecord) {
+			await this.pendingFlushRepo.recordPending({
+				sessionId: flushRequest.sessionId,
+				agentId,
+				flushRangeStart: flushRequest.rangeStart,
+				flushRangeEnd: flushRequest.rangeEnd,
+				nextAttemptAt: null,
+			});
+		}
 
-      this.interactionStore.markProcessed(flushRequest.sessionId, flushRequest.rangeEnd);
-      await this.pendingFlushRepo.markResolved(sessionId);
-    } catch (thrown) {
-      const error = wrapError(thrown);
-      if (error.code === "COGNITION_UNRESOLVED_REFS") {
-        const failureCount = previousFailureCount + 1;
-        if (failureCount >= UNRESOLVED_BLOCK_AFTER_FAILURES) {
-          await this.pendingFlushRepo.markHardFail(
-            sessionId,
-            `${error.code}: ${error.message}`,
-            failureCount,
-          );
-          return;
-        }
+		try {
+			await this.memoryTaskAgent.runMigrate({
+				...flushRequest,
+				dialogueRecords: toDialogueRecords(records),
+				interactionRecords: records,
+				queueOwnerAgentId: agentId,
+			});
 
-        const delayMs = this.calculateBackoffMs(failureCount, UNRESOLVED_BASE_BACKOFF_MS, UNRESOLVED_MAX_BACKOFF_MS);
-        await this.pendingFlushRepo.markAttempted({
-          sessionId,
-          failureCount,
-          backoffMs: delayMs,
-          nextAttemptAt: now + delayMs,
-          lastError: `${error.code}: ${error.message}`,
-        });
-        return;
-      }
+			this.interactionStore.markProcessed(
+				flushRequest.sessionId,
+				flushRequest.rangeEnd,
+			);
+			await this.pendingFlushRepo.markResolved(sessionId);
+		} catch (thrown) {
+			const error = wrapError(thrown);
+			if (error.code === "COGNITION_UNRESOLVED_REFS") {
+				const failureCount = previousFailureCount + 1;
+				if (failureCount >= UNRESOLVED_BLOCK_AFTER_FAILURES) {
+					await this.pendingFlushRepo.markHardFail(
+						sessionId,
+						`${error.code}: ${error.message}`,
+						failureCount,
+					);
+					return;
+				}
 
-      if (!error.retriable) {
-        const failureCount = previousFailureCount + 1;
-        await this.pendingFlushRepo.markHardFail(
-          sessionId,
-          `${error.code}: ${error.message}`,
-          failureCount,
-        );
-        return;
-      }
+				const delayMs = this.calculateBackoffMs(
+					failureCount,
+					UNRESOLVED_BASE_BACKOFF_MS,
+					UNRESOLVED_MAX_BACKOFF_MS,
+				);
+				await this.pendingFlushRepo.markAttempted({
+					sessionId,
+					failureCount,
+					backoffMs: delayMs,
+					nextAttemptAt: now + delayMs,
+					lastError: `${error.code}: ${error.message}`,
+				});
+				return;
+			}
 
-      const failureCount = previousFailureCount + 1;
-      const delayMs = this.calculateBackoffMs(failureCount, TRANSIENT_BASE_BACKOFF_MS, TRANSIENT_MAX_BACKOFF_MS);
-      await this.pendingFlushRepo.markAttempted({
-        sessionId,
-        failureCount,
-        backoffMs: delayMs,
-        nextAttemptAt: now + delayMs,
-        lastError: `${error.code}: ${error.message}`,
-      });
-    }
-  }
+			if (!error.retriable) {
+				const failureCount = previousFailureCount + 1;
+				await this.pendingFlushRepo.markHardFail(
+					sessionId,
+					`${error.code}: ${error.message}`,
+					failureCount,
+				);
+				return;
+			}
 
-  private calculateBackoffMs(failureCount: number, baseMs: number, maxMs: number): number {
-    const attempt = Math.max(0, failureCount - 1);
-    const exponential = Math.min(baseMs * Math.pow(2, attempt), maxMs);
-    const jitter = Math.floor(exponential * 0.2 * this.random());
-    return Math.min(maxMs, exponential + jitter);
-  }
+			const failureCount = previousFailureCount + 1;
+			const delayMs = this.calculateBackoffMs(
+				failureCount,
+				TRANSIENT_BASE_BACKOFF_MS,
+				TRANSIENT_MAX_BACKOFF_MS,
+			);
+			await this.pendingFlushRepo.markAttempted({
+				sessionId,
+				failureCount,
+				backoffMs: delayMs,
+				nextAttemptAt: now + delayMs,
+				lastError: `${error.code}: ${error.message}`,
+			});
+		}
+	}
 
-  private now(): number {
-    return this.options.now?.() ?? Date.now();
-  }
+	private calculateBackoffMs(
+		failureCount: number,
+		baseMs: number,
+		maxMs: number,
+	): number {
+		const attempt = Math.max(0, failureCount - 1);
+		const exponential = Math.min(baseMs * 2 ** attempt, maxMs);
+		const jitter = Math.floor(exponential * 0.2 * this.random());
+		return Math.min(maxMs, exponential + jitter);
+	}
 
-  private random(): number {
-    return this.options.random?.() ?? Math.random();
-  }
+	private now(): number {
+		return this.options.now?.() ?? Date.now();
+	}
+
+	private random(): number {
+		return this.options.random?.() ?? Math.random();
+	}
 }
 
 function toDialogueRecords(records: InteractionRecord[]): Array<{
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  recordId: string;
-  recordIndex: number;
-  correlatedTurnId?: string;
+	role: "user" | "assistant";
+	content: string;
+	timestamp: number;
+	recordId: string;
+	recordIndex: number;
+	correlatedTurnId?: string;
 }> {
-  type DialogueRecord = {
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-    recordId: string;
-    recordIndex: number;
-    correlatedTurnId?: string;
-  };
+	type DialogueRecord = {
+		role: "user" | "assistant";
+		content: string;
+		timestamp: number;
+		recordId: string;
+		recordIndex: number;
+		correlatedTurnId?: string;
+	};
 
-  return records
-    .filter((record) => record.recordType === "message")
-    .map((record): DialogueRecord | undefined => {
-      const payload = record.payload as { role?: unknown; content?: unknown };
-      if (payload.role !== "user" && payload.role !== "assistant") {
-        return undefined;
-      }
+	return records
+		.filter((record) => record.recordType === "message")
+		.map((record): DialogueRecord | undefined => {
+			const payload = record.payload as { role?: unknown; content?: unknown };
+			if (payload.role !== "user" && payload.role !== "assistant") {
+				return undefined;
+			}
 
-      return {
-        role: payload.role,
-        content: typeof payload.content === "string" ? payload.content : "",
-        timestamp: record.committedAt,
-        recordId: record.recordId,
-        recordIndex: record.recordIndex,
-        correlatedTurnId: record.correlatedTurnId,
-      };
-    })
-    .filter((record): record is DialogueRecord => record !== undefined);
+			return {
+				role: payload.role,
+				content: typeof payload.content === "string" ? payload.content : "",
+				timestamp: record.committedAt,
+				recordId: record.recordId,
+				recordIndex: record.recordIndex,
+				correlatedTurnId: record.correlatedTurnId,
+			};
+		})
+		.filter((record): record is DialogueRecord => record !== undefined);
 }

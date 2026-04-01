@@ -2,14 +2,11 @@ import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentLoop } from "../core/agent-loop.js";
-import type { ConfigResult } from "../core/config-schema.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
 import type { PromptBuilder } from "../core/prompt-builder.js";
 import type { PromptRenderer } from "../core/prompt-renderer.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
-import type { HealthCheckFn } from "../gateway/controllers.js";
-import type { GatewayServer } from "../gateway/server.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
@@ -65,6 +62,7 @@ export type RuntimeBootstrapOptions = {
 
 export type MemoryPipelineStatus =
 	| "ready"
+	| "partial"
 	| "missing_embedding_model"
 	| "chat_model_unavailable"
 	| "embedding_model_unavailable"

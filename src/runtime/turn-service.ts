@@ -87,6 +87,7 @@ export class TurnService {
 		private readonly traceStore?: TraceStore,
 		private readonly projectionManager?: ProjectionManager,
 		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
+		private readonly memoryPipelineReady = true,
 	) {}
 
 	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
@@ -907,7 +908,7 @@ export class TurnService {
 		sessionId: string,
 		agentId: string,
 	): Promise<boolean> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return false;
 		}
 
@@ -931,7 +932,7 @@ export class TurnService {
 		sessionId: string,
 		requestId?: string,
 	): Promise<void> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return;
 		}
 
@@ -977,7 +978,7 @@ export class TurnService {
 		queueOwnerAgentId: string,
 		requestId?: string,
 	): Promise<void> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return;
 		}
 
