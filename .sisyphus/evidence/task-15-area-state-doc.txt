@@ -1,0 +1,43 @@
+task-15-area-state-doc evidence
+Generated: 2026-04-02
+
+FILE CHECK
+----------
+docs/MEMORY_AREA_STATE_AUTHORITY.md: EXISTS
+
+SECTION CHECK (grep "^## " result)
+------------------------------------
+## 1. Authority Domain Classification      PRESENT
+## 2. Storage Architecture                 PRESENT
+## 3. `source_type` Catalog               PRESENT
+## 4. `surfacing_classification` Catalog   PRESENT
+## 5. Latent State                         PRESENT
+## 6. Relationship to narrative_outward_projection and Graph Edges  PRESENT
+## 7. Write Paths and Trigger Contract     PRESENT
+## 8. Bridge Contract: Area State to Narrative Surfaces  PRESENT
+## 9. Historical Query Capability          PRESENT
+## 10. Authority Model Summary             PRESENT
+
+REQUIRED TOPICS COVERED
+------------------------
+authority_role:           Sec 1 — semi-independent, dual-surface (events ledger + current projection)
+source_type_semantics:    Sec 3 — system / gm / simulation / inferred_world with authority levels
+latent_state:             Sec 5 — latent_state_update writes exist without narrative event
+narrative_bridge:         Sec 8 — bridge contract: public_manifestation only -> area_narrative_current
+
+CODE REFERENCES READ
+---------------------
+src/memory/projection/area-world-projection-repo.ts          AREA_STATE_SOURCE_TYPES, SURFACING_CLASSIFICATIONS
+src/storage/domain-repos/pg/area-world-projection-repo.ts    upsertAreaStateCurrent, applyPublicationProjection etc
+src/storage/pg-app-schema-derived.ts                         area_state_current, area_narrative_current DDL
+src/storage/pg-app-schema-truth.ts                           area_state_events DDL
+src/migration/pg-projection-rebuild.ts                       rebuildAreaStateCurrent logic
+src/runtime/rp-turn-contract.ts                              PublicationTargetScope = "current_area" | "world_public"
+src/memory/materialization.ts                                applyPublicationProjectionUpdate caller
+src/memory/promotion.ts                                      applyPromotionProjection caller
+docs/MEMORY_REFACTOR_V3_CANDIDATES_2026-03-22.zh-CN.md       sec 3 DEFERRED intent, sec 5 current-only freeze
+
+CONCLUSION
+----------
+Document is consistent with actual code behavior.
+No speculation — all claims traceable to code or schema DDL.

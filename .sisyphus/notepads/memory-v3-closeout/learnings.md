@@ -280,3 +280,41 @@ Barrel exports (index.ts) can create false positives — check if the barrel its
 - `applyCallOneToolCalls` stub must push to `created.changedNodeRefs` — otherwise `enqueueOrganizerJobs` returns early (line 573-575) and never calls `enqueue()`.
 - `makeStubAgent` accepts optional `jobPersistence` (was required before).
 - Structured log assertions verify operation, jobType, batchId, agentId, error fields.
+
+## Task 15 (G6): Area State Authority Domain Definition
+
+### Key architectural finding
+Area State is a **semi-independent authority domain**, not derived from narrative:
+- `area_state_events`: append-only truth plane (canonical)
+- `area_state_current`: rebuildable current projection (NOT canonical)
+- `area_narrative_current`: lossy narrative summary cache (NO backing ledger, cannot be rebuilt)
+
+### source_type values (AREA_STATE_SOURCE_TYPES const)
+- `system` (default) — engine writes via publication/materialization/promotion
+- `gm` — game master overrides
+- `simulation` — autonomous world-process writes
+- `inferred_world` — derived/estimated state (lowest provenance)
+No runtime precedence enforcement — consumers must implement if needed.
+
+### surfacing_classification values (SURFACING_CLASSIFICATIONS const)
+- `public_manifestation` — also writes area_narrative_current
+- `latent_state_update` — state exists, no narrative surface
+- `private_only` — no surfacing at all
+World-scoped projections (promotion, world_public publication) are restricted to public_manifestation only.
+
+### Latent state verdict
+Latent area state CAN exist without narrative events. area_state_events has no FK to event_nodes or private_episode_events. A settlement_id links to a settlement batch, not a narrative event.
+
+### Three write trigger paths
+- `publication` (applyPublicationProjection): area OR world, classification default = public_manifestation
+- `materialization` (applyMaterializationProjection): area only, classification default = public_manifestation
+- `promotion` (applyPromotionProjection): world only, always public_manifestation, never area state
+
+### bridge contract
+area_state writes -> area_narrative_current ONLY when surfacing_classification == 'public_manifestation'
+area_narrative_current = one row per (agent_id, area_id), overwrites on each public_manifestation write, no ledger, no rebuild path.
+
+### Historical query capability
+Current-only freeze: getAreaStateCurrent() + getAreaStateAsOf() only.
+getAreaStateAsOf() queries area_state_events directly (not current projection).
+Full historical snapshot rebuild is V3 DEFERRED (§5 candidates doc).
