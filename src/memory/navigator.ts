@@ -77,6 +77,10 @@ type NodeSnapshot = {
   timestamp: number | null;
 };
 
+/**
+ * @deprecated Active safety net in GraphNavigator. Retirement condition: when
+ * isFullGraphReadRepo() returns true for all PG repos AND the legacy fallback is no longer needed.
+ */
 type LegacyDbLike = {
   prepare: (sql: string) => {
     all: (...args: unknown[]) => unknown[];
@@ -174,6 +178,10 @@ export class GraphNavigator {
   private readonly redactionPolicy: RedactionPolicy;
   private readonly edgeView: GraphEdgeView;
   private readonly legacyDb: LegacyDbLike | null;
+  /**
+   * @deprecated Set to true when !isFullGraphReadRepo(readRepo). Remove when legacy
+   * safety net is no longer needed.
+   */
   private readonly useLegacySyncSafetyNet: boolean;
   private readonly privateNodeOwnerCache = new Map<NodeRef, string | null>();
   private readonly visibilityRecordCache = new Map<NodeRef, GraphNodeVisibilityRecord | null>();
@@ -1662,6 +1670,9 @@ export class GraphNavigator {
     return readRepo;
   }
 
+  /**
+   * Gate for legacy safety net. When this returns true for all repos, LegacyDbLike can be removed.
+   */
   private isFullGraphReadRepo(readRepo: GraphReadQueryRepo): boolean {
     const candidate = readRepo as Partial<GraphReadQueryRepo>;
     return (

@@ -1,3 +1,7 @@
+/**
+ * @deprecated SQLite-shaped synchronous DB interface. Retirement condition: when all
+ * src/memory/ consumers migrate to PG async repos. See G9 in MEMORY_V3_REMAINING_GAPS_2026-04-01.zh-CN.md
+ */
 export interface Db {
   readonly raw: unknown;
   exec(sql: string): void;

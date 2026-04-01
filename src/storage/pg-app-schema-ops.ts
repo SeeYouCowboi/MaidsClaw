@@ -76,6 +76,11 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
   `);
 
   // ── recent_cognition_slots ──────────────────────────────────────────
+  // Classification: prompt_cache. Canonical source is private_cognition_events
+  // (append-only ledger). This table is a denormalized prompt convenience cache
+  // (session-scoped, trimmed to 64 entries). Can be rebuilt from ledger if lost.
+  // No dedicated rebuild path exists — adding one is a V3.1+ candidate (see §14.3
+  // in MEMORY_V3_REMAINING_GAPS_2026-04-01.zh-CN.md).
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS recent_cognition_slots (
       session_id          TEXT NOT NULL,

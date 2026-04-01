@@ -1,0 +1,38 @@
+Task 6: Add deprecation annotations to active SQLite compat surfaces + classify recent_cognition_slots
+
+## Changes Made
+
+### 1. src/storage/db-types.ts (lines 1-16)
+- Added `@deprecated` JSDoc to `Db` interface
+- Retirement condition: when all src/memory/ consumers migrate to PG async repos
+- Reference: G9 in MEMORY_V3_REMAINING_GAPS_2026-04-01.zh-CN.md
+
+### 2. src/memory/navigator.ts
+
+#### LegacyDbLike (lines 84-89)
+- Added `@deprecated` JSDoc
+- Retirement condition: when isFullGraphReadRepo() returns true for all PG repos AND legacy fallback no longer needed
+
+#### useLegacySyncSafetyNet flag (line 182)
+- Added deprecation comment explaining when it's set and when to remove
+
+#### isFullGraphReadRepo() method (lines 1673-1692)
+- Added JSDoc explaining it's the "gate for legacy safety net"
+- Documents when LegacyDbLike can be removed
+
+### 3. src/storage/pg-app-schema-ops.ts (lines 78-84)
+- Added `@classification: prompt_cache` comment block for recent_cognition_slots table
+- Documents: canonical source is private_cognition_events (append-only ledger)
+- This table is a denormalized prompt convenience cache (session-scoped, trimmed to 64 entries)
+- Can be rebuilt from ledger if lost; no dedicated rebuild path exists (V3.1+ candidate per §14.3)
+
+### 4. src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts (lines 1-10)
+- Added `@classification: prompt_cache` JSDoc to interface
+- Same documentation as schema file for consistency
+
+## Build & Test Results
+
+- bun run build: PASS (tsc --noEmit exits 0)
+- bun test: 868 pass / 350 skip / 21 fail (matches baseline)
+
+No behavioral changes - comment/JSDoc only work as specified.
