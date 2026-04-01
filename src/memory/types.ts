@@ -75,10 +75,16 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
 
 /**
  * All valid core memory block labels.
- * - `persona`: canonical writable label for agent identity (T21 forward)
+ *
+ * Canonical (V3):
+ * - `persona`: writable agent identity (T21 forward)
  * - `pinned_summary` / `pinned_index`: canonical labels (T7 forward)
- * - `user`: legacy label, read-only
- * - `index`: read-only (managed by core-memory-index-updater)
+ *
+ * System-managed:
+ * - `index`: read-only for RP, actively written by {@link CoreMemoryIndexUpdater}
+ *
+ * @deprecated Legacy — retained for DB compat, no longer prompt-surfaced:
+ * - `user`: read-only, superseded by persona + pinned_summary
  */
 export const CORE_MEMORY_LABELS = ["user", "index", "pinned_summary", "pinned_index", "persona"] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];

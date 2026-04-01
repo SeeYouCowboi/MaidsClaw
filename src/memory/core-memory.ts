@@ -10,7 +10,13 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
   char_limit: number;
   read_only: number;
 }> = [
+  /**
+   * @deprecated Legacy label — no longer surfaced in prompts (V3 closeout).
+   * Retire when all existing user-labeled DB rows have been migrated or when
+   * pinned_summary/persona covers all use cases. Do not add new writes.
+   */
   { label: "user", description: "Information about the user (legacy, read-only)", char_limit: 3000, read_only: 1 },
+  /** System-managed by {@link CoreMemoryIndexUpdater}. Not legacy — actively written by task-agent. */
   { label: "index", description: "Memory index with pointer addresses", char_limit: 1500, read_only: 1 },
   { label: "pinned_summary", description: "Pinned character summary (canonical)", char_limit: 4000, read_only: 0 },
   { label: "pinned_index", description: "Pinned memory index (canonical, no RP direct-write)", char_limit: 1500, read_only: 1 },

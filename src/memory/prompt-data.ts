@@ -18,8 +18,15 @@ export type PromptDataRepos = {
 };
 
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
-// Legacy compat: user blocks still exist in DB (read-only) and are surfaced as shared blocks for display
-const SHARED_LABELS: CoreMemoryLabel[] = ["user"];
+/**
+ * Labels surfaced in the prompt as shared blocks.
+ *
+ * `user` was removed in V3 closeout — existing DB rows are retained (read-only)
+ * but no longer injected into the active prompt. Use `persona` or `pinned_summary`
+ * for any new agent-visible context. If re-display is needed for migration, add
+ * `"user"` back here temporarily.
+ */
+const SHARED_LABELS: CoreMemoryLabel[] = [];
 const retrievalServiceByDb = new WeakMap<Db, RetrievalService>();
 
 function resolveRetrievalService(db: Db, retrievalService?: RetrievalService): RetrievalService {
