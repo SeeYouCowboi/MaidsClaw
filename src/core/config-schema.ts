@@ -19,7 +19,6 @@ export type ProviderConfigs = {
 };
 
 export type StorageConfig = {
-  databasePath?: string;
   dataDir: string;
 };
 
