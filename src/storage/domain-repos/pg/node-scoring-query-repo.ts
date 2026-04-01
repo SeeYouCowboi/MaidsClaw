@@ -184,7 +184,8 @@ export class PgNodeScoringQueryRepo implements NodeScoringQueryRepo {
           DO UPDATE SET updated_at = EXCLUDED.updated_at
         `;
       }
-    } catch {
+    } catch (error) {
+      console.error('[registerGraphNodeShadows] failed to register node shadows:', error, { nodeRefs: nodes });
     }
   }
 

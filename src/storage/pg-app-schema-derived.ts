@@ -221,6 +221,23 @@ export async function bootstrapDerivedSchema(
   `);
 
   await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS graph_nodes (
+      id         BIGSERIAL PRIMARY KEY,
+      node_kind  TEXT NOT NULL,
+      node_id    TEXT NOT NULL,
+      node_ref   TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      UNIQUE(node_kind, node_id)
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_graph_nodes_kind
+      ON graph_nodes(node_kind)
+  `);
+
+  await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS node_scores (
       node_ref      TEXT PRIMARY KEY,
       salience      REAL NOT NULL,

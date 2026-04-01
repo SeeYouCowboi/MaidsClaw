@@ -71,6 +71,41 @@ describe.skipIf(skipPgTests)("pg-derived-schema bootstrap", () => {
     });
   });
 
+  it("creates graph_nodes and supports insert/query round-trip", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapDerivedSchema(pool);
+
+      const now = Date.now();
+      await pool`
+        INSERT INTO graph_nodes (node_kind, node_id, node_ref, created_at, updated_at)
+        VALUES ('event', '42', 'event:42', ${now}, ${now})
+      `;
+
+      const rows = await pool`
+        SELECT node_kind, node_id, node_ref
+        FROM graph_nodes
+        WHERE node_ref = 'event:42'
+      `;
+      expect(rows.length).toBe(1);
+      expect(rows[0].node_kind).toBe("event");
+      expect(rows[0].node_id).toBe("42");
+      expect(rows[0].node_ref).toBe("event:42");
+
+      const later = now + 1000;
+      await pool`
+        INSERT INTO graph_nodes (node_kind, node_id, node_ref, created_at, updated_at)
+        VALUES ('event', '42', 'event:42', ${later}, ${later})
+        ON CONFLICT (node_kind, node_id)
+        DO UPDATE SET updated_at = EXCLUDED.updated_at
+      `;
+
+      const afterUpsert = await pool`
+        SELECT COUNT(*) as cnt FROM graph_nodes WHERE node_ref = 'event:42'
+      `;
+      expect(Number(afterUpsert[0].cnt)).toBe(1);
+    });
+  });
+
   it("does not create any *_fts sidecar tables", async () => {
     await withTestAppSchema(sql, async (pool) => {
       await bootstrapDerivedSchema(pool);
