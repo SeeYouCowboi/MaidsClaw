@@ -1,0 +1,5 @@
+{
+  "memory": {
+    "migrationChatModelId": "openai/gpt-4o"
+  }
+}
