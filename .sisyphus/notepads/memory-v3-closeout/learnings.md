@@ -411,3 +411,71 @@ skipped tests. 4 describes × 2 hooks + 9 it blocks = 17 "skipped tests" for 9 a
 ### LSP skipIf type gap
 `describe.skipIf()` reports LSP error "Property 'skipIf' does not exist" — this is a known
 Bun types gap present in all 24 pg-app test files. Works correctly at runtime.
+
+## Task 13 (G5): Time-Slice Truth Model Contract Doc + Boundary Tests
+
+### Per-surface capability findings (verified from code)
+1. **area_state** → HISTORICAL via `getAreaStateAsOf()` [committed_time only]
+   - Queries `area_state_events` directly (not current projection)
+   - `area_state_current` is ON CONFLICT DO UPDATE (current snapshot only)
+2. **world_state** → HISTORICAL via `getWorldStateAsOf()` [committed_time only]
+   - Same pattern as area_state: events table for history, current table for snapshot
+3. **graph edges** → HISTORICAL via `filterEvidencePathsByTimeSlice()` [both dimensions]
+   - Post-retrieval filter in navigator.explore() at line 251
+   - Seeds are NOT time-aware; only beam-expanded evidence paths are filtered
+4. **cognition** → CURRENT_ONLY
+   - `private_cognition_events` has `committed_time` but no `asOf` query API
+   - Navigator reads `private_cognition_current` directly
+5. **episode** → CURRENT_ONLY
+   - `private_episode_events` has both `valid_time` + `committed_time` but no `asOf` API
+6. **search_docs_*** → CURRENT_ONLY
+   - No time-slice columns at all; only `created_at`
+7. **node_embeddings** → CURRENT_ONLY
+   - Only `updated_at`; upsert overwrites old vectors
+
+### Time-slice flow in memory_explore tool
+- Tool params: `asOfTime` + `timeDimension` (preferred) or legacy `asOfValidTime`/`asOfCommittedTime`
+- Resolved via `buildTimeSliceQuery()` → populates `MemoryExploreInput.asOfValidTime/asOfCommittedTime`
+- Navigator passes through to `filterEvidencePathsByTimeSlice()` after beam expansion
+- `hasTimeSlice()` check at line 253 for path summary generation
+
+### Important: valid_time-only repo queries missing
+Both `getAreaStateAsOf()` and `getWorldStateAsOf()` only accept `committed_time` cutoffs.
+The events tables have `valid_time` columns + indexes but no `asOfValidTime` repo method exists.
+This is a V3.1+ implementation gap, not a bug.
+
+### Test count: 10 boundary tests (8 non-PG + 3 PG-dependent, but the describe blocks split them)
+- Bun runner reports 8 pass + 5 skip (3 PG tests + 2 hooks counted as skips)
+
+## Task 19: Memory pipeline E2E integration wiring
+
+### Integration test strategy (construct-but-gate compatible)
+- Real bootstrap path can be exercised with PG + mock model registry (custom `DefaultModelServiceRegistry`), no external embedding API needed.
+- With `memoryEmbeddingModelId` set and resolvable:
+  - `memoryTaskAgent` is constructed (`!== null`)
+  - `memoryPipelineStatus` is `"partial"`
+  - `memoryPipelineReady` remains `false`
+- Because of the gate, `flushIfDue` behavior must be validated by a focused TurnService harness where `memoryPipelineReady=true` and a real agent instance is injected, then assert `runMigrate` invocation.
+
+### Skip guard compatibility note
+- `skipPgTests` is not exported from `test/helpers/pg-app-test-utils.ts` in current code.
+- Safe pattern used: import module namespace and read optional `skipPgTests`; fallback to `process.env.PG_APP_TEST_URL` presence check.
+
+### Private method verification pattern
+- For `TurnService.flushIfDue` (private), a typed private-API cast (`TurnServicePrivateApi`) allows targeted integration assertions without changing source code.
+
+## Final Verification Wave fixes (F1/F4 follow-up)
+
+### memoryPipelineReady derivation ordering
+- In `src/bootstrap/runtime.ts`, `memoryPipelineReady` is declared before `memoryTaskAgent` is constructed, so deriving readiness requires a mutable binding (`let`) and a post-construction assignment.
+- Safe pattern in this file:
+  1. initialize `let memoryPipelineReady = false`
+  2. construct `memoryTaskAgent`
+  3. set `memoryPipelineReady = memoryTaskAgent !== null`
+
+### Health check consistency when readiness is late-bound
+- `buildHealthChecks(...)` currently runs before `memoryTaskAgent` construction; if readiness is updated later, `healthChecks.memory_pipeline` must also be updated to avoid stale degraded status.
+
+### `as any` replacement rule used
+- Replaced bare `as any` with explicit typed casts (`as unknown as TargetType`) in targeted tests.
+- For mapped edge arrays, `as unknown as EvidencePath["path"]["edges"]` keeps cast intent explicit without `any`.

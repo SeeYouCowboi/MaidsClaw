@@ -37,7 +37,7 @@ function makePath(edges: Array<{ from: string; to: string; timestamp?: number; v
         summary: "test",
         valid_time: e.valid_time ?? undefined,
         committed_time: e.committed_time ?? undefined,
-      })) as any,
+      })) as unknown as EvidencePath["path"]["edges"],
       depth: edges.length,
     },
     score: {

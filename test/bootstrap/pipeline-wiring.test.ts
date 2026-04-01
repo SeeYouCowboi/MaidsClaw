@@ -5,13 +5,19 @@ import type {
 	MemoryPipelineStatus,
 	RuntimeBootstrapResult,
 } from "../../src/bootstrap/types.js";
+import type { CommitService } from "../../src/interaction/commit-service.js";
+import type { FlushSelector } from "../../src/interaction/flush-selector.js";
+import type { InteractionStore } from "../../src/interaction/store.js";
 import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import type { SessionService } from "../../src/session/service.js";
+import type { PendingFlushRecoveryRepo } from "../../src/storage/domain-repos/contracts/pending-flush-recovery-repo.js";
 
 function stubAgentLoop() {
 	return { run: async function* () {} };
 }
 
-const stubCommitService = () => ({ commit: async () => ({}) }) as any;
+const stubCommitService = () =>
+	({ commit: async () => ({}) }) as unknown as CommitService;
 
 const stubInteractionStore = () =>
 	({
@@ -23,26 +29,26 @@ const stubInteractionStore = () =>
 		markProcessed: () => {},
 		setPendingSettlementJobState: () => {},
 		clearPendingSettlementJobState: () => {},
-	}) as any;
+	}) as unknown as InteractionStore;
 
 const stubFlushSelector = () =>
 	({
 		shouldFlush: () => null,
 		buildSessionCloseFlush: () => null,
-	}) as any;
+	}) as unknown as FlushSelector;
 
 const stubSessionService = () =>
 	({
 		getSession: async () => null,
 		setRecoveryRequired: async () => {},
-	}) as any;
+	}) as unknown as SessionService;
 
 const stubPendingFlushRepo = () =>
 	({
 		acquireLock: async () => true,
 		releaseLock: async () => {},
 		listStale: async () => [],
-	}) as any;
+	}) as unknown as PendingFlushRecoveryRepo;
 
 function buildTurnService(
 	memoryTaskAgent: MemoryTaskAgent | null,
@@ -139,7 +145,7 @@ describe("Pipeline Wiring (construct-but-gate)", () => {
 					sweepAttempted = true;
 					return [];
 				},
-			} as any,
+			} as unknown as InteractionStore,
 			stubFlushSelector(),
 			{} as unknown as MemoryTaskAgent,
 			{

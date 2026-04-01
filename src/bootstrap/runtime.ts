@@ -731,7 +731,7 @@ export function bootstrapRuntime(
 	const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
-	const memoryPipelineReady = false;
+	let memoryPipelineReady = false;
 	const memoryPipelineStatus: MemoryPipelineStatus = (() => {
 		if (!memoryEmbeddingModelId) {
 			return "missing_embedding_model";
@@ -1108,6 +1108,8 @@ export function bootstrapRuntime(
 				nodeScoringQueryRepo,
 			)
 		: null;
+	memoryPipelineReady = memoryTaskAgent !== null;
+	healthChecks.memory_pipeline = memoryPipelineReady ? "ok" : "degraded";
 
 	const turnService = new TurnService(
 		turnServiceAgentLoop,

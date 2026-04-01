@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { GraphNavigator, type NarrativeSearchServiceLike, type CognitionSearchServiceLike } from "./navigator";
 import type { GraphReadQueryRepo, GraphNodeVisibilityRecord, GraphNodeSnapshot } from "../storage/domain-repos/contracts/graph-read-query-repo";
 import type { ViewerContext, NodeRef, SeedCandidate, MemoryExploreInput } from "./types";
+import type { RetrievalService } from "./retrieval";
+import type { AliasService } from "./alias";
 
 function makeNodeRef(kind: string, id: number): NodeRef {
   return `${kind}:${id}` as NodeRef;
@@ -97,8 +99,8 @@ describe("ExplainDetailLevel differentiation", () => {
     const alias = makeStubAlias();
     return new GraphNavigator(
       readRepo as unknown as GraphReadQueryRepo,
-      retrieval as any,
-      alias as any,
+      retrieval as unknown as RetrievalService,
+      alias as unknown as AliasService,
     );
   }
 
