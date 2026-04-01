@@ -17,7 +17,8 @@ import type { CliContext } from "../context.js";
 import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { ObservationEvent } from "../../app/contracts/execution.js";
-import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
+import { createAppHost, type AppUserFacade } from "../../app/host/index.js";
+import { createGatewayAppClients } from "../../app/clients/app-clients.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -135,9 +136,24 @@ async function handleTurnSend(
   // Optional: --save-trace (enable trace capture)
   const saveTrace = args.flags["save-trace"] === true;
 
-  let runtime: AppClientRuntime;
+  let clients: AppUserFacade;
+  let shutdown: () => void;
   try {
-    runtime = await createAppClientRuntime({ mode, cwd: ctx.cwd, baseUrl });
+    if (mode === "gateway") {
+      clients = createGatewayAppClients(baseUrl);
+      shutdown = () => {};
+    } else {
+      const host = await createAppHost({
+        role: "local",
+        cwd: ctx.cwd,
+        requireAllProviders: false,
+      });
+      if (!host.user) {
+        throw new Error("createAppHost({ role: 'local' }) did not produce a user facade");
+      }
+      clients = host.user;
+      shutdown = () => void host.shutdown();
+    }
   } catch (err) {
     throw new CliError(
       "BOOTSTRAP_FAILED",
@@ -147,7 +163,7 @@ async function handleTurnSend(
   }
 
   try {
-    const session = await runtime.clients.session.getSession(sessionId);
+    const session = await clients.session.getSession(sessionId);
     if (!session) {
       throw new CliError(
         "SESSION_NOT_FOUND",
@@ -170,7 +186,7 @@ async function handleTurnSend(
     const toolEvents: ObservationEvent[] = [];
     let turnError: string | undefined;
 
-    for await (const event of runtime.clients.turn.streamTurn({
+    for await (const event of clients.turn.streamTurn({
       sessionId,
       text,
       ...(agentIdOverride ?? session.agent_id ? { agentId: agentIdOverride ?? session.agent_id } : {}),
@@ -193,7 +209,7 @@ async function handleTurnSend(
       throw new CliError("TURN_STREAM_FAILED", turnError, EXIT_RUNTIME);
     }
 
-    const summary = await runtime.clients.inspect.getSummary(requestId);
+    const summary = await clients.inspect.getSummary(requestId);
     const responseData: Record<string, unknown> = {
       session_id: summary.session_id ?? sessionId,
       request_id: requestId,
@@ -241,7 +257,7 @@ async function handleTurnSend(
       }
     }
   } finally {
-    runtime.shutdown();
+    shutdown();
   }
 }
 

@@ -7,8 +7,77 @@ import { describe, expect, it, beforeAll, afterAll } from "bun:test";
 import { SessionService } from "../../src/session/service.js";
 import { GatewayServer } from "../../src/gateway/server.js";
 import type { GatewayEvent, GatewayEventType } from "../../src/core/types.js";
+import { LocalSessionClient } from "../../src/app/clients/local/local-session-client.js";
+import type { ObservationEvent } from "../../src/app/contracts/execution.js";
+import type { TurnClient, TurnRequest } from "../../src/app/clients/turn-client.js";
+import type { TurnService } from "../../src/runtime/turn-service.js";
+import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
+import type { AppUserFacade } from "../../src/app/host/types.js";
+import { executeUserTurn } from "../../src/app/turn/user-turn-service.js";
+import { chunkToObservationEvent } from "../../src/gateway/controllers.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Build a test-only AppUserFacade from low-level services, replacing the removed
+ * deprecated GatewayServerOptions.sessionService / turnService / memoryTaskAgent.
+ */
+function buildTestUserFacade(opts: {
+  sessionService: SessionService;
+  turnService?: Pick<TurnService, "runUserTurn">;
+  memoryTaskAgent?: MemoryTaskAgent | null;
+}): AppUserFacade {
+  const fallbackTurnService: Pick<TurnService, "runUserTurn"> = {
+    async *runUserTurn(): AsyncGenerator<Chunk> {
+      yield { type: "text_delta", text: "Hello from MaidsClaw." };
+      yield {
+        type: "message_end",
+        stopReason: "end_turn",
+        inputTokens: 0,
+        outputTokens: 10,
+      };
+    },
+  };
+
+  const effectiveTurnService = opts.turnService ?? fallbackTurnService;
+
+  const sessionClient = new LocalSessionClient({
+    sessionService: opts.sessionService,
+    turnService: opts.turnService as TurnService | undefined,
+    memoryTaskAgent: opts.memoryTaskAgent,
+  });
+
+  const turnClient: TurnClient = {
+    async *streamTurn(params: TurnRequest): AsyncGenerator<ObservationEvent> {
+      const stream = await executeUserTurn(
+        {
+          sessionId: params.sessionId,
+          agentId: params.agentId,
+          userText: params.text,
+          requestId: params.requestId,
+        },
+        {
+          sessionService: opts.sessionService,
+          turnService: effectiveTurnService,
+        },
+      );
+
+      for await (const chunk of stream) {
+        const mapped = chunkToObservationEvent(chunk);
+        if (mapped) {
+          yield mapped;
+        }
+      }
+    },
+  };
+
+  return {
+    session: sessionClient,
+    turn: turnClient,
+    inspect: undefined as any,
+    health: undefined as any,
+  };
+}
 
 /** Parse SSE response text into GatewayEvent objects */
 function parseSseEvents(text: string): GatewayEvent[] {
@@ -50,7 +119,7 @@ beforeAll(() => {
   server = new GatewayServer({
     port: 0,
     host: "localhost",
-    sessionService,
+    userFacade: buildTestUserFacade({ sessionService }),
   });
   server.start();
   const port = server.getPort();
@@ -312,14 +381,16 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* (params: unknown) {
-          receivedParams = params;
-          yield { type: "text_delta" as const, text: "ok" };
-          yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 0, outputTokens: 1 };
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* (params: unknown) {
+            receivedParams = params;
+            yield { type: "text_delta" as const, text: "ok" };
+            yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 0, outputTokens: 1 };
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -463,7 +534,7 @@ describe("POST /v1/sessions - agent validation", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
+      userFacade: buildTestUserFacade({ sessionService: localSessionService }),
       hasAgent: (agentId: string) => knownAgents.has(agentId),
     });
     localServer.start();
@@ -493,7 +564,7 @@ describe("POST /v1/sessions - agent validation", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
+      userFacade: buildTestUserFacade({ sessionService: localSessionService }),
       hasAgent: (agentId: string) => knownAgents.has(agentId),
     });
     localServer.start();
@@ -528,7 +599,7 @@ describe("POST /v1/sessions/{id}/recover", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
+      userFacade: buildTestUserFacade({ sessionService: localSessionService }),
     });
     localServer.start();
 
@@ -571,7 +642,7 @@ describe("POST /v1/sessions/{id}/recover", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
+      userFacade: buildTestUserFacade({ sessionService: localSessionService }),
     });
     localServer.start();
 
@@ -625,7 +696,7 @@ describe("POST /v1/sessions/{id}/recover", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
+      userFacade: buildTestUserFacade({ sessionService: localSessionService }),
     });
     localServer.start();
 
@@ -662,18 +733,20 @@ describe("Stream semantics", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* () {
-          yield { type: "text_delta" as const, text: "partial" };
-          yield {
-            type: "error" as const,
-            code: "MODEL_ERROR",
-            message: "model failed",
-            retriable: true,
-          };
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* () {
+            yield { type: "text_delta" as const, text: "partial" };
+            yield {
+              type: "error" as const,
+              code: "MODEL_ERROR",
+              message: "model failed",
+              retriable: true,
+            };
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -709,15 +782,17 @@ describe("Stream semantics", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* () {
-          yield { type: "text_delta" as const, text: "Hello" };
-          yield { type: "message_end" as const, stopReason: "tool_use" as const, inputTokens: 10, outputTokens: 5 };
-          yield { type: "text_delta" as const, text: "World" };
-          yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 15, outputTokens: 8 };
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* () {
+            yield { type: "text_delta" as const, text: "Hello" };
+            yield { type: "message_end" as const, stopReason: "tool_use" as const, inputTokens: 10, outputTokens: 5 };
+            yield { type: "text_delta" as const, text: "World" };
+            yield { type: "message_end" as const, stopReason: "end_turn" as const, inputTokens: 15, outputTokens: 8 };
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -755,14 +830,16 @@ describe("Stream semantics", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* () {
-          yield { type: "tool_use_start" as const, id: "t1", name: "search" };
-          yield { type: "tool_use_end" as const, id: "t1" };
-          yield { type: "message_end" as const, stopReason: "end_turn" as const };
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* () {
+            yield { type: "tool_use_start" as const, id: "t1", name: "search" };
+            yield { type: "tool_use_end" as const, id: "t1" };
+            yield { type: "message_end" as const, stopReason: "end_turn" as const };
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -800,14 +877,16 @@ describe("Stream semantics", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* () {
-          yield { type: "tool_execution_result" as const, id: "t1", name: "search", result: { data: "found" }, isError: false };
-          yield { type: "tool_execution_result" as const, id: "t2", name: "delete", result: "permission denied", isError: true };
-          yield { type: "message_end" as const, stopReason: "end_turn" as const };
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* () {
+            yield { type: "tool_execution_result" as const, id: "t1", name: "search", result: { data: "found" }, isError: false };
+            yield { type: "tool_execution_result" as const, id: "t2", name: "delete", result: "permission denied", isError: true };
+            yield { type: "message_end" as const, stopReason: "end_turn" as const };
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -854,13 +933,15 @@ describe("Stream semantics", () => {
     const localServer = new GatewayServer({
       port: 0,
       host: "localhost",
-      sessionService: localSessionService,
-      turnService: {
-        runUserTurn: async function* () {
-          yield { type: "text_delta" as const, text: "partial" };
-          throw new Error("stream explosion");
-        },
-      } as any,
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          runUserTurn: async function* () {
+            yield { type: "text_delta" as const, text: "partial" };
+            throw new Error("stream explosion");
+          },
+        } as any,
+      }),
     });
     localServer.start();
 
@@ -921,12 +1002,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -989,12 +1072,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -1041,12 +1126,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -1108,12 +1195,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -1202,12 +1291,14 @@ describe("Real TurnService-backed gateway path", () => {
     runtime.toolExecutor.registerLocal(failingTool);
 
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -1260,12 +1351,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {
@@ -1309,12 +1402,14 @@ describe("Real TurnService-backed gateway path", () => {
     });
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
     const srv = new GatewayServer({
-      port: 0,
-      host: "localhost",
-      sessionService: runtime.sessionService,
-      turnService: runtime.turnService,
-      hasAgent: (id: string) => runtime.agentRegistry.has(id),
-    });
+          port: 0,
+          host: "localhost",
+          userFacade: buildTestUserFacade({
+            sessionService: runtime.sessionService,
+            turnService: runtime.turnService,
+          }),
+          hasAgent: (id: string) => runtime.agentRegistry.has(id),
+        });
     srv.start();
 
     try {

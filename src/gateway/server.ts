@@ -1,17 +1,8 @@
 import type { Server } from "bun";
-import { LocalSessionClient } from "../app/clients/local/local-session-client.js";
-import type { TurnClient } from "../app/clients/turn-client.js";
-import type { ObservationEvent } from "../app/contracts/execution.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin, AppUserFacade } from "../app/host/types.js";
-import { executeUserTurn } from "../app/turn/user-turn-service.js";
-import type { Chunk } from "../core/chunk.js";
-import type { MemoryTaskAgent } from "../memory/task-agent.js";
-import type { TurnService } from "../runtime/turn-service.js";
-import type { SessionService } from "../session/service.js";
 import {
 	type ControllerContext,
-	chunkToObservationEvent,
 	type HealthCheckFn,
 } from "./controllers.js";
 import { resolveRoute } from "./routes.js";
@@ -24,59 +15,7 @@ export type GatewayServerOptions = {
 	healthChecks?: Record<string, HealthCheckFn>;
 	listRuntimeAgents?: AppHostAdmin["listRuntimeAgents"];
 	hasAgent?: (agentId: string) => boolean;
-	/** @deprecated Test-only backward compat — pass userFacade instead */
-	sessionService?: SessionService;
-	/** @deprecated Test-only backward compat — pass userFacade instead */
-	turnService?: TurnService;
-	/** @deprecated Test-only backward compat — pass userFacade instead */
-	memoryTaskAgent?: MemoryTaskAgent | null;
 };
-
-/** @internal @deprecated Legacy bridge for tests — use userFacade.turn instead */
-function createLegacyTurnClient(
-	sessionService: SessionService,
-	turnService: Pick<TurnService, "runUserTurn"> | undefined,
-	traceStore: TraceStore | undefined,
-): TurnClient {
-	const fallbackTurnService: Pick<TurnService, "runUserTurn"> = {
-		async *runUserTurn(): AsyncGenerator<Chunk> {
-			yield { type: "text_delta", text: "Hello from MaidsClaw." };
-			yield {
-				type: "message_end",
-				stopReason: "end_turn",
-				inputTokens: 0,
-				outputTokens: 10,
-			};
-		},
-	};
-
-	const effectiveTurnService = turnService ?? fallbackTurnService;
-
-	return {
-		async *streamTurn(params): AsyncGenerator<ObservationEvent> {
-			const stream = await executeUserTurn(
-				{
-					sessionId: params.sessionId,
-					agentId: params.agentId,
-					userText: params.text,
-					requestId: params.requestId,
-					...(traceStore ? { metadata: { traceStore } } : {}),
-				},
-				{
-					sessionService,
-					turnService: effectiveTurnService,
-				},
-			);
-
-			for await (const chunk of stream) {
-				const mapped = chunkToObservationEvent(chunk);
-				if (mapped) {
-					yield mapped;
-				}
-			}
-		},
-	};
-}
 
 /**
  * Gateway HTTP server wrapping Bun.serve().
@@ -91,29 +30,9 @@ export class GatewayServer {
 	}
 
 	start(): void {
-		const sessionClient =
-			this.options.userFacade?.session ??
-			(this.options.sessionService
-				? new LocalSessionClient({
-						sessionService: this.options.sessionService,
-						turnService: this.options.turnService,
-						memoryTaskAgent: this.options.memoryTaskAgent,
-					})
-				: undefined);
-
-		const turnClient =
-			this.options.userFacade?.turn ??
-			(this.options.sessionService
-				? createLegacyTurnClient(
-						this.options.sessionService,
-						this.options.turnService,
-						this.options.traceStore,
-					)
-				: undefined);
-
 		const ctx: ControllerContext = {
-			sessionClient,
-			turnClient,
+			sessionClient: this.options.userFacade?.session,
+			turnClient: this.options.userFacade?.turn,
 			inspectClient: this.options.userFacade?.inspect,
 			healthClient: this.options.userFacade?.health,
 			traceStore: this.options.traceStore,

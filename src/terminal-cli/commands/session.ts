@@ -12,7 +12,8 @@ import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { MaidsClawError } from "../../core/errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { CliMode } from "../types.js";
-import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
+import { createAppHost, type AppUserFacade } from "../../app/host/index.js";
+import { createGatewayAppClients } from "../../app/clients/app-clients.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -216,13 +217,36 @@ async function handleSessionRecover(
   }
 }
 
+type CliRuntime = {
+  clients: AppUserFacade;
+  shutdown: () => void;
+};
+
 async function bootstrapClients(params: {
   mode: "local" | "gateway";
   baseUrl: string;
   cwd: string;
-}): Promise<AppClientRuntime> {
+}): Promise<CliRuntime> {
   try {
-    return await createAppClientRuntime(params);
+    if (params.mode === "gateway") {
+      return {
+        clients: createGatewayAppClients(params.baseUrl),
+        shutdown: () => {},
+      };
+    }
+
+    const host = await createAppHost({
+      role: "local",
+      cwd: params.cwd,
+      requireAllProviders: false,
+    });
+    if (!host.user) {
+      throw new Error("createAppHost({ role: 'local' }) did not produce a user facade");
+    }
+    return {
+      clients: host.user,
+      shutdown: () => void host.shutdown(),
+    };
   } catch (err) {
     throw new CliError(
       "BOOTSTRAP_FAILED",

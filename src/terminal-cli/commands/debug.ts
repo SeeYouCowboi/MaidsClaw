@@ -1,10 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { CliContext } from "../context.js";
-import {
-	createAppClientRuntime,
-	type AppClientRuntime,
-} from "../app-client-runtime.js";
+import { createAppHost, type AppUserFacade } from "../../app/host/index.js";
+import { createGatewayAppClients } from "../../app/clients/app-clients.js";
 import { CliError, EXIT_RUNTIME, EXIT_USAGE } from "../errors.js";
 import { resolveContext } from "../inspect/context-resolver.js";
 import { renderJson, renderText } from "../inspect/renderers.js";
@@ -163,17 +161,36 @@ function toCliError(err: unknown): CliError {
 	return new CliError("DEBUG_COMMAND_FAILED", String(err), EXIT_RUNTIME);
 }
 
+type CliRuntime = {
+	clients: AppUserFacade;
+	shutdown: () => void;
+};
+
 async function openClientRuntime(
 	ctx: CliContext,
 	mode: "local" | "gateway",
 	baseUrl: string,
-): Promise<AppClientRuntime> {
+): Promise<CliRuntime> {
 	try {
-		return await createAppClientRuntime({
-			mode,
+		if (mode === "gateway") {
+			return {
+				clients: createGatewayAppClients(baseUrl),
+				shutdown: () => {},
+			};
+		}
+
+		const host = await createAppHost({
+			role: "local",
 			cwd: ctx.cwd,
-			baseUrl,
+			requireAllProviders: false,
 		});
+		if (!host.user) {
+			throw new Error("createAppHost({ role: 'local' }) did not produce a user facade");
+		}
+		return {
+			clients: host.user,
+			shutdown: () => void host.shutdown(),
+		};
 	} catch (err) {
 		throw new CliError(
 			"BOOTSTRAP_FAILED",
@@ -187,7 +204,7 @@ async function withClientRuntime<T>(
 	ctx: CliContext,
 	mode: "local" | "gateway",
 	baseUrl: string,
-	work: (runtime: AppClientRuntime) => Promise<T>,
+	work: (runtime: CliRuntime) => Promise<T>,
 ): Promise<T> {
 	const runtime = await openClientRuntime(ctx, mode, baseUrl);
 	try {
