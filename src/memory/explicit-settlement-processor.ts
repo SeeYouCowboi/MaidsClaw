@@ -1,6 +1,6 @@
 import type { AgentRole } from "../agents/profile.js";
 
-type DbLike = {
+export type ExplicitSettlementDbAdapter = {
   prepare(sql: string): {
     run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
     all(...params: unknown[]): unknown[];
@@ -10,6 +10,7 @@ type DbLike = {
 
 import { MaidsClawError } from "../core/errors.js";
 import { enforceArtifactContracts } from "../core/tools/artifact-contract-policy.js";
+import type { TurnSettlementPayload } from "../interaction/contracts.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import type {
   AssertionBasis,
@@ -21,19 +22,17 @@ import type {
   CommitmentRecord,
   EvaluationRecord,
 } from "../runtime/rp-turn-contract.js";
-import type { TurnSettlementPayload } from "../interaction/contracts.js";
-import { CognitionRepository } from "./cognition/cognition-repo.js";
+import type { CognitionRepository } from "./cognition/cognition-repo.js";
 import { normalizeConflictFactorRefs } from "./cognition/private-cognition-current.js";
-import { enforceWriteTemplate } from "./contracts/write-template.js";
-import { RelationBuilder } from "./cognition/relation-builder.js";
+import type { RelationBuilder } from "./cognition/relation-builder.js";
 import {
   materializeRelationIntents,
   resolveConflictFactors,
   resolveLocalRefs,
   validateRelationIntents,
-  type ResolvedLocalRefs,
   type SettledArtifacts,
 } from "./cognition/relation-intent-resolver.js";
+import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
 import type { GraphStorageService } from "./storage.js";
@@ -59,20 +58,40 @@ const V3_BASIS_TO_V4: Record<string, AssertionBasis> = {
   communication: "hearsay",
 };
 
+export type ExplicitSettlementProcessorDeps = {
+  db: ExplicitSettlementDbAdapter;
+  cognitionRepo: Pick<
+    CognitionRepository,
+    | "upsertAssertion"
+    | "upsertEvaluation"
+    | "upsertCommitment"
+    | "retractCognition"
+    | "getEvaluations"
+    | "getCommitments"
+    | "getAssertions"
+    | "getAssertionByKey"
+    | "getEvaluationByKey"
+    | "getCommitmentByKey"
+  >;
+  relationBuilder: Pick<RelationBuilder, "writeContestRelations">;
+};
+
 export class ExplicitSettlementProcessor {
-  private readonly cognitionRepo: CognitionRepository;
-  private readonly relationBuilder: RelationBuilder;
+  private readonly db: ExplicitSettlementDbAdapter;
+  private readonly cognitionRepo: ExplicitSettlementProcessorDeps["cognitionRepo"];
+  private readonly relationBuilder: ExplicitSettlementProcessorDeps["relationBuilder"];
 
   constructor(
-    private readonly db: DbLike,
+    deps: ExplicitSettlementProcessorDeps,
     private readonly storage: GraphStorageService,
     private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
     private readonly loadExistingContext: ExistingContextLoader,
     private readonly applyCallOneToolCalls: CallOneApplier,
     private readonly settlementLedger?: SettlementLedger,
   ) {
-    this.cognitionRepo = new CognitionRepository(db);
-    this.relationBuilder = new RelationBuilder(db);
+    this.db = deps.db;
+    this.cognitionRepo = deps.cognitionRepo;
+    this.relationBuilder = deps.relationBuilder;
   }
 
   async process(

@@ -7,7 +7,11 @@ import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
-import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
+import {
+  ExplicitSettlementProcessor,
+  type ExplicitSettlementProcessorDeps,
+} from "./explicit-settlement-processor.js";
+import { RelationBuilder } from "./cognition/relation-builder.js";
 import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
@@ -18,7 +22,6 @@ import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
-import type { Db } from "../storage/db-types.js";
 import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
 
 import type {
@@ -318,19 +321,23 @@ export class MemoryIngestionPolicy {
   }
 }
 
-type RawDatabaseLike = {
+export type MemoryTaskDbAdapter = {
   exec(sql: string): void;
-  close(): void;
   prepare(sql: string): {
     run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
     all(...params: unknown[]): unknown[];
     get(...params: unknown[]): unknown;
   };
-  transaction<T>(fn: () => T): () => T;
+  transaction?<T>(fn: () => T): T | (() => T);
+};
+
+export type MemoryTaskAgentDeps = {
+  db: MemoryTaskDbAdapter;
+  explicitSettlement?: ExplicitSettlementProcessorDeps;
 };
 
 export class MemoryTaskAgent {
-  private readonly db: Db;
+  private readonly db: MemoryTaskDbAdapter;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
@@ -341,7 +348,7 @@ export class MemoryTaskAgent {
   private organizeTail: Promise<unknown> = Promise.resolve();
 
   constructor(
-    dbInput: Db | RawDatabaseLike,
+    deps: MemoryTaskAgentDeps,
     private readonly storage: GraphStorageService,
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
@@ -352,7 +359,7 @@ export class MemoryTaskAgent {
     private readonly strictDurableMode = false,
     nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
-    this.db = normalizeDbInput(dbInput);
+    this.db = deps.db;
     this.modelProvider =
       modelProvider ??
       ({
@@ -365,8 +372,13 @@ export class MemoryTaskAgent {
         },
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
+    const explicitSettlementDeps = deps.explicitSettlement ?? {
+      db: this.db,
+      cognitionRepo: new CognitionRepository(this.db),
+      relationBuilder: new RelationBuilder(this.db),
+    };
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
-      this.db,
+      explicitSettlementDeps,
       this.storage,
       this.modelProvider,
       (agentId) => this.loadExistingContext(agentId),
@@ -388,7 +400,7 @@ export class MemoryTaskAgent {
       console.warn(
         "[MemoryTaskAgent] strictDurableMode=true but no jobPersistence provided; durable enqueue will always throw",
       );
-    }
+  }
   }
 
   runMigrate(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
@@ -975,57 +987,4 @@ export class MemoryTaskAgent {
     }
     return "causal";
   }
-}
-
-function normalizeDbInput(db: Db | RawDatabaseLike): Db {
-  if (isDb(db)) {
-    return db;
-  }
-
-  return {
-    raw: db as Db["raw"],
-    exec(sql: string): void {
-      db.exec(sql);
-    },
-    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
-      const stmt = db.prepare(sql);
-      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
-    },
-    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.run(...(params as [])) : stmt.run();
-      return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-    },
-    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.get(...(params as [])) : stmt.get();
-      return result === null ? undefined : (result as T);
-    },
-    close(): void {
-      db.close();
-    },
-    transaction<T>(fn: () => T): T {
-      return db.transaction(fn)();
-    },
-    prepare(sql: string) {
-      const stmt = db.prepare(sql);
-      return {
-        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
-          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-        },
-        all(...params: unknown[]): unknown[] {
-          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
-        },
-        get(...params: unknown[]): unknown {
-          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
-          return result === null ? undefined : result;
-        },
-      };
-    },
-  };
-}
-
-function isDb(db: Db | RawDatabaseLike): db is Db {
-  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }

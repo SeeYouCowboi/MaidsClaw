@@ -1,0 +1,37 @@
+Task 7 — MemoryTaskAgent constructor refactor (PG-native deps)
+
+Date: 2026-04-02
+Branch HEAD before commit: 96f0a97
+
+Scope implemented:
+- Refactored MemoryTaskAgent constructor to remove `Db | RawDatabaseLike` first parameter.
+- Refactored ExplicitSettlementProcessor constructor to accept explicit deps instead of internal `DbLike` construction.
+- Removed `RawDatabaseLike`, `normalizeDbInput`, and `isDb` from task-agent.ts.
+- Preserved existing flush/organize/settle behavior; dependency wiring only.
+
+Changed files:
+- src/memory/task-agent.ts
+- src/memory/explicit-settlement-processor.ts
+- .sisyphus/notepads/memory-v3-closeout/learnings.md
+
+Verification evidence:
+
+1) LSP diagnostics (changed source files)
+- src/memory/task-agent.ts: no errors/warnings
+- src/memory/explicit-settlement-processor.ts: no errors/warnings
+
+2) Build
+Command: `bun run build`
+Result: PASS (exit 0)
+Observed output:
+`$ tsc -p tsconfig.build.json --noEmit`
+
+3) Tests
+Command: `bun test`
+Result: PASS vs baseline expectation (no new failures)
+Observed totals:
+- 868 pass
+- 350 skip
+- 21 fail
+
+Failure profile matches known baseline (primarily PG connectivity/known fixture expectations), with no additional failure count.
