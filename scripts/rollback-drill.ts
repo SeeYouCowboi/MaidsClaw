@@ -1,5 +1,11 @@
 #!/usr/bin/env bun
 
+/**
+ * ⚠️ HISTORICAL ARTIFACT: SQLite has been retired in Phase 3.
+ * This script is kept for reference but rollback to SQLite is no longer supported.
+ * PostgreSQL is now the only supported backend.
+ */
+
 import { copyFileSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -17,9 +23,10 @@ function failWithUsage(message: string): never {
   console.error(
     "Usage: bun run scripts/rollback-drill.ts --sqlite-db <path> --pg-url <url> [--dry-run]",
   );
-  console.error("  --sqlite-db  Path to SQLite database file (required)");
+  console.error("  --sqlite-db  Path to SQLite database file (required, historical only)");
   console.error("  --pg-url     PostgreSQL URL (required)");
   console.error("  --dry-run    Print planned actions without making changes");
+  console.error("\n⚠️  NOTE: SQLite has been retired. This script is a historical artifact.");
   process.exit(1);
 }
 
@@ -122,12 +129,9 @@ await runStep("[STEP 2] Export SQLite to JSONL", () => {
     return;
   }
 
-  const exporter = new SqliteExporter({ dbPath: sqliteDbPath, outDir: exportDir }, console.log);
-  try {
-    exporter.export();
-  } finally {
-    exporter.close();
-  }
+  // SQLite export no longer available - SQLite was retired in Phase 3.
+  // Rollback to SQLite is not supported.
+  console.log("  [SKIPPED] SqliteExporter removed - SQLite retired in Phase 3");
 
   if (!existsSync(manifestPath)) {
     throw new Error(`Export manifest missing: ${manifestPath}`);
@@ -194,6 +198,7 @@ await runStep("[STEP 6] Simulate failure and rollback switch to SQLite", () => {
   process.env.MAIDSCLAW_BACKEND = "sqlite";
   rollbackAtMs = Date.now();
   console.log("  simulated failure injected; MAIDSCLAW_BACKEND=sqlite");
+  console.log("  ⚠️  WARNING: SQLite has been retired. Rollback to SQLite is not supported.");
 });
 
 await runStep("[STEP 7] SQLite smoke check from backup snapshot", () => {
@@ -202,15 +207,9 @@ await runStep("[STEP 7] SQLite smoke check from backup snapshot", () => {
     return;
   }
 
-  const backupDb = openDatabase({ path: backupPath });
-  try {
-    const row = backupDb.get<{ integrity_check?: string }>("PRAGMA integrity_check");
-    if (row?.integrity_check !== "ok") {
-      throw new Error(`SQLite integrity_check failed: ${String(row?.integrity_check ?? "unknown")}`);
-    }
-  } finally {
-    closeDatabaseGracefully(backupDb);
-  }
+  // openDatabase and closeDatabaseGracefully removed - SQLite retired in Phase 3
+  console.log("  [SKIPPED] SQLite database operations removed - SQLite retired in Phase 3");
+  console.log("  ⚠️  Rollback to SQLite is no longer supported.");
 });
 
 console.log("Rollback drill summary");
@@ -223,6 +222,7 @@ if (cutoverAtMs && rollbackAtMs) {
   console.log(`  rollback_window_ms: ${rollbackAtMs - cutoverAtMs}`);
 }
 console.log("  rollback_safety_window: safe only before persistent PG writes after cutover");
+console.log("  ⚠️  NOTE: SQLite has been retired. This script is a historical artifact.");
 if (args.dryRun) {
   console.log("  mode: dry-run (no file copy/export/import/env mutation executed)");
 }

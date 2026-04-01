@@ -1,5 +1,30 @@
-=== grep -r 'bun:sqlite' src/ scripts/ --include='*.ts' ===
+T27 EVIDENCE: Zero bun:sqlite imports
 
-EXIT CODE: 0
-RESULT: 0 matches — all bun:sqlite references removed from src/ and scripts/
-Verified: 2026-04-01T08:21:58Z
+DATE: 2026-04-01
+
+COMMAND: grep -r "bun:sqlite" src/ scripts/ --include="*.ts"
+RESULT: 0 matches (exit code 1 = no matches)
+
+DELETED FILES VERIFIED:
+- src/storage/domain-repos/sqlite/ → GONE (entire directory)
+- src/storage/database.ts → GONE
+- scripts/parity-verify.ts → GONE
+- src/migration/sqlite-exporter.ts → GONE
+- scripts/sqlite-export.ts → GONE
+- src/jobs/sqlite-drain-check.ts → GONE
+- src/interaction/schema.ts → GONE
+- src/session/migrations.ts → GONE
+- test/helpers/memory-test-utils.ts → GONE
+
+MODIFIED:
+- src/memory/schema.ts → rewritten (kept domain constants, removed SQLite DDL)
+- src/migration/pg-importer.ts → imports from export-types.js (not sqlite-exporter)
+- src/bootstrap/runtime.ts → PG-only, no SQLite branch
+- src/bootstrap/types.ts → no db?, rawDb? fields
+- .env.example → no MAIDSCLAW_DB_PATH
+
+CREATED:
+- src/migration/export-types.ts → shared JSONL format types
+- src/storage/db-types.ts → structural Db interface (no bun:sqlite dep)
+
+STATUS: PASS

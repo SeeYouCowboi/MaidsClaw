@@ -1,9 +1,11 @@
-=== pg-importer decoupled from sqlite-exporter ===
+T27 EVIDENCE: pg-importer decoupled from sqlite-exporter
 
---- grep sqlite-exporter src/migration/pg-importer.ts ---
-NOT FOUND (correct - now imports from export-types.js)
+DATE: 2026-04-01
 
---- Current import in pg-importer.ts ---
-} from "./export-types.js";
+COMMAND: grep "sqlite-exporter" src/migration/pg-importer.ts
+RESULT: 0 matches
 
-Verified: 2026-04-01T08:22:20Z
+pg-importer.ts now imports from "./export-types.js" instead of "./sqlite-exporter.js"
+src/migration/export-types.ts exists with: ExportSurfaceConfig, SurfaceExportResult, ExportManifest, ExportOptions, EXPORT_SURFACES
+
+STATUS: PASS

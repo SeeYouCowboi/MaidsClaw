@@ -1928,7 +1928,7 @@ Max Concurrent: 8 (Wave 3)
   - Files: `src/storage/backend-types.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 27. SQLite 代码全面删除 + 清理 [CONSENSUS §3.72 第 5 步]
+- [x] 27. SQLite 代码全面删除 + 清理 [CONSENSUS §3.72 第 5 步]
 
   **What to do**:
   彻底删除所有 SQLite 相关代码，使项目不再包含任何 SQLite 依赖：
@@ -2050,11 +2050,11 @@ Max Concurrent: 8 (Wave 3)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read plan end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files in `.sisyphus/evidence/`. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names. Verify ZERO `bun:sqlite` imports remain in `src/` (excluding `src/storage/domain-repos/sqlite/` which should be deleted by T27).
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | bun:sqlite imports [N] | VERDICT`
 
