@@ -1,0 +1,9 @@
+=== pg-importer decoupled from sqlite-exporter ===
+
+--- grep sqlite-exporter src/migration/pg-importer.ts ---
+NOT FOUND (correct - now imports from export-types.js)
+
+--- Current import in pg-importer.ts ---
+} from "./export-types.js";
+
+Verified: 2026-04-01T08:22:20Z

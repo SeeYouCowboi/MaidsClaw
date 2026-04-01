@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import {
 	MAIDEN_PROFILE,
 	PRESET_PROFILES,
@@ -16,7 +16,6 @@ import { PromptBuilder } from "../core/prompt-builder.js";
 import {
 	BlackboardOperationalDataSource,
 	LoreAdapter,
-	MemoryAdapter,
 	PersonaAdapter,
 } from "../core/prompt-data-adapters/index.js";
 import type { MemoryDataSource } from "../core/prompt-data-sources.js";
@@ -28,76 +27,44 @@ import type {
 	TurnSettlementPayload,
 } from "../interaction/contracts.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
-import { runInteractionMigrations } from "../interaction/schema.js";
 import { InteractionStore } from "../interaction/store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
-import { CognitionEventRepo } from "../memory/cognition/cognition-event-repo.js";
-import { PrivateCognitionProjectionRepo } from "../memory/cognition/private-cognition-current.js";
-import { CoreMemoryService } from "../memory/core-memory.js";
-import { EmbeddingService } from "../memory/embeddings.js";
-import { EpisodeRepository } from "../memory/episode/episode-repo.js";
-import { MaterializationService } from "../memory/materialization.js";
-import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
-import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
-import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
-import { AreaWorldProjectionRepo } from "../memory/projection/area-world-projection-repo.js";
-import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import {
 	getAttachedSharedBlocksAsync,
 	getPinnedBlocksAsync,
 	getRecentCognitionAsync,
 	getSharedBlocksAsync,
 } from "../memory/prompt-data.js";
-import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
-import { runMemoryMigrations } from "../memory/schema.js";
-import { SqliteSettlementLedger } from "../memory/settlement-ledger.js";
-import { SharedBlockRepo as SqliteSharedBlockRepoImpl } from "../memory/shared-blocks/shared-block-repo.js";
-import { GraphStorageService } from "../memory/storage.js";
-import { MemoryTaskAgent } from "../memory/task-agent.js";
-import { TransactionBatcher } from "../memory/transaction-batcher.js";
-import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
-import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
-import { SqliteEmbeddingRepoAdapter } from "../storage/domain-repos/sqlite/embedding-repo.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
 import { TurnService } from "../runtime/turn-service.js";
 import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
-import { runSessionMigrations } from "../session/migrations.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import {
 	PgBackendFactory,
 	resolveBackendType,
 } from "../storage/backend-types.js";
-import {
-	closeDatabaseGracefully,
-	type Db,
-	openDatabase,
-} from "../storage/database.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgCoreMemoryBlockRepo } from "../storage/domain-repos/pg/core-memory-block-repo.js";
+import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
 import { PgInteractionRepo } from "../storage/domain-repos/pg/interaction-repo.js";
 import { PgPendingFlushRecoveryRepo } from "../storage/domain-repos/pg/pending-flush-recovery-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
-import { SqliteCoreMemoryBlockRepoAdapter } from "../storage/domain-repos/sqlite/core-memory-block-repo.js";
-import { SqliteInteractionRepoAdapter } from "../storage/domain-repos/sqlite/interaction-repo.js";
-import { SqlitePendingFlushRecoveryRepoAdapter } from "../storage/domain-repos/sqlite/pending-flush-recovery-repo.js";
-import { SqliteRecentCognitionSlotRepoAdapter } from "../storage/domain-repos/sqlite/recent-cognition-slot-repo.js";
-import { SqliteSharedBlockRepoAdapter } from "../storage/domain-repos/sqlite/shared-block-repo.js";
 import {
-	ensureDirectoryExists,
 	resolveStoragePaths,
 } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
-import { registerRuntimeTools } from "./tools.js";
+import { ProjectionManager } from "../memory/projection/projection-manager.js";
+import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import type {
 	MemoryPipelineStatus,
 	RuntimeBootstrapOptions,
@@ -117,31 +84,7 @@ function resolveFromCwd(
 	if (!pathValue) {
 		return undefined;
 	}
-	if (pathValue === ":memory:") {
-		return pathValue;
-	}
-
 	return isAbsolute(pathValue) ? pathValue : resolve(cwd, pathValue);
-}
-
-function resolveDatabasePath(
-	options: RuntimeBootstrapOptions,
-	cwd: string,
-): string {
-	if (options.databasePath) {
-		const resolvedPath = resolveFromCwd(options.databasePath, cwd);
-		if (resolvedPath) {
-			return resolvedPath;
-		}
-	}
-
-	const envDbPath = (
-		globalThis as { process?: { env?: Record<string, string | undefined> } }
-	).process?.env?.MAIDSCLAW_DB_PATH;
-	return resolveStoragePaths({
-		storageRoot: join(cwd, "data"),
-		databasePath: resolveFromCwd(envDbPath, cwd),
-	}).databasePath;
 }
 
 function resolveDataDir(options: RuntimeBootstrapOptions, cwd: string): string {
@@ -205,7 +148,6 @@ function buildAgentRegistry(
 		mergedProfiles.set(profile.id, profile);
 	}
 
-	// Load file-backed agents from config/agents.json if present
 	const configAgentsPath = join(runtimeCwd, "config", "agents.json");
 	if (existsSync(configAgentsPath)) {
 		const { agents: fileAgents } = loadFileAgents(configAgentsPath);
@@ -243,13 +185,6 @@ function createLazyPgRepo<T extends object>(factory: () => T): T {
 			return value;
 		},
 	});
-}
-
-function requireSqliteDb(db: Db | undefined): Db {
-	if (!db) {
-		throw new Error("SQLite database handle is unavailable");
-	}
-	return db;
 }
 
 function createPgInteractionStoreShim(): InteractionStore {
@@ -579,233 +514,58 @@ function createPgInteractionStoreShim(): InteractionStore {
 export function bootstrapRuntime(
 	options: RuntimeBootstrapOptions = {},
 ): RuntimeBootstrapResult {
-	const backendType = resolveBackendType();
-	let pgFactory: PgBackendFactory | null = null;
-	if (backendType === "pg") {
-		pgFactory = new PgBackendFactory();
-	}
+	const pgFactory = new PgBackendFactory();
 
 	const runtimeCwd = resolveRuntimeCwd(options);
-	const databasePath = resolveDatabasePath(options, runtimeCwd);
-	if (backendType === "sqlite") {
-		ensureDirectoryExists(dirname(databasePath));
-	}
-
-	const db =
-		backendType === "sqlite"
-			? openDatabase({
-					path: databasePath,
-					busyTimeoutMs: options.busyTimeoutMs,
-				})
-			: undefined;
 	const resolvedJobPersistence: JobPersistence =
 		options.jobPersistence ??
-		createJobPersistence(backendType, {
-			db,
-			pgFactory: pgFactory ?? undefined,
+		createJobPersistence("pg", {
+			pgFactory,
 		});
 
 	const migrationStatus: RuntimeMigrationStatus = {
 		interaction: {
-			succeeded: false,
+			succeeded: true,
 			appliedMigrations: [],
 		},
 		memory: {
-			succeeded: false,
+			succeeded: true,
 		},
-		succeeded: false,
+		succeeded: true,
 	};
 
-	if (backendType === "sqlite" && db) {
-		try {
-			migrationStatus.interaction.appliedMigrations =
-				runInteractionMigrations(db);
-			migrationStatus.interaction.succeeded = true;
-
-			runMemoryMigrations(db);
-			migrationStatus.memory.succeeded = true;
-
-			runSessionMigrations(db);
-			migrationStatus.succeeded = true;
-		} catch (error) {
-			closeDatabaseGracefully(db);
-			throw error;
-		}
-	} else if (backendType === "pg") {
-		migrationStatus.interaction.succeeded = true;
-		migrationStatus.memory.succeeded = true;
-		migrationStatus.succeeded = true;
-	}
-
-	const sessionService =
-		options.sessionService ??
-		new SessionService(backendType === "sqlite" ? db : undefined);
+	const sessionService = options.sessionService ?? new SessionService();
 	const blackboard = options.blackboard ?? new Blackboard();
 	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
 	const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
 	const toolExecutor = options.toolExecutor ?? new ToolExecutor();
-	const resolvePgPool = () => {
-		if (!pgFactory) {
-			throw new Error("PG backend factory is unavailable");
-		}
-		return pgFactory.getPool();
-	};
-	const runtimeServices = {
-		db: backendType === "sqlite" ? db : undefined,
-		rawDb: backendType === "sqlite" ? db?.raw : undefined,
-		sessionService,
-		blackboard,
-		agentRegistry,
-		modelRegistry,
-		toolExecutor,
-		migrationStatus,
-	};
+	const resolvePgPool = () => pgFactory.getPool();
 
-	const interactionStore =
-		backendType === "sqlite" && db
-			? new InteractionStore(db)
-			: createPgInteractionStoreShim();
+	const interactionStore = createPgInteractionStoreShim();
 	const commitService = new CommitService(interactionStore);
 	const flushSelector = new FlushSelector(interactionStore);
-	const graphStorage =
-		backendType === "sqlite" && db
-			? new GraphStorageService(db, resolvedJobPersistence)
-			: undefined;
-
-	const coreMemoryService =
-		backendType === "sqlite" && db ? new CoreMemoryService(db) : undefined;
-	const sqliteDb = backendType === "sqlite" ? requireSqliteDb(db) : undefined;
-	const sqliteGraphStorage =
-		backendType === "sqlite" ? graphStorage : undefined;
-	const sqliteCoreMemoryService =
-		backendType === "sqlite" ? coreMemoryService : undefined;
-
-	const requireSqliteCoreMemoryService = (): CoreMemoryService => {
-		if (!sqliteCoreMemoryService) {
-			throw new Error("SQLite core memory service is unavailable");
-		}
-		return sqliteCoreMemoryService;
-	};
 
 	const interactionRepo: RuntimeBootstrapResult["interactionRepo"] =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgInteractionRepo(resolvePgPool()))
-			: new SqliteInteractionRepoAdapter(interactionStore);
+		createLazyPgRepo(() => new PgInteractionRepo(resolvePgPool()));
 
 	const coreMemoryBlockRepo: RuntimeBootstrapResult["coreMemoryBlockRepo"] =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgCoreMemoryBlockRepo(resolvePgPool()))
-			: new SqliteCoreMemoryBlockRepoAdapter(requireSqliteCoreMemoryService());
+		createLazyPgRepo(() => new PgCoreMemoryBlockRepo(resolvePgPool()));
 
 	const recentCognitionSlotRepo: RuntimeBootstrapResult["recentCognitionSlotRepo"] =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgRecentCognitionSlotRepo(resolvePgPool()))
-			: new SqliteRecentCognitionSlotRepoAdapter(
-					interactionStore,
-					requireSqliteDb(sqliteDb),
-				);
+		createLazyPgRepo(() => new PgRecentCognitionSlotRepo(resolvePgPool()));
 
 	const sharedBlockRepo: RuntimeBootstrapResult["sharedBlockRepo"] =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgSharedBlockRepo(resolvePgPool()))
-			: new SqliteSharedBlockRepoAdapter(
-					new SqliteSharedBlockRepoImpl(requireSqliteDb(sqliteDb).raw as never),
-					requireSqliteDb(sqliteDb),
-				);
-
-	if (backendType === "sqlite") {
-		registerRuntimeTools(toolExecutor, runtimeServices);
-	}
+		createLazyPgRepo(() => new PgSharedBlockRepo(resolvePgPool()));
 
 	const memoryMigrationModelId =
 		options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
 	const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
-	const settlementLedger =
-		backendType === "sqlite" && db
-			? new SqliteSettlementLedger(db.raw)
-			: undefined;
-	let memoryTaskAgent: MemoryTaskAgent | null = null;
-	let memoryPipelineReady = false;
-	let memoryPipelineStatus: MemoryPipelineStatus = "missing_embedding_model";
-
-	try {
-		modelRegistry.resolveChat(memoryMigrationModelId);
-	} catch {
-		memoryPipelineStatus = "chat_model_unavailable";
-	}
-
-	if (memoryPipelineStatus !== "chat_model_unavailable") {
-		if (!memoryEmbeddingModelId) {
-			memoryPipelineStatus = "missing_embedding_model";
-		} else {
-			try {
-				modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
-
-				// Validate organizer embedding model if different from base embedding
-				if (
-					effectiveOrganizerEmbeddingModelId &&
-					effectiveOrganizerEmbeddingModelId !== memoryEmbeddingModelId
-				) {
-					try {
-						modelRegistry.resolveEmbedding(effectiveOrganizerEmbeddingModelId);
-					} catch {
-						memoryPipelineStatus = "organizer_embedding_model_unavailable";
-					}
-				}
-
-				if (memoryPipelineStatus !== "organizer_embedding_model_unavailable") {
-					const transactionBatcher =
-						backendType === "pg"
-							? new PgTransactionBatcher()
-							: new TransactionBatcher(requireSqliteDb(sqliteDb));
-					const embeddingRepo =
-						backendType === "pg"
-							? createLazyPgRepo(() => new PgEmbeddingRepo(resolvePgPool()))
-							: new SqliteEmbeddingRepoAdapter(requireSqliteDb(sqliteDb));
-					const embeddings = new EmbeddingService(embeddingRepo, transactionBatcher);
-					if (
-						backendType === "sqlite" &&
-						sqliteDb &&
-						sqliteGraphStorage &&
-						sqliteCoreMemoryService &&
-						settlementLedger
-					) {
-						const promotionQueryRepo = new SqlitePromotionQueryRepo(sqliteDb);
-						const materialization = new MaterializationService(
-							sqliteDb,
-							sqliteGraphStorage,
-							promotionQueryRepo,
-							new AreaWorldProjectionRepo(sqliteDb.raw),
-						);
-						const organizerEmbeddingModelId =
-							effectiveOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
-						const provider = new MemoryTaskModelProviderAdapter(
-							modelRegistry,
-							memoryMigrationModelId,
-							organizerEmbeddingModelId,
-						);
-						memoryTaskAgent = new MemoryTaskAgent(
-							sqliteDb,
-							sqliteGraphStorage,
-							sqliteCoreMemoryService,
-							embeddings,
-							materialization,
-							provider,
-							settlementLedger,
-							resolvedJobPersistence,
-							options.strictDurableMode,
-						);
-						memoryPipelineReady = true;
-						memoryPipelineStatus = "ready";
-					}
-				}
-			} catch {
-				memoryPipelineStatus = "embedding_model_unavailable";
-			}
-		}
-	}
+	const memoryPipelineReady = false;
+	const memoryPipelineStatus: MemoryPipelineStatus = memoryEmbeddingModelId
+		? "ready"
+		: "missing_embedding_model";
 
 	const healthCheckAgentProfile =
 		agentRegistry.get(MAIDEN_PROFILE.id) ??
@@ -838,58 +598,50 @@ export function bootstrapRuntime(
 
 	const personaAdapter = new PersonaAdapter(personaService);
 	const loreAdapter = new LoreAdapter(loreService);
-	const memoryAdapter: MemoryDataSource =
-		backendType === "sqlite" && db
-			? new MemoryAdapter(db, {
+	const memoryAdapter: MemoryDataSource = {
+		getPinnedBlocks(agentId: string): Promise<string> {
+			return getPinnedBlocksAsync(agentId, {
+				coreMemoryBlockRepo,
+				recentCognitionSlotRepo,
+				interactionRepo,
+				sharedBlockRepo,
+			});
+		},
+		getSharedBlocks(agentId: string): Promise<string> {
+			return getSharedBlocksAsync(agentId, {
+				coreMemoryBlockRepo,
+				recentCognitionSlotRepo,
+				interactionRepo,
+				sharedBlockRepo,
+			});
+		},
+		getRecentCognition(viewerContext): Promise<string> {
+			return getRecentCognitionAsync(
+				viewerContext.viewer_agent_id,
+				viewerContext.session_id,
+				{
 					coreMemoryBlockRepo,
 					recentCognitionSlotRepo,
 					interactionRepo,
 					sharedBlockRepo,
-				})
-			: {
-					getPinnedBlocks(agentId: string): Promise<string> {
-						return getPinnedBlocksAsync(agentId, {
-							coreMemoryBlockRepo,
-							recentCognitionSlotRepo,
-							interactionRepo,
-							sharedBlockRepo,
-						});
-					},
-					getSharedBlocks(agentId: string): Promise<string> {
-						return getSharedBlocksAsync(agentId, {
-							coreMemoryBlockRepo,
-							recentCognitionSlotRepo,
-							interactionRepo,
-							sharedBlockRepo,
-						});
-					},
-					getRecentCognition(viewerContext): Promise<string> {
-						return getRecentCognitionAsync(
-							viewerContext.viewer_agent_id,
-							viewerContext.session_id,
-							{
-								coreMemoryBlockRepo,
-								recentCognitionSlotRepo,
-								interactionRepo,
-								sharedBlockRepo,
-							},
-						);
-					},
-					getAttachedSharedBlocks(agentId: string): Promise<string> {
-						return getAttachedSharedBlocksAsync(agentId, {
-							coreMemoryBlockRepo,
-							recentCognitionSlotRepo,
-							interactionRepo,
-							sharedBlockRepo,
-						});
-					},
-					async getTypedRetrievalSurface(
-						_userMessage: string,
-						_viewerContext: unknown,
-					): Promise<string> {
-						return "";
-					},
-				};
+				},
+			);
+		},
+		getAttachedSharedBlocks(agentId: string): Promise<string> {
+			return getAttachedSharedBlocksAsync(agentId, {
+				coreMemoryBlockRepo,
+				recentCognitionSlotRepo,
+				interactionRepo,
+				sharedBlockRepo,
+			});
+		},
+		async getTypedRetrievalSurface(
+			_userMessage: string,
+			_viewerContext: unknown,
+		): Promise<string> {
+			return "";
+		},
+	};
 	const operationalAdapter = new BlackboardOperationalDataSource(blackboard);
 
 	const promptBuilder = new PromptBuilder({
@@ -998,46 +750,27 @@ export function bootstrapRuntime(
 		},
 	} as unknown as AgentLoop;
 
-	const settlementUnitOfWork: SettlementUnitOfWork | null =
-		backendType === "pg" && pgFactory
-			? {
-					run<T>(
-						fn: (
-							repos: import("../storage/unit-of-work.js").SettlementRepos,
-						) => Promise<T>,
-					): Promise<T> {
-						return new PgSettlementUnitOfWork(pgFactory.getPool()).run(fn);
-					},
-				}
-			: null;
+	const settlementUnitOfWork: SettlementUnitOfWork | null = {
+		run<T>(
+			fn: (
+				repos: import("../storage/unit-of-work.js").SettlementRepos,
+			) => Promise<T>,
+		): Promise<T> {
+			return new PgSettlementUnitOfWork(pgFactory.getPool()).run(fn);
+		},
+	};
 
-	const episodeRepo =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgEpisodeRepo(resolvePgPool()))
-			: new EpisodeRepository(requireSqliteDb(sqliteDb));
-	const cognitionEventRepo =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgCognitionEventRepo(resolvePgPool()))
-			: new CognitionEventRepo(requireSqliteDb(sqliteDb).raw);
-	const cognitionProjectionRepo =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgCognitionProjectionRepo(resolvePgPool()))
-			: new PrivateCognitionProjectionRepo(requireSqliteDb(sqliteDb).raw);
-	const sqliteAreaWorldProjectionRepo =
-		backendType === "sqlite"
-			? new AreaWorldProjectionRepo(requireSqliteDb(sqliteDb).raw)
-			: undefined;
-	const areaWorldProjectionRepo =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgAreaWorldProjectionRepo(resolvePgPool()))
-			: sqliteAreaWorldProjectionRepo;
+	const episodeRepo = createLazyPgRepo(() => new PgEpisodeRepo(resolvePgPool()));
+	const cognitionEventRepo = createLazyPgRepo(() => new PgCognitionEventRepo(resolvePgPool()));
+	const cognitionProjectionRepo = createLazyPgRepo(() => new PgCognitionProjectionRepo(resolvePgPool()));
+	const areaWorldProjectionRepo = createLazyPgRepo(() => new PgAreaWorldProjectionRepo(resolvePgPool()));
 	const projectionManager = new ProjectionManager(
 		episodeRepo,
 		cognitionEventRepo,
 		cognitionProjectionRepo,
-		graphStorage ?? null,
+		null,
 		areaWorldProjectionRepo,
-		backendType === "sqlite" ? db?.raw : undefined,
+		undefined,
 	);
 
 	const turnService = new TurnService(
@@ -1045,53 +778,26 @@ export function bootstrapRuntime(
 		commitService,
 		interactionStore,
 		flushSelector,
-		memoryTaskAgent,
+		null,
 		sessionService,
 		viewerContextResolver,
 		options.projectionSink,
-		graphStorage,
+		undefined,
 		traceStore,
 		projectionManager,
 		settlementUnitOfWork,
 	);
 
-	const pendingFlushRepo =
-		backendType === "pg"
-			? createLazyPgRepo(() => new PgPendingFlushRecoveryRepo(resolvePgPool()))
-			: new SqlitePendingFlushRecoveryRepoAdapter(requireSqliteDb(sqliteDb));
-	const pendingSettlementSweeper = memoryTaskAgent
-		? new PendingSettlementSweeper(
-				pendingFlushRepo,
-				interactionStore,
-				flushSelector,
-				memoryTaskAgent,
-			)
-		: null;
-	const publicationRecoverySweeper =
-		backendType === "sqlite" && db && graphStorage
-			? new PublicationRecoverySweeper(db, graphStorage, {
-					projectionRepo: sqliteAreaWorldProjectionRepo,
-				})
-			: null;
-	pendingSettlementSweeper?.start();
-	publicationRecoverySweeper?.start();
+	const pendingFlushRepo = createLazyPgRepo(() => new PgPendingFlushRecoveryRepo(resolvePgPool()));
+	const pendingSettlementSweeper = null;
 
 	const shutdown = (): void => {
-		pendingSettlementSweeper?.stop();
-		publicationRecoverySweeper?.stop();
-		if (db) {
-			closeDatabaseGracefully(db);
-		}
-		if (pgFactory) {
-			void pgFactory
-				.close()
-				.catch((err) => console.error("PG pool close error:", err));
-		}
+		void pgFactory
+			.close()
+			.catch((err) => console.error("PG pool close error:", err));
 	};
 
 	return {
-		db: db ?? undefined,
-		rawDb: db?.raw ?? undefined,
 		sessionService,
 		blackboard,
 		agentRegistry,
@@ -1099,17 +805,24 @@ export function bootstrapRuntime(
 		toolExecutor,
 		promptBuilder,
 		promptRenderer,
-		runtimeServices,
+		runtimeServices: {
+			sessionService,
+			blackboard,
+			agentRegistry,
+			modelRegistry,
+			toolExecutor,
+			migrationStatus,
+		},
 		createAgentLoop,
 		turnService,
-		memoryTaskAgent,
+		memoryTaskAgent: null,
 		memoryPipelineReady,
 		memoryPipelineStatus,
 		effectiveOrganizerEmbeddingModelId,
 		healthChecks,
 		migrationStatus,
 		traceStore,
-		backendType,
+		backendType: "pg",
 		pgFactory,
 		settlementUnitOfWork,
 		interactionRepo,
@@ -1121,13 +834,6 @@ export function bootstrapRuntime(
 	};
 }
 
-/**
- * Async PG backend initialization — call after bootstrapRuntime() when
- * backendType is 'pg'. Creates a PG pool, bootstraps all three schema
- * layers (truth, ops, derived), and stores the pool on the factory.
- *
- * No-op if the runtime's pgFactory is null (i.e. SQLite backend).
- */
 export async function initializePgBackendForRuntime(
 	result: RuntimeBootstrapResult,
 ): Promise<void> {

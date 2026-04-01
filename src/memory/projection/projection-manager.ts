@@ -6,7 +6,7 @@ import type {
 	PrivateEpisodeArtifact,
 	PublicationDeclaration,
 } from "../../runtime/rp-turn-contract.js";
-import type { Db } from "../../storage/database.js";
+
 import type { SettlementRepos } from "../../storage/unit-of-work.js";
 import type { CognitionEventRepo } from "../cognition/cognition-event-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
@@ -146,7 +146,7 @@ export class ProjectionManager {
 		private readonly cognitionProjectionRepo: ProjectionCognitionProjectionRepo,
 		private readonly graphStorage: GraphStorageService | null,
 		private readonly areaWorldProjectionRepo: ProjectionAreaWorldProjectionRepo | null = null,
-		private readonly rawDb?: Db["raw"],
+		private readonly rawDb?: unknown,
 	) {}
 
 	/**

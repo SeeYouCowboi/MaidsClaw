@@ -137,7 +137,6 @@ export type SeededEntities = {
 
 /**
  * Seed standard test entities into the PostgreSQL database.
- * Equivalent to seedStandardEntities() from memory-test-utils.ts for SQLite.
  *
  * Creates:
  * - "__self__" (Alice) - person entity

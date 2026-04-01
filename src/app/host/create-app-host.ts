@@ -230,9 +230,7 @@ export async function createAppHost(
 
 	const runtime = _injectedRuntime ?? bootstrapRuntime({
 		cwd: options.cwd,
-		databasePath,
 		dataDir,
-		busyTimeoutMs: options.busyTimeoutMs,
 		memoryMigrationModelId,
 		memoryEmbeddingModelId,
 		memoryOrganizerEmbeddingModelId,

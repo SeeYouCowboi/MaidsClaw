@@ -10,7 +10,7 @@ import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
 import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
 import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
-import { SqliteSettlementLedger, type SettlementLedger } from "./settlement-ledger.js";
+import type { SettlementLedger } from "./settlement-ledger.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { JOB_MAX_ATTEMPTS } from "../jobs/types.js";
 import type { CoreMemoryService } from "./core-memory.js";
@@ -18,9 +18,9 @@ import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
-import { SqliteNodeScoringQueryRepo } from "../storage/domain-repos/sqlite/node-scoring-query-repo.js";
+
 import type {
   GraphOrganizerResult,
   MigrationResult,
@@ -318,10 +318,6 @@ export class MemoryIngestionPolicy {
   }
 }
 
-/**
- * Structural type matching bun:sqlite Database without importing it directly.
- * Used to support backward-compatible constructor that accepts raw Database.
- */
 type RawDatabaseLike = {
   exec(sql: string): void;
   close(): void;
@@ -377,11 +373,11 @@ export class MemoryTaskAgent {
       (request, toolCalls, created) => {
         this.applyCallOneToolCalls(request, toolCalls, created);
       },
-      settlementLedger ?? new SqliteSettlementLedger(this.db.raw),
+      settlementLedger ?? (() => { throw new Error("settlementLedger is required"); })(),
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
-      nodeScoringQueryRepo ?? new SqliteNodeScoringQueryRepo(this.db),
+      nodeScoringQueryRepo ?? (() => { throw new Error("nodeScoringQueryRepo is required"); })(),
       this.storage,
       this.coreMemory,
       this.embeddings,

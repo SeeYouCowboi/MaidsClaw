@@ -1,5 +1,5 @@
 import { MaidsClawError } from "../core/errors.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 
 type InteractionRow = {

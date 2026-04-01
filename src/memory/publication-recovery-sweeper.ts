@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { GraphStorageService } from "./storage.js";

@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 
 export type BatchedWrite = (db: Db) => void;
 export type SqlOperation = { sql: string; params?: unknown[] };

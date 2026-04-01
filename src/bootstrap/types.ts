@@ -16,7 +16,6 @@ import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
 import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
-import type { Db } from "../storage/database.js";
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
@@ -37,8 +36,6 @@ export type RuntimeMigrationStatus = {
 };
 
 export type RuntimeServices = {
-	db?: Db;
-	rawDb?: unknown;
 	sessionService: SessionService;
 	blackboard: Blackboard;
 	agentRegistry: AgentRegistry;
@@ -49,9 +46,7 @@ export type RuntimeServices = {
 
 export type RuntimeBootstrapOptions = {
 	cwd?: string;
-	databasePath?: string;
 	dataDir?: string;
-	busyTimeoutMs?: number;
 	memoryMigrationModelId?: string;
 	memoryEmbeddingModelId?: string;
 	memoryOrganizerEmbeddingModelId?: string;
@@ -75,15 +70,7 @@ export type MemoryPipelineStatus =
 	| "embedding_model_unavailable"
 	| "organizer_embedding_model_unavailable";
 
-/**
- * Full runtime bootstrap result used by the internal composition root.
- * @internal Not intended for public consumption — use
- * {@link PublicRuntimeBootstrapResult} instead when exposing the runtime
- * to consumers outside the bootstrap layer.
- */
 export type RuntimeBootstrapResult = {
-	db?: Db;
-	rawDb?: unknown;
 	sessionService: SessionService;
 	blackboard: Blackboard;
 	agentRegistry: AgentRegistry;
@@ -114,5 +101,5 @@ export type RuntimeBootstrapResult = {
 
 export type PublicRuntimeBootstrapResult = Omit<
 	RuntimeBootstrapResult,
-	"db" | "rawDb" | "sessionService"
+	"sessionService"
 >;

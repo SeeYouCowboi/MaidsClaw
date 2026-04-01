@@ -12,6 +12,5 @@ export type {
   ToolResultPayload,
 } from "./contracts.js";
 export { FlushSelector } from "./flush-selector.js";
-export { INTERACTION_MIGRATIONS, runInteractionMigrations } from "./schema.js";
 export { InteractionStore } from "./store.js";
 export type { GetBySessionOptions } from "./store.js";

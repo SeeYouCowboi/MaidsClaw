@@ -8,10 +8,8 @@ import type {
   JobPersistence,
   PersistentJobStatus,
 } from "./persistence.js";
-import { SqliteJobPersistence } from "./persistence.js";
 import type { JobKind } from "./types.js";
 import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
-import type { Db } from "../storage/database.js";
 
 type PgFactoryWithStore = PgBackendFactory & { store?: DurableJobStore };
 
@@ -239,15 +237,8 @@ export class PgJobPersistence implements JobPersistence {
 
 export function createJobPersistence(
   backendType: BackendType,
-  options: { db?: Db; pgFactory?: PgBackendFactory },
+  options: { pgFactory?: PgBackendFactory },
 ): JobPersistence {
-  if (backendType === "sqlite") {
-    if (!options.db) {
-      throw new Error("SQLite backend requires db");
-    }
-    return new SqliteJobPersistence(options.db);
-  }
-
   if (backendType === "pg") {
     if (!options.pgFactory) {
       throw new Error("PG backend requires pgFactory");

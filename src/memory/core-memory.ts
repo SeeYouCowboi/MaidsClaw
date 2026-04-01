@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { CoreMemoryBlock, CoreMemoryLabel, AppendResult, ReplaceResult } from "./types.js";
 
 /** Labels that are read-only for RP agents (index, pinned_index, user). */

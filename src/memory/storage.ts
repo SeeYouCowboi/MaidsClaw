@@ -1,6 +1,6 @@
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type {
   AreaWorldProjectionRepo,
   CognitionEventRepo,

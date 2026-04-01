@@ -1,5 +1,3 @@
-import type { Db } from "../storage/database.js";
-import { SqliteEmbeddingRepoAdapter } from "../storage/domain-repos/sqlite/embedding-repo.js";
 import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
 import type { ITransactionBatcher } from "./transaction-batcher.js";
 import type { EmbeddingViewType, NodeRef, NodeRefKind } from "./types.js";
@@ -31,10 +29,6 @@ export class EmbeddingService {
     private readonly embeddingRepo: EmbeddingRepo,
     private readonly batcher: ITransactionBatcher,
   ) {}
-
-  static fromSqlite(dbInput: Db | Db["raw"], batcher: ITransactionBatcher): EmbeddingService {
-    return new EmbeddingService(new SqliteEmbeddingRepoAdapter(normalizeDbInput(dbInput)), batcher);
-  }
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
@@ -120,72 +114,4 @@ export class EmbeddingService {
     }
     return settledValue as T;
   }
-}
-
-function normalizeDbInput(db: Db | Db["raw"]): Db {
-  if (isDb(db)) {
-    return db;
-  }
-
-  return {
-    raw: db as unknown as Db["raw"],
-    exec(sql: string): void {
-      if (typeof db.exec === "function") {
-        db.exec(sql);
-        return;
-      }
-      throw new Error("Raw sqlite handle does not expose exec(sql)");
-    },
-    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
-      const stmt = db.prepare(sql);
-      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
-    },
-    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.run(...(params as [])) : stmt.run();
-      return {
-        changes: Number(result.changes ?? 0),
-        lastInsertRowid: result.lastInsertRowid ?? 0,
-      };
-    },
-    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.get(...(params as [])) : stmt.get();
-      return result === null ? undefined : (result as T);
-    },
-    close(): void {
-      if (typeof db.close === "function") {
-        db.close();
-      }
-    },
-    transaction<T>(fn: () => T): T {
-      if (typeof db.transaction === "function") {
-        return db.transaction(fn)();
-      }
-      return fn();
-    },
-    prepare(sql: string) {
-      const stmt = db.prepare(sql);
-      return {
-        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
-          return {
-            changes: Number(result.changes ?? 0),
-            lastInsertRowid: result.lastInsertRowid ?? 0,
-          };
-        },
-        all(...params: unknown[]): unknown[] {
-          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
-        },
-        get(...params: unknown[]): unknown {
-          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
-          return result === null ? undefined : result;
-        },
-      };
-    },
-  };
-}
-
-function isDb(db: Db | Db["raw"]): db is Db {
-  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
 }

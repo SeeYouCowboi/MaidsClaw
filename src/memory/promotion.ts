@@ -13,8 +13,7 @@ import type {
 import type {
   PromotionQueryRepo,
 } from "../storage/domain-repos/contracts/promotion-query-repo.js";
-import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
-import type { Db } from "../storage/database.js";
+
 
 type EventCandidateCriteria = {
   spoken?: boolean;
@@ -45,28 +44,21 @@ export class PromotionService implements IPromotionService {
   private readonly queryRepo: PromotionQueryRepo;
 
   constructor(
-    dbInput: unknown,
+    _dbInput: unknown,
     private readonly storage: GraphStorageService,
     private readonly modelProvider?: PromotionModelProvider,
     projectionRepo?: AreaWorldProjectionRepo,
     queryRepo?: PromotionQueryRepo,
   ) {
-    const sqliteDb = this.resolveSqliteDb(dbInput);
-    if (projectionRepo) {
-      this.projectionRepo = projectionRepo;
-    } else if (sqliteDb) {
-      this.projectionRepo = new AreaWorldProjectionRepo(sqliteDb.raw);
-    } else {
-      throw new Error("PromotionService requires projectionRepo when SQLite db is unavailable");
+    if (!projectionRepo) {
+      throw new Error("PromotionService requires projectionRepo");
     }
+    this.projectionRepo = projectionRepo;
 
-    if (queryRepo) {
-      this.queryRepo = queryRepo;
-    } else if (sqliteDb) {
-      this.queryRepo = new SqlitePromotionQueryRepo(sqliteDb);
-    } else {
-      throw new Error("PromotionService requires queryRepo when SQLite db is unavailable");
+    if (!queryRepo) {
+      throw new Error("PromotionService requires queryRepo");
     }
+    this.queryRepo = queryRepo;
   }
 
   identifyEventCandidates(criteria: EventCandidateCriteria = {}): EventNode[] {
@@ -398,59 +390,6 @@ export class PromotionService implements IPromotionService {
       source_record_id: record.sourceRecordId,
       event_origin: "runtime_projection",
     };
-  }
-
-  private resolveSqliteDb(dbInput: unknown): Db | undefined {
-    const candidate = dbInput as { raw?: unknown; prepare?: unknown; query?: unknown };
-    if (typeof candidate.query === "function" && candidate.raw) {
-      return candidate as Db;
-    }
-    if (typeof candidate.prepare === "function") {
-      const rawDb = dbInput as Db["raw"];
-      return {
-        raw: rawDb,
-        exec(sql: string): void {
-          rawDb.exec(sql);
-        },
-        query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
-          const stmt = rawDb.prepare(sql);
-          return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
-        },
-        run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-          const stmt = rawDb.prepare(sql);
-          const result = params ? stmt.run(...(params as [])) : stmt.run();
-          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-        },
-        get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
-          const stmt = rawDb.prepare(sql);
-          const result = params ? stmt.get(...(params as [])) : stmt.get();
-          return result === null ? undefined : (result as T);
-        },
-        close(): void {
-          rawDb.close();
-        },
-        transaction<T>(fn: () => T): T {
-          return rawDb.transaction(fn)();
-        },
-        prepare(sql: string) {
-          const stmt = rawDb.prepare(sql);
-          return {
-            run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-              const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
-              return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
-            },
-            all(...params: unknown[]): unknown[] {
-              return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
-            },
-            get(...params: unknown[]): unknown {
-              const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
-              return result === null ? undefined : result;
-            },
-          };
-        },
-      };
-    }
-    return undefined;
   }
 
   private resolveNow<T>(value: Promise<T> | T): T {

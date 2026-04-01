@@ -1,9 +1,7 @@
-import type { Db } from "../../storage/database.js";
 import type {
   NarrativeSearchHit,
   NarrativeSearchRepo,
 } from "../../storage/domain-repos/contracts/narrative-search-repo.js";
-import { SqliteNarrativeSearchRepo } from "../../storage/domain-repos/sqlite/narrative-search-repo.js";
 import type { MemoryHint, NodeRef, ViewerContext } from "../types.js";
 
 type NarrativeSearchResult = {
@@ -22,10 +20,8 @@ type NarrativeSearchResult = {
 export class NarrativeSearchService {
   private readonly repo: NarrativeSearchRepo;
 
-  constructor(repoOrDb: NarrativeSearchRepo | Db) {
-    this.repo = this.isNarrativeSearchRepo(repoOrDb)
-      ? repoOrDb
-      : new SqliteNarrativeSearchRepo(repoOrDb);
+  constructor(repo: NarrativeSearchRepo) {
+    this.repo = repo;
   }
 
   async searchNarrative(query: string, viewerContext: ViewerContext): Promise<NarrativeSearchResult[]> {
@@ -54,9 +50,7 @@ export class NarrativeSearchService {
 
   // ── Private helpers ──────────────────────────────────────────────────
 
-  private isNarrativeSearchRepo(value: NarrativeSearchRepo | Db): value is NarrativeSearchRepo {
-    return typeof (value as NarrativeSearchRepo).searchNarrative === "function";
-  }
+
 
   private mapHit(hit: NarrativeSearchHit): NarrativeSearchResult {
     return {

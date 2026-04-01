@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import type { Db } from "../src/storage/database.js";
+import type { Db } from "../src/storage/db-types.js";
 import { bootstrapRuntime } from "../src/bootstrap/runtime.js";
 import {
   buildAreaSearchAuthorityRows,

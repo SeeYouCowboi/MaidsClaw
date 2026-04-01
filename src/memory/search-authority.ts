@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 
 export type PrivateSearchAuthorityRow = {
   docType: string;

@@ -7,7 +7,7 @@ import {
   EXPORT_SURFACES,
   type ExportManifest,
   type SurfaceExportResult,
-} from "./sqlite-exporter.js";
+} from "./export-types.js";
 
 const DEFAULT_BATCH_SIZE = 1000;
 const CHECKPOINT_FILENAME = ".import-checkpoint.json";

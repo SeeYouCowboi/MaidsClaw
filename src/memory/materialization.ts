@@ -2,7 +2,7 @@ import type { AgentRole } from "../agents/profile.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
@@ -14,7 +14,6 @@ import type { PrivateEventCategory, PublicEventCategory } from "./types.js";
 import type {
   PromotionQueryRepo,
 } from "../storage/domain-repos/contracts/promotion-query-repo.js";
-import { SqlitePromotionQueryRepo } from "../storage/domain-repos/sqlite/promotion-query-repo.js";
 
 type RecoveryJobDbLike = {
   prepare: (sql: string) => {
@@ -64,7 +63,7 @@ export class MaterializationService {
   ) {
     this.db = normalizeDbInput(dbInput);
     this.projectionRepo = projectionRepo ?? null;
-    this.promotionQueryRepo = promotionQueryRepo ?? new SqlitePromotionQueryRepo(this.db);
+    this.promotionQueryRepo = promotionQueryRepo ?? (() => { throw new Error("promotionQueryRepo is required"); })();
   }
 
   materializeDelayed(privateEvents: unknown[], agentId: string): MaterializationResult {
@@ -628,70 +627,9 @@ function isLikelySqliteError(error: unknown): boolean {
   );
 }
 
-function normalizeDbInput(db: Db | Db["raw"]): Db {
-  if (isDb(db)) {
-    return db;
+function normalizeDbInput(dbInput: Db | unknown): Db {
+  if (typeof (dbInput as Db).query === "function") {
+    return dbInput as Db;
   }
-
-  return {
-    raw: db as unknown as Db["raw"],
-    exec(sql: string): void {
-      if (typeof db.exec === "function") {
-        db.exec(sql);
-        return;
-      }
-      throw new Error("Raw sqlite handle does not expose exec(sql)");
-    },
-    query<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
-      const stmt = db.prepare(sql);
-      return (params ? stmt.all(...(params as [])) : stmt.all()) as T[];
-    },
-    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.run(...(params as [])) : stmt.run();
-      return {
-        changes: Number(result.changes ?? 0),
-        lastInsertRowid: result.lastInsertRowid ?? 0,
-      };
-    },
-    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined {
-      const stmt = db.prepare(sql);
-      const result = params ? stmt.get(...(params as [])) : stmt.get();
-      return result === null ? undefined : (result as T);
-    },
-    close(): void {
-      if (typeof db.close === "function") {
-        db.close();
-      }
-    },
-    transaction<T>(fn: () => T): T {
-      if (typeof db.transaction === "function") {
-        return db.transaction(fn)();
-      }
-      return fn();
-    },
-    prepare(sql: string) {
-      const stmt = db.prepare(sql);
-      return {
-        run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
-          const result = params.length > 0 ? stmt.run(...(params as [])) : stmt.run();
-          return {
-            changes: Number(result.changes ?? 0),
-            lastInsertRowid: result.lastInsertRowid ?? 0,
-          };
-        },
-        all(...params: unknown[]): unknown[] {
-          return (params.length > 0 ? stmt.all(...(params as [])) : stmt.all()) as unknown[];
-        },
-        get(...params: unknown[]): unknown {
-          const result = params.length > 0 ? stmt.get(...(params as [])) : stmt.get();
-          return result === null ? undefined : result;
-        },
-      };
-    },
-  };
-}
-
-function isDb(db: Db | Db["raw"]): db is Db {
-  return typeof (db as Db).query === "function" && typeof (db as Db).raw !== "undefined";
+  throw new Error("Raw SQLite database handles are no longer supported; pass a Db-shaped object");
 }

@@ -1,5 +1,5 @@
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
-import type { Db } from "../../storage/database.js";
+import type { Db } from "../../storage/db-types.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";

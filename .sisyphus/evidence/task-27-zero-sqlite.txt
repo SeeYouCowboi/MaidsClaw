@@ -1,0 +1,5 @@
+=== grep -r 'bun:sqlite' src/ scripts/ --include='*.ts' ===
+
+EXIT CODE: 0
+RESULT: 0 matches — all bun:sqlite references removed from src/ and scripts/
+Verified: 2026-04-01T08:21:58Z

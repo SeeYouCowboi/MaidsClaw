@@ -4,8 +4,6 @@ import { copyFileSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { PgImporter } from "../src/migration/pg-importer.js";
-import { SqliteExporter } from "../src/migration/sqlite-exporter.js";
-import { closeDatabaseGracefully, openDatabase } from "../src/storage/database.js";
 import { createPgPool } from "../src/storage/pg-pool.js";
 
 type CliArgs = {

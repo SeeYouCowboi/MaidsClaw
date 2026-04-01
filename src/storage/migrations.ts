@@ -1,4 +1,4 @@
-import type { Db } from "./database.js";
+import type { Db } from "./db-types.js";
 
 export type MigrationStep = {
   id: string;

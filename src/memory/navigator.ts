@@ -2,7 +2,7 @@ import type {
   GraphNodeVisibilityRecord,
   GraphReadQueryRepo,
 } from "../storage/domain-repos/contracts/graph-read-query-repo.js";
-import { SqliteGraphReadQueryRepo } from "../storage/domain-repos/sqlite/graph-read-query-repo.js";
+
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import type { RetrievalService } from "./retrieval.js";
@@ -1659,14 +1659,6 @@ export class GraphNavigator {
   }
 
   private coerceReadRepo(readRepo: GraphReadQueryRepo): GraphReadQueryRepo {
-    if (this.isFullGraphReadRepo(readRepo)) {
-      return readRepo;
-    }
-
-    if (this.legacyDb) {
-      return new SqliteGraphReadQueryRepo(this.legacyDb as unknown as ConstructorParameters<typeof SqliteGraphReadQueryRepo>[0]);
-    }
-
     return readRepo;
   }
 
