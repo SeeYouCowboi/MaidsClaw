@@ -24,13 +24,6 @@ const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
  * `"user"` back here temporarily.
  */
 const SHARED_LABELS: CoreMemoryLabel[] = [];
-function resolveRetrievalService(retrievalService?: RetrievalService): RetrievalService {
-  if (retrievalService) {
-    return retrievalService;
-  }
-
-  throw new Error("retrievalService is required");
-}
 
 /**
  * Format graph navigator evidence for prompt injection.
@@ -283,13 +276,13 @@ export async function getTypedRetrievalSurfaceAsync(
   userMessage: string,
   viewerContext: ViewerContext,
   repos: PromptDataRepos,
-  retrievalService?: RetrievalService,
+  retrievalService: RetrievalService,
 ): Promise<string> {
   if (userMessage.trim().length < 3) {
     return "";
   }
 
-  const retrieval = resolveRetrievalService(retrievalService);
+  const retrieval = retrievalService;
   const payload = await repos.recentCognitionSlotRepo.getSlotPayload(
     viewerContext.session_id,
     viewerContext.viewer_agent_id,

@@ -32,6 +32,9 @@ export class MemoryAdapter implements MemoryDataSource {
   }
 
   async getTypedRetrievalSurface(userMessage: string, viewerContext: ViewerContext): Promise<string> {
+    if (!this.retrievalService) {
+      return "";
+    }
     return getTypedRetrievalSurfaceAsync(userMessage, viewerContext, this.repos, this.retrievalService);
   }
 }
