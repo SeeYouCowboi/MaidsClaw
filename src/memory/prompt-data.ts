@@ -3,10 +3,8 @@ import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
-import { CoreMemoryService } from "./core-memory";
 import { RetrievalService } from "./retrieval";
 import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
-import { SharedBlockRepo } from "./shared-blocks/shared-block-repo.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
@@ -42,58 +40,6 @@ function resolveRetrievalService(db: Db, retrievalService?: RetrievalService): R
   const created = RetrievalService.create(db);
   retrievalServiceByDb.set(db, created);
   return created;
-}
-
-export function getPinnedBlocks(agentId: string, db: Db): string {
-  const blocks = getAllCoreMemoryBlocks(agentId, db);
-  const pinned = blocks.filter((b) => PINNED_LABELS.includes(b.label));
-  return renderCoreMemoryBlocks(pinned, "pinned_block");
-}
-
-export function getSharedBlocks(agentId: string, db: Db): string {
-  const blocks = getAllCoreMemoryBlocks(agentId, db);
-  const shared = blocks.filter((b) => SHARED_LABELS.includes(b.label));
-  return renderCoreMemoryBlocks(shared, "shared_block");
-}
-
-export async function getTypedRetrievalSurface(
-  userMessage: string,
-  viewerContext: ViewerContext,
-  db: Db,
-  retrievalService?: RetrievalService,
-): Promise<string> {
-  if (userMessage.trim().length < 3) {
-    return "";
-  }
-
-  const retrieval = resolveRetrievalService(db, retrievalService);
-  const recentEntries = getRecentCognitionEntries(
-    viewerContext.viewer_agent_id,
-    viewerContext.session_id,
-    db,
-  );
-  const recentCognitionKeys = new Set<string>();
-  for (const entry of recentEntries) {
-    const key = entry.key?.trim();
-    const kind = entry.kind?.trim();
-    if (!key || key.length === 0) {
-      continue;
-    }
-    recentCognitionKeys.add(key);
-    if (kind && kind.length > 0) {
-      recentCognitionKeys.add(`${kind}:${key}`);
-    }
-  }
-  const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
-  const conversationTexts = getConversationMessageContents(viewerContext.session_id, db);
-
-  const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
-    recentCognitionKeys,
-    recentCognitionTexts,
-    conversationTexts,
-  });
-
-  return renderTypedRetrieval(typed);
 }
 
 /**
@@ -151,14 +97,6 @@ export function formatNavigatorEvidence(
   return lines.join("\n").trimEnd();
 }
 
-type RecentCognitionSlotRow = {
-  slot_payload: string;
-};
-
-type InteractionMessageRow = {
-  payload: string;
-};
-
 type RecentCognitionEntry = {
   settlementId: string;
   committedAt: number;
@@ -172,11 +110,6 @@ type RecentCognitionEntry = {
   conflictSummary?: string;
   conflictFactorRefs?: string[];
 };
-
-export function getRecentCognition(agentId: string, sessionId: string, db: Db): string {
-  const entries = getRecentCognitionEntries(agentId, sessionId, db);
-  return formatRecentCognitionEntries(entries);
-}
 
 export function formatRecentCognitionFromPayload(slotPayload: string | undefined): string {
   if (!slotPayload) {
@@ -253,51 +186,6 @@ export function formatContestedEntry(entry: RecentCognitionEntry): string {
   return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
 }
 
-function getRecentCognitionEntries(agentId: string, sessionId: string, db: Db): RecentCognitionEntry[] {
-  const row = db.get<RecentCognitionSlotRow>(
-    `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
-    [sessionId, agentId],
-  );
-
-  if (row === undefined) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(row.slot_payload) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed as RecentCognitionEntry[];
-  } catch {
-    return [];
-  }
-}
-
-function getConversationMessageContents(sessionId: string, db: Db, limit = 12): string[] {
-  const rows = db.query<InteractionMessageRow>(
-    `SELECT payload
-     FROM interaction_records
-     WHERE session_id = ? AND record_type = 'message'
-     ORDER BY record_index DESC
-     LIMIT ?`,
-    [sessionId, limit],
-  );
-
-  const lines: string[] = [];
-  for (const row of rows) {
-    try {
-      const payload = JSON.parse(row.payload) as { content?: unknown };
-      if (typeof payload.content === "string" && payload.content.trim().length > 0) {
-        lines.push(payload.content);
-      }
-    } catch {
-      continue;
-    }
-  }
-  return lines;
-}
-
 function renderTypedRetrieval(result: TypedRetrievalResult): string {
   const parts: string[] = [];
 
@@ -343,11 +231,6 @@ type CoreMemoryRenderableBlock = {
   value: string;
 };
 
-function getAllCoreMemoryBlocks(agentId: string, db: Db): CoreMemoryRenderableBlock[] {
-  const service = new CoreMemoryService(db);
-  return service.getAllBlocks(agentId);
-}
-
 function renderCoreMemoryBlocks(
   blocks: CoreMemoryRenderableBlock[],
   tagName: "pinned_block" | "shared_block",
@@ -362,47 +245,6 @@ function renderCoreMemoryBlocks(
         `<${tagName} label="${block.label}" chars_current="${block.chars_current}" chars_limit="${block.char_limit}">${block.value}</${tagName}>`,
     )
     .join("\n");
-}
-
-type AttachmentRow = {
-  block_id: number;
-};
-
-/**
- * Get formatted shared blocks attached to an agent for prompt injection.
- * Queries shared_block_attachments for the agent, fetches block title and sections,
- * and formats as XML-like <shared_block> elements.
- * Returns empty string if no attachments exist.
- * Data source only — T24 Prompt Builder decides WHERE in the prompt to place this.
- */
-export function getAttachedSharedBlocks(agentId: string, db: Db): string {
-  const attachments = db.query<AttachmentRow>(
-    `SELECT block_id FROM shared_block_attachments WHERE target_kind = 'agent' AND target_id = ?`,
-    [agentId],
-  );
-
-  if (attachments.length === 0) {
-    return "";
-  }
-
-  const repo = new SharedBlockRepo(db);
-  const blocks: string[] = [];
-
-  for (const attachment of attachments) {
-    const block = repo.getBlock(attachment.block_id);
-    if (!block) continue;
-
-    const sections = repo.getSections(attachment.block_id);
-    if (sections.length === 0) continue;
-
-    const sectionLines = sections
-      .map((s) => `${s.sectionPath}: ${s.content}`)
-      .join("\n");
-
-    blocks.push(`<shared_block title="${block.title}">\n${sectionLines}\n</shared_block>`);
-  }
-
-  return blocks.join("\n");
 }
 
 export async function getPinnedBlocksAsync(agentId: string, repos: PromptDataRepos): Promise<string> {

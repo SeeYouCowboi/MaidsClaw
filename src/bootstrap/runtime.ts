@@ -62,7 +62,6 @@ import { resolveViewerContext } from "../runtime/viewer-context-resolver.js";
 import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { PgBackendFactory } from "../storage/backend-types.js";
-import type { Db } from "../storage/db-types.js";
 import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
@@ -210,62 +209,13 @@ function createLazyPgRepo<T extends object>(factory: () => T): T {
 const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
 	exec(sql: string): void {
 		throw new Error(
-			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: exec("${sql}")`,
+			`[MemoryTaskAgent] exec() not available in PG runtime — migrate to PG repo: exec("${sql}")`,
 		);
 	},
 	prepare(sql: string) {
 		throw new Error(
-			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: prepare("${sql}")`,
+			`[MemoryTaskAgent] prepare() not available in PG runtime — migrate to PG repo: prepare("${sql}")`,
 		);
-	},
-};
-
-const throwingLegacyDbAdapter: Db = {
-	raw: null,
-	exec(sql: string): void {
-		throwingMemoryDbAdapter.exec(sql);
-	},
-	query<T = Record<string, unknown>>(sql: string, _params?: unknown[]): T[] {
-		throw new Error(
-			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: query("${sql}")`,
-		);
-	},
-	run(
-		sql: string,
-		_params?: unknown[],
-	): { changes: number; lastInsertRowid: number | bigint } {
-		throw new Error(
-			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: run("${sql}")`,
-		);
-	},
-	get<T = Record<string, unknown>>(
-		sql: string,
-		_params?: unknown[],
-	): T | undefined {
-		throw new Error(
-			`[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: get("${sql}")`,
-		);
-	},
-	close(): void {
-		throw new Error(
-			"[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: close()",
-		);
-	},
-	transaction<T>(_fn: () => T): T {
-		throw new Error(
-			"[ThrowingMemoryTaskDbAdapter] Legacy SQLite path not supported in PG runtime: transaction(fn)",
-		);
-	},
-	prepare(sql: string): {
-		run(...params: unknown[]): {
-			changes: number;
-			lastInsertRowid: number | bigint;
-		};
-		all(...params: unknown[]): unknown[];
-		get(...params: unknown[]): unknown;
-	} {
-		void sql;
-		return throwingMemoryDbAdapter.prepare(sql);
 	},
 };
 
@@ -1023,7 +973,7 @@ export function bootstrapRuntime(
 		},
 		resolvedJobPersistence,
 	);
-	const coreMemoryService = new CoreMemoryService(throwingLegacyDbAdapter);
+	const coreMemoryService = new CoreMemoryService(coreMemoryBlockRepo);
 
 	{
 		// RetrievalService is not yet wired in PG bootstrap runtime.
@@ -1075,7 +1025,6 @@ export function bootstrapRuntime(
 		new PgTransactionBatcher(),
 	);
 	const materializationService = new MaterializationService(
-		throwingLegacyDbAdapter,
 		graphStorageService,
 		promotionQueryRepo,
 		undefined,
@@ -1163,7 +1112,6 @@ export function bootstrapRuntime(
 	const publicationRecoverySweeper =
 		memoryTaskAgent !== null && isPublicationRecoverySchemaCompatible()
 			? new PublicationRecoverySweeper(
-					throwingLegacyDbAdapter,
 					graphStorageService,
 					undefined,
 				)

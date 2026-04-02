@@ -228,7 +228,7 @@ export class GraphOrganizer {
     const recurrence = Math.min(1, edgeRows.length / 10);
     const updatedAt = (await this.nodeScoringQueryRepo.getNodeRecencyTimestamp(nodeRef)) ?? now;
     const recency = Math.max(0, 1 - (now - updatedAt) / (7 * 24 * 60 * 60 * 1000));
-    const indexBlock = this.coreMemory.getBlock(agentId, "index");
+    const indexBlock = await this.coreMemory.getBlock(agentId, "index");
     const indexPresence = indexBlock.value.includes(nodeRef) ? 1 : 0;
     const hasPersistedScore = await this.nodeScoringQueryRepo.hasNodeScore(nodeRef);
     const persistence = hasPersistedScore ? 1 : 0.5;

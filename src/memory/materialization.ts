@@ -2,7 +2,6 @@ import type { AgentRole } from "../agents/profile.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
 import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
-import type { Db } from "../storage/db-types.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
@@ -51,17 +50,14 @@ type MaterializablePrivateEvent = {
 };
 
 export class MaterializationService {
-  private readonly db: Db;
   private readonly projectionRepo: AreaWorldProjectionRepo | null;
   private readonly promotionQueryRepo: PromotionQueryRepo;
 
   constructor(
-    dbInput: Db | Db["raw"],
     private readonly storage: GraphStorageService | null,
     promotionQueryRepo?: PromotionQueryRepo,
     projectionRepo?: AreaWorldProjectionRepo | null,
   ) {
-    this.db = normalizeDbInput(dbInput);
     this.projectionRepo = projectionRepo ?? null;
     this.promotionQueryRepo = promotionQueryRepo ?? (() => { throw new Error("promotionQueryRepo is required"); })();
   }
@@ -181,15 +177,8 @@ export class MaterializationService {
     return { id: Number(parsed.id) };
   }
 
-  private getEventById(eventId: number): EventRow | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, session_id, timestamp, topic_id, emotion
-         FROM event_nodes
-         WHERE id = ?`,
-      )
-      .get(eventId) as EventRow | null;
-    return row;
+  private getEventById(_eventId: number): EventRow | null {
+    return null;
   }
 
   private linkPrivateToPublic(_privateEventId: number, _publicEventId: number): void {
@@ -285,7 +274,6 @@ export class MaterializationService {
     },
   ): MaterializationResult {
     return materializePublications(this.storage, publications, settlementId, ctx, {
-      db: this.db,
       projectionRepo: this.projectionRepo ?? undefined,
       sourceAgentId: ctx.sourceAgentId,
       agentRole: ctx.agentRole,
@@ -624,11 +612,4 @@ function isTransientStorageError(error: unknown): boolean {
     msg.includes("database is locked") ||
     msg.includes("database is busy")
   );
-}
-
-function normalizeDbInput(dbInput: Db | unknown): Db {
-  if (typeof (dbInput as Db).query === "function") {
-    return dbInput as Db;
-  }
-  throw new Error("Raw database handles are no longer supported; pass a Db-shaped object");
 }

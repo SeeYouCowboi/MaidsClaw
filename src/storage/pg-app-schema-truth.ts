@@ -18,7 +18,7 @@ const PG_MAX_BIGINT = "9223372036854775807";
  *
  * All time fields are epoch-millisecond BIGINT (not TIMESTAMPTZ).
  * JSON text columns use JSONB for PG-native query support.
- * SQLite INTEGER PRIMARY KEY → BIGSERIAL PRIMARY KEY.
+ * Primary keys use BIGSERIAL.
  */
 export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   // ══════════════════════════════════════════════════════════════════
@@ -553,7 +553,7 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   `);
 
   // ══════════════════════════════════════════════════════════════════
-  // Append-only triggers (PG equivalent of SQLite BEFORE UPDATE/DELETE)
+  // Append-only triggers
   // ══════════════════════════════════════════════════════════════════
 
   const appendOnlyTables = [
