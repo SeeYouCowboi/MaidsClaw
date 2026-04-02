@@ -1,0 +1,24 @@
+Task 3: Dead Code Removal — Evidence
+======================================
+
+Date: 2026-04-01
+
+Files Deleted:
+1. src/storage/migrations.ts (45 lines) — SQLite migration framework
+2. src/memory/maintenance-report.ts — SQLite PRAGMA maintenance
+3. src/memory/search-rebuild-job.ts — old SQLite FTS rebuild job
+
+Pre-Deletion Reference Check:
+- migrations.ts: Zero actual importers (only documentation references)
+- maintenance-report.ts: Zero importers (confirmed via grep)
+- search-rebuild-job.ts: Zero importers (replaced by search-rebuild-pg.ts)
+
+Also Modified:
+- src/storage/index.ts: Removed export of deleted migrations module
+
+Post-Deletion Verification:
+- src/memory/search-rebuild-pg.ts: EXISTS (verified)
+- bun run build: PASS (exit 0)
+- bun test: PASS (868 pass / 350 skip / 21 fail — baseline maintained)
+
+No new test failures introduced.

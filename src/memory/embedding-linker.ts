@@ -20,7 +20,7 @@ export class EmbeddingLinker {
   constructor(
     private readonly storage: GraphStorageService,
     private readonly embeddings: EmbeddingService,
-    private readonly renderNodeContent: (nodeRef: NodeRef) => string | undefined,
+    private readonly renderNodeContent: (nodeRef: NodeRef) => Promise<string | undefined>,
     private readonly selectSemanticRelation: (
       sourceRef: NodeRef,
       sourceKind: NodeRefKind,
@@ -30,11 +30,17 @@ export class EmbeddingLinker {
       targetContent: string,
       similarity: number,
       agentId: string,
-    ) => SemanticEdgeType | null,
-    private readonly addOneHopNeighbors: (nodeRef: NodeRef, output: Set<NodeRef>) => void,
+      modelId?: string,
+    ) => Promise<SemanticEdgeType | null>,
+    private readonly addOneHopNeighbors: (nodeRef: NodeRef, output: Set<NodeRef>) => Promise<void>,
   ) {}
 
-  link(entries: OrganizerEmbeddingEntry[], nodes: OrganizerNode[], agentId: string): { semanticEdgeCount: number; scoreTargets: Set<NodeRef> } {
+  async link(
+    entries: OrganizerEmbeddingEntry[],
+    nodes: OrganizerNode[],
+    agentId: string,
+    modelId?: string,
+  ): Promise<{ semanticEdgeCount: number; scoreTargets: Set<NodeRef> }> {
     let semanticEdgeCount = 0;
     const scoreTargets = new Set<NodeRef>();
 
@@ -45,6 +51,7 @@ export class EmbeddingLinker {
         nodeKind: source.nodeKind,
         agentId,
         limit: 20,
+        modelId,
       });
 
       let similarCount = 0;
@@ -56,8 +63,8 @@ export class EmbeddingLinker {
           continue;
         }
 
-        const targetContent = this.renderNodeContent(neighbor.nodeRef) ?? "";
-        const relation = this.selectSemanticRelation(
+        const targetContent = (await this.renderNodeContent(neighbor.nodeRef)) ?? "";
+        const relation = await this.selectSemanticRelation(
           source.nodeRef,
           source.nodeKind,
           sourceContent,
@@ -66,6 +73,7 @@ export class EmbeddingLinker {
           targetContent,
           neighbor.similarity,
           agentId,
+          modelId,
         );
 
         if (!relation) {
@@ -86,7 +94,7 @@ export class EmbeddingLinker {
         semanticEdgeCount += 1;
         scoreTargets.add(source.nodeRef);
         scoreTargets.add(neighbor.nodeRef);
-        this.addOneHopNeighbors(neighbor.nodeRef, scoreTargets);
+        await this.addOneHopNeighbors(neighbor.nodeRef, scoreTargets);
 
         if (relation === "semantic_similar") {
           similarCount += 1;

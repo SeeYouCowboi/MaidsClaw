@@ -114,18 +114,18 @@ async function handleAgentList(
 
 	if (source === "runtime") {
 		// Runtime source: bootstrap and list registered agents
-		let shutdown: (() => void) | undefined;
+		let host: { shutdown(): Promise<void>; admin: { listRuntimeAgents(): Promise<unknown> } } | undefined;
 		try {
-			const { bootstrapApp } = await import(
-				"../../bootstrap/app-bootstrap.js"
+			const { createAppHost } = await import(
+				"../../app/host/index.js"
 			);
-			const result = bootstrapApp({
+			host = await createAppHost({
+				role: "local",
 				cwd: ctx.cwd,
 				requireAllProviders: false,
 			});
-			shutdown = result.shutdown;
 
-			const agents = result.runtime.agentRegistry.getAll();
+			const agents = await host.admin.listRuntimeAgents() as Array<{ id: string; role: string; modelId?: string; personaId?: string }>;
 			const rows = agents.map((a) => ({
 				agent_id: a.id,
 				role: a.role,
@@ -154,7 +154,7 @@ async function handleAgentList(
 				}
 			}
 		} finally {
-			shutdown?.();
+			await host?.shutdown();
 		}
 		return;
 	}
@@ -231,18 +231,19 @@ async function handleAgentShow(
 	}
 
 	if (source === "runtime") {
-		let shutdown: (() => void) | undefined;
+		let host: { shutdown(): Promise<void>; admin: { listRuntimeAgents(): Promise<unknown> } } | undefined;
 		try {
-			const { bootstrapApp } = await import(
-				"../../bootstrap/app-bootstrap.js"
+			const { createAppHost } = await import(
+				"../../app/host/index.js"
 			);
-			const result = bootstrapApp({
+			host = await createAppHost({
+				role: "local",
 				cwd: ctx.cwd,
 				requireAllProviders: false,
 			});
-			shutdown = result.shutdown;
 
-			const profile = result.runtime.agentRegistry.get(agentId);
+			const agents = await host.admin.listRuntimeAgents() as Array<{ id: string; toolPermissions: Array<{ toolName: string; allowed: boolean }>;  [key: string]: unknown }>;
+			const profile = agents.find(a => a.id === agentId);
 			if (!profile) {
 				throw new CliError(
 					"AGENT_NOT_FOUND",
@@ -269,7 +270,7 @@ async function handleAgentShow(
 				writeText(formatAgentDetail(data, "runtime"));
 			}
 		} finally {
-			shutdown?.();
+			await host?.shutdown();
 		}
 		return;
 	}

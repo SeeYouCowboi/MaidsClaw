@@ -1,0 +1,45 @@
+T20: Memory Tests PG Coverage - Evidence
+========================================
+Date: 2026-04-01
+
+BUILD STATUS: PASS (bun run build → 0 errors)
+
+FILES ADDED:
+  - test/pg-app/pg-narrative-search-repo.test.ts (NEW)
+    10 test cases covering PgNarrativeSearchRepo:
+    1. Area docs returned for matching area_id
+    2. World docs returned regardless of area_id
+    3. Area + world results combined with deduplication
+    4. Short query guard (< 3 chars → empty)
+    5. Both includeArea/includeWorld false → empty
+    6. Area search skipped when current_area_id is null
+    7. Limit parameter respected
+    8. Results sorted by score descending
+    9. minScore filter applied
+    10. ILIKE fallback for substring matches
+
+FILES MODIFIED:
+  - .sisyphus/evidence/task-20-pg-coverage-audit.txt (NEW - full audit document)
+
+EVIDENCE ARTIFACTS:
+  - task-20-pg-coverage-audit.txt: Complete coverage matrix (29 memory tests → PG coverage)
+  - task-20-memory-tests-pg.txt: This file (summary + build evidence)
+
+COVERAGE SUMMARY:
+  29 memory test files audited
+  22 fully covered by existing PG tests
+   6 partially covered (above-storage orchestration logic)
+   1 SQLite-only (schema.test.ts) — PG schema tests exist separately
+  
+  20 PG domain repos:
+  16 with dedicated tests
+   4 read-query repos without dedicated tests (3 acceptable, 1 gap filled)
+
+GAP FILLED:
+  PgNarrativeSearchRepo — uses pg_trgm similarity(), word_similarity(), GREATEST(), ILIKE
+  These PG-specific query operators had no test coverage. Now covered by 10 test cases.
+
+ACCEPTABLE GAPS (not filled — rationale documented in audit):
+  PgPromotionQueryRepo — read-only, pure-logic decision functions
+  PgGraphReadQueryRepo — read-only over validated tables, massive setup cost
+  PgNodeScoringQueryRepo — read-only scoring queries over validated tables

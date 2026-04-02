@@ -1,5 +1,5 @@
 import { MaidsClawError } from "../core/errors.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 
 type InteractionRow = {
@@ -56,6 +56,7 @@ export type GetBySessionOptions = {
 
 export class InteractionStore {
   private readonly db: Db;
+  private _inTransaction = false;
 
   constructor(db: Db) {
     this.db = db;
@@ -97,18 +98,40 @@ export class InteractionStore {
   }
 
   runInTransaction<T>(fn: (store: InteractionStore) => T): T {
-    if (this.db.raw.inTransaction) {
+    if (this._inTransaction) {
       return fn(this);
     }
 
-    this.db.raw.prepare("BEGIN IMMEDIATE").run();
+    this._inTransaction = true;
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = fn(this);
-      this.db.raw.prepare("COMMIT").run();
+      this.db.exec("COMMIT");
       return result;
     } catch (error) {
-      this.db.raw.prepare("ROLLBACK").run();
+      this.db.exec("ROLLBACK");
       throw error;
+    } finally {
+      this._inTransaction = false;
+    }
+  }
+
+  async runInTransactionAsync<T>(fn: (store: InteractionStore) => Promise<T>): Promise<T> {
+    if (this._inTransaction) {
+      return fn(this);
+    }
+
+    this._inTransaction = true;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = await fn(this);
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    } finally {
+      this._inTransaction = false;
     }
   }
 
@@ -240,10 +263,11 @@ export class InteractionStore {
       entries = entries.slice(entries.length - 64);
     }
 
-    this.db.raw.prepare(
+    this.db.run(
       `INSERT OR REPLACE INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at)
        VALUES (?, ?, ?, ?, ?)`,
-    ).run(sessionId, agentId, settlementId, JSON.stringify(entries), Date.now());
+      [sessionId, agentId, settlementId, JSON.stringify(entries), Date.now()],
+    );
   }
 
   getBySession(sessionId: string, options?: GetBySessionOptions): InteractionRecord[] {

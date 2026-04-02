@@ -1,8 +1,7 @@
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
-import { InteractionStore } from "../../interaction/store.js";
 import type { InspectContext } from "../contracts/inspect.js";
 import type { TraceStore } from "./trace-store.js";
 import { getRequestEvidence } from "../inspect/inspect-query-service.js";
+import type { InspectRuntimeDeps } from "../inspect/runtime-deps.js";
 
 export type DiagnosticEntry = {
   primary_cause: string;
@@ -25,11 +24,11 @@ export type DiagnosticEntry = {
   next_commands: string[];
 };
 
-export function diagnose(params: {
-  runtime: RuntimeBootstrapResult;
+export async function diagnose(params: {
+  runtime: InspectRuntimeDeps;
   traceStore?: TraceStore;
   context: InspectContext;
-}): DiagnosticEntry {
+}): Promise<DiagnosticEntry> {
   if (!params.context.requestId) {
     return {
       primary_cause: "missing_request_id",
@@ -45,8 +44,8 @@ export function diagnose(params: {
   }
 
   const requestId = params.context.requestId;
-  const interactionStore = new InteractionStore(params.runtime.db);
-  const evidence = getRequestEvidence({
+  const interactionRepo = params.runtime.interactionRepo;
+  const evidence = await getRequestEvidence({
     runtime: params.runtime,
     traceStore: params.traceStore,
     context: params.context,
@@ -77,7 +76,7 @@ export function diagnose(params: {
   }
 
   if (sessionId) {
-    const pending = interactionStore.getPendingSettlementJobState(sessionId);
+    const pending = await interactionRepo.getPendingSettlementJobState(sessionId);
     if (pending?.last_error_code === "COGNITION_UNRESOLVED_REFS") {
       return {
         primary_cause: "unresolved_explicit_cognition_refs",
@@ -99,7 +98,7 @@ export function diagnose(params: {
       };
     }
 
-    if (params.runtime.sessionService.requiresRecovery(sessionId)) {
+    if (await params.runtime.sessionService.requiresRecovery(sessionId)) {
       return {
         primary_cause: "session_recovery_required",
         subsystem: "session_recovery",

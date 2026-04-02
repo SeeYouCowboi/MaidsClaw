@@ -89,11 +89,11 @@ export class PromptBuilder {
 			slotContent.set(PromptSectionSlot.WORLD_RULES, this.getWorldRules());
 			slotContent.set(
 				PromptSectionSlot.PINNED_SHARED,
-				this.getPinnedSharedBlocks(input.viewerContext.viewer_agent_id),
+				await this.getPinnedSharedBlocks(input.viewerContext.viewer_agent_id),
 			);
 			slotContent.set(
 				PromptSectionSlot.RECENT_COGNITION,
-				this.getRecentCognition(input.viewerContext),
+				await this.getRecentCognition(input.viewerContext),
 			);
 			slotContent.set(
 				PromptSectionSlot.TYPED_RETRIEVAL,
@@ -220,26 +220,26 @@ export class PromptBuilder {
 			.join("\n");
 	}
 
-	private getPinnedSharedBlocks(agentId: string): string {
+	private async getPinnedSharedBlocks(agentId: string): Promise<string> {
 		const memDs = this.getMemoryDataSource();
 		const parts: string[] = [];
 
 		if (memDs.getPinnedBlocks) {
-			const pinned = this.readDataSource("memory.getPinnedBlocks", () =>
+			const pinned = await this.readDataSource("memory.getPinnedBlocks", () =>
 				memDs.getPinnedBlocks!(agentId),
 			);
 			if (pinned) parts.push(pinned);
 		}
 
 		if (memDs.getSharedBlocks) {
-			const shared = this.readDataSource("memory.getSharedBlocks", () =>
+			const shared = await this.readDataSource("memory.getSharedBlocks", () =>
 				memDs.getSharedBlocks!(agentId),
 			);
 			if (shared) parts.push(shared);
 		}
 
 		if (memDs.getAttachedSharedBlocks) {
-			const attached = this.readDataSource("memory.getAttachedSharedBlocks", () =>
+			const attached = await this.readDataSource("memory.getAttachedSharedBlocks", () =>
 				memDs.getAttachedSharedBlocks!(agentId),
 			);
 			if (attached) parts.push(attached);
@@ -269,12 +269,12 @@ export class PromptBuilder {
 		return result ?? "";
 	}
 
-	private getRecentCognition(viewerContext: ViewerContext): string {
+	private async getRecentCognition(viewerContext: ViewerContext): Promise<string> {
 		return (
-			this.readDataSource("memory.getRecentCognition", () =>
+			await this.readDataSource("memory.getRecentCognition", () =>
 				this.getMemoryDataSource().getRecentCognition(viewerContext),
-			) ?? ""
-		);
+			)
+		) ?? "";
 	}
 
 	private getMaidenOperationalState(): string {

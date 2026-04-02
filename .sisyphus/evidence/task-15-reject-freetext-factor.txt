@@ -1,0 +1,31 @@
+T15 Evidence: Reject Freetext Factors
+
+## Non-Ref Factor Rejection — relation-intent-resolver.ts
+
+File: src/memory/cognition/relation-intent-resolver.ts
+
+### New Validation in resolveConflictFactors()
+Before attempting nodeRef resolution, each ConflictFactor is validated:
+
+1. Empty/missing `kind`:
+   - Condition: !factor.kind || factor.kind.trim().length === 0
+   - Result: rejected with reason "missing or empty kind"
+   - Logged: [settlement_conflict_factor_rejected] reason=missing_kind
+
+2. Empty/missing `ref`:
+   - Condition: !factor.ref || factor.ref.trim().length === 0
+   - Result: rejected with reason "missing or empty ref (freetext factor rejected)"
+   - Logged: [settlement_conflict_factor_rejected] reason=missing_ref
+
+3. Non-resolvable ref (freetext strings):
+   - Condition: ref doesn't match any graph node ref pattern, cognition key, or local ref
+   - Result: rejected with reason "unresolvable ref: {ref}"
+   - No conflicts_with edge created
+
+### Test Coverage (test/memory/contested-evidence.test.ts)
+- "factor with empty ref is rejected and logged" — PASS
+  Verifies: empty ref → unresolved, console.warn emitted
+- "factor with missing kind is rejected" — PASS
+  Verifies: empty kind → unresolved
+- "freetext factor (non-resolvable ref) produces no conflicts_with edge" — PASS
+  Verifies: random string ref → unresolved, no edge in memory_relations

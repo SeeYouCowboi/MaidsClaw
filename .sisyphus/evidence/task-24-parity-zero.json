@@ -1,0 +1,167 @@
+{
+  "mode": "derived",
+  "generatedAt": "2026-03-31T22:00:04.774Z",
+  "truthReport": null,
+  "derivedReport": {
+    "timestamp": 1774994404773,
+    "surfaces": [
+      {
+        "surface": "search_docs_private",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_area",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_world",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_cognition",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "node_embeddings",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "semantic_edges",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "node_scores",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      }
+    ],
+    "totalMismatches": 0,
+    "passed": true
+  },
+  "combinedReport": {
+    "timestamp": 1774994404774,
+    "surfaces": [
+      {
+        "surface": "search_docs_private",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_area",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_world",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "search_docs_cognition",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "node_embeddings",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "semantic_edges",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      },
+      {
+        "surface": "node_scores",
+        "sqliteCount": 0,
+        "pgCount": 0,
+        "countMatch": true,
+        "mismatches": [],
+        "sampleMismatches": 0,
+        "matchCount": 1,
+        "mismatchCount": 0
+      }
+    ],
+    "totalMismatches": 0,
+    "passed": true
+  },
+  "coverage": {
+    "expectedTruthSurfaces": 14,
+    "expectedDerivedSurfaces": 7,
+    "truthSurfacesRun": 0,
+    "derivedSurfacesRun": 7,
+    "passed": true,
+    "errors": []
+  }
+}

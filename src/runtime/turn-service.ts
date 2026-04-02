@@ -5,7 +5,10 @@ import type { LogEntry } from "../app/contracts/trace.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
-import { defaultViewerCanReadAdminOnly, type ViewerContext } from "../core/contracts/viewer-context.js";
+import {
+	defaultViewerCanReadAdminOnly,
+	type ViewerContext,
+} from "../core/contracts/viewer-context.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 
@@ -23,8 +26,8 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
-import { materializePublications } from "../memory/materialization.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
+import { materializePublications } from "../memory/materialization.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
@@ -32,6 +35,10 @@ import type {
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
 import type { SessionService } from "../session/service.js";
+import type {
+	SettlementRepos,
+	SettlementUnitOfWork,
+} from "../storage/unit-of-work.js";
 import type {
 	AssertionRecordV4,
 	CanonicalRpTurnOutcome,
@@ -79,6 +86,8 @@ export class TurnService {
 		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
 		private readonly projectionManager?: ProjectionManager,
+		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
+		private readonly memoryPipelineReady = true,
 	) {}
 
 	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
@@ -130,7 +139,7 @@ export class TurnService {
 		this.traceStore?.initTrace(
 			requestId,
 			request.sessionId,
-			this.resolveQueueOwnerAgentId(request.sessionId) ?? "unknown",
+			(await this.resolveQueueOwnerAgentId(request.sessionId)) ?? "unknown",
 		);
 
 		const existingUserRecord =
@@ -153,7 +162,7 @@ export class TurnService {
 			});
 
 		const turnRangeStart = userRecord.recordIndex;
-		const assistantActorType = this.resolveAssistantActorType(
+		const assistantActorType = await this.resolveAssistantActorType(
 			effectiveRequest.sessionId,
 		);
 
@@ -223,7 +232,7 @@ export class TurnService {
 			return;
 		}
 
-		this.handleFailedTurn({
+		await this.handleFailedTurn({
 			request,
 			turnRangeStart,
 			errorChunk,
@@ -266,7 +275,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -293,7 +302,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -325,7 +334,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -347,7 +356,12 @@ export class TurnService {
 		const hasAssistantVisibleActivity = hasPublicReply;
 
 		const hasPrivateEpisodes = canonicalOutcome.privateEpisodes.length > 0;
-		if (!hasPublicReply && !hasPrivateOps && !hasPublications && !hasPrivateEpisodes) {
+		if (
+			!hasPublicReply &&
+			!hasPrivateOps &&
+			!hasPublications &&
+			!hasPrivateEpisodes
+		) {
 			const errorChunk = {
 				code: "RP_EMPTY_TURN",
 				message:
@@ -360,7 +374,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -372,22 +386,12 @@ export class TurnService {
 		}
 
 		const settlementId = `stl:${requestId}`;
-		if (
-			this.interactionStore.settlementExists(
-				effectiveRequest.sessionId,
-				settlementId,
-			)
-		) {
-			const existingSettlement = this.interactionStore
-				.getBySession(effectiveRequest.sessionId)
-				.find(
-					(record) =>
-						record.recordId === settlementId &&
-						record.recordType === "turn_settlement",
-				);
-			const existingPayload = existingSettlement?.payload as
-				| Partial<TurnSettlementPayload>
-				| undefined;
+		const existingPayload = await this.getExistingSettlementPayload(
+			effectiveRequest.sessionId,
+			requestId,
+			settlementId,
+		);
+		if (existingPayload) {
 			const replayPublicReply =
 				typeof existingPayload?.publicReply === "string"
 					? existingPayload.publicReply
@@ -412,101 +416,140 @@ export class TurnService {
 			return;
 		}
 
+		const committedAt = Date.now();
 		try {
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
 				effectiveRequest.sessionId,
 				"rp_agent",
 			);
+			const ownerAgentId =
+				(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
 			viewerSnapshot = resolvedViewerSnapshot;
-			this.interactionStore.runInTransaction(() => {
-				const settlementPayload: TurnSettlementPayload = {
-					settlementId,
-					requestId,
-					sessionId: effectiveRequest.sessionId,
-					ownerAgentId:
-						this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					publicReply: canonicalOutcome.publicReply,
-					hasPublicReply,
-					viewerSnapshot: resolvedViewerSnapshot,
-					schemaVersion: "turn_settlement_v5",
-					privateCognition: hasPrivateOps
-						? canonicalOutcome.privateCognition
-						: undefined,
-					privateEpisodes: canonicalOutcome.privateEpisodes.length > 0
+			const settlementPayload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: effectiveRequest.sessionId,
+				ownerAgentId,
+				publicReply: canonicalOutcome.publicReply,
+				hasPublicReply,
+				viewerSnapshot: resolvedViewerSnapshot,
+				schemaVersion: "turn_settlement_v5",
+				privateCognition: hasPrivateOps
+					? canonicalOutcome.privateCognition
+					: undefined,
+				privateEpisodes:
+					canonicalOutcome.privateEpisodes.length > 0
 						? canonicalOutcome.privateEpisodes
 						: undefined,
-					publications,
-					...(canonicalOutcome.pinnedSummaryProposal
-						? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
-						: {}),
-					relationIntents: canonicalOutcome.relationIntents.length > 0
+				publications,
+				...(canonicalOutcome.pinnedSummaryProposal
+					? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+					: {}),
+				relationIntents:
+					canonicalOutcome.relationIntents.length > 0
 						? canonicalOutcome.relationIntents
 						: undefined,
-					conflictFactors: canonicalOutcome.conflictFactors.length > 0
+				conflictFactors:
+					canonicalOutcome.conflictFactors.length > 0
 						? canonicalOutcome.conflictFactors
 						: undefined,
-				};
-
-				this.commitService.commitWithId({
-					sessionId: effectiveRequest.sessionId,
-					actorType: "rp_agent",
-					recordId: settlementId,
-					recordType: "turn_settlement",
-					payload: settlementPayload,
-					correlatedTurnId: requestId,
-				});
-
-				if (hasPublicReply) {
-					const assistantPayload: AssistantMessagePayloadV3 = {
-						role: "assistant",
-						content: canonicalOutcome.publicReply,
-						settlementId,
-					};
-
-					this.commitService.commit({
-						sessionId: effectiveRequest.sessionId,
-						actorType: "rp_agent",
-						recordType: "message",
-						payload: assistantPayload,
-						correlatedTurnId: requestId,
-					});
-				}
+			};
 
 			const slotEntries = buildCognitionSlotPayload(
 				canonicalOutcome.privateCognition?.ops ?? [],
 				settlementId,
+				committedAt,
 			);
 
-			if (this.projectionManager) {
-				this.projectionManager.commitSettlement({
-					settlementId,
+		if (this.settlementUnitOfWork) {
+			await this.settlementUnitOfWork.run(async (repos) => {
+				await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
+				await this.commitSettlementRecordsWithRepos({
+					repos,
 					sessionId: effectiveRequest.sessionId,
-					agentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
-					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
-					privateEpisodes: canonicalOutcome.privateEpisodes,
-					publications,
-					areaStateArtifacts: settlementPayload.areaStateArtifacts,
-					viewerSnapshot: resolvedViewerSnapshot,
-					upsertRecentCognitionSlot: this.interactionStore.upsertRecentCognitionSlot.bind(this.interactionStore),
-					recentCognitionSlotJson: JSON.stringify(slotEntries),
-					agentRole: "rp_agent",
-					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-					artifactEnforcementContext: {
-						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						ownerAgentId: settlementPayload.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						writeOperation: "append",
-					},
-				});
-			} else {
-				this.interactionStore.upsertRecentCognitionSlot(
-					effectiveRequest.sessionId,
-					this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "",
+					requestId,
 					settlementId,
-					JSON.stringify(slotEntries),
-				);
-			}
-			settlementPayloadAfterCommit = settlementPayload;
+					settlementPayload,
+					hasPublicReply,
+					publicReply: canonicalOutcome.publicReply,
+				});
+				await this.commitSettlementProjectionWithRepos({
+					repos,
+					effectiveRequest,
+					settlementId,
+					settlementPayload,
+					resolvedViewerSnapshot,
+					ownerAgentId,
+					publications,
+					slotEntries,
+					committedAt,
+					canonicalOutcome,
+				});
+				await repos.settlementLedger.markApplied(settlementId);
 			});
+			} else {
+				await this.interactionStore.runInTransactionAsync(async () => {
+					this.commitService.commitWithId({
+						sessionId: effectiveRequest.sessionId,
+						actorType: "rp_agent",
+						recordId: settlementId,
+						recordType: "turn_settlement",
+						payload: settlementPayload,
+						correlatedTurnId: requestId,
+					});
+
+					if (hasPublicReply) {
+						const assistantPayload: AssistantMessagePayloadV3 = {
+							role: "assistant",
+							content: canonicalOutcome.publicReply,
+							settlementId,
+						};
+
+						this.commitService.commit({
+							sessionId: effectiveRequest.sessionId,
+							actorType: "rp_agent",
+							recordType: "message",
+							payload: assistantPayload,
+							correlatedTurnId: requestId,
+						});
+					}
+
+					if (this.projectionManager) {
+						await this.projectionManager.commitSettlement({
+							settlementId,
+							sessionId: effectiveRequest.sessionId,
+							agentId: ownerAgentId,
+							cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+							privateEpisodes: canonicalOutcome.privateEpisodes,
+							publications,
+							areaStateArtifacts: settlementPayload.areaStateArtifacts,
+							viewerSnapshot: resolvedViewerSnapshot,
+							upsertRecentCognitionSlot:
+								this.interactionStore.upsertRecentCognitionSlot.bind(
+									this.interactionStore,
+								),
+							recentCognitionSlotJson: JSON.stringify(slotEntries),
+							agentRole: "rp_agent",
+							artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+							artifactEnforcementContext: {
+								writingAgentId: ownerAgentId || undefined,
+								ownerAgentId,
+								writeOperation: "append",
+							},
+							committedAt,
+						});
+					} else {
+						this.interactionStore.upsertRecentCognitionSlot(
+							effectiveRequest.sessionId,
+							ownerAgentId,
+							settlementId,
+							JSON.stringify(slotEntries),
+						);
+					}
+				});
+			}
+
+			settlementPayloadAfterCommit = settlementPayload;
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "Turn settlement transaction failed");
 			const errorChunk = {
@@ -519,7 +562,7 @@ export class TurnService {
 				message: errorChunk.message,
 				retriable: false,
 			};
-			this.handleFailedTurn({
+			await this.handleFailedTurn({
 				request: effectiveRequest,
 				turnRangeStart,
 				errorChunk,
@@ -545,26 +588,40 @@ export class TurnService {
 
 		if (hasPublications && this.graphStorage && !this.projectionManager) {
 			try {
-			materializePublications(this.graphStorage, publications, settlementId, {
-					sessionId: effectiveRequest.sessionId,
-					locationEntityId: viewerSnapshot?.currentLocationEntityId,
-					timestamp: Date.now(),
-				}, {
-					agentRole: "rp_agent",
+				materializePublications(
+					this.graphStorage,
+					publications,
+					settlementId,
+					{
+						sessionId: effectiveRequest.sessionId,
+						locationEntityId: viewerSnapshot?.currentLocationEntityId,
+						timestamp: committedAt,
+					},
+					{
+						agentRole: "rp_agent",
 					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
 					artifactEnforcementContext: {
-						writingAgentId: this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
-						ownerAgentId: settlementPayloadAfterCommit?.ownerAgentId || this.resolveQueueOwnerAgentId(effectiveRequest.sessionId),
+						writingAgentId: await this.resolveQueueOwnerAgentId(
+							effectiveRequest.sessionId,
+						),
+						ownerAgentId:
+							settlementPayloadAfterCommit?.ownerAgentId ||
+							(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)),
 						writeOperation: "append",
 					},
-				});
+				},
+			);
 			} catch (err) {
-				this.traceLog(requestId, "error", `Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`);
+				this.traceLog(
+					requestId,
+					"error",
+					`Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 		}
 
 		const queueOwnerAgentId =
-			this.resolveQueueOwnerAgentId(effectiveRequest.sessionId) ?? "unknown";
+			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "unknown";
 		this.projectionSink?.onProjectionEligible(
 			createProjectionAppendix({
 				publicReply: canonicalOutcome.publicReply,
@@ -596,11 +653,167 @@ export class TurnService {
 		this.traceStore?.finalizeTrace(requestId);
 	}
 
+	private async getExistingSettlementPayload(
+		sessionId: string,
+		requestId: string,
+		settlementId: string,
+	): Promise<Partial<TurnSettlementPayload> | undefined> {
+		if (this.settlementUnitOfWork) {
+			try {
+				const payload = await this.settlementUnitOfWork.run(async (repos) =>
+					repos.interactionRepo.getSettlementPayload(sessionId, requestId),
+				);
+				if (payload) {
+					return payload;
+				}
+			} catch {
+				void 0;
+			}
+		}
+
+		if (!this.interactionStore.settlementExists(sessionId, settlementId)) {
+			return undefined;
+		}
+
+		const existingSettlement = this.interactionStore
+			.getBySession(sessionId)
+			.find(
+				(record) =>
+					record.recordId === settlementId &&
+					record.recordType === "turn_settlement",
+			);
+		return existingSettlement?.payload as
+			| Partial<TurnSettlementPayload>
+			| undefined;
+	}
+
+	private async commitSettlementRecordsWithRepos(params: {
+		repos: SettlementRepos;
+		sessionId: string;
+		requestId: string;
+		settlementId: string;
+		settlementPayload: TurnSettlementPayload;
+		hasPublicReply: boolean;
+		publicReply: string;
+	}): Promise<void> {
+		const {
+			repos,
+			sessionId,
+			requestId,
+			settlementId,
+			settlementPayload,
+			hasPublicReply,
+			publicReply,
+		} = params;
+
+		const maxIndex = await repos.interactionRepo.getMaxIndex(sessionId);
+		let nextRecordIndex = maxIndex === undefined ? 0 : maxIndex + 1;
+
+		await repos.interactionRepo.commit({
+			sessionId,
+			recordId: settlementId,
+			recordIndex: nextRecordIndex,
+			actorType: "rp_agent",
+			recordType: "turn_settlement",
+			payload: settlementPayload,
+			correlatedTurnId: requestId,
+			committedAt: Date.now(),
+		});
+
+		nextRecordIndex += 1;
+
+		if (!hasPublicReply) {
+			return;
+		}
+
+		const assistantPayload: AssistantMessagePayloadV3 = {
+			role: "assistant",
+			content: publicReply,
+			settlementId,
+		};
+
+		await repos.interactionRepo.commit({
+			sessionId,
+			recordId: crypto.randomUUID(),
+			recordIndex: nextRecordIndex,
+			actorType: "rp_agent",
+			recordType: "message",
+			payload: assistantPayload,
+			correlatedTurnId: requestId,
+			committedAt: Date.now(),
+		});
+	}
+
+	private async commitSettlementProjectionWithRepos(params: {
+		repos: SettlementRepos;
+		effectiveRequest: AgentRunRequest;
+		settlementId: string;
+		settlementPayload: TurnSettlementPayload;
+		resolvedViewerSnapshot: TurnSettlementPayload["viewerSnapshot"];
+		ownerAgentId: string;
+		publications: CanonicalRpTurnOutcome["publications"];
+		slotEntries: RecentCognitionEntry[];
+		committedAt: number;
+		canonicalOutcome: CanonicalRpTurnOutcome;
+	}): Promise<void> {
+		const {
+			repos,
+			effectiveRequest,
+			settlementId,
+			settlementPayload,
+			resolvedViewerSnapshot,
+			ownerAgentId,
+			publications,
+			slotEntries,
+			committedAt,
+			canonicalOutcome,
+		} = params;
+
+		if (this.projectionManager) {
+			await this.projectionManager.commitSettlement(
+				{
+					settlementId,
+					sessionId: effectiveRequest.sessionId,
+					agentId: ownerAgentId,
+					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
+					privateEpisodes: canonicalOutcome.privateEpisodes,
+					publications,
+					areaStateArtifacts: settlementPayload.areaStateArtifacts,
+					viewerSnapshot: resolvedViewerSnapshot,
+					recentCognitionSlotJson: JSON.stringify(slotEntries),
+					agentRole: "rp_agent",
+					artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+					artifactEnforcementContext: {
+						writingAgentId: ownerAgentId || undefined,
+						ownerAgentId,
+						writeOperation: "append",
+					},
+					committedAt,
+				},
+				{
+					episodeRepo: repos.episodeRepo,
+					cognitionEventRepo: repos.cognitionEventRepo,
+					cognitionProjectionRepo: repos.cognitionProjectionRepo,
+					areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
+					recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
+				},
+			);
+			return;
+		}
+
+		await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
+			effectiveRequest.sessionId,
+			ownerAgentId,
+			settlementId,
+			JSON.stringify(slotEntries),
+		);
+	}
+
 	private async resolveViewerSnapshot(
 		sessionId: string,
 		role: AgentProfile["role"],
 	): Promise<TurnSettlementPayload["viewerSnapshot"]> {
-		const agentId = this.resolveQueueOwnerAgentId(sessionId) ?? "";
+		const agentId = (await this.resolveQueueOwnerAgentId(sessionId)) ?? "";
 		const viewerContext = await this.resolveViewerContext({
 			sessionId,
 			agentId,
@@ -642,13 +855,13 @@ export class TurnService {
 		};
 	}
 
-	private handleFailedTurn(params: {
+	private async handleFailedTurn(params: {
 		request: AgentRunRequest;
 		turnRangeStart: number;
 		errorChunk: { code?: string; message?: string };
 		assistantText: string;
 		hasAssistantVisibleActivity: boolean;
-	}): void {
+	}): Promise<void> {
 		const {
 			request,
 			turnRangeStart,
@@ -687,7 +900,7 @@ export class TurnService {
 			statusRecord.recordIndex,
 		);
 		if (hasAssistantVisibleActivity) {
-			this.sessionService.setRecoveryRequired(request.sessionId);
+			await this.sessionService.setRecoveryRequired(request.sessionId);
 		}
 	}
 
@@ -695,7 +908,7 @@ export class TurnService {
 		sessionId: string,
 		agentId: string,
 	): Promise<boolean> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return false;
 		}
 
@@ -719,11 +932,11 @@ export class TurnService {
 		sessionId: string,
 		requestId?: string,
 	): Promise<void> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return;
 		}
 
-		const queueOwnerAgentId = this.resolveQueueOwnerAgentId(sessionId);
+		const queueOwnerAgentId = await this.resolveQueueOwnerAgentId(sessionId);
 		if (!queueOwnerAgentId) {
 			return;
 		}
@@ -765,7 +978,7 @@ export class TurnService {
 		queueOwnerAgentId: string,
 		requestId?: string,
 	): Promise<void> {
-		if (this.memoryTaskAgent === null) {
+		if (!this.memoryPipelineReady || this.memoryTaskAgent === null) {
 			return;
 		}
 
@@ -780,7 +993,7 @@ export class TurnService {
 			dialogueRecords: toDialogueRecords(records),
 			interactionRecords: records as never,
 			queueOwnerAgentId,
-			agentRole: this.resolveAssistantActorType(flushRequest.sessionId),
+			agentRole: await this.resolveAssistantActorType(flushRequest.sessionId),
 		});
 
 		this.interactionStore.markProcessed(
@@ -799,14 +1012,14 @@ export class TurnService {
 		}
 	}
 
-	private resolveQueueOwnerAgentId(sessionId: string): string | undefined {
-		return this.sessionService.getSession(sessionId)?.agentId;
+	private async resolveQueueOwnerAgentId(sessionId: string): Promise<string | undefined> {
+		return (await this.sessionService.getSession(sessionId))?.agentId;
 	}
 
-	private resolveAssistantActorType(
+	private async resolveAssistantActorType(
 		sessionId: string,
-	): "rp_agent" | "maiden" | "task_agent" {
-		const agentId = this.resolveQueueOwnerAgentId(sessionId);
+	): Promise<"rp_agent" | "maiden" | "task_agent"> {
+		const agentId = await this.resolveQueueOwnerAgentId(sessionId);
 		if (agentId?.startsWith("maid:")) {
 			return "maiden";
 		}
@@ -1029,8 +1242,8 @@ function summarizeCommitment(record: CommitmentRecord): string {
 function buildCognitionSlotPayload(
 	ops: CognitionOp[],
 	settlementId: string,
+	committedAt: number,
 ): RecentCognitionEntry[] {
-	const committedAt = Date.now();
 	const items: RecentCognitionEntry[] = [];
 
 	for (const op of ops) {

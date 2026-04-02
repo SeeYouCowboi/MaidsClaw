@@ -1,0 +1,12 @@
+Scenario: Tests are hermetic (no external dependencies)
+Steps: Run bun run test:acceptance:app-host without PG_APP_TEST_URL, OPENAI_API_KEY, etc.
+Result:
+  bun test v1.3.10 (30e609e0)
+  Error [UNKNOWN_COMMAND]: Unknown command: "nonexistent". Available: config
+  Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "nonexistent" for "config". Available: init, validate, show, write-runtime, doctor
+  ... (error messages are expected test output)
+  66 pass
+  0 fail
+  252 expect() calls
+  Ran 66 tests across 6 files. [3.37s]
+Evidence: All app-host acceptance tests pass using in-memory SQLite, no external services required

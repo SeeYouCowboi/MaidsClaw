@@ -1,0 +1,280 @@
+T20: PG Integration Test Coverage Audit
+=======================================
+Date: 2026-04-01
+Goal: Ensure all major memory pipeline behaviors have PG integration test coverage
+      in test/pg-app/ before SQLite code is deleted in T27.
+
+METHODOLOGY
+-----------
+1. Read all 29 memory test files (27 in test/memory/, 2 in src/memory/)
+2. Read all 25 PG test files in test/pg-app/ in their entirety
+3. Read all 20 PG domain repos in src/storage/domain-repos/pg/
+4. Mapped each memory test behavior to existing PG coverage
+5. Identified untested PG repos and assessed gap severity
+
+═══════════════════════════════════════════════════════════════════════
+COVERAGE MATRIX: 29 Memory Test Files → PG Test Coverage
+═══════════════════════════════════════════════════════════════════════
+
+Legend:
+  ✅ COVERED    = Core behavior has PG test equivalent
+  ⚡ PARTIAL    = Storage layer covered, orchestration logic is above-storage
+  ❌ NO PG      = SQLite-only concept, no PG equivalent needed
+  🔶 GAP        = Storage behavior exists in PG repo but has no dedicated test
+
+───────────────────────────────────────────────────────────────────────
+1. private-episode-repo.test.ts
+   Behaviors: append, readBySettlement, readByAgent, duplicate handling, category validation
+   PG Coverage: ✅ pg-episode-cognition-repo.test.ts
+     - append/read round-trip, readByAgent ordering, limit, duplicate ON CONFLICT DO NOTHING
+     - category rejection (thought, invalid), forbidden fields, append-only trigger
+   Verdict: FULLY COVERED
+
+2. cognition-commit.test.ts
+   Behaviors: CognitionOpCommitter processes assertion/evaluation/commitment ops, stores events
+   PG Coverage: ✅ pg-episode-cognition-repo.test.ts + pg-current-projection-repo.test.ts
+     - Cognition event repo: append/read, replay ordering, afterTime filter, JSONB round-trip
+     - Cognition projection: upsert from assertion event, getAllCurrent
+     - Settlement UoW: full settlement pipeline commits cognitionOps
+   Verdict: FULLY COVERED (storage layer; CognitionOpCommitter orchestration is above-storage logic)
+
+3. materialization-promotion.test.ts
+   Behaviors: MaterializationService decides promotion class for events
+   PG Coverage: ⚡ PARTIAL
+     - pg-graph-store-repo.test.ts: createProjectedEvent stores promotion_class
+     - PgPromotionQueryRepo EXISTS (383 lines, complex query logic) but has NO dedicated test
+   Verdict: Storage writes covered. PgPromotionQueryRepo query logic is a GAP (see below).
+
+4. relation-intents.test.ts
+   Behaviors: RelationBuilder creates memory relations from cognition
+   PG Coverage: ⚡ PARTIAL
+     - pg-graph-store-repo.test.ts: createLogicEdge tested
+     - PgGraphReadQueryRepo readMemoryRelationEdges EXISTS but has NO dedicated test
+   Verdict: Write path covered. Read-query path is above-storage logic + untested repo.
+
+5. retrieval-search.test.ts
+   Behaviors: RetrievalService keyword search, cognition search, retrieval ranking, narrative FTS
+   PG Coverage: ⚡ PARTIAL
+     - pg-search-projection-repo.test.ts: searchPrivate, searchArea (pg_trgm)
+     - PgNarrativeSearchRepo EXISTS (110 lines) but has NO dedicated test
+   Verdict: Private/area search covered. Narrative search (area+world trgm search) is a GAP.
+
+6. schema.test.ts
+   Behaviors: sqlite_master, PRAGMA, FTS5, WAL mode
+   PG Coverage: ❌ NO PG EQUIVALENT NEEDED
+     - SQLite-only introspection. PG schema validation already exists in:
+       pg-truth-schema.test.ts, pg-ops-schema.test.ts, pg-derived-schema.test.ts
+   Verdict: N/A — SQLite-specific, PG schemas already validated
+
+7. visibility-isolation.test.ts
+   Behaviors: CoreMemoryService agent-scoped block visibility, no cross-agent leak
+   PG Coverage: ✅ pg-memory-blocks-repo.test.ts
+     - Core blocks: initializeBlocks, getBlock, appendBlock, replaceBlock
+     - Shared blocks: createBlock, retrievalOnly, sections, CASCADE FK
+   Verdict: FULLY COVERED (block operations; visibility logic is above-storage)
+
+8. publication-recovery-sweeper.test.ts
+   Behaviors: PublicationRecoverySweeper finds and retries failed publication projections
+   PG Coverage: ✅ pg-flush-recovery-repo.test.ts
+     - recordPending, markAttempted with backoff, queryActive, markResolved, markHardFail
+   Verdict: FULLY COVERED (repo layer; sweeper orchestration is above-storage)
+
+9. cognition-search.test.ts
+   Behaviors: CognitionSearchService FTS search across cognition records
+   PG Coverage: ✅ pg-search-projection-repo.test.ts
+     - searchPrivate with pg_trgm covers cognition search docs
+   Verdict: FULLY COVERED (PG uses trgm instead of FTS5, search interface same)
+
+10. area-world-timeslice.test.ts
+    Behaviors: AreaWorldProjectionRepo timeslice queries, area/world state history
+    PG Coverage: ✅ pg-current-projection-repo.test.ts + pg-projection-replay.test.ts
+      - Area/world upsert + query, conflict resolution, rebuild parity
+    Verdict: FULLY COVERED
+
+11. graph-node-registry.test.ts
+    Behaviors: GraphStorageService node registration, entity resolution, embedding linkage
+    PG Coverage: ✅ pg-graph-store-repo.test.ts + pg-embedding-repo.test.ts
+      - Entity upsert (shared_public + private_overlay), resolveEntityByPointerKey
+      - Embedding: pgvector round-trip, cosine search, deleteByModel
+    Verdict: FULLY COVERED
+
+12. embedding-versioning.test.ts
+    Behaviors: EmbeddingService model versioning, re-embed on model change, version isolation
+    PG Coverage: ✅ pg-embedding-repo.test.ts + pg-embedding-rebuild.test.ts
+      - Model epoch enforcement, model isolation, rebuildEmbeddings, clearFirst
+    Verdict: FULLY COVERED
+
+13. contested-evidence.test.ts
+    Behaviors: CognitionRepository contested assertions, evidence weighting, stance resolution
+    PG Coverage: ✅ pg-projection-replay.test.ts + pg-episode-cognition-repo.test.ts
+      - Cognition rebuild latest stance wins, retract events, JSONB round-trip
+    Verdict: FULLY COVERED (stance storage; conflict resolution logic is above-storage)
+
+14. organizer-durable-pipeline.test.ts
+    Behaviors: GraphOrganizer + MaterializationService + MemoryTaskAgent durable pipeline
+    PG Coverage: ⚡ PARTIAL
+      - Individual repos all tested (graph store, embeddings, search rebuild)
+      - Pipeline orchestration is above-storage logic
+    Verdict: Storage layer covered. Pipeline orchestration is NOT storage.
+
+15. task-agent-strict.test.ts
+    Behaviors: MemoryTaskAgent strict mode operations
+    PG Coverage: ⚡ PARTIAL — Above-storage agent logic
+    Verdict: Not a storage test. Agent behavior layer.
+
+16. search-rebuild.test.ts
+    Behaviors: Search index rebuild from graph storage
+    PG Coverage: ✅ pg-search-rebuild.test.ts
+      - rebuildPrivate, rebuildArea, rebuildWorld, rebuildCognition, rebuild('all')
+      - Excludes retracted/rejected/abandoned cognition, clears stale docs
+    Verdict: FULLY COVERED
+
+17. settlement-clock.test.ts
+    Behaviors: Settlement clock episode/cognition timing, ProjectionManager ordering
+    PG Coverage: ✅ pg-settlement-uow.test.ts + pg-settlement-ledger.test.ts
+      - Full settlement lifecycle, atomic commit/rollback, ProjectionManager.commitSettlement
+    Verdict: FULLY COVERED
+
+18. settlement-ledger.test.ts
+    Behaviors: Settlement ledger full lifecycle, idempotent pending, retry logic
+    PG Coverage: ✅ pg-settlement-ledger.test.ts
+      - Full lifecycle, markPending idempotent, retry increment, conflict, terminal
+    Verdict: FULLY COVERED
+
+19. validation-area-world-surfacing.test.ts
+    Behaviors: Area/world state surfacing, classification, public manifestation
+    PG Coverage: ✅ pg-current-projection-repo.test.ts + pg-search-rebuild.test.ts
+      - Area/world upsert + query, search rebuild area/world
+    Verdict: FULLY COVERED
+
+20. validation-contested-cognition.test.ts
+    Behaviors: ExplicitSettlementProcessor conflicting assertions, stance resolution
+    PG Coverage: ✅ pg-projection-replay.test.ts + pg-settlement-uow.test.ts
+      - Cognition rebuild latest-wins, retract handling, atomic settlement
+    Verdict: FULLY COVERED (storage layer)
+
+21. validation-episode-lifecycle.test.ts
+    Behaviors: Episode creation → settlement → query, ordering, category
+    PG Coverage: ✅ pg-episode-cognition-repo.test.ts
+      - Episode append/read round-trip, ordering, category validation
+    Verdict: FULLY COVERED
+
+22. validation-negative-cases.test.ts
+    Behaviors: Invalid inputs, boundary conditions, SharedBlockRepo edge cases
+    PG Coverage: ✅ pg-memory-blocks-repo.test.ts
+      - appendBlock rejects over limit, rejects read-only, replaceBlock fails not found
+      - SharedBlockRepo: sectionExists, deleteSection, getBlock undefined for missing
+    Verdict: FULLY COVERED
+
+23. validation-explain-visibility.test.ts
+    Behaviors: GraphNavigator + AliasService explain visibility reasoning
+    PG Coverage: ⚡ PARTIAL
+      - PgGraphReadQueryRepo EXISTS (1172 lines, complex visibility logic) but NO test
+      - VisibilityPolicy used in graph-read-query-repo.ts
+    Verdict: Storage query layer is a GAP, but navigation logic is above-storage.
+
+24. validation-cross-session.test.ts
+    Behaviors: PrivateCognitionProjectionRepo continuity across sessions
+    PG Coverage: ✅ pg-current-projection-repo.test.ts
+      - Cognition projection upsert replaces on conflict (same cognition_key)
+    Verdict: FULLY COVERED
+
+25. validation-time-model.test.ts
+    Behaviors: EpisodeRepository temporal ordering, valid_time vs committed_time
+    PG Coverage: ✅ pg-episode-cognition-repo.test.ts
+      - readByAgent ordering, timestamp handling
+    Verdict: FULLY COVERED
+
+26. validation-publication-pipeline.test.ts
+    Behaviors: AreaWorldProjectionRepo publication flow, surfacing classification
+    PG Coverage: ✅ pg-current-projection-repo.test.ts + pg-projection-replay.test.ts
+      - Area world upsert + query, rebuild area state
+    Verdict: FULLY COVERED
+
+27. validation-turn-settlement.test.ts
+    Behaviors: Full ProjectionManager + ExplicitSettlementProcessor flow
+    PG Coverage: ✅ pg-settlement-uow.test.ts
+      - Atomic commit with full pipeline (cognitionOps, episodes, publications, etc.)
+    Verdict: FULLY COVERED
+
+28. e2e-rp-memory-pipeline.test.ts
+    Behaviors: Full RP pipeline: graph → cognition → projection → surfacing → retrieval
+    PG Coverage: ✅ e2e-migration.test.ts + pg-settlement-uow.test.ts
+      - E2e: SQLite→PG parity, boot, settlement turn commit, search rebuild
+      - Settlement UoW: full pipeline atomic commit
+    Verdict: FULLY COVERED (end-to-end)
+
+29. src/memory/cognition/cognition-search.test.ts
+    Behaviors: CognitionSearchService FTS
+    PG Coverage: ✅ pg-search-projection-repo.test.ts
+      - searchPrivate covers cognition doc search via pg_trgm
+    Verdict: FULLY COVERED
+
+═══════════════════════════════════════════════════════════════════════
+UNTESTED PG DOMAIN REPOS (4 of 20)
+═══════════════════════════════════════════════════════════════════════
+
+1. PgNarrativeSearchRepo (narrative-search-repo.ts, 110 lines)
+   - searchNarrative: area + world trgm search, dedup, scoring, min length guard
+   - Uses: pg_trgm similarity(), word_similarity(), GREATEST(), ILIKE
+   - Risk: MEDIUM — uses PG-specific functions not tested elsewhere
+   - Recommendation: WRITE TEST — pg_trgm query behavior differs from FTS5
+
+2. PgPromotionQueryRepo (promotion-query-repo.ts, 383 lines)
+   - findPromotionEventCandidates, findStableFactCandidates, getEntityRecord
+   - resolvePublicEntityDecision, resolveCandidateTimestamp
+   - Uses: unsafe SQL with dynamic WHERE, NodeRef parsing, JSON participant parsing
+   - Risk: LOW-MEDIUM — mostly SELECT queries on already-tested tables
+   - Recommendation: SKIP — complex but read-only, tested indirectly via
+     pg-graph-store-repo (writes) and pg-search-rebuild (reads). The decision
+     logic (isExistencePrivate, shouldUsePlaceholder) is pure TS logic.
+
+3. PgGraphReadQueryRepo (graph-read-query-repo.ts, 1172 lines)
+   - readLogicEdges, readMemoryRelationEdges, readSemanticEdges, readStateFactEdges
+   - readEventParticipantContexts, readActiveFactsForEntityFrontier
+   - getNodeSnapshots, getNodeVisibility, readAgentAssertionsLinkedToEntities
+   - Uses: complex JOINs, regex ~, VisibilityPolicy, time-slice filtering
+   - Risk: LOW — all reads from tables that already have write+read tests.
+     The VisibilityPolicy is pure logic. Time-slice filtering is tested
+     in pg-projection-replay.test.ts indirectly.
+   - Recommendation: SKIP — read-query repo over already-validated tables.
+     Would require massive test setup for marginal coverage gain.
+
+4. PgNodeScoringQueryRepo (node-scoring-query-repo.ts, 468 lines)
+   - getNodeRenderingPayload, getLatestNodeEmbedding, registerGraphNodeShadows
+   - listSemanticNeighborWeights, hasNodeScore, getNodeRecencyTimestamp
+   - getEventLogicDegree, getNodeTopicCluster, getSearchProjectionMaterial
+   - Uses: vector parsing, JSONB ->> extraction, multi-table lookups
+   - Risk: LOW — read-only queries. Node scores tested in pg-embedding-repo.test.ts.
+     Semantic edges tested in pg-embedding-repo.test.ts. Embeddings tested.
+   - Recommendation: SKIP — scoring queries over validated tables.
+
+═══════════════════════════════════════════════════════════════════════
+FINAL ASSESSMENT
+═══════════════════════════════════════════════════════════════════════
+
+Of 29 memory test files:
+  ✅ 22 FULLY COVERED by existing PG tests
+  ⚡  6 PARTIALLY covered (storage layer covered; orchestration is above-storage)
+  ❌  1 SQLite-only (schema.test.ts) — PG schema tests already exist separately
+
+Of 20 PG domain repos:
+  ✅ 16 have dedicated PG integration tests
+  🔶  4 have no dedicated tests (all read-query repos)
+
+RECOMMENDED NEW TEST: 1 file
+  → pg-narrative-search-repo.test.ts
+    Reason: PgNarrativeSearchRepo uses pg_trgm similarity/word_similarity/GREATEST/ILIKE
+    which are PG-specific functions not exercised by any other test. This is the
+    only genuine storage-behavior gap where PG query semantics differ from SQLite FTS5.
+
+SKIPPED (acceptable gaps):
+  → PgPromotionQueryRepo: Read-only, pure-logic decision functions, tested indirectly
+  → PgGraphReadQueryRepo: Read-only over validated tables, massive setup for marginal gain
+  → PgNodeScoringQueryRepo: Read-only scoring queries, tables already validated
+
+CONCLUSION:
+PG integration test coverage is STRONG. 22 of 29 memory behaviors are fully covered.
+The 6 "partial" cases are above-storage orchestration logic that will be addressed in T27
+when SQLite service wrappers are replaced. The ONE genuine gap is PgNarrativeSearchRepo
+which exercises PG-specific trgm functions not tested elsewhere.

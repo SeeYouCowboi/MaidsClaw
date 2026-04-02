@@ -1,0 +1,39 @@
+Task: 14 - Role Boundary Acceptance Tests (R10)
+Date: 2026-03-31
+
+Implemented:
+- Added `test/app/host/role-boundaries.test.ts`
+- Added 6 acceptance tests covering role boundaries:
+  1) server non-durable: user facade + gateway, no consumer
+  2) server durable: gateway + consumer
+  3) worker: consumer only, no gateway, no user facade
+  4) local: user facade only (no consumer/gateway)
+  5) maintenance: maintenance facade present, no gateway
+  6) shutdown idempotent across server/server-durable/worker/local/maintenance
+
+Verification Evidence:
+
+Command: bun test test/app/host/role-boundaries.test.ts
+Result:
+  bun test v1.3.10 (30e609e0)
+   6 pass
+   0 fail
+   32 expect() calls
+  Ran 6 tests across 1 file. [74.00ms]
+
+Command: bun run build
+Result:
+  $ tsc -p tsconfig.build.json --noEmit
+  Exit: PASS
+
+Command: bun test
+Result:
+  bun test v1.3.10 (30e609e0)
+   1927 pass
+   396 skip
+   0 fail
+   6135 expect() calls
+  Ran 2323 tests across 178 files. [67.40s]
+
+Diagnostics:
+- LSP diagnostics on `test/app/host/role-boundaries.test.ts`: clean (no diagnostics)

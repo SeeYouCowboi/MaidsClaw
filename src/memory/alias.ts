@@ -1,8 +1,15 @@
-import type { Database } from "bun:sqlite";
 import type { EntityAlias } from "./types.js";
 
+type DbLike = {
+  prepare(sql: string): {
+    get(...params: unknown[]): unknown;
+    run(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+  };
+};
+
 export class AliasService {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: DbLike) {}
 
   /**
    * Exact string match lookup: returns canonical entity_id or null

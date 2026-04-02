@@ -1,0 +1,68 @@
+Task 17: interaction/store.ts + shared-block-attach-service.ts decoupling [GAP-C3]
+=================================================================================
+
+## Changes Made
+
+### src/interaction/store.ts — db.raw removal
+- Replaced `this.db.raw.inTransaction` with private `_inTransaction` boolean flag
+- Replaced `this.db.raw.prepare("BEGIN IMMEDIATE").run()` → `this.db.exec("BEGIN IMMEDIATE")`
+- Replaced `this.db.raw.prepare("COMMIT").run()` → `this.db.exec("COMMIT")`
+- Replaced `this.db.raw.prepare("ROLLBACK").run()` → `this.db.exec("ROLLBACK")`
+- Added `finally` blocks to ensure `_inTransaction` flag is always reset
+- Replaced `this.db.raw.prepare(...)` in `upsertRecentCognitionSlot` → `this.db.run(sql, params)`
+- Result: ZERO db.raw references remain in store.ts
+
+### src/memory/shared-blocks/shared-block-attach-service.ts — DbLike removal
+- Removed custom `DbLike` type interface
+- Removed `SharedBlockPermissions` dependency
+- Removed all `.prepare()` / `.run()` / `.get()` / `.all()` direct SQL calls
+- Constructor now takes `SharedBlockRepo` contract instead of `DbLike`
+- All methods now async, delegating to repo contract methods
+- `SharedBlockAttachment` type re-exported from contract location
+
+### src/storage/domain-repos/contracts/shared-block-repo.ts — Contract expansion
+- Added `SharedBlockAttachment` type
+- Added `isBlockAdmin(blockId, agentId)` method
+- Added `attachBlock(blockId, targetId, attachedByAgentId)` method
+- Added `detachBlock(blockId, targetId)` method
+- Added `getAttachments(targetKind, targetId)` method
+
+### src/storage/domain-repos/pg/shared-block-repo.ts — PG implementation
+- Implemented all 4 new contract methods
+- `isBlockAdmin`: checks shared_blocks.created_by_agent_id OR shared_block_admins
+- `attachBlock`: INSERT ON CONFLICT DO UPDATE RETURNING
+- `detachBlock`: DELETE with count check
+- `getAttachments`: SELECT with type normalization
+
+### src/storage/domain-repos/sqlite/shared-block-repo.ts — SQLite implementation
+- Implemented all 4 new contract methods
+- `isBlockAdmin`: uses db.get() against shared_blocks and shared_block_admins
+- `attachBlock`: INSERT OR IGNORE with fallback SELECT
+- `detachBlock`: DELETE with changes check
+- `getAttachments`: SELECT with type mapping
+
+### src/storage/domain-repos/contracts/index.ts
+- Added SharedBlockAttachment to barrel export
+
+### runtime.ts — No changes needed
+- SharedBlockAttachService is not wired in runtime.ts
+- SharedBlockPermissions is not referenced in runtime.ts
+
+## Verification
+
+### Build
+$ bun run build → 0 errors (tsc --noEmit clean)
+
+### Tests
+$ bun test → 1925 pass, 401 skip, 17 fail
+- 4 failures: pre-existing private-thoughts-behavioral.test.ts (config-related, documented acceptable)
+- 13 failures: pre-existing from previous task changes to task-agent.ts/storage.ts (settlement-ledger.ts db.prepare issues)
+- 0 new failures from this task's changes
+
+### Interaction-specific tests
+$ bun test test/interaction/ → 80 pass, 0 fail
+
+### db.raw verification
+$ grep -c "\.raw" src/interaction/store.ts → 0 matches
+$ grep -c "DbLike" src/memory/shared-blocks/shared-block-attach-service.ts → 0 matches
+$ grep -c "\.prepare(" src/memory/shared-blocks/shared-block-attach-service.ts → 0 matches

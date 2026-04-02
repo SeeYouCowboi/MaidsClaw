@@ -1,0 +1,33 @@
+Task: 16 - MaintenanceOrchestrationService
+Date: 2026-03-31
+
+Changed Files:
+- src/app/host/maintenance-orchestration-service.ts
+- test/app/host/maintenance-orchestration-service.test.ts
+- src/jobs/types.ts
+- src/app/host/types.ts
+- src/app/host/create-app-host.ts
+- src/jobs/durable-store.ts
+- src/jobs/job-persistence-factory.ts
+- src/jobs/dispatcher.ts
+- src/jobs/pg-store.ts
+
+Verification:
+1) LSP diagnostics on all changed files
+   Result: clean (no diagnostics)
+
+2) Focused test run
+   Command: bun test test/app/host/maintenance-orchestration-service.test.ts
+   Result: pass (4 pass, 0 fail)
+
+3) Build
+   Command: bun run build
+   Result: pass (tsc --noEmit exit 0)
+
+4) Full test suite
+   Command: bun test
+   Result: pass (1931 pass, 396 skip, 0 fail)
+
+Notes:
+- Maintenance orchestration now dispatches durable maintenance jobs via JobPersistence.
+- Maintenance facade exposes granular maintenance methods through createAppHost wiring.

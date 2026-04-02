@@ -1,7 +1,7 @@
-import type { RuntimeBootstrapResult } from "../../../bootstrap/types.js";
 import type { InspectClient, InspectLogsFilter } from "../inspect-client.js";
 import { diagnose, type DiagnosticEntry } from "../../diagnostics/diagnose-service.js";
 import type { TraceStore } from "../../diagnostics/trace-store.js";
+import type { InspectRuntimeDeps } from "../../inspect/runtime-deps.js";
 import {
   loadChunksView,
   loadLogsView,
@@ -21,7 +21,7 @@ import {
 
 export class LocalInspectClient implements InspectClient {
   constructor(
-    private readonly runtime: RuntimeBootstrapResult,
+    private readonly runtime: InspectRuntimeDeps,
     private readonly traceStore: TraceStore | undefined = runtime.traceStore,
   ) {}
 

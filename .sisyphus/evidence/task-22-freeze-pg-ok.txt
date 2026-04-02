@@ -1,0 +1,8 @@
+Command:
+MAIDSCLAW_SQLITE_FREEZE=true MAIDSCLAW_BACKEND=pg bun -e "import { bootstrapRuntime } from './src/bootstrap/runtime.ts'; const runtime = bootstrapRuntime(); runtime.shutdown(); console.log('PG startup ok under sqlite freeze');"
+
+Result:
+PG startup ok under sqlite freeze
+
+Status:
+Exit code 0

@@ -1,0 +1,33 @@
+F3 Manual QA Results — Memory V3 Closeout
+==========================================
+Date: 2026-04-02
+Executor: Sisyphus-Junior QA
+
+QA Results:
+- QA 1 Build: PASS (tsc -p tsconfig.build.json --noEmit exit 0)
+- QA 2 graph_nodes schema: PASS (CREATE TABLE IF NOT EXISTS graph_nodes at line 224)
+- QA 3 Dead code removed: PASS (migrations.ts, maintenance-report.ts, search-rebuild-job.ts deleted; search-rebuild-pg.ts preserved)
+- QA 4 No SQLite residue: PASS (no databasePath in config-schema.ts, no PRAGMA in src/)
+- QA 5 Memory tools registered: PASS (registerMemoryTools imported at L35, called at L1026 in runtime.ts)
+- QA 6 MemoryTaskAgent PG deps: PASS (no old RawDatabaseLike/normalizeDbInput/isDb patterns; MemoryTaskDbAdapter at L324, MemoryTaskAgentDeps at L334)
+- QA 7 Bootstrap wires agent: PASS (memoryTaskAgent instantiated at L1097 in runtime.ts, not null)
+- QA 8 Pipeline status semantics: PASS ("partial" state at L760 in runtime.ts, memoryPipelineStatus/memoryPipelineReady properly wired)
+- QA 9 Strict mode throws: PASS (strictDurableMode at L359, throw paths at L503-517 for durable enqueue failures)
+- QA 10 No createAppClientRuntime callers: PASS (zero callers in src/)
+- QA 11 Deprecated bridge deleted: PASS (src/terminal-cli/app-client-runtime.ts deleted)
+- QA 12 Relation contract centralized: PASS (src/memory/contracts/relation-contract.ts exists, imported by graph-edge-view.ts at L6)
+- QA 13 Explain audit differentiated: PASS (audit detail level has distinct maxCandidates, audit_summary builder, AuditProvenance at L1422 in navigator.ts)
+- QA 14 Trace non-stub read path: PASS (getTrace at L100, listTraces at L104 in trace-store.ts, both implemented)
+- QA 15 Compat annotations: PASS (db-types.ts @deprecated at L2; navigator.ts LegacyDbLike at L86, @deprecated at L83/L184, useLegacySyncSafetyNet at L187; pg-app-schema-ops.ts has no compat surfaces requiring annotation)
+- QA 16 Contract docs exist: PASS (all 3 contract docs present: TIME_SLICE, RELATION, AREA_STATE)
+- QA 17 E2E test exists: PASS (test/memory/pipeline-e2e.test.ts exists, references memoryTaskAgent/memoryPipelineReady)
+- QA 18 Evidence files: PASS (186 evidence files present, well above ≥5 threshold)
+- QA 19 Test suite: 908 pass / 376 skip / 21 fail — NO new regressions (baseline: 868 pass / 349 skip / 21 fail; fail count identical)
+
+Scenarios: 19/19 pass
+VERDICT: APPROVE
+
+Notes:
+- QA 19 fail count stable at 21. The one displayed failure (worker-role.test.ts:118 dispatcherStartCallCount) is a pre-existing test, not a regression.
+- Pass count increased by 40 vs baseline (868→908), indicating new test coverage added.
+- QA 15 pg-app-schema-ops.ts has no compat/legacy surfaces; it is pure PG operational schema, so no annotation is needed.

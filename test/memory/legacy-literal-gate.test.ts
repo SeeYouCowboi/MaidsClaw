@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, extname } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -42,7 +42,13 @@ function isLikelyBinary(relativePath: string): boolean {
     return true;
   }
 
-  const buffer = readFileSync(resolve(process.cwd(), relativePath));
+  const absolutePath = resolve(process.cwd(), relativePath);
+  // Skip files that have been deleted but not yet committed
+  if (!existsSync(absolutePath)) {
+    return true; // Treat missing files as binary to skip content scanning
+  }
+
+  const buffer = readFileSync(absolutePath);
   return buffer.includes(0);
 }
 
@@ -59,7 +65,13 @@ describe("legacy literal gate", () => {
         continue;
       }
 
-      const content = readFileSync(resolve(process.cwd(), relativePath), "utf8");
+      const absolutePath = resolve(process.cwd(), relativePath);
+      // Skip files that have been deleted but not yet committed
+      if (!existsSync(absolutePath)) {
+        continue;
+      }
+
+      const content = readFileSync(absolutePath, "utf8");
       const hits = FORBIDDEN_TOKENS.filter((token) => content.includes(token));
       if (hits.length > 0) {
         violations.push(`${relativePath}: ${hits.join(", ")}`);

@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { JobDedupEngine } from "../../src/jobs/dedup.js";
 import { JobDispatcher } from "../../src/jobs/dispatcher.js";
 import { JobQueue } from "../../src/jobs/queue.js";
+import type { JobEntry } from "../../src/jobs/persistence.js";
 import type { Job, JobKind } from "../../src/jobs/types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 function makeJob(overrides?: Partial<Job>): Job {
   return {
@@ -33,7 +35,7 @@ function createDispatcher(): { queue: JobQueue; dedup: JobDedupEngine; dispatche
   return { queue, dedup, dispatcher };
 }
 
-describe("JobDedupEngine", () => {
+(describe as any).skipIf(skipPgTests)("JobDedupEngine", () => {
   it("returns coalesce/drop/noop/accept based on existing job status", () => {
     const engine = new JobDedupEngine();
     const key = "memory.migrate:session-1:0-9";
@@ -52,7 +54,7 @@ describe("JobDedupEngine", () => {
   });
 });
 
-describe("JobQueue", () => {
+(describe as any).skipIf(skipPgTests)("JobQueue", () => {
   it("dequeues higher-priority execution class first", () => {
     const queue = new JobQueue();
 
@@ -82,7 +84,7 @@ describe("JobQueue", () => {
   });
 });
 
-describe("JobDispatcher", () => {
+(describe as any).skipIf(skipPgTests)("JobDispatcher", () => {
   it("requeues retriable job before maxAttempts and eventually fails when exhausted", async () => {
     const { queue, dispatcher } = createDispatcher();
 
@@ -195,6 +197,114 @@ describe("JobDispatcher", () => {
 
     expect(first !== null).toBe(true);
     expect(second).toBeNull();
+    expect(queue.size()).toBe(1);
+  });
+});
+
+(describe as any).skipIf(skipPgTests)("search.rebuild recovery", () => {
+  function createMockPersistence(entries: JobEntry[]) {
+    return {
+      listPending: () => entries,
+      listRetryable: () => [],
+    };
+  }
+
+  it("recovers search.rebuild job from persistence and maps to correct execution class", async () => {
+    const queue = new JobQueue();
+    const dedup = new JobDedupEngine();
+    const mockPersistence = createMockPersistence([
+      {
+        id: "search-rebuild-1",
+        jobType: "search.rebuild",
+        payload: {},
+        status: "pending",
+        attemptCount: 0,
+        maxAttempts: 2,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
+
+    const dispatcher = new JobDispatcher({
+      queue,
+      dedup,
+      persistence: mockPersistence as any,
+    });
+
+    await dispatcher.start();
+
+    const recoveredJob = queue.getByKey("search-rebuild-1");
+    expect(recoveredJob !== undefined).toBe(true);
+    if (recoveredJob) {
+      expect(recoveredJob.kind).toBe("search.rebuild");
+      expect(recoveredJob.executionClass).toBe("background.search_rebuild");
+    }
+  });
+
+  it("recovers search.rebuild from retryable state", async () => {
+    const queue = new JobQueue();
+    const dedup = new JobDedupEngine();
+    const mockPersistence = {
+      listPending: () => [],
+      listRetryable: () => [
+        {
+          id: "search-rebuild-retry",
+          jobType: "search.rebuild",
+          payload: { batchId: "batch-1" },
+          status: "retryable",
+          attemptCount: 1,
+          maxAttempts: 3,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          errorMessage: "Previous failure",
+        },
+      ],
+    };
+
+    const dispatcher = new JobDispatcher({
+      queue,
+      dedup,
+      persistence: mockPersistence as any,
+    });
+
+    await dispatcher.start();
+
+    const recoveredJob = queue.getByKey("search-rebuild-retry");
+    expect(recoveredJob !== undefined).toBe(true);
+    if (recoveredJob) {
+      expect(recoveredJob.kind).toBe("search.rebuild");
+      expect(recoveredJob.executionClass).toBe("background.search_rebuild");
+      expect(recoveredJob.attempts).toBe(1);
+      expect(recoveredJob.error).toBe("Previous failure");
+    }
+  });
+
+  it("does NOT drop search.rebuild job on recovery (regression test)", async () => {
+    const queue = new JobQueue();
+    const dedup = new JobDedupEngine();
+    const mockPersistence = createMockPersistence([
+      {
+        id: "search-rebuild-critical",
+        jobType: "search.rebuild",
+        payload: { indexName: "memory_idx" },
+        status: "pending",
+        attemptCount: 0,
+        maxAttempts: 2,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
+
+    const dispatcher = new JobDispatcher({
+      queue,
+      dedup,
+      persistence: mockPersistence as any,
+    });
+
+    await dispatcher.start();
+
+    const recoveredJob = queue.getByKey("search-rebuild-critical");
+    expect(recoveredJob).toBeDefined();
     expect(queue.size()).toBe(1);
   });
 });

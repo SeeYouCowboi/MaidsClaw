@@ -1,5 +1,13 @@
-import type { Database } from "bun:sqlite";
 import type { PublicationTargetScope } from "../../runtime/rp-turn-contract.js";
+
+type DbLike = {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+};
 
 export const SURFACING_CLASSIFICATIONS = [
   "public_manifestation",
@@ -32,17 +40,37 @@ type AreaNarrativeRow = {
   updated_at: number;
 };
 
+type AreaStateAsOfRow = {
+  key: string;
+  value_json: string;
+  surfacing_classification: SurfacingClassification;
+  source_type: AreaStateSourceType;
+  valid_time: number | null;
+  committed_time: number | null;
+};
+
 type WorldStateRow = {
   key: string;
   value_json: string;
   surfacing_classification: SurfacingClassification;
   updated_at: number;
+  valid_time: number | null;
+  committed_time: number | null;
 };
 
 type WorldNarrativeRow = {
   id: number;
   summary_text: string;
   updated_at: number;
+};
+
+type WorldStateAsOfRow = {
+  key: string;
+  value_json: string;
+  surfacing_classification: SurfacingClassification;
+  source_type: AreaStateSourceType;
+  valid_time: number | null;
+  committed_time: number | null;
 };
 
 export type UpsertAreaStateInput = {
@@ -55,10 +83,22 @@ export type UpsertAreaStateInput = {
   updatedAt?: number;
   validTime?: number;
   committedTime?: number;
+  settlementId?: string;
+};
+
+export type UpsertWorldStateInput = {
+  key: string;
+  value: unknown;
+  surfacingClassification: SurfacingClassification;
+  sourceType?: AreaStateSourceType;
+  updatedAt?: number;
+  validTime?: number;
+  committedTime?: number;
+  settlementId?: string;
 };
 
 export class AreaWorldProjectionRepo {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: DbLike) {}
 
   upsertAreaState(input: UpsertAreaStateInput): void {
     this.upsertAreaStateCurrent(input);
@@ -69,8 +109,28 @@ export class AreaWorldProjectionRepo {
     const sourceType = input.sourceType ?? "system";
     const validTime = input.validTime ?? updatedAt;
     const committedTime = input.committedTime ?? updatedAt;
+    const settlementId = this.resolveSettlementId(input.settlementId, committedTime);
+    const valueJson = this.toJson(input.value);
     this.assertSurfacingClassification(input.surfacingClassification);
     this.assertAreaStateSourceType(sourceType);
+    this.db
+      .prepare(
+        `INSERT INTO area_state_events (agent_id, area_id, key, value_json, surfacing_classification, source_type, valid_time, committed_time, settlement_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.agentId,
+        input.areaId,
+        input.key,
+        valueJson,
+        input.surfacingClassification,
+        sourceType,
+        validTime,
+        committedTime,
+        settlementId,
+        committedTime,
+      );
+
     this.db
       .prepare(
         `INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at, valid_time, committed_time)
@@ -88,13 +148,37 @@ export class AreaWorldProjectionRepo {
         input.agentId,
         input.areaId,
         input.key,
-        this.toJson(input.value),
+        valueJson,
         input.surfacingClassification,
         sourceType,
         updatedAt,
         validTime,
         committedTime,
       );
+  }
+
+  rebuildAreaCurrentFromEvents(agentId: string, areaId: number): void {
+    this.db.prepare(`DELETE FROM area_state_current WHERE agent_id = ? AND area_id = ?`).run(agentId, areaId);
+
+    this.db
+      .prepare(
+        `INSERT INTO area_state_current (agent_id, area_id, key, value_json, surfacing_classification, source_type, updated_at, valid_time, committed_time)
+         SELECT e1.agent_id, e1.area_id, e1.key, e1.value_json, e1.surfacing_classification, e1.source_type,
+                e1.committed_time AS updated_at, e1.valid_time, e1.committed_time
+         FROM area_state_events e1
+         WHERE e1.agent_id = ?
+           AND e1.area_id = ?
+           AND e1.id = (
+             SELECT e2.id
+             FROM area_state_events e2
+             WHERE e2.agent_id = e1.agent_id
+               AND e2.area_id = e1.area_id
+               AND e2.key = e1.key
+             ORDER BY e2.committed_time DESC, e2.id DESC
+             LIMIT 1
+           )`,
+      )
+      .run(agentId, areaId);
   }
 
   getAreaStateCurrent(agentId: string, areaId: number, key: string): AreaStateRow | null {
@@ -105,6 +189,21 @@ export class AreaWorldProjectionRepo {
          WHERE agent_id = ? AND area_id = ? AND key = ?`,
       )
       .get(agentId, areaId, key) as AreaStateRow | null;
+  }
+
+  getAreaStateAsOf(agentId: string, areaId: number, key: string, asOfCommittedTime: number): AreaStateAsOfRow | null {
+    return this.db
+      .prepare(
+        `SELECT key, value_json, surfacing_classification, source_type, valid_time, committed_time
+         FROM area_state_events
+         WHERE agent_id = ?
+           AND area_id = ?
+           AND key = ?
+           AND committed_time <= ?
+         ORDER BY committed_time DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(agentId, areaId, key, asOfCommittedTime) as AreaStateAsOfRow | null;
   }
 
   upsertAreaNarrativeCurrent(input: {
@@ -136,35 +235,88 @@ export class AreaWorldProjectionRepo {
       .get(agentId, areaId) as AreaNarrativeRow | null;
   }
 
-  upsertWorldStateCurrent(input: {
-    key: string;
-    value: unknown;
-    surfacingClassification: SurfacingClassification;
-    updatedAt?: number;
-  }): void {
+  upsertWorldStateCurrent(input: UpsertWorldStateInput): void {
     const updatedAt = input.updatedAt ?? Date.now();
+    const sourceType = input.sourceType ?? "system";
+    const validTime = input.validTime ?? updatedAt;
+    const committedTime = input.committedTime ?? updatedAt;
+    const settlementId = this.resolveSettlementId(input.settlementId, committedTime);
+    const valueJson = this.toJson(input.value);
     this.assertSurfacingClassification(input.surfacingClassification);
+    this.assertAreaStateSourceType(sourceType);
+
     this.db
       .prepare(
-        `INSERT INTO world_state_current (key, value_json, surfacing_classification, updated_at)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO world_state_events (key, value_json, surfacing_classification, source_type, valid_time, committed_time, settlement_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.key,
+        valueJson,
+        input.surfacingClassification,
+        sourceType,
+        validTime,
+        committedTime,
+        settlementId,
+        committedTime,
+      );
+
+    this.db
+      .prepare(
+        `INSERT INTO world_state_current (key, value_json, surfacing_classification, updated_at, valid_time, committed_time)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(key)
          DO UPDATE SET
-           value_json = excluded.value_json,
-           surfacing_classification = excluded.surfacing_classification,
-           updated_at = excluded.updated_at`,
+            value_json = excluded.value_json,
+            surfacing_classification = excluded.surfacing_classification,
+            updated_at = excluded.updated_at,
+            valid_time = excluded.valid_time,
+            committed_time = excluded.committed_time`,
       )
-      .run(input.key, this.toJson(input.value), input.surfacingClassification, updatedAt);
+      .run(input.key, valueJson, input.surfacingClassification, updatedAt, validTime, committedTime);
+  }
+
+  rebuildWorldCurrentFromEvents(): void {
+    this.db.exec(`DELETE FROM world_state_current`);
+
+    this.db
+      .prepare(
+        `INSERT INTO world_state_current (key, value_json, surfacing_classification, updated_at, valid_time, committed_time)
+         SELECT e1.key, e1.value_json, e1.surfacing_classification,
+                e1.committed_time AS updated_at, e1.valid_time, e1.committed_time
+         FROM world_state_events e1
+         WHERE e1.id = (
+           SELECT e2.id
+           FROM world_state_events e2
+           WHERE e2.key = e1.key
+           ORDER BY e2.committed_time DESC, e2.id DESC
+           LIMIT 1
+         )`,
+      )
+      .run();
   }
 
   getWorldStateCurrent(key: string): WorldStateRow | null {
     return this.db
       .prepare(
-        `SELECT key, value_json, surfacing_classification, updated_at
-         FROM world_state_current
-         WHERE key = ?`,
+        `SELECT key, value_json, surfacing_classification, updated_at, valid_time, committed_time
+          FROM world_state_current
+          WHERE key = ?`,
       )
       .get(key) as WorldStateRow | null;
+  }
+
+  getWorldStateAsOf(key: string, asOfCommittedTime: number): WorldStateAsOfRow | null {
+    return this.db
+      .prepare(
+        `SELECT key, value_json, surfacing_classification, source_type, valid_time, committed_time
+         FROM world_state_events
+         WHERE key = ?
+           AND committed_time <= ?
+         ORDER BY committed_time DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(key, asOfCommittedTime) as WorldStateAsOfRow | null;
   }
 
   upsertWorldNarrativeCurrent(input: { summaryText: string; updatedAt?: number }): void {
@@ -196,6 +348,7 @@ export class AreaWorldProjectionRepo {
     targetScope: PublicationTargetScope;
     agentId: string;
     areaId: number;
+    settlementId?: string;
     projectionKey: string;
     summaryText: string;
     payload?: unknown;
@@ -211,6 +364,7 @@ export class AreaWorldProjectionRepo {
         value: input.payload ?? { summary: input.summaryText },
         surfacingClassification: classification,
         updatedAt: input.updatedAt,
+        settlementId: input.settlementId,
       });
       this.upsertWorldNarrativeCurrent({ summaryText: input.summaryText, updatedAt: input.updatedAt });
       return;
@@ -223,6 +377,7 @@ export class AreaWorldProjectionRepo {
       value: input.payload ?? { summary: input.summaryText },
       surfacingClassification: classification,
       updatedAt: input.updatedAt,
+      settlementId: input.settlementId,
     });
     if (classification === "public_manifestation") {
       this.upsertAreaNarrativeCurrent({
@@ -238,6 +393,7 @@ export class AreaWorldProjectionRepo {
     trigger: ProjectionUpdateTrigger;
     agentId: string;
     areaId: number;
+    settlementId?: string;
     projectionKey: string;
     summaryText: string;
     payload?: unknown;
@@ -253,6 +409,7 @@ export class AreaWorldProjectionRepo {
       value: input.payload ?? { summary: input.summaryText },
       surfacingClassification: classification,
       updatedAt: input.updatedAt,
+      settlementId: input.settlementId,
     });
     if (classification === "public_manifestation") {
       this.upsertAreaNarrativeCurrent({
@@ -266,6 +423,7 @@ export class AreaWorldProjectionRepo {
 
   applyPromotionProjection(input: {
     trigger: ProjectionUpdateTrigger;
+    settlementId?: string;
     projectionKey: string;
     summaryText: string;
     payload?: unknown;
@@ -280,8 +438,16 @@ export class AreaWorldProjectionRepo {
       value: input.payload ?? { summary: input.summaryText },
       surfacingClassification: classification,
       updatedAt: input.updatedAt,
+      settlementId: input.settlementId,
     });
     this.upsertWorldNarrativeCurrent({ summaryText: input.summaryText, updatedAt: input.updatedAt });
+  }
+
+  private resolveSettlementId(settlementId: string | undefined, committedTime: number): string {
+    if (settlementId && settlementId.trim().length > 0) {
+      return settlementId;
+    }
+    return `legacy:auto:${committedTime}`;
   }
 
   private assertSurfacingClassification(value: string): void {

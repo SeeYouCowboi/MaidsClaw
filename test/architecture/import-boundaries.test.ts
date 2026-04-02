@@ -83,3 +83,125 @@ describe("Import boundary: app/runtime/bootstrap/gateway must not depend on term
     expect(deepCount).toBeGreaterThan(0);
   });
 });
+
+// New boundary rules for facade leak detection
+function scanForPattern(dirs: string[], patterns: RegExp[]): Violation[] {
+  const violations: Violation[] = [];
+  const glob = new Glob("**/*.ts");
+
+  for (const dir of dirs) {
+    const absDir = join(PROJECT_ROOT, dir);
+    for (const match of glob.scanSync({ cwd: absDir, absolute: true })) {
+      if (match.endsWith(".test.ts") || match.endsWith(".d.ts")) continue;
+
+      const content = readFileSync(match, "utf-8");
+      const lines = content.split("\n");
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (const pattern of patterns) {
+          if (pattern.test(line)) {
+            const relPath = relative(PROJECT_ROOT, match).split("\\").join("/");
+            violations.push({
+              file: relPath,
+              line: i + 1,
+              text: line.trim(),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+describe("Import boundary: terminal-cli/commands/ and terminal-cli/shell/ must NOT import RuntimeBootstrapResult", () => {
+  const targetDirs = ["src/terminal-cli/commands", "src/terminal-cli/shell"];
+  const patterns = [
+    /from\s+["'][^"']*RuntimeBootstrapResult[^"']*["']/,
+    /import.*RuntimeBootstrapResult/,
+  ];
+
+  it("has no imports of RuntimeBootstrapResult", () => {
+    const violations = scanForPattern(targetDirs, patterns);
+
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  ${v.file}:${v.line} → ${v.text}`)
+        .join("\n");
+      throw new Error(
+        `Found ${violations.length} forbidden import(s) of RuntimeBootstrapResult in terminal-cli/commands/ and terminal-cli/shell/:\n${details}`,
+      );
+    }
+
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe("Import boundary: src/app/clients/ must NOT import InteractionStore", () => {
+  const targetDirs = ["src/app/clients"];
+  const patterns = [
+    /from\s+["'][^"']*InteractionStore[^"']*["']/,
+    /import.*InteractionStore/,
+  ];
+
+  it("has no imports of InteractionStore", () => {
+    const violations = scanForPattern(targetDirs, patterns);
+
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  ${v.file}:${v.line} → ${v.text}`)
+        .join("\n");
+      throw new Error(
+        `Found ${violations.length} forbidden import(s) of InteractionStore in src/app/clients/:\n${details}`,
+      );
+    }
+
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe("Import boundary: src/gateway/controllers.ts must NOT import RuntimeBootstrapResult", () => {
+  const targetFile = "src/gateway/controllers.ts";
+  const patterns = [
+    /from\s+["'][^"']*RuntimeBootstrapResult[^"']*["']/,
+    /import.*RuntimeBootstrapResult/,
+  ];
+
+  it("has no imports of RuntimeBootstrapResult", () => {
+    const filePath = join(PROJECT_ROOT, targetFile);
+    const violations: Violation[] = [];
+
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const lines = content.split("\n");
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        for (const pattern of patterns) {
+          if (pattern.test(line)) {
+            violations.push({
+              file: targetFile,
+              line: i + 1,
+              text: line.trim(),
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // File doesn't exist - that's fine, no violations
+    }
+
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  ${v.file}:${v.line} → ${v.text}`)
+        .join("\n");
+      throw new Error(
+        `Found ${violations.length} forbidden import(s) of RuntimeBootstrapResult in src/gateway/controllers.ts:\n${details}`,
+      );
+    }
+
+    expect(violations).toHaveLength(0);
+  });
+});

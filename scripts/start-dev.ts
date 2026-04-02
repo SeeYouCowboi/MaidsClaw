@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { bootstrapApp } from "../src/bootstrap/app-bootstrap.js";
+import { createAppHost } from "../src/app/host/create-app-host.js";
 import { VERSION } from "../src/index.js";
 
 const DEFAULT_PORT = 3000;
@@ -21,29 +21,27 @@ async function main(): Promise<void> {
     console.warn("[WARN] OPENAI_API_KEY not set. Some features may not work.");
   }
 
-  const app = bootstrapApp({
-    enableGateway: true,
+  const appHost = await createAppHost({
+    role: "server",
     requireAllProviders: false,
     port,
     host,
   });
 
-  if (!app.server) {
-    throw new Error("Gateway server was not initialized");
-  }
+  await appHost.start();
 
-  app.server.start();
+  console.log(`MaidsClaw v${VERSION} [dev] started on port ${appHost.getBoundPort!()}`);
 
-  console.log(`MaidsClaw v${VERSION} [dev] started on port ${app.server.getPort()}`);
-
-  for (const [name, status] of Object.entries(app.runtime.healthChecks)) {
-    const icon = status === "ok" ? "[OK]" : status === "degraded" ? "[WARN]" : "[ERR]";
-    console.log(`   ${icon} ${name}: ${status}`);
+  const healthStatus = await appHost.user!.health.checkHealth();
+  for (const [name, value] of Object.entries(healthStatus.readyz)) {
+    if (name === "status") continue;
+    const icon = value === "ok" ? "[OK]" : value === "degraded" ? "[WARN]" : "[ERR]";
+    console.log(`   ${icon} ${name}: ${value}`);
   }
 
   const shutdown = (): void => {
     console.log("\nShutting down gracefully...");
-    app.shutdown();
+    void appHost.shutdown();
     console.log("Goodbye!");
     process.exit(0);
   };

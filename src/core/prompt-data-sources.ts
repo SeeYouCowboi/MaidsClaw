@@ -13,10 +13,10 @@ export type LoreDataSource = {
 };
 
 export type MemoryDataSource = {
-  getPinnedBlocks?(agentId: string): string;
-  getSharedBlocks?(agentId: string): string;
-  getRecentCognition(viewerContext: ViewerContext): string;
-  getAttachedSharedBlocks?(agentId: string): string;
+  getPinnedBlocks?(agentId: string): string | Promise<string>;
+  getSharedBlocks?(agentId: string): string | Promise<string>;
+  getRecentCognition(viewerContext: ViewerContext): string | Promise<string>;
+  getAttachedSharedBlocks?(agentId: string): string | Promise<string>;
   getTypedRetrievalSurface?(userMessage: string, viewerContext: ViewerContext): string | Promise<string>;
 };
 

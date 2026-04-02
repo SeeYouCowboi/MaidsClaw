@@ -1,0 +1,4 @@
+=== T7 Test Evidence ===
+Tests: 2014 pass, 249 skip, 4 fail (pre-existing)
+No regressions introduced
+Date: 2026-03-30

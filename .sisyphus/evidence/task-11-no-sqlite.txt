@@ -1,0 +1,49 @@
+Task 11: settlement-ledger + explicit-settlement-processor decoupled from bun:sqlite
+======================================================================================
+
+Date: 2026-04-01
+
+## Changes Made
+
+### src/memory/settlement-ledger.ts
+- REMOVED: `import type { Database } from "bun:sqlite"`
+- ADDED: Local `DbLike` type matching the structural contract used by cognition-repo.ts, relation-builder.ts
+- CHANGED: `SqliteSettlementLedger` constructor parameter from `Database` to `DbLike`
+- Business logic: UNCHANGED (all prepare/run/get calls remain identical)
+
+### src/memory/explicit-settlement-processor.ts
+- REMOVED: `import type { Database } from "bun:sqlite"`  
+- ADDED: Local `DbLike` type matching the structural contract
+- CHANGED: `ExplicitSettlementProcessor` constructor `db` parameter from `Database` to `DbLike`
+- Business logic: UNCHANGED (episode queries, publication queries, relation materialization, conflict factor resolution all use same SQL)
+
+### No changes needed to:
+- src/bootstrap/runtime.ts — `db.raw` (a `Database` instance) structurally satisfies `DbLike`
+- src/storage/domain-repos/sqlite/settlement-ledger-repo.ts — wraps `SqliteSettlementLedger`, no direct bun:sqlite dependency
+- src/storage/domain-repos/contracts/settlement-ledger-repo.ts — already clean
+- src/storage/domain-repos/pg/settlement-ledger-repo.ts — already clean
+
+## Verification
+
+### AST grep verification (0 bun:sqlite imports in target files)
+Pattern: `import type { Database } from "bun:sqlite"`
+Files checked: src/memory/settlement-ledger.ts, src/memory/explicit-settlement-processor.ts
+Result: 0 matches ✓
+
+### Build
+$ bun run build
+→ tsc -p tsconfig.build.json --noEmit → 0 errors ✓
+
+### Tests
+$ bun test
+→ 1937 pass, 401 skip, 5 fail
+  - 4 pre-existing failures in test/runtime/private-thoughts-behavioral.test.ts (config-related)
+  - 1 flaky failure in test/memory/organizer-durable-pipeline.test.ts (passes on re-run)
+→ No regressions ✓
+
+### LSP diagnostics
+- src/memory/settlement-ledger.ts: 0 errors ✓
+- src/memory/explicit-settlement-processor.ts: 0 errors ✓
+- src/bootstrap/runtime.ts: 0 errors ✓
+- src/memory/task-agent.ts: 0 errors ✓
+- src/storage/domain-repos/sqlite/settlement-ledger-repo.ts: 0 errors ✓

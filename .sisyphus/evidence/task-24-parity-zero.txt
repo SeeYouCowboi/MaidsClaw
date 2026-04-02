@@ -1,0 +1,8 @@
+Parity verification summary
+-------------------------
+  mode: derived
+  derived: surfaces=7, mismatches=0, mismatch_surfaces=0
+  total_surfaces: 7
+  total_mismatches: 0
+  coverage_ok: true
+  json_report: D:\ACodingWorkSpace\MaidsClaw\.sisyphus\evidence\task-24-parity-zero.json

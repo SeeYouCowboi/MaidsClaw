@@ -1,0 +1,31 @@
+Task 10: Settlement Single-Clock Timestamp Consistency
+=======================================================
+
+Fix: materializePublicationsSafe() no longer calls Date.now() independently.
+All sync projections in commitSettlement() share a single canonical timestamp.
+
+Changes:
+- src/memory/projection/projection-manager.ts
+  - materializePublicationsSafe() now accepts `committedAt: number` parameter
+  - commitSettlement() passes `now` to materializePublicationsSafe(params, now)
+  - SettlementProjectionParams gains optional `committedAt` field
+  - commitSettlement() uses `params.committedAt ?? Date.now()`
+
+- src/runtime/turn-service.ts
+  - `const committedAt = Date.now()` hoisted before transaction block
+  - buildCognitionSlotPayload() accepts `committedAt` parameter (no longer calls Date.now())
+  - commitSettlement() receives `committedAt` via params
+  - Fallback materializePublications() path uses `committedAt` instead of Date.now()
+
+Preserved (NOT changed):
+- recent_cognition_slots.updated_at (interaction/store.ts:246) — cache freshness, independent Date.now()
+- event_nodes.created_at (storage.ts:175) — row insertion time, independent Date.now()
+
+Test: test/memory/settlement-clock.test.ts
+- "commitSettlement uses a single timestamp across episodes, cognition events, and publication event_nodes" — PASS
+- "committedAt override is respected by all downstream projections" — PASS
+- "recent_cognition_slots.updated_at remains independent of settlement committedAt" — PASS
+
+Settlement clock test: 4 pass, 0 fail, 16 expect() calls
+Build: tsc -p tsconfig.build.json --noEmit — 0 errors
+Full suite: 1821 pass, 0 fail across 120 files [58.05s]

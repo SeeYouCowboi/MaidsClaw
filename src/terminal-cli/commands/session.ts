@@ -12,7 +12,8 @@ import { CliError, EXIT_USAGE, EXIT_RUNTIME } from "../errors.js";
 import { MaidsClawError } from "../../core/errors.js";
 import { writeJson, writeText } from "../output.js";
 import type { CliMode } from "../types.js";
-import { createAppClientRuntime, type AppClientRuntime } from "../app-client-runtime.js";
+import { createAppHost, type AppUserFacade } from "../../app/host/index.js";
+import { createGatewayAppClients } from "../../app/clients/app-clients.js";
 
 // ── Known flags ──────────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ async function handleSessionCreate(
   validateFlags(KNOWN_CREATE_FLAGS, args, "session create");
   const agentId = requireStringFlag(args, "agent", "session create");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
-  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
+  const runtime = await bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
   try {
     const record = await runtime.clients.session.createSession(agentId);
@@ -132,7 +133,7 @@ async function handleSessionClose(
   validateFlags(KNOWN_CLOSE_FLAGS, args, "session close");
   const sessionId = requireStringFlag(args, "session", "session close");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
-  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
+  const runtime = await bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
   try {
     const session = await runtime.clients.session.getSession(sessionId);
@@ -153,12 +154,6 @@ async function handleSessionClose(
     }
 
     const closed = await runtime.clients.session.closeSession(sessionId);
-    const flushRan =
-      runtime.mode === "local"
-      && runtime.runtime
-      && typeof session.agent_id === "string"
-        ? await runtime.runtime.turnService.flushOnSessionClose(sessionId, session.agent_id)
-        : false;
 
     if (ctx.json) {
       writeJson({
@@ -168,7 +163,7 @@ async function handleSessionClose(
         data: {
           session_id: closed.session_id,
           closed_at: closed.closed_at,
-          flush_ran: flushRan,
+          host_steps: closed.host_steps,
         },
       });
     } else if (!ctx.quiet) {
@@ -188,7 +183,7 @@ async function handleSessionRecover(
   validateFlags(KNOWN_RECOVER_FLAGS, args, "session recover");
   const sessionId = requireStringFlag(args, "session", "session recover");
   const { mode, baseUrl } = resolveModeAndBaseUrl(args);
-  const runtime = bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
+  const runtime = await bootstrapClients({ mode, baseUrl, cwd: ctx.cwd });
 
   try {
     await runtime.clients.session.recoverSession(sessionId);
@@ -222,13 +217,36 @@ async function handleSessionRecover(
   }
 }
 
-function bootstrapClients(params: {
+type CliRuntime = {
+  clients: AppUserFacade;
+  shutdown: () => void;
+};
+
+async function bootstrapClients(params: {
   mode: "local" | "gateway";
   baseUrl: string;
   cwd: string;
-}): AppClientRuntime {
+}): Promise<CliRuntime> {
   try {
-    return createAppClientRuntime(params);
+    if (params.mode === "gateway") {
+      return {
+        clients: createGatewayAppClients(params.baseUrl),
+        shutdown: () => {},
+      };
+    }
+
+    const host = await createAppHost({
+      role: "local",
+      cwd: params.cwd,
+      requireAllProviders: false,
+    });
+    if (!host.user) {
+      throw new Error("createAppHost({ role: 'local' }) did not produce a user facade");
+    }
+    return {
+      clients: host.user,
+      shutdown: () => void host.shutdown(),
+    };
   } catch (err) {
     throw new CliError(
       "BOOTSTRAP_FAILED",

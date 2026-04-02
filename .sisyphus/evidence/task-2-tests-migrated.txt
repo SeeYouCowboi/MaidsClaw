@@ -1,0 +1,19 @@
+=== test files migration verification ===
+
+--- grep for bootstrapApp in test files (expect 0 results) ---
+test/cli/acceptance.test.ts:0
+test/cli/debug-commands.test.ts:0
+0 matches in all files
+
+--- acceptance.test.ts results ---
+bun test v1.3.10 (30e609e0)
+{"ok":false,"command":"debug trace","error":{"code":"UNSAFE_RAW_LOCAL_ONLY","message":"--unsafe-raw is only allowed in local mode","exitCode":2}}
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /prompt. Send a message first, or use /prompt --request <id>.
+No request context available for /chunks. Send a message first, or use /chunks --request <id>.
+No request context available for /diagnose. Send a message first, or use /diagnose --request <id>.
+No request context available for /trace. Send a message first, or use /trace --request <id>.
+
+--- debug-commands.test.ts results ---
+bun test v1.3.10 (30e609e0)

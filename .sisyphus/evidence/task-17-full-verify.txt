@@ -1,0 +1,77 @@
+Task 17: Extended Verify Coverage — Evidence
+=============================================
+
+Date: 2026-03-27
+
+## Changes Made
+
+### scripts/memory-verify.ts
+Extended with 3 new verification surfaces:
+
+1. `--surface search`: Verifies 4 search_docs_* tables against canonical authority sources:
+   - search_docs_cognition ↔ private_cognition_current (row count parity)
+   - search_docs_area ↔ event_nodes WHERE visibility_scope='area_visible' AND summary IS NOT NULL
+   - search_docs_world ↔ event_nodes (world_public) + entity_nodes (shared_public) + fact_edges
+   - search_docs_private ↔ entity_nodes (private_overlay) + private_cognition_current (active, filtered)
+
+2. `--surface graph-registry`: Verifies graph_nodes contains all recently-created nodes:
+   - Queries DISTINCT node_ref from node_embeddings WHERE updated_at >= 7 days ago
+   - Checks each ref exists in graph_nodes
+   - Reports coverage percentage
+   - Gracefully handles missing graph_nodes table (pre-migration 036)
+
+3. `--surface contested`: Verifies conflicts_with edge endpoints exist:
+   - Queries memory_relations WHERE relation_type='conflicts_with'
+   - Checks source_node_ref and target_node_ref exist in:
+     - private_cognition_current (for assertion/evaluation/commitment refs)
+     - private_episode_events (for private_episode refs)
+   - Reports dangling ref count
+
+### `--all` flag updated
+Now runs all 6 surfaces: cognition, area, world, search, graph-registry, contested
+
+### Report format updated
+Changed from "Overall: PASS/FAIL" to "Summary: X PASS / Y FAIL" for per-surface counts
+
+### test/scripts/area-world-verify.test.ts
+Updated format expectations from "Overall: PASS" → "1 PASS / 0 FAIL" etc.
+
+## Verification
+
+### Build
+$ bun run build
+✓ tsc -p tsconfig.build.json --noEmit — zero errors
+
+### Tests
+$ bun test test/scripts/
+✓ 31 pass, 0 fail across 2 files
+
+### LSP Diagnostics
+✓ No errors in scripts/memory-verify.ts
+
+## Healthy State (empty DB)
+Expected --all output on fresh DB:
+```
+[PASS] cognition: No agents in private_cognition_current — nothing to verify.
+[PASS] area: No area state data — nothing to verify.
+[PASS] world: No world state data — nothing to verify.
+[PASS] search: All 4 search tables match canonical sources (0 total rows).
+[PASS] graph-registry: graph_nodes table not yet created — nothing to verify.
+[PASS] contested: No conflicts_with relations — nothing to verify.
+
+Summary: 6 PASS / 0 FAIL
+```
+
+## Drift State Detection
+Search surface will report FAIL when search_docs_* row counts diverge from canonical sources:
+```
+[FAIL] search: search_docs_cognition missing 3 rows
+```
+Graph-registry will report FAIL when node_embeddings entries lack graph_nodes registration:
+```
+[FAIL] graph-registry: 8/10 registered (80% coverage) — 2 missing from graph_nodes.
+```
+Contested will report FAIL when conflicts_with endpoint refs are dangling:
+```
+[FAIL] contested: 1 dangling ref(s) across 4 checked endpoints.
+```

@@ -1,5 +1,5 @@
 import { MaidsClawError } from "../core/errors.js";
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 
 export type SessionRecord = {
   sessionId: string;
@@ -17,7 +17,7 @@ export class SessionService {
     this.db = db;
   }
 
-  createSession(agentId: string): SessionRecord {
+  async createSession(agentId: string): Promise<SessionRecord> {
     const sessionId = crypto.randomUUID();
     const createdAt = Date.now();
 
@@ -42,7 +42,7 @@ export class SessionService {
     return record;
   }
 
-  getSession(sessionId: string): SessionRecord | undefined {
+  async getSession(sessionId: string): Promise<SessionRecord | undefined> {
     if (this.db) {
       const row = this.db.get<{
         session_id: string;
@@ -67,8 +67,8 @@ export class SessionService {
     return this.sessions.get(sessionId);
   }
 
-  closeSession(sessionId: string): SessionRecord {
-    const record = this.getSession(sessionId);
+  async closeSession(sessionId: string): Promise<SessionRecord> {
+    const record = await this.getSession(sessionId);
     if (!record) {
       throw new MaidsClawError({
         code: "SESSION_NOT_FOUND",
@@ -94,14 +94,14 @@ export class SessionService {
     return record;
   }
 
-  isOpen(sessionId: string): boolean {
-    const record = this.getSession(sessionId);
+  async isOpen(sessionId: string): Promise<boolean> {
+    const record = await this.getSession(sessionId);
     if (!record) return false;
     return record.closedAt === undefined;
   }
 
-  markRecoveryRequired(sessionId: string): void {
-    const session = this.getSession(sessionId);
+  async markRecoveryRequired(sessionId: string): Promise<void> {
+    const session = await this.getSession(sessionId);
     if (!session) {
       throw new MaidsClawError({
         code: "SESSION_NOT_FOUND",
@@ -119,11 +119,12 @@ export class SessionService {
     this.recoveryRequired.add(sessionId);
   }
 
-  setRecoveryRequired(sessionId: string): void {
-    this.markRecoveryRequired(sessionId);
+  /** @deprecated Use markRecoveryRequired instead */
+  async setRecoveryRequired(sessionId: string): Promise<void> {
+    await this.markRecoveryRequired(sessionId);
   }
 
-  clearRecoveryRequired(sessionId: string): void {
+  async clearRecoveryRequired(sessionId: string): Promise<void> {
     if (this.db) {
       this.db.run("UPDATE sessions SET recovery_required = 0 WHERE session_id = ?", [sessionId]);
       return;
@@ -132,7 +133,7 @@ export class SessionService {
     this.recoveryRequired.delete(sessionId);
   }
 
-  requiresRecovery(sessionId: string): boolean {
+  async requiresRecovery(sessionId: string): Promise<boolean> {
     if (this.db) {
       const row = this.db.get<{ recovery_required: number }>(
         "SELECT recovery_required FROM sessions WHERE session_id = ?",
@@ -144,7 +145,8 @@ export class SessionService {
     return this.recoveryRequired.has(sessionId);
   }
 
-  isRecoveryRequired(sessionId: string): boolean {
+  /** @deprecated Use requiresRecovery instead */
+  async isRecoveryRequired(sessionId: string): Promise<boolean> {
     return this.requiresRecovery(sessionId);
   }
 }

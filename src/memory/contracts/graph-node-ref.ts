@@ -5,6 +5,9 @@ export type GraphNodeRef = {
   id: string;
 };
 
+/** Regex pattern for validating node_ref strings (e.g., "assertion:123") */
+export const NODE_REF_REGEX = /^(assertion|evaluation|commitment|event|entity|fact):(.+)$/;
+
 export function parseGraphNodeRef(raw: string): GraphNodeRef {
   const colonIndex = raw.indexOf(":");
   if (colonIndex === -1) {

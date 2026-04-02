@@ -1,7 +1,7 @@
 import type { Chunk } from "../../../core/chunk.js";
 import type { TurnSettlementPayload } from "../../../interaction/contracts.js";
 import { normalizeSettlementPayload } from "../../../interaction/settlement-adapter.js";
-import type { InteractionStore } from "../../../interaction/store.js";
+import type { InteractionRepo } from "../../../storage/domain-repos/contracts/interaction-repo.js";
 import type { SessionService } from "../../../session/service.js";
 import type {
 	ObservationEvent,
@@ -27,7 +27,7 @@ export type LocalTurnParams = {
 export type LocalTurnDeps = {
 	sessionService: SessionService;
 	turnService: ExecuteUserTurnDeps["turnService"];
-	interactionStore: InteractionStore;
+	interactionRepo: InteractionRepo;
 	traceStore?: TraceStore;
 };
 
@@ -39,8 +39,7 @@ export class LocalTurnClient implements TurnClient {
 			? (this.deps.traceStore ?? new TraceStore())
 			: undefined;
 
-		const stream = executeUserTurn(
-			{
+		const stream = await executeUserTurn({
 				sessionId: params.sessionId,
 				agentId: params.agentId,
 				userText: params.text,
@@ -48,12 +47,10 @@ export class LocalTurnClient implements TurnClient {
 				metadata: {
 					traceStore: perTurnTraceStore,
 				},
-			},
-			{
+			}, {
 				sessionService: this.deps.sessionService,
 				turnService: this.deps.turnService,
-			},
-		);
+			});
 
 		for await (const chunk of stream) {
 			const normalized = normalizeChunk(chunk, Date.now());
@@ -93,7 +90,7 @@ export async function executeLocalTurn(
 		}
 	}
 
-	const settlementPayloadRaw = deps.interactionStore.getSettlementPayload(
+	const settlementPayloadRaw = await deps.interactionRepo.getSettlementPayload(
 		params.sessionId,
 		requestId,
 	);
@@ -118,7 +115,7 @@ export async function executeLocalTurn(
 		assistant_text: assistantText,
 		has_public_reply: hasPublicReply,
 		private_cognition: privateCognition,
-		recovery_required: deps.sessionService.requiresRecovery(params.sessionId),
+		recovery_required: await deps.sessionService.requiresRecovery(params.sessionId),
 		public_chunks: publicChunks,
 		tool_events: toolEvents,
 	};

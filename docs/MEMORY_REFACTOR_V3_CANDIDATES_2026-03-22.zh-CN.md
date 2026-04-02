@@ -10,7 +10,18 @@
 > |------|------|
 > | **DONE** | §1 检索主链接管、§2 Durable Cognition/Episodic Recall、§4 Current Projection/Historical Log、§9 Visibility/Redaction/Authorization、§18 共识计划未完成条目、§20 Tool Contract/Capability Matrix |
 > | **CUTOVER-SCOPED** | §5 的 in-scope time-slice read closure + current-only 边界、§6 的 `memory_relations` 语义保真收尾、§12 的既有 pipeline 一致性收敛、§14 的 authority matrix / replay scope / cache 分类子问题、§15 的 audit-proven integrity hardening、§19 的 residual replay/verify/checklist/test cleanup |
-> | **DEFERRED** | §3 Area State、§5 的完整产品化与历史 projection、§6 的全链统一读取层收敛、§7 Symbolic Relation Layer、§8 Graph Node Registry、§10 Persona/Pinned/Shared 替换旧 Core Memory、§11/§11.1 Shared Blocks 多 Agent 协作、§12 的更大补偿/repair 框架、§13 Contested Evidence 完善、§14 的 durable organizer / search repair / 单时钟等平台重构、§15 的完整 FK/约束计划、§16 Graph Retrieval 策略优化、§17 外部参考吸收、§19 的离线对照/回滚演练与最终命名清扫、§21-28 各候选扩展 |
+> | **DEFERRED** | §3 Area State、§5 的完整产品化与历史 projection、§6 的全链统一读取层收敛、§7 Symbolic Relation Layer、§8 Graph Node Registry、§10 Persona/Pinned/Shared 替换旧 Core Memory、§11/§11.1 Shared Blocks 多 Agent 协作、§12 的更大补偿/repair 框架、§13 Contested Evidence 完善、§14 的 durable organizer / search repair / 单时钟等平台重构、§15 的完整 FK/约束计划、§16 Graph Retrieval 策略优化、§17 外部参考吸收、§19 的离线对照与最终命名清扫、§21-28 各候选扩展 |
+>
+> **状态更新（2026-04-01）**
+>
+> - SQLite → PG 迁移已完成，后续 V3 工作不再以 cutover / rollback drill / parity / shadow compare 为前置 blocker。
+> - 当前更实际的 PG-native 收尾对象包括：
+>   - `src/memory/navigator.ts` 的 legacy sync safety net / `LegacyDbLike` fallback
+>   - `src/storage/db-types.ts` 与若干 `Db` / `lastInsertRowid` 形状接口
+>   - `src/memory/maintenance-report.ts` 的 SQLite `PRAGMA` 报表路径
+>   - `src/memory/search-rebuild-job.ts` 的 FTS sidecar / `rowid` helper
+>   - `src/core/config-schema.ts` 中仅为兼容保留的 `databasePath?`
+> - 这些项目属于 **PG-native legacy cleanup / platform hardening**，而不是再次做数据库迁移。
 
 定位原则:
 
@@ -456,43 +467,21 @@ canViewAdminOnly(viewerContext: ViewerContext): boolean {
 
 ## 19. 兼容迁移 / 删旧配套工程
 
-> **MOSTLY DONE / CUTOVER-SCOPED（2026-03-27）**: 核心删旧已完成（migration 017 drop `agent_event_overlay`；migration 028/029 backfill；migration 030 drop `agent_fact_overlay`；migration 031/032 tighten constraints）。`private_event` / `private_belief` 已从生产代码移除。backfill 脚本见 `scripts/memory-backfill.ts`、`scripts/memory-replay.ts`、`scripts/memory-verify.ts`。当前 cutover 计划已吸收残余 §19 收尾：replay/verify coverage audit、delete-readiness checklist、dead compat cleanup、legacy-dependent test alignment。仍延后的部分包括：离线对照校验、回滚演练、`private_event` / `private_belief` 命名残留的最终清扫。
+> **MOSTLY DONE / RESIDUAL CLEANUP（2026-04-01）**: 核心删旧与 PG 迁移已完成。当前剩余项不再是 cutover/rollback，而是命名清扫、只读 compat 面收尾、legacy helper 删除条件确认。
 
-- 为旧 `private_event / private_belief / overlay` 数据准备:
-- 一次性 backfill 脚本
-- 可重复 replay 脚本
-- 样本对照校验脚本
-- 目标是把旧数据安全映射到:
-- `private_episode`
-- `private_cognition_events`
-- `private_cognition_current`
-- 新关系层
+- 剩余工作应聚焦：
+  - 删除仍无主链读写职责的 compat / readonly surface
+  - 清理 `private_event / private_belief` 命名残留
+  - 清理历史迁移期文档/脚本引用
+  - 对保留的 legacy helper 明确“主链不可达 / 仅只读兼容 / 待删除条件”
 
-- 为切断旧写入口准备更完整的 cutover 配套:
-- dual-read 校验窗口
-- 写入路径计数与告警
-- 旧表新增写入探测
-- migration completeness dashboard / report
-- 便于在切换期确认“新主链是否真的完全接管”
+- 不再把以下事项当成当前 blocker：
+  - SQLite → PG cutover 配套
+  - rollback drill
+  - shadow/dual-read window
+  - migration completeness dashboard
 
-- 为删旧准备显式 delete-readiness checklist:
-- 新写入已不再触达旧表
-- prompt / retrieval / tools / graph navigator 已不再暴露旧节点名
-- visibility / redaction / retrieval / graph traversal 已不再依赖旧私有节点分支
-- 历史数据已完成 backfill 或被明确归档
-- 回滚与重建路径已演练
-
-- 为兼容期保留更稳健的只读遗留访问层:
-- legacy snapshot / archive view
-- 审计只读查询
-- 离线比对导出
-- 避免在删旧前因为调试需要又把旧表重新接回主链
-
-- 为最终清理旧物理遗留名准备专门收尾轮次:
-- 删除 `private_event / private_belief` 领域命名残留
-- 清理 schema、tool schema、prompt slot、graph edge label 中的旧命名
-- 清理文档、测试、迁移脚本中的旧语义别名
-- 这一轮适合放在 V3 做集中收尾，而不是在 V2 主收敛期分散打补丁
+- 若未来再次发生跨存储迁移，应另起专门迁移计划，而不是继续沿用本节的旧 cutover 语义。
 
 ## 20. Tool Contract / Capability Matrix 演进
 

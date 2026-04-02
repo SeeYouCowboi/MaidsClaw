@@ -129,7 +129,7 @@ MaidsClaw 的女仆感主要来自这几层，而不是只靠 prompt 口癖:
 | Runtime | Bun |
 | 语言 | TypeScript（strict） |
 | 原生模块 | Rust + NAPI-RS |
-| 存储 | SQLite via `bun:sqlite` |
+| 存储 | PostgreSQL |
 | 模型提供方 | OpenAI / Anthropic |
 | 接入方式 | HTTP + SSE |
 
@@ -165,7 +165,7 @@ MaidsClaw/
 │  ├─ state/           Blackboard 共享状态
 │  ├─ interaction/     交互日志与上下文刷新
 │  ├─ gateway/         HTTP / SSE 网关
-│  ├─ storage/         SQLite、文件存储、迁移
+│  ├─ storage/         PostgreSQL、文件存储、迁移
 │  ├─ session/         会话服务
 │  └─ native-fallbacks/ Rust 原生模块的 TS 兜底实现
 ├─ native/             Rust NAPI-RS crate
@@ -228,7 +228,6 @@ cd ..
 | `OPENAI_API_KEY` | OpenAI API Key |
 | `MAIDSCLAW_PORT` | 网关端口 |
 | `MAIDSCLAW_HOST` | 网关监听地址 |
-| `MAIDSCLAW_DB_PATH` | SQLite 数据库路径 |
 | `MAIDSCLAW_DATA_DIR` | 数据目录 |
 | `MAIDSCLAW_NATIVE_MODULES` | 是否尝试加载 Rust 原生模块 |
 

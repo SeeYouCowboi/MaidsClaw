@@ -1,0 +1,106 @@
+Task 6: PG Test Infrastructure Enhancement
+==========================================
+Date: 2026-04-01
+Status: COMPLETED
+
+## Changes Made
+
+### Modified: test/helpers/pg-app-test-utils.ts
+
+Added the following exports:
+
+1. **Imports** (added):
+   - bootstrapTruthSchema from "../../src/storage/pg-app-schema-truth.js"
+   - bootstrapOpsSchema from "../../src/storage/pg-app-schema-ops.js"
+   - bootstrapDerivedSchema from "../../src/storage/pg-app-schema-derived.js"
+   - PgGraphMutableStoreRepo from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js"
+
+2. **New Type: SeededEntities**
+   - { selfId: number, userId: number, locationId: number, bobId: number }
+   - Mirrors SQLite's SeededEntities from memory-test-utils.ts
+
+3. **New Function: seedStandardPgEntities(sql)**
+   - Seeds 4 standard entities:
+     * "__self__" (Alice) - person entity
+     * "__user__" (User) - person entity  
+     * "test-room" (Test Room) - location entity
+     * "bob" (Bob) - person entity
+   - Returns SeededEntities with the created entity IDs
+   - Uses PgGraphMutableStoreRepo for entity creation
+
+4. **New Type: CreatePgTestDbOptions**
+   - { embeddingDim?: number } - optional embedding dimension for pgvector
+
+5. **New Type: PgTestDb**
+   - { pool: postgres.Sql, schemaName: string, entities: SeededEntities, cleanup: () => Promise<void> }
+   - Complete test database context with cleanup
+
+6. **New Factory: createPgTestDb(options?)**
+   - One-stop factory for creating a fully-bootstrapped PG test database
+   - Automatically:
+     1. Ensures test database exists (ensureTestPgAppDb)
+     2. Creates connection pool with isolated schema (createTestPgAppPool)
+     3. Creates the isolated schema
+     4. Bootstraps truth schema (bootstrapTruthSchema)
+     5. Bootstraps ops schema (bootstrapOpsSchema)
+     6. Bootstraps derived schema (bootstrapDerivedSchema)
+     7. Seeds standard entities (seedStandardPgEntities)
+     8. Returns pool, schema name, entity IDs, and cleanup function
+   - Cleanup on bootstrap failure (automatic teardown)
+
+## Usage Example
+
+```typescript
+import { describe, beforeAll, afterAll, it } from "bun:test";
+import { createPgTestDb } from "../helpers/pg-app-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
+
+describe.skipIf(skipPgTests)("My PG Test", () => {
+  let testDb: Awaited<ReturnType<typeof createPgTestDb>>;
+
+  beforeAll(async () => {
+    testDb = await createPgTestDb();
+  });
+
+  afterAll(async () => {
+    await testDb.cleanup();
+  });
+
+  it("uses the test database", async () => {
+    // Use testDb.pool for queries
+    // Access testDb.entities.selfId, userId, locationId, bobId
+    const rows = await testDb.pool`SELECT COUNT(*) FROM entity_nodes`;
+    expect(rows[0].count).toBeGreaterThanOrEqual(4);
+  });
+});
+```
+
+## Build Verification
+
+```
+$ bun run build
+$ tsc -p tsconfig.build.json --noEmit
+```
+Result: 0 errors
+
+## Comparison: SQLite vs PG Test Factories
+
+SQLite (memory-test-utils.ts):
+- createTempDb() -> { db, dbPath }
+- seedStandardEntities(db) -> SeededEntities
+- cleanupDb(db, dbPath)
+
+PostgreSQL (pg-app-test-utils.ts):
+- createPgTestDb() -> { pool, schemaName, entities, cleanup }
+- seedStandardPgEntities(sql) -> SeededEntities
+- Automatic cleanup via returned cleanup function
+- Schema isolation via unique schema names per test
+
+## Migration Path for T20/T21
+
+When migrating tests from SQLite to PG:
+1. Replace `createTempDb()` with `await createPgTestDb()`
+2. Replace `db` queries with `testDb.pool` tagged template queries
+3. Access entity IDs via `testDb.entities` instead of seedStandardEntities return
+4. Call `await testDb.cleanup()` in afterAll instead of cleanupDb
+5. Wrap describe with `.skipIf(skipPgTests)`

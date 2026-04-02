@@ -1,11 +1,11 @@
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
+import type { InspectRuntimeDeps } from "./runtime-deps.js";
 import type {
 	InteractionRecord,
 	TurnSettlementPayload,
 } from "../../interaction/contracts.js";
 import { redactInteractionRecord } from "../../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../../interaction/settlement-adapter.js";
-import { InteractionStore } from "../../interaction/store.js";
+import type { InteractionRepo } from "../../storage/domain-repos/contracts/interaction-repo.js";
 import type { InspectContext } from "../contracts/inspect.js";
 import type { TraceBundle } from "../contracts/trace.js";
 import type { TraceStore } from "../diagnostics/trace-store.js";
@@ -20,12 +20,12 @@ export type RequestEvidence = {
 	trace: TraceBundle | null;
 };
 
-export function getRecordsForRequest(
-	runtime: RuntimeBootstrapResult,
+export async function getRecordsForRequest(
+	runtime: InspectRuntimeDeps,
 	context: InspectContext,
 	requestId: string,
-): InteractionRecord[] {
-	return getRequestEvidence({ runtime, context, requestId }).records;
+): Promise<InteractionRecord[]> {
+	return (await getRequestEvidence({ runtime, context, requestId })).records;
 }
 
 export function getSettlementRecord(
@@ -55,33 +55,33 @@ export function getSettlementRecord(
 	return redactInteractionRecord(settlement);
 }
 
-export function getRequestEvidence(params: {
-	runtime: RuntimeBootstrapResult;
+export async function getRequestEvidence(params: {
+	runtime: InspectRuntimeDeps;
 	context: InspectContext;
 	requestId: string;
 	traceStore?: TraceStore;
-}): RequestEvidence {
+}): Promise<RequestEvidence> {
 	const trace = getTraceBundle(
 		params.runtime,
 		params.requestId,
 		params.traceStore,
 	);
-	const interactionStore = getInteractionStore(params.runtime);
-	const context = completeContext(
+	const interactionRepo = getInteractionRepo(params.runtime);
+	const context = await completeContext(
 		params.context,
 		params.requestId,
-		interactionStore,
+		interactionRepo,
 		trace,
 	);
 
 	const records = context.sessionId
-		? interactionStore
-				.getBySession(context.sessionId)
-				.filter((record) => record.correlatedTurnId === params.requestId)
+		? (await interactionRepo
+				.getBySession(context.sessionId))
+				.filter((record: InteractionRecord) => record.correlatedTurnId === params.requestId)
 		: [];
 
 	const settlementPayloadRaw = context.sessionId
-		? interactionStore.getSettlementPayload(context.sessionId, params.requestId)
+		? await interactionRepo.getSettlementPayload(context.sessionId, params.requestId)
 		: undefined;
 	const settlementPayload = settlementPayloadRaw
 		? normalizeSettlementPayload(settlementPayloadRaw)
@@ -96,16 +96,16 @@ export function getRequestEvidence(params: {
 	};
 }
 
-function completeContext(
+async function completeContext(
 	context: InspectContext,
 	requestId: string,
-	interactionStore: InteractionStore,
+	interactionRepo: InteractionRepo,
 	trace: TraceBundle | null,
-): InspectContext {
-	const sessionId = resolveSessionId(
+): Promise<InspectContext> {
+	const sessionId = await resolveSessionId(
 		context,
 		requestId,
-		interactionStore,
+		interactionRepo,
 		trace,
 	);
 	return {
@@ -119,22 +119,22 @@ function completeContext(
 	};
 }
 
-function resolveSessionId(
+async function resolveSessionId(
 	context: InspectContext,
 	requestId: string,
-	interactionStore: InteractionStore,
+	interactionRepo: InteractionRepo,
 	trace: TraceBundle | null,
-): string | undefined {
+): Promise<string | undefined> {
 	const requestedSession = normalize(context.sessionId);
 	if (
 		requestedSession &&
-		hasRequestInSession(interactionStore, requestedSession, requestId)
+		await hasRequestInSession(interactionRepo, requestedSession, requestId)
 	) {
 		return requestedSession;
 	}
 
 	const sessionFromRequest =
-		interactionStore.findSessionIdByRequestId(requestId);
+		await interactionRepo.findSessionIdByRequestId(requestId);
 	if (sessionFromRequest) {
 		return sessionFromRequest;
 	}
@@ -142,7 +142,7 @@ function resolveSessionId(
 	const sessionFromTrace = normalize(trace?.session_id);
 	if (
 		sessionFromTrace &&
-		hasRequestInSession(interactionStore, sessionFromTrace, requestId)
+		await hasRequestInSession(interactionRepo, sessionFromTrace, requestId)
 	) {
 		return sessionFromTrace;
 	}
@@ -150,18 +150,18 @@ function resolveSessionId(
 	return requestedSession ?? sessionFromTrace;
 }
 
-function hasRequestInSession(
-	interactionStore: InteractionStore,
+async function hasRequestInSession(
+	interactionRepo: InteractionRepo,
 	sessionId: string,
 	requestId: string,
-): boolean {
-	return interactionStore
-		.getBySession(sessionId)
-		.some((record) => record.correlatedTurnId === requestId);
+): Promise<boolean> {
+	return (await interactionRepo
+		.getBySession(sessionId))
+		.some((record: InteractionRecord) => record.correlatedTurnId === requestId);
 }
 
 function getTraceBundle(
-	runtime: RuntimeBootstrapResult,
+	runtime: InspectRuntimeDeps,
 	requestId: string,
 	traceStore?: TraceStore,
 ): TraceBundle | null {
@@ -195,8 +195,8 @@ function resolveUnsafeRawMode(
 	return true;
 }
 
-function getInteractionStore(
-	runtime: RuntimeBootstrapResult,
-): InteractionStore {
-	return new InteractionStore(runtime.db);
+function getInteractionRepo(
+	runtime: InspectRuntimeDeps,
+): InteractionRepo {
+	return runtime.interactionRepo;
 }

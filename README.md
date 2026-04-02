@@ -127,7 +127,7 @@ In practice, that means:
 | Runtime | Bun |
 | Language | TypeScript (strict) |
 | Native modules | Rust + NAPI-RS |
-| Storage | SQLite via `bun:sqlite` |
+| Storage | PostgreSQL |
 | Model providers | OpenAI / Anthropic |
 | Transport | HTTP + SSE |
 
@@ -163,7 +163,7 @@ MaidsClaw/
 │  ├─ state/             Blackboard shared state
 │  ├─ interaction/       Interaction log and context flushing
 │  ├─ gateway/           HTTP / SSE gateway
-│  ├─ storage/           SQLite, file storage, migrations
+│  ├─ storage/           PostgreSQL, file storage, migrations
 │  ├─ session/           Session services
 │  └─ native-fallbacks/  TypeScript fallbacks for native modules
 ├─ native/               Rust NAPI-RS crate
@@ -227,7 +227,6 @@ cd ..
 | `OPENAI_API_KEY` | OpenAI API key |
 | `MAIDSCLAW_PORT` | Gateway port |
 | `MAIDSCLAW_HOST` | Gateway bind host |
-| `MAIDSCLAW_DB_PATH` | SQLite database path |
 | `MAIDSCLAW_DATA_DIR` | Data directory |
 | `MAIDSCLAW_NATIVE_MODULES` | Whether to attempt loading Rust native modules |
 

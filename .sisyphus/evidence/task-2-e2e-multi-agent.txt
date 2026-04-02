@@ -1,0 +1,902 @@
+bun test v1.3.10 (30e609e0)
+
+test\pg-app\e2e-migration.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_sections\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_admins\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_attachments\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_patch_log\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_snapshots\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"settlement_processing_ledger\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_settlement_ledger_status\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"event_nodes\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_event_nodes_area_source_record\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_event_nodes_publication_scope\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_event_nodes_session_timestamp\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_event_nodes_scope_location\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"logic_edges\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_logic_edges_source\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_logic_edges_target\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"topics\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"fact_edges\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_fact_edges_validity\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_fact_edges_current\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"entity_nodes\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_entity_public_pointer\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_entity_private_pointer\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"entity_aliases\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_entity_aliases_alias_owner\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"pointer_redirects\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_pointer_redirect_old_owner\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"core_memory_blocks\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_core_memory_agent_label\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"memory_relations\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_memory_relations_source\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_memory_relations_target\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_memory_relations_pair_type\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"private_episode_events\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_private_episode_events_settlement\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_private_episode_events_agent\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_private_episode_events_settlement_local_ref\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"private_cognition_events\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_private_cognition_events_agent_key_time\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_private_cognition_events_settlement\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"area_state_events\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_area_state_events_agent_area_key\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_area_state_events_settlement\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_area_state_events_valid_time\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"world_state_events\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_world_state_events_key_committed\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_world_state_events_settlement\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_world_state_events_valid_time\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_blocks\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_block_sections\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_block_admins\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_block_attachments\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_shared_block_attachments_target\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_block_patch_log\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_shared_block_patch_log_block_seq\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"shared_block_snapshots\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"sessions\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_sessions_agent_id\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_sessions_closed_at\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_sessions_recovery_required\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"interaction_records\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_interaction_session_index\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_interaction_session_processed\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"recent_cognition_slots\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"pending_settlement_recovery\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"ux_pending_recovery_session_active\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_pending_recovery_next_attempt\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42710",
+  message: "extension \"pg_trgm\" already exists, skipping",
+  file: "extension.c",
+  line: "2017",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42710",
+  message: "extension \"vector\" already exists, skipping",
+  file: "extension.c",
+  line: "2017",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"private_cognition_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"area_state_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_area_state_current_agent_area\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"area_narrative_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"world_state_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_world_state_current_updated\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"world_narrative_current\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"search_docs_private\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_private_agent\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_private_content_trgm\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"search_docs_area\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_area_location\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_area_content_trgm\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"search_docs_world\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_world_content_trgm\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"search_docs_cognition\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_cognition_agent\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_cognition_agent_updated\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_search_docs_cognition_content_trgm\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"node_embeddings\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"idx_node_embeddings_embedding_hnsw\" already exists, skipping",
+  file: "index.c",
+  line: "877",
+  routine: "index_create",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"semantic_edges\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "relation \"node_scores\" already exists, skipping",
+  file: "parse_utilcmd.c",
+  line: "207",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 46 other objects",
+  detail: "drop cascades to table settlement_processing_ledger\ndrop cascades to table event_nodes\ndrop cascades to table logic_edges\ndrop cascades to table topics\ndrop cascades to table fact_edges\ndrop cascades to table entity_nodes\ndrop cascades to table entity_aliases\ndrop cascades to table pointer_redirects\ndrop cascades to table core_memory_blocks\ndrop cascades to table memory_relations\ndrop cascades to table private_episode_events\ndrop cascades to table private_cognition_events\ndrop cascades to table area_state_events\ndrop cascades to table world_state_events\ndrop cascades to table shared_blocks\ndrop cascades to table shared_block_sections\ndrop cascades to table shared_block_admins\ndrop cascades to table shared_block_attachments\ndrop cascades to table shared_block_patch_log\ndrop cascades to table shared_block_snapshots\ndrop cascades to function fn_deny_update_private_episode_events()\ndrop cascades to function fn_deny_delete_private_episode_events()\ndrop cascades to function fn_deny_update_private_cognition_events()\ndrop cascades to function fn_deny_delete_private_cognition_events()\ndrop cascades to function fn_deny_update_area_state_events()\ndrop cascades to function fn_deny_delete_area_state_events()\ndrop cascades to function fn_deny_update_world_state_events()\ndrop cascades to function fn_deny_delete_world_state_events()\ndrop cascades to table sessions\ndrop cascades to table interaction_records\ndrop cascades to table recent_cognition_slots\ndrop cascades to table pending_settlement_recovery\ndrop cascades to extension pg_trgm\ndrop cascades to extension vector\ndrop cascades to table private_cognition_current\ndrop cascades to table area_state_current\ndrop cascades to table area_narrative_current\ndrop cascades to table world_state_current\ndrop cascades to table world_narrative_current\ndrop cascades to table search_docs_private\ndrop cascades to table search_docs_area\ndrop cascades to table search_docs_world\ndrop cascades to table search_docs_cognition\ndrop cascades to table node_embeddings\ndrop cascades to table semantic_edges\ndrop cascades to table node_scores",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_sections\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_admins\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_attachments\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_patch_log\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "truncate cascades to table \"shared_block_snapshots\"",
+  file: "tablecmds.c",
+  line: "1848",
+  routine: "ExecuteTruncateGuts",
+}
+[multi-agent truth parity] surfaces=11, mismatches=0
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 46 other objects",
+  detail: "drop cascades to table settlement_processing_ledger\ndrop cascades to table event_nodes\ndrop cascades to table logic_edges\ndrop cascades to table topics\ndrop cascades to table fact_edges\ndrop cascades to table entity_nodes\ndrop cascades to table entity_aliases\ndrop cascades to table pointer_redirects\ndrop cascades to table core_memory_blocks\ndrop cascades to table memory_relations\ndrop cascades to table private_episode_events\ndrop cascades to table private_cognition_events\ndrop cascades to table area_state_events\ndrop cascades to table world_state_events\ndrop cascades to table shared_blocks\ndrop cascades to table shared_block_sections\ndrop cascades to table shared_block_admins\ndrop cascades to table shared_block_attachments\ndrop cascades to table shared_block_patch_log\ndrop cascades to table shared_block_snapshots\ndrop cascades to function fn_deny_update_private_episode_events()\ndrop cascades to function fn_deny_delete_private_episode_events()\ndrop cascades to function fn_deny_update_private_cognition_events()\ndrop cascades to function fn_deny_delete_private_cognition_events()\ndrop cascades to function fn_deny_update_area_state_events()\ndrop cascades to function fn_deny_delete_area_state_events()\ndrop cascades to function fn_deny_update_world_state_events()\ndrop cascades to function fn_deny_delete_world_state_events()\ndrop cascades to table sessions\ndrop cascades to table interaction_records\ndrop cascades to table recent_cognition_slots\ndrop cascades to table pending_settlement_recovery\ndrop cascades to extension pg_trgm\ndrop cascades to extension vector\ndrop cascades to table private_cognition_current\ndrop cascades to table area_state_current\ndrop cascades to table area_narrative_current\ndrop cascades to table world_state_current\ndrop cascades to table world_narrative_current\ndrop cascades to table search_docs_private\ndrop cascades to table search_docs_area\ndrop cascades to table search_docs_world\ndrop cascades to table search_docs_cognition\ndrop cascades to table node_embeddings\ndrop cascades to table semantic_edges\ndrop cascades to table node_scores",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"test_ba11751cd4d4\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "526",
+  routine: "does_not_exist_skipping",
+}
+
+ 2 pass
+ 0 fail
+ 59 expect() calls
+Ran 2 tests across 1 file. [7.59s]

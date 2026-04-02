@@ -1,5 +1,6 @@
 import type { Job, JobKey, JobStatus } from "./types.js";
 import { EXECUTION_CLASS_PRIORITY } from "./types.js";
+import type { JobPersistence, PersistentJobStatus } from "./persistence.js";
 
 type StoredJob = Job & { enqueueSeq: number };
 
@@ -8,6 +9,8 @@ export class JobQueue {
   private readonly jobsByKey = new Map<JobKey, string>();
   private readonly pendingJobIds = new Set<string>();
   private enqueueCounter = 0;
+
+  constructor(private readonly persistence?: JobPersistence) {}
 
   enqueue(job: Job): void {
     const stored: StoredJob = {
@@ -21,6 +24,17 @@ export class JobQueue {
     if (job.status === "pending") {
       this.pendingJobIds.add(job.jobId);
     }
+
+    void this.persistence?.enqueue({
+      id: this.persistenceId(job),
+      jobType: job.kind,
+      payload: this.serializeJob(job),
+      status: this.toPersistenceStatus(job.status),
+      maxAttempts: job.maxAttempts,
+      errorMessage: job.error,
+      nextAttemptAt: job.status === "pending" ? Date.now() : undefined,
+      claimedAt: job.startedAt,
+    });
   }
 
   dequeue(): Job | undefined {
@@ -71,6 +85,34 @@ export class JobQueue {
     this.jobsById.set(jobId, merged);
     this.jobsByKey.set(merged.jobKey, merged.jobId);
     this.syncPendingState(existing.status, merged.status, merged.jobId);
+    this.syncPersistence(existing, merged);
+  }
+
+  private syncPersistence(previous: Job, next: Job): void {
+    if (!this.persistence) {
+      return;
+    }
+
+    const jobId = this.persistenceId(next);
+
+    if (next.status === "running") {
+      void this.persistence.claim(jobId, "local-dispatcher", 0);
+      return;
+    }
+
+    if (next.status === "completed") {
+      void this.persistence.complete(jobId);
+      return;
+    }
+
+    if (next.status === "failed" || next.status === "cancelled") {
+      void this.persistence.fail(jobId, next.error ?? `Job ${next.status}`, false);
+      return;
+    }
+
+    if (next.status === "pending" && previous.status === "running") {
+      void this.persistence.fail(jobId, next.error ?? "Job failed", true);
+    }
   }
 
   private syncPendingState(previous: JobStatus, next: JobStatus, jobId: string): void {
@@ -160,5 +202,44 @@ export class JobQueue {
     }
 
     return copy;
+  }
+
+  private persistenceId(job: Job): string {
+    return job.idempotencyKey ?? job.jobKey;
+  }
+
+  private serializeJob(job: Job): Record<string, unknown> {
+    return {
+      jobId: job.jobId,
+      jobKey: job.jobKey,
+      kind: job.kind,
+      executionClass: job.executionClass,
+      sessionId: job.sessionId,
+      agentId: job.agentId,
+      idempotencyKey: job.idempotencyKey,
+      payload: job.payload,
+      status: job.status,
+      attempts: job.attempts,
+      maxAttempts: job.maxAttempts,
+      retriable: job.retriable,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+      error: job.error,
+      ownershipAccepted: job.ownershipAccepted,
+    };
+  }
+
+  private toPersistenceStatus(status: JobStatus): PersistentJobStatus {
+    if (status === "pending") {
+      return "pending";
+    }
+    if (status === "running") {
+      return "processing";
+    }
+    if (status === "completed") {
+      return "reconciled";
+    }
+    return "exhausted";
   }
 }

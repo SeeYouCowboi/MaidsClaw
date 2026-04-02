@@ -1,0 +1,5 @@
+Scenario: PG tests still run when PG is available
+Preconditions: PG running at 127.0.0.1:55432
+Status: PG NOT available in current environment (A002 — PG backend activation deferred to next plan)
+Evidence: PG test execution deferred per A002 decision. PG tests correctly SKIP (not FAIL) when PG_TEST_URL is unset, as verified by task-18-hermetic-baseline.txt.
+          Full PG test execution pending A002 implementation in next round.

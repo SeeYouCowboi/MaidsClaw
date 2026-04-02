@@ -1,0 +1,147 @@
+## task-2-write-paths.txt
+## All write paths (INSERT / UPDATE / DELETE) to search_docs_* tables
+## Generated: 2026-03-27
+## Command: grep -rn "INSERT\|UPDATE\|DELETE" src/ | grep -i "search_docs_"
+## Plus: grep -rn "syncSearchDoc\|removeSearchDoc\|syncCognitionSearchDoc" src/ (production only)
+
+================================================================================
+SECTION 1: Raw DML statements in production source files
+================================================================================
+
+--- src/memory/storage.ts ---
+
+:710  INSERT OR REPLACE INTO search_docs_private (id, doc_type, source_ref, agent_id, content, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      [via syncSearchDoc(scope="private", ...)]
+
+:716  syncFtsRow("search_docs_private_fts", docId, content)
+      [helper: DELETE + INSERT into search_docs_private_fts]
+
+:731  INSERT OR REPLACE INTO search_docs_area (id, doc_type, source_ref, location_entity_id, content, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      [via syncSearchDoc(scope="area", ...)]
+
+:737  syncFtsRow("search_docs_area_fts", docId, content)
+      [helper: DELETE + INSERT into search_docs_area_fts]
+
+:747  INSERT OR REPLACE INTO search_docs_world (id, doc_type, source_ref, content, created_at)
+      VALUES (?, ?, ?, ?, ?)
+      [via syncSearchDoc(scope="world", ...)]
+
+:753  syncFtsRow("search_docs_world_fts", docId, content)
+      [helper: DELETE + INSERT into search_docs_world_fts]
+
+:762  DELETE FROM search_docs_private WHERE source_ref = ?
+      [via removeSearchDoc(scope="private", ...)]
+
+:764  DELETE FROM search_docs_private_fts WHERE rowid = ?
+      [companion FTS delete]
+
+:773  DELETE FROM search_docs_area WHERE source_ref = ?
+      [via removeSearchDoc(scope="area", ...)]
+
+:775  DELETE FROM search_docs_area_fts WHERE rowid = ?
+      [companion FTS delete]
+
+:783  DELETE FROM search_docs_world WHERE source_ref = ?
+      [via removeSearchDoc(scope="world", ...)]
+
+:785  DELETE FROM search_docs_world_fts WHERE rowid = ?
+      [companion FTS delete]
+
+--- src/memory/cognition/cognition-repo.ts ---
+
+:957  UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?
+      [via updateCognitionStance() — evaluation/commitment branch]
+
+:974  UPDATE search_docs_cognition SET stance = ?, updated_at = ? WHERE source_ref = ? AND agent_id = ?
+      [via updateCognitionStance() — assertion branch]
+
+:1000 INSERT OR REPLACE INTO search_docs_cognition
+      (id, doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      [via syncCognitionSearchDoc()]
+
+:1018 DELETE FROM search_docs_cognition_fts WHERE rowid = ?
+      [companion FTS delete before re-insert]
+
+:1020 INSERT INTO search_docs_cognition_fts(rowid, content) VALUES (?, ?)
+      [companion FTS insert]
+
+--- src/memory/schema.ts ---
+
+:796  DELETE FROM search_docs_cognition
+      WHERE source_ref LIKE 'private_event:%' OR source_ref LIKE 'private_belief:%'
+      [migration memory:029 — purge legacy node refs]
+
+================================================================================
+SECTION 2: Call sites for syncSearchDoc / removeSearchDoc (production only)
+================================================================================
+
+--- src/memory/storage.ts (direct event writes) ---
+
+:209  syncSearchDoc("world", makeNodeRef("event", eventId), params.summary)
+      [createEvent() — world_public visibility]
+
+:211  syncSearchDoc("area", makeNodeRef("event", eventId), params.summary, undefined, params.locationEntityId)
+      [createEvent() — area_visible visibility]
+
+:261  syncSearchDoc("world", makeNodeRef("event", eventId), params.summary)
+      [createPromotedEvent() — always world_public]
+
+--- src/memory/graph-organizer.ts (async refresh via GraphOrganizer.run()) ---
+
+:399  storage.syncSearchDoc("area", nodeRef, row.summary, undefined, row.location_entity_id)
+      [syncSearchProjection() — event, area_visible]
+
+:401  storage.syncSearchDoc("world", nodeRef, row.summary)
+      [syncSearchProjection() — event, world_public]
+
+:420  storage.syncSearchDoc("private", nodeRef, content, row.owner_agent_id ?? agentId)
+      [syncSearchProjection() — entity, private_overlay]
+
+:422  storage.syncSearchDoc("world", nodeRef, content)
+      [syncSearchProjection() — entity, shared_public]
+
+:435  storage.removeSearchDoc("private", nodeRef)
+      [syncSearchProjection() — evaluation/commitment, status=retracted]
+
+:439  storage.syncSearchDoc("private", nodeRef, content, row.agent_id)
+      [syncSearchProjection() — evaluation/commitment, active]
+
+:451  storage.removeSearchDoc("private", nodeRef)
+      [syncSearchProjection() — assertion, stance=rejected/abandoned]
+
+:461  storage.syncSearchDoc("private", nodeRef, ..., row.agent_id)
+      [syncSearchProjection() — assertion, active]
+
+:471  storage.syncSearchDoc("world", nodeRef, ...)
+      [syncSearchProjection() — fact_edge]
+
+--- src/memory/promotion.ts ---
+
+:336  storage.syncSearchDoc("world", makeNodeRef("fact", factId), summary)
+      [crystallizeFact() — fact promotion to world surface]
+
+--- src/memory/cognition/cognition-repo.ts (call sites for syncCognitionSearchDoc) ---
+
+:252  syncCognitionSearchDoc({kind:"assertion", ...})   [upsertAssertion — existing, with cognitionKey]
+:286  syncCognitionSearchDoc({kind:"assertion", ...})   [upsertAssertion — new, with cognitionKey]
+:321  syncCognitionSearchDoc({kind:"assertion", ...})   [upsertAssertion — anonymous]
+:393  syncCognitionSearchDoc({kind:"evaluation", ...})  [upsertEvaluation — existing]
+:439  syncCognitionSearchDoc({kind:"evaluation", ...})  [upsertEvaluation — new]
+:513  syncCognitionSearchDoc({kind:"commitment", ...})  [upsertCommitment — existing]
+:559  syncCognitionSearchDoc({kind:"commitment", ...})  [upsertCommitment — new]
+
+================================================================================
+SECTION 3: Table inventory (from schema.ts lines 81-92)
+================================================================================
+
+search_docs_private       — main table (id, doc_type, source_ref, agent_id, content, created_at)
+search_docs_private_fts   — FTS5 virtual table (content, tokenize='trigram')
+search_docs_area          — main table (id, doc_type, source_ref, location_entity_id, content, created_at)
+search_docs_area_fts      — FTS5 virtual table (content, tokenize='trigram')
+search_docs_world         — main table (id, doc_type, source_ref, content, created_at)
+search_docs_world_fts     — FTS5 virtual table (content, tokenize='trigram')
+search_docs_cognition     — main table (id, doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at)
+search_docs_cognition_fts — FTS5 virtual table (content, tokenize='trigram')

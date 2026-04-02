@@ -1,0 +1,18 @@
+Task: T5 Wave 1 - Organizer Durable Pipeline
+Scenario: Per-chunk job splitting
+
+Command:
+bun test test/memory/organizer-durable-pipeline.test.ts -t "splits changedNodeRefs"
+
+Output:
+bun test v1.3.10 (30e609e0)
+
+ 1 pass
+ 3 filtered out
+ 0 fail
+ 5 expect() calls
+Ran 1 test across 1 file. [252.00ms]
+
+Notes:
+- The test asserts that a >50 changedNodeRefs settlement enqueues multiple `memory.organize` durable rows.
+- It verifies 3 chunk jobs are persisted (50/50/21) for a 121-ref flush.

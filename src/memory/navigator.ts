@@ -1,8 +1,11 @@
-import type { Database } from "bun:sqlite";
+import type {
+  GraphNodeVisibilityRecord,
+  GraphReadQueryRepo,
+} from "../storage/domain-repos/contracts/graph-read-query-repo.js";
+
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import type { RetrievalService } from "./retrieval.js";
-import { MAX_INTEGER } from "./schema.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
 import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
 import {
@@ -14,8 +17,10 @@ import {
 import { VisibilityPolicy } from "./visibility-policy.js";
 import {
   MEMORY_RELATION_TYPES,
+  type AuditProvenance,
   type BeamEdge,
   type BeamPath,
+  type EdgeLayer,
   type EvidencePath,
   type ExplainDetailLevel,
   type ExploreMode,
@@ -23,7 +28,6 @@ import {
   type MemoryRelationType,
   type NavigatorEdgeKind,
   type NavigatorResult,
-  type EventNode,
   type NodeRef,
   type NodeRefKind,
   type PathScore,
@@ -73,6 +77,17 @@ type InternalBeamPath = {
 type NodeSnapshot = {
   summary: string | null;
   timestamp: number | null;
+};
+
+/**
+ * @deprecated Active safety net in GraphNavigator. Retirement condition: when
+ * isFullGraphReadRepo() returns true for all PG repos AND the legacy fallback is no longer needed.
+ */
+type LegacyDbLike = {
+  prepare: (sql: string) => {
+    all: (...args: unknown[]) => unknown[];
+    get: (...args: unknown[]) => unknown;
+  };
 };
 
 export type NavigatorOptions = {
@@ -160,12 +175,21 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
 ]);
 
 export class GraphNavigator {
+  private readonly readRepo: GraphReadQueryRepo;
   private readonly visibilityPolicy: VisibilityPolicy;
   private readonly redactionPolicy: RedactionPolicy;
   private readonly edgeView: GraphEdgeView;
+  private readonly legacyDb: LegacyDbLike | null;
+  /**
+   * @deprecated Set to true when !isFullGraphReadRepo(readRepo). Remove when legacy
+   * safety net is no longer needed.
+   */
+  private readonly useLegacySyncSafetyNet: boolean;
+  private readonly privateNodeOwnerCache = new Map<NodeRef, string | null>();
+  private readonly visibilityRecordCache = new Map<NodeRef, GraphNodeVisibilityRecord | null>();
 
   constructor(
-    private readonly db: Database,
+    readRepo: GraphReadQueryRepo,
     private readonly retrieval: RetrievalService,
     private readonly alias: AliasService,
     _modelProvider?: ModelProviderClientLike,
@@ -178,7 +202,10 @@ export class GraphNavigator {
     const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
     this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
     this.redactionPolicy = redactionPolicy ?? new RedactionPolicy();
-    this.edgeView = new GraphEdgeView(this.db, this.visibilityPolicy);
+    this.legacyDb = this.asLegacyDbLike(readRepo);
+    this.useLegacySyncSafetyNet = !this.isFullGraphReadRepo(readRepo) && this.legacyDb !== null;
+    this.readRepo = this.coerceReadRepo(readRepo);
+    this.edgeView = new GraphEdgeView(this.readRepo);
   }
 
   async explore(
@@ -190,6 +217,8 @@ export class GraphNavigator {
     if (!viewerContext || !viewerContext.viewer_agent_id) {
       throw new Error("viewerContext is required");
     }
+    this.privateNodeOwnerCache.clear();
+    this.visibilityRecordCache.clear();
 
     const effectiveStrategy = strategy ?? GRAPH_RETRIEVAL_STRATEGIES.default_retrieval;
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
@@ -201,7 +230,11 @@ export class GraphNavigator {
     const mergedSeeds = this.mergeSeeds(rawSeeds, supplementalSeeds);
     const fallbackSeeds = this.fallbackSeedsFromAnalysis(mergedSeeds, analysis);
     const focusedSeeds = this.injectFocusSeed(fallbackSeeds, input.focusRef);
-    const visibleSeeds = focusedSeeds.filter((seed) => this.isNodeVisible(seed.node_ref, viewerContext));
+    const visibleSeedRefs = await this.filterVisibleNodeRefs(
+      focusedSeeds.map((seed) => seed.node_ref),
+      viewerContext,
+    );
+    const visibleSeeds = focusedSeeds.filter((seed) => visibleSeedRefs.has(seed.node_ref));
 
     if (visibleSeeds.length === 0) {
       return {
@@ -212,16 +245,17 @@ export class GraphNavigator {
       };
     }
 
-    const seedScores = this.computeSeedScores(visibleSeeds, analysis);
-    const expandedPaths = this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy);
-    const rerankedPaths = this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy);
+    const seedScores = await this.computeSeedScores(visibleSeeds, analysis);
+    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy);
+    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy);
     const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
-    const assembled = this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
+    const assembled = await this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
     const sliced = filterEvidencePathsByTimeSlice(assembled, input);
-    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel);
+    const seedsByRef = new Map(visibleSeeds.map((s) => [s.node_ref, s]));
+    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel, seedsByRef);
     const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
 
-    return {
+    const result: NavigatorResult = {
       query,
       query_type: analysis.query_type,
       summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
@@ -235,6 +269,12 @@ export class GraphNavigator {
       },
       evidence_paths: levelFiltered,
     };
+
+    if (input.detailLevel === "audit") {
+      result.audit_summary = this.buildAuditSummary(levelFiltered);
+    }
+
+    return result;
   }
 
   private asNavigatorOptions(optionsOrInput?: NavigatorOptions | MemoryExploreInput): NavigatorOptions | undefined {
@@ -458,8 +498,8 @@ export class GraphNavigator {
     return merged;
   }
 
-  private computeSeedScores(seeds: SeedCandidate[], analysis: QueryAnalysis): Map<NodeRef, number> {
-    const salienceByRef = this.loadSalienceForRefs(seeds.map((seed) => seed.node_ref));
+  private async computeSeedScores(seeds: SeedCandidate[], analysis: QueryAnalysis): Promise<Map<NodeRef, number>> {
+    const salienceByRef = await this.loadSalienceForRefs(seeds.map((seed) => seed.node_ref));
     const scores = new Map<NodeRef, number>();
 
     for (const seed of seeds) {
@@ -479,20 +519,19 @@ export class GraphNavigator {
     return scores;
   }
 
-  private loadSalienceForRefs(refs: NodeRef[]): Map<NodeRef, number> {
+  private async loadSalienceForRefs(refs: NodeRef[]): Promise<Map<NodeRef, number>> {
     const unique = Array.from(new Set(refs));
     if (unique.length === 0) {
       return new Map();
     }
 
-    const placeholders = unique.map(() => "?").join(",");
-    const rows = this.db
-      .prepare(`SELECT node_ref, salience FROM node_scores WHERE node_ref IN (${placeholders})`)
-      .all(...unique) as Array<{ node_ref: string; salience: number }>;
-
+    const repoWithSalience = this.readRepo as Partial<GraphReadQueryRepo>;
+    const rows = typeof repoWithSalience.getNodeSalience === "function"
+      ? await repoWithSalience.getNodeSalience(unique)
+      : this.loadSalienceForRefsLegacy(unique);
     const map = new Map<NodeRef, number>();
     for (const row of rows) {
-      map.set(row.node_ref as NodeRef, this.clamp01(row.salience));
+      map.set(row.nodeRef, this.clamp01(row.salience));
     }
     return map;
   }
@@ -522,7 +561,7 @@ export class GraphNavigator {
     return (priors[queryType] as Record<string, number>)[nodeKind] ?? 0.2;
   }
 
-  private expandTypedBeam(
+  private async expandTypedBeam(
     seeds: SeedCandidate[],
     seedScores: Map<NodeRef, number>,
     queryType: QueryType,
@@ -530,7 +569,7 @@ export class GraphNavigator {
     options: Required<NavigatorOptions>,
     input: TimeSliceQuery,
     strategy: GraphRetrievalStrategy,
-  ): InternalBeamPath[] {
+  ): Promise<InternalBeamPath[]> {
     const effectiveBeamWidth = Math.min(32, Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)));
     const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
     let currentLayer: InternalBeamPath[] = sortedSeeds.slice(0, effectiveBeamWidth).map((seed) => ({
@@ -548,7 +587,7 @@ export class GraphNavigator {
 
     for (let depth = 1; depth <= options.maxDepth; depth += 1) {
       const frontier = this.groupFrontierByKind(currentLayer);
-      const neighborMap = this.fetchNeighborsByFrontier(frontier, viewerContext, input);
+      const neighborMap = await this.fetchNeighborsByFrontier(frontier, viewerContext, input);
 
       const nextCandidates: InternalBeamPath[] = [];
       for (const pathItem of currentLayer) {
@@ -602,48 +641,47 @@ export class GraphNavigator {
     return grouped;
   }
 
-  private fetchNeighborsByFrontier(
+  private async fetchNeighborsByFrontier(
     frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     timeSlice: TimeSliceQuery,
-  ): Map<NodeRef, InternalBeamEdge[]> {
+  ): Promise<Map<NodeRef, InternalBeamEdge[]>> {
     const map = new Map<NodeRef, InternalBeamEdge[]>();
 
-    this.expandEventFrontier(frontier.get("event"), viewerContext, map, timeSlice);
-    this.expandEntityFrontier(frontier.get("entity"), viewerContext, map, timeSlice);
-    this.expandFactFrontier(frontier.get("fact"), viewerContext, map, timeSlice);
+    await this.expandEventFrontier(frontier.get("event"), viewerContext, map, timeSlice);
+    await this.expandEntityFrontier(frontier.get("entity"), viewerContext, map, timeSlice);
+    await this.expandFactFrontier(frontier.get("fact"), viewerContext, map, timeSlice);
     const privateEventFrontier = new Set<NodeRef>([
       ...(frontier.get("evaluation") ?? []),
       ...(frontier.get("commitment") ?? []),
     ]);
-    this.expandPrivateEventFrontier(privateEventFrontier.size > 0 ? privateEventFrontier : undefined, viewerContext, map, timeSlice);
+    await this.expandPrivateEventFrontier(privateEventFrontier.size > 0 ? privateEventFrontier : undefined, viewerContext, map, timeSlice);
 
     const privateBeliefFrontier = new Set<NodeRef>([
       ...(frontier.get("assertion") ?? []),
     ]);
-    this.expandPrivateBeliefFrontier(privateBeliefFrontier.size > 0 ? privateBeliefFrontier : undefined, viewerContext, map, timeSlice);
-    this.expandRelationEdges(frontier, viewerContext, map, timeSlice);
+    await this.expandPrivateBeliefFrontier(privateBeliefFrontier.size > 0 ? privateBeliefFrontier : undefined, viewerContext, map, timeSlice);
+    await this.expandRelationEdges(frontier, viewerContext, map, timeSlice);
 
     return map;
   }
 
-  private expandEventFrontier(
+  private async expandEventFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     if (!frontier || frontier.size === 0) {
       return;
     }
 
-    const ids = this.extractIdsFromRefs(frontier, "event");
-    if (ids.length === 0) {
+    const eventRefs = Array.from(frontier);
+    if (eventRefs.length === 0) {
       return;
     }
-    const placeholders = ids.map(() => "?").join(",");
 
-    const logicEdges = this.edgeView.readLogicEdges(frontier, viewerContext, timeSlice);
+    const logicEdges = await this.edgeView.readLogicEdges(frontier, viewerContext, timeSlice);
     for (const edge of logicEdges) {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
@@ -658,7 +696,7 @@ export class GraphNavigator {
       });
     }
 
-    const stateSupportEdges = this.edgeView.readStateFactEdges(frontier, viewerContext, timeSlice);
+    const stateSupportEdges = await this.edgeView.readStateFactEdges(frontier, viewerContext, timeSlice);
     for (const edge of stateSupportEdges) {
       const parsedFact = this.parseNodeRef(edge.target_ref);
       this.pushEdge(map, edge.source_ref, {
@@ -674,38 +712,19 @@ export class GraphNavigator {
       });
     }
 
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
-    const eventRows = this.db
-      .prepare(
-        `SELECT id, participants, primary_actor_entity_id, timestamp, summary
-         FROM event_nodes
-         WHERE id IN (${placeholders})
-           AND ${eventVisibilityPredicate}`,
-      )
-      .all(...ids) as Array<{
-      id: number;
-      participants: string | null;
-      primary_actor_entity_id: number | null;
-      timestamp: number;
-      summary: string | null;
-    }>;
-
-    for (const row of eventRows) {
-      const srcRef = `event:${row.id}` as NodeRef;
-      const entityIds = new Set<number>();
-      const participants = this.alias.resolveParticipants(row.participants);
-      for (const participant of participants) {
-        if (participant.entityId !== null) {
-          entityIds.add(participant.entityId);
-        }
+    const contexts = await this.readRepo.readEventParticipantContexts(eventRefs, viewerContext);
+    const candidateEntityRefs = new Set<NodeRef>();
+    for (const context of contexts) {
+      for (const participantRef of context.participantEntityRefs) {
+        candidateEntityRefs.add(participantRef);
       }
-      if (row.primary_actor_entity_id !== null) {
-        entityIds.add(row.primary_actor_entity_id);
-      }
+    }
+    const visibleEntityRefs = await this.filterVisibleNodeRefs(Array.from(candidateEntityRefs), viewerContext);
 
-      for (const entityId of entityIds) {
-        const target = `entity:${entityId}` as NodeRef;
-        if (!this.isNodeVisible(target, viewerContext)) {
+    for (const context of contexts) {
+      const srcRef = context.eventRef;
+      for (const target of context.participantEntityRefs) {
+        if (!visibleEntityRefs.has(target)) {
           continue;
         }
         this.pushEdge(map, srcRef, {
@@ -713,121 +732,77 @@ export class GraphNavigator {
           to: target,
           kind: "participant",
           weight: 0.85,
-          timestamp: row.timestamp,
-          summary: row.summary,
+          timestamp: context.timestamp,
+          summary: context.summary,
           canonical_fact_id: null,
           canonical_evidence: false,
         });
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
+    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
-  private expandEntityFrontier(
+  private async expandEntityFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     if (!frontier || frontier.size === 0) {
       return;
     }
 
+    const frontierRefs = Array.from(frontier);
     const ids = this.extractIdsFromRefs(frontier, "entity");
-    if (ids.length === 0) {
+    if (ids.length === 0 || frontierRefs.length === 0) {
       return;
     }
-    const placeholders = ids.map(() => "?").join(",");
 
-    const factRows = this.db
-      .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, t_valid
-         FROM fact_edges
-         WHERE t_invalid = ? AND (source_entity_id IN (${placeholders}) OR target_entity_id IN (${placeholders}))`,
-      )
-      .all(MAX_INTEGER, ...ids, ...ids) as Array<{
-      id: number;
-      source_entity_id: number;
-      target_entity_id: number;
-      predicate: string;
-      t_valid: number;
-    }>;
+    const factRows = await this.readRepo.readActiveFactsForEntityFrontier(frontierRefs);
+    const factEntityCandidates: NodeRef[] = [];
+    for (const row of factRows) {
+      factEntityCandidates.push(row.sourceEntityRef, row.targetEntityRef);
+    }
+    const visibleFactEntities = await this.filterVisibleNodeRefs(factEntityCandidates, viewerContext);
 
     for (const row of factRows) {
-      const sourceRef = `entity:${row.source_entity_id}` as NodeRef;
-      const targetRef = `entity:${row.target_entity_id}` as NodeRef;
+      const sourceRef = row.sourceEntityRef;
+      const targetRef = row.targetEntityRef;
+      const parsedFact = this.parseNodeRef(row.factRef);
+      const factId = parsedFact?.kind === "fact" ? parsedFact.id : null;
 
-      if (frontier.has(sourceRef) && this.isNodeVisible(targetRef, viewerContext)) {
+      if (frontier.has(sourceRef) && visibleFactEntities.has(targetRef)) {
         this.pushEdge(map, sourceRef, {
           from: sourceRef,
           to: targetRef,
           kind: "fact_relation",
           weight: 1,
-          timestamp: row.t_valid,
+          timestamp: row.validTime,
           summary: row.predicate,
-          canonical_fact_id: row.id,
+          canonical_fact_id: factId,
           canonical_evidence: true,
         });
       }
 
-      if (frontier.has(targetRef) && this.isNodeVisible(sourceRef, viewerContext)) {
+      if (frontier.has(targetRef) && visibleFactEntities.has(sourceRef)) {
         this.pushEdge(map, targetRef, {
           from: targetRef,
           to: sourceRef,
           kind: "fact_relation",
           weight: 1,
-          timestamp: row.t_valid,
+          timestamp: row.validTime,
           summary: row.predicate,
-          canonical_fact_id: row.id,
+          canonical_fact_id: factId,
           canonical_evidence: true,
         });
       }
     }
 
-    const participantConditions = ids.map(() => "participants LIKE ?").join(" OR ");
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
-    const participantSql =
-      `SELECT id, participants, primary_actor_entity_id, timestamp, summary
-       FROM event_nodes
-       WHERE (
-          primary_actor_entity_id IN (${placeholders})` +
-      (participantConditions.length > 0 ? ` OR ${participantConditions}` : "") +
-      `)
-       AND ${eventVisibilityPredicate}`;
-
-    const participantBindings = [
-      ...ids,
-      ...ids.map((id) => `%entity:${id}%`),
-    ];
-    const participantRows = this.db.prepare(participantSql).all(
-      ...participantBindings,
-    ) as Array<{
-      id: number;
-      participants: string | null;
-      primary_actor_entity_id: number | null;
-      timestamp: number;
-      summary: string | null;
-    }>;
-
+    const participantRows = await this.readRepo.readVisibleEventsForEntityFrontier(frontierRefs, viewerContext);
     for (const row of participantRows) {
-      const eventRef = `event:${row.id}` as NodeRef;
-      if (!this.isNodeVisible(eventRef, viewerContext)) {
-        continue;
-      }
-      const participants = this.alias.resolveParticipants(row.participants);
-      const eventEntityIds = new Set<number>();
-      if (row.primary_actor_entity_id !== null) {
-        eventEntityIds.add(row.primary_actor_entity_id);
-      }
-      for (const participant of participants) {
-        if (participant.entityId !== null) {
-          eventEntityIds.add(participant.entityId);
-        }
-      }
-
-      for (const entityId of eventEntityIds) {
-        const entityRef = `entity:${entityId}` as NodeRef;
+      const eventRef = row.eventRef;
+      for (const entityRef of row.participantEntityRefs) {
         if (!frontier.has(entityRef)) {
           continue;
         }
@@ -844,42 +819,24 @@ export class GraphNavigator {
       }
     }
 
-    const idSet = new Set<number>(ids);
-    const beliefRows = this.db
-      .prepare(
-        `SELECT id, summary_text, record_json, updated_at
-         FROM private_cognition_current
-         WHERE agent_id = ? AND kind = 'assertion'`,
-      )
-      .all(viewerContext.viewer_agent_id) as Array<{
-      id: number;
-      summary_text: string | null;
-      record_json: string | null;
-      updated_at: number;
-    }>;
+    const beliefRows = await this.readRepo.readAgentAssertionsLinkedToEntities(
+      viewerContext.viewer_agent_id,
+      frontierRefs,
+    );
+    const visibleBeliefs = await this.filterVisibleNodeRefs(
+      beliefRows.map((row) => row.assertionRef),
+      viewerContext,
+    );
 
     for (const row of beliefRows) {
-      const parsedRecord = this.parseAssertionRecord(row.record_json);
-      const sourceEntityId = parsedRecord.sourceEntityId;
-      const targetEntityId = parsedRecord.targetEntityId;
-      if (sourceEntityId === null && targetEntityId === null) {
+      const beliefRef = row.assertionRef;
+      if (!visibleBeliefs.has(beliefRef)) {
         continue;
       }
 
-      const sourceMatches = sourceEntityId !== null && idSet.has(sourceEntityId);
-      const targetMatches = targetEntityId !== null && idSet.has(targetEntityId);
-      if (!sourceMatches && !targetMatches) {
-        continue;
-      }
-
-      const beliefRef = `assertion:${row.id}` as NodeRef;
-      if (!this.isNodeVisible(beliefRef, viewerContext)) {
-        continue;
-      }
-
-      const sourceRef = sourceEntityId !== null ? (`entity:${sourceEntityId}` as NodeRef) : null;
-      const targetRef = targetEntityId !== null ? (`entity:${targetEntityId}` as NodeRef) : null;
-      const summary = parsedRecord.predicate ?? row.summary_text;
+      const sourceRef = row.sourceEntityRef;
+      const targetRef = row.targetEntityRef;
+      const summary = row.predicate ?? row.summary;
 
       if (sourceRef && frontier.has(sourceRef)) {
         this.pushEdge(map, sourceRef, {
@@ -887,7 +844,7 @@ export class GraphNavigator {
           to: beliefRef,
           kind: "fact_relation",
           weight: 0.7,
-          timestamp: row.updated_at,
+          timestamp: row.updatedAt,
           summary,
           canonical_fact_id: null,
           canonical_evidence: false,
@@ -899,7 +856,7 @@ export class GraphNavigator {
           to: beliefRef,
           kind: "fact_relation",
           weight: 0.7,
-          timestamp: row.updated_at,
+          timestamp: row.updatedAt,
           summary,
           canonical_fact_id: null,
           canonical_evidence: false,
@@ -907,109 +864,102 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
+    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
-  private expandFactFrontier(
+  private async expandFactFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     if (!frontier || frontier.size === 0) {
       return;
     }
-    const ids = this.extractIdsFromRefs(frontier, "fact");
-    if (ids.length === 0) {
+    const factRefs = Array.from(frontier);
+    if (factRefs.length === 0) {
       return;
     }
-    const placeholders = ids.map(() => "?").join(",");
 
-    const factRows = this.db
-      .prepare(
-        `SELECT id, source_entity_id, target_entity_id, predicate, source_event_id, t_valid
-         FROM fact_edges
-         WHERE t_invalid = ? AND id IN (${placeholders})`,
-      )
-      .all(MAX_INTEGER, ...ids) as Array<{
-      id: number;
-      source_entity_id: number;
-      target_entity_id: number;
-      predicate: string;
-      source_event_id: number | null;
-      t_valid: number;
-    }>;
+    const factRows = await this.readRepo.readActiveFactsForEntityFrontier(factRefs);
+    const candidateRefs: NodeRef[] = [];
+    for (const row of factRows) {
+      candidateRefs.push(row.sourceEntityRef, row.targetEntityRef);
+      if (row.sourceEventRef) {
+        candidateRefs.push(row.sourceEventRef);
+      }
+    }
+    const visibleRefs = await this.filterVisibleNodeRefs(candidateRefs, viewerContext);
 
     for (const row of factRows) {
-      const factRef = `fact:${row.id}` as NodeRef;
-      const sourceRef = `entity:${row.source_entity_id}` as NodeRef;
-      const targetRef = `entity:${row.target_entity_id}` as NodeRef;
+      const factRef = row.factRef;
+      const sourceRef = row.sourceEntityRef;
+      const targetRef = row.targetEntityRef;
+      const parsedFact = this.parseNodeRef(factRef);
+      const factId = parsedFact?.kind === "fact" ? parsedFact.id : null;
 
-      if (this.isNodeVisible(sourceRef, viewerContext)) {
+      if (visibleRefs.has(sourceRef)) {
         this.pushEdge(map, factRef, {
           from: factRef,
           to: sourceRef,
           kind: "fact_relation",
           weight: 0.95,
-          timestamp: row.t_valid,
+          timestamp: row.validTime,
           summary: row.predicate,
-          canonical_fact_id: row.id,
+          canonical_fact_id: factId,
           canonical_evidence: true,
         });
       }
 
-      if (this.isNodeVisible(targetRef, viewerContext)) {
+      if (visibleRefs.has(targetRef)) {
         this.pushEdge(map, factRef, {
           from: factRef,
           to: targetRef,
           kind: "fact_relation",
           weight: 0.95,
-          timestamp: row.t_valid,
+          timestamp: row.validTime,
           summary: row.predicate,
-          canonical_fact_id: row.id,
+          canonical_fact_id: factId,
           canonical_evidence: true,
         });
       }
 
-      if (row.source_event_id !== null) {
-        const eventRef = `event:${row.source_event_id}` as NodeRef;
-        if (this.isNodeVisible(eventRef, viewerContext)) {
-          this.pushEdge(map, factRef, {
-            from: factRef,
-            to: eventRef,
-            kind: "fact_support",
-            weight: 0.9,
-            timestamp: row.t_valid,
-            summary: row.predicate,
-            canonical_fact_id: row.id,
-            canonical_evidence: true,
-          });
-        }
+      if (row.sourceEventRef && visibleRefs.has(row.sourceEventRef)) {
+        this.pushEdge(map, factRef, {
+          from: factRef,
+          to: row.sourceEventRef,
+          kind: "fact_support",
+          weight: 0.9,
+          timestamp: row.validTime,
+          summary: row.predicate,
+          canonical_fact_id: factId,
+          canonical_evidence: true,
+        });
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
+    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice);
   }
 
-  private expandPrivateEventFrontier(
+  private async expandPrivateEventFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     if (!frontier || frontier.size === 0) {
       return;
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
+    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
-  private expandPrivateBeliefFrontier(
+  private async expandPrivateBeliefFrontier(
     frontier: Set<NodeRef> | undefined,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     if (!frontier || frontier.size === 0) {
       return;
     }
@@ -1021,88 +971,77 @@ export class GraphNavigator {
         idToRef.set(parsed.id, ref);
       }
     }
-    const ids = [...idToRef.keys()];
-    if (ids.length === 0) {
+    if (idToRef.size === 0) {
       return;
     }
-    const placeholders = ids.map(() => "?").join(",");
 
-    const pointerRefCache = new Map<string, NodeRef | null>();
-    const resolveEntityRef = (pointerKey: string | null): NodeRef | null => {
-      if (!pointerKey) {
-        return null;
+    const details = await this.readRepo.readAgentAssertionDetails(
+      viewerContext.viewer_agent_id,
+      Array.from(frontier),
+      timeSlice.asOfCommittedTime,
+    );
+
+    const candidateRefs: NodeRef[] = [];
+    for (const detail of details) {
+      candidateRefs.push(detail.assertionRef);
+      if (detail.sourceEntityRef) {
+        candidateRefs.push(detail.sourceEntityRef);
       }
-      const cacheKey = pointerKey.normalize("NFC");
-      if (pointerRefCache.has(cacheKey)) {
-        return pointerRefCache.get(cacheKey) ?? null;
+      if (detail.targetEntityRef) {
+        candidateRefs.push(detail.targetEntityRef);
       }
-      const resolved = this.resolveEntityRefFromPointerKey(cacheKey, viewerContext.viewer_agent_id);
-      pointerRefCache.set(cacheKey, resolved);
-      return resolved;
-    };
+      if (detail.sourceEventRef) {
+        candidateRefs.push(detail.sourceEventRef);
+      }
+    }
+    const visibleRefs = await this.filterVisibleNodeRefs(candidateRefs, viewerContext);
 
-    const committedCutoffClause = timeSlice.asOfCommittedTime != null ? " AND updated_at <= ?" : "";
-    const currentRows = this.db
-      .prepare(
-        `SELECT id, summary_text, record_json, updated_at
-         FROM private_cognition_current
-         WHERE agent_id = ? AND kind = 'assertion' AND id IN (${placeholders})${committedCutoffClause}`,
-      )
-      .all(
-        viewerContext.viewer_agent_id,
-        ...ids,
-        ...(timeSlice.asOfCommittedTime != null ? [timeSlice.asOfCommittedTime] : []),
-      ) as Array<{
-      id: number;
-      summary_text: string | null;
-      record_json: string;
-      updated_at: number;
-    }>;
+    for (const detail of details) {
+      const beliefRef = detail.assertionRef;
+      if (!visibleRefs.has(beliefRef)) {
+        continue;
+      }
+      const parsedBelief = this.parseNodeRef(beliefRef);
+      const beliefId = parsedBelief?.kind === "assertion" ? parsedBelief.id : null;
+      const canonicalBeliefRef = beliefId != null ? (idToRef.get(beliefId) ?? beliefRef) : beliefRef;
+      const summary = detail.predicate ?? detail.summary;
 
-    for (const row of currentRows) {
-      const beliefRef = (idToRef.get(row.id) ?? `assertion:${row.id}`) as NodeRef;
-      const parsedRecord = this.parseAssertionRecord(row.record_json);
-      const summary = parsedRecord.predicate ?? row.summary_text;
-      const sourceRef =
-        resolveEntityRef(parsedRecord.sourcePointerKey)
-        ?? (parsedRecord.sourceEntityId !== null ? (`entity:${parsedRecord.sourceEntityId}` as NodeRef) : null);
-      const targetRef =
-        resolveEntityRef(parsedRecord.targetPointerKey)
-        ?? (parsedRecord.targetEntityId !== null ? (`entity:${parsedRecord.targetEntityId}` as NodeRef) : null);
+      const sourceRef = detail.sourceEntityRef;
+      const targetRef = detail.targetEntityRef;
 
-      if (sourceRef && this.isNodeVisible(sourceRef, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
+      if (sourceRef && visibleRefs.has(sourceRef)) {
+        this.pushEdge(map, canonicalBeliefRef, {
+          from: canonicalBeliefRef,
           to: sourceRef,
           kind: "fact_relation",
           weight: 0.75,
-          timestamp: row.updated_at,
+          timestamp: detail.updatedAt,
           summary,
           canonical_fact_id: null,
           canonical_evidence: false,
         });
       }
 
-      if (targetRef && this.isNodeVisible(targetRef, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
+      if (targetRef && visibleRefs.has(targetRef)) {
+        this.pushEdge(map, canonicalBeliefRef, {
+          from: canonicalBeliefRef,
           to: targetRef,
           kind: "fact_relation",
           weight: 0.75,
-          timestamp: row.updated_at,
+          timestamp: detail.updatedAt,
           summary,
           canonical_fact_id: null,
           canonical_evidence: false,
         });
       }
 
-      if (parsedRecord.sourceEventRef && this.isNodeVisible(parsedRecord.sourceEventRef, viewerContext)) {
-        this.pushEdge(map, beliefRef, {
-          from: beliefRef,
-          to: parsedRecord.sourceEventRef,
+      if (detail.sourceEventRef && visibleRefs.has(detail.sourceEventRef)) {
+        this.pushEdge(map, canonicalBeliefRef, {
+          from: canonicalBeliefRef,
+          to: detail.sourceEventRef,
           kind: "fact_support",
           weight: 0.7,
-          timestamp: row.updated_at,
+          timestamp: detail.updatedAt,
           summary,
           canonical_fact_id: null,
           canonical_evidence: false,
@@ -1110,22 +1049,22 @@ export class GraphNavigator {
       }
     }
 
-    this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
+    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
   }
 
-  private expandRelationEdges(
+  private async expandRelationEdges(
     frontier: Map<NodeRefKind, Set<NodeRef>>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
-  ): void {
+  ): Promise<void> {
     const allRefs: NodeRef[] = [];
     for (const refs of frontier.values()) {
       for (const ref of refs) allRefs.push(ref);
     }
     if (allRefs.length === 0) return;
 
-    const edges = this.edgeView.readMemoryRelations(new Set(allRefs), viewerContext, timeSlice);
+    const edges = await this.edgeView.readMemoryRelations(new Set(allRefs), viewerContext, timeSlice);
     for (const edge of edges) {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
@@ -1141,16 +1080,16 @@ export class GraphNavigator {
     }
   }
 
-  private expandSemanticEdges(
+  private async expandSemanticEdges(
     frontier: Set<NodeRef>,
     viewerContext: ViewerContext,
     map: Map<NodeRef, InternalBeamEdge[]>,
     timeSlice: TimeSliceQuery,
     privateFrontier = false,
-  ): void {
-    const edges = this.edgeView.readSemanticEdges(frontier, viewerContext, timeSlice);
+  ): Promise<void> {
+    const edges = await this.edgeView.readSemanticEdges(frontier, viewerContext, timeSlice);
     for (const edge of edges) {
-      if (privateFrontier && !this.isSameAgentPrivateCompatibility(edge.source_ref, edge.target_ref, viewerContext.viewer_agent_id)) {
+      if (privateFrontier && !(await this.isSameAgentPrivateCompatibility(edge.source_ref, edge.target_ref, viewerContext.viewer_agent_id))) {
         continue;
       }
       this.pushEdge(map, edge.source_ref, {
@@ -1167,7 +1106,7 @@ export class GraphNavigator {
     }
   }
 
-  private isSameAgentPrivateCompatibility(from: NodeRef, to: NodeRef, viewerAgentId: string): boolean {
+  private async isSameAgentPrivateCompatibility(from: NodeRef, to: NodeRef, viewerAgentId: string): Promise<boolean> {
     const fromKind = this.parseNodeRef(from)?.kind;
     const toKind = this.parseNodeRef(to)?.kind;
     const fromPrivate = fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment";
@@ -1177,37 +1116,40 @@ export class GraphNavigator {
       return true;
     }
 
-    if (fromPrivate && this.getPrivateNodeAgentId(from) !== viewerAgentId) {
+    if (fromPrivate && (await this.getPrivateNodeAgentId(from)) !== viewerAgentId) {
       return false;
     }
-    if (toPrivate && this.getPrivateNodeAgentId(to) !== viewerAgentId) {
+    if (toPrivate && (await this.getPrivateNodeAgentId(to)) !== viewerAgentId) {
       return false;
     }
 
     if (fromPrivate && toPrivate) {
-      return this.getPrivateNodeAgentId(from) === this.getPrivateNodeAgentId(to);
+      return (await this.getPrivateNodeAgentId(from)) === (await this.getPrivateNodeAgentId(to));
     }
 
     return true;
   }
 
-  private getPrivateNodeAgentId(nodeRef: NodeRef): string | null {
+  private async getPrivateNodeAgentId(nodeRef: NodeRef): Promise<string | null> {
+    const cached = this.privateNodeOwnerCache.get(nodeRef);
+    if (cached !== undefined) {
+      return cached;
+    }
     const parsed = this.parseNodeRef(nodeRef);
     if (!parsed) {
+      this.privateNodeOwnerCache.set(nodeRef, null);
       return null;
     }
-    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_cognition_current WHERE id=?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row?.agent_id ?? null;
+    if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+      const repoWithOwners = this.readRepo as Partial<GraphReadQueryRepo>;
+      const owners = typeof repoWithOwners.getPrivateNodeOwners === "function"
+        ? await repoWithOwners.getPrivateNodeOwners([nodeRef])
+        : this.loadPrivateOwnersLegacy([nodeRef]);
+      const owner = owners[0]?.agentId ?? null;
+      this.privateNodeOwnerCache.set(nodeRef, owner);
+      return owner;
     }
-    if (parsed.kind === "assertion") {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_cognition_current WHERE id=?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row?.agent_id ?? null;
-    }
+    this.privateNodeOwnerCache.set(nodeRef, null);
     return null;
   }
 
@@ -1225,117 +1167,6 @@ export class GraphNavigator {
     return (b.timestamp ?? 0) - (a.timestamp ?? 0);
   }
 
-  private parseAssertionRecord(recordJson: string | null): {
-    sourcePointerKey: string | null;
-    targetPointerKey: string | null;
-    predicate: string | null;
-    sourceEventRef: NodeRef | null;
-    sourceEntityId: number | null;
-    targetEntityId: number | null;
-  } {
-    if (!recordJson) {
-      return {
-        sourcePointerKey: null,
-        targetPointerKey: null,
-        predicate: null,
-        sourceEventRef: null,
-        sourceEntityId: null,
-        targetEntityId: null,
-      };
-    }
-
-    try {
-      const parsed = JSON.parse(recordJson) as Record<string, unknown>;
-      if (!parsed || typeof parsed !== "object") {
-        return {
-          sourcePointerKey: null,
-          targetPointerKey: null,
-          predicate: null,
-          sourceEventRef: null,
-          sourceEntityId: null,
-          targetEntityId: null,
-        };
-      }
-
-      const sourcePointerKey =
-        typeof parsed.sourcePointerKey === "string" && parsed.sourcePointerKey.trim().length > 0
-          ? parsed.sourcePointerKey.trim()
-          : null;
-      const targetPointerKey =
-        typeof parsed.targetPointerKey === "string" && parsed.targetPointerKey.trim().length > 0
-          ? parsed.targetPointerKey.trim()
-          : null;
-      const predicate =
-        typeof parsed.predicate === "string" && parsed.predicate.trim().length > 0
-          ? parsed.predicate.trim()
-          : null;
-
-      const sourceEventRaw =
-        typeof parsed.sourceEventRef === "string"
-          ? parsed.sourceEventRef
-          : typeof parsed.source_event_ref === "string"
-            ? parsed.source_event_ref
-            : null;
-      const sourceEventCandidate = sourceEventRaw?.trim();
-      const sourceEventRef =
-        sourceEventCandidate && this.parseNodeRef(sourceEventCandidate as NodeRef)
-          ? (sourceEventCandidate as NodeRef)
-          : null;
-
-      const sourceEntityRaw = parsed.sourceEntityId ?? parsed.source_entity_id;
-      const sourceEntityId =
-        typeof sourceEntityRaw === "number" && Number.isInteger(sourceEntityRaw) && sourceEntityRaw > 0
-          ? sourceEntityRaw
-          : null;
-
-      const targetEntityRaw = parsed.targetEntityId ?? parsed.target_entity_id;
-      const targetEntityId =
-        typeof targetEntityRaw === "number" && Number.isInteger(targetEntityRaw) && targetEntityRaw > 0
-          ? targetEntityRaw
-          : null;
-
-      return {
-        sourcePointerKey,
-        targetPointerKey,
-        predicate,
-        sourceEventRef,
-        sourceEntityId,
-        targetEntityId,
-      };
-    } catch {
-      return {
-        sourcePointerKey: null,
-        targetPointerKey: null,
-        predicate: null,
-        sourceEventRef: null,
-        sourceEntityId: null,
-        targetEntityId: null,
-      };
-    }
-  }
-
-  private resolveEntityRefFromPointerKey(pointerKey: string, viewerAgentId: string): NodeRef | null {
-    const normalized = pointerKey.trim();
-    if (normalized.length === 0) {
-      return null;
-    }
-
-    const row = this.db
-      .prepare(
-        `SELECT id
-         FROM entity_nodes
-         WHERE pointer_key = ?
-           AND (
-             (memory_scope = 'private_overlay' AND owner_agent_id = ?)
-             OR memory_scope = 'shared_public'
-           )
-         ORDER BY CASE WHEN memory_scope = 'private_overlay' THEN 0 ELSE 1 END
-         LIMIT 1`,
-      )
-      .get(normalized, viewerAgentId) as { id: number } | undefined;
-
-    return row ? (`entity:${row.id}` as NodeRef) : null;
-  }
 
   private edgePriorityScore(kind: NavigatorEdgeKind | MemoryRelationType, queryType: QueryType): number {
     const ordered = QUERY_TYPE_PRIORITY[queryType];
@@ -1374,14 +1205,14 @@ export class GraphNavigator {
     return Array.from(bySignature.values());
   }
 
-  private rerankPaths(
+  private async rerankPaths(
     paths: InternalBeamPath[],
     seedScores: Map<NodeRef, number>,
     queryType: QueryType,
     maxDepth: number,
     strategy?: GraphRetrievalStrategy,
-  ): Array<{ path: InternalBeamPath; score: PathScore }> {
-    const snapshots = this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
+  ): Promise<Array<{ path: InternalBeamPath; score: PathScore }>> {
+    const snapshots = await this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
 
     const scored = paths.map((path) => {
       const seedScore = seedScores.get(path.path.seed) ?? 0;
@@ -1426,54 +1257,20 @@ export class GraphNavigator {
     return scored;
   }
 
-  private loadNodeSnapshots(refs: NodeRef[]): Map<NodeRef, NodeSnapshot> {
+  private async loadNodeSnapshots(refs: NodeRef[]): Promise<Map<NodeRef, NodeSnapshot>> {
     const unique = Array.from(new Set(refs));
-    const byKind = new Map<NodeRefKind, number[]>();
-    for (const ref of unique) {
-      const parsed = this.parseNodeRef(ref);
-      if (!parsed) {
-        continue;
-      }
-      const list = byKind.get(parsed.kind) ?? [];
-      list.push(parsed.id);
-      byKind.set(parsed.kind, list);
-    }
-
+    const repoWithSnapshots = this.readRepo as Partial<GraphReadQueryRepo>;
+    const rows = typeof repoWithSnapshots.getNodeSnapshots === "function"
+      ? await repoWithSnapshots.getNodeSnapshots(unique)
+      : this.loadNodeSnapshotsLegacy(unique);
     const map = new Map<NodeRef, NodeSnapshot>();
-
-    this.populateSnapshots(map, "event", byKind.get("event"), "event_nodes", "summary", "timestamp");
-    this.populateSnapshots(map, "entity", byKind.get("entity"), "entity_nodes", "summary", "updated_at");
-    this.populateSnapshots(map, "fact", byKind.get("fact"), "fact_edges", "predicate", "t_valid");
-    this.populateSnapshots(map, "evaluation", byKind.get("evaluation"), "private_cognition_current", "summary_text", "updated_at");
-    this.populateSnapshots(map, "commitment", byKind.get("commitment"), "private_cognition_current", "summary_text", "updated_at");
-    this.populateSnapshots(map, "assertion", byKind.get("assertion"), "private_cognition_current", "summary_text", "updated_at");
-
-    return map;
-  }
-
-  private populateSnapshots(
-    map: Map<NodeRef, NodeSnapshot>,
-    kind: NodeRefKind,
-    ids: number[] | undefined,
-    table: string,
-    summaryColumn: string,
-    tsColumn: string,
-  ): void {
-    if (!ids || ids.length === 0) {
-      return;
-    }
-
-    const placeholders = ids.map(() => "?").join(",");
-    const rows = this.db
-      .prepare(`SELECT id, ${summaryColumn} AS summary, ${tsColumn} AS ts FROM ${table} WHERE id IN (${placeholders})`)
-      .all(...ids) as Array<{ id: number; summary: string | null; ts: number | null }>;
-
     for (const row of rows) {
-      map.set(`${kind}:${row.id}` as NodeRef, {
+      map.set(row.nodeRef, {
         summary: row.summary,
-        timestamp: row.ts,
+        timestamp: row.timestamp,
       });
     }
+    return map;
   }
 
   private calculateTemporalConsistency(edges: InternalBeamEdge[]): number {
@@ -1558,11 +1355,11 @@ export class GraphNavigator {
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
 
-  private assembleEvidence(
+  private async assembleEvidence(
     scored: Array<{ path: InternalBeamPath; score: PathScore }>,
     viewerContext: ViewerContext,
     maxCandidates: number,
-  ): EvidencePath[] {
+  ): Promise<EvidencePath[]> {
     const result: EvidencePath[] = [];
     for (const candidate of scored) {
       if (result.length >= maxCandidates) {
@@ -1576,7 +1373,7 @@ export class GraphNavigator {
         supporting_facts: this.collectSupportingFacts(candidate.path.internal_edges),
       };
 
-      const safe = this.applyPostFilterSafetyNet(evidence, viewerContext);
+      const safe = await this.applyPostFilterSafetyNet(evidence, viewerContext);
       if (safe) {
         result.push(safe);
       }
@@ -1584,14 +1381,83 @@ export class GraphNavigator {
     return result;
   }
 
-  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel): EvidencePath[] {
+  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath[] {
     if (!detailLevel || detailLevel === "standard") {
       return paths;
     }
     if (detailLevel === "concise") {
       return paths.slice(0, 3);
     }
+    if (detailLevel === "audit") {
+      return paths.map((p) => this.enrichWithProvenance(p, seedsByRef));
+    }
     return paths;
+  }
+
+  private enrichWithProvenance(evidencePath: EvidencePath, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath {
+    const seed = seedsByRef?.get(evidencePath.path.seed);
+    const sourceSurface = seed?.source_scope ?? "unknown";
+
+    const edgeTimestamps = evidencePath.path.edges
+      .map((e) => e.timestamp)
+      .filter((t): t is number => t !== null);
+    const committedTime = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : null;
+
+    const confidenceScore = this.clamp01(evidencePath.score.path_score);
+
+    const conflictRefs: NodeRef[] = [];
+    for (const edge of evidencePath.path.edges) {
+      if (edge.kind === "conflict_or_update") {
+        conflictRefs.push(edge.from, edge.to);
+      }
+    }
+    const uniqueConflictRefs = Array.from(new Set(conflictRefs));
+
+    const edgeLayers = Array.from(new Set(
+      evidencePath.path.edges
+        .map((e) => e.layer)
+        .filter((l): l is EdgeLayer => l !== undefined),
+    ));
+
+    const provenance: AuditProvenance = {
+      source_surface: sourceSurface,
+      committed_time: committedTime,
+      confidence_score: confidenceScore,
+      conflict_refs: uniqueConflictRefs,
+      edge_layers: edgeLayers,
+    };
+
+    return { ...evidencePath, provenance };
+  }
+
+  private buildAuditSummary(paths: EvidencePath[]): NavigatorResult["audit_summary"] {
+    const surfaces = new Set<string>();
+    let earliest: number | null = null;
+    let latest: number | null = null;
+    let conflictCount = 0;
+
+    for (const p of paths) {
+      if (p.provenance) {
+        surfaces.add(p.provenance.source_surface);
+        if (p.provenance.committed_time !== null) {
+          if (earliest === null || p.provenance.committed_time < earliest) {
+            earliest = p.provenance.committed_time;
+          }
+          if (latest === null || p.provenance.committed_time > latest) {
+            latest = p.provenance.committed_time;
+          }
+        }
+        conflictCount += p.provenance.conflict_refs.length > 0 ? 1 : 0;
+      }
+    }
+
+    return {
+      total_paths: paths.length,
+      surfaces_used: Array.from(surfaces),
+      earliest_committed_time: earliest,
+      latest_committed_time: latest,
+      conflict_count: conflictCount,
+    };
   }
 
   private collectSupportingNodes(path: BeamPath): NodeRef[] {
@@ -1608,11 +1474,19 @@ export class GraphNavigator {
     return Array.from(facts).sort((a, b) => a - b);
   }
 
-  private applyPostFilterSafetyNet(evidencePath: EvidencePath, viewerContext: ViewerContext): EvidencePath | null {
+  private applyPostFilterSafetyNet(evidencePath: EvidencePath, viewerContext: ViewerContext): Promise<EvidencePath | null> | EvidencePath | null {
+    if (this.useLegacySyncSafetyNet && this.legacyDb) {
+      return this.applyPostFilterSafetyNetLegacy(evidencePath, viewerContext);
+    }
+    return this.applyPostFilterSafetyNetAsync(evidencePath, viewerContext);
+  }
+
+  private async applyPostFilterSafetyNetAsync(evidencePath: EvidencePath, viewerContext: ViewerContext): Promise<EvidencePath | null> {
     const visibleNodes: NodeRef[] = [];
     const redactedPlaceholders: RedactedPlaceholder[] = [];
+    await this.primeVisibilityRecords(evidencePath.path.nodes);
     for (const node of evidencePath.path.nodes) {
-      const disposition = this.getNodeDisposition(node, viewerContext);
+      const disposition = await this.getNodeDisposition(node, viewerContext);
       if (disposition === "visible") {
         visibleNodes.push(node);
       } else {
@@ -1651,59 +1525,137 @@ export class GraphNavigator {
     return filtered;
   }
 
-  private isNodeVisible(nodeRef: NodeRef, viewerContext: ViewerContext): boolean {
-    return this.getNodeDisposition(nodeRef, viewerContext) === "visible";
+  private applyPostFilterSafetyNetLegacy(evidencePath: EvidencePath, viewerContext: ViewerContext): EvidencePath | null {
+    const visibleNodes: NodeRef[] = [];
+    const redactedPlaceholders: RedactedPlaceholder[] = [];
+    for (const node of evidencePath.path.nodes) {
+      const disposition = this.getNodeDispositionLegacy(node, viewerContext);
+      if (disposition === "visible") {
+        visibleNodes.push(node);
+      } else {
+        redactedPlaceholders.push(this.redactionPolicy.toPlaceholder(node, disposition));
+      }
+    }
+
+    if (visibleNodes.length === 0) {
+      return null;
+    }
+
+    const visibleSet = new Set<NodeRef>(visibleNodes);
+    const filteredEdges = evidencePath.path.edges.filter(
+      (edge) => visibleSet.has(edge.from) && visibleSet.has(edge.to),
+    );
+    const filteredSupportingNodes = evidencePath.supporting_nodes.filter((node) => visibleSet.has(node));
+
+    const filtered: EvidencePath = {
+      path: {
+        seed: visibleSet.has(evidencePath.path.seed) ? evidencePath.path.seed : visibleNodes[0],
+        nodes: visibleNodes,
+        edges: filteredEdges,
+        depth: Math.min(evidencePath.path.depth, filteredEdges.length),
+      },
+      score: evidencePath.score,
+      supporting_nodes: filteredSupportingNodes,
+      supporting_facts: evidencePath.supporting_facts,
+      ...(redactedPlaceholders.length > 0 ? { redacted_placeholders: redactedPlaceholders } : {}),
+    };
+
+    filtered.summary = this.summarizeEvidencePath(filtered);
+
+    if (filtered.path.nodes.length === 0) {
+      return null;
+    }
+    return filtered;
   }
 
-  private getNodeDisposition(nodeRef: NodeRef, viewerContext: ViewerContext): VisibilityDisposition {
-    const nodeData = this.loadNodeVisibilityData(nodeRef);
+  private async filterVisibleNodeRefs(nodeRefs: NodeRef[], viewerContext: ViewerContext): Promise<Set<NodeRef>> {
+    const unique = Array.from(new Set(nodeRefs));
+    await this.primeVisibilityRecords(unique);
+    const visible = new Set<NodeRef>();
+    for (const nodeRef of unique) {
+      const disposition = await this.getNodeDisposition(nodeRef, viewerContext);
+      if (disposition === "visible") {
+        visible.add(nodeRef);
+      }
+    }
+    return visible;
+  }
+
+  private async getNodeDisposition(nodeRef: NodeRef, viewerContext: ViewerContext): Promise<VisibilityDisposition> {
+    await this.primeVisibilityRecords([nodeRef]);
+    const record = this.visibilityRecordCache.get(nodeRef) ?? null;
+    if (!record) {
+      return "hidden";
+    }
+    const nodeData = this.toVisibilityNodeData(record);
     if (!nodeData) {
       return "hidden";
     }
     return this.visibilityPolicy.getNodeDisposition(viewerContext, nodeRef, nodeData);
   }
 
-  private loadNodeVisibilityData(nodeRef: NodeRef): Record<string, unknown> | null {
-    const parsed = this.parseNodeRef(nodeRef);
-    if (!parsed) {
-      return null;
+  private async primeVisibilityRecords(nodeRefs: NodeRef[]): Promise<void> {
+    const missing = nodeRefs.filter((nodeRef) => !this.visibilityRecordCache.has(nodeRef));
+    if (missing.length === 0) {
+      return;
     }
-
-    if (parsed.kind === "entity") {
-      const row = this.db
-        .prepare("SELECT memory_scope, owner_agent_id FROM entity_nodes WHERE id = ?")
-        .get(parsed.id) as { memory_scope: "shared_public" | "private_overlay"; owner_agent_id: string | null } | undefined;
-      return row ? { memory_scope: row.memory_scope, owner_agent_id: row.owner_agent_id } : null;
+    const repoWithVisibility = this.readRepo as Partial<GraphReadQueryRepo>;
+    const rows = typeof repoWithVisibility.getNodeVisibility === "function"
+      ? await repoWithVisibility.getNodeVisibility(missing)
+      : this.loadVisibilityRecordsLegacy(missing);
+    const byRef = new Map(rows.map((row) => [row.nodeRef, row] as const));
+    for (const nodeRef of missing) {
+      this.visibilityRecordCache.set(nodeRef, byRef.get(nodeRef) ?? null);
     }
+  }
 
-    if (parsed.kind === "evaluation" || parsed.kind === "commitment") {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row ? { agent_id: row.agent_id } : null;
+  private getNodeDispositionLegacy(nodeRef: NodeRef, viewerContext: ViewerContext): VisibilityDisposition {
+    const record = this.getLegacyVisibilityRecord(nodeRef);
+    if (!record) {
+      return "hidden";
     }
-
-    if (parsed.kind === "assertion") {
-      const row = this.db
-        .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
-        .get(parsed.id) as { agent_id: string } | undefined;
-      return row ? { agent_id: row.agent_id } : null;
+    const nodeData = this.toVisibilityNodeData(record);
+    if (!nodeData) {
+      return "hidden";
     }
+    return this.visibilityPolicy.getNodeDisposition(viewerContext, nodeRef, nodeData);
+  }
 
-    if (parsed.kind === "event") {
-      const row = this.db
-        .prepare("SELECT * FROM event_nodes WHERE id = ?")
-        .get(parsed.id) as EventNode | undefined;
-      return row ? row as unknown as Record<string, unknown> : null;
+  private getLegacyVisibilityRecord(nodeRef: NodeRef): GraphNodeVisibilityRecord | null {
+    const cached = this.visibilityRecordCache.get(nodeRef);
+    if (cached !== undefined) {
+      return cached;
     }
+    const row = this.loadVisibilityRecordFromLegacyDb(nodeRef);
+    this.visibilityRecordCache.set(nodeRef, row);
+    return row;
+  }
 
-    if (parsed.kind === "fact") {
-      const row = this.db
-        .prepare("SELECT id FROM fact_edges WHERE id = ? AND t_invalid = ?")
-        .get(parsed.id, MAX_INTEGER) as { id: number } | undefined;
-      return row ? { id: row.id } : null;
+  private supportsNodeVisibilityRepo(): boolean {
+    const repo = this.readRepo as Partial<GraphReadQueryRepo>;
+    return typeof repo.getNodeVisibility === "function";
+  }
+
+  private toVisibilityNodeData(record: GraphNodeVisibilityRecord): Record<string, unknown> | null {
+    if (record.kind === "entity") {
+      return {
+        memory_scope: record.memoryScope,
+        owner_agent_id: record.ownerAgentId,
+      };
     }
-
+    if (record.kind === "event") {
+      return {
+        visibility_scope: record.visibilityScope,
+        location_entity_id: record.locationEntityId,
+        owner_agent_id: record.ownerAgentId,
+      };
+    }
+    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment") {
+      return { agent_id: record.agentId };
+    }
+    if (record.kind === "fact") {
+      return record.active ? { id: 1 } : null;
+    }
     return null;
   }
 
@@ -1782,5 +1734,238 @@ export class GraphNavigator {
       return 1;
     }
     return value;
+  }
+
+  private asLegacyDbLike(value: unknown): LegacyDbLike | null {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+    const candidate = value as Partial<LegacyDbLike>;
+    return typeof candidate.prepare === "function" ? (candidate as LegacyDbLike) : null;
+  }
+
+  private coerceReadRepo(readRepo: GraphReadQueryRepo): GraphReadQueryRepo {
+    return readRepo;
+  }
+
+  /**
+   * Gate for legacy safety net. When this returns true for all repos, LegacyDbLike can be removed.
+   */
+  private isFullGraphReadRepo(readRepo: GraphReadQueryRepo): boolean {
+    const candidate = readRepo as Partial<GraphReadQueryRepo>;
+    return (
+      typeof candidate.getNodeSalience === "function"
+      && typeof candidate.readLogicEdges === "function"
+      && typeof candidate.readMemoryRelationEdges === "function"
+      && typeof candidate.readSemanticEdges === "function"
+      && typeof candidate.readStateFactEdges === "function"
+      && typeof candidate.readEventParticipantContexts === "function"
+      && typeof candidate.readActiveFactsForEntityFrontier === "function"
+      && typeof candidate.readVisibleEventsForEntityFrontier === "function"
+      && typeof candidate.readAgentAssertionsLinkedToEntities === "function"
+      && typeof candidate.readAgentAssertionDetails === "function"
+      && typeof candidate.resolveEntityRefByPointerKey === "function"
+      && typeof candidate.getNodeSnapshots === "function"
+      && typeof candidate.getNodeVisibility === "function"
+      && typeof candidate.getPrivateNodeOwners === "function"
+      && typeof candidate.listRelationTypesForFrontier === "function"
+    );
+  }
+
+  private loadSalienceForRefsLegacy(nodeRefs: NodeRef[]): Array<{ nodeRef: NodeRef; salience: number }> {
+    if (!this.legacyDb || nodeRefs.length === 0) {
+      return [];
+    }
+    try {
+      const placeholders = nodeRefs.map(() => "?").join(",");
+      const rows = this.legacyDb
+        .prepare(`SELECT node_ref, salience FROM node_scores WHERE node_ref IN (${placeholders})`)
+        .all(...nodeRefs) as Array<{ node_ref: string; salience: number }>;
+      return rows.map((row) => ({
+        nodeRef: row.node_ref as NodeRef,
+        salience: row.salience,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  private loadPrivateOwnersLegacy(nodeRefs: NodeRef[]): Array<{ nodeRef: NodeRef; agentId: string }> {
+    if (!this.legacyDb || nodeRefs.length === 0) {
+      return [];
+    }
+    const refsById = new Map<number, NodeRef>();
+    for (const nodeRef of nodeRefs) {
+      const parsed = this.parseNodeRef(nodeRef);
+      if (!parsed) {
+        continue;
+      }
+      if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+        refsById.set(parsed.id, nodeRef);
+      }
+    }
+    const ids = Array.from(refsById.keys());
+    if (ids.length === 0) {
+      return [];
+    }
+    const placeholders = ids.map(() => "?").join(",");
+    try {
+      const rows = this.legacyDb
+        .prepare(`SELECT id, agent_id FROM private_cognition_current WHERE id IN (${placeholders})`)
+        .all(...ids) as Array<{ id: number; agent_id: string }>;
+      return rows
+        .map((row) => {
+          const nodeRef = refsById.get(row.id);
+          if (!nodeRef) {
+            return null;
+          }
+          return { nodeRef, agentId: row.agent_id };
+        })
+        .filter((row): row is { nodeRef: NodeRef; agentId: string } => row !== null);
+    } catch {
+      return [];
+    }
+  }
+
+  private loadNodeSnapshotsLegacy(nodeRefs: NodeRef[]): Array<{ nodeRef: NodeRef; summary: string | null; timestamp: number | null }> {
+    if (!this.legacyDb || nodeRefs.length === 0) {
+      return [];
+    }
+    const results: Array<{ nodeRef: NodeRef; summary: string | null; timestamp: number | null }> = [];
+    for (const nodeRef of nodeRefs) {
+      const parsed = this.parseNodeRef(nodeRef);
+      if (!parsed) {
+        continue;
+      }
+      try {
+        if (parsed.kind === "event") {
+          const row = this.legacyDb
+            .prepare("SELECT summary, timestamp FROM event_nodes WHERE id = ?")
+            .get(parsed.id) as { summary: string | null; timestamp: number | null } | undefined;
+          if (row) {
+            results.push({ nodeRef, summary: row.summary, timestamp: row.timestamp });
+          }
+          continue;
+        }
+        if (parsed.kind === "entity") {
+          const row = this.legacyDb
+            .prepare("SELECT canonical_name FROM entity_nodes WHERE id = ?")
+            .get(parsed.id) as { canonical_name: string | null } | undefined;
+          if (row) {
+            results.push({ nodeRef, summary: row.canonical_name, timestamp: null });
+          }
+          continue;
+        }
+        if (parsed.kind === "fact") {
+          const row = this.legacyDb
+            .prepare("SELECT predicate, t_valid FROM fact_edges WHERE id = ?")
+            .get(parsed.id) as { predicate: string | null; t_valid: number | null } | undefined;
+          if (row) {
+            results.push({ nodeRef, summary: row.predicate, timestamp: row.t_valid });
+          }
+          continue;
+        }
+        if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+          const row = this.legacyDb
+            .prepare("SELECT summary_text, updated_at FROM private_cognition_current WHERE id = ?")
+            .get(parsed.id) as { summary_text: string | null; updated_at: number | null } | undefined;
+          if (row) {
+            results.push({ nodeRef, summary: row.summary_text, timestamp: row.updated_at });
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    return results;
+  }
+
+  private loadVisibilityRecordsLegacy(nodeRefs: NodeRef[]): GraphNodeVisibilityRecord[] {
+    const records: GraphNodeVisibilityRecord[] = [];
+    for (const nodeRef of nodeRefs) {
+      const row = this.loadVisibilityRecordFromLegacyDb(nodeRef);
+      if (row) {
+        records.push(row);
+      }
+    }
+    return records;
+  }
+
+  private loadVisibilityRecordFromLegacyDb(nodeRef: NodeRef): GraphNodeVisibilityRecord | null {
+    if (!this.legacyDb) {
+      return null;
+    }
+    const parsed = this.parseNodeRef(nodeRef);
+    if (!parsed) {
+      return null;
+    }
+
+    try {
+      if (parsed.kind === "entity") {
+        const row = this.legacyDb
+          .prepare("SELECT memory_scope, owner_agent_id FROM entity_nodes WHERE id = ?")
+          .get(parsed.id) as { memory_scope: "shared_public" | "private_overlay"; owner_agent_id: string | null } | undefined;
+        if (!row) {
+          return null;
+        }
+        return {
+          nodeRef,
+          kind: "entity",
+          memoryScope: row.memory_scope,
+          ownerAgentId: row.owner_agent_id,
+        };
+      }
+
+      if (parsed.kind === "event") {
+        const row = this.legacyDb
+          .prepare("SELECT visibility_scope, location_entity_id FROM event_nodes WHERE id = ?")
+          .get(parsed.id) as {
+          visibility_scope: "area_visible" | "world_public";
+          location_entity_id: number;
+        } | undefined;
+        if (!row) {
+          return null;
+        }
+        return {
+          nodeRef,
+          kind: "event",
+          visibilityScope: row.visibility_scope,
+          locationEntityId: row.location_entity_id,
+          ownerAgentId: null,
+        };
+      }
+
+      if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+        const row = this.legacyDb
+          .prepare("SELECT agent_id FROM private_cognition_current WHERE id = ?")
+          .get(parsed.id) as { agent_id: string } | undefined;
+        if (!row) {
+          return null;
+        }
+        return {
+          nodeRef,
+          kind: parsed.kind,
+          agentId: row.agent_id,
+        };
+      }
+
+      if (parsed.kind === "fact") {
+        const row = this.legacyDb
+          .prepare("SELECT id FROM fact_edges WHERE id = ? AND t_invalid = ?")
+          .get(parsed.id, Number.MAX_SAFE_INTEGER) as { id: number } | undefined;
+        if (!row) {
+          return null;
+        }
+        return {
+          nodeRef,
+          kind: "fact",
+          active: true,
+        };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
   }
 }

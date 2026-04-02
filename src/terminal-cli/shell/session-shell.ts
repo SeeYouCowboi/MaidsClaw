@@ -3,17 +3,15 @@
  *
  * Each line of user input is either:
  * - A slash command (dispatched to {@link dispatchSlashCommand})
- * - A turn message (sent to {@link LocalRuntime.executeTurn})
+ * - A turn message (sent via {@link AppUserFacade.turn})
  *
  * After each turn, a compact status line is printed:
  *   [req:<request_id> | settle:<settlement_id|none> | reply:<yes|no> | recovery:<yes|no>]
  */
 
-import readline from "readline";
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
-import { createLocalRuntime } from "../local-runtime.js";
-import type { LocalRuntime } from "../local-runtime.js";
-import { GatewayClient } from "../gateway-client.js";
+import readline from "node:readline";
+import type { AppUserFacade } from "../../app/host/types.js";
+import type { GatewayClient } from "../gateway-client.js";
 import { writeText } from "../output.js";
 import { dispatchSlashCommand } from "./slash-dispatcher.js";
 import type { ShellState } from "./state.js";
@@ -22,19 +20,17 @@ import type { ShellState } from "./state.js";
 
 export class SessionShell {
 	private readonly state: ShellState;
-	private readonly runtime?: RuntimeBootstrapResult;
-	private readonly localRuntime?: LocalRuntime;
+	private readonly facade: AppUserFacade;
 	private readonly gatewayClient?: GatewayClient;
 	private readonly saveTrace: boolean;
 
 	constructor(
 		state: ShellState,
-		runtime: RuntimeBootstrapResult | undefined,
+		facade: AppUserFacade,
 		options?: { saveTrace?: boolean; gatewayClient?: GatewayClient },
 	) {
 		this.state = state;
-		this.runtime = runtime;
-		this.localRuntime = runtime ? createLocalRuntime(runtime) : undefined;
+		this.facade = facade;
 		this.gatewayClient = options?.gatewayClient;
 		this.saveTrace = options?.saveTrace ?? false;
 	}
@@ -62,7 +58,7 @@ export class SessionShell {
 				if (trimmed.startsWith("/")) {
 					const result = await dispatchSlashCommand(trimmed, {
 						state: this.state,
-						runtime: this.runtime,
+						facade: this.facade,
 						gatewayClient: this.gatewayClient,
 					});
 					if (result.exit) {
@@ -106,8 +102,8 @@ export class SessionShell {
 
 				if (streamed.assistantText) {
 					writeText(streamed.assistantText);
-			} else if (summary.private_cognition_count > 0) {
-				writeText("[silent turn — private cognition only]");
+				} else if (summary.private_cognition_count > 0) {
+					writeText("[silent turn — private cognition only]");
 				} else {
 					writeText("[no output]");
 				}
@@ -122,25 +118,41 @@ export class SessionShell {
 				return;
 			}
 
-			if (!this.localRuntime) {
-				throw new Error("Local runtime is not initialized");
-			}
+			const requestId = crypto.randomUUID();
+			let assistantText = "";
+			let hadError = false;
+			let errorMessage: string | undefined;
 
-			const result = await this.localRuntime.executeTurn({
+			for await (const event of this.facade.turn.streamTurn({
 				sessionId: this.state.sessionId,
 				agentId: this.state.agentId,
 				text,
+				requestId,
 				saveTrace: this.saveTrace,
-			});
+			})) {
+				if (event.type === "text_delta") {
+					assistantText += event.text;
+				}
+				if (event.type === "error") {
+					hadError = true;
+					errorMessage = event.message;
+				}
+			}
+
+			if (hadError) {
+				throw new Error(errorMessage ?? "Turn failed");
+			}
+
+			const summary = await this.facade.inspect.getSummary(requestId);
 
 			// Update shell state
-			this.state.lastRequestId = result.request_id;
-			this.state.lastSettlementId = result.settlement_id;
+			this.state.lastRequestId = requestId;
+			this.state.lastSettlementId = summary.settlement.settlement_id;
 
 			// Print assistant response
-			if (result.assistant_text) {
-				writeText(result.assistant_text);
-			} else if (result.private_cognition.present) {
+			if (assistantText) {
+				writeText(assistantText);
+			} else if (summary.private_cognition_count > 0) {
 				writeText("[silent turn — private cognition only]");
 			} else {
 				writeText("[no output]");
@@ -148,14 +160,16 @@ export class SessionShell {
 
 			// Compact status line
 			const statusParts = [
-				`req:${result.request_id}`,
-				`settle:${result.settlement_id ?? "none"}`,
-				`reply:${result.has_public_reply ? "yes" : "no"}`,
-				`recovery:${result.recovery_required ? "yes" : "no"}`,
+				`req:${requestId}`,
+				`settle:${summary.settlement.settlement_id ?? "none"}`,
+				`reply:${summary.has_public_reply ? "yes" : "no"}`,
+				`recovery:${summary.recovery_required ? "yes" : "no"}`,
 			];
 			writeText(`[${statusParts.join(" | ")}]`);
 		} catch (err) {
-			writeText(`Turn error: ${err instanceof Error ? err.message : String(err)}`);
+			writeText(
+				`Turn error: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		}
 	}
 }

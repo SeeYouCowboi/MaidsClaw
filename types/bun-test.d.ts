@@ -4,7 +4,7 @@ declare module "bun:test" {
     toBe(expected: unknown): Promise<void>;
     toEqual(expected: unknown): Promise<void>;
     toBeUndefined(): Promise<void>;
-    toThrow(expected?: string | RegExp): Promise<void>;
+    toThrow(expected?: string | RegExp | (new (...args: any[]) => any)): Promise<void>;
   };
 
   type Matchers<T> = {
@@ -20,21 +20,44 @@ declare module "bun:test" {
     toBeLessThan(expected: number): void;
     toBeLessThanOrEqual(expected: number): void;
     toBeCloseTo(expected: number, precision?: number): void;
+    toBeInstanceOf(ctor: new (...args: any[]) => any): void;
     toMatch(expected: RegExp | string): void;
     toContain(expected: unknown): void;
     toHaveLength(expected: number): void;
-    toThrow(expected?: string | RegExp): void;
+    toThrow(expected?: string | RegExp | (new (...args: any[]) => any)): void;
     toHaveBeenCalledWith(...expected: unknown[]): void;
     resolves: AsyncMatchers;
     rejects: AsyncMatchers;
     not: Omit<Matchers<T>, "not">;
   };
 
-  export function describe(name: string, fn: () => void): void;
-  export function it(name: string, fn: () => void | Promise<void>): void;
+  type DescribeFn = (name: string, fn: () => void) => void;
+  type TestFn = (name: string, fn: () => void | Promise<void>, timeout?: number) => void;
+
+  export const describe: DescribeFn & {
+    skip: DescribeFn;
+    only: DescribeFn;
+    skipIf(condition: boolean): DescribeFn;
+    if(condition: boolean): DescribeFn;
+  };
+
+  export const it: TestFn & {
+    skip: TestFn;
+    only: TestFn;
+    skipIf(condition: boolean): TestFn;
+    if(condition: boolean): TestFn;
+  };
+
+  export const test: TestFn & {
+    skip: TestFn;
+    only: TestFn;
+    skipIf(condition: boolean): TestFn;
+    if(condition: boolean): TestFn;
+  };
+
   export function expect<T>(value: T): Matchers<T>;
   export namespace expect {
-    function any<T = unknown>(constructor: new (...args: any[]) => T | Function): unknown;
+    function any<T = unknown>(ctor: new (...args: any[]) => T | Function): unknown;
     function objectContaining<T extends object>(value: T): T;
   }
   export function beforeAll(fn: () => void | Promise<void>): void;

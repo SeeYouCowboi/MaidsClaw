@@ -1,0 +1,32 @@
+Task 5 Evidence: contracts created + build verification
+Date: 2026-04-01
+
+Command: ls src/storage/domain-repos/contracts
+Output:
+area-world-projection-repo.ts
+cognition-event-repo.ts
+cognition-projection-repo.ts
+core-memory-block-repo.ts
+embedding-repo.ts
+episode-repo.ts
+graph-mutable-store-repo.ts
+graph-read-query-repo.ts
+index.ts
+interaction-repo.ts
+narrative-search-repo.ts
+node-score-repo.ts
+node-scoring-query-repo.ts
+pending-flush-recovery-repo.ts
+promotion-query-repo.ts
+recent-cognition-slot-repo.ts
+search-projection-repo.ts
+semantic-edge-repo.ts
+session-repo.ts
+settlement-ledger-repo.ts
+shared-block-repo.ts
+
+Command: bun run build
+Output:
+$ tsc -p tsconfig.build.json --noEmit
+
+Result: PASS (0 errors)

@@ -1,0 +1,36 @@
+Task 8 (G2b) Evidence — construct-but-gate wiring
+Date: 2026-04-02
+
+Changed files:
+- src/bootstrap/runtime.ts
+- src/bootstrap/types.ts
+- src/runtime/turn-service.ts
+- src/memory/pending-settlement-sweeper.ts
+- .sisyphus/notepads/memory-v3-closeout/learnings.md
+
+Implemented outcomes:
+- MemoryTaskAgent is now constructed in bootstrap when memoryEmbeddingModelId is set.
+- ThrowingMemoryTaskDbAdapter shim is defined and used for MemoryTaskAgent deps.db.
+- PendingSettlementSweeper is instantiated with pendingFlushRepo and start() is called.
+- PublicationRecoverySweeper is conditionally instantiated only when schema-compatible guard passes.
+- memoryPipelineReady remains false by design (construct-but-gate).
+- memoryPipelineStatus semantics updated to include "partial" when embedding is configured but runtime is still gated.
+- TurnService flush paths are gated by memoryPipelineReady (plus non-null memoryTaskAgent).
+
+Verification:
+1) LSP diagnostics (error-level) on changed files:
+   - src/bootstrap/runtime.ts: clean
+   - src/bootstrap/types.ts: clean
+   - src/runtime/turn-service.ts: clean
+   - src/memory/pending-settlement-sweeper.ts: clean
+
+2) Build:
+   Command: bun run build
+   Result: PASS (tsc -p tsconfig.build.json --noEmit)
+
+3) Tests:
+   Command: bun test
+   Result: PASS against expected baseline profile
+   - 868 pass
+   - 350 skip
+   - 21 fail (pre-existing env/known baseline failures, no net increase)

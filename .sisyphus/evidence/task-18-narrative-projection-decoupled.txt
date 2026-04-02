@@ -1,0 +1,26 @@
+Task: T18 narrative-search + area-world-projection decoupling verification
+
+Verification summary:
+- git diff reviewed for:
+  - src/memory/narrative/narrative-search.ts
+  - src/memory/projection/area-world-projection-repo.ts
+  - src/memory/projection/projection-manager.ts
+- lsp_diagnostics on changed T18 files:
+  - narrative-search.ts: clean
+  - area-world-projection-repo.ts: clean
+  - projection-manager.ts: clean
+  - pg/narrative-search-repo.ts: clean
+  - sqlite/narrative-search-repo.ts: info-only (organize imports), no errors/warnings
+- ast_grep_search pattern `import type { Database } from "bun:sqlite";` on T18 targets:
+  - src/memory/narrative/narrative-search.ts: 0 matches
+  - src/memory/projection/area-world-projection-repo.ts: 0 matches
+- build check:
+  - command: bun run build
+  - result: pass (tsc --noEmit, 0 errors)
+
+Files prepared for T18 commit scope:
+- src/memory/narrative/narrative-search.ts
+- src/memory/projection/area-world-projection-repo.ts
+- src/memory/projection/projection-manager.ts
+- src/storage/domain-repos/pg/narrative-search-repo.ts
+- src/storage/domain-repos/sqlite/narrative-search-repo.ts

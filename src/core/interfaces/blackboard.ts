@@ -2,7 +2,7 @@
  * Blackboard — Reserved Interface (V1 Stub)
  *
  * V1 stub: SimpleBlackboard implemented in src/state/blackboard.ts
- * V2+ full: event-bus notified changes, persistence to SQLite, typed schemas per namespace.
+ * V2+ full: event-bus notified changes, persistent storage, typed schemas per namespace.
  *
  * All calling code should depend on this interface type, not the concrete class,
  * so implementations can be swapped by changing one line in the DI/config setup.

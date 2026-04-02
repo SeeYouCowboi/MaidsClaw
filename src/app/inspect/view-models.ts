@@ -1,12 +1,11 @@
-import { CoreMemoryService } from "../../memory/core-memory.js";
-import { getRecentCognition } from "../../memory/prompt-data.js";
-import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
+import { formatRecentCognitionFromPayload } from "../../memory/prompt-data.js";
 import type { InteractionRecord } from "../../interaction/contracts.js";
 import { redactInteractionRecord } from "../../interaction/redaction.js";
-import { InteractionStore } from "../../interaction/store.js";
+import type { InteractionRepo } from "../../storage/domain-repos/contracts/interaction-repo.js";
 import type { InspectContext } from "../contracts/inspect.js";
 import type { LogEntry, TraceBundle } from "../contracts/trace.js";
 import type { TraceStore } from "../diagnostics/trace-store.js";
+import type { InspectRuntimeDeps } from "./runtime-deps.js";
 import {
   getRequestEvidence,
   getSettlementRecord,
@@ -14,7 +13,7 @@ import {
 } from "./inspect-query-service.js";
 
 export type InspectViewLoadParams = {
-  runtime: RuntimeBootstrapResult;
+  runtime: InspectRuntimeDeps;
   traceStore?: TraceStore;
   context: InspectContext;
   raw?: boolean;
@@ -106,7 +105,7 @@ export type MemoryView = {
   agent_id?: string;
   memory_pipeline: {
     ready: boolean;
-    status: RuntimeBootstrapResult["memoryPipelineStatus"];
+    status: InspectRuntimeDeps["memoryPipelineStatus"];
   };
   core_memory_summary: Array<{
     label: string;
@@ -135,9 +134,9 @@ export type TraceView = {
   };
 };
 
-export function loadSummaryView(params: InspectViewLoadParams): SummaryView {
+export async function loadSummaryView(params: InspectViewLoadParams): Promise<SummaryView> {
   const requestId = requireRequestId(params.context);
-  const evidence = getRequestEvidence({
+  const evidence = await getRequestEvidence({
     runtime: params.runtime,
     traceStore: params.traceStore,
     context: params.context,
@@ -146,9 +145,9 @@ export function loadSummaryView(params: InspectViewLoadParams): SummaryView {
   const settlement = getSettlementRecord(evidence.records, params);
   const settlementPayload = settlement?.payload as SettlementPayloadLike | undefined;
   const derivedSessionId = settlementPayload?.sessionId ?? evidence.trace?.session_id ?? evidence.context.sessionId;
-  const interactionStore = getInteractionStore(params.runtime);
+  const interactionRepo = getInteractionRepo(params.runtime);
   const pendingState = derivedSessionId
-    ? interactionStore.getPendingSettlementJobState(derivedSessionId)
+    ? await interactionRepo.getPendingSettlementJobState(derivedSessionId)
     : null;
 
   const errorFromStatus = evidence.records
@@ -181,20 +180,20 @@ export function loadSummaryView(params: InspectViewLoadParams): SummaryView {
     },
     pending_sweep_state: pendingState ?? {},
     recovery_required: derivedSessionId
-      ? params.runtime.sessionService.requiresRecovery(derivedSessionId)
+      ? await params.runtime.sessionService.requiresRecovery(derivedSessionId)
       : false,
     trace_available: evidence.trace !== null,
   };
 }
 
-export function loadTranscriptView(params: InspectViewLoadParams): TranscriptView {
+export async function loadTranscriptView(params: InspectViewLoadParams): Promise<TranscriptView> {
   const sessionId = requireSessionId(params.context);
-  const records = getInteractionStore(params.runtime).getBySession(sessionId);
+  const records = await getInteractionRepo(params.runtime).getBySession(sessionId);
   const unsafeRaw = resolveUnsafeRawMode(params.mode, params.unsafeRaw ?? false);
 
   const entries = records
-    .filter((record) => includeTranscriptRecord(record, Boolean(params.raw)))
-    .map((record) => {
+    .filter((record: InteractionRecord) => includeTranscriptRecord(record, Boolean(params.raw)))
+    .map((record: InteractionRecord) => {
       const requestId = record.correlatedTurnId;
       if (record.recordType === "message") {
         const payload = record.payload as { content?: unknown };
@@ -238,9 +237,9 @@ export function loadTranscriptView(params: InspectViewLoadParams): TranscriptVie
   };
 }
 
-export function loadPromptView(params: InspectViewLoadParams): PromptView {
+export async function loadPromptView(params: InspectViewLoadParams): Promise<PromptView> {
   const requestId = requireRequestId(params.context);
-  const evidence = getRequestEvidence({
+  const evidence = await getRequestEvidence({
     runtime: params.runtime,
     traceStore: params.traceStore,
     context: params.context,
@@ -253,7 +252,7 @@ export function loadPromptView(params: InspectViewLoadParams): PromptView {
   const sessionId = settlementPayload?.sessionId ?? evidence.trace?.session_id ?? evidence.context.sessionId;
   const agentId = settlementPayload?.ownerAgentId ?? evidence.trace?.agent_id ?? evidence.context.agentId;
   const recentCognition = sessionId && agentId
-    ? getRecentCognition(agentId, sessionId, params.runtime.db)
+    ? await getRecentCognitionFromRepo(agentId, sessionId, params.runtime)
     : "";
 
   return {
@@ -264,8 +263,8 @@ export function loadPromptView(params: InspectViewLoadParams): PromptView {
       ? { rendered_system_prompt: evidence.trace.prompt.rendered_system }
       : {}),
     conversation_messages: evidence.records
-      .filter((record) => record.recordType === "message")
-      .map((record) => {
+      .filter((record: InteractionRecord) => record.recordType === "message")
+      .map((record: InteractionRecord) => {
         const payload = record.payload as { role?: unknown; content?: unknown };
         return {
           role: typeof payload.role === "string" ? payload.role : "unknown",
@@ -277,14 +276,14 @@ export function loadPromptView(params: InspectViewLoadParams): PromptView {
   };
 }
 
-export function loadChunksView(params: InspectViewLoadParams): ChunksView {
+export async function loadChunksView(params: InspectViewLoadParams): Promise<ChunksView> {
   const requestId = requireRequestId(params.context);
-  const trace = getRequestEvidence({
+  const trace = (await getRequestEvidence({
     runtime: params.runtime,
     traceStore: params.traceStore,
     context: params.context,
     requestId,
-  }).trace;
+  })).trace;
 
   return {
     request_id: requestId,
@@ -307,11 +306,11 @@ export function loadChunksView(params: InspectViewLoadParams): ChunksView {
   };
 }
 
-export function loadLogsView(params: InspectViewLoadParams): LogsView {
+export async function loadLogsView(params: InspectViewLoadParams): Promise<LogsView> {
   const requestId = params.context.requestId;
   const sessionId = params.context.sessionId;
   const agentId = params.context.agentId;
-  const bundles = collectTraceBundles(params, requestId, sessionId);
+  const bundles = await collectTraceBundles(params, requestId, sessionId);
 
   const entries = bundles
     .flatMap((bundle) =>
@@ -335,17 +334,18 @@ export function loadLogsView(params: InspectViewLoadParams): LogsView {
   };
 }
 
-export function loadMemoryView(params: InspectViewLoadParams): MemoryView {
+export async function loadMemoryView(params: InspectViewLoadParams): Promise<MemoryView> {
   const sessionId = requireSessionId(params.context);
-  const agentId = params.context.agentId
-    ?? params.runtime.sessionService.getSession(sessionId)?.agentId;
-  const pendingState = getInteractionStore(params.runtime).getPendingSettlementJobState(sessionId);
+	const agentId = params.context.agentId
+		?? (await params.runtime.sessionService.getSession(sessionId))?.agentId;
+  const interactionRepo = getInteractionRepo(params.runtime);
+  const pendingState = await interactionRepo.getPendingSettlementJobState(sessionId);
 
   let coreMemorySummary: MemoryView["core_memory_summary"] = [];
   if (agentId) {
     try {
-      const coreMemory = new CoreMemoryService(params.runtime.db);
-      coreMemorySummary = coreMemory.getAllBlocks(agentId).map((block) => ({
+      const blocks = await params.runtime.coreMemoryBlockRepo.getAllBlocks(agentId);
+      coreMemorySummary = blocks.map((block) => ({
         label: block.label,
         chars_current: block.chars_current,
         char_limit: block.char_limit,
@@ -364,23 +364,23 @@ export function loadMemoryView(params: InspectViewLoadParams): MemoryView {
     },
     core_memory_summary: coreMemorySummary,
     recent_cognition: agentId
-      ? getRecentCognition(agentId, sessionId, params.runtime.db)
+      ? await getRecentCognitionFromRepo(agentId, sessionId, params.runtime)
       : "",
     flush_state: {
       unprocessed_settlements:
-        getInteractionStore(params.runtime).countUnprocessedSettlements(sessionId),
+        await interactionRepo.countUnprocessedSettlements(sessionId),
     },
     pending_sweeper_state: pendingState ?? {},
   };
 }
 
-export function loadTraceView(
+export async function loadTraceView(
   params: InspectViewLoadParams,
   unsafeRaw: boolean,
-): TraceView {
+): Promise<TraceView> {
   const requestId = requireRequestId(params.context);
   const unsafeRawMode = resolveUnsafeRawMode(params.mode, unsafeRaw);
-  const evidence = getRequestEvidence({
+  const evidence = await getRequestEvidence({
     runtime: params.runtime,
     traceStore: params.traceStore,
     context: params.context,
@@ -437,18 +437,18 @@ function requireSessionId(context: InspectContext): string {
   return context.sessionId;
 }
 
-function collectTraceBundles(
+async function collectTraceBundles(
   params: InspectViewLoadParams,
   requestId?: string,
   sessionId?: string,
-): TraceBundle[] {
+): Promise<TraceBundle[]> {
   if (requestId) {
-    const trace = getRequestEvidence({
+    const trace = (await getRequestEvidence({
       runtime: params.runtime,
       traceStore: params.traceStore,
       context: params.context,
       requestId,
-    }).trace;
+    })).trace;
     return trace ? [trace] : [];
   }
 
@@ -456,19 +456,19 @@ function collectTraceBundles(
     return [];
   }
 
-  const records = getInteractionStore(params.runtime).getBySession(sessionId);
+  const records = await getInteractionRepo(params.runtime).getBySession(sessionId);
   const requestIds = [...new Set(records
-    .map((record) => record.correlatedTurnId)
+    .map((record: InteractionRecord) => record.correlatedTurnId)
     .filter((value): value is string => typeof value === "string" && value.length > 0))];
 
   const bundles: TraceBundle[] = [];
   for (const id of requestIds) {
-    const trace = getRequestEvidence({
+    const trace = (await getRequestEvidence({
       runtime: params.runtime,
       traceStore: params.traceStore,
       context: { ...params.context, requestId: id },
       requestId: id,
-    }).trace;
+    })).trace;
     if (trace) {
       bundles.push(trace);
     }
@@ -561,8 +561,17 @@ function resolveUnsafeRawMode(
   return true;
 }
 
-function getInteractionStore(runtime: RuntimeBootstrapResult): InteractionStore {
-  return new InteractionStore(runtime.db);
+function getInteractionRepo(runtime: InspectRuntimeDeps): InteractionRepo {
+  return runtime.interactionRepo;
+}
+
+async function getRecentCognitionFromRepo(
+  agentId: string,
+  sessionId: string,
+  runtime: InspectRuntimeDeps,
+): Promise<string> {
+  const payload = await runtime.recentCognitionSlotRepo.getSlotPayload(sessionId, agentId);
+  return formatRecentCognitionFromPayload(payload);
 }
 
 type SettlementPayloadLike = {

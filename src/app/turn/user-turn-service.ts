@@ -12,12 +12,12 @@ export type ExecuteUserTurnDeps = {
 	turnService: Pick<TurnService, "runUserTurn">;
 };
 
-export function executeUserTurn(
+export async function executeUserTurn(
 	params: ExecuteUserTurnParams,
 	deps: ExecuteUserTurnDeps,
-): AsyncIterable<Chunk> {
-	if (!deps.sessionService.isOpen(params.sessionId)) {
-		const session = deps.sessionService.getSession(params.sessionId);
+): Promise<AsyncIterable<Chunk>> {
+	if (!await deps.sessionService.isOpen(params.sessionId)) {
+		const session = await deps.sessionService.getSession(params.sessionId);
 		if (!session) {
 			throw new MaidsClawError({
 				code: "SESSION_NOT_FOUND",
@@ -35,7 +35,7 @@ export function executeUserTurn(
 		});
 	}
 
-	if (deps.sessionService.isRecoveryRequired(params.sessionId)) {
+	if (await deps.sessionService.isRecoveryRequired(params.sessionId)) {
 		throw new MaidsClawError({
 			code: "INVALID_ACTION",
 			message: `Session '${params.sessionId}' requires recovery before accepting new turns`,
@@ -47,7 +47,7 @@ export function executeUserTurn(
 		});
 	}
 
-	const session = deps.sessionService.getSession(params.sessionId);
+	const session = await deps.sessionService.getSession(params.sessionId);
 	if (!session) {
 		throw new MaidsClawError({
 			code: "SESSION_NOT_FOUND",

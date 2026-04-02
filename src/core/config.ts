@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
-const DEFAULT_DB_PATH = "./data/maidsclaw.db";
 const DEFAULT_DATA_DIR = "./data";
 const DEFAULT_NATIVE_MODULES = true;
 const DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-5";
@@ -62,8 +61,6 @@ export function loadConfig(options?: {
   
   const host = getOptionalEnv("MAIDSCLAW_HOST", DEFAULT_HOST);
   
-  // Get storage config with defaults
-  const databasePath = resolvePath(getOptionalEnv("MAIDSCLAW_DB_PATH", DEFAULT_DB_PATH), cwd);
   const dataDir = resolvePath(getOptionalEnv("MAIDSCLAW_DATA_DIR", DEFAULT_DATA_DIR), cwd);
   
   // Get native modules setting
@@ -114,7 +111,6 @@ export function loadConfig(options?: {
       openai: openaiConfig
     },
     storage: {
-      databasePath,
       dataDir
     },
     server: {

@@ -1,19 +1,19 @@
-import type { Database } from "bun:sqlite";
-import { defaultViewerCanReadAdminOnly } from "../core/contracts/viewer-context.js";
 import { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import { makeNodeRef } from "./schema.js";
 import type { GraphStorageService } from "./storage.js";
-import { VisibilityPolicy } from "./visibility-policy.js";
 import type {
   EventNode,
   IPromotionService,
   NodeRef,
   ProjectedWrite,
+  PromotionClass,
   PromotionCandidate,
-  PublicEventCategory,
   ReferenceResolution,
-  ViewerContext,
 } from "./types.js";
+import type {
+  PromotionQueryRepo,
+} from "../storage/domain-repos/contracts/promotion-query-repo.js";
+
 
 type EventCandidateCriteria = {
   spoken?: boolean;
@@ -33,29 +33,6 @@ export interface PromotionModelProvider {
   normalizePromotionSummary?(summary: string): string;
 }
 
-type EntityRow = {
-  id: number;
-  pointer_key: string;
-  display_name: string;
-  entity_type: string;
-  memory_scope: "shared_public" | "private_overlay";
-  canonical_entity_id: number | null;
-  summary: string | null;
-};
-
-type EventRow = {
-  id: number;
-  session_id: string;
-  summary: string | null;
-  timestamp: number;
-  participants: string | null;
-  location_entity_id: number;
-  event_category: PublicEventCategory;
-  primary_actor_entity_id: number | null;
-};
-
-const IDENTITY_HIDDEN_MARKERS = ["unknown", "hidden", "redacted", "anonymous", "masked"] as const;
-const EXISTENCE_PRIVATE_MARKERS = ["private", "secret", "classified", "sensitive", "internal_only"] as const;
 const STABLE_FACT_PATTERNS = [
   /\bowns\b/i,
   /\blikes\b/i,
@@ -64,81 +41,50 @@ const STABLE_FACT_PATTERNS = [
 
 export class PromotionService implements IPromotionService {
   private readonly projectionRepo: AreaWorldProjectionRepo;
-  private readonly visibilityPolicy: VisibilityPolicy;
+  private readonly queryRepo: PromotionQueryRepo;
 
   constructor(
-    private readonly db: Database,
+    _dbInput: unknown,
     private readonly storage: GraphStorageService,
     private readonly modelProvider?: PromotionModelProvider,
     projectionRepo?: AreaWorldProjectionRepo,
+    queryRepo?: PromotionQueryRepo,
   ) {
-    this.projectionRepo = projectionRepo ?? new AreaWorldProjectionRepo(db);
-    this.visibilityPolicy = new VisibilityPolicy();
+    if (!projectionRepo) {
+      throw new Error("PromotionService requires projectionRepo");
+    }
+    this.projectionRepo = projectionRepo;
+
+    if (!queryRepo) {
+      throw new Error("PromotionService requires queryRepo");
+    }
+    this.queryRepo = queryRepo;
   }
 
   identifyEventCandidates(criteria: EventCandidateCriteria = {}): EventNode[] {
-    const spoken = criteria.spoken ?? true;
-    const stable = criteria.stable ?? true;
-
-    const clauses = [this.areaOnlyEventPredicate(), "summary IS NOT NULL"];
-    if (spoken) {
-      clauses.push("event_category = 'speech'");
-    }
-    if (stable) {
-      clauses.push("promotion_class = 'world_candidate'");
-    }
-
-    const sql = `SELECT * FROM event_nodes WHERE ${clauses.join(" AND ")} ORDER BY timestamp ASC, id ASC`;
-    return this.db.prepare(sql).all() as EventNode[];
+    const records = this.resolveNow(
+      this.queryRepo.findPromotionEventCandidates({
+        spokenOnly: criteria.spoken ?? true,
+        stableOnly: criteria.stable ?? true,
+      }),
+    );
+    return records.map((record) => this.toEventNode(record));
   }
 
   identifyFactCandidates(criteria: FactCandidateCriteria = {}): FactCandidate[] {
-    const minEvidence = Math.max(1, criteria.minEvidence ?? 2);
-    const rows = this.db
-      .prepare(
-        `SELECT id, summary, participants, location_entity_id
-         FROM event_nodes
-         WHERE ${this.allAreaAndWorldEventPredicate()}
-           AND summary IS NOT NULL
-         ORDER BY timestamp ASC, id ASC`,
-      )
-      .all() as Array<{ id: number; summary: string; participants: string | null; location_entity_id: number }>;
-
-    const grouped = new Map<string, FactCandidate>();
-    for (const row of rows) {
-      const predicate = this.extractStablePredicate(row.summary);
-      if (!predicate) {
-        continue;
-      }
-
-      const refs = this.parseParticipantRefs(row.participants);
-      if (refs.length < 2) {
-        refs.push(makeNodeRef("entity", row.location_entity_id));
-      }
-      if (refs.length < 2) {
-        continue;
-      }
-
-      const sourceRef = refs[0];
-      const targetRef = refs[1];
-      const key = `${sourceRef}|${predicate}|${targetRef}`;
-      const existing = grouped.get(key);
-      if (existing) {
-        existing.evidence_count += 1;
-        continue;
-      }
-
-      grouped.set(key, {
-        source_ref: makeNodeRef("event", row.id),
-        target_scope: "world_public",
-        summary: row.summary,
-        entity_refs: [sourceRef, targetRef],
-        evidence_count: 1,
-        predicate,
-      });
-    }
-
-    return Array.from(grouped.values()).filter((candidate) => candidate.evidence_count >= minEvidence);
+    const records = this.resolveNow(
+      this.queryRepo.findStableFactCandidates({
+        minEvidence: Math.max(1, criteria.minEvidence ?? 2),
+      }),
+    );
+    return records.map((record) => ({
+      source_ref: record.sourceEventRef,
+      target_scope: record.targetScope,
+      summary: record.summary,
+      entity_refs: record.entityRefs,
+      evidence_count: record.evidenceCount,
+      predicate: record.predicate,
+    }));
   }
 
   resolveReferences(candidate: PromotionCandidate): ReferenceResolution[] {
@@ -152,7 +98,7 @@ export class PromotionService implements IPromotionService {
       ];
     }
 
-    const timestamp = this.resolveCandidateTimestamp(candidate);
+    const timestamp = this.resolveNow(this.queryRepo.resolveCandidateTimestamp(candidate.source_ref));
     const resolutions: ReferenceResolution[] = [];
     const seen = new Set<string>();
 
@@ -171,61 +117,58 @@ export class PromotionService implements IPromotionService {
         continue;
       }
 
-      const sourceEntityId = this.parseNodeRefId(entityRef, "entity");
-      const entity = this.getEntityById(sourceEntityId);
-      if (!entity) {
+      const decision = this.resolveNow(
+        this.queryRepo.resolvePublicEntityDecision({
+          sourceEntityRef: entityRef,
+          timestamp,
+          isLocation: false,
+        }),
+      );
+
+      if (decision.action === "block") {
         resolutions.push({
           source_ref: entityRef,
           action: "block",
-          reason: `entity not found: ${entityRef}`,
+          reason: decision.reason,
         });
         continue;
       }
 
-      if (entity.memory_scope === "shared_public") {
-        resolutions.push({ source_ref: entityRef, action: "reuse", resolved_entity_id: entity.id });
-        continue;
-      }
-
-      const sharedByPointer = this.findSharedEntityByPointer(entity.pointer_key);
-      if (sharedByPointer) {
-        resolutions.push({ source_ref: entityRef, action: "reuse", resolved_entity_id: sharedByPointer.id });
-        continue;
-      }
-
-      if (this.isExistencePrivate(entity)) {
+      if (decision.action === "reuse_shared") {
         resolutions.push({
           source_ref: entityRef,
-          action: "block",
-          reason: "entity existence is private",
+          action: "reuse",
+          resolved_entity_id: this.parseNodeRefId(decision.resolvedEntityRef, "entity"),
         });
         continue;
       }
 
-      if (this.shouldUsePlaceholder(entity)) {
-        const placeholderPointerKey = `unknown_person@area:t${timestamp}`;
+      if (decision.action === "promote_placeholder") {
         const placeholderId = this.storage.upsertEntity({
-          pointerKey: placeholderPointerKey,
-          displayName: "Unknown person",
-          entityType: "person",
+          pointerKey: decision.placeholderPointerKey,
+          displayName: decision.displayName,
+          entityType: decision.entityType,
           memoryScope: "shared_public",
         });
         resolutions.push({
           source_ref: entityRef,
           action: "promote_placeholder",
           resolved_entity_id: placeholderId,
-          placeholder_pointer_key: placeholderPointerKey,
+          placeholder_pointer_key: decision.placeholderPointerKey,
         });
         continue;
       }
 
       const promotedId = this.storage.upsertEntity({
-        pointerKey: entity.pointer_key,
-        displayName: entity.display_name,
-        entityType: entity.entity_type,
-        summary: entity.summary ?? undefined,
+        pointerKey: decision.sourceEntity.pointerKey,
+        displayName: decision.sourceEntity.displayName,
+        entityType: decision.sourceEntity.entityType,
+        summary: decision.sourceEntity.summary ?? undefined,
         memoryScope: "shared_public",
-        canonicalEntityId: entity.canonical_entity_id ?? entity.id,
+        canonicalEntityId:
+          decision.sourceEntity.canonicalEntityRef
+            ? this.parseNodeRefId(decision.sourceEntity.canonicalEntityRef, "entity")
+            : this.parseNodeRefId(decision.sourceEntity.entityRef, "entity"),
       });
       resolutions.push({ source_ref: entityRef, action: "promote_full", resolved_entity_id: promotedId });
     }
@@ -254,13 +197,12 @@ export class PromotionService implements IPromotionService {
     }
 
     if (candidate.source_ref.startsWith("event:")) {
-      const sourceEventId = this.parseNodeRefId(candidate.source_ref, "event");
-      const sourceEvent = this.getEventById(sourceEventId);
+      const sourceEvent = this.resolveNow(this.queryRepo.getEventRecord(candidate.source_ref));
       if (!sourceEvent) {
         throw new Error(`Source event not found: ${candidate.source_ref}`);
       }
 
-      const participantRefs = this.parseParticipantRefs(sourceEvent.participants);
+      const participantRefs = [...sourceEvent.participants];
       for (const ref of candidate.entity_refs) {
         if (!participantRefs.includes(ref)) {
           participantRefs.push(ref);
@@ -276,23 +218,24 @@ export class PromotionService implements IPromotionService {
         ),
       );
 
-      const promotedLocation = this.resolveEntityIdToPublic(sourceEvent.location_entity_id, resolutionMap);
+      const promotedLocation = this.resolveEntityRefToPublic(sourceEvent.locationEntityRef, resolutionMap);
       if (promotedLocation === null) {
         throw new Error("Promotion requires a public-safe location entity");
       }
 
-      const promotedPrimaryActor = sourceEvent.primary_actor_entity_id
-        ? this.resolveEntityIdToPublic(sourceEvent.primary_actor_entity_id, resolutionMap)
+      const promotedPrimaryActor = sourceEvent.primaryActorEntityRef
+        ? this.resolveEntityRefToPublic(sourceEvent.primaryActorEntityRef, resolutionMap)
         : null;
 
       const summary = this.normalizeSummary(candidate.summary || sourceEvent.summary || "Promoted event");
+      const sourceEventId = this.parseNodeRefId(candidate.source_ref, "event");
       const promotedEventId = this.storage.createPromotedEvent({
-        sessionId: sourceEvent.session_id,
+        sessionId: sourceEvent.sessionId,
         summary,
         timestamp: sourceEvent.timestamp,
         participants: JSON.stringify(promotedParticipants),
         locationEntityId: promotedLocation,
-        eventCategory: sourceEvent.event_category,
+        eventCategory: sourceEvent.eventCategory,
         primaryActorEntityId: promotedPrimaryActor ?? undefined,
         sourceEventId,
       });
@@ -353,120 +296,6 @@ export class PromotionService implements IPromotionService {
     };
   }
 
-  private getEntityById(id: number): EntityRow | null {
-    return this.db
-      .prepare(
-        `SELECT id, pointer_key, display_name, entity_type, memory_scope, canonical_entity_id, summary
-         FROM entity_nodes
-         WHERE id = ?`,
-      )
-      .get(id) as EntityRow | null;
-  }
-
-  private getEventById(id: number): EventRow | null {
-    return this.db
-      .prepare(
-        `SELECT id, session_id, summary, timestamp, participants, location_entity_id, event_category, primary_actor_entity_id
-          FROM event_nodes
-          WHERE id = ?`,
-      )
-      .get(id) as EventRow | null;
-  }
-
-  private allAreaAndWorldEventPredicate(tableAlias?: string): string {
-    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
-    const areaRows = this.db
-      .prepare("SELECT DISTINCT location_entity_id FROM event_nodes ORDER BY location_entity_id ASC")
-      .all() as Array<{ location_entity_id: number }>;
-
-    if (areaRows.length === 0) {
-      return worldOnlyPredicate;
-    }
-
-    const predicates = new Set<string>();
-    predicates.add(worldOnlyPredicate);
-    for (const row of areaRows) {
-      predicates.add(
-        this.visibilityPolicy.eventVisibilityPredicate(
-          this.makePolicyViewerContext(row.location_entity_id),
-          tableAlias,
-        ),
-      );
-    }
-    return `(${Array.from(predicates).join(" OR ")})`;
-  }
-
-  private areaOnlyEventPredicate(tableAlias?: string): string {
-    const allVisiblePredicate = this.allAreaAndWorldEventPredicate(tableAlias);
-    const worldOnlyPredicate = this.visibilityPolicy.eventVisibilityPredicate(this.makePolicyViewerContext(null), tableAlias);
-    return `(${allVisiblePredicate} AND NOT ${worldOnlyPredicate})`;
-  }
-
-  private makePolicyViewerContext(currentAreaId: number | null): ViewerContext {
-    return {
-      viewer_agent_id: "promotion-system",
-      viewer_role: "maiden",
-      can_read_admin_only: defaultViewerCanReadAdminOnly("maiden"),
-      current_area_id: currentAreaId ?? undefined,
-      session_id: "promotion",
-    };
-  }
-
-  private findSharedEntityByPointer(pointerKey: string): { id: number } | null {
-    return this.db
-      .prepare(
-        `SELECT id
-         FROM entity_nodes
-         WHERE pointer_key = ? AND memory_scope = 'shared_public'
-         LIMIT 1`,
-      )
-      .get(pointerKey) as { id: number } | null;
-  }
-
-  private parseParticipantRefs(participants: string | null): NodeRef[] {
-    if (!participants) {
-      return [];
-    }
-
-    try {
-      const parsed = JSON.parse(participants) as string[];
-      return parsed
-        .filter((value): value is `entity:${number}` => /^entity:\d+$/.test(value))
-        .map((value) => value as NodeRef);
-    } catch {
-      return [];
-    }
-  }
-
-  private parseNodeRefId(nodeRef: string, kind: "entity" | "event"): number {
-    const prefix = `${kind}:`;
-    if (!nodeRef.startsWith(prefix)) {
-      throw new Error(`Invalid node ref kind for ${kind}: ${nodeRef}`);
-    }
-    const id = Number(nodeRef.slice(prefix.length));
-    if (!Number.isInteger(id) || id <= 0) {
-      throw new Error(`Invalid node ref id: ${nodeRef}`);
-    }
-    return id;
-  }
-
-  private resolveCandidateTimestamp(candidate: PromotionCandidate): number {
-    if (candidate.source_ref.startsWith("event:")) {
-      const source = this.getEventById(this.parseNodeRefId(candidate.source_ref, "event"));
-      return source?.timestamp ?? Date.now();
-    }
-
-    if (candidate.source_ref.startsWith("evaluation:") || candidate.source_ref.startsWith("commitment:")) {
-      const id = Number(candidate.source_ref.split(":")[1]);
-      const row = this.db
-        .prepare(`SELECT created_at FROM private_episode_events WHERE id = ?`)
-        .get(id) as { created_at: number } | null;
-      return row?.created_at ?? Date.now();
-    }
-
-    return Date.now();
-  }
-
   private resolveEntityRefToPublic(entityRef: string, map: Map<number, number>): number | null {
     if (!entityRef.startsWith("entity:")) {
       return null;
@@ -480,14 +309,26 @@ export class PromotionService implements IPromotionService {
       return resolved;
     }
 
-    const row = this.getEntityById(sourceEntityId);
-    if (!row) {
+    const entity = this.resolveNow(this.queryRepo.getEntityRecord(makeNodeRef("entity", sourceEntityId)));
+    if (!entity) {
       return null;
     }
-    if (row.memory_scope === "shared_public") {
-      return row.id;
+    if (entity.memoryScope === "shared_public") {
+      return this.parseNodeRefId(entity.entityRef, "entity");
     }
     return null;
+  }
+
+  private parseNodeRefId(nodeRef: string, kind: "entity" | "event"): number {
+    const prefix = `${kind}:`;
+    if (!nodeRef.startsWith(prefix)) {
+      throw new Error(`Invalid node ref kind for ${kind}: ${nodeRef}`);
+    }
+    const id = Number(nodeRef.slice(prefix.length));
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error(`Invalid node ref id: ${nodeRef}`);
+    }
+    return id;
   }
 
   private extractStablePredicate(summary: string): string | null {
@@ -509,22 +350,6 @@ export class PromotionService implements IPromotionService {
     return null;
   }
 
-  private isExistencePrivate(entity: EntityRow): boolean {
-    const haystack = `${entity.pointer_key} ${entity.display_name}`.toLowerCase();
-    return EXISTENCE_PRIVATE_MARKERS.some((marker) => haystack.includes(marker));
-  }
-
-  private shouldUsePlaceholder(entity: EntityRow): boolean {
-    if (entity.entity_type !== "person") {
-      return false;
-    }
-    const haystack = `${entity.pointer_key} ${entity.display_name}`.toLowerCase();
-    if (haystack.startsWith("unknown_person@area:t")) {
-      return true;
-    }
-    return IDENTITY_HIDDEN_MARKERS.some((marker) => haystack.includes(marker));
-  }
-
   private normalizeSummary(summary: string): string {
     const trimmed = summary.trim();
     if (!trimmed) {
@@ -533,5 +358,48 @@ export class PromotionService implements IPromotionService {
 
     const normalized = this.modelProvider?.normalizePromotionSummary?.(trimmed);
     return normalized?.trim() || trimmed;
+  }
+
+  private toEventNode(record: {
+    eventRef: NodeRef;
+    sessionId: string;
+    summary: string | null;
+    timestamp: number;
+    participants: NodeRef[];
+    locationEntityRef: NodeRef;
+    eventCategory: "speech" | "action" | "observation" | "state_change";
+    primaryActorEntityRef: NodeRef | null;
+    promotionClass: PromotionClass;
+    sourceRecordId: string | null;
+  }): EventNode {
+    return {
+      id: this.parseNodeRefId(record.eventRef, "event"),
+      session_id: record.sessionId,
+      raw_text: null,
+      summary: record.summary,
+      timestamp: record.timestamp,
+      created_at: record.timestamp,
+      participants: JSON.stringify(record.participants),
+      emotion: null,
+      topic_id: null,
+      visibility_scope: "area_visible",
+      location_entity_id: this.parseNodeRefId(record.locationEntityRef, "entity"),
+      event_category: record.eventCategory,
+      primary_actor_entity_id: record.primaryActorEntityRef ? this.parseNodeRefId(record.primaryActorEntityRef, "entity") : null,
+      promotion_class: record.promotionClass,
+      source_record_id: record.sourceRecordId,
+      event_origin: "runtime_projection",
+    };
+  }
+
+  private resolveNow<T>(value: Promise<T> | T): T {
+    if (!(value instanceof Promise)) {
+      return value;
+    }
+    const settled = Bun.peek(value);
+    if (settled instanceof Promise) {
+      throw new Error("PromotionService sync path requires synchronously-resolved query repo promise");
+    }
+    return settled;
   }
 }

@@ -1,0 +1,32 @@
+Evidence: task-10 pg retention — family override delays cleanup
+Date: 2026-03-29
+
+## Test: "family override: family-specific window delays cleanup"
+
+Setup:
+- Job A: organize job, no family key → succeeded
+- Job B: search.rebuild (family="search.rebuild:world") → succeeded
+
+Call: cleanupTerminal(0, { "search.rebuild:world": 999_999_999 })
+
+Result:
+- Job A (no family / not in override set): DELETED (global window=0 applies)
+- Job B (family="search.rebuild:world"): RETAINED (override window=999999999ms, cutoff far in past)
+
+Verification:
+- inspect(jobA.key) → undefined
+- inspect(jobB.key) → { status: 'succeeded' }
+
+## Implementation approach
+cleanupTerminal splits into two queries when overrides present:
+1. DELETE non-override terminal rows with default cutoff
+2. For each override family: DELETE with family-specific cutoff
+
+This allows per-family retention windows without schema changes.
+
+## Test output
+bun test test/jobs/pg-retention.test.ts
+ 4 pass, 0 fail, 18 expect() calls
+
+## Build
+bun run build → clean (tsc --noEmit passes)

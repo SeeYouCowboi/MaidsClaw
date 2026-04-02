@@ -1,4 +1,4 @@
-import { bootstrapApp } from "./bootstrap/app-bootstrap.js";
+import { createAppHost } from "./app/host/index.js";
 
 export const VERSION = "0.1.0";
 
@@ -7,21 +7,18 @@ export function version(): string {
 }
 
 async function main(): Promise<void> {
-  const app = bootstrapApp({
-    enableGateway: true,
+  const host = await createAppHost({
+    role: "server",
     requireAllProviders: false,
   });
-  if (!app.server) {
-    throw new Error("Gateway server was not initialized");
-  }
 
-  app.server.start();
+  await host.start();
 
-  console.log(`MaidsClaw v${VERSION} started on port ${app.server.getPort()}`);
+  console.log(`MaidsClaw v${VERSION} started on port ${host.getBoundPort!()}`);
 
   const shutdown = (): void => {
     console.log("Shutting down...");
-    app.shutdown();
+    void host.shutdown();
     process.exit(0);
   };
 

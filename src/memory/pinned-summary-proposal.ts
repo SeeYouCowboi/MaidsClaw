@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { PinnedSummaryProposal } from "../runtime/rp-turn-contract.js";
 
 export type StoredProposal = {

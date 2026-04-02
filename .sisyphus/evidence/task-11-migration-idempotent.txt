@@ -1,0 +1,8 @@
+bun test v1.3.10 (30e609e0)
+Command: bun test "test/memory/area-world-history-ledger.test.ts" --test-name-pattern "migration is idempotent"
+
+ 1 pass
+ 5 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [153.00ms]

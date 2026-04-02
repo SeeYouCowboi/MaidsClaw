@@ -1,0 +1,21 @@
+services:
+  app-pg:
+    image: pgvector/pgvector:pg16
+    container_name: maidsclaw-app-pg
+    restart: unless-stopped
+    ports:
+      - "55433:5432"
+    environment:
+      POSTGRES_USER: maidsclaw
+      POSTGRES_PASSWORD: maidsclaw
+      POSTGRES_DB: maidsclaw_app
+    volumes:
+      - app-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maidsclaw -d maidsclaw_app"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-pg-data:

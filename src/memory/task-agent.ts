@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { AgentRole } from "../agents/profile.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
@@ -8,14 +7,23 @@ import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
-import { ExplicitSettlementProcessor } from "./explicit-settlement-processor.js";
+import {
+  ExplicitSettlementProcessor,
+  type ExplicitSettlementProcessorDeps,
+} from "./explicit-settlement-processor.js";
+import { RelationBuilder } from "./cognition/relation-builder.js";
 import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
+import type { SettlementLedger } from "./settlement-ledger.js";
+import type { JobPersistence } from "../jobs/persistence.js";
+import { JOB_MAX_ATTEMPTS } from "../jobs/types.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
+import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
+
 import type {
   GraphOrganizerResult,
   MigrationResult,
@@ -111,6 +119,7 @@ const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
 const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
 const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
 const ASSERTION_IDS_KEY = "assertion_ids";
+export const ORGANIZER_CHUNK_SIZE = 50;
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
@@ -312,23 +321,45 @@ export class MemoryIngestionPolicy {
   }
 }
 
+export type MemoryTaskDbAdapter = {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+  transaction?<T>(fn: () => T): T | (() => T);
+};
+
+export type MemoryTaskAgentDeps = {
+  db: MemoryTaskDbAdapter;
+  explicitSettlement?: ExplicitSettlementProcessorDeps;
+};
+
 export class MemoryTaskAgent {
+  private readonly db: MemoryTaskDbAdapter;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
   private readonly coreMemoryIndexUpdater: CoreMemoryIndexUpdater;
   private readonly graphOrganizer: GraphOrganizer;
+  private readonly jobPersistence?: JobPersistence;
   private migrateTail: Promise<unknown> = Promise.resolve();
   private organizeTail: Promise<unknown> = Promise.resolve();
 
   constructor(
-    private readonly db: Database,
+    deps: MemoryTaskAgentDeps,
     private readonly storage: GraphStorageService,
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
     private readonly materialization: MaterializationService,
     modelProvider?: MemoryTaskModelProvider,
+    settlementLedger?: SettlementLedger,
+    jobPersistence?: JobPersistence,
+    private readonly strictDurableMode = false,
+    nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
+    this.db = deps.db;
     this.modelProvider =
       modelProvider ??
       ({
@@ -341,23 +372,35 @@ export class MemoryTaskAgent {
         },
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
+    const explicitSettlementDeps = deps.explicitSettlement ?? {
+      db: this.db,
+      cognitionRepo: new CognitionRepository(this.db),
+      relationBuilder: new RelationBuilder(this.db),
+    };
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
-      this.db,
+      explicitSettlementDeps,
       this.storage,
       this.modelProvider,
       (agentId) => this.loadExistingContext(agentId),
       (request, toolCalls, created) => {
         this.applyCallOneToolCalls(request, toolCalls, created);
       },
+      settlementLedger ?? (() => { throw new Error("settlementLedger is required"); })(),
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
-      this.db,
+      nodeScoringQueryRepo ?? (() => { throw new Error("nodeScoringQueryRepo is required"); })(),
       this.storage,
       this.coreMemory,
       this.embeddings,
       this.modelProvider,
     );
+    this.jobPersistence = jobPersistence;
+    if (this.strictDurableMode && !this.jobPersistence) {
+      console.warn(
+        "[MemoryTaskAgent] strictDurableMode=true but no jobPersistence provided; durable enqueue will always throw",
+      );
+  }
   }
 
   runMigrate(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
@@ -384,7 +427,7 @@ export class MemoryTaskAgent {
       changedNodeRefs: [],
     };
 
-    this.db.prepare("BEGIN IMMEDIATE").run();
+      this.db.exec("BEGIN IMMEDIATE");
     try {
       await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
         agentRole: flushRequest.agentRole ?? "rp_agent",
@@ -439,9 +482,9 @@ export class MemoryTaskAgent {
 
       await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
 
-      this.db.prepare("COMMIT").run();
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.db.prepare("ROLLBACK").run();
+      this.db.exec("ROLLBACK");
       throw error;
     }
 
@@ -453,15 +496,41 @@ export class MemoryTaskAgent {
       embeddingModelId: this.modelProvider.defaultEmbeddingModelId,
     };
 
-    void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
-      console.error("[MemoryTaskAgent] background organize failed", {
+    if (this.jobPersistence) {
+      try {
+        await this.enqueueOrganizerJobs(flushRequest.agentId, flushRequest.idempotencyKey, created.changedNodeRefs);
+      } catch (err) {
+        if (this.strictDurableMode) {
+          throw err;
+        }
+        console.error("[MemoryTaskAgent] organizer enqueue failed, falling back to background", {
+          operation: "runMigrateInternal",
+          jobType: "graph_organizer",
+          batchId: organizeJob.batchId,
+          agentId: organizeJob.agentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.launchBackgroundOrganize(organizeJob);
+      }
+    } else if (this.strictDurableMode) {
+      throw new Error(
+        `[MemoryTaskAgent] strictDurableMode requires jobPersistence for organizer dispatch (batchId=${organizeJob.batchId})`,
+      );
+    } else {
+      /**
+       * @deprecated Use durable job queue via JobPersistence instead.
+       * This fire-and-forget path is preserved for backward compat when
+       * no JobPersistence is configured and strictDurableMode is false.
+       * Remove when all deployments supply JobPersistence.
+       */
+      console.error("[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback", {
+        operation: "runMigrateInternal",
+        jobType: "graph_organizer",
         batchId: organizeJob.batchId,
-        sessionId: organizeJob.sessionId,
         agentId: organizeJob.agentId,
-        embeddingModelId: organizeJob.embeddingModelId,
-        error: err instanceof Error ? err.message : String(err),
       });
-    });
+      this.launchBackgroundOrganize(organizeJob);
+    }
 
     return {
       batch_id: flushRequest.idempotencyKey,
@@ -473,6 +542,61 @@ export class MemoryTaskAgent {
   }
   private async runOrganizeInternal(job: GraphOrganizerJob): Promise<GraphOrganizerResult> {
     return this.graphOrganizer.run(job);
+  }
+
+  /**
+   * @deprecated Use durable job queue via JobPersistence instead.
+   * Preserved for backward compat when strictDurableMode is false.
+   */
+  private launchBackgroundOrganize(organizeJob: GraphOrganizerJob): void {
+    void Promise.resolve().then(() => this.runOrganize(organizeJob)).catch((err: unknown) => {
+      console.error("[MemoryTaskAgent] background organize failed", {
+        batchId: organizeJob.batchId,
+        sessionId: organizeJob.sessionId,
+        agentId: organizeJob.agentId,
+        embeddingModelId: organizeJob.embeddingModelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  private async enqueueOrganizerJobs(
+    agentId: string,
+    settlementId: string,
+    changedNodeRefs: NodeRef[],
+  ): Promise<void> {
+    if (!this.jobPersistence) {
+      return;
+    }
+
+    const uniqueNodeRefs = Array.from(new Set(changedNodeRefs));
+    if (uniqueNodeRefs.length === 0) {
+      return;
+    }
+
+    const chunkCount = Math.ceil(uniqueNodeRefs.length / ORGANIZER_CHUNK_SIZE);
+    const now = Date.now();
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+      const start = chunkIndex * ORGANIZER_CHUNK_SIZE;
+      const chunkNodeRefs = uniqueNodeRefs.slice(start, start + ORGANIZER_CHUNK_SIZE);
+      if (chunkNodeRefs.length === 0) {
+        continue;
+      }
+
+      const ordinal = String(chunkIndex + 1).padStart(4, "0");
+      await this.jobPersistence.enqueue({
+        id: `memory.organize:${settlementId}:chunk:${ordinal}`,
+        jobType: "memory.organize",
+        payload: {
+          agentId,
+          chunkNodeRefs,
+          settlementId,
+        },
+        status: "pending",
+        maxAttempts: JOB_MAX_ATTEMPTS["memory.organize"],
+        nextAttemptAt: now,
+      });
+    }
   }
 
   private assertQueueOwnership(flushRequest: MemoryFlushRequest): void {

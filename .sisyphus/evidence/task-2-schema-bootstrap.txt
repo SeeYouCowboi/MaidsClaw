@@ -1,0 +1,40 @@
+Task 2: Add graph_nodes table to derived schema + fix empty catch
+==================================================================
+
+## Changes Made
+
+### 1. pg-app-schema-derived.ts — Added graph_nodes table
+- CREATE TABLE IF NOT EXISTS graph_nodes (id, node_kind, node_id, node_ref, created_at, updated_at)
+- UNIQUE(node_kind, node_id) — matches ON CONFLICT in registerGraphNodeShadows INSERT
+- CREATE INDEX IF NOT EXISTS idx_graph_nodes_kind ON graph_nodes(node_kind)
+- Placed before node_scores, alongside node_embeddings and semantic_edges
+
+### 2. node-scoring-query-repo.ts — Fixed empty catch {}
+- Replaced `catch {}` at line 187 with:
+  `catch (error) { console.error('[registerGraphNodeShadows] failed to register node shadows:', error, { nodeRefs: nodes }); }`
+- Fire-and-forget preserved (no re-throw), but now observable via console.error
+
+### 3. pg-derived-schema.test.ts — Added round-trip test
+- "creates graph_nodes and supports insert/query round-trip"
+- Tests INSERT, SELECT by node_ref, and UPSERT via ON CONFLICT (node_kind, node_id)
+- Uses describe.skipIf(skipPgTests) pattern
+
+## Column Mapping Verification
+INSERT in registerGraphNodeShadows (line 181):
+  INSERT INTO graph_nodes (node_kind, node_id, node_ref, created_at, updated_at)
+  VALUES (${parsed.kind}, ${parsed.id}, ${nodeRef}, ${registeredAt}, ${registeredAt})
+  ON CONFLICT (node_kind, node_id) DO UPDATE SET updated_at = EXCLUDED.updated_at
+
+CREATE TABLE columns match exactly:
+  node_kind  TEXT NOT NULL     ← parsed.kind
+  node_id    TEXT NOT NULL     ← parsed.id
+  node_ref   TEXT NOT NULL     ← nodeRef
+  created_at BIGINT NOT NULL   ← registeredAt
+  updated_at BIGINT NOT NULL   ← registeredAt
+  UNIQUE(node_kind, node_id)   ← matches ON CONFLICT
+
+## Build Verification
+- `bun run build`: EXIT 0 (zero errors)
+- `bun test`: 868 pass / 350 skip / 21 fail
+  - +1 skip vs baseline (new graph_nodes test skipped — PG not available at :55433)
+  - 21 fail = same pre-existing ECONNREFUSED failures, no new failures

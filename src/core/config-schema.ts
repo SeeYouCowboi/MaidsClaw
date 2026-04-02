@@ -18,10 +18,8 @@ export type ProviderConfigs = {
   openai: OpenAIProviderConfig;
 };
 
-// Storage config
 export type StorageConfig = {
-  databasePath: string;   // Path to SQLite database file
-  dataDir: string;        // Root data directory (personas, lore, etc.)
+  dataDir: string;
 };
 
 // Server config

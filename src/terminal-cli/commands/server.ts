@@ -1,7 +1,7 @@
 /**
  * CLI `server start` command.
  *
- * Uses the shared `bootstrapApp()` path — no second server assembly.
+ * Uses `createAppHost({ role: "server" })` for full lifecycle management.
  */
 
 import { registerCommand } from "../parser.js";
@@ -35,10 +35,10 @@ async function handleServerStart(
   let port: number | undefined;
   if (args.flags["port"] !== undefined && args.flags["port"] !== true) {
     const parsed = Number(args.flags["port"]);
-    if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 65535) {
       throw new CliError(
         "INVALID_FLAG_VALUE",
-        `Invalid port: ${String(args.flags["port"])}. Must be 1-65535.`,
+        `Invalid port: ${String(args.flags["port"])}. Must be 0-65535.`,
         EXIT_USAGE,
       );
     }
@@ -66,18 +66,17 @@ async function handleServerStart(
   // Parse --debug-capture (stub for now — trace capture is T15)
   const debugCapture = args.flags["debug-capture"] === true;
 
-  // Lazy-import bootstrap to avoid loading heavy runtime at CLI parse time
-  const { bootstrapApp } = await import("../../bootstrap/app-bootstrap.js");
+  const { createAppHost } = await import("../../app/host/index.js");
 
-  let app: Awaited<ReturnType<typeof bootstrapApp>>;
+  let appHost: Awaited<ReturnType<typeof createAppHost>>;
   try {
-app = bootstrapApp({
-cwd: ctx.cwd,
-enableGateway: true,
-...(port !== undefined ? { port } : {}),
-...(host !== undefined ? { host } : {}),
-traceCaptureEnabled: debugCapture,
-});
+    appHost = await createAppHost({
+      role: "server",
+      cwd: ctx.cwd,
+      ...(port !== undefined ? { port } : {}),
+      ...(host !== undefined ? { host } : {}),
+      traceCaptureEnabled: debugCapture,
+    });
   } catch (err) {
     throw new CliError(
       "SERVER_START_FAILED",
@@ -86,39 +85,38 @@ traceCaptureEnabled: debugCapture,
     );
   }
 
-  // Start the gateway server
-  if (app.server) {
-    try {
-      app.server.start();
-    } catch (err) {
-      app.shutdown();
-      throw new CliError(
-        "SERVER_START_FAILED",
-        `Failed to bind server: ${err instanceof Error ? err.message : String(err)}`,
-        EXIT_RUNTIME,
-      );
-    }
+  try {
+    await appHost.start();
+  } catch (err) {
+    await appHost.shutdown();
+    throw new CliError(
+      "SERVER_START_FAILED",
+      `Failed to bind server: ${err instanceof Error ? err.message : String(err)}`,
+      EXIT_RUNTIME,
+    );
   }
 
-  const boundPort = app.server?.getPort() ?? port ?? 3000;
+  const boundPort = appHost.getBoundPort!();
   const boundHost = host ?? "localhost";
   const boundAddress = `http://${boundHost}:${boundPort}`;
 
-  // Collect health summary
+  const healthStatus = await appHost.user!.health.checkHealth();
   const healthSummary: Record<string, string> = {};
-  for (const [name, checkFn] of Object.entries(app.healthChecks)) {
-    healthSummary[name] = checkFn();
+  for (const [key, value] of Object.entries(healthStatus.readyz)) {
+    if (value !== undefined) {
+      healthSummary[key] = value;
+    }
   }
 
-  const memoryPipelineStatus = app.runtime.memoryPipelineStatus;
-  const sweeperEnabled = app.runtime.memoryPipelineReady;
+  const pipelineStatus = await appHost.admin.getPipelineStatus();
+  const memoryPipelineStatus = pipelineStatus.memoryPipelineStatus;
+  const sweeperEnabled = pipelineStatus.memoryPipelineReady;
 
-  // Register graceful shutdown
   const handleSignal = () => {
     if (!ctx.quiet) {
       writeText("\nShutting down...");
     }
-    app.shutdown();
+    void appHost.shutdown();
     process.exit(0);
   };
   process.on("SIGINT", handleSignal);

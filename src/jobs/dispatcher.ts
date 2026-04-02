@@ -1,5 +1,6 @@
 import type { EventBus } from "../core/event-bus.js";
 import type { JobDedupEngine } from "./dedup.js";
+import type { JobEntry, JobPersistence } from "./persistence.js";
 import type { JobQueue } from "./queue.js";
 import {
   CONCURRENCY_CAPS,
@@ -18,16 +19,58 @@ export class JobDispatcher {
   private readonly workers = new Map<JobKind, WorkerFn>();
   private readonly jobsByKey = new Map<JobKey, Job>();
   private readonly inFlightByKey = new Set<string>();
+  private startPromise?: Promise<void>;
 
   constructor(
-    private readonly deps: { queue: JobQueue; dedup: JobDedupEngine; eventBus?: EventBus },
+    private readonly deps: {
+      queue: JobQueue;
+      dedup: JobDedupEngine;
+      eventBus?: EventBus;
+      persistence?: JobPersistence;
+    },
   ) {}
+
+  start(): Promise<void> {
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    if (!this.deps.persistence) {
+      this.startPromise = Promise.resolve();
+      return this.startPromise;
+    }
+
+    this.startPromise = this.loadResumableJobs();
+    return this.startPromise;
+  }
+
+  private async loadResumableJobs(): Promise<void> {
+    if (!this.deps.persistence) {
+      return;
+    }
+
+    const recovered = [
+      ...(await this.deps.persistence.listPending()),
+      ...(await this.deps.persistence.listRetryable(Date.now())),
+    ];
+
+    for (const entry of recovered) {
+      const job = this.toRecoveredJob(entry);
+      if (!job || this.deps.queue.getByKey(job.jobKey)) {
+        continue;
+      }
+      this.deps.queue.enqueue(job);
+      this.jobsByKey.set(job.jobKey, job);
+    }
+  }
 
   registerWorker(kind: JobKind, worker: WorkerFn): void {
     this.workers.set(kind, worker);
   }
 
   submit(jobSpec: SubmitSpec): Job | null {
+    void this.start();
+
     const existing = this.deps.queue.getByKey(jobSpec.jobKey);
     if (existing) {
       this.jobsByKey.set(existing.jobKey, existing);
@@ -59,6 +102,8 @@ export class JobDispatcher {
   }
 
   async processNext(): Promise<boolean> {
+    await this.start();
+
     const next = this.selectNextRunnableJob();
     if (!next) {
       return false;
@@ -195,6 +240,46 @@ export class JobDispatcher {
       return !this.inFlightByKey.has(key);
     }
 
+    if (job.kind === "search.rebuild") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("search.rebuild:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.search_rebuild_global;
+    }
+
+    if (job.kind === "maintenance.replay_projection") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.replay_projection:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_replay_global;
+    }
+
+    if (job.kind === "maintenance.rebuild_derived") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.rebuild_derived:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_rebuild_derived_global;
+    }
+
+    if (job.kind === "maintenance.full") {
+      let running = 0;
+      for (const key of this.inFlightByKey) {
+        if (key.startsWith("maintenance.full:global")) {
+          running += 1;
+        }
+      }
+      return running < CONCURRENCY_CAPS.maintenance_full_global;
+    }
+
     return true;
   }
 
@@ -207,6 +292,22 @@ export class JobDispatcher {
 
     if (job.kind === "memory.organize") {
       return "memory.organize:global";
+    }
+
+    if (job.kind === "search.rebuild") {
+      return "search.rebuild:global";
+    }
+
+    if (job.kind === "maintenance.replay_projection") {
+      return "maintenance.replay_projection:global";
+    }
+
+    if (job.kind === "maintenance.rebuild_derived") {
+      return "maintenance.rebuild_derived:global";
+    }
+
+    if (job.kind === "maintenance.full") {
+      return "maintenance.full:global";
     }
 
     const parentRunId =
@@ -268,4 +369,106 @@ export class JobDispatcher {
     const parts = jobKey.split(":");
     return parts.length >= 2 ? parts[1] : "global";
   }
+
+  private toRecoveredJob(entry: JobEntry): Job | undefined {
+    if (!entry.id || !isJobKind(entry.jobType)) {
+      return undefined;
+    }
+
+    const payloadRecord = this.asRecord(entry.payload);
+    const payload = payloadRecord ?? {};
+
+    const jobKey = this.readString(payload, "jobKey") ?? entry.id;
+
+    const payloadKind = this.readString(payload, "kind");
+    const kind: JobKind = isJobKind(payloadKind) ? payloadKind : entry.jobType;
+
+    const payloadExecutionClass = this.readString(payload, "executionClass");
+    const executionClass: Job["executionClass"] = isExecutionClass(payloadExecutionClass)
+      ? payloadExecutionClass
+      : defaultExecutionClass(kind);
+
+    return {
+      jobId: this.readString(payload, "jobId") ?? crypto.randomUUID(),
+      jobKey,
+      kind,
+      executionClass,
+      sessionId: this.readString(payload, "sessionId") ?? undefined,
+      agentId: this.readString(payload, "agentId") ?? undefined,
+      idempotencyKey: this.readString(payload, "idempotencyKey") ?? entry.id,
+      payload: payloadRecord && "payload" in payloadRecord ? payloadRecord.payload : entry.payload,
+      status: "pending",
+      attempts: Math.max(0, entry.attemptCount),
+      maxAttempts: Math.max(1, entry.maxAttempts),
+      retriable: this.readBoolean(payload, "retriable", true),
+      createdAt: this.readNumber(payload, "createdAt") ?? entry.createdAt,
+      startedAt: undefined,
+      completedAt: undefined,
+      error: entry.errorMessage,
+      ownershipAccepted: false,
+    };
+  }
+
+  private readString(payload: Record<string, unknown>, key: string): string | undefined {
+    const value = payload[key];
+    return typeof value === "string" ? value : undefined;
+  }
+
+  private readNumber(payload: Record<string, unknown>, key: string): number | undefined {
+    const value = payload[key];
+    return typeof value === "number" ? value : undefined;
+  }
+
+  private readBoolean(payload: Record<string, unknown>, key: string, fallback: boolean): boolean {
+    const value = payload[key];
+    return typeof value === "boolean" ? value : fallback;
+  }
+}
+
+function isJobKind(value: string | undefined): value is JobKind {
+  return (
+    value === "memory.migrate"
+    || value === "memory.organize"
+    || value === "task.run"
+    || value === "search.rebuild"
+    || value === "maintenance.replay_projection"
+    || value === "maintenance.rebuild_derived"
+    || value === "maintenance.full"
+  );
+}
+
+function isExecutionClass(value: string | undefined): value is Job["executionClass"] {
+  return (
+    value === "interactive.user_turn"
+    || value === "interactive.delegated_task"
+    || value === "background.memory_migrate"
+    || value === "background.memory_organize"
+    || value === "background.search_rebuild"
+    || value === "background.maintenance_replay"
+    || value === "background.maintenance_rebuild_derived"
+    || value === "background.maintenance_full"
+    || value === "background.autonomy"
+  );
+}
+
+function defaultExecutionClass(kind: JobKind): Job["executionClass"] {
+  if (kind === "memory.migrate") {
+    return "background.memory_migrate";
+  }
+  if (kind === "memory.organize") {
+    return "background.memory_organize";
+  }
+  if (kind === "search.rebuild") {
+    return "background.search_rebuild";
+  }
+  if (kind === "maintenance.replay_projection") {
+    return "background.maintenance_replay";
+  }
+  if (kind === "maintenance.rebuild_derived") {
+    return "background.maintenance_rebuild_derived";
+  }
+  if (kind === "maintenance.full") {
+    return "background.maintenance_full";
+  }
+  return "background.autonomy";
 }

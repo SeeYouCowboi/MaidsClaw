@@ -1,0 +1,33 @@
+Task 11: Server Durable Mode in createAppHost
+Date: 2026-03-31
+
+Changes validated:
+- Added AppHost option `enableDurableOrchestration?: boolean`
+- Server role now optionally starts/stops durable job consumer alongside gateway
+- Runtime bootstrap now accepts `strictDurableMode?: boolean`
+- createAppHost passes `strictDurableMode: true` when role is worker or durable orchestration is enabled
+- MemoryTaskAgent now receives strict durable mode flag and throws on durable enqueue failure instead of fallback when strict mode is enabled
+- Added TDD file: test/app/host/server-durable.test.ts
+
+Verification:
+1) bun test test/app/host/server-durable.test.ts
+   Result: 3 pass, 0 fail
+
+2) bun run build
+   Result: pass (tsc --noEmit exit 0)
+
+3) bun test test/cli/
+   Result: 205 pass, 0 fail
+
+4) bun test
+   Result: 1913 pass, 396 skip, 0 fail
+
+5) LSP diagnostics (changed files)
+   Files:
+   - src/app/host/create-app-host.ts
+   - src/app/host/types.ts
+   - src/bootstrap/types.ts
+   - src/bootstrap/runtime.ts
+   - src/memory/task-agent.ts
+   - test/app/host/server-durable.test.ts
+   Result: no diagnostics found in all files

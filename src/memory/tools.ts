@@ -55,6 +55,41 @@ export type ToolExecutorLike = {
   registerLocal(tool: MemoryToolDefinition): void;
 };
 
+export type AreaWorldProjectionReader = {
+  getAreaStateCurrent(agentId: string, areaId: number, key: string): unknown | null;
+  getAreaStateAsOf(agentId: string, areaId: number, key: string, asOfCommittedTime: number): unknown | null;
+  getWorldStateCurrent(key: string): unknown | null;
+  getWorldStateAsOf(key: string, asOfCommittedTime: number): unknown | null;
+};
+
+export function readAreaStateForTool(
+  projection: AreaWorldProjectionReader,
+  params: {
+    agentId: string;
+    areaId: number;
+    key: string;
+    asOfCommittedTime?: number;
+  },
+): unknown | null {
+  if (params.asOfCommittedTime != null) {
+    return projection.getAreaStateAsOf(params.agentId, params.areaId, params.key, params.asOfCommittedTime);
+  }
+  return projection.getAreaStateCurrent(params.agentId, params.areaId, params.key);
+}
+
+export function readWorldStateForTool(
+  projection: AreaWorldProjectionReader,
+  params: {
+    key: string;
+    asOfCommittedTime?: number;
+  },
+): unknown | null {
+  if (params.asOfCommittedTime != null) {
+    return projection.getWorldStateAsOf(params.key, params.asOfCommittedTime);
+  }
+  return projection.getWorldStateCurrent(params.key);
+}
+
 // ---------------------------------------------------------------------------
 // Pointer syntax guide (shared across descriptions)
 // ---------------------------------------------------------------------------

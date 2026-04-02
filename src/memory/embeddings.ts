@@ -1,10 +1,10 @@
-import type { Db } from "../storage/database.js";
-import type { TransactionBatcher } from "./transaction-batcher.js";
-import type { EmbeddingViewType, NodeRef } from "./types.js";
+import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
+import type { ITransactionBatcher } from "./transaction-batcher.js";
+import type { EmbeddingViewType, NodeRef, NodeRefKind } from "./types.js";
 
 type EmbeddingEntry = {
   nodeRef: NodeRef;
-  nodeKind: string;
+  nodeKind: NodeRefKind;
   viewType: EmbeddingViewType;
   modelId: string;
   embedding: Float32Array;
@@ -13,17 +13,19 @@ type EmbeddingEntry = {
 type NeighborQueryOptions = {
   nodeKind?: string;
   agentId: string | null;
+  modelId?: string;
   limit?: number;
 };
 
 export class EmbeddingService {
-  constructor(
-    private readonly db: Db,
-    private readonly batcher: TransactionBatcher,
-  ) {}
+	constructor(
+		private readonly embeddingRepo: EmbeddingRepo,
+		private readonly batcher: ITransactionBatcher,
+	) {}
 
   cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
+      console.warn(`cosineSimilarity: dimension mismatch (${a.length} vs ${b.length}), returning 0`);
       return 0;
     }
 
@@ -41,61 +43,31 @@ export class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
-  batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
+	batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
     if (entries.length === 0) {
       return;
     }
 
-    const now = Date.now();
-    const insert = this.db.prepare(
-      "INSERT OR REPLACE INTO node_embeddings (node_ref, node_kind, view_type, model_id, embedding, updated_at) VALUES (?,?,?,?,?,?)",
-    );
-
     this.batcher.runInTransaction(() => {
       for (const entry of entries) {
-        insert.run(
-          entry.nodeRef,
-          entry.nodeKind,
-          entry.viewType,
-          entry.modelId,
-          this.serializeEmbedding(entry.embedding),
-          now,
+        this.resolveNow(
+          this.embeddingRepo.upsert(
+            entry.nodeRef,
+            entry.nodeKind,
+            entry.viewType,
+            entry.modelId,
+            entry.embedding,
+          ),
         );
       }
     });
   }
 
-  queryNearestNeighbors(
+	queryNearestNeighbors(
     queryEmbedding: Float32Array,
     options: NeighborQueryOptions,
   ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
-    const limit = options.limit ?? 20;
-    const rows = options.nodeKind
-      ? (this.db
-          .prepare("SELECT node_ref, node_kind, embedding FROM node_embeddings WHERE node_kind=?")
-          .all(options.nodeKind) as Array<{ node_ref: string; node_kind: string; embedding: Buffer | Uint8Array }>)
-      : (this.db.prepare("SELECT node_ref, node_kind, embedding FROM node_embeddings").all() as Array<{
-          node_ref: string;
-          node_kind: string;
-          embedding: Buffer | Uint8Array;
-        }>);
-
-    const privateEventOwnerStmt = this.db.prepare("SELECT agent_id FROM private_episode_events WHERE id=?");
-    const privateBeliefOwnerStmt = this.db.prepare("SELECT agent_id FROM private_cognition_current WHERE id=?");
-
-    const candidates: Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> = [];
-    for (const row of rows) {
-      const nodeRef = row.node_ref as NodeRef;
-      if (!this.isNodeVisibleForAgent(nodeRef, row.node_kind, options.agentId, privateEventOwnerStmt, privateBeliefOwnerStmt)) {
-        continue;
-      }
-
-      const vector = this.deserializeEmbedding(Buffer.from(row.embedding));
-      const similarity = this.cosineSimilarity(queryEmbedding, vector);
-      candidates.push({ nodeRef, similarity, nodeKind: row.node_kind });
-    }
-
-    return candidates.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+    return this.resolveNow(this.embeddingRepo.query(queryEmbedding, options));
   }
 
   deserializeEmbedding(blob: Buffer): Float32Array {
@@ -108,36 +80,18 @@ export class EmbeddingService {
     return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
   }
 
-  private isNodeVisibleForAgent(
-    nodeRef: NodeRef,
-    nodeKind: string,
-    agentId: string | null,
-    _privateEventOwnerStmt: ReturnType<Db["prepare"]>,
-    privateBeliefOwnerStmt: ReturnType<Db["prepare"]>,
-  ): boolean {
-    if (nodeKind !== "assertion" && nodeKind !== "evaluation" && nodeKind !== "commitment") {
-      return true;
+  private resolveNow<T>(value: Promise<T> | T): T {
+    if (!(value instanceof Promise)) {
+      return value;
     }
 
-    if (agentId === null) {
-      return false;
+    const settledValue = Bun.peek(value);
+    if (settledValue instanceof Promise) {
+      throw new Error(
+        "EmbeddingService sync API received unresolved async repo result. "
+          + "Inject adapter-style repos that resolve immediately for this call path.",
+      );
     }
-
-    const id = this.parseNodeRefId(nodeRef);
-    if (!id) {
-      return false;
-    }
-
-    const row = privateBeliefOwnerStmt.get(id) as { agent_id: string } | undefined;
-    return row?.agent_id === agentId;
-  }
-
-  private parseNodeRefId(nodeRef: NodeRef): number | undefined {
-    const idPart = String(nodeRef).split(":")[1];
-    const id = Number(idPart);
-    if (!Number.isInteger(id) || id <= 0) {
-      return undefined;
-    }
-    return id;
+    return settledValue as T;
   }
 }

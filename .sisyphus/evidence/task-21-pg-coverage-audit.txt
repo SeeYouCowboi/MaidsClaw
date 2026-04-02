@@ -1,0 +1,87 @@
+T21 PG Coverage Audit — Remaining Test Fixture Migration
+=========================================================
+Date: 2026-04-01
+
+SCOPE: All test files using createTempDb()/openDatabase() OUTSIDE test/memory/ and src/memory/
+
+AUDIT RESULTS (17 files total)
+==============================
+
+Category (a) — SQLite-coupled, cannot migrate (12 files)
+---------------------------------------------------------
+These files pass `db: Database` directly to service constructors (InteractionStore(db),
+TurnService(...), etc.) which accept SQLite Database types. Cannot mechanically swap to PG.
+
+1. test/interaction/interaction-log.test.ts         — InteractionStore(db) constructor
+2. test/interaction/store-request-lookup.test.ts    — InteractionStore(db) constructor
+3. test/session/session-turn.test.ts                — SessionStore(db), TurnService(db)
+4. test/cli/inspect-view-models.test.ts             — InspectStore(db) constructor
+5. test/cli/acceptance/acceptance.test.ts            — full CLI acceptance harness
+6. test/jobs/job-persistence-factory.test.ts         — JobPersistenceFactory(db)
+7. test/jobs/durable-persistence.test.ts             — DurablePersistence(db)
+8. test/runtime/turn-service.test.ts                 — TurnService(db, ...)
+9. test/runtime/turn-service-run-user-turn.test.ts   — TurnService(db, ...)
+10. test/runtime/prompt-integration.test.ts          — full runtime stack with SQLite
+11. test/e2e/private-thoughts-e2e.test.ts            — end-to-end with SQLite
+12. test/runtime/demo-scenario.test.ts               — full demo runtime with SQLite
+
+Category (b) — Potentially migratable, but already covered (4 files)
+---------------------------------------------------------------------
+These test higher-level APIs (seed + verify). Scenarios already covered in test/pg-app/.
+
+1. test/scripts/search-verify.test.ts               — search verification (covered by pg-narrative-search-repo)
+2. test/scripts/memory-maintenance.test.ts           — memory maintenance (covered by pg-memory-maintenance)
+3. test/scripts/area-world-verify.test.ts            — area/world verify (covered by pg-area-world-repo)
+4. test/runtime/private-thoughts-behavioral.test.ts  — behavioral tests (covered by pg-private-thoughts)
+
+Category (c) — SQLite-specific (1 file)
+----------------------------------------
+1. test/storage/database.test.ts                     — tests WAL mode, FTS5 trigram, SQLite-specific features
+
+EXISTING PG TEST COVERAGE (26 files in test/pg-app/)
+=====================================================
+Already well-covered:
+- Session lifecycle (create, list, find, close, reopen)
+- Interaction records (commit, list, getMessageRecords)
+- Memory CRUD (create, read, update, delete, search)
+- Narrative search (FTS, vector, hybrid)
+- Area/world management
+- Private thoughts
+- Job persistence (enqueue, claim, complete, retry)
+- Search rebuild lifecycle
+- Memory maintenance
+- Admin/inspector views
+- Retention/drain policies
+
+REAL GAPS FOUND (4 methods on PgInteractionRepo)
+=================================================
+1. getSettlementPayload — not tested
+2. getMessageRecords filtering (message-only, excluding status/settlement) — not properly tested
+3. findSessionIdByRequestId REQUEST_ID_AMBIGUOUS error path — not tested
+4. listStalePendingSettlementSessions — not tested at all
+
+NEW TEST FILE CREATED
+=====================
+File: test/pg-app/pg-interaction-request-lookup.test.ts (315 lines, 7 test cases)
+
+Tests:
+1. getSettlementPayload returns latest settlement payload for session+request
+2. getSettlementPayload returns undefined when settlement is missing
+3. getMessageRecords returns only message records, excluding status and settlement
+4. findSessionIdByRequestId throws REQUEST_ID_AMBIGUOUS when request maps to multiple sessions
+5. listStalePendingSettlementSessions returns sessions with stale unprocessed settlements
+6. listStalePendingSettlementSessions excludes recently committed settlements
+7. listStalePendingSettlementSessions ignores processed settlements
+
+NOTE: Tests 1 and 5 fail due to pre-existing JSONB string bug in PgInteractionRepo
+(see task-21-remaining-tests-pg.txt for details). These failures are NOT introduced
+by the new test file — the same JSONB bug causes 5 pre-existing failures in
+pg-interaction-session-repo.test.ts.
+
+CONCLUSION
+==========
+- 12/17 files are SQLite-coupled and CANNOT be migrated (different constructor signatures)
+- 4/17 files test scenarios already covered by existing PG tests
+- 1/17 file tests SQLite-specific features (irrelevant to PG)
+- 4 real coverage gaps identified and new tests written
+- No mechanical createTempDb->createPgTestDb migration is possible for the remaining files

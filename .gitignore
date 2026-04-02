@@ -29,6 +29,8 @@ Thumbs.db
 .sisyphus/*
 !.sisyphus/plans/
 !.sisyphus/drafts/
+!.sisyphus/docs/
+!.sisyphus/evidence/
 
 # Lock files (Bun project — use bun.lockb)
 package-lock.json

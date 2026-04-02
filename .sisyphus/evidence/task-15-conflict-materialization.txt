@@ -1,0 +1,34 @@
+T15 Evidence: Conflict Factor Materialization
+
+## conflictFactors[] Audit — relation-intent-resolver.ts
+
+File: src/memory/cognition/relation-intent-resolver.ts
+
+### Validation Added
+resolveConflictFactors() now validates each factor BEFORE attempting resolution:
+1. `factor.kind` must be a non-empty string → rejected with "missing or empty kind"
+2. `factor.ref` must be a non-empty string → rejected with "missing or empty ref"
+3. Both rejections produce console.warn with [settlement_conflict_factor_rejected] tag
+
+### cognition_key:* Virtual Ref Resolution (Already Correct)
+The `resolveFactorNodeRef()` function already resolves `cognition_key:*` prefixed refs
+to real node refs (e.g., `assertion:42`). The flow:
+1. Strips `cognition_key:` prefix
+2. Looks up cognition by key in private_cognition_current
+3. Returns canonical ref like `assertion:{id}` or `evaluation:{id}`
+
+Virtual refs never leak into stored `conflict_factor_refs_json` because:
+- `resolveConflictFactors` returns `.nodeRef` (always real)
+- `normalizeConflictFactorRefs` validates pattern `(assertion|evaluation|...):\d+`
+- `writeContestRelations` only writes real refs
+
+### conflicts_with Edge Server-Side Generation (Already Correct)
+The flow in ExplicitSettlementProcessor:
+1. `resolveConflictFactors()` → resolves factor refs to real nodeRefs
+2. `applyContestConflictFactors()` → normalizes refs, writes `conflicts_with` edges
+3. `writeContestRelations()` → inserts into memory_relations
+No payload-level `conflicts_with` declaration is accepted.
+
+Tests:
+- "ref-based factor generates conflicts_with edge" — PASS
+- "cognition_key ref resolves to real node ref for conflicts_with edge" — PASS

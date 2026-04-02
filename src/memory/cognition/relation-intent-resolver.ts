@@ -1,5 +1,6 @@
 import { MaidsClawError } from "../../core/errors.js";
 import type { CanonicalRpTurnOutcome, CognitionKind, ConflictFactor, RelationIntent } from "../../runtime/rp-turn-contract.js";
+import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 
 type DbLike = {
   prepare(sql: string): {
@@ -235,6 +236,21 @@ export function resolveConflictFactors(
   const unresolved: UnresolvedConflictFactor[] = [];
 
   for (const factor of factors) {
+    if (!factor.kind || typeof factor.kind !== "string" || factor.kind.trim().length === 0) {
+      console.warn(
+        `[settlement_conflict_factor_rejected] reason=missing_kind ref=${factor.ref ?? "(none)"} settlement=${options?.settlementId ?? "unknown"}`,
+      );
+      unresolved.push({ factor, reason: "missing or empty kind" });
+      continue;
+    }
+    if (!factor.ref || typeof factor.ref !== "string" || factor.ref.trim().length === 0) {
+      console.warn(
+        `[settlement_conflict_factor_rejected] reason=missing_ref kind=${factor.kind} settlement=${options?.settlementId ?? "unknown"}`,
+      );
+      unresolved.push({ factor, reason: "missing or empty ref (freetext factor rejected)" });
+      continue;
+    }
+
     const nodeRef = resolveFactorNodeRef(factor.ref, db, options);
     if (!nodeRef) {
       unresolved.push({ factor, reason: `unresolvable ref: ${factor.ref}` });
@@ -300,8 +316,14 @@ function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
-  if (/^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(raw)) {
+  if (raw.startsWith("private_episode:")) {
     return raw;
+  }
+  try {
+    parseGraphNodeRef(raw);
+    return raw;
+  } catch {
+    // not a direct node ref, try cognition key lookup
   }
 
   const cognitionRef = raw.startsWith(COGNITION_KEY_PREFIX)

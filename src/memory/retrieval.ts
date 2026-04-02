@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { EmbeddingService } from "./embeddings.js";
 import { CognitionSearchService } from "./cognition/cognition-search.js";
@@ -69,9 +69,9 @@ export class RetrievalService {
     const deps = this.resolveDeps(dbOrDeps);
     const { db } = deps;
     this.db = db;
-    this.embeddingService = deps.embeddingService ?? new EmbeddingService(db, new TransactionBatcher(db));
-    this.narrativeSearch = deps.narrativeSearch ?? new NarrativeSearchService(db);
-    this.cognitionSearch = deps.cognitionSearch ?? new CognitionSearchService(db);
+    this.embeddingService = deps.embeddingService ?? (() => { throw new Error("embeddingService is required"); })();
+    this.narrativeSearch = deps.narrativeSearch ?? (() => { throw new Error("narrativeSearch is required"); })();
+    this.cognitionSearch = deps.cognitionSearch ?? (() => { throw new Error("cognitionSearch is required"); })();
     this.orchestrator = deps.orchestrator
       ?? new RetrievalOrchestrator({
         narrativeService: this.narrativeSearch,

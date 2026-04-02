@@ -1,0 +1,50 @@
+Task: T13 graph-organizer + promotion decoupling from bun:sqlite
+Date: 2026-04-01
+
+Scope implemented
+- src/memory/graph-organizer.ts now depends on NodeScoringQueryRepo (no direct bun:sqlite reads).
+- src/memory/promotion.ts now depends on PromotionQueryRepo (no direct bun:sqlite reads).
+- Added sqlite+pg query repo implementations:
+  - src/storage/domain-repos/sqlite/node-scoring-query-repo.ts
+  - src/storage/domain-repos/pg/node-scoring-query-repo.ts
+  - src/storage/domain-repos/sqlite/promotion-query-repo.ts
+  - src/storage/domain-repos/pg/promotion-query-repo.ts
+- Supporting call-path/test updates:
+  - src/memory/embedding-linker.ts
+  - src/memory/task-agent.ts
+  - src/memory/promotion.test.ts
+  - test/memory/graph-node-registry.test.ts
+
+Verification commands and outcomes
+1) AST import check (targets only)
+   Command:
+   ast-grep pattern: import { Database } from "bun:sqlite"
+   paths: src/memory/graph-organizer.ts, src/memory/promotion.ts
+   Result: No matches found.
+
+2) Type build
+   Command:
+   bun run build
+   Result:
+   tsc -p tsconfig.build.json --noEmit (pass)
+
+3) Test suite
+   Command:
+   bun test
+   Result:
+   Fails in unrelated pre-existing dirty-tree areas (embedding/materialization/shared-block/runtime persona suites).
+   T13-specific promotion path was fixed and validated with focused run:
+
+   Command:
+   bun test src/memory/promotion.test.ts
+   Result:
+   6 pass, 0 fail.
+
+4) LSP diagnostics on changed T13 files
+   Result:
+   No error diagnostics on changed T13 files and supporting files.
+   (Some files still show biome import-order informational diagnostics.)
+
+Notes
+- Full repository test baseline is currently unstable due to concurrent non-T13 changes in working tree.
+- Commit is restricted to T13-scoped files and direct supporting constructor/test wiring only.

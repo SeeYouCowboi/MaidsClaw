@@ -1,4 +1,4 @@
-import type { Db } from "../storage/database.js";
+import type { Db } from "../storage/db-types.js";
 import type { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { GraphStorageService } from "./storage.js";
@@ -150,11 +150,11 @@ export class PublicationRecoverySweeper {
         sourcePubIndex: payload.pubIndex,
       });
     } catch (error: unknown) {
-      if (!isSqliteUniqueConstraintError(error)) {
-        this.handleFailure(job.id, payload, error, now);
-        return;
-      }
-    }
+		if (!isUniqueConstraintError(error)) {
+			this.handleFailure(job.id, payload, error, now);
+			return;
+		}
+	}
 
     try {
       this.applyProjection(payload);
@@ -317,7 +317,7 @@ export class PublicationRecoverySweeper {
   }
 }
 
-function isSqliteUniqueConstraintError(error: unknown): boolean {
+function isUniqueConstraintError(error: unknown): boolean {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     return msg.includes("unique constraint") || msg.includes("unique_constraint") || msg.includes("constraint failed");
