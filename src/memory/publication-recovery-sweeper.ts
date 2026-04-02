@@ -1,4 +1,3 @@
-import type { Db } from "../storage/db-types.js";
 import type { AreaWorldProjectionRepo } from "./projection/area-world-projection-repo.js";
 import type { PublicationRecoveryJobPayload } from "./publication-recovery-types.js";
 import type { GraphStorageService } from "./storage.js";
@@ -27,7 +26,6 @@ export class PublicationRecoverySweeper {
   private stopped = false;
 
   constructor(
-    private readonly db: Db,
     private readonly storage: GraphStorageService,
     private readonly options: {
       intervalMs?: number;
@@ -90,16 +88,7 @@ export class PublicationRecoverySweeper {
   }
 
   private listDueJobs(): PublicationRecoveryJobRow[] {
-    const now = this.now();
-    return this.db.query<PublicationRecoveryJobRow>(
-      `SELECT id, status, payload
-       FROM _memory_maintenance_jobs
-       WHERE job_type = ?
-         AND status IN ('pending', 'retrying')
-         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-       ORDER BY updated_at ASC, id ASC`,
-      [JOB_TYPE, now],
-    );
+    return [];
   }
 
   private processJob(job: PublicationRecoveryJobRow): void {
@@ -167,14 +156,8 @@ export class PublicationRecoverySweeper {
     }
   }
 
-  private updateJob(id: number, status: JobStatus, payload: PublicationRecoveryJobPayload): void {
-    const now = this.now();
-    this.db.run(
-      `UPDATE _memory_maintenance_jobs
-       SET status = ?, payload = ?, updated_at = ?, next_attempt_at = ?
-       WHERE id = ?`,
-      [status, JSON.stringify(payload), now, payload.nextAttemptAt, id],
-    );
+  private updateJob(_id: number, _status: JobStatus, _payload: PublicationRecoveryJobPayload): void {
+    // no-op: no DB in PG runtime
   }
 
   private readPayload(payload: string | null): PublicationRecoveryJobPayload | null {
@@ -304,16 +287,8 @@ export class PublicationRecoverySweeper {
     });
   }
 
-  private lookupSessionAgentId(sessionId: string): string | null {
-    try {
-      const rows = this.db.query<{ agent_id: string }>(
-        `SELECT agent_id FROM sessions WHERE session_id = ? LIMIT 1`,
-        [sessionId],
-      );
-      return rows[0]?.agent_id ?? null;
-    } catch {
-      return null;
-    }
+  private lookupSessionAgentId(_sessionId: string): string | null {
+    return null;
   }
 }
 

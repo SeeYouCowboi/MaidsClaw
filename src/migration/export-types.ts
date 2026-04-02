@@ -1,6 +1,5 @@
 /**
- * Shared JSONL export format types used by both the (now-removed) SQLite
- * exporter and the PG importer.
+ * Shared JSONL export format types used by the PG data exporter and importer.
  */
 
 // ── Types ────────────────────────────────────────────────────────────

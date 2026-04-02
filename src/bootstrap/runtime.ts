@@ -1075,7 +1075,6 @@ export function bootstrapRuntime(
 		new PgTransactionBatcher(),
 	);
 	const materializationService = new MaterializationService(
-		throwingLegacyDbAdapter,
 		graphStorageService,
 		promotionQueryRepo,
 		undefined,
@@ -1163,7 +1162,6 @@ export function bootstrapRuntime(
 	const publicationRecoverySweeper =
 		memoryTaskAgent !== null && isPublicationRecoverySchemaCompatible()
 			? new PublicationRecoverySweeper(
-					throwingLegacyDbAdapter,
 					graphStorageService,
 					undefined,
 				)
