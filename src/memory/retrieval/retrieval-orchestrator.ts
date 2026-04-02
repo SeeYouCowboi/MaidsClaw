@@ -96,7 +96,7 @@ export class RetrievalOrchestrator {
 
     const recentCognitionKeys = new Set<string>(dedupContext?.recentCognitionKeys ?? []);
     if (this.currentProjectionReader && template.cognitionBudget > 0) {
-      const currentRows = this.currentProjectionReader.getActiveCurrent(viewerContext.viewer_agent_id);
+      const currentRows = await this.currentProjectionReader.getActiveCurrent(viewerContext.viewer_agent_id);
       for (const row of currentRows) {
         const key = row.cognition_key?.trim();
         if (!key || !recentCognitionKeys.has(key)) {
@@ -114,7 +114,7 @@ export class RetrievalOrchestrator {
     }
 
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(query, template, viewerContext);
-    const episodeHints = this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
+    const episodeHints = await this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
 
     const narrativeHints: MemoryHint[] =
       template.narrativeEnabled && (template.narrativeBudget > 0 || effectiveEpisodeBudget > 0)
@@ -127,7 +127,7 @@ export class RetrievalOrchestrator {
 
     const rawCognitionHits: CognitionHit[] =
       template.cognitionEnabled && (template.cognitionBudget > 0 || effectiveConflictNotesBudget > 0)
-        ? this.cognitionService.searchCognition({
+        ? await this.cognitionService.searchCognition({
             agentId: viewerContext.viewer_agent_id,
             query,
             activeOnly: true,
@@ -374,16 +374,16 @@ export class RetrievalOrchestrator {
     return typed;
   }
 
-  private resolveEpisodeHints(
+  private async resolveEpisodeHints(
     query: string,
     viewerContext: ViewerContext,
     effectiveEpisodeBudget: number,
-  ): TypedNarrativeSegment[] {
+  ): Promise<TypedNarrativeSegment[]> {
     if (!this.episodeRepository || effectiveEpisodeBudget <= 0) {
       return [];
     }
 
-    const rawRows = this.episodeRepository.readByAgent(
+    const rawRows = await this.episodeRepository.readByAgent(
       viewerContext.viewer_agent_id,
       Math.max(effectiveEpisodeBudget * 3, effectiveEpisodeBudget + 4),
     );

@@ -1,12 +1,16 @@
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
-import type { Db } from "../../storage/db-types.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
-import { PrivateCognitionProjectionRepo } from "./private-cognition-current.js";
-import { RelationBuilder, type ConflictEvidence, type ConflictHistoryEntry } from "./relation-builder.js";
+import type { CognitionSearchRepo } from "../../storage/domain-repos/contracts/cognition-search-repo.js";
+import type {
+  ConflictEvidence as RelationConflictEvidence,
+  ConflictHistoryEntry as RelationConflictHistoryEntry,
+  RelationReadRepo,
+} from "../../storage/domain-repos/contracts/relation-read-repo.js";
+import type { CognitionProjectionRepo } from "../../storage/domain-repos/contracts/cognition-projection-repo.js";
 
-const COGNITION_KEY_PREFIX = "cognition_key" + ":";
+const COGNITION_KINDS: CognitionKind[] = ["assertion", "evaluation", "commitment"];
 
 type ConflictEvidenceItem = {
   targetRef: string;
@@ -44,62 +48,106 @@ type CognitionHit = {
   resolution?: ConflictResolution | null;
 };
 
-type CognitionSearchDocRow = {
-  id: number;
-  doc_type: string;
-  source_ref: string;
-  agent_id: string;
-  kind: string;
-  basis: string | null;
-  stance: string | null;
-  content: string;
-  updated_at: number;
-  created_at: number;
-};
-
-const HORIZON_RANK: Record<string, number> = {
-  immediate: 1,
-  near: 2,
-  long: 3,
-};
-const HORIZON_DEFAULT_RANK = 99;
-
 export class CognitionSearchService {
-  private readonly relationBuilder: RelationBuilder;
+  constructor(
+    private readonly searchRepo: CognitionSearchRepo,
+    private readonly relationReadRepo: RelationReadRepo,
+    private readonly projectionRepo: CognitionProjectionRepo,
+  ) {}
 
-  constructor(private readonly db: Db) {
-    this.relationBuilder = new RelationBuilder(db);
-  }
-
-  searchCognition(params: CognitionSearchParams): CognitionHit[] {
+  async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
     const effectiveActiveOnly = params.activeOnly ?? (params.kind === "commitment");
     const limit = params.limit ?? 100;
 
     let hits: CognitionHit[];
     if (params.query && params.query.trim().length >= 3) {
-      hits = this.searchByFts(params, effectiveActiveOnly, limit);
+      hits = await this.searchByFts(params, effectiveActiveOnly, limit);
     } else {
-      hits = this.searchByIndex(params, effectiveActiveOnly, limit);
+      hits = await this.searchByIndex(params, effectiveActiveOnly, limit);
     }
 
     return this.enrichContestedHits(params.agentId, hits);
   }
 
-  private enrichContestedHits(agentId: string, hits: CognitionHit[]): CognitionHit[] {
-    const projection = new PrivateCognitionProjectionRepo(this.db);
+  private async searchByFts(
+    params: CognitionSearchParams,
+    activeOnly: boolean,
+    limit: number,
+  ): Promise<CognitionHit[]> {
+    let hits = await this.searchRepo.searchBySimilarity(params.query ?? "", params.agentId, {
+      kind: params.kind,
+      stance: params.stance,
+      basis: params.basis,
+      activeOnly,
+      limit,
+    });
 
+    if (activeOnly) {
+      hits = await this.filterActiveCommitments(hits, params.agentId);
+    }
+
+    if (params.kind === "commitment") {
+      return this.searchRepo.sortCommitments(hits, params.agentId);
+    }
+
+    return hits;
+  }
+
+  private async searchByIndex(
+    params: CognitionSearchParams,
+    activeOnly: boolean,
+    limit: number,
+  ): Promise<CognitionHit[]> {
+    let hits: CognitionHit[];
+
+    if (params.kind) {
+      hits = await this.searchRepo.searchByKind(params.agentId, params.kind, {
+        stance: params.stance,
+        basis: params.basis,
+        activeOnly,
+        limit,
+      });
+    } else {
+      const searches = await Promise.all(
+        COGNITION_KINDS.map((kind) => this.searchRepo.searchByKind(params.agentId, kind, {
+          stance: params.stance,
+          basis: params.basis,
+          activeOnly,
+          limit,
+        })),
+      );
+      hits = searches.flat().sort((left, right) => right.updated_at - left.updated_at).slice(0, limit);
+    }
+
+    if (activeOnly) {
+      hits = await this.filterActiveCommitments(hits, params.agentId);
+    }
+
+    if (params.kind === "commitment") {
+      return this.searchRepo.sortCommitments(hits, params.agentId);
+    }
+
+    return hits;
+  }
+
+  private async filterActiveCommitments(hits: CognitionHit[], agentId: string): Promise<CognitionHit[]> {
+    return this.searchRepo.filterActiveCommitments(hits, agentId);
+  }
+
+  private async enrichContestedHits(agentId: string, hits: CognitionHit[]): Promise<CognitionHit[]> {
     for (const hit of hits) {
       if (hit.stance !== "contested") continue;
-      const cognitionKey = hit.cognitionKey ?? this.resolveCognitionKey(hit.source_ref, agentId);
+
+      const cognitionKey = hit.cognitionKey ?? await this.resolveCognitionKey(hit.source_ref, agentId);
       if (cognitionKey) {
         hit.cognitionKey = cognitionKey;
       }
 
-      const current = cognitionKey ? projection.getCurrent(agentId, cognitionKey) : null;
+      const current = cognitionKey ? await this.projectionRepo.getCurrent(agentId, cognitionKey) : null;
       const projectionFactorRefs = this.parseFactorRefsJson(current?.conflict_factor_refs_json ?? null);
       const summaryFromProjection = current?.conflict_summary?.trim() || null;
 
-      const evidence = this.relationBuilder.getConflictEvidence(String(hit.source_ref), 3);
+      const evidence = await this.relationReadRepo.getConflictEvidence(String(hit.source_ref), 3);
       const evidenceRefs = evidence.map((row) => row.targetRef as NodeRef);
 
       const factorRefs = projectionFactorRefs.length > 0 ? projectionFactorRefs : evidenceRefs;
@@ -109,18 +157,19 @@ export class CognitionSearchService {
       hit.conflictSummary = summary;
       hit.conflictFactorRefs = factorRefs;
       hit.conflictEvidence = this.toConflictEvidenceItems(evidence);
-      hit.resolution = this.extractResolution(String(hit.source_ref));
+      hit.resolution = await this.extractResolution(String(hit.source_ref));
     }
+
     return hits;
   }
 
-  private extractResolution(nodeRef: string): ConflictResolution | null {
-    const history = this.relationBuilder.getConflictHistory(nodeRef, 5);
-    for (let i = history.length - 1; i >= 0; i--) {
-      const entry = history[i] as ConflictHistoryEntry;
+  private async extractResolution(nodeRef: string): Promise<ConflictResolution | null> {
+    const history = await this.relationReadRepo.getConflictHistory(nodeRef, 5);
+    for (let index = history.length - 1; index >= 0; index--) {
+      const entry = history[index] as RelationConflictHistoryEntry;
       if (
-        (entry.relation_type === "resolved_by" || entry.relation_type === "downgraded_by") &&
-        entry.source_node_ref === nodeRef
+        (entry.relation_type === "resolved_by" || entry.relation_type === "downgraded_by")
+        && entry.source_node_ref === nodeRef
       ) {
         return { type: entry.relation_type, by_node_ref: entry.target_node_ref };
       }
@@ -128,7 +177,7 @@ export class CognitionSearchService {
     return null;
   }
 
-  private toConflictEvidenceItems(evidence: ConflictEvidence[]): ConflictEvidenceItem[] {
+  private toConflictEvidenceItems(evidence: RelationConflictEvidence[]): ConflictEvidenceItem[] {
     const items: ConflictEvidenceItem[] = [];
     for (const item of evidence) {
       try {
@@ -152,6 +201,7 @@ export class CognitionSearchService {
     if (!value) {
       return [];
     }
+
     try {
       const parsed = JSON.parse(value) as unknown;
       if (!Array.isArray(parsed)) {
@@ -166,261 +216,34 @@ export class CognitionSearchService {
     }
   }
 
-  private resolveCognitionKey(sourceRef: NodeRef, agentId: string): string | null {
-    const text = String(sourceRef);
-    if (text.startsWith(COGNITION_KEY_PREFIX)) {
-      const key = text.slice(COGNITION_KEY_PREFIX.length).trim();
-      return key.length > 0 ? key : null;
-    }
-
-    const [kind, rawId] = text.split(":");
-    if (!rawId) {
-      return null;
-    }
-    const id = Number(rawId);
-    if (Number.isNaN(id)) {
-      return null;
-    }
-
-    if (kind === "assertion") {
-      const row = this.db
-        .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ? AND kind = 'assertion'`)
-        .get(id, agentId) as { "cognition_key": string | null } | null;
-      return row?.cognition_key ?? null;
-    }
-
-    if (kind === "evaluation" || kind === "commitment") {
-      const row = this.db
-        .prepare(`SELECT cognition_key FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
-        .get(id, agentId) as { "cognition_key": string | null } | null;
-      return row?.cognition_key ?? null;
-    }
-
-    return null;
-  }
-
-  private searchByFts(
-    params: CognitionSearchParams,
-    activeOnly: boolean,
-    limit: number,
-  ): CognitionHit[] {
-    const safeQuery = this.escapeFtsQuery((params.query ?? "").trim());
-    const conditions: string[] = ["d.agent_id = ?"];
-    const binds: unknown[] = [params.agentId];
-
-    if (params.kind) {
-      conditions.push("d.kind = ?");
-      binds.push(params.kind);
-    }
-    if (params.stance) {
-      conditions.push("d.stance = ?");
-      binds.push(params.stance);
-    }
-    if (params.basis) {
-      conditions.push("d.basis = ?");
-      binds.push(params.basis);
-    }
-    if (activeOnly) {
-      conditions.push("(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))");
-    }
-
-    const whereClause = conditions.join(" AND ");
-
-    const rows = this.db
-      .prepare(
-        `SELECT d.id, d.doc_type, d.source_ref, d.agent_id, d.kind, d.basis, d.stance,
-                d.content, d.updated_at, d.created_at
-         FROM search_docs_cognition d
-         JOIN search_docs_cognition_fts f ON f.rowid = d.id
-         WHERE f.content MATCH ? AND ${whereClause}
-         ORDER BY d.updated_at DESC
-         LIMIT ?`,
-      )
-      .all(safeQuery, ...binds, limit) as CognitionSearchDocRow[];
-
-    let hits = rows.map((row) => this.toHit(row));
-    if (activeOnly) {
-      hits = this.filterActiveCommitments(hits, params.agentId);
-    }
-
-    if (params.kind === "commitment") {
-      return this.sortCommitments(hits, params.agentId);
-    }
-    return hits;
-  }
-
-  private searchByIndex(
-    params: CognitionSearchParams,
-    activeOnly: boolean,
-    limit: number,
-  ): CognitionHit[] {
-    const conditions: string[] = ["d.agent_id = ?"];
-    const binds: unknown[] = [params.agentId];
-
-    if (params.kind) {
-      conditions.push("d.kind = ?");
-      binds.push(params.kind);
-    }
-    if (params.stance) {
-      conditions.push("d.stance = ?");
-      binds.push(params.stance);
-    }
-    if (params.basis) {
-      conditions.push("d.basis = ?");
-      binds.push(params.basis);
-    }
-    if (activeOnly) {
-      conditions.push("(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))");
-    }
-
-    const whereClause = conditions.join(" AND ");
-
-    const rows = this.db
-      .prepare(
-        `SELECT d.id, d.doc_type, d.source_ref, d.agent_id, d.kind, d.basis, d.stance,
-                d.content, d.updated_at, d.created_at
-         FROM search_docs_cognition d
-         WHERE ${whereClause}
-         ORDER BY d.updated_at DESC
-         LIMIT ?`,
-      )
-      .all(...binds, limit) as CognitionSearchDocRow[];
-
-    let hits = rows.map((row) => this.toHit(row));
-    if (activeOnly) {
-      hits = this.filterActiveCommitments(hits, params.agentId);
-    }
-
-    if (params.kind === "commitment") {
-      return this.sortCommitments(hits, params.agentId);
-    }
-    return hits;
-  }
-
-  private filterActiveCommitments(hits: CognitionHit[], agentId: string): CognitionHit[] {
-    return hits.filter((hit) => {
-      if (hit.kind !== "commitment") return true;
-      const overlayId = this.parseOverlayId(hit.source_ref);
-      if (overlayId === null) return true;
-      const row = this.db
-        .prepare(`SELECT status FROM private_cognition_current WHERE id = ? AND agent_id = ?`)
-        .get(overlayId, agentId) as { status: string } | null;
-      return row?.status === "active";
-    });
-  }
-
-  private sortCommitments(hits: CognitionHit[], agentId: string): CognitionHit[] {
-    const commitmentMeta = new Map<string, { priority: number; horizon: string | null }>();
-
-    for (const hit of hits) {
-      if (hit.kind !== "commitment") continue;
-      const overlayId = this.parseOverlayId(hit.source_ref);
-      if (overlayId === null) continue;
-
-      const row = this.db
-        .prepare(
-          `SELECT CAST(json_extract(record_json, '$.priority') AS INTEGER) AS priority,
-                  json_extract(record_json, '$.horizon') AS horizon
-           FROM private_cognition_current
-           WHERE id = ? AND agent_id = ?`,
-        )
-        .get(overlayId, agentId) as { priority: number | null; horizon: string | null } | null;
-
-      if (row) {
-        commitmentMeta.set(String(hit.source_ref), {
-          priority: typeof row.priority === "number" && Number.isFinite(row.priority) ? row.priority : 999,
-          horizon: typeof row.horizon === "string" ? row.horizon : null,
-        });
-      }
-    }
-
-    return hits.sort((a, b) => {
-      const metaA = commitmentMeta.get(String(a.source_ref));
-      const metaB = commitmentMeta.get(String(b.source_ref));
-
-      const prioA = metaA?.priority ?? 999;
-      const prioB = metaB?.priority ?? 999;
-      if (prioA !== prioB) return prioA - prioB;
-
-      const horizonA = HORIZON_RANK[metaA?.horizon ?? ""] ?? HORIZON_DEFAULT_RANK;
-      const horizonB = HORIZON_RANK[metaB?.horizon ?? ""] ?? HORIZON_DEFAULT_RANK;
-      if (horizonA !== horizonB) return horizonA - horizonB;
-
-      return b.updated_at - a.updated_at;
-    });
-  }
-
-  private parseOverlayId(sourceRef: NodeRef): number | null {
-    try {
-      const ref = parseGraphNodeRef(String(sourceRef));
-      const id = Number(ref.id);
-      return Number.isNaN(id) ? null : id;
-    } catch {
-      return null;
-    }
-  }
-
-  private toHit(row: CognitionSearchDocRow): CognitionHit {
-    return {
-      kind: row.kind as CognitionKind,
-      basis: (row.basis as AssertionBasis) ?? null,
-      stance: (row.stance as AssertionStance) ?? null,
-      cognitionKey: this.extractCognitionKey(row.source_ref),
-      source_ref: row.source_ref as NodeRef,
-      content: row.content,
-      updated_at: row.updated_at,
-    };
-  }
-
-  private extractCognitionKey(sourceRef: string): string | null {
-    const prefix = COGNITION_KEY_PREFIX;
-    if (!sourceRef.startsWith(prefix)) {
-      return null;
-    }
-    const key = sourceRef.slice(prefix.length).trim();
-    return key.length > 0 ? key : null;
-  }
-
-  private escapeFtsQuery(input: string): string {
-    const tokens = input
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3)
-      .map((token) => token.replaceAll('"', '""'));
-
-    if (tokens.length === 0) {
-      return `"${input.replaceAll('"', '""')}"`;
-    }
-
-    if (tokens.length === 1) {
-      return `"${tokens[0]}"`;
-    }
-
-    return tokens.map((token) => `"${token}"`).join(" OR ");
+  private async resolveCognitionKey(sourceRef: NodeRef, agentId: string): Promise<string | null> {
+    return this.searchRepo.resolveCognitionKey(sourceRef, agentId);
   }
 
   createCurrentProjectionReader(): CurrentProjectionReader {
-    return new CurrentProjectionReader(new PrivateCognitionProjectionRepo(this.db));
+    return new CurrentProjectionReader(this.projectionRepo);
   }
 }
 
 export class CurrentProjectionReader {
-  constructor(private readonly repo: PrivateCognitionProjectionRepo) {}
+  constructor(private readonly repo: CognitionProjectionRepo) {}
 
-  getCurrent(agentId: string, cognitionKey: string): CognitionCurrentRow | null {
+  async getCurrent(agentId: string, cognitionKey: string): Promise<CognitionCurrentRow | null> {
     return this.repo.getCurrent(agentId, cognitionKey);
   }
 
-  getAllCurrent(agentId: string): CognitionCurrentRow[] {
+  async getAllCurrent(agentId: string): Promise<CognitionCurrentRow[]> {
     return this.repo.getAllCurrent(agentId);
   }
 
-  getAllCurrentByKind(agentId: string, kind: CognitionKind): CognitionCurrentRow[] {
-    return this.repo.getAllCurrent(agentId).filter((row) => row.kind === kind);
+  async getAllCurrentByKind(agentId: string, kind: CognitionKind): Promise<CognitionCurrentRow[]> {
+    const rows = await this.repo.getAllCurrent(agentId);
+    return rows.filter((row) => row.kind === kind);
   }
 
-  getActiveCurrent(agentId: string): CognitionCurrentRow[] {
-    return this.repo.getAllCurrent(agentId).filter((row) => row.status !== "retracted");
+  async getActiveCurrent(agentId: string): Promise<CognitionCurrentRow[]> {
+    const rows = await this.repo.getAllCurrent(agentId);
+    return rows.filter((row) => row.status !== "retracted");
   }
 
   toHit(row: CognitionCurrentRow): CognitionHit {
