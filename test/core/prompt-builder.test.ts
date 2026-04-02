@@ -130,7 +130,7 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		expect(slots.includes(PromptSectionSlot.PERSONA)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.SYSTEM_PREAMBLE)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.PINNED_SHARED)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(false);
@@ -150,7 +150,7 @@ describe("PromptBuilder", () => {
 		expect(pinnedShared).not.toContain("privateEpisodes");
 	});
 
-	it("rp-agent keeps deterministic four-surface slot order", async () => {
+	it("rp-agent keeps deterministic slot order", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -163,12 +163,12 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		const personaIndex = slots.indexOf(PromptSectionSlot.PERSONA);
+		const systemPreambleIndex = slots.indexOf(PromptSectionSlot.SYSTEM_PREAMBLE);
 		const pinnedSharedIndex = slots.indexOf(PromptSectionSlot.PINNED_SHARED);
 		const recentCognitionIndex = slots.indexOf(PromptSectionSlot.RECENT_COGNITION);
 
-		expect(personaIndex).toBeGreaterThan(-1);
-		expect(pinnedSharedIndex).toBeGreaterThan(personaIndex);
+		expect(systemPreambleIndex).toBeGreaterThan(-1);
+		expect(pinnedSharedIndex).toBeGreaterThan(systemPreambleIndex);
 		expect(recentCognitionIndex).toBeGreaterThan(pinnedSharedIndex);
 	});
 

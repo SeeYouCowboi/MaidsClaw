@@ -210,7 +210,6 @@ export class PromptBuilder {
 				PromptSectionSlot.SYSTEM_PREAMBLE,
 				persona,
 			);
-			slotContent.set(PromptSectionSlot.PERSONA, persona);
 			slotContent.set(PromptSectionSlot.WORLD_RULES, this.getWorldRules());
 			slotContent.set(
 				PromptSectionSlot.PINNED_SHARED,

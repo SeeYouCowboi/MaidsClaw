@@ -8,7 +8,6 @@
 export enum PromptSectionSlot {
   SYSTEM_PREAMBLE = "system_preamble",
   WORLD_RULES = "world_rules",
-  PERSONA = "persona",
   PINNED_SHARED = "pinned_shared",
   RECENT_COGNITION = "recent_cognition",
   /** Placeholder for typed retrieval content (T9 will fill). */
@@ -25,7 +24,6 @@ export enum PromptSectionSlot {
 export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.SYSTEM_PREAMBLE,
   PromptSectionSlot.WORLD_RULES,
-  PromptSectionSlot.PERSONA,
   PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,
   PromptSectionSlot.TYPED_RETRIEVAL,
