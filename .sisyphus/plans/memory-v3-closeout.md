@@ -348,7 +348,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 3. G11 — Delete 3 Confirmed Dead Files
+- [x] 3. G11 — Delete 3 Confirmed Dead Files
 
   **What to do**:
   - Delete the following files (confirmed zero importers in src/):
@@ -421,7 +421,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 4. G9a — Delete Dead SQLite Residue
+- [x] 4. G9a — Delete Dead SQLite Residue
 
   **What to do**:
   - Remove `databasePath?` config field from `src/core/config-schema.ts:22` — confirmed zero callers
@@ -479,7 +479,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 5. G8 + §10 — Retire Legacy `user` + Clarify `index` Core Memory Labels
+- [x] 5. G8 + §10 — Retire Legacy `user` + Clarify `index` Core Memory Labels
 
   **What to do**:
   - **`user` label retirement**:
@@ -572,7 +572,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 6. G9b + §14.3 — Annotate Active Compat Surfaces + Classify `recent_cognition_slots`
+- [x] 6. G9b + §14.3 — Annotate Active Compat Surfaces + Classify `recent_cognition_slots`
 
   **What to do**:
   - **Active compat deprecation annotations**:
@@ -661,7 +661,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/storage/db-types.ts`, `src/memory/navigator.ts`, `src/storage/pg-app-schema-ops.ts`, `src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 7. G2a — Refactor MemoryTaskAgent Constructor for PG-native Dependencies
+- [x] 7. G2a — Refactor MemoryTaskAgent Constructor for PG-native Dependencies
 
   **What to do**:
   - Current state: `MemoryTaskAgent` constructor takes `dbInput: Db | RawDatabaseLike` (synchronous SQLite interface). PG is async — can't create a sync `Db` adapter.
@@ -750,7 +750,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 8. G2b — Wire MemoryTaskAgent + Sweepers in Bootstrap + Fix Pipeline Status
+- [x] 8. G2b — Wire MemoryTaskAgent + Sweepers in Bootstrap + Fix Pipeline Status
 
   **What to do**:
   - In `src/bootstrap/runtime.ts`:
@@ -865,7 +865,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 9. G2c — Pipeline Wiring Verification Tests
+- [x] 9. G2c — Pipeline Wiring Verification Tests
 
   **What to do**:
   - Write tests verifying all G2 wiring is correct:
@@ -923,7 +923,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 10. G1 — Wire registerMemoryTools() into Bootstrap + Tests
+- [x] 10. G1 — Wire registerMemoryTools() into Bootstrap + Tests
 
   **What to do**:
   - In `src/bootstrap/runtime.ts`, after `ToolExecutor` is created and `MemoryTaskAgent` is instantiated:
@@ -1008,7 +1008,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 11. G3 — Remove Organizer Background Fallback + Strict Mode Tests
+- [x] 11. G3 — Remove Organizer Background Fallback + Strict Mode Tests
 
   **What to do**:
   - Read `src/memory/task-agent.ts:487-505` — organizer enqueue failure fallback to background
@@ -1087,7 +1087,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/task-agent.ts`, new test
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 12. G10 — Migrate CLI to createAppHost, Remove Deprecated Bridge
+- [x] 12. G10 — Migrate CLI to createAppHost, Remove Deprecated Bridge
 
   **What to do**:
   - Migrate 3 CLI callers from `createAppClientRuntime()` to `createAppHost()`:
@@ -1171,7 +1171,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 13. G5 — Time-slice Truth Model Contract Doc + Boundary Tests
+- [x] 13. G5 — Time-slice Truth Model Contract Doc + Boundary Tests
 
   **What to do**:
   - Create documentation at `docs/MEMORY_TIME_SLICE_CONTRACT.md` defining:
@@ -1247,7 +1247,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 14. G7 — Centralize RelationContract + Platform Contract Doc
+- [x] 14. G7 — Centralize RelationContract + Platform Contract Doc
 
   **What to do**:
   - Read current relation type definitions scattered across:
@@ -1308,7 +1308,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 15. G6 — Area State Authority Domain Definition Doc
+- [x] 15. G6 — Area State Authority Domain Definition Doc
 
   **What to do**:
   - Create documentation at `docs/MEMORY_AREA_STATE_AUTHORITY.md` defining:
@@ -1370,7 +1370,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 16. G12a — Differentiate Explain Audit Detail Level
+- [x] 16. G12a — Differentiate Explain Audit Detail Level
 
   **What to do**:
   - Current state: `explain` detail levels defined as `"concise" | "standard" | "audit"` (`src/memory/types.ts:41-45`) but `audit` likely behaves identically to `standard`
@@ -1425,7 +1425,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/types.ts`, navigator/explain paths
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 17. G12b — Trace Capture Non-stub 化
+- [x] 17. G12b — Trace Capture Non-stub 化
 
   **What to do**:
   - Current state: `--debug-capture` CLI flag is implemented (non-empty), `TraceStore` write path works (`src/bootstrap/runtime.ts:582-586`), but trace query/replay/export is still stub ("T15" marker)
@@ -1483,7 +1483,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 18. G12c — Key Regression Test Assets for PG-native Paths
+- [x] 18. G12c — Key Regression Test Assets for PG-native Paths
 
   **What to do**:
   - Add regression tests for critical PG-native paths that currently lack coverage:
@@ -1542,7 +1542,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 19. G2 Pipeline E2E Integration Test
+- [x] 19. G2 Pipeline E2E Integration Test
 
   **What to do**:
   - Write an end-to-end integration test that verifies the complete pipeline:
