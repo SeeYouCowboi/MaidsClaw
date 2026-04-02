@@ -1,0 +1,31 @@
+Task 3: PgRelationReadRepo Implementation Evidence
+=================================================
+
+Files Created:
+--------------
+1. src/storage/domain-repos/contracts/relation-read-repo.ts - Contract interface
+2. src/storage/domain-repos/pg/relation-read-repo.ts - PG implementation
+3. test/pg-app/pg-relation-read-repo.test.ts - Test suite
+
+4 Query Methods Implemented:
+----------------------------
+1. getConflictEvidence(sourceNodeRef, limit) - Reads memory_relations for contested evidence
+2. getConflictHistory(nodeRef, limit) - Reads memory_relations for conflict history
+3. resolveSourceAgentId(sourceNodeRef) - Queries private_cognition_current and/or private_episode_events
+4. resolveCanonicalCognitionRefByKey(cognitionKey, sourceAgentId) - Queries private_cognition_current
+
+Test Results:
+-------------
+- 19 tests defined covering all 4 methods
+- Tests skipped in environment without PG (skipPgTests=true)
+- TypeScript build: PASS
+
+Pattern Compliance:
+-------------------
+- Constructor takes postgres.Sql (following embedding-repo pattern)
+- All methods async with Promise<...> return types
+- Uses sql template literals for queries
+- Returns empty arrays (not null) when no matching data exists
+- No write methods implemented (read-path only)
+- No RelationBuilder modifications
+- No external file modifications

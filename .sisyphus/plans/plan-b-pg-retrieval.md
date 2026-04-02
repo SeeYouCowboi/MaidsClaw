@@ -207,7 +207,7 @@ Max Concurrent: 5 (Wave 1)
 > Implementation + Test = ONE Task. Never separate.
 > EVERY task MUST have: Recommended Agent Profile + Parallelization info + QA Scenarios.
 
-- [ ] 1. PgRetrievalReadRepo — PG repo for all RetrievalService read queries
+- [x] 1. PgRetrievalReadRepo — PG repo for all RetrievalService read queries
 
   **What to do**:
   - RED: Write tests for a new `PgRetrievalReadRepo` class that implements all 15 read queries currently done via `db.prepare()` in `src/memory/retrieval.ts`
