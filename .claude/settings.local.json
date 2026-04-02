@@ -75,7 +75,9 @@
       "Bash(cp /tmp/pgvector/vector.dll /d/PG/lib/vector.dll)",
       "Bash(cp /tmp/pgvector/vector.control /d/PG/share/extension/vector.control)",
       "Bash(cp '/tmp/pgvector/sql/*.sql' /d/PG/share/extension/)",
-      "Bash(psql -U maidsclaw -h 127.0.0.1 -p 55432 -d maidsclaw_app_test -c 'CREATE EXTENSION IF NOT EXISTS vector; SELECT extname, extversion FROM pg_extension WHERE extname='\\\\''vector'\\\\'';')"
+      "Bash(psql -U maidsclaw -h 127.0.0.1 -p 55432 -d maidsclaw_app_test -c 'CREATE EXTENSION IF NOT EXISTS vector; SELECT extname, extversion FROM pg_extension WHERE extname='\\\\''vector'\\\\'';')",
+      "Bash(grep -E \"\\\\.\\(ts|sql\\)$\")",
+      "Bash(grep \"\\\\.ts$\")"
     ]
   }
 }
