@@ -1,6 +1,6 @@
 import type postgres from "postgres";
 import type { InteractionRecord, TurnSettlementPayload } from "../../../interaction/contracts.js";
-import type { InteractionRepo, InteractionTransactionContext } from "../contracts/interaction-repo.js";
+import type { GetMessageRecordsOptions, InteractionRepo, InteractionTransactionContext } from "../contracts/interaction-repo.js";
 import { MaidsClawError } from "../../../core/errors.js";
 
 function parsePayload(raw: unknown): unknown {
@@ -139,14 +139,24 @@ export class PgInteractionRepo implements InteractionRepo {
     return payload as TurnSettlementPayload;
   }
 
-  async getMessageRecords(sessionId: string): Promise<InteractionRecord[]> {
-    const rows = await this.sql`
-      SELECT *
-      FROM interaction_records
-      WHERE session_id = ${sessionId}
-        AND record_type = 'message'
-      ORDER BY record_index ASC
-    `;
+  async getMessageRecords(sessionId: string, options?: GetMessageRecordsOptions): Promise<InteractionRecord[]> {
+    const mode = options?.mode ?? "full";
+    const rows = mode === "truncated"
+      ? await this.sql`
+          SELECT *
+          FROM interaction_records
+          WHERE session_id = ${sessionId}
+            AND record_type = 'message'
+            AND is_processed = 0
+          ORDER BY record_index ASC
+        `
+      : await this.sql`
+          SELECT *
+          FROM interaction_records
+          WHERE session_id = ${sessionId}
+            AND record_type = 'message'
+          ORDER BY record_index ASC
+        `;
     return rows.map((r) => rowToRecord(r));
   }
 

@@ -19,6 +19,7 @@ import type {
 	ChatMessage,
 	ChatModelProvider,
 	ContentBlock,
+	ToolChoiceSpec,
 } from "./models/chat-provider.js";
 import type { PromptBuilder } from "./prompt-builder.js";
 import type { PromptRenderer } from "./prompt-renderer.js";
@@ -599,18 +600,28 @@ export class AgentLoop {
 			if (normalizedToolCalls.length === 0) {
 				if (assistantText.length > 0) {
 					loopLogger?.info(
-						"Text fallback: model returned text without tool call",
+						"Text fallback: model returned text without tool call — attempting structured extraction retry",
 						{
 							turn: turnIndex,
 							textLen: assistantText.length,
 						},
 					);
-                    return {
-                        outcome: normalizeRpTurnOutcome({
-                            schemaVersion: "rp_turn_outcome_v5",
-                            publicReply: assistantText,
-                        }),
-                    };
+					const retryResult = await this.retryStructuredExtraction(
+						assistantText,
+						workingMessages,
+						systemPrompt,
+						bufferedToolExecutor,
+						loopLogger,
+					);
+					if (retryResult) {
+						return retryResult;
+					}
+					return {
+						outcome: normalizeRpTurnOutcome({
+							schemaVersion: "rp_turn_outcome_v5",
+							publicReply: assistantText,
+						}),
+					};
 				}
 				loopLogger?.warn(
 					"Empty result: model returned no text and no tool calls",
@@ -722,6 +733,80 @@ export class AgentLoop {
 		}
 	}
 
+	private async retryStructuredExtraction(
+		publicReplyText: string,
+		conversationMessages: ChatMessage[],
+		systemPrompt: string,
+		bufferedToolExecutor: ToolExecutor,
+		loopLogger: Logger | undefined,
+	): Promise<RpBufferedExecutionResult | null> {
+		const extractionPrompt =
+			`Your publicReply: "${publicReplyText.slice(0, 500)}"\n\n` +
+			`Call submit_rp_turn now. Set publicReply to the exact text above. ` +
+			`Fill latentScratchpad, privateCognition, privateEpisodes based on the conversation.`;
+
+		const retryMessages: ChatMessage[] = [
+			...conversationMessages,
+			{ role: "user", content: extractionPrompt },
+		];
+
+		const retryRequest = this.buildCompletionRequest(
+			retryMessages,
+			systemPrompt,
+			bufferedToolExecutor,
+		);
+
+		try {
+			const pendingCalls = new Map<string, PendingToolCall>();
+			const completed: PendingToolCall[] = [];
+			let retryText = "";
+
+			for await (const chunk of this.modelProvider.chatCompletion(retryRequest)) {
+				if (chunk.type === "text_delta") {
+					retryText += chunk.text;
+				} else if (chunk.type === "tool_use_start") {
+					pendingCalls.set(chunk.id, { id: chunk.id, name: chunk.name, argumentsJson: "" });
+				} else if (chunk.type === "tool_use_delta") {
+					const p = pendingCalls.get(chunk.id);
+					if (p) p.argumentsJson += chunk.partialJson;
+				} else if (chunk.type === "tool_use_end") {
+					const p = pendingCalls.get(chunk.id);
+					if (p) completed.push(p);
+				} else if (chunk.type === "error") {
+					loopLogger?.warn("Structured extraction retry failed with model error", { error: chunk.message });
+					return null;
+				}
+			}
+
+			for (const toolCall of completed) {
+				if (toolCall.name === "submit_rp_turn") {
+					const args = parseToolArgs(toolCall);
+					if (typeof args.publicReply === "string" && args.publicReply.trim() === "") {
+						args.publicReply = publicReplyText;
+					}
+					if (typeof args.publicReply !== "string") {
+						args.publicReply = publicReplyText;
+					}
+					const result = await bufferedToolExecutor.execute(
+						"submit_rp_turn",
+						args,
+						{ sessionId: "", agentId: this.profile.id },
+					);
+					loopLogger?.info("Structured extraction retry succeeded");
+					return { outcome: result as CanonicalRpTurnOutcome };
+				}
+			}
+
+			loopLogger?.warn("Structured extraction retry: model did not call submit_rp_turn");
+			return null;
+		} catch (err) {
+			loopLogger?.warn("Structured extraction retry threw", {
+				error: err instanceof Error ? err.message : String(err),
+			});
+			return null;
+		}
+	}
+
 	private async buildInitialPromptState(
 		request: AgentRunRequest,
 	): Promise<{ systemPrompt: string; messages: ChatMessage[] }> {
@@ -796,14 +881,24 @@ export class AgentLoop {
 		messages: ChatMessage[],
 		systemPrompt: string,
 		toolExecutor: ToolExecutor = this.toolExecutor,
-		options?: { forceToolUse?: boolean },
+		options?: { forceToolUse?: boolean; forceToolName?: string },
 	): ChatCompletionRequest {
+		let toolChoice: ToolChoiceSpec | undefined;
+		if (options?.forceToolName) {
+			// Force a specific tool call — bypasses provider-level disableToolChoiceRequired
+			// because it maps to tool_choice: { type: "function", function: { name } }
+			// rather than tool_choice: "required".
+			toolChoice = { type: "tool", name: options.forceToolName };
+		} else if (options?.forceToolUse) {
+			toolChoice = { type: "any" };
+		}
+
 		return {
 			modelId: this.profile.modelId,
 			systemPrompt,
 			messages,
 			maxTokens: this.profile.maxOutputTokens,
-			toolChoice: options?.forceToolUse ? { type: "any" } : undefined,
+			toolChoice,
 			tools: getFilteredSchemas(this.profile, toolExecutor).map((tool) => ({
 				name: tool.name,
 				description: tool.description,

@@ -460,10 +460,15 @@ function createPgInteractionStoreShim(): InteractionStore {
 			return payload as TurnSettlementPayload;
 		},
 
-		getMessageRecords(sessionId: string): InteractionRecord[] {
-			return getSortedRecords(sessionId).filter(
+		getMessageRecords(sessionId: string, options?: { mode?: string }): InteractionRecord[] {
+			const mode = options?.mode ?? "full";
+			const sorted = getSortedRecords(sessionId).filter(
 				(entry) => entry.recordType === "message",
 			);
+			if (mode === "truncated") {
+				return sorted.filter((entry) => !entry.isProcessed);
+			}
+			return sorted;
 		},
 
 		upsertRecentCognitionSlot(

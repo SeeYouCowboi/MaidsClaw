@@ -1,5 +1,15 @@
 import type { InteractionRecord, TurnSettlementPayload } from "../../../interaction/contracts.js";
 
+export type ConversationHistoryMode = "full" | "truncated";
+
+export type GetMessageRecordsOptions = {
+  /** Controls whether to return all messages or only unprocessed ones.
+   *  - "full": return ALL message records (default, backward-compatible)
+   *  - "truncated": return only records where is_processed = 0 (post-flush)
+   */
+  mode?: ConversationHistoryMode;
+};
+
 export type InteractionTransactionContext = {
   interactionRepo: InteractionRepo;
 };
@@ -15,7 +25,7 @@ export interface InteractionRepo {
   ): Promise<InteractionRecord | undefined>;
   findSessionIdByRequestId(requestId: string): Promise<string | undefined>;
   getSettlementPayload(sessionId: string, requestId: string): Promise<TurnSettlementPayload | undefined>;
-  getMessageRecords(sessionId: string): Promise<InteractionRecord[]>;
+  getMessageRecords(sessionId: string, options?: GetMessageRecordsOptions): Promise<InteractionRecord[]>;
   getBySession(
     sessionId: string,
     options?: {

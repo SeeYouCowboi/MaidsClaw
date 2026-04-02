@@ -83,32 +83,36 @@ export function prevalidateRelationIntents(outcome: CanonicalRpTurnOutcome): voi
     }
   }
 
+  const validIntents: RelationIntent[] = [];
   for (const intent of outcome.relationIntents) {
     if (!ALLOWED_INTENTS.has(intent.intent)) {
-      throw new Error(`invalid relation intent: ${intent.intent}`);
+      continue;
     }
     const sourceKind = localRefKinds.get(intent.sourceRef);
     if (sourceKind !== "episode") {
-      throw new Error(`invalid relation sourceRef: ${intent.sourceRef} must resolve to privateEpisodes.localRef`);
+      continue;
     }
 
     const targetLocalKind = localRefKinds.get(intent.targetRef);
     const targetCognitionKind = cognitionKinds.get(intent.targetRef);
     if (!targetLocalKind && !targetCognitionKind) {
-      throw new Error(`unresolved relation targetRef: ${intent.targetRef}`);
+      continue;
     }
 
     if (intent.intent === "supports") {
       if (targetCognitionKind === undefined && targetLocalKind !== "cognition") {
-        throw new Error(`invalid supports endpoint: ${intent.targetRef} must resolve to cognition`);
+        continue;
       }
+      validIntents.push(intent);
       continue;
     }
 
     if (targetCognitionKind !== "evaluation" && targetCognitionKind !== "commitment") {
-      throw new Error(`invalid triggered endpoint: ${intent.targetRef} must resolve to evaluation/commitment`);
+      continue;
     }
+    validIntents.push(intent);
   }
+  outcome.relationIntents = validIntents;
 }
 
 export function resolveLocalRefs(

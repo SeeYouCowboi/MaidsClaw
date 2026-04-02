@@ -27,7 +27,8 @@ const MAIDEN_OPERATIONAL_KEYS = [
 // ---------------------------------------------------------------------------
 const RP_AGENT_FRAMEWORK_INSTRUCTIONS = `## RP Turn Submission Framework
 
-You MUST call submit_rp_turn to end each turn.
+CRITICAL: You CANNOT reply directly with text. Your ONLY way to respond is by calling the submit_rp_turn tool.
+Put your spoken response in the publicReply field. Any text you generate outside of submit_rp_turn will be DISCARDED and the user will see nothing.
 Besides publicReply, populate the structured fields described below.
 All structured fields are invisible to the user — record your TRUE internal state, even when publicReply is evasive or misleading.
 Write all summary / notes text in the same language as the conversation.
@@ -53,7 +54,11 @@ Each op is either { op: "upsert", record: {...} } or { op: "retract", target: { 
 
 Fields:
 - kind: "assertion"
-- key: stable identifier, e.g. "butler/accounting_anomaly"  (reuse the same key to update)
+- key: stable identifier in "<entity>/<topic>" format, e.g. "butler/accounting_anomaly"
+  - REUSE the same key when the same fact evolves — update stance/proposition, do NOT create a new key
+  - Before creating a new key, check if an existing key already covers this topic
+  - Bad: "player/corpse_claim", "player/corpse_contact_claim", "player/corpse_evasion" for the same fact
+  - Good: one key "player/corpse_contact" with stance updated from "tentative" to "confirmed"
 - proposition: { subject, predicate, object }
   - subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master"
   - predicate: a verb phrase, e.g. "has_suspicious_meetings_with"
@@ -77,8 +82,9 @@ Fields:
 - key: e.g. "trust/alice", "respect/butler"
 - target: { kind: "pointer_key", value: "<entity_id>" }
 - dimensions: array of { name: string, value: number (1-10) }
-  - e.g. { name: "trustworthiness", value: 4 }, { name: "competence", value: 7 }
-- emotionTags (optional): e.g. ["wary", "protective"]
+  - Use these standard dimension names consistently: "trustworthiness", "threat_level", "cooperation_value", "competence"
+  - Do NOT invent alternate names like "suspiciousness" or "suspicion_level" — use "threat_level" instead
+- emotionTags (optional): single-word tags only, e.g. ["wary", "protective", "anxious", "alert"]. Avoid compound phrases like "cautiously_optimistic"
 - notes (optional): free-text explanation
 
 Example:
@@ -138,7 +144,8 @@ Example:
 2. privateCognition: update whenever a belief, evaluation, or commitment changes. Reuse the same key to update.
 3. privateEpisodes: log 1-3 events every turn.
 4. Be precise with enum values — use only the exact values listed above.
-5. Your structured data must reflect your TRUE internal state, not what you say aloud.`;
+5. Your structured data must reflect your TRUE internal state, not what you say aloud.
+6. Retract stale entries: when a hypothesis is disproven, a goal is fulfilled/abandoned, or a constraint no longer applies, use { op: "retract" } to remove it. Do not let outdated beliefs accumulate.`;
 
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;

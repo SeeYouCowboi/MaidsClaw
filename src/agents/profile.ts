@@ -1,3 +1,4 @@
+import type { ConversationHistoryMode } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RetrievalTemplate } from "../memory/contracts/retrieval-template.js";
 import type { WriteTemplate } from "../memory/contracts/write-template.js";
 
@@ -35,6 +36,7 @@ export type AgentProfile = {
   };
   lorebookEnabled: boolean;
   narrativeContextEnabled: boolean;
+  conversationHistoryMode?: ConversationHistoryMode;
   retrievalTemplate?: RetrievalTemplate;
   writeTemplate?: WriteTemplate;
 };

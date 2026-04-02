@@ -2,6 +2,8 @@ import { MaidsClawError } from "../core/errors.js";
 import type { Db } from "../storage/db-types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 
+import type { ConversationHistoryMode } from "../storage/domain-repos/contracts/interaction-repo.js";
+
 type InteractionRow = {
   id: number;
   session_id: string;
@@ -217,15 +219,21 @@ export class InteractionStore {
     }
   }
 
-  getMessageRecords(sessionId: string): InteractionRecord[] {
-    const rows = this.db.query<InteractionRow>(
-      `SELECT *
-       FROM interaction_records
-       WHERE session_id = ?
-         AND record_type = 'message'
-       ORDER BY record_index ASC`,
-      [sessionId],
-    );
+  getMessageRecords(sessionId: string, options?: { mode?: ConversationHistoryMode }): InteractionRecord[] {
+    const mode = options?.mode ?? "full";
+    const sql = mode === "truncated"
+      ? `SELECT *
+         FROM interaction_records
+         WHERE session_id = ?
+           AND record_type = 'message'
+           AND is_processed = 0
+         ORDER BY record_index ASC`
+      : `SELECT *
+         FROM interaction_records
+         WHERE session_id = ?
+           AND record_type = 'message'
+         ORDER BY record_index ASC`;
+    const rows = this.db.query<InteractionRow>(sql, [sessionId]);
     return rows.map(rowToRecord);
   }
 

@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { AgentRole, OutputMode, AgentLifecycle } from "../../../agents/profile.js";
+import type { ConversationHistoryMode } from "../../../storage/domain-repos/contracts/interaction-repo.js";
 import type { RetrievalTemplate } from "../../../memory/contracts/retrieval-template.js";
 import type { WriteTemplate } from "../../../memory/contracts/write-template.js";
 
