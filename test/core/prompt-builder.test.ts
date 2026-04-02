@@ -117,7 +117,7 @@ describe("PromptBuilder", () => {
 		expect(operational.length > 0).toBe(true);
 	});
 
-	it("builds rp-agent prompt with four frontstage surfaces and without legacy memory slots", async () => {
+	it("builds rp-agent prompt with frontstage surfaces and framework instructions", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -130,13 +130,17 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		expect(slots.includes(PromptSectionSlot.PERSONA)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.SYSTEM_PREAMBLE)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.PINNED_SHARED)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(false);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
-		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);
+		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(true);
+
+		const operationalContent =
+			getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+		expect(operationalContent).toContain("submit_rp_turn");
 
 		const recentCognitionContent = getSectionContent(output.sections, PromptSectionSlot.RECENT_COGNITION);
 		expect(recentCognitionContent).toContain("\u2022 [assertion]");
@@ -150,7 +154,7 @@ describe("PromptBuilder", () => {
 		expect(pinnedShared).not.toContain("privateEpisodes");
 	});
 
-	it("rp-agent keeps deterministic four-surface slot order", async () => {
+	it("rp-agent keeps deterministic slot order", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -163,12 +167,12 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		const personaIndex = slots.indexOf(PromptSectionSlot.PERSONA);
+		const systemPreambleIndex = slots.indexOf(PromptSectionSlot.SYSTEM_PREAMBLE);
 		const pinnedSharedIndex = slots.indexOf(PromptSectionSlot.PINNED_SHARED);
 		const recentCognitionIndex = slots.indexOf(PromptSectionSlot.RECENT_COGNITION);
 
-		expect(personaIndex).toBeGreaterThan(-1);
-		expect(pinnedSharedIndex).toBeGreaterThan(personaIndex);
+		expect(systemPreambleIndex).toBeGreaterThan(-1);
+		expect(pinnedSharedIndex).toBeGreaterThan(systemPreambleIndex);
 		expect(recentCognitionIndex).toBeGreaterThan(pinnedSharedIndex);
 	});
 
