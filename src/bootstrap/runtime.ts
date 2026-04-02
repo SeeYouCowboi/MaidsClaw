@@ -18,7 +18,7 @@ import {
 	LoreAdapter,
 	PersonaAdapter,
 } from "../core/prompt-data-adapters/index.js";
-import type { MemoryDataSource } from "../core/prompt-data-sources.js";
+import { MemoryAdapter } from "../core/prompt-data-adapters/memory-adapter.js";
 import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import { CommitService } from "../interaction/commit-service.js";
@@ -31,22 +31,21 @@ import type { InteractionStore } from "../interaction/store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
+import { AliasService } from "../memory/alias.js";
+import { CognitionSearchService } from "../memory/cognition/cognition-search.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
-import { registerMemoryTools } from "../memory/tools.js";
-import type { RetrievalService } from "../memory/retrieval.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
+import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
+import { GraphNavigator } from "../memory/navigator.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
-import {
-	getAttachedSharedBlocksAsync,
-	getPinnedBlocksAsync,
-	getRecentCognitionAsync,
-	getSharedBlocksAsync,
-} from "../memory/prompt-data.js";
+import type { PromptDataRepos } from "../memory/prompt-data.js";
 import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
+import { RetrievalOrchestrator } from "../memory/retrieval/retrieval-orchestrator.js";
+import { RetrievalService } from "../memory/retrieval.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
 import { GraphStorageService } from "../memory/storage.js";
 import {
@@ -54,6 +53,7 @@ import {
 	type MemoryTaskDbAdapter,
 	type MemoryTaskModelProvider,
 } from "../memory/task-agent.js";
+import { registerMemoryTools } from "../memory/tools.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
@@ -63,19 +63,25 @@ import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { PgBackendFactory } from "../storage/backend-types.js";
 import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
+import { PgAliasRepo } from "../storage/domain-repos/pg/alias-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
+import { PgCognitionSearchRepo } from "../storage/domain-repos/pg/cognition-search-repo.js";
 import { PgCoreMemoryBlockRepo } from "../storage/domain-repos/pg/core-memory-block-repo.js";
 import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
 import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgGraphReadQueryRepo } from "../storage/domain-repos/pg/graph-read-query-repo.js";
 import { PgInteractionRepo } from "../storage/domain-repos/pg/interaction-repo.js";
+import { PgNarrativeSearchRepo } from "../storage/domain-repos/pg/narrative-search-repo.js";
 import { PgNodeScoreRepo } from "../storage/domain-repos/pg/node-score-repo.js";
 import { PgNodeScoringQueryRepo } from "../storage/domain-repos/pg/node-scoring-query-repo.js";
 import { PgPendingFlushRecoveryRepo } from "../storage/domain-repos/pg/pending-flush-recovery-repo.js";
 import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
+import { PgRetrievalReadRepo } from "../storage/domain-repos/pg/retrieval-read-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-repo.js";
 import { PgSessionRepo } from "../storage/domain-repos/pg/session-repo.js";
@@ -410,7 +416,10 @@ function createPgInteractionStoreShim(): InteractionStore {
 			return payload as TurnSettlementPayload;
 		},
 
-		getMessageRecords(sessionId: string, options?: { mode?: string }): InteractionRecord[] {
+		getMessageRecords(
+			sessionId: string,
+			options?: { mode?: string },
+		): InteractionRecord[] {
 			const mode = options?.mode ?? "full";
 			const sorted = getSortedRecords(sessionId).filter(
 				(entry) => entry.recordType === "message",
@@ -660,8 +669,11 @@ export function bootstrapRuntime(
 	};
 
 	const resolvePgPool = () => pgFactory.getPool();
-	const pgSessionRepo = createLazyPgRepo(() => new PgSessionRepo(resolvePgPool()));
-	const sessionService = options.sessionService ?? new SessionService({ pgRepo: pgSessionRepo });
+	const pgSessionRepo = createLazyPgRepo(
+		() => new PgSessionRepo(resolvePgPool()),
+	);
+	const sessionService =
+		options.sessionService ?? new SessionService({ pgRepo: pgSessionRepo });
 	const blackboard = options.blackboard ?? new Blackboard();
 	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
 	const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
@@ -704,7 +716,10 @@ export function bootstrapRuntime(
 		try {
 			modelRegistry.resolveEmbedding(memoryEmbeddingModelId);
 		} catch (error) {
-			console.error("[memoryPipelineStatus] embedding model unavailable:", error);
+			console.error(
+				"[memoryPipelineStatus] embedding model unavailable:",
+				error,
+			);
 			return "embedding_model_unavailable";
 		}
 
@@ -712,7 +727,10 @@ export function bootstrapRuntime(
 			try {
 				modelRegistry.resolveEmbedding(effectiveOrganizerEmbeddingModelId);
 			} catch (error) {
-				console.error("[memoryPipelineStatus] organizer embedding model unavailable:", error);
+				console.error(
+					"[memoryPipelineStatus] organizer embedding model unavailable:",
+					error,
+				);
 				return "organizer_embedding_model_unavailable";
 			}
 		}
@@ -751,58 +769,13 @@ export function bootstrapRuntime(
 
 	const personaAdapter = new PersonaAdapter(personaService);
 	const loreAdapter = new LoreAdapter(loreService);
-	const memoryAdapter: MemoryDataSource = {
-		getPinnedBlocks(agentId: string): Promise<string> {
-			return getPinnedBlocksAsync(agentId, {
-				coreMemoryBlockRepo,
-				recentCognitionSlotRepo,
-				interactionRepo,
-				sharedBlockRepo,
-			});
-		},
-		getSharedBlocks(agentId: string): Promise<string> {
-			return getSharedBlocksAsync(agentId, {
-				coreMemoryBlockRepo,
-				recentCognitionSlotRepo,
-				interactionRepo,
-				sharedBlockRepo,
-			});
-		},
-		getRecentCognition(viewerContext): Promise<string> {
-			return getRecentCognitionAsync(
-				viewerContext.viewer_agent_id,
-				viewerContext.session_id,
-				{
-					coreMemoryBlockRepo,
-					recentCognitionSlotRepo,
-					interactionRepo,
-					sharedBlockRepo,
-				},
-			);
-		},
-		getAttachedSharedBlocks(agentId: string): Promise<string> {
-			return getAttachedSharedBlocksAsync(agentId, {
-				coreMemoryBlockRepo,
-				recentCognitionSlotRepo,
-				interactionRepo,
-				sharedBlockRepo,
-			});
-		},
-		async getTypedRetrievalSurface(
-			_userMessage: string,
-			_viewerContext: unknown,
-		): Promise<string> {
-			return "";
-		},
+	const promptDataRepos: PromptDataRepos = {
+		coreMemoryBlockRepo,
+		recentCognitionSlotRepo,
+		interactionRepo,
+		sharedBlockRepo,
 	};
 	const operationalAdapter = new BlackboardOperationalDataSource(blackboard);
-
-	const promptBuilder = new PromptBuilder({
-		persona: personaAdapter,
-		lore: loreAdapter,
-		memory: memoryAdapter,
-		operational: operationalAdapter,
-	});
 
 	const promptRenderer = new PromptRenderer();
 	const viewerContextResolver = ({
@@ -934,6 +907,22 @@ export function bootstrapRuntime(
 	const embeddingRepo = createLazyPgRepo(
 		() => new PgEmbeddingRepo(resolvePgPool()),
 	);
+	const pgRetrievalReadRepo = createLazyPgRepo(
+		() => new PgRetrievalReadRepo(resolvePgPool()),
+	);
+	const pgCognitionSearchRepo = createLazyPgRepo(
+		() => new PgCognitionSearchRepo(resolvePgPool()),
+	);
+	const pgRelationReadRepo = createLazyPgRepo(
+		() => new PgRelationReadRepo(resolvePgPool()),
+	);
+	const pgAliasRepo = createLazyPgRepo(() => new PgAliasRepo(resolvePgPool()));
+	const pgGraphReadQueryRepo = createLazyPgRepo(
+		() => new PgGraphReadQueryRepo(resolvePgPool()),
+	);
+	const pgNarrativeSearchRepo = createLazyPgRepo(
+		() => new PgNarrativeSearchRepo(resolvePgPool()),
+	);
 	const semanticEdgeRepo = createLazyPgRepo(
 		() => new PgSemanticEdgeRepo(resolvePgPool()),
 	);
@@ -975,54 +964,77 @@ export function bootstrapRuntime(
 	);
 	const coreMemoryService = new CoreMemoryService(coreMemoryBlockRepo);
 
-	{
-		// RetrievalService is not yet wired in PG bootstrap runtime.
-		// Tools that depend on it (cognition_search, memory_explore, narrative_search)
-		// are registered for schema visibility but will return an error if called
-		// before RetrievalService is available. This is an intentional deferral,
-		// not an "unimplemented" stub.
-		const lazyRetrieval = createLazyPgRepo<RetrievalService>(
-			() => {
-				throw new Error(
-					"RetrievalService is not yet available in this runtime configuration",
-				);
-			},
-		);
-		registerMemoryTools(
-			{
-				registerLocal(memTool) {
-					toolExecutor.registerLocal({
-						name: memTool.name,
-						description: memTool.description,
-						parameters: memTool.parameters,
-						effectClass: memTool.effectClass,
-						traceVisibility: memTool.traceVisibility,
-						executionContract: memTool.executionContract,
-						async execute(params, context) {
-							const vc = context?.viewerContext;
-							if (!vc) {
-								throw new Error(
-									`Memory tool '${memTool.name}' requires viewerContext in DispatchContext`,
-								);
-							}
-							return memTool.handler(
-								params as Record<string, unknown>,
-								vc,
-							);
-						},
-					});
-				},
-			},
-			{
-				coreMemory: coreMemoryService,
-				retrieval: lazyRetrieval,
-			},
-		);
-	}
-
 	const embeddingService = new EmbeddingService(
 		embeddingRepo,
 		new PgTransactionBatcher(),
+	);
+	const aliasService = new AliasService(pgAliasRepo);
+	const narrativeSearchService = new NarrativeSearchService(
+		pgNarrativeSearchRepo,
+	);
+	const cognitionSearchService = new CognitionSearchService(
+		pgCognitionSearchRepo,
+		pgRelationReadRepo,
+		cognitionProjectionRepo,
+	);
+	const currentProjectionReader =
+		cognitionSearchService.createCurrentProjectionReader();
+	const retrievalOrchestrator = new RetrievalOrchestrator({
+		narrativeService: narrativeSearchService,
+		cognitionService: cognitionSearchService,
+		currentProjectionReader,
+	});
+	const retrievalService = new RetrievalService({
+		retrievalRepo: pgRetrievalReadRepo,
+		embeddingService,
+		narrativeSearch: narrativeSearchService,
+		cognitionSearch: cognitionSearchService,
+		orchestrator: retrievalOrchestrator,
+	});
+	const graphNavigator = new GraphNavigator(
+		pgGraphReadQueryRepo,
+		retrievalService,
+		aliasService,
+		undefined,
+		narrativeSearchService,
+		cognitionSearchService,
+	);
+	const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService);
+	const promptBuilder = new PromptBuilder({
+		persona: personaAdapter,
+		lore: loreAdapter,
+		memory: memoryAdapter,
+		operational: operationalAdapter,
+	});
+	registerMemoryTools(
+		{
+			registerLocal(memTool) {
+				toolExecutor.registerLocal({
+					name: memTool.name,
+					description: memTool.description,
+					parameters: memTool.parameters,
+					effectClass: memTool.effectClass,
+					traceVisibility: memTool.traceVisibility,
+					executionContract: memTool.executionContract,
+					async execute(params, context) {
+						const vc = context?.viewerContext;
+						if (!vc) {
+							throw new Error(
+								`Memory tool '${memTool.name}' requires viewerContext in DispatchContext`,
+							);
+						}
+						return memTool.handler(params as Record<string, unknown>, vc);
+					},
+				});
+			},
+		},
+		{
+			coreMemory: coreMemoryService,
+			retrieval: retrievalService,
+			navigator: graphNavigator,
+			narrativeSearch: narrativeSearchService,
+			cognitionSearch: cognitionSearchService,
+		},
 	);
 	const materializationService = new MaterializationService(
 		graphStorageService,
@@ -1111,10 +1123,7 @@ export function bootstrapRuntime(
 			: null;
 	const publicationRecoverySweeper =
 		memoryTaskAgent !== null && isPublicationRecoverySchemaCompatible()
-			? new PublicationRecoverySweeper(
-					graphStorageService,
-					undefined,
-				)
+			? new PublicationRecoverySweeper(graphStorageService, undefined)
 			: null;
 
 	pendingSettlementSweeper?.start();
