@@ -117,7 +117,7 @@ describe("PromptBuilder", () => {
 		expect(operational.length > 0).toBe(true);
 	});
 
-	it("builds rp-agent prompt with four frontstage surfaces and without legacy memory slots", async () => {
+	it("builds rp-agent prompt with frontstage surfaces and framework instructions", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -136,7 +136,11 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.TYPED_RETRIEVAL)).toBe(false);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
-		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(false);
+		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(true);
+
+		const operationalContent =
+			getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+		expect(operationalContent).toContain("submit_rp_turn");
 
 		const recentCognitionContent = getSectionContent(output.sections, PromptSectionSlot.RECENT_COGNITION);
 		expect(recentCognitionContent).toContain("\u2022 [assertion]");
