@@ -142,7 +142,7 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
       required: ["label", "content"],
       additionalProperties: false,
     },
-    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
       const label = args.label as string;
       const content = args.content as string;
 
@@ -150,7 +150,7 @@ function makeCoreMemoryAppend(services: MemoryToolServices): MemoryToolDefinitio
         return { success: false, error: `Label '${label}' is forbidden for RP Agent tools` };
       }
 
-      const result = services.coreMemory.appendBlock(
+      const result = await services.coreMemory.appendBlock(
         viewerContext.viewer_agent_id,
         label as CoreMemoryLabel,
         content,
@@ -199,7 +199,7 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
       required: ["label", "old_content", "new_content"],
       additionalProperties: false,
     },
-    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
       const label = args.label as string;
       const oldContent = args.old_content as string;
       const newContent = args.new_content as string;
@@ -208,7 +208,7 @@ function makeCoreMemoryReplace(services: MemoryToolServices): MemoryToolDefiniti
         return { success: false, error: `Label '${label}' is forbidden for RP Agent tools` };
       }
 
-      const result = services.coreMemory.replaceBlock(
+      const result = await services.coreMemory.replaceBlock(
         viewerContext.viewer_agent_id,
         label as CoreMemoryLabel,
         oldContent,

@@ -13,7 +13,7 @@ export class CoreMemoryIndexUpdater {
   ) {}
 
   async updateIndex(agentId: string, created: CreatedState, callTwoTools: ChatToolDefinition[]): Promise<void> {
-    const indexBlock = this.coreMemory.getBlock(agentId, "index");
+    const indexBlock = await this.coreMemory.getBlock(agentId, "index");
     const callTwo = await this.modelProvider.chat(
       [
         {
@@ -38,7 +38,7 @@ export class CoreMemoryIndexUpdater {
 
     const newIndexText = this.extractUpdatedIndex(callTwo, indexBlock.value);
     if (newIndexText !== indexBlock.value) {
-      const replaced = this.coreMemory.replaceBlock(agentId, "index", indexBlock.value, newIndexText, "task-agent");
+      const replaced = await this.coreMemory.replaceBlock(agentId, "index", indexBlock.value, newIndexText, "task-agent");
       if (!replaced.success) {
         throw new Error(`Index update failed: ${replaced.reason}`);
       }

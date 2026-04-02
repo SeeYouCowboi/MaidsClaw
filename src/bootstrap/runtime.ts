@@ -1023,7 +1023,7 @@ export function bootstrapRuntime(
 		},
 		resolvedJobPersistence,
 	);
-	const coreMemoryService = new CoreMemoryService(throwingLegacyDbAdapter);
+	const coreMemoryService = new CoreMemoryService(coreMemoryBlockRepo);
 
 	{
 		// RetrievalService is not yet wired in PG bootstrap runtime.
