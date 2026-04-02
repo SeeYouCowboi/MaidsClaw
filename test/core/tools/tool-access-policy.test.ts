@@ -40,6 +40,7 @@ function makePermissions(overrides?: Partial<AgentPermissions>): AgentPermission
     canReadSharedBlocks: false,
     canMutateSharedBlocks: false,
     canMutateAdminRules: false,
+    canSettleRpTurn: false,
     ...overrides,
   };
 }

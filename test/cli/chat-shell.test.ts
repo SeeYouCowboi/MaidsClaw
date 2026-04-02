@@ -63,20 +63,19 @@ describe("SlashDispatcher", () => {
 		});
 		Object.assign(state, overrides);
 
-		// Minimal mock runtime — enough for slash commands that don't
-		// need real DB access. Inspect commands will throw but we catch that.
-		const mockRuntime = {
-			sessionService: {
-				requiresRecovery: () => false,
-				clearRecoveryRequired: () => {},
-				closeSession: (id: string) => ({ sessionId: id, closedAt: Date.now() }),
-				getSession: () => null,
-				createSession: () => ({ sessionId: "new-sess", agentId: "test-agent", createdAt: Date.now() }),
+		const mockFacade = {
+			session: {
+				createSession: async () => ({ session_id: "new-sess", created_at: Date.now() }),
+				getSession: async () => null,
+				closeSession: async (id: string) => ({ session_id: id, closed_at: Date.now(), host_steps: {} }),
+				recoverSession: async () => ({ recovered: false }),
 			},
-			traceStore: undefined,
-		} as unknown as SlashDispatchContext["runtime"];
+			turn: {},
+			inspect: {},
+			health: {},
+		} as unknown as SlashDispatchContext["facade"];
 
-		return { state, runtime: mockRuntime };
+		return { state, facade: mockFacade };
 	}
 
 	it("/help does not exit", async () => {

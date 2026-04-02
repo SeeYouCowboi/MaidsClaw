@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
-describe("createAppHost", () => {
+describe.skipIf(skipPgTests)("createAppHost", () => {
   let host: AppHost | undefined;
 
   afterEach(async () => {

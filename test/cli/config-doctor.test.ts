@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import { registerConfigCommands } from "../../src/terminal-cli/commands/config.js";
+import { PgBackendFactory } from "../../src/storage/backend-types.js";
 
 const _savedBackend = process.env.MAIDSCLAW_BACKEND;
 beforeAll(() => { process.env.MAIDSCLAW_BACKEND = "pg"; });
@@ -77,10 +78,15 @@ let savedOpenAIKey: string | undefined;
 let savedMoonshotKey: string | undefined;
 let savedBailianKey: string | undefined;
 
+const originalPgInit = PgBackendFactory.prototype.initialize;
+
 describe("config doctor", () => {
   beforeEach(() => {
     resetCommands();
     registerConfigCommands();
+
+    // Mock PG initialization — doctor tests check model/config resolution, not PG connectivity
+    PgBackendFactory.prototype.initialize = async function () {};
 
     savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
     savedOpenAIKey = process.env.OPENAI_API_KEY;
@@ -89,6 +95,7 @@ describe("config doctor", () => {
   });
 
   afterEach(() => {
+    PgBackendFactory.prototype.initialize = originalPgInit;
     cleanupTempDirs();
     if (savedAnthropicKey !== undefined) {
       process.env.ANTHROPIC_API_KEY = savedAnthropicKey;

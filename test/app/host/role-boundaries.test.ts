@@ -3,8 +3,8 @@ import type { AppHostOptions } from "../../../src/app/host/types.js";
 import { createAppHost } from "../../../src/app/host/create-app-host.js";
 import type { RuntimeBootstrapResult } from "../../../src/bootstrap/types.js";
 import { GatewayServer } from "../../../src/gateway/server.js";
-import { JobDispatcher } from "../../../src/jobs/dispatcher.js";
-import { JobScheduler } from "../../../src/jobs/scheduler.js";
+import { LeaseReclaimSweeper } from "../../../src/jobs/lease-reclaim-sweeper.js";
+import { PgJobRunner } from "../../../src/jobs/pg-runner.js";
 
 function createMockRuntime(): {
 	runtime: RuntimeBootstrapResult;
@@ -50,6 +50,7 @@ function createMockRuntime(): {
 			store: {
 				enqueue: async () => undefined,
 				claim: async () => null,
+				claimNext: async () => ({ outcome: "none_ready" as const }),
 				complete: async () => undefined,
 				fail: async () => undefined,
 				heartbeat: async () => undefined,
@@ -71,22 +72,23 @@ function createMockRuntime(): {
 function patchLifecycleSpies(): {
 	getGatewayStartCallCount: () => number;
 	getGatewayStopCallCount: () => number;
-	getDispatcherStartCallCount: () => number;
-	getSchedulerStartCallCount: () => number;
-	getSchedulerStopCallCount: () => number;
+	getConsumerStartCallCount: () => number;
+	getSweeperStartCallCount: () => number;
+	getSweeperStopCallCount: () => number;
 	restore: () => void;
 } {
 	let gatewayStartCallCount = 0;
 	let gatewayStopCallCount = 0;
-	let dispatcherStartCallCount = 0;
-	let schedulerStartCallCount = 0;
-	let schedulerStopCallCount = 0;
+	let consumerStartCallCount = 0;
+	let sweeperStartCallCount = 0;
+	let sweeperStopCallCount = 0;
+	let consumerObserved = false;
 
 	const originalGatewayStart = GatewayServer.prototype.start;
 	const originalGatewayStop = GatewayServer.prototype.stop;
-	const originalDispatcherStart = JobDispatcher.prototype.start;
-	const originalSchedulerStart = JobScheduler.prototype.start;
-	const originalSchedulerStop = JobScheduler.prototype.stop;
+	const originalConsumerProcessNext = PgJobRunner.prototype.processNext;
+	const originalSweeperStart = LeaseReclaimSweeper.prototype.start;
+	const originalSweeperStop = LeaseReclaimSweeper.prototype.stop;
 
 	GatewayServer.prototype.start = function patchedGatewayStart() {
 		gatewayStartCallCount += 1;
@@ -94,28 +96,32 @@ function patchLifecycleSpies(): {
 	GatewayServer.prototype.stop = function patchedGatewayStop() {
 		gatewayStopCallCount += 1;
 	};
-	JobDispatcher.prototype.start = async function patchedDispatcherStart() {
-		dispatcherStartCallCount += 1;
+	PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+		if (!consumerObserved) {
+			consumerObserved = true;
+			consumerStartCallCount += 1;
+		}
+		return "none_ready";
 	};
-	JobScheduler.prototype.start = function patchedSchedulerStart() {
-		schedulerStartCallCount += 1;
+	LeaseReclaimSweeper.prototype.start = function patchedSweeperStart() {
+		sweeperStartCallCount += 1;
 	};
-	JobScheduler.prototype.stop = function patchedSchedulerStop() {
-		schedulerStopCallCount += 1;
+	LeaseReclaimSweeper.prototype.stop = function patchedSweeperStop() {
+		sweeperStopCallCount += 1;
 	};
 
 	return {
 		getGatewayStartCallCount: () => gatewayStartCallCount,
 		getGatewayStopCallCount: () => gatewayStopCallCount,
-		getDispatcherStartCallCount: () => dispatcherStartCallCount,
-		getSchedulerStartCallCount: () => schedulerStartCallCount,
-		getSchedulerStopCallCount: () => schedulerStopCallCount,
+		getConsumerStartCallCount: () => consumerStartCallCount,
+		getSweeperStartCallCount: () => sweeperStartCallCount,
+		getSweeperStopCallCount: () => sweeperStopCallCount,
 		restore: () => {
 			GatewayServer.prototype.start = originalGatewayStart;
 			GatewayServer.prototype.stop = originalGatewayStop;
-			JobDispatcher.prototype.start = originalDispatcherStart;
-			JobScheduler.prototype.start = originalSchedulerStart;
-			JobScheduler.prototype.stop = originalSchedulerStop;
+			PgJobRunner.prototype.processNext = originalConsumerProcessNext;
+			LeaseReclaimSweeper.prototype.start = originalSweeperStart;
+			LeaseReclaimSweeper.prototype.stop = originalSweeperStop;
 		},
 	};
 }
@@ -137,8 +143,8 @@ describe("createAppHost role boundaries", () => {
 			await host.start();
 
 			expect(spies.getGatewayStartCallCount()).toBe(1);
-			expect(spies.getDispatcherStartCallCount()).toBe(0);
-			expect(spies.getSchedulerStartCallCount()).toBe(0);
+			expect(spies.getConsumerStartCallCount()).toBe(0);
+			expect(spies.getSweeperStartCallCount()).toBe(0);
 
 			await host.shutdown();
 		} finally {
@@ -162,8 +168,8 @@ describe("createAppHost role boundaries", () => {
 			await host.start();
 
 			expect(spies.getGatewayStartCallCount()).toBe(1);
-			expect(spies.getDispatcherStartCallCount()).toBe(1);
-			expect(spies.getSchedulerStartCallCount()).toBe(1);
+			expect(spies.getConsumerStartCallCount()).toBe(1);
+			expect(spies.getSweeperStartCallCount()).toBe(1);
 
 			await host.shutdown();
 		} finally {
@@ -185,8 +191,8 @@ describe("createAppHost role boundaries", () => {
 
 			await host.start();
 
-			expect(spies.getDispatcherStartCallCount()).toBe(1);
-			expect(spies.getSchedulerStartCallCount()).toBe(1);
+			expect(spies.getConsumerStartCallCount()).toBe(1);
+			expect(spies.getSweeperStartCallCount()).toBe(1);
 			expect(spies.getGatewayStartCallCount()).toBe(0);
 
 			await host.shutdown();
@@ -210,8 +216,8 @@ describe("createAppHost role boundaries", () => {
 			await host.start();
 
 			expect(spies.getGatewayStartCallCount()).toBe(0);
-			expect(spies.getDispatcherStartCallCount()).toBe(0);
-			expect(spies.getSchedulerStartCallCount()).toBe(0);
+			expect(spies.getConsumerStartCallCount()).toBe(0);
+			expect(spies.getSweeperStartCallCount()).toBe(0);
 
 			await host.shutdown();
 		} finally {
@@ -234,8 +240,8 @@ describe("createAppHost role boundaries", () => {
 			await host.start();
 
 			expect(spies.getGatewayStartCallCount()).toBe(0);
-			expect(spies.getDispatcherStartCallCount()).toBe(0);
-			expect(spies.getSchedulerStartCallCount()).toBe(0);
+			expect(spies.getConsumerStartCallCount()).toBe(0);
+			expect(spies.getSweeperStartCallCount()).toBe(1);
 
 			await host.shutdown();
 		} finally {
@@ -278,7 +284,7 @@ describe("createAppHost role boundaries", () => {
 			}
 
 			expect(spies.getGatewayStopCallCount()).toBe(2);
-			expect(spies.getSchedulerStopCallCount()).toBe(2);
+			expect(spies.getSweeperStopCallCount()).toBe(3);
 		} finally {
 			spies.restore();
 		}

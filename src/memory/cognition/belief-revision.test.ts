@@ -296,9 +296,10 @@ describe("belief-revision / assertLegalStanceTransition", () => {
         expect(e).toBeInstanceOf(MaidsClawError);
         const error = e as MaidsClawError;
         expect(error.code).toBe("COGNITION_ILLEGAL_STANCE_TRANSITION");
-        expect(error.details.cognitionKey).toBe("my-key");
-        expect(error.details.currentStance).toBe("confirmed");
-        expect(error.details.targetStance).toBe("rejected");
+        const details = error.details as Record<string, unknown>;
+        expect(details.cognitionKey).toBe("my-key");
+        expect(details.currentStance).toBe("confirmed");
+        expect(details.targetStance).toBe("rejected");
       }
     });
 
@@ -309,7 +310,7 @@ describe("belief-revision / assertLegalStanceTransition", () => {
         expect(e).toBeInstanceOf(MaidsClawError);
         const error = e as MaidsClawError;
         expect(error.code).toBe("COGNITION_ILLEGAL_STANCE_TRANSITION");
-        expect(error.details.preContestedStance).toBe("accepted");
+        expect((error.details as Record<string, unknown>).preContestedStance).toBe("accepted");
       }
     });
 
@@ -400,9 +401,10 @@ describe("belief-revision / assertBasisUpgradeOnly", () => {
         expect(e).toBeInstanceOf(MaidsClawError);
         const error = e as MaidsClawError;
         expect(error.code).toBe("COGNITION_ILLEGAL_BASIS_DOWNGRADE");
-        expect(error.details.cognitionKey).toBe("my-key");
-        expect(error.details.currentBasis).toBe("first_hand");
-        expect(error.details.targetBasis).toBe("belief");
+        const details = error.details as Record<string, unknown>;
+        expect(details.cognitionKey).toBe("my-key");
+        expect(details.currentBasis).toBe("first_hand");
+        expect(details.targetBasis).toBe("belief");
       }
     });
   });

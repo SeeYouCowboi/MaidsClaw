@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { RuntimeBootstrapResult } from "../../../src/bootstrap/types.js";
 import { createAppHost } from "../../../src/app/host/create-app-host.js";
 import { GatewayServer } from "../../../src/gateway/server.js";
-import { JobDispatcher } from "../../../src/jobs/dispatcher.js";
-import { JobScheduler } from "../../../src/jobs/scheduler.js";
+import { LeaseReclaimSweeper } from "../../../src/jobs/lease-reclaim-sweeper.js";
+import { PgJobRunner } from "../../../src/jobs/pg-runner.js";
 
 function createInjectedRuntime(): {
 	runtime: RuntimeBootstrapResult;
@@ -49,6 +49,7 @@ function createInjectedRuntime(): {
 			store: {
 				enqueue: async () => undefined,
 				claim: async () => null,
+				claimNext: async () => ({ outcome: "none_ready" as const }),
 				complete: async () => undefined,
 				fail: async () => undefined,
 				heartbeat: async () => undefined,
@@ -70,27 +71,29 @@ function createInjectedRuntime(): {
 describe("createAppHost worker role", () => {
 	test("starts durable consumer on start and stops it on shutdown", async () => {
 		const { runtime, getShutdownCallCount } = createInjectedRuntime();
-		let schedulerStartCallCount = 0;
-		let schedulerStopCallCount = 0;
-		let dispatcherStartCallCount = 0;
+		let sweeperStartCallCount = 0;
+		let sweeperStopCallCount = 0;
+		let consumerStartCallCount = 0;
 		let gatewayStartCallCount = 0;
+		let consumerObserved = false;
 
-		const originalSchedulerStart = JobScheduler.prototype.start;
-		const originalSchedulerStop = JobScheduler.prototype.stop;
-		const originalDispatcherStart = JobDispatcher.prototype.start;
+		const originalSweeperStart = LeaseReclaimSweeper.prototype.start;
+		const originalSweeperStop = LeaseReclaimSweeper.prototype.stop;
+		const originalProcessNext = PgJobRunner.prototype.processNext;
 		const originalGatewayStart = GatewayServer.prototype.start;
 
-		JobScheduler.prototype.start = function patchedSchedulerStart(...args) {
-			schedulerStartCallCount += 1;
-			return originalSchedulerStart.apply(this, args);
+		LeaseReclaimSweeper.prototype.start = function patchedSweeperStart() {
+			sweeperStartCallCount += 1;
 		};
-		JobScheduler.prototype.stop = function patchedSchedulerStop(...args) {
-			schedulerStopCallCount += 1;
-			return originalSchedulerStop.apply(this, args);
+		LeaseReclaimSweeper.prototype.stop = function patchedSweeperStop() {
+			sweeperStopCallCount += 1;
 		};
-		JobDispatcher.prototype.start = function patchedDispatcherStart(...args) {
-			dispatcherStartCallCount += 1;
-			return originalDispatcherStart.apply(this, args);
+		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+			if (!consumerObserved) {
+				consumerObserved = true;
+				consumerStartCallCount += 1;
+			}
+			return "none_ready";
 		};
 		GatewayServer.prototype.start = function patchedGatewayStart(...args) {
 			gatewayStartCallCount += 1;
@@ -115,19 +118,19 @@ describe("createAppHost worker role", () => {
 
 			await host.start();
 
-			expect(dispatcherStartCallCount).toBe(1);
-			expect(schedulerStartCallCount).toBe(1);
+			expect(consumerStartCallCount).toBe(1);
+			expect(sweeperStartCallCount).toBe(1);
 			expect(gatewayStartCallCount).toBe(0);
 
 			await host.shutdown();
 			await host.shutdown();
 
-			expect(schedulerStopCallCount).toBe(1);
+			expect(sweeperStopCallCount).toBe(1);
 			expect(getShutdownCallCount()).toBe(1);
 		} finally {
-			JobScheduler.prototype.start = originalSchedulerStart;
-			JobScheduler.prototype.stop = originalSchedulerStop;
-			JobDispatcher.prototype.start = originalDispatcherStart;
+			LeaseReclaimSweeper.prototype.start = originalSweeperStart;
+			LeaseReclaimSweeper.prototype.stop = originalSweeperStop;
+			PgJobRunner.prototype.processNext = originalProcessNext;
 			GatewayServer.prototype.start = originalGatewayStart;
 		}
 	});

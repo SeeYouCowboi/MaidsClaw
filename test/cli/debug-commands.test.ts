@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
 import type { JsonEnvelope } from "../../src/terminal-cli/types.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 const tempRoots: string[] = [];
 let savedAnthropicKey: string | undefined;
@@ -52,7 +53,7 @@ function parseJsonOutput(raw: string): JsonEnvelope {
 	return JSON.parse(line) as JsonEnvelope;
 }
 
-describe("debug commands", () => {
+describe.skipIf(skipPgTests)("debug commands", () => {
 	beforeEach(() => {
 		resetCommands();
 		registerDebugCommands();

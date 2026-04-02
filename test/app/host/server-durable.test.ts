@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { RuntimeBootstrapResult } from "../../../src/bootstrap/types.js";
 import { createAppHost } from "../../../src/app/host/create-app-host.js";
 import { GatewayServer } from "../../../src/gateway/server.js";
-import { JobDispatcher } from "../../../src/jobs/dispatcher.js";
-import { JobScheduler } from "../../../src/jobs/scheduler.js";
+import { LeaseReclaimSweeper } from "../../../src/jobs/lease-reclaim-sweeper.js";
+import { PgJobRunner } from "../../../src/jobs/pg-runner.js";
 
 function createInjectedRuntime(): {
 	runtime: RuntimeBootstrapResult;
@@ -49,6 +49,7 @@ function createInjectedRuntime(): {
 			store: {
 				enqueue: async () => undefined,
 				claim: async () => null,
+				claimNext: async () => ({ outcome: "none_ready" as const }),
 				complete: async () => undefined,
 				fail: async () => undefined,
 				heartbeat: async () => undefined,
@@ -70,21 +71,24 @@ function createInjectedRuntime(): {
 describe("createAppHost server durable mode", () => {
 	test("starts job consumer in addition to gateway when durable mode is enabled", async () => {
 		const { runtime } = createInjectedRuntime();
-		let schedulerStartCallCount = 0;
-		let dispatcherStartCallCount = 0;
+		let sweeperStartCallCount = 0;
+		let consumerStartCallCount = 0;
 		let gatewayStartCallCount = 0;
+		let consumerObserved = false;
 
-		const originalSchedulerStart = JobScheduler.prototype.start;
-		const originalDispatcherStart = JobDispatcher.prototype.start;
+		const originalSweeperStart = LeaseReclaimSweeper.prototype.start;
+		const originalProcessNext = PgJobRunner.prototype.processNext;
 		const originalGatewayStart = GatewayServer.prototype.start;
 
-		JobScheduler.prototype.start = function patchedSchedulerStart(...args) {
-			schedulerStartCallCount += 1;
-			return originalSchedulerStart.apply(this, args);
+		LeaseReclaimSweeper.prototype.start = function patchedSweeperStart() {
+			sweeperStartCallCount += 1;
 		};
-		JobDispatcher.prototype.start = function patchedDispatcherStart(...args) {
-			dispatcherStartCallCount += 1;
-			return originalDispatcherStart.apply(this, args);
+		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+			if (!consumerObserved) {
+				consumerObserved = true;
+				consumerStartCallCount += 1;
+			}
+			return "none_ready";
 		};
 		GatewayServer.prototype.start = function patchedGatewayStart() {
 			gatewayStartCallCount += 1;
@@ -102,32 +106,33 @@ describe("createAppHost server durable mode", () => {
 			await host.start();
 
 			expect(gatewayStartCallCount).toBe(1);
-			expect(dispatcherStartCallCount).toBe(1);
-			expect(schedulerStartCallCount).toBe(1);
+			expect(consumerStartCallCount).toBe(1);
+			expect(sweeperStartCallCount).toBe(1);
+
+			await host.shutdown();
 		} finally {
-			JobScheduler.prototype.start = originalSchedulerStart;
-			JobDispatcher.prototype.start = originalDispatcherStart;
+			LeaseReclaimSweeper.prototype.start = originalSweeperStart;
+			PgJobRunner.prototype.processNext = originalProcessNext;
 			GatewayServer.prototype.start = originalGatewayStart;
 		}
 	});
 
 	test("does not start job consumer for default server mode", async () => {
 		const { runtime } = createInjectedRuntime();
-		let schedulerStartCallCount = 0;
-		let dispatcherStartCallCount = 0;
+		let sweeperStartCallCount = 0;
+		let consumerStartCallCount = 0;
 		let gatewayStartCallCount = 0;
 
-		const originalSchedulerStart = JobScheduler.prototype.start;
-		const originalDispatcherStart = JobDispatcher.prototype.start;
+		const originalSweeperStart = LeaseReclaimSweeper.prototype.start;
+		const originalProcessNext = PgJobRunner.prototype.processNext;
 		const originalGatewayStart = GatewayServer.prototype.start;
 
-		JobScheduler.prototype.start = function patchedSchedulerStart(...args) {
-			schedulerStartCallCount += 1;
-			return originalSchedulerStart.apply(this, args);
+		LeaseReclaimSweeper.prototype.start = function patchedSweeperStart() {
+			sweeperStartCallCount += 1;
 		};
-		JobDispatcher.prototype.start = function patchedDispatcherStart(...args) {
-			dispatcherStartCallCount += 1;
-			return originalDispatcherStart.apply(this, args);
+		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+			consumerStartCallCount += 1;
+			return "none_ready";
 		};
 		GatewayServer.prototype.start = function patchedGatewayStart() {
 			gatewayStartCallCount += 1;
@@ -142,23 +147,25 @@ describe("createAppHost server durable mode", () => {
 			await host.start();
 
 			expect(gatewayStartCallCount).toBe(1);
-			expect(dispatcherStartCallCount).toBe(0);
-			expect(schedulerStartCallCount).toBe(0);
+			expect(consumerStartCallCount).toBe(0);
+			expect(sweeperStartCallCount).toBe(0);
 		} finally {
-			JobScheduler.prototype.start = originalSchedulerStart;
-			JobDispatcher.prototype.start = originalDispatcherStart;
+			LeaseReclaimSweeper.prototype.start = originalSweeperStart;
+			PgJobRunner.prototype.processNext = originalProcessNext;
 			GatewayServer.prototype.start = originalGatewayStart;
 		}
 	});
 
 	test("stops both gateway and consumer on shutdown when durable mode is enabled", async () => {
 		const { runtime, getShutdownCallCount } = createInjectedRuntime();
-		let schedulerStopCallCount = 0;
+		let sweeperStopCallCount = 0;
 		let gatewayStopCallCount = 0;
 
 		const originalGatewayStart = GatewayServer.prototype.start;
 		const originalGatewayStop = GatewayServer.prototype.stop;
-		const originalSchedulerStop = JobScheduler.prototype.stop;
+		const originalProcessNext = PgJobRunner.prototype.processNext;
+		const originalSweeperStart = LeaseReclaimSweeper.prototype.start;
+		const originalSweeperStop = LeaseReclaimSweeper.prototype.stop;
 
 		GatewayServer.prototype.start = function patchedGatewayStart() {
 			return;
@@ -166,9 +173,14 @@ describe("createAppHost server durable mode", () => {
 		GatewayServer.prototype.stop = function patchedGatewayStop() {
 			gatewayStopCallCount += 1;
 		};
-		JobScheduler.prototype.stop = function patchedSchedulerStop(...args) {
-			schedulerStopCallCount += 1;
-			return originalSchedulerStop.apply(this, args);
+		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+			return "none_ready";
+		};
+		LeaseReclaimSweeper.prototype.start = function patchedSweeperStart() {
+			return;
+		};
+		LeaseReclaimSweeper.prototype.stop = function patchedSweeperStop() {
+			sweeperStopCallCount += 1;
 		};
 
 		try {
@@ -185,12 +197,14 @@ describe("createAppHost server durable mode", () => {
 			await host.shutdown();
 
 			expect(gatewayStopCallCount).toBe(1);
-			expect(schedulerStopCallCount).toBe(1);
+			expect(sweeperStopCallCount).toBe(1);
 			expect(getShutdownCallCount()).toBe(1);
 		} finally {
 			GatewayServer.prototype.start = originalGatewayStart;
 			GatewayServer.prototype.stop = originalGatewayStop;
-			JobScheduler.prototype.stop = originalSchedulerStop;
+			PgJobRunner.prototype.processNext = originalProcessNext;
+			LeaseReclaimSweeper.prototype.start = originalSweeperStart;
+			LeaseReclaimSweeper.prototype.stop = originalSweeperStop;
 		}
 	});
 });

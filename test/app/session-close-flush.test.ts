@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { GatewaySessionClient } from "../../src/app/clients/gateway/gateway-session-client.js";
 import { LocalSessionClient } from "../../src/app/clients/local/local-session-client.js";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import type { TurnService } from "../../src/runtime/turn-service.js";
@@ -117,19 +118,21 @@ describe("LocalSessionClient.closeSession flush decision matrix", () => {
 		expect(result.host_steps.flush_on_session_close).toBe("skipped_no_agent");
 	});
 
-	test("returns not_applicable when closing via app host with no memory agent", async () => {
-		host = await createAppHost({
-			role: "local",
-			memoryEmbeddingModelId: "",
+	describe.skipIf(skipPgTests)("PG-dependent", () => {
+		test("returns not_applicable when closing via app host with no memory agent", async () => {
+			host = await createAppHost({
+				role: "local",
+				memoryEmbeddingModelId: "",
+			});
+			if (!host.user) {
+				throw new Error("Expected local host to expose user facade");
+			}
+
+			const created = await host.user.session.createSession("maid:main");
+			const closed = await host.user.session.closeSession(created.session_id);
+
+			expect(closed.host_steps.flush_on_session_close).toBe("not_applicable");
 		});
-		if (!host.user) {
-			throw new Error("Expected local host to expose user facade");
-		}
-
-		const created = await host.user.session.createSession("maid:main");
-		const closed = await host.user.session.closeSession(created.session_id);
-
-		expect(closed.host_steps.flush_on_session_close).toBe("not_applicable");
 	});
 
 	test("returns not_applicable when flush reports no pending work", async () => {

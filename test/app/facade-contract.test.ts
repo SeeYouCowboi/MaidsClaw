@@ -7,6 +7,7 @@ import {
 	type AppUserFacade,
 	createAppHost,
 } from "../../src/app/host/index.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 async function bootstrapTestEnv(): Promise<{
 	host: AppHost;
@@ -44,7 +45,7 @@ function assertCloseResultShape(result: SessionCloseResult): void {
 	expect(typeof result.host_steps.flush_on_session_close).toBe("string");
 }
 
-describe("AppUserFacade acceptance contract", () => {
+describe.skipIf(skipPgTests)("AppUserFacade acceptance contract", () => {
 	let host: AppHost | undefined;
 	let facade: AppUserFacade | undefined;
 
