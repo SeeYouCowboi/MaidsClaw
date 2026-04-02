@@ -58,6 +58,10 @@ export class LocalTurnClient implements TurnClient {
 				yield normalized;
 			}
 		}
+
+		if (perTurnTraceStore && params.requestId) {
+			perTurnTraceStore.finalizeTrace(params.requestId);
+		}
 	}
 }
 

@@ -156,7 +156,8 @@ export class TurnService {
 			traceStore: request.traceStore ?? this.traceStore,
 		};
 
-		this.traceStore?.initTrace(
+		const activeTraceStore = effectiveRequest.traceStore;
+		activeTraceStore?.initTrace(
 			requestId,
 			request.sessionId,
 			(await this.resolveQueueOwnerAgentId(request.sessionId)) ?? "unknown",
@@ -248,7 +249,7 @@ export class TurnService {
 			}
 
 			await this.flushIfDue(effectiveRequest.sessionId, requestId);
-			this.traceStore?.finalizeTrace(requestId);
+			activeTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -260,7 +261,7 @@ export class TurnService {
 			hasAssistantVisibleActivity,
 		});
 		this.traceLog(requestId, "error", "Turn failed and recovery path executed");
-		this.traceStore?.finalizeTrace(requestId);
+		activeTraceStore?.finalizeTrace(requestId);
 	}
 
 	private async *runRpBufferedTurn(
@@ -273,6 +274,7 @@ export class TurnService {
 			requestId,
 			traceStore: request.traceStore ?? this.traceStore,
 		};
+		const rpTraceStore = effectiveRequest.traceStore;
 
 		let bufferedResult: RpBufferedExecutionResult;
 		let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
@@ -302,7 +304,7 @@ export class TurnService {
 				assistantText: "",
 				hasAssistantVisibleActivity: false,
 			});
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -329,7 +331,7 @@ export class TurnService {
 				assistantText: "",
 				hasAssistantVisibleActivity: false,
 			});
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -364,7 +366,7 @@ export class TurnService {
 						: "",
 				hasAssistantVisibleActivity: false,
 			});
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -401,7 +403,7 @@ export class TurnService {
 				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -432,7 +434,7 @@ export class TurnService {
 			this.traceChunk(requestId, messageEndChunk);
 			yield messageEndChunk;
 			await this.flushIfDue(effectiveRequest.sessionId, requestId);
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -590,7 +592,7 @@ export class TurnService {
 				assistantText: canonicalOutcome.publicReply,
 				hasAssistantVisibleActivity,
 			});
-			this.traceStore?.finalizeTrace(requestId);
+			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}
 
@@ -671,7 +673,7 @@ export class TurnService {
 		yield messageEndChunk;
 
 		await this.flushIfDue(effectiveRequest.sessionId, requestId);
-		this.traceStore?.finalizeTrace(requestId);
+		rpTraceStore?.finalizeTrace(requestId);
 	}
 
 	private async getExistingSettlementPayload(
