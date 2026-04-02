@@ -1,4 +1,3 @@
-import type { Db } from "../../storage/db-types.js";
 import type { RetrievalService } from "../../memory/retrieval.js";
 import {
   getAttachedSharedBlocksAsync,
@@ -12,7 +11,6 @@ import type { MemoryDataSource, ViewerContext } from "../prompt-data-sources.js"
 
 export class MemoryAdapter implements MemoryDataSource {
   constructor(
-    _db: Db,
     private readonly repos: PromptDataRepos,
     private readonly retrievalService?: RetrievalService,
   ) {}
