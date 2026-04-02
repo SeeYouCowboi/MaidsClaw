@@ -1,9 +1,8 @@
-import type { Db } from "../storage/db-types.js";
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
-import { RetrievalService } from "./retrieval";
+import type { RetrievalService } from "./retrieval";
 import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
@@ -25,21 +24,12 @@ const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
  * `"user"` back here temporarily.
  */
 const SHARED_LABELS: CoreMemoryLabel[] = [];
-const retrievalServiceByDb = new WeakMap<Db, RetrievalService>();
-
-function resolveRetrievalService(db: Db, retrievalService?: RetrievalService): RetrievalService {
+function resolveRetrievalService(retrievalService?: RetrievalService): RetrievalService {
   if (retrievalService) {
     return retrievalService;
   }
 
-  const cached = retrievalServiceByDb.get(db);
-  if (cached) {
-    return cached;
-  }
-
-  const created = RetrievalService.create(db);
-  retrievalServiceByDb.set(db, created);
-  return created;
+  throw new Error("retrievalService is required");
 }
 
 /**
@@ -292,7 +282,6 @@ export async function getAttachedSharedBlocksAsync(agentId: string, repos: Promp
 export async function getTypedRetrievalSurfaceAsync(
   userMessage: string,
   viewerContext: ViewerContext,
-  db: Db,
   repos: PromptDataRepos,
   retrievalService?: RetrievalService,
 ): Promise<string> {
@@ -300,7 +289,7 @@ export async function getTypedRetrievalSurfaceAsync(
     return "";
   }
 
-  const retrieval = resolveRetrievalService(db, retrievalService);
+  const retrieval = resolveRetrievalService(retrievalService);
   const payload = await repos.recentCognitionSlotRepo.getSlotPayload(
     viewerContext.session_id,
     viewerContext.viewer_agent_id,

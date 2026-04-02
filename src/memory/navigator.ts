@@ -204,7 +204,7 @@ export class GraphNavigator {
     const effectiveStrategy = strategy ?? GRAPH_RETRIEVAL_STRATEGIES.default_retrieval;
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
     const input = this.asExploreInput(query, optionsOrInput);
-    const analysis = this.analyzeQuery(query, viewerContext, input.mode);
+    const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
 
     const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount);
     const supplementalSeeds = await this.collectSupplementalSeeds(query, viewerContext, rawSeeds);
@@ -299,7 +299,7 @@ export class GraphNavigator {
     };
   }
 
-  private analyzeQuery(query: string, viewerContext: ViewerContext, mode?: ExploreMode): QueryAnalysis {
+  private async analyzeQuery(query: string, viewerContext: ViewerContext, mode?: ExploreMode): Promise<QueryAnalysis> {
     const normalized = query.trim().toLowerCase();
     const tokens = query
       .split(/[^a-zA-Z0-9_@:-]+/)
@@ -313,7 +313,7 @@ export class GraphNavigator {
       if (aliasToken.length < 2) {
         continue;
       }
-      const entityId = this.alias.resolveAlias(aliasToken, viewerContext.viewer_agent_id);
+      const entityId = await this.alias.resolveAlias(aliasToken, viewerContext.viewer_agent_id);
       if (entityId !== null) {
         resolvedEntityIds.add(entityId);
         entityHints.add(aliasToken);

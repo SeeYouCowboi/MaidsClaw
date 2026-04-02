@@ -47,7 +47,7 @@ export type MemoryToolServices = {
       basis?: string;
       activeOnly?: boolean;
       limit?: number;
-    }): unknown;
+    }): Promise<unknown>;
   };
 };
 
@@ -261,18 +261,18 @@ function makeMemoryRead(services: MemoryToolServices): MemoryToolDefinition {
       },
       additionalProperties: false,
     },
-    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
       if (typeof args.entity === "string") {
-        return services.retrieval.readByEntity(args.entity, viewerContext);
+        return await services.retrieval.readByEntity(args.entity, viewerContext);
       }
       if (typeof args.topic === "string") {
-        return services.retrieval.readByTopic(args.topic, viewerContext);
+        return await services.retrieval.readByTopic(args.topic, viewerContext);
       }
       if (Array.isArray(args.event_ids)) {
-        return services.retrieval.readByEventIds(args.event_ids as number[], viewerContext);
+        return await services.retrieval.readByEventIds(args.event_ids as number[], viewerContext);
       }
       if (Array.isArray(args.fact_ids)) {
-        return services.retrieval.readByFactIds(args.fact_ids as number[], viewerContext);
+        return await services.retrieval.readByFactIds(args.fact_ids as number[], viewerContext);
       }
       return { success: false, error: "Provide one of: entity, topic, event_ids, or fact_ids" };
     },
@@ -417,12 +417,12 @@ function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition
       },
       additionalProperties: false,
     },
-    handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
+    async handler(args: Record<string, unknown>, viewerContext: ViewerContext) {
       if (!services.cognitionSearch) {
         return { success: false, error: "CognitionSearch not available" };
       }
 
-      return services.cognitionSearch.searchCognition({
+      return await services.cognitionSearch.searchCognition({
         agentId: viewerContext.viewer_agent_id,
         query: typeof args.query === "string" ? args.query : undefined,
         kind: typeof args.kind === "string" ? args.kind : undefined,

@@ -1,19 +1,15 @@
-import type { Db } from "../storage/db-types.js";
+import type { RetrievalReadRepo } from "../storage/domain-repos/contracts/retrieval-read-repo.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
-import { EmbeddingService } from "./embeddings.js";
-import { CognitionSearchService } from "./cognition/cognition-search.js";
+import type { EmbeddingService } from "./embeddings.js";
+import type { CognitionSearchService } from "./cognition/cognition-search.js";
 import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
-import { NarrativeSearchService } from "./narrative/narrative-search.js";
-import { EpisodeRepository } from "./episode/episode-repo.js";
-import {
+import type { NarrativeSearchService } from "./narrative/narrative-search.js";
+import type {
   RetrievalOrchestrator,
-  type RetrievalDedupContext,
-  type RetrievalQueryStrategy,
-  type TypedRetrievalResult,
+  RetrievalDedupContext,
+  RetrievalQueryStrategy,
+  TypedRetrievalResult,
 } from "./retrieval/retrieval-orchestrator.js";
-import { MAX_INTEGER } from "./schema.js";
-import { TransactionBatcher } from "./transaction-batcher.js";
-import { VisibilityPolicy } from "./visibility-policy.js";
 import type { EpisodeRow } from "./episode/episode-repo.js";
 import type {
   EntityNode,
@@ -49,131 +45,42 @@ type TopicReadResult = {
 };
 
 type RetrievalServiceDeps = {
-  db: Db;
+  retrievalRepo: RetrievalReadRepo;
   embeddingService?: EmbeddingService;
   narrativeSearch?: NarrativeSearchService;
   cognitionSearch?: CognitionSearchService;
   orchestrator?: RetrievalOrchestrator;
-  visibilityPolicy?: VisibilityPolicy;
 };
 
 export class RetrievalService {
-  private readonly db: Db;
+  private readonly retrievalRepo: RetrievalReadRepo;
   private readonly embeddingService: EmbeddingService;
   private readonly narrativeSearch: NarrativeSearchService;
   private readonly cognitionSearch: CognitionSearchService;
   private readonly orchestrator: RetrievalOrchestrator;
-  private readonly visibilityPolicy: VisibilityPolicy;
 
-  constructor(dbOrDeps: Db | RetrievalServiceDeps) {
-    const deps = this.resolveDeps(dbOrDeps);
-    const { db } = deps;
-    this.db = db;
+  constructor(deps: RetrievalServiceDeps) {
+    this.retrievalRepo = deps.retrievalRepo;
     this.embeddingService = deps.embeddingService ?? (() => { throw new Error("embeddingService is required"); })();
     this.narrativeSearch = deps.narrativeSearch ?? (() => { throw new Error("narrativeSearch is required"); })();
     this.cognitionSearch = deps.cognitionSearch ?? (() => { throw new Error("cognitionSearch is required"); })();
-    this.orchestrator = deps.orchestrator
-      ?? new RetrievalOrchestrator({
-        narrativeService: this.narrativeSearch,
-        cognitionService: this.cognitionSearch,
-        currentProjectionReader: this.cognitionSearch.createCurrentProjectionReader(),
-        episodeRepository: new EpisodeRepository(db),
-      });
-    this.visibilityPolicy = deps.visibilityPolicy ?? new VisibilityPolicy();
+    this.orchestrator = deps.orchestrator ?? (() => { throw new Error("orchestrator is required"); })();
   }
 
-  static create(db: Db): RetrievalService {
-    return Reflect.construct(this, [db]) as RetrievalService;
+  async readByEntity(pointerKey: string, viewerContext: ViewerContext): Promise<EntityReadResult> {
+    return this.retrievalRepo.readByEntity(pointerKey, viewerContext);
   }
 
-  private resolveDeps(dbOrDeps: Db | RetrievalServiceDeps): RetrievalServiceDeps {
-    if ("db" in dbOrDeps) {
-      return dbOrDeps;
-    }
-    return { db: dbOrDeps };
+  async readByTopic(name: string, viewerContext: ViewerContext): Promise<TopicReadResult> {
+    return this.retrievalRepo.readByTopic(name, viewerContext);
   }
 
-  readByEntity(pointerKey: string, viewerContext: ViewerContext): EntityReadResult {
-    const resolvedPointer = this.resolveRedirect(pointerKey, viewerContext.viewer_agent_id);
-    const entity = this.resolveEntityByPointer(resolvedPointer, viewerContext.viewer_agent_id);
-    if (!entity) {
-      return { entity: null, facts: [], events: [], episodes: [] };
-    }
-
-    const facts = this.db
-      .prepare(
-        "SELECT * FROM fact_edges WHERE (source_entity_id=? OR target_entity_id=?) AND t_invalid=?",
-      )
-      .all(entity.id, entity.id, MAX_INTEGER) as FactEdge[];
-
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
-    const events = this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE (participants LIKE ? OR primary_actor_entity_id=?)
-           AND ${eventVisibilityPredicate}`,
-      )
-      .all(`%entity:${entity.id}%`, entity.id) as EventNode[];
-
-    const episodes = this.db
-      .prepare(
-        `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes,
-                location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at
-         FROM private_episode_events
-         WHERE agent_id=? AND location_entity_id=?`,
-      )
-      .all(viewerContext.viewer_agent_id, entity.id) as EpisodeRow[];
-
-    return { entity, facts, events, episodes };
+  async readByEventIds(ids: number[], viewerContext: ViewerContext): Promise<EventNode[]> {
+    return this.retrievalRepo.readByEventIds(ids, viewerContext);
   }
 
-  readByTopic(name: string, viewerContext: ViewerContext): TopicReadResult {
-    const resolvedName = this.resolveRedirect(name, viewerContext.viewer_agent_id);
-    const topic = this.db.prepare("SELECT * FROM topics WHERE name=?").get(resolvedName) as Topic | null;
-    if (!topic) {
-      return { topic: null, events: [], episodes: [] };
-    }
-
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
-    const events = this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE topic_id=?
-           AND ${eventVisibilityPredicate}`,
-      )
-      .all(topic.id) as EventNode[];
-
-    // Private episodes have no topic FK — no correlation possible in the new schema.
-    const episodes: EpisodeRow[] = [];
-
-    return { topic, events, episodes };
-  }
-
-  readByEventIds(ids: number[], viewerContext: ViewerContext): EventNode[] {
-    if (ids.length === 0) {
-      return [];
-    }
-
-    const placeholders = ids.map(() => "?").join(",");
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
-    return this.db
-      .prepare(
-        `SELECT * FROM event_nodes
-         WHERE id IN (${placeholders})
-           AND ${eventVisibilityPredicate}`,
-      )
-      .all(...ids) as EventNode[];
-  }
-
-  readByFactIds(ids: number[], _viewerContext: ViewerContext): FactEdge[] {
-    if (ids.length === 0) {
-      return [];
-    }
-
-    const placeholders = ids.map(() => "?").join(",");
-    return this.db
-      .prepare(`SELECT * FROM fact_edges WHERE id IN (${placeholders}) AND t_invalid=?`)
-      .all(...ids, MAX_INTEGER) as FactEdge[];
+  async readByFactIds(ids: number[], viewerContext: ViewerContext): Promise<FactEdge[]> {
+    return this.retrievalRepo.readByFactIds(ids, viewerContext);
   }
 
   async searchVisibleNarrative(query: string, viewerContext: ViewerContext): Promise<SearchResult[]> {
@@ -269,10 +176,8 @@ export class RetrievalService {
     }
 
     const semanticRankByRef = new Map<string, { rank: number; nodeKind: string }>();
-    const embeddingCount = this.db.prepare("SELECT count(*) as count FROM node_embeddings").get() as {
-      count: number;
-    };
-    if (embeddingCount.count > 0 && queryEmbedding) {
+    const embeddingCount = await this.retrievalRepo.countNodeEmbeddings();
+    if (embeddingCount > 0 && queryEmbedding) {
       const neighbors = this.embeddingService.queryNearestNeighbors(queryEmbedding, {
         agentId: viewerContext.viewer_agent_id,
         limit: Math.max(limit * 4, 20),
@@ -340,67 +245,12 @@ export class RetrievalService {
     return selected;
   }
 
-  private resolveRedirect(name: string, ownerAgentId?: string): string {
-    const agentRedirect = ownerAgentId
-      ? (this.db
-          .prepare("SELECT new_name FROM pointer_redirects WHERE old_name=? AND owner_agent_id=?")
-          .get(name, ownerAgentId) as { new_name: string } | undefined)
-      : undefined;
-
-    if (agentRedirect) {
-      return agentRedirect.new_name;
-    }
-
-    const globalRedirect = this.db
-      .prepare("SELECT new_name FROM pointer_redirects WHERE old_name=? AND owner_agent_id IS NULL")
-      .get(name) as { new_name: string } | undefined;
-
-    return globalRedirect?.new_name ?? name;
+  async resolveRedirect(name: string, ownerAgentId?: string): Promise<string> {
+    return this.retrievalRepo.resolveRedirect(name, ownerAgentId);
   }
 
-  private resolveEntityByPointer(pointerKey: string, viewerAgentId: string): EntityNode | null {
-    const privateEntity = this.db
-      .prepare(
-        "SELECT * FROM entity_nodes WHERE pointer_key=? AND memory_scope='private_overlay' AND owner_agent_id=? LIMIT 1",
-      )
-      .get(pointerKey, viewerAgentId) as EntityNode | undefined;
-    if (privateEntity) {
-      return privateEntity;
-    }
-
-    const sharedEntity = this.db
-      .prepare(
-        "SELECT * FROM entity_nodes WHERE pointer_key=? AND memory_scope='shared_public' LIMIT 1",
-      )
-      .get(pointerKey) as EntityNode | undefined;
-    if (sharedEntity) {
-      return sharedEntity;
-    }
-
-    const alias = this.db
-      .prepare(
-        `SELECT canonical_id
-         FROM entity_aliases
-         WHERE alias=? AND (owner_agent_id=? OR owner_agent_id IS NULL)
-         ORDER BY CASE WHEN owner_agent_id=? THEN 0 ELSE 1 END
-         LIMIT 1`,
-      )
-      .get(pointerKey, viewerAgentId, viewerAgentId) as { canonical_id: number } | undefined;
-    if (!alias) {
-      return null;
-    }
-
-    const aliasedPrivate = this.db
-      .prepare("SELECT * FROM entity_nodes WHERE id=? AND memory_scope='private_overlay' AND owner_agent_id=?")
-      .get(alias.canonical_id, viewerAgentId) as EntityNode | undefined;
-    if (aliasedPrivate) {
-      return aliasedPrivate;
-    }
-
-    const aliasedShared = this.db
-      .prepare("SELECT * FROM entity_nodes WHERE id=? AND memory_scope='shared_public'")
-      .get(alias.canonical_id) as EntityNode | undefined;
-    return aliasedShared ?? null;
+  async resolveEntityByPointer(pointerKey: string, viewerAgentId: string): Promise<EntityNode | null> {
+    return this.retrievalRepo.resolveEntityByPointer(pointerKey, viewerAgentId);
   }
 
   private rrf(rank: number): number {

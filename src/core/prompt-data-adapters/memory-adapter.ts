@@ -1,4 +1,5 @@
 import type { Db } from "../../storage/db-types.js";
+import type { RetrievalService } from "../../memory/retrieval.js";
 import {
   getAttachedSharedBlocksAsync,
   getPinnedBlocksAsync,
@@ -10,7 +11,11 @@ import {
 import type { MemoryDataSource, ViewerContext } from "../prompt-data-sources.js";
 
 export class MemoryAdapter implements MemoryDataSource {
-  constructor(private readonly db: Db, private readonly repos: PromptDataRepos) {}
+  constructor(
+    _db: Db,
+    private readonly repos: PromptDataRepos,
+    private readonly retrievalService?: RetrievalService,
+  ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
     return getPinnedBlocksAsync(agentId, this.repos);
@@ -29,6 +34,6 @@ export class MemoryAdapter implements MemoryDataSource {
   }
 
   async getTypedRetrievalSurface(userMessage: string, viewerContext: ViewerContext): Promise<string> {
-    return getTypedRetrievalSurfaceAsync(userMessage, viewerContext, this.db, this.repos);
+    return getTypedRetrievalSurfaceAsync(userMessage, viewerContext, this.repos, this.retrievalService);
   }
 }
