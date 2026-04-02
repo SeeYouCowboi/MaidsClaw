@@ -79,6 +79,7 @@ import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-repo.js";
+import { PgSessionRepo } from "../storage/domain-repos/pg/session-repo.js";
 import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
 import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
 import { resolveStoragePaths } from "../storage/paths.js";
@@ -703,12 +704,13 @@ export function bootstrapRuntime(
 		succeeded: true,
 	};
 
-	const sessionService = options.sessionService ?? new SessionService();
+	const resolvePgPool = () => pgFactory.getPool();
+	const pgSessionRepo = createLazyPgRepo(() => new PgSessionRepo(resolvePgPool()));
+	const sessionService = options.sessionService ?? new SessionService({ pgRepo: pgSessionRepo });
 	const blackboard = options.blackboard ?? new Blackboard();
 	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
 	const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
 	const toolExecutor = options.toolExecutor ?? new ToolExecutor();
-	const resolvePgPool = () => pgFactory.getPool();
 
 	const interactionStore = createPgInteractionStoreShim();
 	const commitService = new CommitService(interactionStore);

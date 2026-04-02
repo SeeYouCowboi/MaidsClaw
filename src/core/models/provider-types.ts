@@ -67,4 +67,5 @@ export type ProviderCatalogEntry = {
   warningMessage?: string; // shown on instantiation for experimental providers
   supportsStreamingUsage?: boolean; // true if provider supports stream_options.include_usage
   extraHeaders?: Record<string, string>; // additional HTTP headers sent with every request
+  disableToolChoiceRequired?: boolean; // true if provider rejects tool_choice:"required" (e.g. thinking-enabled models like Kimi K2.5)
 };

@@ -22,6 +22,124 @@ const MAIDEN_OPERATIONAL_KEYS = [
 	"agent_runtime.*",
 ];
 
+// ---------------------------------------------------------------------------
+// RP Agent Framework — injected into OPERATIONAL_STATE for every rp_agent turn
+// ---------------------------------------------------------------------------
+const RP_AGENT_FRAMEWORK_INSTRUCTIONS = `## RP Turn Submission Framework
+
+You MUST call submit_rp_turn to end each turn.
+Besides publicReply, populate the structured fields described below.
+All structured fields are invisible to the user — record your TRUE internal state, even when publicReply is evasive or misleading.
+Write all summary / notes text in the same language as the conversation.
+
+---
+
+### 1. latentScratchpad  (string — use EVERY turn)
+
+Your private internal monologue BEFORE you compose publicReply.
+Write out your reasoning, emotional state, strategic calculations, and what you chose to hide or reveal.
+This is trace-only and never shown to the user.
+
+---
+
+### 2. privateCognition  (use whenever your beliefs, attitudes, or goals change)
+
+A structured record of durable internal-state mutations.
+Wrap in: { schemaVersion: "rp_private_cognition_v4", ops: [ ...ops ] }
+
+Each op is either { op: "upsert", record: {...} } or { op: "retract", target: { kind, key } }.
+
+#### 2a. assertion — a belief about the world
+
+Fields:
+- kind: "assertion"
+- key: stable identifier, e.g. "butler/accounting_anomaly"  (reuse the same key to update)
+- proposition: { subject, predicate, object }
+  - subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master"
+  - predicate: a verb phrase, e.g. "has_suspicious_meetings_with"
+  - object: { kind: "entity", ref: { kind: "pointer_key", value: "<entity_id>" } }
+- stance: one of "hypothetical" | "tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned"
+  - hypothetical = pure speculation, tentative = suspected, accepted = believed true, confirmed = verified, contested = conflicting evidence
+- basis (optional): one of "first_hand" | "hearsay" | "inference" | "introspection" | "belief"
+  - first_hand = you directly witnessed/observed it
+  - hearsay = someone else told you
+  - inference = you deduced it from evidence
+  - introspection = you recognized it about your own inner state
+  - belief = gut feeling without clear evidence
+
+Example:
+{ op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "has_unexplained_meetings_with", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
+
+#### 2b. evaluation — how you rate / feel about an entity
+
+Fields:
+- kind: "evaluation"
+- key: e.g. "trust/alice", "respect/butler"
+- target: { kind: "pointer_key", value: "<entity_id>" }
+- dimensions: array of { name: string, value: number (1-10) }
+  - e.g. { name: "trustworthiness", value: 4 }, { name: "competence", value: 7 }
+- emotionTags (optional): e.g. ["wary", "protective"]
+- notes (optional): free-text explanation
+
+Example:
+{ op: "upsert", record: { kind: "evaluation", key: "trust/master", target: { kind: "pointer_key", value: "master" }, dimensions: [{ name: "emotional_dependence", value: 8 }, { name: "information_autonomy", value: 3 }], emotionTags: ["protective", "anxious"], notes: "主人开始追问，我需要提高警惕" } }
+
+#### 2c. commitment — a goal, plan, intent, constraint, or avoidance
+
+Fields:
+- kind: "commitment"
+- key: e.g. "goal/filter_info", "constraint/no_full_disclosure"
+- mode: one of "goal" | "intent" | "plan" | "constraint" | "avoidance"
+  - goal = long-term objective, intent = current turn intention, plan = multi-step strategy
+  - constraint = self-imposed rule, avoidance = something to actively prevent
+- target: either { action: "<description>" } or a proposition
+- status: one of "active" | "paused" | "fulfilled" | "abandoned"
+- priority (optional): 1-10
+- horizon (optional): "immediate" | "near" | "long"
+
+Example:
+{ op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "prevent master from confronting butler before evidence is complete" }, status: "active", priority: 9, horizon: "near" } }
+
+#### 2d. retract — remove a previous cognition entry
+
+{ op: "retract", target: { kind: "assertion", key: "butler/secret_meetings" } }
+
+---
+
+### 3. privateEpisodes  (use every turn — log 1-3 events)
+
+Scene-level events that happened this turn. Each entry:
+- category: one of "speech" | "action" | "observation" | "state_change"
+  - speech = something said aloud, action = a physical/deliberate act, observation = something noticed, state_change = a shift in mood/relationship/situation
+- summary: one-sentence description of the event
+- privateNotes (optional): your private annotation about the significance
+
+Examples:
+{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑" }
+{ category: "action", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项" }
+{ category: "state_change", summary: "主人对我的信息筛选行为开始产生警觉" }
+
+---
+
+### 4. publications  (only when making a declarative public statement)
+
+Declare something you said or did that should be part of the public scene record.
+- kind: one of "spoken" | "written" | "visual"
+- targetScope: "current_area" or "world_public"
+- summary: what was declared
+
+Example:
+{ kind: "spoken", targetScope: "current_area", summary: "向主人报告了管家的来访" }
+
+---
+
+### Rules
+1. latentScratchpad: write EVERY turn. Think before you speak.
+2. privateCognition: update whenever a belief, evaluation, or commitment changes. Reuse the same key to update.
+3. privateEpisodes: log 1-3 events every turn.
+4. Be precise with enum values — use only the exact values listed above.
+5. Your structured data must reflect your TRUE internal state, not what you say aloud.`;
+
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;
 	lore?: LoreDataSource;
@@ -102,6 +220,10 @@ export class PromptBuilder {
 			slotContent.set(
 				PromptSectionSlot.LORE_ENTRIES,
 				this.getLoreEntries(loreQuery),
+			);
+			slotContent.set(
+				PromptSectionSlot.OPERATIONAL_STATE,
+				RP_AGENT_FRAMEWORK_INSTRUCTIONS,
 			);
 		} else {
 			slotContent.set(

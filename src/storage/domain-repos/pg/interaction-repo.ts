@@ -3,6 +3,13 @@ import type { InteractionRecord, TurnSettlementPayload } from "../../../interact
 import type { InteractionRepo, InteractionTransactionContext } from "../contracts/interaction-repo.js";
 import { MaidsClawError } from "../../../core/errors.js";
 
+function parsePayload(raw: unknown): unknown {
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch { return raw; }
+  }
+  return raw;
+}
+
 function rowToRecord(row: Record<string, unknown>): InteractionRecord {
   const record: InteractionRecord = {
     sessionId: row.session_id as string,
@@ -10,7 +17,7 @@ function rowToRecord(row: Record<string, unknown>): InteractionRecord {
     recordIndex: row.record_index as number,
     actorType: row.actor_type as InteractionRecord["actorType"],
     recordType: row.record_type as InteractionRecord["recordType"],
-    payload: row.payload,
+    payload: parsePayload(row.payload),
     committedAt: Number(row.committed_at),
   };
   if (row.correlated_turn_id != null) {

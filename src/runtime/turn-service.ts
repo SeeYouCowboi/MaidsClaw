@@ -90,21 +90,41 @@ export class TurnService {
 		private readonly memoryPipelineReady = true,
 	) {}
 
-	runUserTurn(params: RunUserTurnParams): AsyncIterable<Chunk> {
-		const history = this.interactionStore.getMessageRecords(params.sessionId);
+	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
 		const messages: ChatMessage[] = [];
-		for (const record of history) {
-			const payload = record.payload as { role?: unknown; content?: unknown };
-			if (payload.role !== "user" && payload.role !== "assistant") {
-				continue;
+
+		if (this.settlementUnitOfWork) {
+			const pgRecords = await this.settlementUnitOfWork.run(
+				async (repos) => repos.interactionRepo.getMessageRecords(params.sessionId),
+			);
+			for (const record of pgRecords) {
+				const payload = record.payload as { role?: unknown; content?: unknown };
+				if (payload.role !== "user" && payload.role !== "assistant") {
+					continue;
+				}
+				messages.push({
+					role: payload.role,
+					content:
+						typeof payload.content === "string"
+							? payload.content
+							: String(payload.content ?? ""),
+				});
 			}
-			messages.push({
-				role: payload.role,
-				content:
-					typeof payload.content === "string"
-						? payload.content
-						: String(payload.content ?? ""),
-			});
+		} else {
+			const history = this.interactionStore.getMessageRecords(params.sessionId);
+			for (const record of history) {
+				const payload = record.payload as { role?: unknown; content?: unknown };
+				if (payload.role !== "user" && payload.role !== "assistant") {
+					continue;
+				}
+				messages.push({
+					role: payload.role,
+					content:
+						typeof payload.content === "string"
+							? payload.content
+							: String(payload.content ?? ""),
+				});
+			}
 		}
 
 		messages.push({
@@ -119,7 +139,7 @@ export class TurnService {
 			traceStore: params.metadata?.traceStore,
 		};
 
-		return this.run(request);
+		yield* this.run(request);
 	}
 
 	/**
@@ -472,6 +492,7 @@ export class TurnService {
 					settlementPayload,
 					hasPublicReply,
 					publicReply: canonicalOutcome.publicReply,
+					userText: getLatestUserMessage(effectiveRequest.messages),
 				});
 				await this.commitSettlementProjectionWithRepos({
 					repos,
@@ -695,6 +716,7 @@ export class TurnService {
 		settlementPayload: TurnSettlementPayload;
 		hasPublicReply: boolean;
 		publicReply: string;
+		userText?: string;
 	}): Promise<void> {
 		const {
 			repos,
@@ -704,10 +726,25 @@ export class TurnService {
 			settlementPayload,
 			hasPublicReply,
 			publicReply,
+			userText,
 		} = params;
 
 		const maxIndex = await repos.interactionRepo.getMaxIndex(sessionId);
 		let nextRecordIndex = maxIndex === undefined ? 0 : maxIndex + 1;
+
+		if (userText !== undefined && userText.length > 0) {
+			await repos.interactionRepo.commit({
+				sessionId,
+				recordId: crypto.randomUUID(),
+				recordIndex: nextRecordIndex,
+				actorType: "user",
+				recordType: "message",
+				payload: { role: "user", content: userText },
+				correlatedTurnId: requestId,
+				committedAt: Date.now(),
+			});
+			nextRecordIndex += 1;
+		}
 
 		await repos.interactionRepo.commit({
 			sessionId,

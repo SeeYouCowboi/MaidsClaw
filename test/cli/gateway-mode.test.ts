@@ -7,7 +7,7 @@ import { LocalInspectClient } from "../../src/app/clients/local/local-inspect-cl
 import { LocalSessionClient } from "../../src/app/clients/local/local-session-client.js";
 import { LocalTurnClient } from "../../src/app/clients/local/local-turn-client.js";
 import type { ObservationEvent } from "../../src/app/contracts/execution.js";
-import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { bootstrapRuntime, initializePgBackendForRuntime } from "../../src/bootstrap/runtime.js";
 import { GatewayServer } from "../../src/gateway/server.js";
 import { registerDebugCommands } from "../../src/terminal-cli/commands/debug.js";
 import { registerSessionCommands } from "../../src/terminal-cli/commands/session.js";
@@ -63,7 +63,7 @@ describe("gateway mode", () => {
 	let server: GatewayServer;
 	let baseUrl: string;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		resetCommands();
 		registerDebugCommands();
 		registerSessionCommands();
@@ -72,6 +72,7 @@ describe("gateway mode", () => {
 		runtime = bootstrapRuntime({
 			cwd: makeTempDir(),
 		});
+		await initializePgBackendForRuntime(runtime);
 		const userFacade: AppUserFacade = {
 			session: new LocalSessionClient({
 				sessionService: runtime.sessionService,

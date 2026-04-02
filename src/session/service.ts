@@ -1,5 +1,6 @@
 import { MaidsClawError } from "../core/errors.js";
 import type { Db } from "../storage/db-types.js";
+import type { SessionRepo } from "../storage/domain-repos/contracts/session-repo.js";
 
 export type SessionRecord = {
   sessionId: string;
@@ -9,15 +10,34 @@ export type SessionRecord = {
 };
 
 export class SessionService {
+  private readonly pgRepo?: SessionRepo;
   private readonly db?: Db;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly recoveryRequired = new Set<string>();
 
-  constructor(db?: Db) {
-    this.db = db;
+  constructor(optionsOrDb?: { pgRepo: SessionRepo } | Db) {
+    if (optionsOrDb && "pgRepo" in optionsOrDb) {
+      this.pgRepo = optionsOrDb.pgRepo;
+    } else {
+      this.db = optionsOrDb as Db | undefined;
+    }
+  }
+
+  private pgAvailable(): boolean {
+    if (!this.pgRepo) return false;
+    try {
+      void (this.pgRepo as unknown as Record<string, unknown>).createSession;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async createSession(agentId: string): Promise<SessionRecord> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.createSession(agentId);
+    }
+
     const sessionId = crypto.randomUUID();
     const createdAt = Date.now();
 
@@ -43,6 +63,10 @@ export class SessionService {
   }
 
   async getSession(sessionId: string): Promise<SessionRecord | undefined> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.getSession(sessionId);
+    }
+
     if (this.db) {
       const row = this.db.get<{
         session_id: string;
@@ -68,6 +92,10 @@ export class SessionService {
   }
 
   async closeSession(sessionId: string): Promise<SessionRecord> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.closeSession(sessionId);
+    }
+
     const record = await this.getSession(sessionId);
     if (!record) {
       throw new MaidsClawError({
@@ -95,12 +123,20 @@ export class SessionService {
   }
 
   async isOpen(sessionId: string): Promise<boolean> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.isOpen(sessionId);
+    }
+
     const record = await this.getSession(sessionId);
     if (!record) return false;
     return record.closedAt === undefined;
   }
 
   async markRecoveryRequired(sessionId: string): Promise<void> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.markRecoveryRequired(sessionId);
+    }
+
     const session = await this.getSession(sessionId);
     if (!session) {
       throw new MaidsClawError({
@@ -125,6 +161,10 @@ export class SessionService {
   }
 
   async clearRecoveryRequired(sessionId: string): Promise<void> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.clearRecoveryRequired(sessionId);
+    }
+
     if (this.db) {
       this.db.run("UPDATE sessions SET recovery_required = 0 WHERE session_id = ?", [sessionId]);
       return;
@@ -134,6 +174,10 @@ export class SessionService {
   }
 
   async requiresRecovery(sessionId: string): Promise<boolean> {
+    if (this.pgAvailable()) {
+      return this.pgRepo!.requiresRecovery(sessionId);
+    }
+
     if (this.db) {
       const row = this.db.get<{ recovery_required: number }>(
         "SELECT recovery_required FROM sessions WHERE session_id = ?",

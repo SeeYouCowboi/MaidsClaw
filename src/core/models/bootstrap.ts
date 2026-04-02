@@ -35,6 +35,7 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       logger: context.logger as ConstructorParameters<typeof OpenAIProvider>[0]["logger"],
       supportsStreamingUsage: entry.supportsStreamingUsage,
       extraHeaders: entry.extraHeaders,
+      disableToolChoiceRequired: entry.disableToolChoiceRequired,
     });
     return { chatProvider: provider, embeddingProvider: provider };
   },

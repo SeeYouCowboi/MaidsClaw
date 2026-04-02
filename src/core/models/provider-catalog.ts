@@ -155,6 +155,7 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
     riskTier: "compatible",
     baseUrl: "https://api.moonshot.cn",
     authModes: ["api-key"],
+    disableToolChoiceRequired: true,
     selectionPolicy: {
       enabledByDefault: true,
       eligibleForAutoFallback: false,

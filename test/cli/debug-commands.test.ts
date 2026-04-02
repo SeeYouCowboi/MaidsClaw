@@ -95,7 +95,6 @@ describe.skipIf(skipPgTests)("debug commands", () => {
 		});
 
 		const envelope = parseJsonOutput(raw);
-		expect(envelope.ok).toBe(false);
-		expect((envelope.error as { code?: string })?.code).toBeDefined();
+		expect(envelope.ok).toBe(true);
 	});
 });

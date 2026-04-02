@@ -26,6 +26,11 @@ export function createPgPool(
     connect_timeout: merged.connect_timeout,
     idle_timeout: merged.idle_timeout,
     max_lifetime: merged.max_lifetime,
+    onnotice(notice: postgres.Notice) {
+      const code = (notice as Record<string, unknown>).code as string | undefined;
+      if (code === "42P07" || code === "42710") return;
+      console.warn("[pg notice]", notice);
+    },
   };
 
   if (merged.statement_timeout !== undefined) {

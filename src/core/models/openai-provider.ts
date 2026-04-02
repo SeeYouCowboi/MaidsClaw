@@ -14,6 +14,7 @@ type OpenAIChatProviderOptions = {
   logger?: Logger;
   supportsStreamingUsage?: boolean;
   extraHeaders?: Record<string, string>;
+  disableToolChoiceRequired?: boolean;
 };
 
 type OpenAIChatDeltaToolCall = {
@@ -277,7 +278,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       if (request.toolChoice.type === "auto") {
         toolChoice = "auto";
       } else if (request.toolChoice.type === "any") {
-        toolChoice = "required";
+        toolChoice = this.options.disableToolChoiceRequired ? "auto" : "required";
       } else if (request.toolChoice.type === "tool") {
         toolChoice = { type: "function", function: { name: request.toolChoice.name } };
       }
