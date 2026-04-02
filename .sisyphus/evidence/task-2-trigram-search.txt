@@ -1,0 +1,77 @@
+bun test v1.3.10 (30e609e0)
+
+test\pg-app\pg-cognition-search-repo.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 3 other objects",
+  detail: "drop cascades to extension pg_trgm\ndrop cascades to table private_cognition_current\ndrop cascades to table search_docs_cognition",
+  file: "dependency.c",
+  line: "1221",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"test_0e5097ca849e\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "526",
+  routine: "does_not_exist_skipping",
+}
+
+ 6 pass
+ 0 fail
+ 16 expect() calls
+Ran 6 tests across 1 file. [870.00ms]
