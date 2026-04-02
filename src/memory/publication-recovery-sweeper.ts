@@ -20,6 +20,12 @@ type PublicationRecoveryJobRow = {
   payload: string | null;
 };
 
+/**
+ * Publication recovery sweeper. Currently inactive: `listDueJobs` returns an
+ * empty list because job persistence has not yet been migrated to PG. The sweep
+ * loop runs harmlessly but processes no jobs. Full migration to PG-backed job
+ * persistence is required before this sweeper becomes operational.
+ */
 export class PublicationRecoverySweeper {
   private timer?: ReturnType<typeof setInterval>;
   private sweepInFlight = false;
