@@ -115,4 +115,71 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
       expect(hitsB[0].sourceRef).toBe("assertion:11");
     });
   });
+
+  it("updateCognitionSearchDocStanceBySourceRef updates only stance column", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapDerivedSchema(sql);
+      const repo = new PgSearchProjectionRepo(sql);
+
+      const docId = await repo.upsertCognitionDoc({
+        sourceRef: "assertion:50" as NodeRef,
+        agentId: "agent-x",
+        kind: "assertion",
+        basis: "first_hand",
+        stance: "tentative",
+        content: "The sky is blue according to observations",
+      });
+      expect(docId).toBeGreaterThan(0);
+
+      const now = Date.now();
+      await repo.updateCognitionSearchDocStanceBySourceRef(
+        "assertion:50" as NodeRef,
+        "agent-x",
+        "confirmed",
+        now,
+      );
+
+      // Verify stance changed, other fields preserved
+      const hits = await repo.searchCognition("sky blue observations", "agent-x", 10);
+      expect(hits.length).toBe(1);
+      expect(hits[0].stance).toBe("confirmed");
+      expect(hits[0].basis).toBe("first_hand");
+      expect(hits[0].kind).toBe("assertion");
+      expect(hits[0].content).toContain("The sky is blue");
+    });
+  });
+
+  it("updateCognitionSearchDocStanceBySourceRef does not affect other agents", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapDerivedSchema(sql);
+      const repo = new PgSearchProjectionRepo(sql);
+
+      await repo.upsertCognitionDoc({
+        sourceRef: "assertion:60" as NodeRef,
+        agentId: "agent-a",
+        kind: "assertion",
+        stance: "tentative",
+        content: "Stance update isolation test document",
+      });
+      await repo.upsertCognitionDoc({
+        sourceRef: "assertion:60" as NodeRef,
+        agentId: "agent-b",
+        kind: "assertion",
+        stance: "tentative",
+        content: "Stance update isolation test document",
+      });
+
+      await repo.updateCognitionSearchDocStanceBySourceRef(
+        "assertion:60" as NodeRef,
+        "agent-a",
+        "rejected",
+        Date.now(),
+      );
+
+      const hitsA = await repo.searchCognition("Stance update isolation", "agent-a", 10);
+      const hitsB = await repo.searchCognition("Stance update isolation", "agent-b", 10);
+      expect(hitsA[0].stance).toBe("rejected");
+      expect(hitsB[0].stance).toBe("tentative");
+    });
+  });
 });

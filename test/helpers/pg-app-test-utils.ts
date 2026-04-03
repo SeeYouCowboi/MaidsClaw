@@ -37,7 +37,7 @@ export function createTestPgAppPool(): postgres.Sql {
   const schemaName = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const sql = postgres(getTestUrl(), {
     max: 3,
-    connection: { search_path: schemaName },
+    connection: { search_path: `${schemaName},public` },
   });
   schemaRegistry.set(sql, schemaName);
   return sql;

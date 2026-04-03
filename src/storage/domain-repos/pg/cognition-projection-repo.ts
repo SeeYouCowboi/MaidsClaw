@@ -277,4 +277,50 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
       `;
     }
   }
+
+  async updateConflictFactors(
+    agentId: string,
+    cognitionKey: string,
+    conflictSummary: string,
+    conflictFactorRefsJson: string,
+    updatedAt: number,
+  ): Promise<void> {
+    await this.sql`
+      UPDATE private_cognition_current
+      SET conflict_summary = ${conflictSummary},
+          conflict_factor_refs_json = ${conflictFactorRefsJson},
+          updated_at = ${updatedAt}
+      WHERE agent_id = ${agentId} AND cognition_key = ${cognitionKey}
+    `;
+  }
+
+  async patchRecordJsonSourceEventRef(
+    id: number,
+    sourceEventRef: string,
+    updatedAt: number,
+  ): Promise<void> {
+    await this.sql`
+      UPDATE private_cognition_current
+      SET record_json = record_json || jsonb_build_object('sourceEventRef', ${sourceEventRef}::text),
+          updated_at = ${updatedAt}
+      WHERE id = ${id}
+    `;
+  }
+
+  async resolveEntityByPointerKey(pointerKey: string, agentId: string): Promise<number | null> {
+    const normalizedPointerKey = pointerKey.normalize("NFC");
+    const rows = await this.sql<{ id: string | number }[]>`
+      SELECT id
+      FROM entity_nodes
+      WHERE pointer_key = ${normalizedPointerKey}
+        AND (
+          (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
+          OR memory_scope = 'shared_public'
+        )
+      ORDER BY CASE WHEN memory_scope = 'private_overlay' THEN 0 ELSE 1 END
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return Number(rows[0].id);
+  }
 }

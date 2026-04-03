@@ -1,0 +1,178 @@
+bun test v1.3.10 (30e609e0)
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除13个其它对象",
+  detail: "递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "模式 \"test_1194f84b587d\" 不存在",
+  file: "dropcmds.c",
+  line: "526",
+  routine: "does_not_exist_skipping",
+}

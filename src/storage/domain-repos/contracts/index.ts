@@ -55,6 +55,11 @@ export type {
   StableFactPromotionCandidate,
 } from "./promotion-query-repo.js";
 export type { RecentCognitionSlotRepo } from "./recent-cognition-slot-repo.js";
+export type {
+  MemoryRelationRow,
+  RelationWriteRepo,
+  UpsertRelationParams,
+} from "./relation-write-repo.js";
 export type { SearchProjectionRepo, SearchProjectionScope } from "./search-projection-repo.js";
 export type { SemanticEdgeRepo } from "./semantic-edge-repo.js";
 export type { SessionRepo } from "./session-repo.js";

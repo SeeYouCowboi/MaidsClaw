@@ -1,0 +1,150 @@
+bun test v1.3.10 (30e609e0)
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除41个其它对象",
+  detail: "递归删除 表 settlement_processing_ledger\n递归删除 表 event_nodes\n递归删除 表 logic_edges\n递归删除 表 topics\n递归删除 表 fact_edges\n递归删除 表 entity_nodes\n递归删除 表 entity_aliases\n递归删除 表 pointer_redirects\n递归删除 表 core_memory_blocks\n递归删除 表 memory_relations\n递归删除 表 private_episode_events\n递归删除 表 private_cognition_events\n递归删除 表 area_state_events\n递归删除 表 world_state_events\n递归删除 表 shared_blocks\n递归删除 表 shared_block_sections\n递归删除 表 shared_block_admins\n递归删除 表 shared_block_attachments\n递归删除 表 shared_block_patch_log\n递归删除 表 shared_block_snapshots\n递归删除 函数 fn_deny_update_private_episode_events()\n递归删除 函数 fn_deny_delete_private_episode_events()\n递归删除 函数 fn_deny_update_private_cognition_events()\n递归删除 函数 fn_deny_delete_private_cognition_events()\n递归删除 函数 fn_deny_update_area_state_events()\n递归删除 函数 fn_deny_delete_area_state_events()\n递归删除 函数 fn_deny_update_world_state_events()\n递归删除 函数 fn_deny_delete_world_state_events()\n递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除41个其它对象",
+  detail: "递归删除 表 settlement_processing_ledger\n递归删除 表 event_nodes\n递归删除 表 logic_edges\n递归删除 表 topics\n递归删除 表 fact_edges\n递归删除 表 entity_nodes\n递归删除 表 entity_aliases\n递归删除 表 pointer_redirects\n递归删除 表 core_memory_blocks\n递归删除 表 memory_relations\n递归删除 表 private_episode_events\n递归删除 表 private_cognition_events\n递归删除 表 area_state_events\n递归删除 表 world_state_events\n递归删除 表 shared_blocks\n递归删除 表 shared_block_sections\n递归删除 表 shared_block_admins\n递归删除 表 shared_block_attachments\n递归删除 表 shared_block_patch_log\n递归删除 表 shared_block_snapshots\n递归删除 函数 fn_deny_update_private_episode_events()\n递归删除 函数 fn_deny_delete_private_episode_events()\n递归删除 函数 fn_deny_update_private_cognition_events()\n递归删除 函数 fn_deny_delete_private_cognition_events()\n递归删除 函数 fn_deny_update_area_state_events()\n递归删除 函数 fn_deny_delete_area_state_events()\n递归删除 函数 fn_deny_update_world_state_events()\n递归删除 函数 fn_deny_delete_world_state_events()\n递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除41个其它对象",
+  detail: "递归删除 表 settlement_processing_ledger\n递归删除 表 event_nodes\n递归删除 表 logic_edges\n递归删除 表 topics\n递归删除 表 fact_edges\n递归删除 表 entity_nodes\n递归删除 表 entity_aliases\n递归删除 表 pointer_redirects\n递归删除 表 core_memory_blocks\n递归删除 表 memory_relations\n递归删除 表 private_episode_events\n递归删除 表 private_cognition_events\n递归删除 表 area_state_events\n递归删除 表 world_state_events\n递归删除 表 shared_blocks\n递归删除 表 shared_block_sections\n递归删除 表 shared_block_admins\n递归删除 表 shared_block_attachments\n递归删除 表 shared_block_patch_log\n递归删除 表 shared_block_snapshots\n递归删除 函数 fn_deny_update_private_episode_events()\n递归删除 函数 fn_deny_delete_private_episode_events()\n递归删除 函数 fn_deny_update_private_cognition_events()\n递归删除 函数 fn_deny_delete_private_cognition_events()\n递归删除 函数 fn_deny_update_area_state_events()\n递归删除 函数 fn_deny_delete_area_state_events()\n递归删除 函数 fn_deny_update_world_state_events()\n递归删除 函数 fn_deny_delete_world_state_events()\n递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除41个其它对象",
+  detail: "递归删除 表 settlement_processing_ledger\n递归删除 表 event_nodes\n递归删除 表 logic_edges\n递归删除 表 topics\n递归删除 表 fact_edges\n递归删除 表 entity_nodes\n递归删除 表 entity_aliases\n递归删除 表 pointer_redirects\n递归删除 表 core_memory_blocks\n递归删除 表 memory_relations\n递归删除 表 private_episode_events\n递归删除 表 private_cognition_events\n递归删除 表 area_state_events\n递归删除 表 world_state_events\n递归删除 表 shared_blocks\n递归删除 表 shared_block_sections\n递归删除 表 shared_block_admins\n递归删除 表 shared_block_attachments\n递归删除 表 shared_block_patch_log\n递归删除 表 shared_block_snapshots\n递归删除 函数 fn_deny_update_private_episode_events()\n递归删除 函数 fn_deny_delete_private_episode_events()\n递归删除 函数 fn_deny_update_private_cognition_events()\n递归删除 函数 fn_deny_delete_private_cognition_events()\n递归删除 函数 fn_deny_update_area_state_events()\n递归删除 函数 fn_deny_delete_area_state_events()\n递归删除 函数 fn_deny_update_world_state_events()\n递归删除 函数 fn_deny_delete_world_state_events()\n递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"pg_trgm\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "42710",
+  message: "扩展 \"vector\" 已经存在,跳过",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "串联删除41个其它对象",
+  detail: "递归删除 表 settlement_processing_ledger\n递归删除 表 event_nodes\n递归删除 表 logic_edges\n递归删除 表 topics\n递归删除 表 fact_edges\n递归删除 表 entity_nodes\n递归删除 表 entity_aliases\n递归删除 表 pointer_redirects\n递归删除 表 core_memory_blocks\n递归删除 表 memory_relations\n递归删除 表 private_episode_events\n递归删除 表 private_cognition_events\n递归删除 表 area_state_events\n递归删除 表 world_state_events\n递归删除 表 shared_blocks\n递归删除 表 shared_block_sections\n递归删除 表 shared_block_admins\n递归删除 表 shared_block_attachments\n递归删除 表 shared_block_patch_log\n递归删除 表 shared_block_snapshots\n递归删除 函数 fn_deny_update_private_episode_events()\n递归删除 函数 fn_deny_delete_private_episode_events()\n递归删除 函数 fn_deny_update_private_cognition_events()\n递归删除 函数 fn_deny_delete_private_cognition_events()\n递归删除 函数 fn_deny_update_area_state_events()\n递归删除 函数 fn_deny_delete_area_state_events()\n递归删除 函数 fn_deny_update_world_state_events()\n递归删除 函数 fn_deny_delete_world_state_events()\n递归删除 表 private_cognition_current\n递归删除 表 area_state_current\n递归删除 表 area_narrative_current\n递归删除 表 world_state_current\n递归删除 表 world_narrative_current\n递归删除 表 search_docs_private\n递归删除 表 search_docs_area\n递归删除 表 search_docs_world\n递归删除 表 search_docs_cognition\n递归删除 表 node_embeddings\n递归删除 表 semantic_edges\n递归删除 表 graph_nodes\n递归删除 表 node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "注意",
+  severity: "NOTICE",
+  code: "00000",
+  message: "模式 \"test_791b9c9b3571\" 不存在",
+  file: "dropcmds.c",
+  line: "526",
+  routine: "does_not_exist_skipping",
+}

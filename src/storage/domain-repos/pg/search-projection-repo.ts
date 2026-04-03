@@ -3,6 +3,7 @@ import type { NodeRef } from "../../../memory/types.js";
 import type {
   SearchProjectionRepo,
   SearchProjectionScope,
+  UpsertCognitionDocParams,
 } from "../contracts/search-projection-repo.js";
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
@@ -67,17 +68,6 @@ type UpsertAreaDocParams = {
 type UpsertWorldDocParams = {
   sourceRef: NodeRef;
   content: string;
-  createdAt?: number;
-};
-
-type UpsertCognitionDocParams = {
-  sourceRef: NodeRef;
-  agentId: string;
-  kind: string;
-  basis?: string | null;
-  stance?: string | null;
-  content: string;
-  updatedAt?: number;
   createdAt?: number;
 };
 
@@ -336,6 +326,19 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     }
 
     return toNumber(row.id);
+  }
+
+  async updateCognitionSearchDocStanceBySourceRef(
+    sourceRef: NodeRef,
+    agentId: string,
+    stance: string,
+    updatedAt: number,
+  ): Promise<void> {
+    await this.sql`
+      UPDATE search_docs_cognition
+      SET stance = ${stance}, updated_at = ${updatedAt}
+      WHERE source_ref = ${sourceRef} AND agent_id = ${agentId}
+    `;
   }
 
   async deletePrivateDoc(sourceRef: NodeRef, agentId: string): Promise<void> {
