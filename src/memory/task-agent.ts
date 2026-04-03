@@ -348,8 +348,21 @@ export type MemoryTaskDbAdapter = {
   transaction?<T>(fn: () => T): T | (() => T);
 };
 
+const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
+  exec(sql: string): void {
+    throw new Error(
+      `[MemoryTaskAgent] exec() not available without db adapter: exec("${sql}")`,
+    );
+  },
+  prepare(sql: string) {
+    throw new Error(
+      `[MemoryTaskAgent] prepare() not available without db adapter: prepare("${sql}")`,
+    );
+  },
+};
+
 export type MemoryTaskAgentDeps = {
-  db: MemoryTaskDbAdapter;
+  db?: MemoryTaskDbAdapter;
   explicitSettlement?: ExplicitSettlementProcessorDeps;
   sqlFactory?: () => postgres.Sql;
   graphMutableStoreRepo?: GraphMutableStoreRepo;
@@ -390,7 +403,7 @@ export class MemoryTaskAgent {
     private readonly strictDurableMode = false,
     nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
-    this.db = deps.db;
+    this.db = deps.db ?? throwingMemoryDbAdapter;
     this.sqlFactory = deps.sqlFactory;
     this.graphMutableStoreRepo = deps.graphMutableStoreRepo;
     this.graphReadQueryRepo = deps.graphReadQueryRepo;

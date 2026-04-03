@@ -52,7 +52,6 @@ import type { SettlementLedger } from "../memory/settlement-ledger.js";
 import { GraphStorageService } from "../memory/storage.js";
 import {
 	MemoryTaskAgent,
-	type MemoryTaskDbAdapter,
 	type MemoryTaskModelProvider,
 } from "../memory/task-agent.js";
 import { registerMemoryTools } from "../memory/tools.js";
@@ -214,19 +213,6 @@ function createLazyPgRepo<T extends object>(factory: () => T): T {
 		},
 	});
 }
-
-const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
-	exec(sql: string): void {
-		throw new Error(
-			`[MemoryTaskAgent] exec() not available in PG runtime — migrate to PG repo: exec("${sql}")`,
-		);
-	},
-	prepare(sql: string) {
-		throw new Error(
-			`[MemoryTaskAgent] prepare() not available in PG runtime — migrate to PG repo: prepare("${sql}")`,
-		);
-	},
-};
 
 function createSettlementLedgerAdapter(
 	settlementLedgerRepo: SettlementLedgerRepo,
@@ -953,6 +939,34 @@ export function bootstrapRuntime(
 		cognitionSearch: cognitionSearchService,
 		orchestrator: retrievalOrchestrator,
 	});
+	const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
+		memoryEmbeddingModelId
+			? (() => {
+					try {
+						return new MemoryTaskModelProviderAdapter(
+							modelRegistry,
+							memoryMigrationModelId,
+							memoryEmbeddingModelId,
+						);
+					} catch (error) {
+						const reason =
+							error instanceof Error ? error.message : String(error);
+						return {
+							defaultEmbeddingModelId: memoryEmbeddingModelId,
+							chat: async () => {
+								throw new Error(
+									`[MemoryTaskModelProviderAdapter] chat provider unavailable: ${reason}`,
+								);
+							},
+							embed: async () => {
+								throw new Error(
+									`[MemoryTaskModelProviderAdapter] embedding provider unavailable: ${reason}`,
+								);
+							},
+						} satisfies MemoryTaskModelProvider;
+					}
+				})()
+			: undefined;
 	const graphNavigator = new GraphNavigator(
 		pgGraphReadQueryRepo,
 		retrievalService,
@@ -960,6 +974,11 @@ export function bootstrapRuntime(
 		undefined,
 		narrativeSearchService,
 		cognitionSearchService,
+		undefined,
+		undefined,
+		undefined,
+		memoryTaskModelProvider,
+		effectiveOrganizerEmbeddingModelId,
 	);
 	const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService);
 	const promptBuilder = new PromptBuilder({
@@ -1016,38 +1035,9 @@ export function bootstrapRuntime(
 		relationReadRepo: pgRelationReadRepo,
 		cognitionProjectionRepo,
 	});
-	const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
-		memoryEmbeddingModelId
-			? (() => {
-					try {
-						return new MemoryTaskModelProviderAdapter(
-							modelRegistry,
-							memoryMigrationModelId,
-							memoryEmbeddingModelId,
-						);
-					} catch (error) {
-						const reason =
-							error instanceof Error ? error.message : String(error);
-						return {
-							defaultEmbeddingModelId: memoryEmbeddingModelId,
-							chat: async () => {
-								throw new Error(
-									`[MemoryTaskModelProviderAdapter] chat provider unavailable: ${reason}`,
-								);
-							},
-							embed: async () => {
-								throw new Error(
-									`[MemoryTaskModelProviderAdapter] embedding provider unavailable: ${reason}`,
-								);
-							},
-						} satisfies MemoryTaskModelProvider;
-					}
-				})()
-			: undefined;
 	const memoryTaskAgent = memoryEmbeddingModelId
 		? new MemoryTaskAgent(
 				{
-					db: throwingMemoryDbAdapter,
 					sqlFactory: () => resolvePgPool(),
 					graphMutableStoreRepo: graphStoreRepo,
 					graphReadQueryRepo: pgGraphReadQueryRepo,

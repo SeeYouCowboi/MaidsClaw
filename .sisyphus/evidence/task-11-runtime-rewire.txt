@@ -1,0 +1,23 @@
+bun run build
+$ tsc -p tsconfig.build.json --noEmit
+
+bun test test/memory/pipeline-e2e.test.ts
+bun test v1.3.10 (30e609e0)
+test\memory\pipeline-e2e.test.ts:
+ 3 pass
+ 0 fail
+ 9 expect() calls
+Ran 3 tests across 1 file. [780.00ms]
+
+bun test test/memory/task-agent-pg.test.ts
+bun test v1.3.10 (30e609e0)
+test\memory\task-agent-pg.test.ts:
+ 4 pass
+ 0 fail
+ 16 expect() calls
+Ran 4 tests across 1 file. [44.00ms]
+
+Notes:
+- build exited successfully
+- required memory suite tests passed
+- PG NOTICE logs emitted during schema setup; non-fatal
