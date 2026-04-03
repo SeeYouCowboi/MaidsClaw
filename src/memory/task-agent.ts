@@ -338,33 +338,9 @@ export class MemoryIngestionPolicy {
   }
 }
 
-type MemoryTaskDbAdapter = {
-  exec(sql: string): void;
-  prepare(sql: string): {
-    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
-    all(...params: unknown[]): unknown[];
-    get(...params: unknown[]): unknown;
-  };
-  transaction?<T>(fn: () => T): T | (() => T);
-};
-
-const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
-  exec(sql: string): void {
-    throw new Error(
-      `[MemoryTaskAgent] exec() not available without db adapter: exec("${sql}")`,
-    );
-  },
-  prepare(sql: string) {
-    throw new Error(
-      `[MemoryTaskAgent] prepare() not available without db adapter: prepare("${sql}")`,
-    );
-  },
-};
-
 export type MemoryTaskAgentDeps = {
-  db?: MemoryTaskDbAdapter;
   explicitSettlement?: ExplicitSettlementProcessorDeps;
-  sqlFactory?: () => postgres.Sql;
+  sqlFactory: () => postgres.Sql;
   graphMutableStoreRepo?: GraphMutableStoreRepo;
   graphReadQueryRepo?: GraphReadQueryRepo;
   episodeRepo?: EpisodeRepo;
@@ -373,8 +349,7 @@ export type MemoryTaskAgentDeps = {
 };
 
 export class MemoryTaskAgent {
-  private readonly db: MemoryTaskDbAdapter;
-  private readonly sqlFactory?: () => postgres.Sql;
+  private readonly sqlFactory: () => postgres.Sql;
   private readonly graphMutableStoreRepo?: GraphMutableStoreRepo;
   private readonly graphReadQueryRepo?: GraphReadQueryRepo;
   private readonly episodeRepo?: EpisodeRepo;
@@ -403,7 +378,9 @@ export class MemoryTaskAgent {
     private readonly strictDurableMode = false,
     nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
-    this.db = deps.db ?? throwingMemoryDbAdapter;
+    if (!deps.sqlFactory) {
+      throw new Error("MemoryTaskAgent requires sqlFactory for PG transactions");
+    }
     this.sqlFactory = deps.sqlFactory;
     this.graphMutableStoreRepo = deps.graphMutableStoreRepo;
     this.graphReadQueryRepo = deps.graphReadQueryRepo;
@@ -424,22 +401,27 @@ export class MemoryTaskAgent {
       } satisfies MemoryTaskModelProvider);
     this.ingestionPolicy = new MemoryIngestionPolicy();
     const explicitSettlementDeps = deps.explicitSettlement ?? {
-      db: this.db,
-      cognitionRepo: new CognitionRepository(this.db),
-      relationBuilder: new RelationBuilder(this.db),
+      cognitionRepo: {
+        getAssertions: async (): Promise<never[]> => { throw new Error("cognitionRepo not configured for PG"); },
+        getCommitments: async (): Promise<never[]> => { throw new Error("cognitionRepo not configured for PG"); },
+        upsertAssertion: async (): Promise<{ id: number }> => { throw new Error("cognitionRepo not configured for PG"); },
+        upsertEvaluation: async (): Promise<{ id: number }> => { throw new Error("cognitionRepo not configured for PG"); },
+        upsertCommitment: async (): Promise<{ id: number }> => { throw new Error("cognitionRepo not configured for PG"); },
+        retractCognition: async (): Promise<void> => { throw new Error("cognitionRepo not configured for PG"); },
+        getEvaluations: async (): Promise<never[]> => { throw new Error("cognitionRepo not configured for PG"); },
+        getAssertionByKey: async (): Promise<null> => { throw new Error("cognitionRepo not configured for PG"); },
+        getEvaluationByKey: async (): Promise<null> => { throw new Error("cognitionRepo not configured for PG"); },
+        getCommitmentByKey: async (): Promise<null> => { throw new Error("cognitionRepo not configured for PG"); },
+      },
+      relationBuilder: {
+        writeContestRelations: async (): Promise<void> => { throw new Error("relationBuilder not configured for PG"); },
+      },
       relationWriteRepo: {
         upsertRelation: async (): Promise<void> => { throw new Error("relationWriteRepo not configured for PG"); },
-        getRelationsBySource: async (): Promise<never[]> => { throw new Error("relationWriteRepo not configured for PG"); },
-        getRelationsForNode: async (): Promise<never[]> => { throw new Error("relationWriteRepo not configured for PG"); },
       },
       cognitionProjectionRepo: {
-        upsertFromEvent: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
-        rebuild: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
         getCurrent: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
-        getAllCurrent: async (): Promise<never[]> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
         updateConflictFactors: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
-        patchRecordJsonSourceEventRef: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
-        resolveEntityByPointerKey: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
       },
     };
     this.cognitionOpsRepo = explicitSettlementDeps.cognitionRepo;
@@ -655,16 +637,6 @@ export class MemoryTaskAgent {
       });
 
       await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
-    } else {
-      await this.runLegacySqliteTransaction(async () => {
-        await runFlushBody(
-          this.explicitSettlementProcessor,
-          () => this.loadExistingContext(flushRequest.agentId),
-          (toolCalls) => this.applyCallOneToolCalls(flushRequest, toolCalls, created),
-          (privateEvents) => this.createSameEpisodeEdgesForBatch(privateEvents),
-        );
-        await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
-      });
     }
 
     if (areaCandidates.length > 0) {
@@ -806,9 +778,10 @@ export class MemoryTaskAgent {
     void txGraphMutableStoreRepo;
 
     const graphReadQueryRepo = txGraphReadQueryRepo ?? this.graphReadQueryRepo;
-    const entities = graphReadQueryRepo
-      ? await graphReadQueryRepo.getEntitiesForContext(agentId, 200)
-      : await this.loadEntitiesForContextSqlite(agentId);
+    if (!graphReadQueryRepo) {
+      throw new Error("MemoryTaskAgent requires graphReadQueryRepo");
+    }
+    const entities = await graphReadQueryRepo.getEntitiesForContext(agentId, 200);
 
     const cognitionRepo = txCognitionRepo ?? this.cognitionOpsRepo;
     const assertions = (await cognitionRepo.getAssertions(agentId, { activeOnly: false })).slice(0, 150);
@@ -1004,12 +977,8 @@ export class MemoryTaskAgent {
         beliefOpIndex += 1;
 
         const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
-        if (sourceEventRef) {
-          if (txCognitionProjectionRepo) {
-            await txCognitionProjectionRepo.patchRecordJsonSourceEventRef(beliefId, sourceEventRef, Date.now());
-          } else {
-            this.patchSourceEventRefSqlite(beliefId, sourceEventRef);
-          }
+        if (sourceEventRef && txCognitionProjectionRepo) {
+          await txCognitionProjectionRepo.patchRecordJsonSourceEventRef(beliefId, sourceEventRef, Date.now());
         }
 
         created.assertionIds.push(beliefId);
@@ -1064,9 +1033,10 @@ export class MemoryTaskAgent {
     }
 
     const graphReadQueryRepo = txGraphReadQueryRepo ?? this.graphReadQueryRepo;
-    const events = graphReadQueryRepo
-      ? await graphReadQueryRepo.getEventsByIds(linkedEventIds)
-      : await this.getEventsByIdsSqlite(linkedEventIds);
+    if (!graphReadQueryRepo) {
+      throw new Error("MemoryTaskAgent requires graphReadQueryRepo");
+    }
+    const events = await graphReadQueryRepo.getEventsByIds(linkedEventIds);
 
     if (events.length < 2) {
       return;
@@ -1088,9 +1058,6 @@ export class MemoryTaskAgent {
     });
 
     const dayMs = 24 * 60 * 60 * 1000;
-    const insertStmt = txGraphMutableStoreRepo
-      ? null
-      : this.getSameEpisodeInsertStmtSqlite();
 
     for (let index = 0; index < sorted.length - 1; index += 1) {
       const current = sorted[index];
@@ -1108,9 +1075,6 @@ export class MemoryTaskAgent {
       if (txGraphMutableStoreRepo) {
         await txGraphMutableStoreRepo.createLogicEdge(current.id, next.id, "same_episode");
         await txGraphMutableStoreRepo.createLogicEdge(next.id, current.id, "same_episode");
-      } else {
-        this.insertSameEpisodeEdgeSqlite(insertStmt, current.id, next.id);
-        this.insertSameEpisodeEdgeSqlite(insertStmt, next.id, current.id);
       }
     }
   }
@@ -1139,38 +1103,9 @@ export class MemoryTaskAgent {
         pointerMap.set(value, resolved);
         return resolved;
       }
-    } else {
-      const resolved = this.resolveEntityReferenceSqlite(value, agentId);
-      if (resolved !== undefined) {
-        pointerMap.set(value, resolved);
-        return resolved;
-      }
     }
 
     return undefined;
-  }
-
-  private async runLegacySqliteTransaction(fn: () => Promise<void>): Promise<void> {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      await fn();
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  private async loadEntitiesForContextSqlite(agentId: string): Promise<unknown[]> {
-    return this.db
-      .prepare(
-        `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
-         FROM entity_nodes
-         WHERE memory_scope = 'shared_public' OR owner_agent_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 200`,
-      )
-      .all(agentId);
   }
 
   private async upsertEntityCompat(
@@ -1230,21 +1165,10 @@ export class MemoryTaskAgent {
     private_notes: string | null;
     created_at: number;
   } | null> {
-    if (txEpisodeRepo) {
-      return txEpisodeRepo.readById(id);
+    if (!txEpisodeRepo) {
+      throw new Error("MemoryTaskAgent requires episodeRepo");
     }
-    return this.db.prepare(
-      `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
-    ).get(id) as {
-      id: number;
-      event_id: number | null;
-      agent_id: string;
-      category: string;
-      summary: string;
-      private_notes: string | null;
-      committed_time: number;
-      created_at: number;
-    } | null;
+    return txEpisodeRepo.readById(id);
   }
 
   private async getPointerKeyByEntityIdCompat(
@@ -1255,12 +1179,6 @@ export class MemoryTaskAgent {
       return (await txGraphMutableStoreRepo.getEntityById(entityId))?.pointerKey;
     }
     return this.storage.getEntityById(entityId)?.pointerKey;
-  }
-
-  private patchSourceEventRefSqlite(beliefId: number, sourceEventRef: NodeRef): void {
-    this.db
-      .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
-      .run(sourceEventRef, Date.now(), beliefId);
   }
 
   private async createEntityAliasCompat(
@@ -1288,54 +1206,6 @@ export class MemoryTaskAgent {
       return;
     }
     this.storage.createLogicEdge(sourceEventId, targetEventId, relationType);
-  }
-
-  private async getEventsByIdsSqlite(
-    linkedEventIds: number[],
-  ): Promise<Array<{ id: number; session_id: string; topic_id: number | null; timestamp: number }>> {
-    return this.db
-      .prepare(
-        `SELECT id, session_id, topic_id, timestamp
-         FROM event_nodes
-         WHERE id IN (${linkedEventIds.map(() => "?").join(",")})`,
-      )
-      .all(...linkedEventIds) as Array<{ id: number; session_id: string; topic_id: number | null; timestamp: number }>;
-  }
-
-  private getSameEpisodeInsertStmtSqlite(): {
-    run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
-  } {
-    return this.db.prepare(
-      `INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, created_at)
-       VALUES (?, ?, 'same_episode', ?)`,
-    );
-  }
-
-  private insertSameEpisodeEdgeSqlite(
-    insertStmt: { run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint } } | null,
-    sourceEventId: number,
-    targetEventId: number,
-  ): void {
-    const createdAt = Date.now();
-    insertStmt?.run(sourceEventId, targetEventId, createdAt);
-  }
-
-  private resolveEntityReferenceSqlite(value: string, agentId: string): number | undefined {
-    const privateRow = this.db
-      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = ? AND memory_scope = 'private_overlay' AND owner_agent_id = ?`)
-      .get(value, agentId) as { id: number } | null;
-    if (privateRow) {
-      return privateRow.id;
-    }
-
-    const sharedRow = this.db
-      .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = ? AND memory_scope = 'shared_public'`)
-      .get(value) as { id: number } | null;
-    if (sharedRow) {
-      return sharedRow.id;
-    }
-
-    return undefined;
   }
 
   private triggerMaterialization(
