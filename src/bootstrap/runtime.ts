@@ -9,10 +9,10 @@ import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { TraceStore } from "../app/diagnostics/trace-store.js";
-import { loadRuntimeConfig } from "../core/config.js";
-import type { RuntimeConfig } from "../core/config-schema.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
+import { loadRuntimeConfig } from "../core/config.js";
+import type { RuntimeConfig } from "../core/config-schema.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import {
@@ -232,7 +232,11 @@ function createSettlementLedgerAdapter(
 			return settlementLedgerRepo.markClaimed(settlementId, claimedBy);
 		},
 		markApplying(settlementId: string, agentId: string, payloadHash?: string) {
-			return settlementLedgerRepo.markApplying(settlementId, agentId, payloadHash);
+			return settlementLedgerRepo.markApplying(
+				settlementId,
+				agentId,
+				payloadHash,
+			);
 		},
 		markApplied(settlementId: string) {
 			return settlementLedgerRepo.markApplied(settlementId);
@@ -250,7 +254,10 @@ function createSettlementLedgerAdapter(
 					errorMessage,
 				);
 			}
-			return settlementLedgerRepo.markFailedTerminal(settlementId, errorMessage);
+			return settlementLedgerRepo.markFailedTerminal(
+				settlementId,
+				errorMessage,
+			);
 		},
 	};
 }
@@ -1060,10 +1067,12 @@ export function bootstrapRuntime(
 						cognitionRepo,
 						relationBuilder,
 						relationWriteRepo: {
-							upsertRelation: (params) => pgRelationWriteRepo.upsertRelation(params),
+							upsertRelation: (params) =>
+								pgRelationWriteRepo.upsertRelation(params),
 						},
 						cognitionProjectionRepo: {
-							getCurrent: (agentId, cognitionKey) => cognitionProjectionRepo.getCurrent(agentId, cognitionKey),
+							getCurrent: (agentId, cognitionKey) =>
+								cognitionProjectionRepo.getCurrent(agentId, cognitionKey),
 							updateConflictFactors: (
 								agentId,
 								cognitionKey,
@@ -1180,6 +1189,7 @@ export function bootstrapRuntime(
 		backendType: "pg",
 		pgFactory,
 		settlementUnitOfWork,
+		projectionManager,
 		interactionRepo,
 		coreMemoryBlockRepo,
 		recentCognitionSlotRepo,

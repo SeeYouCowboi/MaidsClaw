@@ -2,24 +2,27 @@ import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentLoop } from "../core/agent-loop.js";
+import type { RuntimeConfig } from "../core/config-schema.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
 import type { PromptBuilder } from "../core/prompt-builder.js";
 import type { PromptRenderer } from "../core/prompt-renderer.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { JobPersistence } from "../jobs/persistence.js";
+import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
-import type { BackendType, PgBackendFactory } from "../storage/backend-types.js";
+import type {
+	BackendType,
+	PgBackendFactory,
+} from "../storage/backend-types.js";
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { SharedBlockRepo } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
-
-import type { RuntimeConfig } from "../core/config-schema.js";
 
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
@@ -92,6 +95,7 @@ export type RuntimeBootstrapResult = {
 	backendType: BackendType;
 	pgFactory: PgBackendFactory | null;
 	settlementUnitOfWork: SettlementUnitOfWork | null;
+	projectionManager: ProjectionManager;
 	interactionRepo: InteractionRepo;
 	coreMemoryBlockRepo: CoreMemoryBlockRepo;
 	recentCognitionSlotRepo: RecentCognitionSlotRepo;

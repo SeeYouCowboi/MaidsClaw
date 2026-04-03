@@ -1,4 +1,5 @@
 import { isAbsolute, join, resolve } from "node:path";
+import type postgres from "postgres";
 import {
 	bootstrapRuntime,
 	initializePgBackendForRuntime,
@@ -9,6 +10,7 @@ import { GatewayServer } from "../../gateway/server.js";
 import type { DurableJobStore } from "../../jobs/durable-store.js";
 import { LeaseReclaimSweeper } from "../../jobs/lease-reclaim-sweeper.js";
 import { PgJobRunner } from "../../jobs/pg-runner.js";
+import { createThinkerWorker } from "../../runtime/thinker-worker.js";
 import { LocalHealthClient } from "../clients/local/local-health-client.js";
 import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
 import { LocalSessionClient } from "../clients/local/local-session-client.js";
@@ -36,7 +38,9 @@ type JobConsumer = {
 function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 	const store = (runtime.pgFactory as { store?: unknown } | null)?.store;
 	if (!store) {
-		throw new Error("PG worker role requires pgFactory.store durable job store");
+		throw new Error(
+			"PG worker role requires pgFactory.store durable job store",
+		);
 	}
 
 	const runner = new PgJobRunner(
@@ -47,8 +51,26 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 		},
 	);
 
-	runner.registerWorker("cognition.thinker", async (_job) => {
-		/* TODO T7 implements */
+	runner.registerWorker("cognition.thinker", async (job) => {
+		const sql = (
+			runtime.pgFactory as { getPool?: () => postgres.Sql } | null
+		)?.getPool?.();
+		if (!sql) {
+			throw new Error("T7: pgFactory.getPool() unavailable for Thinker worker");
+		}
+
+		const thinkerWorker = createThinkerWorker({
+			sql,
+			projectionManager: runtime.projectionManager,
+			interactionRepo: runtime.interactionRepo,
+			recentCognitionSlotRepo: runtime.recentCognitionSlotRepo,
+			agentRegistry: runtime.agentRegistry,
+			createAgentLoop: runtime.createAgentLoop,
+		});
+
+		await thinkerWorker({
+			payload: job.payload_json,
+		});
 	});
 
 	let timer: ReturnType<typeof setInterval> | undefined;
@@ -187,15 +209,17 @@ export async function createAppHost(
 	const strictDurableMode =
 		options.role === "worker" || options.enableDurableOrchestration === true;
 
-	const runtime = _injectedRuntime ?? bootstrapRuntime({
-		cwd: options.cwd,
-		dataDir,
-		memoryMigrationModelId,
-		memoryEmbeddingModelId,
-		memoryOrganizerEmbeddingModelId,
-		traceCaptureEnabled: options.traceCaptureEnabled,
-		strictDurableMode,
-	});
+	const runtime =
+		_injectedRuntime ??
+		bootstrapRuntime({
+			cwd: options.cwd,
+			dataDir,
+			memoryMigrationModelId,
+			memoryEmbeddingModelId,
+			memoryOrganizerEmbeddingModelId,
+			traceCaptureEnabled: options.traceCaptureEnabled,
+			strictDurableMode,
+		});
 
 	if (runtime.backendType === "pg") {
 		if (options.pgUrl) {
@@ -213,30 +237,28 @@ export async function createAppHost(
 
 	const inspectTraceStore =
 		runtime.traceStore ??
-		(dataDir
-			? new TraceStore(join(dataDir, "debug", "traces"))
-			: undefined);
+		(dataDir ? new TraceStore(join(dataDir, "debug", "traces")) : undefined);
 
 	const user =
 		options.role === "local" || options.role === "server"
 			? {
-				session: new LocalSessionClient({
-					sessionService: runtime.sessionService,
-					turnService: runtime.turnService,
-					memoryTaskAgent: runtime.memoryTaskAgent,
-				}),
-				turn: new LocalTurnClient({
-					sessionService: runtime.sessionService,
-					turnService: runtime.turnService,
-					interactionRepo: runtime.interactionRepo,
-					traceStore: runtime.traceStore,
-				}),
-				inspect: new LocalInspectClient(runtime, inspectTraceStore),
-				health: new LocalHealthClient({
-					memoryPipelineReady: runtime.memoryPipelineReady,
-					healthChecks: runtime.healthChecks,
-				}),
-			}
+					session: new LocalSessionClient({
+						sessionService: runtime.sessionService,
+						turnService: runtime.turnService,
+						memoryTaskAgent: runtime.memoryTaskAgent,
+					}),
+					turn: new LocalTurnClient({
+						sessionService: runtime.sessionService,
+						turnService: runtime.turnService,
+						interactionRepo: runtime.interactionRepo,
+						traceStore: runtime.traceStore,
+					}),
+					inspect: new LocalInspectClient(runtime, inspectTraceStore),
+					health: new LocalHealthClient({
+						memoryPipelineReady: runtime.memoryPipelineReady,
+						healthChecks: runtime.healthChecks,
+					}),
+				}
 			: undefined;
 
 	const server =
@@ -267,8 +289,8 @@ export async function createAppHost(
 			: undefined;
 
 	const isOrchestrated =
-		options.role === "worker"
-		|| (options.role === "server" && options.enableDurableOrchestration === true);
+		options.role === "worker" ||
+		(options.role === "server" && options.enableDurableOrchestration === true);
 
 	const admin: AppHostAdmin = {
 		async getHostStatus() {
@@ -298,7 +320,8 @@ export async function createAppHost(
 		async getCapabilities() {
 			return {
 				orchestration: {
-					durableJobProcessing: options.role === "worker" || options.role === "server",
+					durableJobProcessing:
+						options.role === "worker" || options.role === "server",
 					leaseReclaim: runtime.backendType === "pg",
 					maintenanceFacade: !!maintenance,
 				},
@@ -316,11 +339,11 @@ export async function createAppHost(
 			? createJobConsumer(runtime)
 			: undefined;
 	const shouldRunLeaseReclaimSweeper =
-		options.role === "worker"
-		|| options.role === "maintenance"
-		|| (options.role === "server" && options.enableDurableOrchestration === true);
-	const pgStore =
-		(runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+		options.role === "worker" ||
+		options.role === "maintenance" ||
+		(options.role === "server" && options.enableDurableOrchestration === true);
+	const pgStore = (runtime.pgFactory as { store?: DurableJobStore } | null)
+		?.store;
 	const leaseReclaimSweeper =
 		runtime.backendType === "pg" && shouldRunLeaseReclaimSweeper && pgStore
 			? new LeaseReclaimSweeper(pgStore)
