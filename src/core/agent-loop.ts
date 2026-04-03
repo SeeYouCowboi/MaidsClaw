@@ -66,6 +66,7 @@ export interface AgentRunRequest {
 	delegationDepth?: number;
 	parentRunId?: string;
 	traceStore?: TraceStore;
+	isTalkerMode?: boolean;
 }
 
 export class AgentLoop {
@@ -606,13 +607,15 @@ export class AgentLoop {
 							textLen: assistantText.length,
 						},
 					);
-					const retryResult = await this.retryStructuredExtraction(
-						assistantText,
-						workingMessages,
-						systemPrompt,
-						bufferedToolExecutor,
-						loopLogger,
-					);
+				const retryResult = request.isTalkerMode
+					? null
+					: await this.retryStructuredExtraction(
+							assistantText,
+							workingMessages,
+							systemPrompt,
+							bufferedToolExecutor,
+							loopLogger,
+						);
 					if (retryResult) {
 						return retryResult;
 					}
@@ -852,6 +855,7 @@ export class AgentLoop {
 				this.profile,
 				DEFAULT_PROMPT_MAX_CONTEXT_TOKENS,
 			),
+			isTalkerMode: request.isTalkerMode,
 		});
 
 		const rendered = this.promptRenderer.render({
