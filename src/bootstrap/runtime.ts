@@ -32,7 +32,9 @@ import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
+import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../memory/cognition/cognition-search.js";
+import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MaterializationService } from "../memory/materialization.js";
@@ -81,6 +83,7 @@ import { PgPendingFlushRecoveryRepo } from "../storage/domain-repos/pg/pending-f
 import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
+import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgRetrievalReadRepo } from "../storage/domain-repos/pg/retrieval-read-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-repo.js";
@@ -225,86 +228,42 @@ const throwingMemoryDbAdapter: MemoryTaskDbAdapter = {
 	},
 };
 
-function resolveSettledNow<T>(value: Promise<T> | T, context: string): T {
-	if (!(value instanceof Promise)) {
-		return value;
-	}
-	const settled = Bun.peek(value);
-	if (settled instanceof Promise) {
-		throw new Error(
-			`[bootstrap/runtime] ${context} returned unresolved async result in sync bridge`,
-		);
-	}
-	return settled as T;
-}
-
 function createSettlementLedgerAdapter(
 	settlementLedgerRepo: SettlementLedgerRepo,
 ): SettlementLedger {
 	return {
 		check(settlementId: string) {
-			return resolveSettledNow(
-				settlementLedgerRepo.check(settlementId),
-				"settlementLedger.check",
-			);
+			return settlementLedgerRepo.check(settlementId);
 		},
 		rawStatus(settlementId: string) {
-			return resolveSettledNow(
-				settlementLedgerRepo.rawStatus(settlementId),
-				"settlementLedger.rawStatus",
-			);
+			return settlementLedgerRepo.rawStatus(settlementId);
 		},
 		markPending(settlementId: string, agentId: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markPending(settlementId, agentId),
-				"settlementLedger.markPending",
-			);
+			return settlementLedgerRepo.markPending(settlementId, agentId);
 		},
 		markClaimed(settlementId: string, claimedBy: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markClaimed(settlementId, claimedBy),
-				"settlementLedger.markClaimed",
-			);
+			return settlementLedgerRepo.markClaimed(settlementId, claimedBy);
 		},
 		markApplying(settlementId: string, agentId: string, payloadHash?: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markApplying(settlementId, agentId, payloadHash),
-				"settlementLedger.markApplying",
-			);
+			return settlementLedgerRepo.markApplying(settlementId, agentId, payloadHash);
 		},
 		markApplied(settlementId: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markApplied(settlementId),
-				"settlementLedger.markApplied",
-			);
+			return settlementLedgerRepo.markApplied(settlementId);
 		},
 		markReplayedNoop(settlementId: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markReplayedNoop(settlementId),
-				"settlementLedger.markReplayedNoop",
-			);
+			return settlementLedgerRepo.markReplayedNoop(settlementId);
 		},
 		markConflict(settlementId: string, errorMessage: string) {
-			resolveSettledNow(
-				settlementLedgerRepo.markConflict(settlementId, errorMessage),
-				"settlementLedger.markConflict",
-			);
+			return settlementLedgerRepo.markConflict(settlementId, errorMessage);
 		},
 		markFailed(settlementId: string, errorMessage: string, retryable: boolean) {
 			if (retryable) {
-				resolveSettledNow(
-					settlementLedgerRepo.markFailedRetryScheduled(
-						settlementId,
-						errorMessage,
-					),
-					"settlementLedger.markFailedRetryScheduled",
+				return settlementLedgerRepo.markFailedRetryScheduled(
+					settlementId,
+					errorMessage,
 				);
-				return;
 			}
-			resolveSettledNow(
-				settlementLedgerRepo.markFailedTerminal(settlementId, errorMessage),
-				"settlementLedger.markFailedTerminal",
-			);
+			return settlementLedgerRepo.markFailedTerminal(settlementId, errorMessage);
 		},
 	};
 }
@@ -916,6 +875,9 @@ export function bootstrapRuntime(
 	const pgRelationReadRepo = createLazyPgRepo(
 		() => new PgRelationReadRepo(resolvePgPool()),
 	);
+	const pgRelationWriteRepo = createLazyPgRepo(
+		() => new PgRelationWriteRepo(resolvePgPool()),
+	);
 	const pgAliasRepo = createLazyPgRepo(() => new PgAliasRepo(resolvePgPool()));
 	const pgGraphReadQueryRepo = createLazyPgRepo(
 		() => new PgGraphReadQueryRepo(resolvePgPool()),
@@ -1042,6 +1004,18 @@ export function bootstrapRuntime(
 		undefined,
 	);
 	const settlementLedger = createSettlementLedgerAdapter(settlementLedgerRepo);
+	const cognitionRepo = new CognitionRepository({
+		cognitionProjectionRepo,
+		cognitionEventRepo,
+		searchProjectionRepo,
+		entityResolver: (pointerKey: string, agentId: string) =>
+			cognitionProjectionRepo.resolveEntityByPointerKey(pointerKey, agentId),
+	});
+	const relationBuilder = new RelationBuilder({
+		relationWriteRepo: pgRelationWriteRepo,
+		relationReadRepo: pgRelationReadRepo,
+		cognitionProjectionRepo,
+	});
 	const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
 		memoryEmbeddingModelId
 			? (() => {
@@ -1072,7 +1046,39 @@ export function bootstrapRuntime(
 			: undefined;
 	const memoryTaskAgent = memoryEmbeddingModelId
 		? new MemoryTaskAgent(
-				{ db: throwingMemoryDbAdapter },
+				{
+					db: throwingMemoryDbAdapter,
+					explicitSettlement: {
+						cognitionRepo,
+						relationBuilder,
+						relationWriteRepo: {
+							upsertRelation: (params) => pgRelationWriteRepo.upsertRelation(params),
+						},
+						cognitionProjectionRepo: {
+							getCurrent: (agentId, cognitionKey) => cognitionProjectionRepo.getCurrent(agentId, cognitionKey),
+							updateConflictFactors: (
+								agentId,
+								cognitionKey,
+								conflictSummary,
+								conflictFactorRefsJson,
+								updatedAt,
+							) =>
+								cognitionProjectionRepo.updateConflictFactors(
+									agentId,
+									cognitionKey,
+									conflictSummary,
+									conflictFactorRefsJson,
+									updatedAt,
+								),
+						},
+						episodeRepo: {
+							readBySettlement: (settlementId, agentId) =>
+								episodeRepo.readBySettlement(settlementId, agentId),
+							readPublicationsBySettlement: (settlementId) =>
+								episodeRepo.readPublicationsBySettlement(settlementId),
+						},
+					},
+				},
 				graphStorageService,
 				coreMemoryService,
 				embeddingService,

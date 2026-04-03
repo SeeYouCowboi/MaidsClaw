@@ -11,13 +11,13 @@ export type SettlementLedgerStatus =
 export type SettlementLedgerCheckResult = "pending" | "applied" | "not_found" | "failed";
 
 export interface SettlementLedger {
-  check(settlementId: string): SettlementLedgerCheckResult;
-  rawStatus(settlementId: string): SettlementLedgerStatus | null;
-  markPending(settlementId: string, agentId: string): void;
-  markClaimed(settlementId: string, claimedBy: string): void;
-  markApplying(settlementId: string, agentId: string, payloadHash?: string): void;
-  markApplied(settlementId: string): void;
-  markReplayedNoop(settlementId: string): void;
-  markConflict(settlementId: string, errorMessage: string): void;
-  markFailed(settlementId: string, errorMessage: string, retryable: boolean): void;
+  check(settlementId: string): Promise<SettlementLedgerCheckResult>;
+  rawStatus(settlementId: string): Promise<SettlementLedgerStatus | null>;
+  markPending(settlementId: string, agentId: string): Promise<void>;
+  markClaimed(settlementId: string, claimedBy: string): Promise<void>;
+  markApplying(settlementId: string, agentId: string, payloadHash?: string): Promise<void>;
+  markApplied(settlementId: string): Promise<void>;
+  markReplayedNoop(settlementId: string): Promise<void>;
+  markConflict(settlementId: string, errorMessage: string): Promise<void>;
+  markFailed(settlementId: string, errorMessage: string, retryable: boolean): Promise<void>;
 }

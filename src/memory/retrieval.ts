@@ -167,6 +167,7 @@ export class RetrievalService {
     viewerContext: ViewerContext,
     limit = 10,
     queryEmbedding?: Float32Array,
+    modelId?: string,
   ): Promise<SeedCandidate[]> {
     const lexicalResults = await this.searchVisibleNarrative(query, viewerContext);
 
@@ -178,9 +179,10 @@ export class RetrievalService {
     const semanticRankByRef = new Map<string, { rank: number; nodeKind: string }>();
     const embeddingCount = await this.retrievalRepo.countNodeEmbeddings();
     if (embeddingCount > 0 && queryEmbedding) {
-      const neighbors = this.embeddingService.queryNearestNeighbors(queryEmbedding, {
+      const neighbors = await this.embeddingService.queryNearestNeighbors(queryEmbedding, {
         agentId: viewerContext.viewer_agent_id,
         limit: Math.max(limit * 4, 20),
+        modelId,
       });
       for (let i = 0; i < neighbors.length; i += 1) {
         semanticRankByRef.set(neighbors[i].nodeRef, { rank: i + 1, nodeKind: neighbors[i].nodeKind });

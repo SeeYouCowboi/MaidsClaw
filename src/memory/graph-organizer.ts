@@ -66,7 +66,7 @@ export class GraphOrganizer {
       embedding: vectors[index] ?? new Float32Array([0]),
     }));
 
-    this.embeddings.batchStoreEmbeddings(entries);
+    await this.embeddings.batchStoreEmbeddings(entries);
     await this.shadowRegisterNodes(nodes);
     const { semanticEdgeCount, scoreTargets } = await this.embeddingLinker.link(entries, nodes, job.agentId, job.embeddingModelId);
 
@@ -172,7 +172,7 @@ export class GraphOrganizer {
     if (!targetVector) {
       return false;
     }
-    const nearest = this.embeddings.queryNearestNeighbors(targetVector, {
+    const nearest = await this.embeddings.queryNearestNeighbors(targetVector, {
       nodeKind,
       agentId,
       limit: 5,

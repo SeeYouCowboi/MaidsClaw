@@ -47,7 +47,7 @@ export class EmbeddingLinker {
     for (let index = 0; index < entries.length; index += 1) {
       const source = entries[index];
       const sourceContent = nodes[index]?.content ?? "";
-      const neighbors = this.embeddings.queryNearestNeighbors(source.embedding, {
+      const neighbors = await this.embeddings.queryNearestNeighbors(source.embedding, {
         nodeKind: source.nodeKind,
         agentId,
         limit: 20,

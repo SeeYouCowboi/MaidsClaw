@@ -77,6 +77,23 @@ export class PgEpisodeRepo implements EpisodeRepo {
     return rows.map(normalizeEpisodeRow);
   }
 
+  async readPublicationsBySettlement(
+    settlementId: string,
+  ): Promise<Array<{ id: number; source_pub_index: number | null }>> {
+    const rows = await this.sql`
+      SELECT id, source_pub_index
+      FROM event_nodes
+      WHERE source_settlement_id = ${settlementId}
+      ORDER BY id ASC
+    `;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      source_pub_index:
+        row.source_pub_index == null ? null : Number(row.source_pub_index),
+    }));
+  }
+
   async readByAgent(agentId: string, limit?: number): Promise<EpisodeRow[]> {
     const effectiveLimit = limit ?? 100;
     const rows = await this.sql`

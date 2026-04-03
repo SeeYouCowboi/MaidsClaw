@@ -1,13 +1,5 @@
 import type { AgentRole } from "../agents/profile.js";
 
-export type ExplicitSettlementDbAdapter = {
-  prepare(sql: string): {
-    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
-    all(...params: unknown[]): unknown[];
-    get(...params: unknown[]): unknown;
-  };
-};
-
 import { MaidsClawError } from "../core/errors.js";
 import { enforceArtifactContracts } from "../core/tools/artifact-contract-policy.js";
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
@@ -34,6 +26,7 @@ import {
 } from "./cognition/relation-intent-resolver.js";
 import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
+import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
@@ -61,7 +54,6 @@ const V3_BASIS_TO_V4: Record<string, AssertionBasis> = {
 };
 
 export type ExplicitSettlementProcessorDeps = {
-  db: ExplicitSettlementDbAdapter;
   cognitionRepo: Pick<
     CognitionRepository,
     | "upsertAssertion"
@@ -77,15 +69,16 @@ export type ExplicitSettlementProcessorDeps = {
   >;
   relationBuilder: Pick<RelationBuilder, "writeContestRelations">;
   relationWriteRepo: Pick<RelationWriteRepo, "upsertRelation">;
-  cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent">;
+  cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent" | "updateConflictFactors">;
+  episodeRepo?: Pick<EpisodeRepo, "readBySettlement" | "readPublicationsBySettlement">;
 };
 
 export class ExplicitSettlementProcessor {
-  private readonly db: ExplicitSettlementDbAdapter;
   private readonly cognitionRepo: ExplicitSettlementProcessorDeps["cognitionRepo"];
   private readonly relationBuilder: ExplicitSettlementProcessorDeps["relationBuilder"];
   private readonly relationWriteRepo: ExplicitSettlementProcessorDeps["relationWriteRepo"];
   private readonly cognitionProjectionRepo: ExplicitSettlementProcessorDeps["cognitionProjectionRepo"];
+  private readonly episodeRepo: Pick<EpisodeRepo, "readBySettlement" | "readPublicationsBySettlement">;
 
   constructor(
     deps: ExplicitSettlementProcessorDeps,
@@ -95,11 +88,18 @@ export class ExplicitSettlementProcessor {
     private readonly applyCallOneToolCalls: CallOneApplier,
     private readonly settlementLedger?: SettlementLedger,
   ) {
-    this.db = deps.db;
     this.cognitionRepo = deps.cognitionRepo;
     this.relationBuilder = deps.relationBuilder;
     this.relationWriteRepo = deps.relationWriteRepo;
     this.cognitionProjectionRepo = deps.cognitionProjectionRepo;
+    this.episodeRepo = deps.episodeRepo ?? {
+      readBySettlement: async () => {
+        throw new Error("ExplicitSettlementProcessor requires episodeRepo.readBySettlement");
+      },
+      readPublicationsBySettlement: async () => {
+        throw new Error("ExplicitSettlementProcessor requires episodeRepo.readPublicationsBySettlement");
+      },
+    };
   }
 
   async process(
@@ -128,12 +128,12 @@ export class ExplicitSettlementProcessor {
     }
 
     for (const explicitMeta of ingest.explicitSettlements) {
-      const ledgerState = this.settlementLedger?.check(explicitMeta.settlementId);
+      const ledgerState = await this.settlementLedger?.check(explicitMeta.settlementId);
       if (ledgerState === "applied" || ledgerState === "failed") {
         continue;
       }
 
-      this.settlementLedger?.markApplying(
+      await this.settlementLedger?.markApplying(
         explicitMeta.settlementId,
         explicitMeta.ownerAgentId,
       );
@@ -176,7 +176,7 @@ export class ExplicitSettlementProcessor {
         created.changedNodeRefs.push(...commitResult.refs);
 
         if (settlementPayload) {
-          const settledArtifacts = this.buildSettledArtifacts(
+          const settledArtifacts = await this.buildSettledArtifacts(
             settlementPayload,
             explicitMeta.ownerAgentId,
             explicitMeta.settlementId,
@@ -197,7 +197,7 @@ export class ExplicitSettlementProcessor {
             },
           );
 
-          this.applyContestConflictFactors(
+          await this.applyContestConflictFactors(
             explicitMeta.ownerAgentId,
             explicitMeta.settlementId,
             commitResult.contestedAssertions,
@@ -212,9 +212,9 @@ export class ExplicitSettlementProcessor {
           explicitMeta.privateCognition.ops,
           created,
         );
-        this.settlementLedger?.markApplied(explicitMeta.settlementId);
+        await this.settlementLedger?.markApplied(explicitMeta.settlementId);
       } catch (error) {
-        this.settlementLedger?.markFailed(
+        await this.settlementLedger?.markFailed(
           explicitMeta.settlementId,
           error instanceof Error ? error.message : String(error),
           error instanceof MaidsClawError ? error.retriable : false,
@@ -341,23 +341,17 @@ export class ExplicitSettlementProcessor {
     return { nodeRef: makeNodeRef("commitment", result.id) };
   }
 
-  private buildSettledArtifacts(
+  private async buildSettledArtifacts(
     payload: TurnSettlementPayload,
     agentId: string,
     settlementId: string,
     commitResult: {
       cognitionByKey: Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>;
     },
-  ): SettledArtifacts {
+  ): Promise<SettledArtifacts> {
     const localRefIndex = new Map<string, { kind: "episode" | "publication" | "cognition" | "proposal"; nodeRef: string }>();
 
-    const episodeRows = this.db
-      .prepare(
-        `SELECT id, source_local_ref
-         FROM private_episode_events
-         WHERE settlement_id = ? AND agent_id = ?`,
-      )
-      .all(settlementId, agentId) as Array<{ id: number; source_local_ref: string | null }>;
+    const episodeRows = await this.episodeRepo.readBySettlement(settlementId, agentId);
     for (const row of episodeRows) {
       if (!row.source_local_ref) {
         continue;
@@ -370,13 +364,7 @@ export class ExplicitSettlementProcessor {
 
     const publications = payload.publications ?? [];
     if (publications.length > 0) {
-      const publicationRows = this.db
-        .prepare(
-          `SELECT id, source_pub_index
-           FROM event_nodes
-           WHERE source_settlement_id = ?`,
-        )
-        .all(settlementId) as Array<{ id: number; source_pub_index: number | null }>;
+      const publicationRows = await this.episodeRepo.readPublicationsBySettlement(settlementId);
       for (const row of publicationRows) {
         if (row.source_pub_index === null || row.source_pub_index === undefined) {
           continue;
@@ -400,13 +388,13 @@ export class ExplicitSettlementProcessor {
     };
   }
 
-  private applyContestConflictFactors(
+  private async applyContestConflictFactors(
     agentId: string,
     settlementId: string,
     contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }>,
     resolvedFactorNodeRefs: string[],
     unresolvedCount: number,
-  ): void {
+  ): Promise<void> {
     if (contestedAssertions.length === 0) {
       return;
     }
@@ -421,27 +409,19 @@ export class ExplicitSettlementProcessor {
       : `contested (${validRefs.length} factors)`;
 
     for (const assertion of contestedAssertions) {
-      this.relationBuilder.writeContestRelations(
+      await this.relationBuilder.writeContestRelations(
         assertion.nodeRef,
         validRefs,
         settlementId,
       );
 
-      this.db
-        .prepare(
-          `UPDATE private_cognition_current
-           SET conflict_summary = ?,
-               conflict_factor_refs_json = ?,
-               updated_at = ?
-           WHERE agent_id = ? AND cognition_key = ?`,
-        )
-        .run(
-          summary,
-          JSON.stringify(validRefs),
-          Date.now(),
-          agentId,
-          assertion.cognitionKey,
-        );
+      await this.cognitionProjectionRepo.updateConflictFactors(
+        agentId,
+        assertion.cognitionKey,
+        summary,
+        JSON.stringify(validRefs),
+        Date.now(),
+      );
     }
   }
 

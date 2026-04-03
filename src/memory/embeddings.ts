@@ -43,31 +43,34 @@ export class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
-	batchStoreEmbeddings(entries: EmbeddingEntry[]): void {
+  async batchStoreEmbeddings(entries: EmbeddingEntry[]): Promise<void> {
     if (entries.length === 0) {
       return;
     }
 
+    const pendingWrites: Promise<void>[] = [];
     this.batcher.runInTransaction(() => {
       for (const entry of entries) {
-        this.resolveNow(
-          this.embeddingRepo.upsert(
-            entry.nodeRef,
-            entry.nodeKind,
-            entry.viewType,
-            entry.modelId,
-            entry.embedding,
-          ),
+        const result = this.embeddingRepo.upsert(
+          entry.nodeRef,
+          entry.nodeKind,
+          entry.viewType,
+          entry.modelId,
+          entry.embedding,
         );
+        if (result && typeof (result as Promise<void>).then === "function") {
+          pendingWrites.push(result as Promise<void>);
+        }
       }
     });
+    await Promise.all(pendingWrites);
   }
 
-	queryNearestNeighbors(
+  async queryNearestNeighbors(
     queryEmbedding: Float32Array,
     options: NeighborQueryOptions,
-  ): Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }> {
-    return this.resolveNow(this.embeddingRepo.query(queryEmbedding, options));
+  ): Promise<Array<{ nodeRef: NodeRef; similarity: number; nodeKind: string }>> {
+    return this.embeddingRepo.query(queryEmbedding, options);
   }
 
   deserializeEmbedding(blob: Buffer): Float32Array {
@@ -78,20 +81,5 @@ export class EmbeddingService {
 
   serializeEmbedding(embedding: Float32Array): Buffer {
     return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
-  }
-
-  private resolveNow<T>(value: Promise<T> | T): T {
-    if (!(value instanceof Promise)) {
-      return value;
-    }
-
-    const settledValue = Bun.peek(value);
-    if (settledValue instanceof Promise) {
-      throw new Error(
-        "EmbeddingService sync API received unresolved async repo result. "
-          + "Inject adapter-style repos that resolve immediately for this call path.",
-      );
-    }
-    return settledValue as T;
   }
 }
