@@ -94,6 +94,18 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
     )
   `);
 
+  // ── recent_cognition_slots migrations ──────────────────────────────
+  // Idempotent ALTER TABLE for columns added after initial schema.
+  // ADD COLUMN IF NOT EXISTS is safe to run on existing tables.
+  await sql.unsafe(`
+    ALTER TABLE recent_cognition_slots
+      ADD COLUMN IF NOT EXISTS talker_turn_counter INTEGER NOT NULL DEFAULT 0
+  `);
+  await sql.unsafe(`
+    ALTER TABLE recent_cognition_slots
+      ADD COLUMN IF NOT EXISTS thinker_committed_version INTEGER NOT NULL DEFAULT 0
+  `);
+
   // ── pending_settlement_recovery ─────────────────────────────────────
   // NEW table per consensus §3.80 — replaces _memory_maintenance_jobs
   // usage for flush recovery.
