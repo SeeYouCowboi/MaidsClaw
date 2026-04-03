@@ -151,9 +151,8 @@ Example:
 // Talker mode — lightweight instructions replacing the full cognition framework
 // ---------------------------------------------------------------------------
 const TALKER_INSTRUCTIONS = `## Response Instructions
-Respond in character. Before your reply, write a brief internal note (1-3 sentences) as \`latentScratchpad\`
-capturing your current reasoning, stance, and intent. Then write your \`publicReply\`.
-Use the submit_rp_turn tool with only: publicReply, latentScratchpad. Leave other fields empty.`;
+Respond in character. Write \`latentScratchpad\` (1-3 sentences: reasoning, stance, intent), then \`publicReply\`.
+submit_rp_turn with only: publicReply, latentScratchpad.`;
 
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;

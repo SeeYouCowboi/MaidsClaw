@@ -488,7 +488,7 @@ export class TurnService {
 
 		if (!this.settlementUnitOfWork) {
 			const errorChunk = {
-				code: "INTERNAL_ERROR",
+				code: "SETTLEMENT_UOW_REQUIRED",
 				message:
 					"PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
 			};
@@ -616,15 +616,7 @@ export class TurnService {
 					`Thinker enqueue failed, retrying once: ${error instanceof Error ? error.message : String(error)}`,
 				);
 				await new Promise<void>((resolve) => setTimeout(resolve, 1000));
-				try {
-					await this.jobPersistence.enqueue(thinkerJobEntry);
-				} catch (retryError: unknown) {
-					this.traceLog(
-						requestId,
-						"warn",
-						`Thinker enqueue retry failed: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
-					);
-				}
+				await this.jobPersistence.enqueue(thinkerJobEntry); // no catch — propagate
 			}
 		}
 
@@ -868,7 +860,7 @@ export class TurnService {
 
       if (!this.settlementUnitOfWork) {
         throw new MaidsClawError({
-          code: "INTERNAL_ERROR",
+          code: "SETTLEMENT_UOW_REQUIRED",
           message: "PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
           retriable: false,
         });
