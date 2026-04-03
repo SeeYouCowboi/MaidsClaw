@@ -23,14 +23,12 @@ function makeStubAgent(opts: {
   const agent = Object.create(MemoryTaskAgent.prototype) as MemoryTaskAgent;
   const a = agent as unknown as Record<string, unknown>;
 
-  a.db = {
-    exec: () => {},
-    prepare: () => ({
-      run: () => ({ changes: 0, lastInsertRowid: 0 }),
-      all: () => [],
-      get: () => undefined,
-    }),
-  };
+  // Provide a mock sqlFactory so runMigrateInternal takes the PG path.
+  // The begin() callback receives an empty tx object — PG repo constructors just
+  // store it, and all data-access methods are overridden on the stub below.
+  a.sqlFactory = () => ({
+    begin: (fn: (tx: unknown) => Promise<unknown>) => fn({}),
+  });
   a.modelProvider = {
     defaultEmbeddingModelId: "test-embed",
     chat: async () => [],
