@@ -474,7 +474,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T5)
 
-- [ ] 7. Migrate ExplicitSettlementProcessor to PG — Replace ~6 db.prepare calls
+- [x] 7. Migrate ExplicitSettlementProcessor to PG — Replace ~6 db.prepare calls
 
    **What to do**:
    - RED: Write tests for PG-backed ExplicitSettlementProcessor
@@ -687,7 +687,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T7)
 
-- [ ] 9. EmbeddingService async化 — Remove Bun.peek sync bridge
+- [x] 9. EmbeddingService async化 — Remove Bun.peek sync bridge
 
   **What to do**:
   - RED: Write tests for async `queryNearestNeighbors`
