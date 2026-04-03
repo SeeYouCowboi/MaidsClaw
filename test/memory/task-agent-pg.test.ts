@@ -74,9 +74,6 @@ function makeStubAgent(): MemoryTaskAgent {
   };
   a.coreMemory = {};
   a.embeddings = {};
-  a.materialization = {
-    materializeDelayed: () => {},
-  };
   a.jobPersistence = undefined;
   a.strictDurableMode = false;
   a.migrateTail = Promise.resolve();

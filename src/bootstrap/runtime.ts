@@ -37,7 +37,6 @@ import { CognitionSearchService } from "../memory/cognition/cognition-search.js"
 import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
 import { EmbeddingService } from "../memory/embeddings.js";
-import { MaterializationService } from "../memory/materialization.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
@@ -1017,11 +1016,6 @@ export function bootstrapRuntime(
 			cognitionSearch: cognitionSearchService,
 		},
 	);
-	const materializationService = new MaterializationService(
-		graphStorageService,
-		promotionQueryRepo,
-		undefined,
-	);
 	const settlementLedger = createSettlementLedgerAdapter(settlementLedgerRepo);
 	const cognitionRepo = new CognitionRepository({
 		cognitionProjectionRepo,
@@ -1078,7 +1072,6 @@ export function bootstrapRuntime(
 				graphStorageService,
 				coreMemoryService,
 				embeddingService,
-				materializationService,
 				memoryTaskModelProvider,
 				settlementLedger,
 				resolvedJobPersistence,

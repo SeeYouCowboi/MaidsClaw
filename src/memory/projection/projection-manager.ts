@@ -8,7 +8,7 @@ import type {
 } from "../../runtime/rp-turn-contract.js";
 
 import type { SettlementRepos } from "../../storage/unit-of-work.js";
-import type { CognitionEventRepo } from "../cognition/cognition-event-repo.js";
+import type { CognitionEventRepo } from "../../storage/domain-repos/contracts/cognition-event-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
 import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";

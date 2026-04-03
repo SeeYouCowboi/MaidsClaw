@@ -19,7 +19,6 @@ import type { JobPersistence } from "../jobs/persistence.js";
 import { JOB_MAX_ATTEMPTS } from "../jobs/types.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
-import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
@@ -371,7 +370,6 @@ export class MemoryTaskAgent {
     private readonly storage: GraphStorageService,
     private readonly coreMemory: CoreMemoryService,
     private readonly embeddings: EmbeddingService,
-    private readonly materialization: MaterializationService,
     modelProvider?: MemoryTaskModelProvider,
     settlementLedger?: SettlementLedger,
     jobPersistence?: JobPersistence,
@@ -637,10 +635,6 @@ export class MemoryTaskAgent {
       });
 
       await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
-    }
-
-    if (areaCandidates.length > 0) {
-      this.triggerMaterialization(areaCandidates, flushRequest.agentId);
     }
 
     const organizeJob: GraphOrganizerJob = {
@@ -1206,28 +1200,6 @@ export class MemoryTaskAgent {
       return;
     }
     this.storage.createLogicEdge(sourceEventId, targetEventId, relationType);
-  }
-
-  private triggerMaterialization(
-    areaCandidates: Array<{
-      id: number;
-      event_id: number | null;
-      agent_id: string;
-      role: string | null;
-      private_notes: string | null;
-      salience: number | null;
-      emotion: string | null;
-      event_category: PrivateEventCategory;
-      primary_actor_entity_id: number | null;
-      projection_class: ProjectionClass;
-      location_entity_id: number | null;
-      projectable_summary: string | null;
-      source_record_id: string | null;
-      created_at: number;
-    }>,
-    agentId: string,
-  ): void {
-    this.materialization.materializeDelayed(areaCandidates, agentId);
   }
 
   private asString(value: unknown): string {

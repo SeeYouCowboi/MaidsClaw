@@ -6,7 +6,6 @@ import { RelationBuilder } from "../../src/memory/cognition/relation-builder.js"
 import { CoreMemoryService } from "../../src/memory/core-memory.js";
 import { EmbeddingService } from "../../src/memory/embeddings.js";
 import { ExplicitSettlementProcessor } from "../../src/memory/explicit-settlement-processor.js";
-import { MaterializationService } from "../../src/memory/materialization.js";
 import { PgTransactionBatcher } from "../../src/memory/pg-transaction-batcher.js";
 import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
@@ -130,11 +129,6 @@ function createMemoryTaskAgent(
   const graphStorage = createGraphStorage(sql);
   const coreMemory = new CoreMemoryService(new PgCoreMemoryBlockRepo(sql));
   const embeddings = new EmbeddingService(new PgEmbeddingRepo(sql), new PgTransactionBatcher());
-  const materialization = new MaterializationService(
-    graphStorage,
-    new PgPromotionQueryRepo(sql),
-    undefined,
-  );
 
   const cognitionProjectionRepo = new PgCognitionProjectionRepo(sql);
   const cognitionRepo = new CognitionRepository({
@@ -169,7 +163,6 @@ function createMemoryTaskAgent(
     graphStorage,
     coreMemory,
     embeddings,
-    materialization,
     modelProvider,
     undefined,
     createNoopJobPersistence(),
