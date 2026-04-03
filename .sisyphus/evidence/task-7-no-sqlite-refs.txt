@@ -1,0 +1,19 @@
+Task 7: SQLite References Removed from AliasService
+
+File: src/memory/alias.ts
+
+Before:
+- import type { DbLike } from "./db-types.js" (implied)
+- constructor(private readonly db: DbLike)
+- Used this.db.prepare() for all database operations
+
+After:
+- import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js"
+- constructor(private readonly repo: AliasRepo)
+- Delegates all operations to repo methods
+
+Verification:
+$ grep -n "DbLike\|db.prepare\|from.*db-types" src/memory/alias.ts
+(No output - zero matches found)
+
+All 5 public methods are now async and use the AliasRepo contract interface.

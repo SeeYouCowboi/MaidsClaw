@@ -1,0 +1,309 @@
+bun test v1.3.10 (30e609e0)
+{"ok":false,"command":"agent list","error":{"code":"INVALID_FLAG_VALUE","message":"--source must be \"file\" or \"runtime\", got \"invalid\"","exitCode":2}}
+Available slash commands:
+  /summary, /inspect    - View summary for last request
+  /transcript           - View session transcript
+  /prompt               - View prompt for last request
+  /chunks               - View public chunks for last request
+  /logs                 - View logs for session/request
+  /memory               - View memory state for session
+  /diagnose             - Run diagnostic for last request
+  /trace                - Export trace for last request
+  /raw on|off           - Toggle raw observation mode
+  /recover              - Recover current session
+  /close                - Close session and exit
+  /mode local|gateway   - Switch operating mode
+  /exit, /quit          - Exit shell
+  /help                 - Show this help
+
+Inspect commands accept --request <id> to override the implicit last request.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /prompt. Send a message first, or use /prompt --request <id>.
+No request context available for /chunks. Send a message first, or use /chunks --request <id>.
+No request context available for /diagnose. Send a message first, or use /diagnose --request <id>.
+No request context available for /trace. Send a message first, or use /trace --request <id>.
+Raw observation mode: ON
+Raw observation mode: OFF
+Mode: local
+Mode: gateway
+Unknown slash command: /nonexistent. Type /help for available commands.
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat command does not support --json mode","exitCode":2}}
+Error [MISSING_ARGUMENT]: chat requires --agent <agent_id>
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "chat": --bogus
+
+test\cli\config-doctor.test.ts:
+[memoryPipelineStatus] chat model unavailable: 127 |   private hasUnsupportedEmbeddingPrefix(modelId: string): boolean {
+128 |     return this.unsupportedEmbeddingPrefixes.some((prefix) => modelId.startsWith(prefix));
+129 |   }
+130 | 
+131 |   private modelNotConfigured(capability: "chat" | "embedding", modelId: string): MaidsClawError {
+132 |     return new MaidsClawError({
+                 ^
+MaidsClawError: No chat provider configured for model 'openai/gpt-4o'
+ retriable: false,
+   details: {
+  capability: "chat",
+  modelId: "openai/gpt-4o",
+},
+      code: "MODEL_NOT_CONFIGURED"
+
+      at modelNotConfigured (D:\ACodingWorkSpace\MaidsClaw\src\core\models\registry.ts:132:12)
+      at resolveChat (D:\ACodingWorkSpace\MaidsClaw\src\core\models\registry.ts:81:16)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:698:18)
+      at bootstrapRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:720:10)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:186:38)
+      at handleConfigDoctor (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\config.ts:325:18)
+      at dispatch (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\parser.ts:225:17)
+      at runDoctor (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:68:11)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:139:26)
+
+
+test\cli\gateway-mode.test.ts:
+812 |   function ErrorResponse(x) {
+813 |     if (query) {
+814 |       (query.cursorFn || query.describeFirst) && write(Sync)
+815 |       errorResponse = Errors.postgres(parseError(x))
+816 |     } else {
+817 |       errored(Errors.postgres(parseError(x)))
+                           ^
+PostgresError: �û� "TeaCat" Password ��֤ʧ��
+ severity_local: "��������",
+   severity: "FATAL",
+       file: "auth.c",
+    routine: "auth_failed",
+       code: "28P01"
+
+      at ErrorResponse (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:817:22)
+      at handle (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:765:5)
+      at data (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:457:5)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:264:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:242:18)
+      at data (node:net:280:52)
+111 | 		server.start();
+112 | 		baseUrl = `http://localhost:${server.getPort()}`;
+113 | 	});
+114 | 
+115 | 	afterEach(() => {
+116 | 		server.stop();
+        ^
+TypeError: undefined is not an object (evaluating 'server.stop')
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:116:3)
+(fail) gateway mode > GatewayClient rejects remote unsafe raw [94.00ms]
+812 |   function ErrorResponse(x) {
+813 |     if (query) {
+814 |       (query.cursorFn || query.describeFirst) && write(Sync)
+815 |       errorResponse = Errors.postgres(parseError(x))
+816 |     } else {
+817 |       errored(Errors.postgres(parseError(x)))
+                           ^
+PostgresError: �û� "TeaCat" Password ��֤ʧ��
+ severity_local: "��������",
+   severity: "FATAL",
+       file: "auth.c",
+    routine: "auth_failed",
+       code: "28P01"
+
+      at ErrorResponse (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:817:22)
+      at handle (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:765:5)
+      at data (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:457:5)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:264:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:242:18)
+      at data (node:net:280:52)
+111 | 		server.start();
+112 | 		baseUrl = `http://localhost:${server.getPort()}`;
+113 | 	});
+114 | 
+115 | 	afterEach(() => {
+116 | 		server.stop();
+        ^
+TypeError: undefined is not an object (evaluating 'server.stop')
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:116:3)
+(fail) gateway mode > debug trace export rejects --unsafe-raw in gateway mode [78.00ms]
+812 |   function ErrorResponse(x) {
+813 |     if (query) {
+814 |       (query.cursorFn || query.describeFirst) && write(Sync)
+815 |       errorResponse = Errors.postgres(parseError(x))
+816 |     } else {
+817 |       errored(Errors.postgres(parseError(x)))
+                           ^
+PostgresError: �û� "TeaCat" Password ��֤ʧ��
+ severity_local: "��������",
+   severity: "FATAL",
+       file: "auth.c",
+    routine: "auth_failed",
+       code: "28P01"
+
+      at ErrorResponse (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:817:22)
+      at handle (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:765:5)
+      at data (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:457:5)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:264:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:242:18)
+      at data (node:net:280:52)
+111 | 		server.start();
+112 | 		baseUrl = `http://localhost:${server.getPort()}`;
+113 | 	});
+114 | 
+115 | 	afterEach(() => {
+116 | 		server.stop();
+        ^
+TypeError: undefined is not an object (evaluating 'server.stop')
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:116:3)
+(fail) gateway mode > gateway evidence endpoints return structured JSON [78.00ms]
+812 |   function ErrorResponse(x) {
+813 |     if (query) {
+814 |       (query.cursorFn || query.describeFirst) && write(Sync)
+815 |       errorResponse = Errors.postgres(parseError(x))
+816 |     } else {
+817 |       errored(Errors.postgres(parseError(x)))
+                           ^
+PostgresError: �û� "TeaCat" Password ��֤ʧ��
+ severity_local: "��������",
+   severity: "FATAL",
+       file: "auth.c",
+    routine: "auth_failed",
+       code: "28P01"
+
+      at ErrorResponse (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:817:22)
+      at handle (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:765:5)
+      at data (D:\ACodingWorkSpace\MaidsClaw\node_modules\postgres\src\connection.js:457:5)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:264:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:242:18)
+      at data (node:net:280:52)
+111 | 		server.start();
+112 | 		baseUrl = `http://localhost:${server.getPort()}`;
+113 | 	});
+114 | 
+115 | 	afterEach(() => {
+116 | 		server.stop();
+        ^
+TypeError: undefined is not an object (evaluating 'server.stop')
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\gateway-mode.test.ts:116:3)
+(fail) gateway mode > session and turn commands run in gateway mode [94.00ms]
+Error [UNKNOWN_COMMAND]: Unknown command: "unknown". Available: known
+Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "bad" for "config". Available: show
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_SUBCOMMAND]: "config" requires a subcommand. Available: show
+Error [MISSING_CWD_VALUE]: --cwd requires a path argument
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat does not support --json","exitCode":2}}
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "server start": --bogus
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--port requires a numeric value","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: 99999. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: abc. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--host requires a value","exitCode":2}}
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "health": --bogus
+{"ok":false,"command":"health","error":{"code":"MISSING_FLAG_VALUE","message":"--base-url requires a URL value","exitCode":2}}
+{"ok":false,"command":"health","error":{"code":"CONNECTION_FAILED","message":"Failed to connect to server at http://127.0.0.1:19999: Unable to connect. Is the computer able to access the url?","exitCode":4}}
+
+test\gateway\gateway.test.ts:
+1037 | 
+1038 |       expect(res.status).toBe(200);
+1039 |       const events = parseSseEvents(await res.text());
+1040 |       const types = events.map((e) => e.type);
+1041 | 
+1042 |       expect(types).toContain("status");
+                           ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "status"
+Received: [ "error" ]
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1042:21)
+(fail) Real TurnService-backed gateway path > real-path turn completes with done event
+1103 |         }),
+1104 |       });
+1105 | 
+1106 |       expect(res.status).toBe(200);
+1107 |       const events = parseSseEvents(await res.text());
+1108 |       expect(events.map((event) => event.type)).toEqual(["status", "delta", "done"]);
+                                                       ^
+error: expect(received).toEqual(expected)
+
+  [
+-   "status",
+-   "delta",
+-   "done",
++   "error",
+  ]
+
+- Expected  - 3
++ Received  + 1
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1108:49)
+(fail) Real TurnService-backed gateway path > real-path RP session emits status, full delta, then done [16.00ms]
+1173 |       });
+1174 |       const events2 = parseSseEvents(await res2.text());
+1175 |       expect(events2.length).toBe(1);
+1176 |       expect(events2[0].type).toBe("error");
+1177 |       const errData = events2[0].data as { code: string; retriable: boolean };
+1178 |       expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: "SESSION_RECOVERY_REQUIRED"
+Received: "INTERNAL_ERROR"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1178:28)
+(fail) Real TurnService-backed gateway path > real-path failed turn sets recovery_required and blocks next turn
+1225 |           user_message: { id: "msg-re", text: "Hello" },
+1226 |         }),
+1227 |       }).then((r) => r.text()); // consume body
+1228 | 
+1229 |       // Verify session is now recovery_required
+1230 |       expect(await runtime.sessionService.isRecoveryRequired(session_id)).toBe(true);
+                                                                                 ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1230:75)
+(fail) Real TurnService-backed gateway path > real-path recovery clears blocked state
+1323 | 
+1324 |       const events = parseSseEvents(await res.text());
+1325 |       const types = events.map((e) => e.type);
+1326 | 
+1327 |       const toolResult = events.find((e) => e.type === "tool_result");
+1328 |       expect(toolResult).toBeDefined();
+                                ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1328:26)
+(fail) Real TurnService-backed gateway path > real-path tool execution failure emits tool_result.failed then error [15.00ms]
+
+test\core\models\experimental\codex-adapter.test.ts:
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+
+ 940 pass
+ 453 skip
+ 9 fail
+ 2451 expect() calls
+Ran 1402 tests across 115 files. [2.50s]

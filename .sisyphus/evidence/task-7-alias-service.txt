@@ -1,0 +1,27 @@
+Task 7: Refactor AliasService — Replace DbLike with PgAliasRepo
+
+STATUS: COMPLETED
+
+Files Modified:
+- src/memory/alias.ts — Refactored to use AliasRepo contract interface
+
+Files Created:
+- test/memory/alias-service-pg.test.ts — 26 tests, all passing
+
+Changes Made:
+1. Changed constructor from `db: DbLike` to `repo: AliasRepo`
+2. Removed all `this.db.prepare(...)` calls
+3. Made all 5 public methods async:
+   - resolveAlias(alias, ownerAgentId?) → Promise<number | null>
+   - resolveAliases(aliases, ownerAgentId?) → Promise<Map<string, number | null>>
+   - createAlias(canonicalId, alias, aliasType?, ownerAgentId?) → Promise<number>
+   - getAliasesForEntity(canonicalId, ownerAgentId?) → Promise<EntityAlias[]>
+   - resolveParticipants(participantsJson) → Promise<Array<{ref, entityId|null}>>
+4. Removed DbLike type definition and Db imports
+5. Internal callers (resolveAliases→resolveAlias, resolveParticipants→resolveAlias) now properly awaited
+
+Test Results:
+- bun test test/memory/alias-service-pg.test.ts: 26 pass, 0 fail
+
+SQLite References Removed:
+- grep -n "DbLike\|db.prepare\|from.*db-types" src/memory/alias.ts → zero matches

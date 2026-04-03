@@ -116,3 +116,41 @@
   - `lsp_diagnostics` clean on changed TS file.
   - `bun run build` passes.
   - `bun test` fails only with pre-existing environment/config issues (missing configured model/provider and local PG auth), with no new wiring compile regressions.
+
+## [2026-04-03] Task 12: Full chain integration tests
+
+- Added `test/memory/pg-memory-chain-integration.test.ts` as end-to-end PG retrieval-chain integration coverage, gated with `describe.skipIf(skipPgTests)`.
+- Reused the PG app-test pattern consistently: `withTestAppSchema(pool, ...)` + `bootstrapTruthSchema` + `bootstrapOpsSchema` + `bootstrapDerivedSchema` in every integration case.
+- Built real service wiring in-test (no mocks for repos/services under test): `PgRetrievalReadRepo`, `PgAliasRepo`, `PgRelationReadRepo`, `PgCognitionSearchRepo`, `PgNarrativeSearchRepo`, `PgGraphReadQueryRepo`, `PgCognitionProjectionRepo`, `PgEmbeddingRepo` and higher-level `RetrievalService`, `GraphNavigator`, `MemoryAdapter`, `CoreMemoryService`.
+- Verified all 6 memory tools with their actual `tools.ts` return-shape contracts:
+  - `memory_read` → direct entity/topic/fact/event payload
+  - `narrative_search` → `{ results: [...] }`
+  - `cognition_search` → direct array payload
+  - `memory_explore` → explain-shell payload with `evidence_paths`
+  - `core_memory_append` / `core_memory_replace` → success payloads and persisted block changes
+- Added explicit graceful-empty integration coverage for missing entity/query paths and typed retrieval empty string behavior.
+- Added conversation-aware dedup integration coverage by seeding both `recent_cognition_slots.slot_payload` and `interaction_records` message content, then asserting duplicated cognition/narrative text is filtered while fresh content remains.
+- Evidence files for Task 12 generated under `.sisyphus/evidence/` and show correct skip behavior when PG test env is unavailable.
+
+## [2026-04-03] Task T8/T9 follow-up: dedicated PG unit test files created
+
+- Added missing dedicated unit tests required by Plan B acceptance:
+  - `test/memory/retrieval-service-pg.test.ts`
+  - `test/memory/prompt-data-pg.test.ts`
+- `retrieval-service-pg.test.ts` uses pure stubs (no DB/PG wiring) and verifies RetrievalService delegation for:
+  - `readByEntity`, `readByTopic`, `readByEventIds`, `readByFactIds`
+  - `searchVisibleNarrative`
+  - `generateTypedRetrieval`
+  - `resolveRedirect`, `resolveEntityByPointer`
+- `prompt-data-pg.test.ts` uses pure stubs and verifies `getTypedRetrievalSurfaceAsync(...)` behavior for:
+  - direct `RetrievalService` parameter usage
+  - short-message early return (`< 3` chars)
+  - non-empty rendered output when retrieval hits exist
+  - marker rendering (`[cognition]`, `[narrative]`) when corresponding segments exist
+- Confirmed via grep checks that:
+  - `src/memory/retrieval.ts` has no `Db`/`db.prepare` usage
+  - `src/memory/prompt-data.ts` has no `Db` or `WeakMap<Db` usage
+- Verification executed:
+  - `bun test test/memory/retrieval-service-pg.test.ts` → pass
+  - `bun test test/memory/prompt-data-pg.test.ts` → pass
+  - `bun run build` → pass

@@ -336,7 +336,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/storage/domain-repos/pg/retrieval-read-repo.ts`, `src/storage/domain-repos/contracts/retrieval-read-repo.ts`, `test/pg-app/pg-retrieval-read-repo.test.ts`
   - Pre-commit: `bun test test/pg-app/pg-retrieval-read-repo.test.ts`
 
-- [ ] 2. PgCognitionSearchRepo — PG-native cognition search replacing SQLite FTS5
+- [x] 2. PgCognitionSearchRepo — PG-native cognition search replacing SQLite FTS5
 
   **What to do**:
   - RED: Write tests for a new `PgCognitionSearchRepo` class that replicates CognitionSearchService's query layer in PG
@@ -448,7 +448,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/storage/domain-repos/pg/cognition-search-repo.ts`, `src/storage/domain-repos/contracts/cognition-search-repo.ts`, `test/pg-app/pg-cognition-search-repo.test.ts`
   - Pre-commit: `bun test test/pg-app/pg-cognition-search-repo.test.ts`
 
-- [ ] 3. PgRelationReadRepo — Read-path PG repo for RelationBuilder conflict queries
+- [x] 3. PgRelationReadRepo — Read-path PG repo for RelationBuilder conflict queries
 
   **What to do**:
   - RED: Write tests for `PgRelationReadRepo` covering conflict evidence and history queries
@@ -537,7 +537,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/storage/domain-repos/pg/relation-read-repo.ts`, `src/storage/domain-repos/contracts/relation-read-repo.ts`, `test/pg-app/pg-relation-read-repo.test.ts`
   - Pre-commit: `bun test test/pg-app/pg-relation-read-repo.test.ts`
 
-- [ ] 4. PgAliasRepo — PG repo for AliasService entity alias operations
+- [x] 4. PgAliasRepo — PG repo for AliasService entity alias operations
 
   **What to do**:
   - RED: Write tests for `PgAliasRepo` covering all alias read/write operations
@@ -628,7 +628,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/storage/domain-repos/pg/alias-repo.ts`, `src/storage/domain-repos/contracts/alias-repo.ts`, `test/pg-app/pg-alias-repo.test.ts`
   - Pre-commit: `bun test test/pg-app/pg-alias-repo.test.ts`
 
-- [ ] 5. Sync→Async Cascade Analysis + Interface Contracts
+- [x] 5. Sync→Async Cascade Analysis + Interface Contracts
 
   **What to do**:
   - Analyze and document ALL sync→async cascading changes needed before any service refactor begins
@@ -734,7 +734,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: Interface file, `.sisyphus/drafts/sync-async-cascade.md`
   - Pre-commit: `bun test` (no regressions)
 
-- [ ] 6. Refactor CognitionSearchService — Replace Db with PgCognitionSearchRepo + PgRelationReadRepo
+- [x] 6. Refactor CognitionSearchService — Replace Db with PgCognitionSearchRepo + PgRelationReadRepo
 
   **What to do**:
   - RED: Write tests for the refactored CognitionSearchService that uses PG repos instead of `Db`
@@ -858,7 +858,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/cognition/cognition-search.ts`, `src/memory/retrieval/retrieval-orchestrator.ts`, `test/memory/cognition-search-pg.test.ts`
   - Pre-commit: `bun test test/memory/`
 
-- [ ] 7. Refactor AliasService — Replace DbLike with PgAliasRepo
+- [x] 7. Refactor AliasService — Replace DbLike with PgAliasRepo
 
   **What to do**:
   - RED: Write tests for refactored AliasService using PG repo
@@ -946,7 +946,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/alias.ts`, `test/memory/alias-service-pg.test.ts`
   - Pre-commit: `bun test test/memory/alias-service-pg.test.ts`
 
-- [ ] 8. Refactor RetrievalService — Remove Db, inject PG repos, make sync methods async
+- [x] 8. Refactor RetrievalService — Remove Db, inject PG repos, make sync methods async
 
   **What to do**:
   - RED: Write tests for refactored RetrievalService using PG repos
@@ -1068,7 +1068,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/retrieval.ts`, `src/memory/tools.ts`, `src/memory/navigator.ts`, `src/memory/retrieval/retrieval-orchestrator.ts`, `test/memory/retrieval-service-pg.test.ts`
   - Pre-commit: `bun test`
 
-- [ ] 9. Refactor prompt-data.ts — Remove Db parameter from getTypedRetrievalSurfaceAsync
+- [x] 9. Refactor prompt-data.ts — Remove Db parameter from getTypedRetrievalSurfaceAsync
 
   **What to do**:
   - RED: Write test for refactored `getTypedRetrievalSurfaceAsync` accepting `RetrievalService` directly
@@ -1154,7 +1154,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/prompt-data.ts`, `test/memory/prompt-data-pg.test.ts`
   - Pre-commit: `bun test test/memory/prompt-data-pg.test.ts`
 
-- [ ] 10. Refactor MemoryAdapter — Accept RetrievalService, revive from dead code
+- [x] 10. Refactor MemoryAdapter — Accept RetrievalService, revive from dead code
 
   **What to do**:
   - RED: Write tests for MemoryAdapter using RetrievalService instead of Db
@@ -1245,7 +1245,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/core/prompt-data-adapters/memory-adapter.ts`, `test/core/memory-adapter-pg.test.ts`
   - Pre-commit: `bun test test/core/memory-adapter-pg.test.ts`
 
-- [ ] 11. Wire runtime.ts — Instantiate real services, remove stubs, bring GraphNavigator alive
+- [x] 11. Wire runtime.ts — Instantiate real services, remove stubs, bring GraphNavigator alive
 
   **What to do**:
   - This is the capstone wiring task. Modify `src/bootstrap/runtime.ts` to:
@@ -1412,7 +1412,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/bootstrap/runtime.ts`
   - Pre-commit: `bun test`
 
-- [ ] 12. Full Chain Integration Tests — Verify TYPED_RETRIEVAL, 6 tools, and GraphNavigator
+- [x] 12. Full Chain Integration Tests — Verify TYPED_RETRIEVAL, 6 tools, and GraphNavigator
 
   **What to do**:
   - Write comprehensive integration tests that verify the FULL chain works end-to-end:

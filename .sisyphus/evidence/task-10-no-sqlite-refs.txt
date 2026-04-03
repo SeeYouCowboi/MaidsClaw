@@ -1,0 +1,4 @@
+No SQLite references found (exit code: 1)
+
+Command: grep -n "import.*Db\|db: Db\|from.*db-types" src/core/prompt-data-adapters/memory-adapter.ts
+Result: No matches - all SQLite references successfully removed.

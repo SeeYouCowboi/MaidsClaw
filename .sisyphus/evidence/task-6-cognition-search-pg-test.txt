@@ -1,0 +1,7 @@
+bun test v1.3.10 (30e609e0)
+
+test\memory\cognition-search-pg.test.ts:
+ 4 pass
+ 0 fail
+ 15 expect() calls
+Ran 4 tests across 1 file. [173.00ms]
