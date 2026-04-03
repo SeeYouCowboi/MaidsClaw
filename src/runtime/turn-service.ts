@@ -9,6 +9,7 @@ import {
 	defaultViewerCanReadAdminOnly,
 	type ViewerContext,
 } from "../core/contracts/viewer-context.js";
+import { MaidsClawError } from "../core/errors.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 
@@ -483,94 +484,39 @@ export class TurnService {
 				committedAt,
 			);
 
-		if (this.settlementUnitOfWork) {
-			await this.settlementUnitOfWork.run(async (repos) => {
-				await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
-				await this.commitSettlementRecordsWithRepos({
-					repos,
-					sessionId: effectiveRequest.sessionId,
-					requestId,
-					settlementId,
-					settlementPayload,
-					hasPublicReply,
-					publicReply: canonicalOutcome.publicReply,
-					userText: getLatestUserMessage(effectiveRequest.messages),
-				});
-				await this.commitSettlementProjectionWithRepos({
-					repos,
-					effectiveRequest,
-					settlementId,
-					settlementPayload,
-					resolvedViewerSnapshot,
-					ownerAgentId,
-					publications,
-					slotEntries,
-					committedAt,
-					canonicalOutcome,
-				});
-				await repos.settlementLedger.markApplied(settlementId);
-			});
-			} else {
-				await this.interactionStore.runInTransactionAsync(async () => {
-					this.commitService.commitWithId({
-						sessionId: effectiveRequest.sessionId,
-						actorType: "rp_agent",
-						recordId: settlementId,
-						recordType: "turn_settlement",
-						payload: settlementPayload,
-						correlatedTurnId: requestId,
-					});
-
-					if (hasPublicReply) {
-						const assistantPayload: AssistantMessagePayloadV3 = {
-							role: "assistant",
-							content: canonicalOutcome.publicReply,
-							settlementId,
-						};
-
-						this.commitService.commit({
-							sessionId: effectiveRequest.sessionId,
-							actorType: "rp_agent",
-							recordType: "message",
-							payload: assistantPayload,
-							correlatedTurnId: requestId,
-						});
-					}
-
-					if (this.projectionManager) {
-						await this.projectionManager.commitSettlement({
-							settlementId,
-							sessionId: effectiveRequest.sessionId,
-							agentId: ownerAgentId,
-							cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
-							privateEpisodes: canonicalOutcome.privateEpisodes,
-							publications,
-							areaStateArtifacts: settlementPayload.areaStateArtifacts,
-							viewerSnapshot: resolvedViewerSnapshot,
-							upsertRecentCognitionSlot:
-								this.interactionStore.upsertRecentCognitionSlot.bind(
-									this.interactionStore,
-								),
-							recentCognitionSlotJson: JSON.stringify(slotEntries),
-							agentRole: "rp_agent",
-							artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-							artifactEnforcementContext: {
-								writingAgentId: ownerAgentId || undefined,
-								ownerAgentId,
-								writeOperation: "append",
-							},
-							committedAt,
-						});
-					} else {
-						this.interactionStore.upsertRecentCognitionSlot(
-							effectiveRequest.sessionId,
-							ownerAgentId,
-							settlementId,
-							JSON.stringify(slotEntries),
-						);
-					}
-				});
-			}
+      if (!this.settlementUnitOfWork) {
+        throw new MaidsClawError({
+          code: "INTERNAL_ERROR",
+          message: "PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
+          retriable: false,
+        });
+      }
+      await this.settlementUnitOfWork.run(async (repos) => {
+        await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
+        await this.commitSettlementRecordsWithRepos({
+          repos,
+          sessionId: effectiveRequest.sessionId,
+          requestId,
+          settlementId,
+          settlementPayload,
+          hasPublicReply,
+          publicReply: canonicalOutcome.publicReply,
+          userText: getLatestUserMessage(effectiveRequest.messages),
+        });
+        await this.commitSettlementProjectionWithRepos({
+          repos,
+          effectiveRequest,
+          settlementId,
+          settlementPayload,
+          resolvedViewerSnapshot,
+          ownerAgentId,
+          publications,
+          slotEntries,
+          committedAt,
+          canonicalOutcome,
+        });
+        await repos.settlementLedger.markApplied(settlementId);
+      });
 
 			settlementPayloadAfterCommit = settlementPayload;
 		} catch (error: unknown) {
