@@ -525,7 +525,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T8)
 
-- [ ] 8. Migrate MemoryTaskAgent to PG — Replace ~11 db calls + sql.begin() transactions
+- [x] 8. Migrate MemoryTaskAgent to PG — Replace ~11 db calls + sql.begin() transactions
 
   **What to do**:
   - RED: Write tests for PG-backed MemoryTaskAgent
@@ -738,7 +738,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T10)
 
-- [ ] 10. Wire vector branch in GraphNavigator — Generate queryEmbedding
+- [x] 10. Wire vector branch in GraphNavigator — Generate queryEmbedding
 
   **What to do**:
   - RED: Write test verifying GraphNavigator passes queryEmbedding AND modelId to localizeSeedsHybrid
