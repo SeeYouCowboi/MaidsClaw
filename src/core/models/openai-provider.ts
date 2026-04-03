@@ -232,6 +232,10 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
   }
 
   async embed(texts: string[], purpose: EmbeddingPurpose, modelId: string): Promise<Float32Array[]> {
+    const bareModelId = modelId.includes("/")
+      ? modelId.slice(modelId.indexOf("/") + 1)
+      : modelId;
+
     const response = await this.fetchImpl(`${this.baseUrl}/v1/embeddings`, {
       method: "POST",
       headers: {
@@ -240,7 +244,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
         ...this.options.extraHeaders,
       },
       body: JSON.stringify({
-        model: modelId || this.defaultEmbeddingModel,
+        model: bareModelId || this.defaultEmbeddingModel,
         input: texts,
         user: purpose,
       }),
