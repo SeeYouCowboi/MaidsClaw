@@ -1048,6 +1048,12 @@ export function bootstrapRuntime(
 		? new MemoryTaskAgent(
 				{
 					db: throwingMemoryDbAdapter,
+					sqlFactory: () => resolvePgPool(),
+					graphMutableStoreRepo: graphStoreRepo,
+					graphReadQueryRepo: pgGraphReadQueryRepo,
+					episodeRepo,
+					promotionQueryRepo,
+					areaWorldProjectionRepo,
 					explicitSettlement: {
 						cognitionRepo,
 						relationBuilder,

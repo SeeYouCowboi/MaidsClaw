@@ -90,6 +90,22 @@ export type GraphNodeVisibilityRecord =
   };
 
 export interface GraphReadQueryRepo {
+  getEntitiesForContext(agentId: string, limit?: number): Promise<Array<{
+    id: number;
+    pointer_key: string;
+    display_name: string;
+    entity_type: string;
+    memory_scope: "shared_public" | "private_overlay";
+    owner_agent_id: string | null;
+  }>>;
+
+  getEventsByIds(ids: number[]): Promise<Array<{
+    id: number;
+    session_id: string;
+    topic_id: number | null;
+    timestamp: number;
+  }>>;
+
   /**
    * Loads current salience values for a seed set used by navigator beam scoring.
    * Missing rows should be omitted instead of synthesized.

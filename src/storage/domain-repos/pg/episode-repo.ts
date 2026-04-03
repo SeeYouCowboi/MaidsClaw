@@ -20,6 +20,21 @@ const REJECTED_FIELDS = new Set([
 export class PgEpisodeRepo implements EpisodeRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
+  async readById(id: number): Promise<EpisodeRow | null> {
+    const rows = await this.sql`
+      SELECT id, agent_id, session_id, settlement_id, category, summary,
+             private_notes, location_entity_id, location_text,
+             valid_time, committed_time, source_local_ref, created_at
+      FROM private_episode_events
+      WHERE id = ${id}
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return normalizeEpisodeRow(rows[0]);
+  }
+
   async append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number> {
     if (params.category === "thought") {
       throw new Error(`episode category "thought" is not allowed`);

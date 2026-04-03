@@ -67,6 +67,68 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
 
   constructor(private readonly sql: postgres.Sql) {}
 
+  async getEntitiesForContext(agentId: string, limit = 200): Promise<Array<{
+    id: number;
+    pointer_key: string;
+    display_name: string;
+    entity_type: string;
+    memory_scope: "shared_public" | "private_overlay";
+    owner_agent_id: string | null;
+  }>> {
+    const rows = await this.sql<{
+      id: number | string;
+      pointer_key: string;
+      display_name: string;
+      entity_type: string;
+      memory_scope: "shared_public" | "private_overlay";
+      owner_agent_id: string | null;
+    }[]>`
+      SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
+      FROM entity_nodes
+      WHERE memory_scope = 'shared_public' OR owner_agent_id = ${agentId}
+      ORDER BY updated_at DESC
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      pointer_key: row.pointer_key,
+      display_name: row.display_name,
+      entity_type: row.entity_type,
+      memory_scope: row.memory_scope,
+      owner_agent_id: row.owner_agent_id,
+    }));
+  }
+
+  async getEventsByIds(ids: number[]): Promise<Array<{
+    id: number;
+    session_id: string;
+    topic_id: number | null;
+    timestamp: number;
+  }>> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const rows = await this.sql<{
+      id: number | string;
+      session_id: string;
+      topic_id: number | string | null;
+      timestamp: number | string;
+    }[]>`
+      SELECT id, session_id, topic_id, timestamp
+      FROM event_nodes
+      WHERE id IN ${this.sql(ids)}
+    `;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      session_id: row.session_id,
+      topic_id: row.topic_id == null ? null : Number(row.topic_id),
+      timestamp: Number(row.timestamp),
+    }));
+  }
+
   async getNodeSalience(nodeRefs: readonly NodeRef[]): Promise<NodeSalienceRecord[]> {
     const unique = Array.from(new Set(nodeRefs));
     if (unique.length === 0) {

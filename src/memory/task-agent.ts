@@ -23,6 +23,23 @@ import type { MaterializationService } from "./materialization.js";
 import type { GraphStorageService } from "./storage.js";
 import type { AssertionBasis, AssertionStance } from "../runtime/rp-turn-contract.js";
 import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
+import type postgres from "postgres";
+import type { GraphMutableStoreRepo } from "../storage/domain-repos/contracts/graph-mutable-store-repo.js";
+import type { GraphReadQueryRepo } from "../storage/domain-repos/contracts/graph-read-query-repo.js";
+import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
+import type { PromotionQueryRepo } from "../storage/domain-repos/contracts/promotion-query-repo.js";
+import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
+import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
+import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
+import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
+import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
+import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
+import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
+import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query-repo.js";
+import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
+import { PgGraphReadQueryRepo } from "../storage/domain-repos/pg/graph-read-query-repo.js";
 
 import type {
   GraphOrganizerResult,
@@ -334,10 +351,24 @@ export type MemoryTaskDbAdapter = {
 export type MemoryTaskAgentDeps = {
   db: MemoryTaskDbAdapter;
   explicitSettlement?: ExplicitSettlementProcessorDeps;
+  sqlFactory?: () => postgres.Sql;
+  graphMutableStoreRepo?: GraphMutableStoreRepo;
+  graphReadQueryRepo?: GraphReadQueryRepo;
+  episodeRepo?: EpisodeRepo;
+  promotionQueryRepo?: PromotionQueryRepo;
+  areaWorldProjectionRepo?: AreaWorldProjectionRepo;
 };
 
 export class MemoryTaskAgent {
   private readonly db: MemoryTaskDbAdapter;
+  private readonly sqlFactory?: () => postgres.Sql;
+  private readonly graphMutableStoreRepo?: GraphMutableStoreRepo;
+  private readonly graphReadQueryRepo?: GraphReadQueryRepo;
+  private readonly episodeRepo?: EpisodeRepo;
+  private readonly promotionQueryRepo?: PromotionQueryRepo;
+  private readonly areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+  private readonly settlementLedger?: SettlementLedger;
+  private readonly cognitionOpsRepo: Pick<CognitionRepository, "getAssertions" | "getCommitments" | "upsertAssertion">;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
   private readonly explicitSettlementProcessor: ExplicitSettlementProcessor;
@@ -360,6 +391,13 @@ export class MemoryTaskAgent {
     nodeScoringQueryRepo?: NodeScoringQueryRepo,
   ) {
     this.db = deps.db;
+    this.sqlFactory = deps.sqlFactory;
+    this.graphMutableStoreRepo = deps.graphMutableStoreRepo;
+    this.graphReadQueryRepo = deps.graphReadQueryRepo;
+    this.episodeRepo = deps.episodeRepo;
+    this.promotionQueryRepo = deps.promotionQueryRepo;
+    this.areaWorldProjectionRepo = deps.areaWorldProjectionRepo;
+    this.settlementLedger = settlementLedger;
     this.modelProvider =
       modelProvider ??
       ({
@@ -391,6 +429,7 @@ export class MemoryTaskAgent {
         resolveEntityByPointerKey: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
       },
     };
+    this.cognitionOpsRepo = explicitSettlementDeps.cognitionRepo;
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
       explicitSettlementDeps,
       this.storage,
@@ -399,7 +438,7 @@ export class MemoryTaskAgent {
       async (request, toolCalls, created) => {
         await this.applyCallOneToolCalls(request, toolCalls, created);
       },
-      settlementLedger ?? (() => { throw new Error("settlementLedger is required"); })(),
+      settlementLedger,
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
@@ -432,7 +471,6 @@ export class MemoryTaskAgent {
   private async runMigrateInternal(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
     this.assertQueueOwnership(flushRequest);
     const ingest = this.ingestionPolicy.buildMigrateInput(flushRequest);
-    const existingContext = await this.loadExistingContext(flushRequest.agentId);
     const created: CreatedState = {
       episodeEventIds: [],
       assertionIds: [],
@@ -441,9 +479,47 @@ export class MemoryTaskAgent {
       changedNodeRefs: [],
     };
 
-      this.db.exec("BEGIN IMMEDIATE");
-    try {
-      await this.explicitSettlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
+    let areaCandidates: Array<{
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      role: string | null;
+      private_notes: string | null;
+      salience: number | null;
+      emotion: string | null;
+      event_category: PrivateEventCategory;
+      primary_actor_entity_id: number | null;
+      projection_class: ProjectionClass;
+      location_entity_id: number | null;
+      projectable_summary: string | null;
+      source_record_id: string | null;
+      created_at: number;
+    }> = [];
+
+    const runFlushBody = async (
+      settlementProcessor: ExplicitSettlementProcessor,
+      loadContext: () => Promise<{ entities: unknown[]; privateBeliefs: unknown[] }>,
+      applyCalls: (toolCalls: ToolCallResult[]) => Promise<Array<{
+        id: number;
+        event_id: number | null;
+        agent_id: string;
+        role: string | null;
+        private_notes: string | null;
+        salience: number | null;
+        emotion: string | null;
+        event_category: PrivateEventCategory;
+        primary_actor_entity_id: number | null;
+        projection_class: ProjectionClass;
+        location_entity_id: number | null;
+        projectable_summary: string | null;
+        source_record_id: string | null;
+        created_at: number;
+      }>>,
+      createSameEpisodeEdges: (privateEvents: Array<{ event_id: number | null }>) => Promise<void>,
+    ): Promise<void> => {
+      const existingContext = await loadContext();
+
+      await settlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
         agentRole: flushRequest.agentRole ?? "rp_agent",
         writeTemplateOverride: flushRequest.writeTemplateOverride,
         agentId: flushRequest.agentId,
@@ -486,20 +562,100 @@ export class MemoryTaskAgent {
         CALL_ONE_TOOLS,
       );
 
-      const createdPrivateEvents = await this.applyCallOneToolCalls(flushRequest, callOne, created);
-      const areaCandidates = createdPrivateEvents.filter((event) => event.projection_class === "area_candidate");
-      if (areaCandidates.length > 0) {
-        this.materialization.materializeDelayed(areaCandidates, flushRequest.agentId);
-      }
+      const createdPrivateEvents = await applyCalls(callOne);
+      areaCandidates = createdPrivateEvents.filter((event) => event.projection_class === "area_candidate");
+      await createSameEpisodeEdges(createdPrivateEvents);
+    };
 
-      this.createSameEpisodeEdgesForBatch(createdPrivateEvents);
+    const sql = this.sqlFactory?.();
+    if (sql) {
+      await sql.begin(async (tx) => {
+        const txSql = tx as unknown as postgres.Sql;
+
+        const txCognitionProjectionRepo = new PgCognitionProjectionRepo(txSql);
+        const txCognitionEventRepo = new PgCognitionEventRepo(txSql);
+        const txSearchProjectionRepo = new PgSearchProjectionRepo(txSql);
+        const txCognitionRepo = new CognitionRepository({
+          cognitionProjectionRepo: txCognitionProjectionRepo,
+          cognitionEventRepo: txCognitionEventRepo,
+          searchProjectionRepo: txSearchProjectionRepo,
+          entityResolver: (pointerKey: string, agentId: string) =>
+            txCognitionProjectionRepo.resolveEntityByPointerKey(pointerKey, agentId),
+        });
+        const txGraphMutableStoreRepo = new PgGraphMutableStoreRepo(txSql);
+        const txGraphReadQueryRepo = new PgGraphReadQueryRepo(txSql);
+        const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
+        const txRelationReadRepo = new PgRelationReadRepo(txSql);
+        const txEpisodeRepo = new PgEpisodeRepo(txSql);
+
+        if (this.promotionQueryRepo) {
+          void new PgPromotionQueryRepo(txSql);
+        }
+        if (this.areaWorldProjectionRepo) {
+          void new PgAreaWorldProjectionRepo(txSql);
+        }
+
+        const txRelationBuilder = new RelationBuilder({
+          relationWriteRepo: txRelationWriteRepo,
+          relationReadRepo: txRelationReadRepo,
+          cognitionProjectionRepo: txCognitionProjectionRepo,
+        });
+        const txSettlementProcessor = new ExplicitSettlementProcessor(
+          {
+            cognitionRepo: txCognitionRepo,
+            relationBuilder: txRelationBuilder,
+            relationWriteRepo: txRelationWriteRepo,
+            cognitionProjectionRepo: txCognitionProjectionRepo,
+            episodeRepo: txEpisodeRepo,
+          },
+          this.storage,
+          this.modelProvider,
+          (agentId) => this.loadExistingContext(agentId, txGraphMutableStoreRepo, txCognitionRepo, txGraphReadQueryRepo),
+          async (request, toolCalls, txCreated) => {
+            await this.applyCallOneToolCalls(
+              request,
+              toolCalls,
+              txCreated,
+              txGraphMutableStoreRepo,
+              txCognitionRepo,
+              txEpisodeRepo,
+              txCognitionProjectionRepo,
+            );
+          },
+          this.settlementLedger,
+        );
+
+        await runFlushBody(
+          txSettlementProcessor,
+          () => this.loadExistingContext(flushRequest.agentId, txGraphMutableStoreRepo, txCognitionRepo, txGraphReadQueryRepo),
+          (toolCalls) => this.applyCallOneToolCalls(
+            flushRequest,
+            toolCalls,
+            created,
+            txGraphMutableStoreRepo,
+            txCognitionRepo,
+            txEpisodeRepo,
+            txCognitionProjectionRepo,
+          ),
+          (privateEvents) => this.createSameEpisodeEdgesForBatch(privateEvents, txGraphMutableStoreRepo, txGraphReadQueryRepo),
+        );
+      });
 
       await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
+    } else {
+      await this.runLegacySqliteTransaction(async () => {
+        await runFlushBody(
+          this.explicitSettlementProcessor,
+          () => this.loadExistingContext(flushRequest.agentId),
+          (toolCalls) => this.applyCallOneToolCalls(flushRequest, toolCalls, created),
+          (privateEvents) => this.createSameEpisodeEdgesForBatch(privateEvents),
+        );
+        await this.coreMemoryIndexUpdater.updateIndex(flushRequest.agentId, created, CALL_TWO_TOOLS);
+      });
+    }
 
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    if (areaCandidates.length > 0) {
+      this.triggerMaterialization(areaCandidates, flushRequest.agentId);
     }
 
     const organizeJob: GraphOrganizerJob = {
@@ -628,18 +784,20 @@ export class MemoryTaskAgent {
     }
   }
 
-  private async loadExistingContext(agentId: string): Promise<{ entities: unknown[]; privateBeliefs: unknown[] }> {
-    const entities = this.db
-      .prepare(
-        `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
-         FROM entity_nodes
-         WHERE memory_scope = 'shared_public' OR owner_agent_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 200`,
-      )
-      .all(agentId);
+  private async loadExistingContext(
+    agentId: string,
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+    txCognitionRepo?: Pick<CognitionRepository, "getAssertions" | "getCommitments">,
+    txGraphReadQueryRepo?: GraphReadQueryRepo,
+  ): Promise<{ entities: unknown[]; privateBeliefs: unknown[] }> {
+    void txGraphMutableStoreRepo;
 
-    const cognitionRepo = new CognitionRepository(this.db);
+    const graphReadQueryRepo = txGraphReadQueryRepo ?? this.graphReadQueryRepo;
+    const entities = graphReadQueryRepo
+      ? await graphReadQueryRepo.getEntitiesForContext(agentId, 200)
+      : await this.loadEntitiesForContextSqlite(agentId);
+
+    const cognitionRepo = txCognitionRepo ?? this.cognitionOpsRepo;
     const assertions = (await cognitionRepo.getAssertions(agentId, { activeOnly: false })).slice(0, 150);
     const commitments = (await cognitionRepo.getCommitments(agentId, { activeOnly: false })).slice(0, 50);
 
@@ -672,6 +830,10 @@ export class MemoryTaskAgent {
     flushRequest: MemoryFlushRequest,
     toolCalls: ToolCallResult[],
     created: CreatedState,
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+    txCognitionRepo?: Pick<CognitionRepository, "upsertAssertion">,
+    txEpisodeRepo?: EpisodeRepo,
+    txCognitionProjectionRepo?: CognitionProjectionRepo,
   ): Promise<Array<{
     id: number;
     event_id: number | null;
@@ -689,7 +851,7 @@ export class MemoryTaskAgent {
     created_at: number;
   }>> {
     const pointerToEntityId = new Map<string, number>();
-    const cognitionRepo = new CognitionRepository(this.db);
+    const cognitionRepo = txCognitionRepo ?? this.cognitionOpsRepo;
     const beliefSettlementId = `${flushRequest.idempotencyKey}:belief`;
     let beliefOpIndex = 0;
     const privateEvents: Array<{
@@ -716,13 +878,16 @@ export class MemoryTaskAgent {
         const entityType = this.asString(call.arguments.entity_type);
         const memoryScopeRaw = this.asString(call.arguments.memory_scope);
         const memoryScope = memoryScopeRaw === "shared_public" ? "shared_public" : "private_overlay";
-        const entityId = this.storage.upsertEntity({
-          pointerKey,
-          displayName,
-          entityType,
-          memoryScope,
-          ownerAgentId: memoryScope === "private_overlay" ? flushRequest.agentId : undefined,
-        });
+        const entityId = await this.upsertEntityCompat(
+          {
+            pointerKey,
+            displayName,
+            entityType,
+            memoryScope,
+            ownerAgentId: memoryScope === "private_overlay" ? flushRequest.agentId : undefined,
+          },
+          txGraphMutableStoreRepo,
+        );
         pointerToEntityId.set(pointerKey, entityId);
         created.entityIds.push(entityId);
         created.changedNodeRefs.push(makeNodeRef("entity", entityId));
@@ -730,14 +895,20 @@ export class MemoryTaskAgent {
       }
 
       if (call.name === CREATE_EPISODE_EVENT_TOOL_NAME) {
-        const primaryActor = this.resolveEntityReference(
+        const primaryActor = await this.resolveEntityReference(
           call.arguments.primary_actor_entity_id,
           flushRequest.agentId,
           pointerToEntityId,
+          txGraphMutableStoreRepo,
         );
-        const location = this.resolveEntityReference(call.arguments.location_entity_id, flushRequest.agentId, pointerToEntityId);
+        const location = await this.resolveEntityReference(
+          call.arguments.location_entity_id,
+          flushRequest.agentId,
+          pointerToEntityId,
+          txGraphMutableStoreRepo,
+        );
         const eventId = this.asOptionalNumber(call.arguments.event_id);
-        const privateEventId = this.storage.createPrivateEvent({
+        const privateEventId = await this.createPrivateEventCompat({
           eventId: eventId ?? undefined,
           agentId: flushRequest.agentId,
           role: this.asString(call.arguments.role),
@@ -750,36 +921,27 @@ export class MemoryTaskAgent {
           locationEntityId: location ?? undefined,
           projectableSummary: this.asOptionalString(call.arguments.projectable_summary) ?? undefined,
           sourceRecordId: this.asOptionalString(call.arguments.source_record_id) ?? undefined,
-        });
+        }, txGraphMutableStoreRepo);
         created.episodeEventIds.push(privateEventId);
         created.changedNodeRefs.push(makeNodeRef("evaluation", privateEventId));
-        const row = this.db.prepare(
-          `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
-        ).get(privateEventId) as {
-          id: number;
-          event_id: number | null;
-          agent_id: string;
-          category: string;
-          summary: string;
-          private_notes: string | null;
-          committed_time: number;
-          created_at: number;
-        };
+        const row = await this.readPrivateEpisodeEventByIdCompat(privateEventId, txEpisodeRepo);
+        const eventIdFromRow = row ? ("event_id" in row ? row.event_id : row.valid_time) : null;
+        const categoryFromRow = row ? ("category" in row ? row.category : "observation") : "observation";
         privateEvents.push({
-          id: row.id,
-          event_id: row.event_id,
-          agent_id: row.agent_id,
+          id: row?.id ?? privateEventId,
+          event_id: eventIdFromRow,
+          agent_id: row?.agent_id ?? flushRequest.agentId,
           role: call.arguments.role as string | null,
-          private_notes: row.private_notes,
+          private_notes: row?.private_notes ?? null,
           salience: (call.arguments.salience as number) ?? null,
           emotion: (call.arguments.emotion as string) ?? null,
-          event_category: row.category as PrivateEventCategory,
+          event_category: categoryFromRow as PrivateEventCategory,
           primary_actor_entity_id: primaryActor ?? null,
           projection_class: call.arguments.projection_class as ProjectionClass,
           location_entity_id: location ?? null,
           projectable_summary: (call.arguments.projectable_summary as string) ?? null,
           source_record_id: (call.arguments.source_record_id as string) ?? null,
-          created_at: row.created_at,
+          created_at: row?.created_at ?? Date.now(),
         });
         continue;
       }
@@ -798,19 +960,19 @@ export class MemoryTaskAgent {
             },
           });
         }
-        const source = this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId);
-        const target = this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId);
+        const source = await this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
+        const target = await this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
         if (!source || !target) {
           continue;
         }
         const sourcePointerKey =
           typeof call.arguments.source === "string"
             ? call.arguments.source
-            : this.storage.getEntityById(source)?.pointerKey;
+            : await this.getPointerKeyByEntityIdCompat(source, txGraphMutableStoreRepo);
         const targetPointerKey =
           typeof call.arguments.target === "string"
             ? call.arguments.target
-            : this.storage.getEntityById(target)?.pointerKey;
+            : await this.getPointerKeyByEntityIdCompat(target, txGraphMutableStoreRepo);
         if (!sourcePointerKey || !targetPointerKey) {
           continue;
         }
@@ -830,9 +992,11 @@ export class MemoryTaskAgent {
 
         const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);
         if (sourceEventRef) {
-          this.db
-            .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
-            .run(sourceEventRef, Date.now(), beliefId);
+          if (txCognitionProjectionRepo) {
+            await txCognitionProjectionRepo.patchRecordJsonSourceEventRef(beliefId, sourceEventRef, Date.now());
+          } else {
+            this.patchSourceEventRefSqlite(beliefId, sourceEventRef);
+          }
         }
 
         created.assertionIds.push(beliefId);
@@ -841,15 +1005,16 @@ export class MemoryTaskAgent {
       }
 
       if (call.name === "create_alias") {
-        const canonical = this.resolveEntityReference(call.arguments.canonical_id, flushRequest.agentId, pointerToEntityId);
+        const canonical = await this.resolveEntityReference(call.arguments.canonical_id, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
         if (!canonical) {
           continue;
         }
-        this.storage.createEntityAlias(
+        await this.createEntityAliasCompat(
           canonical,
           this.asString(call.arguments.alias),
           this.asOptionalString(call.arguments.alias_type) ?? undefined,
           flushRequest.agentId,
+          txGraphMutableStoreRepo,
         );
         continue;
       }
@@ -860,10 +1025,11 @@ export class MemoryTaskAgent {
         if (!sourceEventId || !targetEventId) {
           continue;
         }
-        this.storage.createLogicEdge(
+        await this.createLogicEdgeCompat(
           sourceEventId,
           targetEventId,
           this.asLogicRelationType(this.asString(call.arguments.relation_type)),
+          txGraphMutableStoreRepo,
         );
       }
     }
@@ -871,7 +1037,11 @@ export class MemoryTaskAgent {
     return privateEvents;
   }
 
-  private createSameEpisodeEdgesForBatch(privateEvents: Array<{ event_id: number | null }>): void {
+  private async createSameEpisodeEdgesForBatch(
+    privateEvents: Array<{ event_id: number | null }>,
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+    txGraphReadQueryRepo?: GraphReadQueryRepo,
+  ): Promise<void> {
     const linkedEventIds = privateEvents
       .map((event) => event.event_id)
       .filter((eventId): eventId is number => typeof eventId === "number" && eventId > 0);
@@ -880,14 +1050,10 @@ export class MemoryTaskAgent {
       return;
     }
 
-    const placeholders = linkedEventIds.map(() => "?").join(",");
-    const events = this.db
-      .prepare(
-        `SELECT id, session_id, topic_id, timestamp
-         FROM event_nodes
-         WHERE id IN (${placeholders})`,
-      )
-      .all(...linkedEventIds) as Array<{ id: number; session_id: string; topic_id: number | null; timestamp: number }>;
+    const graphReadQueryRepo = txGraphReadQueryRepo ?? this.graphReadQueryRepo;
+    const events = graphReadQueryRepo
+      ? await graphReadQueryRepo.getEventsByIds(linkedEventIds)
+      : await this.getEventsByIdsSqlite(linkedEventIds);
 
     if (events.length < 2) {
       return;
@@ -909,10 +1075,9 @@ export class MemoryTaskAgent {
     });
 
     const dayMs = 24 * 60 * 60 * 1000;
-    const insertStmt = this.db.prepare(
-      `INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, created_at)
-       VALUES (?, ?, 'same_episode', ?)`,
-    );
+    const insertStmt = txGraphMutableStoreRepo
+      ? null
+      : this.getSameEpisodeInsertStmtSqlite();
 
     for (let index = 0; index < sorted.length - 1; index += 1) {
       const current = sorted[index];
@@ -927,17 +1092,22 @@ export class MemoryTaskAgent {
         continue;
       }
 
-      const createdAt = Date.now();
-      insertStmt.run(current.id, next.id, createdAt);
-      insertStmt.run(next.id, current.id, createdAt);
+      if (txGraphMutableStoreRepo) {
+        await txGraphMutableStoreRepo.createLogicEdge(current.id, next.id, "same_episode");
+        await txGraphMutableStoreRepo.createLogicEdge(next.id, current.id, "same_episode");
+      } else {
+        this.insertSameEpisodeEdgeSqlite(insertStmt, current.id, next.id);
+        this.insertSameEpisodeEdgeSqlite(insertStmt, next.id, current.id);
+      }
     }
   }
 
-  private resolveEntityReference(
+  private async resolveEntityReference(
     value: unknown,
     agentId: string,
     pointerMap: Map<string, number>,
-  ): number | undefined {
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<number | undefined> {
     if (typeof value === "number" && Number.isInteger(value) && value > 0) {
       return value;
     }
@@ -950,11 +1120,198 @@ export class MemoryTaskAgent {
       return cached;
     }
 
+    if (txGraphMutableStoreRepo) {
+      const resolved = await txGraphMutableStoreRepo.resolveEntityByPointerKey(value, agentId);
+      if (resolved) {
+        pointerMap.set(value, resolved);
+        return resolved;
+      }
+    } else {
+      const resolved = this.resolveEntityReferenceSqlite(value, agentId);
+      if (resolved !== undefined) {
+        pointerMap.set(value, resolved);
+        return resolved;
+      }
+    }
+
+    return undefined;
+  }
+
+  private async runLegacySqliteTransaction(fn: () => Promise<void>): Promise<void> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      await fn();
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private async loadEntitiesForContextSqlite(agentId: string): Promise<unknown[]> {
+    return this.db
+      .prepare(
+        `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
+         FROM entity_nodes
+         WHERE memory_scope = 'shared_public' OR owner_agent_id = ?
+         ORDER BY updated_at DESC
+         LIMIT 200`,
+      )
+      .all(agentId);
+  }
+
+  private async upsertEntityCompat(
+    params: {
+      pointerKey: string;
+      displayName: string;
+      entityType: string;
+      memoryScope: "shared_public" | "private_overlay";
+      ownerAgentId?: string;
+    },
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<number> {
+    if (txGraphMutableStoreRepo) {
+      return txGraphMutableStoreRepo.upsertEntity(params);
+    }
+    return this.storage.upsertEntity(params);
+  }
+
+  private async createPrivateEventCompat(
+    params: {
+      eventId?: number;
+      agentId: string;
+      role?: string;
+      privateNotes?: string;
+      salience?: number;
+      emotion?: string;
+      eventCategory: PrivateEventCategory;
+      primaryActorEntityId?: number;
+      projectionClass: ProjectionClass;
+      locationEntityId?: number;
+      projectableSummary?: string;
+      sourceRecordId?: string;
+    },
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<number> {
+    if (txGraphMutableStoreRepo) {
+      return txGraphMutableStoreRepo.createPrivateEvent(params);
+    }
+    return this.storage.createPrivateEvent(params);
+  }
+
+  private async readPrivateEpisodeEventByIdCompat(
+    id: number,
+    txEpisodeRepo?: EpisodeRepo,
+  ): Promise<{
+    id: number;
+    event_id: number | null;
+    agent_id: string;
+    category: string;
+    private_notes: string | null;
+    created_at: number;
+  } | {
+    id: number;
+    valid_time: number | null;
+    agent_id: string;
+    category: string;
+    private_notes: string | null;
+    created_at: number;
+  } | null> {
+    if (txEpisodeRepo) {
+      return txEpisodeRepo.readById(id);
+    }
+    return this.db.prepare(
+      `SELECT id, valid_time as event_id, agent_id, category, summary, private_notes, committed_time, created_at FROM private_episode_events WHERE id = ?`
+    ).get(id) as {
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      category: string;
+      summary: string;
+      private_notes: string | null;
+      committed_time: number;
+      created_at: number;
+    } | null;
+  }
+
+  private async getPointerKeyByEntityIdCompat(
+    entityId: number,
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<string | undefined> {
+    if (txGraphMutableStoreRepo) {
+      return (await txGraphMutableStoreRepo.getEntityById(entityId))?.pointerKey;
+    }
+    return this.storage.getEntityById(entityId)?.pointerKey;
+  }
+
+  private patchSourceEventRefSqlite(beliefId: number, sourceEventRef: NodeRef): void {
+    this.db
+      .prepare(`UPDATE private_cognition_current SET source_event_ref = ?, updated_at = ? WHERE id = ?`)
+      .run(sourceEventRef, Date.now(), beliefId);
+  }
+
+  private async createEntityAliasCompat(
+    canonicalId: number,
+    alias: string,
+    aliasType: string | undefined,
+    ownerAgentId: string,
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<void> {
+    if (txGraphMutableStoreRepo) {
+      await txGraphMutableStoreRepo.createEntityAlias(canonicalId, alias, aliasType, ownerAgentId);
+      return;
+    }
+    this.storage.createEntityAlias(canonicalId, alias, aliasType, ownerAgentId);
+  }
+
+  private async createLogicEdgeCompat(
+    sourceEventId: number,
+    targetEventId: number,
+    relationType: "causal" | "temporal_prev" | "temporal_next" | "same_episode",
+    txGraphMutableStoreRepo?: GraphMutableStoreRepo,
+  ): Promise<void> {
+    if (txGraphMutableStoreRepo) {
+      await txGraphMutableStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType);
+      return;
+    }
+    this.storage.createLogicEdge(sourceEventId, targetEventId, relationType);
+  }
+
+  private async getEventsByIdsSqlite(
+    linkedEventIds: number[],
+  ): Promise<Array<{ id: number; session_id: string; topic_id: number | null; timestamp: number }>> {
+    return this.db
+      .prepare(
+        `SELECT id, session_id, topic_id, timestamp
+         FROM event_nodes
+         WHERE id IN (${linkedEventIds.map(() => "?").join(",")})`,
+      )
+      .all(...linkedEventIds) as Array<{ id: number; session_id: string; topic_id: number | null; timestamp: number }>;
+  }
+
+  private getSameEpisodeInsertStmtSqlite(): {
+    run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint };
+  } {
+    return this.db.prepare(
+      `INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, created_at)
+       VALUES (?, ?, 'same_episode', ?)`,
+    );
+  }
+
+  private insertSameEpisodeEdgeSqlite(
+    insertStmt: { run: (...params: unknown[]) => { changes: number; lastInsertRowid: number | bigint } } | null,
+    sourceEventId: number,
+    targetEventId: number,
+  ): void {
+    const createdAt = Date.now();
+    insertStmt?.run(sourceEventId, targetEventId, createdAt);
+  }
+
+  private resolveEntityReferenceSqlite(value: string, agentId: string): number | undefined {
     const privateRow = this.db
       .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = ? AND memory_scope = 'private_overlay' AND owner_agent_id = ?`)
       .get(value, agentId) as { id: number } | null;
     if (privateRow) {
-      pointerMap.set(value, privateRow.id);
       return privateRow.id;
     }
 
@@ -962,11 +1319,32 @@ export class MemoryTaskAgent {
       .prepare(`SELECT id FROM entity_nodes WHERE pointer_key = ? AND memory_scope = 'shared_public'`)
       .get(value) as { id: number } | null;
     if (sharedRow) {
-      pointerMap.set(value, sharedRow.id);
       return sharedRow.id;
     }
 
     return undefined;
+  }
+
+  private triggerMaterialization(
+    areaCandidates: Array<{
+      id: number;
+      event_id: number | null;
+      agent_id: string;
+      role: string | null;
+      private_notes: string | null;
+      salience: number | null;
+      emotion: string | null;
+      event_category: PrivateEventCategory;
+      primary_actor_entity_id: number | null;
+      projection_class: ProjectionClass;
+      location_entity_id: number | null;
+      projectable_summary: string | null;
+      source_record_id: string | null;
+      created_at: number;
+    }>,
+    agentId: string,
+  ): void {
+    this.materialization.materializeDelayed(areaCandidates, agentId);
   }
 
   private asString(value: unknown): string {

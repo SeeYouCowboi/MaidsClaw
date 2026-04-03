@@ -5,6 +5,7 @@ import type {
 
 export interface EpisodeRepo {
   append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number>;
+  readById(id: number): Promise<EpisodeRow | null>;
   readBySettlement(settlementId: string, agentId: string): Promise<EpisodeRow[]>;
   readPublicationsBySettlement(
     settlementId: string,
