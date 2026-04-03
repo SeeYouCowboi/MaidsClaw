@@ -761,14 +761,28 @@ type CliOptions = {
 	phaseFilter?: Set<Phase>;
 	dryRun: boolean;
 	startFrom: number;
+	maxRounds: number;
 };
 
 function parseArgs(argv: string[]): CliOptions {
-	const options: CliOptions = { dryRun: false, startFrom: 1 };
+	const options: CliOptions = { dryRun: false, startFrom: 1, maxRounds: 70 };
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--dry-run") {
 			options.dryRun = true;
+			continue;
+		}
+		if (arg === "--max-rounds") {
+			const value = argv[i + 1];
+			if (!value) {
+				throw new Error("--max-rounds 需要一个数字");
+			}
+			const n = Number(value);
+			if (!Number.isInteger(n) || n < 1 || n > 70) {
+				throw new Error("--max-rounds 必须是 1-70 的整数");
+			}
+			options.maxRounds = n;
+			i += 1;
 			continue;
 		}
 		if (arg === "--start-from") {
@@ -1322,7 +1336,7 @@ async function capturePhaseMemorySnapshot(args: {
 }
 
 function selectTurns(options: CliOptions): TurnSpec[] {
-	return TURN_SPECS.filter((turn) => {
+	const filtered = TURN_SPECS.filter((turn) => {
 		if (turn.round < options.startFrom) {
 			return false;
 		}
@@ -1331,6 +1345,32 @@ function selectTurns(options: CliOptions): TurnSpec[] {
 		}
 		return true;
 	});
+	return filtered.slice(0, options.maxRounds);
+}
+
+const INITIAL_PINNED_SUMMARY = `## 关于对话者（新研究员）的已知信息
+
+- 3天前随补给船抵达，自称海洋生物研究员
+- 由郑远洋安排接待，分配了宿舍和储藏室钥匙（第三把）
+- 年龄约25-30岁，对研究站布局不太熟悉，但海洋生物学术语运用自如
+- 到岛后3天内主要在实验室和样本区活动，与郑远洋有过几次交谈
+- 命案前夜我看到此人在走廊深夜独自走动（尚未向对方提及）
+- 真实身份和来岛目的不明
+
+## 当前态势判断
+
+- 此人到达时间与命案高度吻合，统计上不能当作巧合
+- 持有第三把储藏室钥匙，有进入案发现场的条件
+- 尚无直接证据证明其参与，但也无证据排除
+- 需要通过对话验证其陈述的一致性和可信度`;
+
+async function seedPinnedSummary(sql: postgres.Sql, agentId: string): Promise<void> {
+	const now = Date.now();
+	await sql`
+		INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at)
+		VALUES (${agentId}, 'pinned_summary', 'Pinned character summary (canonical)', ${INITIAL_PINNED_SUMMARY}, 4000, 0, ${now})
+		ON CONFLICT (agent_id, label) DO UPDATE SET value = ${INITIAL_PINNED_SUMMARY}, updated_at = ${now}
+	`;
 }
 
 async function main() {
@@ -1381,6 +1421,11 @@ async function main() {
 		const session = await host.user.session.createSession(AGENT_ID);
 		sessionId = session.session_id;
 		logLine(`Session created: ${sessionId}`);
+
+		if (sql) {
+			await seedPinnedSummary(sql, AGENT_ID);
+			logLine("Pinned summary seeded with initial player knowledge.");
+		}
 
 		const lastRoundPerPhase = new Map<Phase, number>();
 		for (const turn of selectedTurns) {
