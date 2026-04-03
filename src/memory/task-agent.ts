@@ -338,7 +338,7 @@ export class MemoryIngestionPolicy {
   }
 }
 
-export type MemoryTaskDbAdapter = {
+type MemoryTaskDbAdapter = {
   exec(sql: string): void;
   prepare(sql: string): {
     run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
