@@ -12,7 +12,6 @@ import {
 import { MaidsClawError } from "../core/errors.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
-
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -27,6 +26,7 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
 import { materializePublications } from "../memory/materialization.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
@@ -35,7 +35,6 @@ import type {
 	MemoryFlushRequest,
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
-import type { JobPersistence } from "../jobs/persistence.js";
 import type { SessionService } from "../session/service.js";
 import type {
 	SettlementRepos,
@@ -192,7 +191,11 @@ export class TurnService {
 		);
 
 		if (assistantActorType === "rp_agent") {
-			yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
+			if (this.talkerThinkerConfig.enabled) {
+				yield* this.runRpTalkerTurn(effectiveRequest, turnRangeStart);
+			} else {
+				yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
+			}
 			return;
 		}
 
@@ -266,6 +269,322 @@ export class TurnService {
 		});
 		this.traceLog(requestId, "error", "Turn failed and recovery path executed");
 		activeTraceStore?.finalizeTrace(requestId);
+	}
+
+	private async *runRpTalkerTurn(
+		request: AgentRunRequest,
+		turnRangeStart: number,
+	): AsyncGenerator<Chunk> {
+		const requestId = request.requestId ?? `req:${Date.now()}`;
+		const effectiveRequest: AgentRunRequest = {
+			...request,
+			requestId,
+			traceStore: request.traceStore ?? this.traceStore,
+			isTalkerMode: true,
+		};
+		const rpTraceStore = effectiveRequest.traceStore;
+
+		let bufferedResult: RpBufferedExecutionResult;
+		let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
+
+		try {
+			if (!this.agentLoop.runBuffered) {
+				throw new Error("RP buffered execution is unavailable");
+			}
+			bufferedResult = await this.agentLoop.runBuffered(effectiveRequest);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP buffered execution threw");
+			const errorChunk = {
+				code: "AGENT_LOOP_EXCEPTION",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if ("error" in bufferedResult) {
+			const errorChunk = {
+				code: "RP_BUFFERED_EXECUTION_FAILED",
+				message: bufferedResult.error,
+			};
+			this.traceLog(
+				requestId,
+				"error",
+				`RP buffered execution failed: ${bufferedResult.error}`,
+			);
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		let canonicalOutcome: CanonicalRpTurnOutcome;
+		try {
+			canonicalOutcome = normalizeRpTurnOutcome(
+				structuredClone(bufferedResult.outcome),
+			);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP outcome normalization failed");
+			const errorChunk = {
+				code: "RP_OUTCOME_NORMALIZATION_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText:
+					typeof bufferedResult.outcome?.publicReply === "string"
+						? bufferedResult.outcome.publicReply
+						: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const hasPublicReply = canonicalOutcome.publicReply.length > 0;
+		const hasAssistantVisibleActivity = hasPublicReply;
+		if (!hasPublicReply) {
+			const errorChunk = {
+				code: "RP_EMPTY_TURN",
+				message: "empty turn: publicReply is empty",
+			};
+			this.traceLog(requestId, "warn", "RP talker outcome was empty");
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const settlementId = `stl:${requestId}`;
+		const existingPayload = await this.getExistingSettlementPayload(
+			effectiveRequest.sessionId,
+			requestId,
+			settlementId,
+		);
+		if (existingPayload) {
+			const replayPublicReply =
+				typeof existingPayload?.publicReply === "string"
+					? existingPayload.publicReply
+					: "";
+
+			if (replayPublicReply.length > 0) {
+				const chunk: Chunk = {
+					type: "text_delta",
+					text: replayPublicReply,
+				};
+				this.traceChunk(requestId, chunk);
+				yield chunk;
+			}
+			const messageEndChunk: Chunk = {
+				type: "message_end",
+				stopReason: "end_turn",
+			};
+			this.traceChunk(requestId, messageEndChunk);
+			yield messageEndChunk;
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if (!this.settlementUnitOfWork) {
+			const errorChunk = {
+				code: "INTERNAL_ERROR",
+				message:
+					"PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
+			};
+			this.traceLog(requestId, "error", errorChunk.message);
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const ownerAgentId =
+			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
+		let talkerTurnVersion: number | undefined;
+		try {
+			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
+				effectiveRequest.sessionId,
+				"rp_agent",
+			);
+			const settlementPayload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: effectiveRequest.sessionId,
+				ownerAgentId,
+				publicReply: canonicalOutcome.publicReply,
+				hasPublicReply,
+				viewerSnapshot: resolvedViewerSnapshot,
+				schemaVersion: "turn_settlement_v5",
+				privateCognition: undefined,
+				privateEpisodes: undefined,
+				publications: undefined,
+				cognitiveSketch: canonicalOutcome.latentScratchpad,
+			};
+
+			await this.settlementUnitOfWork.run(async (repos) => {
+				await this.commitSettlementRecordsWithRepos({
+					repos,
+					sessionId: effectiveRequest.sessionId,
+					requestId,
+					settlementId,
+					settlementPayload,
+					hasPublicReply,
+					publicReply: canonicalOutcome.publicReply,
+				});
+
+				const versionResult =
+					await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
+						effectiveRequest.sessionId,
+						ownerAgentId,
+						settlementId,
+						"[]",
+						"talker",
+					);
+				talkerTurnVersion = versionResult.talkerTurnCounter;
+			});
+
+			settlementPayloadAfterCommit = settlementPayload;
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "Turn settlement transaction failed");
+			const errorChunk = {
+				code: "TURN_SETTLEMENT_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if (settlementPayloadAfterCommit) {
+			const normalizedSettlementPayload = normalizeSettlementPayload(
+				settlementPayloadAfterCommit,
+			);
+			this.traceStore?.addSettlement(
+				requestId,
+				this.toRedactedSettlementSummary(
+					effectiveRequest.sessionId,
+					normalizedSettlementPayload,
+				),
+			);
+		}
+
+		if (this.jobPersistence && talkerTurnVersion !== undefined) {
+			const thinkerJobEntry = {
+				id: `thinker:${effectiveRequest.sessionId}:${settlementId}`,
+				jobType: "cognition.thinker" as const,
+				payload: {
+					sessionId: effectiveRequest.sessionId,
+					agentId: ownerAgentId,
+					settlementId,
+					talkerTurnVersion,
+				} satisfies import("../jobs/durable-store.js").CognitionThinkerJobPayload,
+				status: "pending" as const,
+				maxAttempts: 3,
+			};
+
+			try {
+				await this.jobPersistence.enqueue(thinkerJobEntry);
+			} catch (error: unknown) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`Thinker enqueue failed, retrying once: ${error instanceof Error ? error.message : String(error)}`,
+				);
+				await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+				try {
+					await this.jobPersistence.enqueue(thinkerJobEntry);
+				} catch (retryError: unknown) {
+					this.traceLog(
+						requestId,
+						"warn",
+						`Thinker enqueue retry failed: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
+					);
+				}
+			}
+		}
+
+		if (hasPublicReply) {
+			const textChunk: Chunk = {
+				type: "text_delta",
+				text: canonicalOutcome.publicReply,
+			};
+			this.traceChunk(requestId, textChunk);
+			yield textChunk;
+		}
+		const messageEndChunk: Chunk = {
+			type: "message_end",
+			stopReason: "end_turn",
+		};
+		this.traceChunk(requestId, messageEndChunk);
+		yield messageEndChunk;
+
+		rpTraceStore?.finalizeTrace(requestId);
 	}
 
 	private async *runRpBufferedTurn(
