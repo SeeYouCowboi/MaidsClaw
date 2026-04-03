@@ -778,7 +778,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T9)
 
-- [ ] 11. Re-wire runtime.ts — Remove throwingMemoryDbAdapter, wire all PG repos
+ - [x] 11. Re-wire runtime.ts — Remove throwingMemoryDbAdapter, wire all PG repos
 
   **What to do**:
   - Modify `src/bootstrap/runtime.ts`:
@@ -821,7 +821,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T12)
 
-- [ ] 12. Cleanup — Remove DbLike/MemoryTaskDbAdapter types + dead imports from MIGRATED files
+ - [x] 12. Cleanup — Remove DbLike/MemoryTaskDbAdapter types + dead imports from MIGRATED files
 
   **What to do**:
   - Remove `MemoryTaskDbAdapter` type export from `src/memory/task-agent.ts`
@@ -848,7 +848,7 @@ Max Concurrent: 4 (Wave 2)
 
   **Commit**: YES (groups with T11)
 
-- [ ] 13. Full chain integration test — MemoryTaskAgent flush + vector retrieval
+ - [x] 13. Full chain integration test — MemoryTaskAgent flush + vector retrieval
 
   **What to do**:
   - Write integration tests verifying the FULL flush chain works:
