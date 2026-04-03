@@ -309,7 +309,7 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
     ).toThrow(`privateEpisode category "thought" is not allowed`);
   });
 
-  it("preserves latentScratchpad as trace-only marker, not a durable artifact", () => {
+  it("preserves latentScratchpad as durable cognitive sketch in settlement", () => {
     const result = normalizeRpTurnOutcome({
       schemaVersion: "rp_turn_outcome_v5",
       publicReply: "test",

@@ -448,35 +448,36 @@ export class TurnService {
 			const ownerAgentId =
 				(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
 			viewerSnapshot = resolvedViewerSnapshot;
-			const settlementPayload: TurnSettlementPayload = {
-				settlementId,
-				requestId,
-				sessionId: effectiveRequest.sessionId,
-				ownerAgentId,
-				publicReply: canonicalOutcome.publicReply,
-				hasPublicReply,
-				viewerSnapshot: resolvedViewerSnapshot,
-				schemaVersion: "turn_settlement_v5",
-				privateCognition: hasPrivateOps
-					? canonicalOutcome.privateCognition
-					: undefined,
-				privateEpisodes:
-					canonicalOutcome.privateEpisodes.length > 0
-						? canonicalOutcome.privateEpisodes
-						: undefined,
-				publications,
-				...(canonicalOutcome.pinnedSummaryProposal
-					? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
-					: {}),
-				relationIntents:
-					canonicalOutcome.relationIntents.length > 0
-						? canonicalOutcome.relationIntents
-						: undefined,
-				conflictFactors:
-					canonicalOutcome.conflictFactors.length > 0
-						? canonicalOutcome.conflictFactors
-						: undefined,
-			};
+      const settlementPayload: TurnSettlementPayload = {
+        settlementId,
+        requestId,
+        sessionId: effectiveRequest.sessionId,
+        ownerAgentId,
+        publicReply: canonicalOutcome.publicReply,
+        hasPublicReply,
+        viewerSnapshot: resolvedViewerSnapshot,
+        schemaVersion: "turn_settlement_v5",
+        privateCognition: hasPrivateOps
+          ? canonicalOutcome.privateCognition
+          : undefined,
+        privateEpisodes:
+          canonicalOutcome.privateEpisodes.length > 0
+            ? canonicalOutcome.privateEpisodes
+            : undefined,
+        publications,
+        ...(canonicalOutcome.pinnedSummaryProposal
+          ? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+          : {}),
+        relationIntents:
+          canonicalOutcome.relationIntents.length > 0
+            ? canonicalOutcome.relationIntents
+            : undefined,
+        conflictFactors:
+          canonicalOutcome.conflictFactors.length > 0
+            ? canonicalOutcome.conflictFactors
+            : undefined,
+        cognitiveSketch: canonicalOutcome.latentScratchpad,
+      };
 
 			const slotEntries = buildCognitionSlotPayload(
 				canonicalOutcome.privateCognition?.ops ?? [],

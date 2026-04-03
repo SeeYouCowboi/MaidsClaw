@@ -119,8 +119,20 @@ export type TurnSettlementPayload = {
     validTime?: number;
     committedTime?: number;
   }>;
+  /** Durable cognitive sketch from latentScratchpad, stored for Thinker processing */
+  cognitiveSketch?: string;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {
   settlementId?: string;
 };
+
+/**
+ * Extracts the cognitive sketch from a TurnSettlementPayload.
+ * Returns undefined if no cognitive sketch was stored.
+ */
+export function getSketchFromSettlement(
+  payload: TurnSettlementPayload,
+): string | undefined {
+  return payload.cognitiveSketch;
+}
