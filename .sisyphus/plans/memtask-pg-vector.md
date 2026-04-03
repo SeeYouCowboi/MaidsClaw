@@ -891,19 +891,19 @@ Max Concurrent: 4 (Wave 2)
 
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, commented-out code, unused imports. Verify no `db.prepare()` calls remain **in the 6 migrated files** (cognition-repo.ts, cognition-event-repo.ts, relation-builder.ts, relation-intent-resolver.ts, explicit-settlement-processor.ts, task-agent.ts). Verify no `Bun.peek` calls remain **in `embeddings.ts`** and **in `createSettlementLedgerAdapter()` at `runtime.ts:241-309`** (replaced with direct async passthrough per T7 item 7). Verify `SettlementLedger` interface (`settlement-ledger.ts`) is fully async (all methods return `Promise`). Verify `CoreMemoryIndexUpdater.updateIndex()` is called OUTSIDE `sql.begin()` in `runMigrateInternal()`. Verify ZERO `this.storage.*` sync facade calls remain inside `runMigrateInternal()` (including `this.storage.getEntityById`). Verify `PgGraphMutableStoreRepo` implements `getEntityById()`. NOTE: `db.prepare`/`Bun.peek` in non-migrated files (`storage.ts`, `materialization.ts`, `promotion.ts`, `shared-block-repo.ts`, `area-world-projection-repo.ts`, `transaction-batcher.ts`) are expected and OUT OF SCOPE — do NOT flag them.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Execute EVERY QA scenario from EVERY task. Test cross-component integration (MemoryTaskAgent → CognitionRepo → PG). Test edge cases: empty DB, invalid cognition keys, concurrent entity resolution. Save to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: verify "What to do" matches actual diff. Check "Must NOT do" compliance. Verify belief-revision.ts untouched. Verify no write-path semantics changed. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | VERDICT`
 
