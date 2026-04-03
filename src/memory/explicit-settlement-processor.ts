@@ -32,6 +32,8 @@ import {
   validateRelationIntents,
   type SettledArtifacts,
 } from "./cognition/relation-intent-resolver.js";
+import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
+import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
@@ -47,8 +49,8 @@ import type {
 } from "./task-agent.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
 
-type ExistingContextLoader = (agentId: string) => { entities: unknown[]; privateBeliefs: unknown[] };
-type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => void;
+type ExistingContextLoader = (agentId: string) => Promise<{ entities: unknown[]; privateBeliefs: unknown[] }>;
+type CallOneApplier = (flushRequest: MemoryFlushRequest, toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>, created: CreatedState) => Promise<void>;
 
 const V3_BASIS_TO_V4: Record<string, AssertionBasis> = {
   observation: "first_hand",
@@ -74,12 +76,16 @@ export type ExplicitSettlementProcessorDeps = {
     | "getCommitmentByKey"
   >;
   relationBuilder: Pick<RelationBuilder, "writeContestRelations">;
+  relationWriteRepo: Pick<RelationWriteRepo, "upsertRelation">;
+  cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent">;
 };
 
 export class ExplicitSettlementProcessor {
   private readonly db: ExplicitSettlementDbAdapter;
   private readonly cognitionRepo: ExplicitSettlementProcessorDeps["cognitionRepo"];
   private readonly relationBuilder: ExplicitSettlementProcessorDeps["relationBuilder"];
+  private readonly relationWriteRepo: ExplicitSettlementProcessorDeps["relationWriteRepo"];
+  private readonly cognitionProjectionRepo: ExplicitSettlementProcessorDeps["cognitionProjectionRepo"];
 
   constructor(
     deps: ExplicitSettlementProcessorDeps,
@@ -92,6 +98,8 @@ export class ExplicitSettlementProcessor {
     this.db = deps.db;
     this.cognitionRepo = deps.cognitionRepo;
     this.relationBuilder = deps.relationBuilder;
+    this.relationWriteRepo = deps.relationWriteRepo;
+    this.cognitionProjectionRepo = deps.cognitionProjectionRepo;
   }
 
   async process(
@@ -132,7 +140,7 @@ export class ExplicitSettlementProcessor {
 
       try {
         const explicitIngest = this.buildExplicitIngest(ingest, explicitMeta.requestId);
-        const explicitContext = this.loadExistingContext(explicitMeta.ownerAgentId);
+        const explicitContext = await this.loadExistingContext(explicitMeta.ownerAgentId);
         const explicitSupportCall = await this.modelProvider.chat(
           [
             {
@@ -148,7 +156,7 @@ export class ExplicitSettlementProcessor {
           explicitSupportTools,
         );
 
-        this.applyCallOneToolCalls(
+        await this.applyCallOneToolCalls(
           {
             ...flushRequest,
             agentId: explicitMeta.ownerAgentId,
@@ -159,7 +167,7 @@ export class ExplicitSettlementProcessor {
 
         const settlementPayload = this.findSettlementPayload(ingest.attachments, explicitMeta.settlementId);
         const currentLocationEntityId = settlementPayload?.viewerSnapshot.currentLocationEntityId;
-        const commitResult = this.commitCognitionOps(
+        const commitResult = await this.commitCognitionOps(
           explicitMeta.ownerAgentId,
           explicitMeta.privateCognition.ops,
           explicitMeta.settlementId,
@@ -177,11 +185,11 @@ export class ExplicitSettlementProcessor {
           const resolvedRefs = resolveLocalRefs(settlementPayload, settledArtifacts);
           const relationIntents = settlementPayload.relationIntents ?? [];
           validateRelationIntents(relationIntents, resolvedRefs);
-          materializeRelationIntents(relationIntents, resolvedRefs, this.db);
+          await materializeRelationIntents(relationIntents, resolvedRefs, this.relationWriteRepo);
 
-          const conflictResult = resolveConflictFactors(
+          const conflictResult = await resolveConflictFactors(
             settlementPayload.conflictFactors ?? [],
-            this.db,
+            this.cognitionProjectionRepo,
             {
               settledRefs: resolvedRefs,
               settlementId: explicitMeta.settlementId,
@@ -198,7 +206,12 @@ export class ExplicitSettlementProcessor {
           );
         }
 
-        this.collectExplicitSettlementRefs(explicitMeta.ownerAgentId, explicitMeta.settlementId, explicitMeta.privateCognition.ops, created);
+        await this.collectExplicitSettlementRefs(
+          explicitMeta.ownerAgentId,
+          explicitMeta.settlementId,
+          explicitMeta.privateCognition.ops,
+          created,
+        );
         this.settlementLedger?.markApplied(explicitMeta.settlementId);
       } catch (error) {
         this.settlementLedger?.markFailed(
@@ -211,16 +224,16 @@ export class ExplicitSettlementProcessor {
     }
   }
 
-  private commitCognitionOps(
+  private async commitCognitionOps(
     agentId: string,
     ops: CognitionOp[],
     settlementId: string,
     currentLocationEntityId?: number,
-  ): {
+  ): Promise<{
     refs: NodeRef[];
     cognitionByKey: Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>;
     contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }>;
-  } {
+  }> {
     const refs: NodeRef[] = [];
     const cognitionByKey = new Map<string, { kind: "assertion" | "evaluation" | "commitment"; nodeRef: string }>();
     const contestedAssertions: Array<{ cognitionKey: string; nodeRef: string }> = [];
@@ -230,7 +243,7 @@ export class ExplicitSettlementProcessor {
       const op = ops[opIndex] as CognitionOp;
       if (op.op === "upsert") {
         try {
-          const committed = this.commitUpsert(op.record, agentId, settlementId, opIndex, currentLocationEntityId);
+          const committed = await this.commitUpsert(op.record, agentId, settlementId, opIndex, currentLocationEntityId);
           refs.push(committed.nodeRef);
           cognitionByKey.set(op.record.key, { kind: op.record.kind, nodeRef: committed.nodeRef });
           if (op.record.kind === "assertion" && op.record.stance === "contested") {
@@ -247,7 +260,7 @@ export class ExplicitSettlementProcessor {
       }
 
       if (op.op === "retract") {
-        this.cognitionRepo.retractCognition(agentId, op.target.key, op.target.kind, settlementId);
+        await this.cognitionRepo.retractCognition(agentId, op.target.key, op.target.kind, settlementId);
       }
     }
 
@@ -263,13 +276,13 @@ export class ExplicitSettlementProcessor {
     return { refs, cognitionByKey, contestedAssertions };
   }
 
-  private commitUpsert(
+  private async commitUpsert(
     record: CognitionRecord,
     agentId: string,
     settlementId: string,
     opIndex: number,
     currentLocationEntityId?: number,
-  ): { nodeRef: NodeRef } {
+  ): Promise<{ nodeRef: NodeRef }> {
     if (record.kind === "assertion") {
       const sourcePointerKey = this.resolvePointerKey(record.proposition.subject, currentLocationEntityId, agentId);
       const targetPointerKey = this.resolvePointerKey(record.proposition.object.ref, currentLocationEntityId, agentId);
@@ -278,7 +291,7 @@ export class ExplicitSettlementProcessor {
         ? (record as AssertionRecordV4).preContestedStance
         : undefined;
 
-      const result = this.cognitionRepo.upsertAssertion({
+      const result = await this.cognitionRepo.upsertAssertion({
         agentId,
         cognitionKey: record.key,
         settlementId,
@@ -296,7 +309,7 @@ export class ExplicitSettlementProcessor {
 
     if (record.kind === "evaluation") {
       const targetEntityId = this.resolveTargetEntityId(record, agentId, currentLocationEntityId);
-      const result = this.cognitionRepo.upsertEvaluation({
+      const result = await this.cognitionRepo.upsertEvaluation({
         agentId,
         cognitionKey: record.key,
         settlementId,
@@ -312,7 +325,7 @@ export class ExplicitSettlementProcessor {
 
     const commitmentRecord = record as CommitmentRecord;
     const targetEntityId = this.resolveCommitmentTargetEntityId(commitmentRecord, agentId, currentLocationEntityId);
-    const result = this.cognitionRepo.upsertCommitment({
+    const result = await this.cognitionRepo.upsertCommitment({
       agentId,
       cognitionKey: record.key,
       settlementId,
@@ -551,25 +564,25 @@ export class ExplicitSettlementProcessor {
     return settlementAttachment.payload as TurnSettlementPayload;
   }
 
-  private collectExplicitSettlementRefs(agentId: string, settlementId: string, ops: CognitionOp[], created: CreatedState): void {
-    const evaluations = this.cognitionRepo
-      .getEvaluations(agentId, { activeOnly: false })
+  private async collectExplicitSettlementRefs(agentId: string, settlementId: string, ops: CognitionOp[], created: CreatedState): Promise<void> {
+    const evaluations = (await this.cognitionRepo
+      .getEvaluations(agentId, { activeOnly: false }))
       .filter((row) => row.settlementId === settlementId);
     for (const row of evaluations) {
       created.episodeEventIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("evaluation", row.id));
     }
 
-    const commitments = this.cognitionRepo
-      .getCommitments(agentId, { activeOnly: false })
+    const commitments = (await this.cognitionRepo
+      .getCommitments(agentId, { activeOnly: false }))
       .filter((row) => row.settlementId === settlementId);
     for (const row of commitments) {
       created.episodeEventIds.push(row.id);
       created.changedNodeRefs.push(makeNodeRef("commitment", row.id));
     }
 
-    const assertions = this.cognitionRepo
-      .getAssertions(agentId, { activeOnly: false })
+    const assertions = (await this.cognitionRepo
+      .getAssertions(agentId, { activeOnly: false }))
       .filter((row) => row.settlementId === settlementId);
     for (const row of assertions) {
       created.assertionIds.push(row.id);
@@ -581,7 +594,7 @@ export class ExplicitSettlementProcessor {
         continue;
       }
       if (op.target.kind === "assertion") {
-        const row = this.cognitionRepo.getAssertionByKey(agentId, op.target.key);
+        const row = await this.cognitionRepo.getAssertionByKey(agentId, op.target.key);
         if (row) {
           created.assertionIds.push(row.id);
           created.changedNodeRefs.push(makeNodeRef("assertion", row.id));
@@ -589,10 +602,11 @@ export class ExplicitSettlementProcessor {
         continue;
       }
 
-      const row =
+      const row = await (
         op.target.kind === "evaluation"
           ? this.cognitionRepo.getEvaluationByKey(agentId, op.target.key)
-          : this.cognitionRepo.getCommitmentByKey(agentId, op.target.key);
+          : this.cognitionRepo.getCommitmentByKey(agentId, op.target.key)
+      );
       if (row) {
         created.episodeEventIds.push(row.id);
         created.changedNodeRefs.push(makeNodeRef(op.target.kind, row.id));

@@ -9,33 +9,9 @@
 import type { MemoryRelationType, RelationDirectness, RelationSourceKind } from "../types.js";
 import type { ResolutionChainType } from "../contracts/relation-contract.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
-
-type DbLike = {
-  prepare(sql: string): {
-    run(...params: unknown[]): { lastInsertRowid: number | bigint };
-    all(...params: unknown[]): unknown[];
-    get(...params: unknown[]): unknown;
-  };
-};
-
-type ConflictEvidenceRow = {
-  target_node_ref: string;
-  strength: number;
-  source_kind: string;
-  source_ref: string;
-  created_at: number;
-};
-
-type ConflictHistoryRow = {
-  relation_type: string;
-  source_node_ref: string;
-  target_node_ref: string;
-  created_at: number;
-};
-
-type AgentRow = { agent_id: string };
-type AssertionIdRow = { id: number };
-type CognitionProjectionRow = { id: number; kind: string | null };
+import type { CognitionProjectionRepo } from "../../storage/domain-repos/contracts/cognition-projection-repo.js";
+import type { RelationReadRepo } from "../../storage/domain-repos/contracts/relation-read-repo.js";
+import type { RelationWriteRepo } from "../../storage/domain-repos/contracts/relation-write-repo.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
@@ -58,8 +34,41 @@ export type ConflictHistoryEntry = {
   created_at: number;
 };
 
+type RelationBuilderDeps = {
+  relationWriteRepo: RelationWriteRepo;
+  relationReadRepo: RelationReadRepo;
+  cognitionProjectionRepo: CognitionProjectionRepo;
+};
+
 export class RelationBuilder {
-  constructor(private readonly db: DbLike) {}
+  private readonly relationWriteRepo: RelationWriteRepo;
+  private readonly relationReadRepo: RelationReadRepo;
+
+  constructor(deps: RelationBuilderDeps | unknown) {
+    if (isRelationBuilderDeps(deps)) {
+      this.relationWriteRepo = deps.relationWriteRepo;
+      this.relationReadRepo = deps.relationReadRepo;
+      void deps.cognitionProjectionRepo;
+      return;
+    }
+
+    const unsupported = (): never => {
+      throw new Error("RelationBuilder requires PG repo dependencies");
+    };
+
+    this.relationWriteRepo = {
+      upsertRelation: async () => unsupported(),
+      getRelationsBySource: async () => unsupported(),
+      getRelationsForNode: async () => unsupported(),
+    };
+
+    this.relationReadRepo = {
+      getConflictEvidence: async () => unsupported(),
+      getConflictHistory: async () => unsupported(),
+      resolveSourceAgentId: async () => unsupported(),
+      resolveCanonicalCognitionRefByKey: async () => unsupported(),
+    };
+  }
 
   /**
    * Write a `conflicts_with` relation when an assertion transitions to `contested`.
@@ -69,14 +78,14 @@ export class RelationBuilder {
    * @param sourceRef     - Provenance ref (e.g. settlement ID)
    * @param strength      - Relation strength (0–1), default 0.8
    */
-  writeContestRelations(
+  async writeContestRelations(
     sourceNodeRef: string,
     factorNodeRefs: string[],
     sourceRef: string,
     strength = 0.8,
-  ): void {
-    const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
-    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
+  ): Promise<void> {
+    const sourceAgentId = await this.resolveSourceAgentId(sourceNodeRef);
+    const canonicalSourceRef = await this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
     if (!canonicalSourceRef) {
       throw new Error(`Unsupported conflict source node ref: ${sourceNodeRef}`);
     }
@@ -84,7 +93,7 @@ export class RelationBuilder {
     const targets = new Set<string>();
     let droppedInvalidRefs = 0;
     for (const nodeRef of factorNodeRefs) {
-      const resolvedTargetRef = this.resolveTargetNodeRef(nodeRef, sourceAgentId);
+      const resolvedTargetRef = await this.resolveTargetNodeRef(nodeRef, sourceAgentId);
       if (!resolvedTargetRef) {
         droppedInvalidRefs += 1;
         continue;
@@ -108,7 +117,7 @@ export class RelationBuilder {
     }
 
     for (const targetNodeRef of targets) {
-      this.writeRelation(CONFLICTS_WITH, canonicalSourceRef, targetNodeRef, sourceRef, {
+      await this.writeRelation(CONFLICTS_WITH, canonicalSourceRef, targetNodeRef, sourceRef, {
         strength,
       });
     }
@@ -120,7 +129,7 @@ export class RelationBuilder {
    * Defaults mirror the `conflicts_with` path:
    *   strength = 0.8, directness = "direct", sourceKind = "agent_op"
    */
-  writeRelation(
+  async writeRelation(
     relationType: MemoryRelationType,
     sourceNodeRef: string,
     targetNodeRef: string,
@@ -130,56 +139,43 @@ export class RelationBuilder {
       directness?: RelationDirectness;
       sourceKind?: RelationSourceKind;
     },
-  ): void {
+  ): Promise<void> {
     const strength = options?.strength ?? 0.8;
     const directness: RelationDirectness = options?.directness ?? DIRECTNESS_DIRECT;
     const sourceKind: RelationSourceKind = options?.sourceKind ?? SOURCE_KIND_AGENT_OP;
     const now = Date.now();
 
-    this.db
-      .prepare(
-        `INSERT INTO memory_relations
-         (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
-         DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
-      )
-      .run(
-        sourceNodeRef,
-        targetNodeRef,
-        relationType,
-        strength,
-        directness,
-        sourceKind,
-        sourceRef,
-        now,
-        now,
-      );
+    await this.relationWriteRepo.upsertRelation({
+      sourceNodeRef,
+      targetNodeRef,
+      relationType,
+      sourceKind,
+      sourceRef,
+      strength,
+      directness,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
   /**
    * Read up to `limit` conflict evidence rows for a given source node ref.
    * Returns strongest-first.
    */
-  getConflictEvidence(sourceNodeRef: string, limit = 3): ConflictEvidence[] {
-    const sourceAgentId = this.resolveSourceAgentId(sourceNodeRef);
-    const canonicalSourceRef = this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
+  async getConflictEvidence(sourceNodeRef: string, limit = 3): Promise<ConflictEvidence[]> {
+    const sourceAgentId = await this.resolveSourceAgentId(sourceNodeRef);
+    const canonicalSourceRef = await this.resolveTargetNodeRef(sourceNodeRef, sourceAgentId);
     if (!canonicalSourceRef) {
       throw new Error(`Unsupported conflict source node ref: ${sourceNodeRef}`);
     }
-    const rows = this.db
-      .prepare(
-        `SELECT target_node_ref, strength, source_kind, source_ref, created_at
-         FROM memory_relations
-         WHERE source_node_ref = ? AND relation_type = ?
-         ORDER BY strength DESC
-         LIMIT ?`,
-      )
-      .all(canonicalSourceRef, CONFLICTS_WITH, limit) as ConflictEvidenceRow[];
+
+    const rows = await this.relationWriteRepo.getRelationsBySource(canonicalSourceRef, CONFLICTS_WITH);
+    rows.sort((a, b) => b.strength - a.strength);
+    const limitedRows = rows.slice(0, limit);
 
     const normalized: ConflictEvidence[] = [];
-    for (const row of rows) {
-      const targetRef = this.resolveTargetNodeRef(row.target_node_ref, sourceAgentId);
+    for (const row of limitedRows) {
+      const targetRef = await this.resolveTargetNodeRef(row.target_node_ref, sourceAgentId);
       if (!targetRef) {
         continue;
       }
@@ -200,27 +196,25 @@ export class RelationBuilder {
    * Returns `conflicts_with`, `resolved_by`, and `downgraded_by` relations
    * where the node appears as either source or target.
    */
-  getConflictHistory(nodeRef: string, limit = 20): ConflictHistoryEntry[] {
-    const rows = this.db
-      .prepare(
-        `SELECT relation_type, source_node_ref, target_node_ref, created_at
-         FROM memory_relations
-         WHERE (source_node_ref = ? OR target_node_ref = ?)
-           AND relation_type IN ('conflicts_with', 'resolved_by', 'downgraded_by')
-         ORDER BY created_at ASC
-         LIMIT ?`,
-      )
-      .all(nodeRef, nodeRef, limit) as ConflictHistoryRow[];
+  async getConflictHistory(nodeRef: string, limit = 20): Promise<ConflictHistoryEntry[]> {
+    const rows = await this.relationWriteRepo.getRelationsForNode(nodeRef, [
+      "conflicts_with",
+      "resolved_by",
+      "downgraded_by",
+    ]);
 
-    return rows.map((row) => ({
+    const mapped = rows.map((row) => ({
       relation_type: row.relation_type as ConflictHistoryEntry["relation_type"],
       source_node_ref: row.source_node_ref,
       target_node_ref: row.target_node_ref,
       created_at: row.created_at,
     }));
+
+    mapped.sort((a, b) => a.created_at - b.created_at);
+    return mapped.slice(0, limit);
   }
 
-  private resolveTargetNodeRef(rawNodeRef: string, sourceAgentId: string | null): string | null {
+  private async resolveTargetNodeRef(rawNodeRef: string, sourceAgentId: string | null): Promise<string | null> {
     const trimmed = rawNodeRef.trim();
     if (!trimmed) {
       return null;
@@ -244,46 +238,8 @@ export class RelationBuilder {
     return this.resolveCanonicalCognitionRefByKey(cognitionKey, sourceAgentId);
   }
 
-  private resolveSourceAgentId(sourceNodeRef: string): string | null {
-    const trimmed = sourceNodeRef.trim();
-
-    if (trimmed.startsWith("assertion:")) {
-      const id = Number(trimmed.slice("assertion:".length));
-      if (!Number.isFinite(id)) {
-        return null;
-      }
-
-      const row = this.db
-        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ? AND kind = 'assertion'`)
-        .get(id) as AgentRow | null;
-      return row?.agent_id ?? null;
-    }
-
-    if (trimmed.startsWith("private_episode:")) {
-      const id = Number(trimmed.slice("private_episode:".length));
-      if (!Number.isFinite(id)) {
-        return null;
-      }
-
-      const row = this.db
-        .prepare(`SELECT agent_id FROM private_episode_events WHERE id = ?`)
-        .get(id) as AgentRow | null;
-      return row?.agent_id ?? null;
-    }
-
-    if (trimmed.startsWith("evaluation:") || trimmed.startsWith("commitment:")) {
-      const id = Number(trimmed.slice(trimmed.indexOf(":") + 1));
-      if (!Number.isFinite(id)) {
-        return null;
-      }
-
-      const row = this.db
-        .prepare(`SELECT agent_id FROM private_cognition_current WHERE id = ?`)
-        .get(id) as AgentRow | null;
-      return row?.agent_id ?? null;
-    }
-
-    return null;
+  private async resolveSourceAgentId(sourceNodeRef: string): Promise<string | null> {
+    return this.relationReadRepo.resolveSourceAgentId(sourceNodeRef);
   }
 
   private extractCognitionKey(rawRef: string): string | null {
@@ -295,38 +251,25 @@ export class RelationBuilder {
     return null;
   }
 
-  private resolveCanonicalCognitionRefByKey(cognitionKey: string, sourceAgentId: string | null): string | null {
-    const agentFilter = sourceAgentId ? " AND agent_id = ?" : "";
-    const agentBind = sourceAgentId ? [sourceAgentId] : [];
-
-    const assertion = this.db
-      .prepare(
-        `SELECT id
-         FROM private_cognition_current
-         WHERE cognition_key = ?${agentFilter}
-           AND kind = 'assertion'
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-      )
-      .get(cognitionKey, ...agentBind) as AssertionIdRow | null;
-    if (assertion) {
-      return `assertion:${assertion.id}`;
-    }
-
-    const cognition = this.db
-      .prepare(
-        `SELECT id, kind
-         FROM private_cognition_current
-         WHERE cognition_key = ?${agentFilter}
-           AND kind IN ('evaluation', 'commitment')
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-      )
-      .get(cognitionKey, ...agentBind) as CognitionProjectionRow | null;
-    if (!cognition || (cognition.kind !== "evaluation" && cognition.kind !== "commitment")) {
-      return null;
-    }
-
-    return `${cognition.kind}:${cognition.id}`;
+  private async resolveCanonicalCognitionRefByKey(
+    cognitionKey: string,
+    sourceAgentId: string | null,
+  ): Promise<string | null> {
+    return this.relationReadRepo.resolveCanonicalCognitionRefByKey(cognitionKey, sourceAgentId);
   }
+}
+
+function isRelationBuilderDeps(value: unknown): value is RelationBuilderDeps {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<RelationBuilderDeps>;
+  return (
+    typeof candidate.relationWriteRepo === "object"
+    && candidate.relationWriteRepo !== null
+    && typeof candidate.relationReadRepo === "object"
+    && candidate.relationReadRepo !== null
+    && typeof candidate.cognitionProjectionRepo === "object"
+    && candidate.cognitionProjectionRepo !== null
+  );
 }

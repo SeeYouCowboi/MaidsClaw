@@ -376,14 +376,28 @@ export class MemoryTaskAgent {
       db: this.db,
       cognitionRepo: new CognitionRepository(this.db),
       relationBuilder: new RelationBuilder(this.db),
+      relationWriteRepo: {
+        upsertRelation: async (): Promise<void> => { throw new Error("relationWriteRepo not configured for PG"); },
+        getRelationsBySource: async (): Promise<never[]> => { throw new Error("relationWriteRepo not configured for PG"); },
+        getRelationsForNode: async (): Promise<never[]> => { throw new Error("relationWriteRepo not configured for PG"); },
+      },
+      cognitionProjectionRepo: {
+        upsertFromEvent: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        rebuild: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        getCurrent: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        getAllCurrent: async (): Promise<never[]> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        updateConflictFactors: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        patchRecordJsonSourceEventRef: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+        resolveEntityByPointerKey: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+      },
     };
     this.explicitSettlementProcessor = new ExplicitSettlementProcessor(
       explicitSettlementDeps,
       this.storage,
       this.modelProvider,
       (agentId) => this.loadExistingContext(agentId),
-      (request, toolCalls, created) => {
-        this.applyCallOneToolCalls(request, toolCalls, created);
+      async (request, toolCalls, created) => {
+        await this.applyCallOneToolCalls(request, toolCalls, created);
       },
       settlementLedger ?? (() => { throw new Error("settlementLedger is required"); })(),
     );
@@ -418,7 +432,7 @@ export class MemoryTaskAgent {
   private async runMigrateInternal(flushRequest: MemoryFlushRequest): Promise<MigrationResult> {
     this.assertQueueOwnership(flushRequest);
     const ingest = this.ingestionPolicy.buildMigrateInput(flushRequest);
-    const existingContext = this.loadExistingContext(flushRequest.agentId);
+    const existingContext = await this.loadExistingContext(flushRequest.agentId);
     const created: CreatedState = {
       episodeEventIds: [],
       assertionIds: [],
@@ -472,7 +486,7 @@ export class MemoryTaskAgent {
         CALL_ONE_TOOLS,
       );
 
-      const createdPrivateEvents = this.applyCallOneToolCalls(flushRequest, callOne, created);
+      const createdPrivateEvents = await this.applyCallOneToolCalls(flushRequest, callOne, created);
       const areaCandidates = createdPrivateEvents.filter((event) => event.projection_class === "area_candidate");
       if (areaCandidates.length > 0) {
         this.materialization.materializeDelayed(areaCandidates, flushRequest.agentId);
@@ -614,7 +628,7 @@ export class MemoryTaskAgent {
     }
   }
 
-  private loadExistingContext(agentId: string): { entities: unknown[]; privateBeliefs: unknown[] } {
+  private async loadExistingContext(agentId: string): Promise<{ entities: unknown[]; privateBeliefs: unknown[] }> {
     const entities = this.db
       .prepare(
         `SELECT id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id
@@ -626,8 +640,8 @@ export class MemoryTaskAgent {
       .all(agentId);
 
     const cognitionRepo = new CognitionRepository(this.db);
-    const assertions = cognitionRepo.getAssertions(agentId, { activeOnly: false }).slice(0, 150);
-    const commitments = cognitionRepo.getCommitments(agentId, { activeOnly: false }).slice(0, 50);
+    const assertions = (await cognitionRepo.getAssertions(agentId, { activeOnly: false })).slice(0, 150);
+    const commitments = (await cognitionRepo.getCommitments(agentId, { activeOnly: false })).slice(0, 50);
 
     const privateBeliefs = [
       ...assertions.map((row) => ({
@@ -654,11 +668,11 @@ export class MemoryTaskAgent {
     return { entities, privateBeliefs };
   }
 
-  private applyCallOneToolCalls(
+  private async applyCallOneToolCalls(
     flushRequest: MemoryFlushRequest,
     toolCalls: ToolCallResult[],
     created: CreatedState,
-  ): Array<{
+  ): Promise<Array<{
     id: number;
     event_id: number | null;
     agent_id: string;
@@ -673,7 +687,7 @@ export class MemoryTaskAgent {
     projectable_summary: string | null;
     source_record_id: string | null;
     created_at: number;
-  }> {
+  }>> {
     const pointerToEntityId = new Map<string, number>();
     const cognitionRepo = new CognitionRepository(this.db);
     const beliefSettlementId = `${flushRequest.idempotencyKey}:belief`;
@@ -801,7 +815,7 @@ export class MemoryTaskAgent {
           continue;
         }
 
-        const beliefId = cognitionRepo.upsertAssertion({
+        const beliefId = (await cognitionRepo.upsertAssertion({
           agentId: flushRequest.agentId,
           settlementId: beliefSettlementId,
           opIndex: beliefOpIndex,
@@ -811,7 +825,7 @@ export class MemoryTaskAgent {
           basis: this.asString(call.arguments.basis) as AssertionBasis,
           stance: stance as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,
-        }).id;
+        })).id;
         beliefOpIndex += 1;
 
         const sourceEventRef = this.asOptionalNodeRef(call.arguments.source_event_ref);

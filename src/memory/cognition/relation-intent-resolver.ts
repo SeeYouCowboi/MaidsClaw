@@ -1,14 +1,8 @@
 import { MaidsClawError } from "../../core/errors.js";
 import type { CanonicalRpTurnOutcome, CognitionKind, ConflictFactor, RelationIntent } from "../../runtime/rp-turn-contract.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
-
-type DbLike = {
-  prepare(sql: string): {
-    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
-    all(...params: unknown[]): unknown[];
-    get(...params: unknown[]): unknown;
-  };
-};
+import type { RelationWriteRepo } from "../../storage/domain-repos/contracts/relation-write-repo.js";
+import type { CognitionProjectionRepo } from "../../storage/domain-repos/contracts/cognition-projection-repo.js";
 
 type LocalRefKind = "episode" | "publication" | "cognition" | "proposal";
 
@@ -195,11 +189,11 @@ export function validateRelationIntents(
   return materializable;
 }
 
-export function materializeRelationIntents(
+export async function materializeRelationIntents(
   intents: RelationIntent[],
   resolvedRefs: ResolvedLocalRefs,
-  db: DbLike,
-): number {
+  relationWriteRepo: Pick<RelationWriteRepo, "upsertRelation">,
+): Promise<number> {
   const validated = validateRelationIntents(intents, resolvedRefs);
   if (validated.length === 0) {
     return 0;
@@ -211,31 +205,27 @@ export function materializeRelationIntents(
     if (intent.source.nodeRef === intent.target.nodeRef) {
       continue;
     }
-    db.prepare(
-      `INSERT INTO memory_relations
-       (source_node_ref, target_node_ref, relation_type, strength, directness, source_kind, source_ref, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'direct', 'turn', ?, ?, ?)
-       ON CONFLICT(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
-       DO UPDATE SET strength = excluded.strength, updated_at = excluded.updated_at`,
-    ).run(
-      intent.source.nodeRef,
-      intent.target.nodeRef,
-      intent.intent,
-      0.8,
-      resolvedRefs.settlementId,
-      now,
-      now,
-    );
+    await relationWriteRepo.upsertRelation({
+      sourceNodeRef: intent.source.nodeRef,
+      targetNodeRef: intent.target.nodeRef,
+      relationType: intent.intent,
+      sourceKind: "turn",
+      sourceRef: resolvedRefs.settlementId,
+      strength: 0.8,
+      directness: "direct",
+      createdAt: now,
+      updatedAt: now,
+    });
     written += 1;
   }
   return written;
 }
 
-export function resolveConflictFactors(
+export async function resolveConflictFactors(
   factors: ConflictFactor[],
-  db: DbLike,
+  cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent">,
   options?: ResolveConflictFactorOptions,
-): { resolved: ResolvedConflictFactor[]; unresolved: UnresolvedConflictFactor[] } {
+): Promise<{ resolved: ResolvedConflictFactor[]; unresolved: UnresolvedConflictFactor[] }> {
   const resolved: ResolvedConflictFactor[] = [];
   const unresolved: UnresolvedConflictFactor[] = [];
 
@@ -255,7 +245,7 @@ export function resolveConflictFactors(
       continue;
     }
 
-    const nodeRef = resolveFactorNodeRef(factor.ref, db, options);
+    const nodeRef = await resolveFactorNodeRef(factor.ref, cognitionProjectionRepo, options);
     if (!nodeRef) {
       unresolved.push({ factor, reason: `unresolvable ref: ${factor.ref}` });
       continue;
@@ -304,11 +294,11 @@ function resolveIntentRef(ref: string, resolvedRefs: ResolvedLocalRefs): Resolve
   });
 }
 
-function resolveFactorNodeRef(
+async function resolveFactorNodeRef(
   ref: string,
-  db: DbLike,
+  cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent">,
   options?: ResolveConflictFactorOptions,
-): string | null {
+): Promise<string | null> {
   const localResolved = options?.settledRefs?.localRefIndex.get(ref);
   if (localResolved) {
     return localResolved.nodeRef;
@@ -337,25 +327,24 @@ function resolveFactorNodeRef(
     return null;
   }
 
-  const fact = db
-    .prepare(
-      `SELECT id FROM private_cognition_current WHERE cognition_key = ? AND kind = 'assertion' ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
-    )
-    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number } | null;
-  if (fact) {
-    return `assertion:${fact.id}`;
+  const agentId = options?.agentId;
+  if (!agentId) {
+    return null;
   }
 
-  const event = db
-    .prepare(
-      `SELECT id, kind FROM private_cognition_current WHERE cognition_key = ? ${options?.agentId ? "AND agent_id = ?" : ""} LIMIT 1`,
-    )
-    .get(cognitionRef, ...(options?.agentId ? [options.agentId] : [])) as { id: number; kind: string | null } | null;
-  if (event) {
-    if (event.kind === "evaluation" || event.kind === "commitment") {
-      return `${event.kind}:${event.id}`;
-    }
+  const record = await cognitionProjectionRepo.getCurrent(agentId, cognitionRef);
+  if (!record) {
     return null;
+  }
+
+  if (record.kind === "assertion") {
+    return `assertion:${record.id}`;
+  }
+  if (record.kind === "evaluation") {
+    return `evaluation:${record.id}`;
+  }
+  if (record.kind === "commitment") {
+    return `commitment:${record.id}`;
   }
 
   return null;
