@@ -121,6 +121,10 @@ export type TurnSettlementPayload = {
   }>;
   /** Durable cognitive sketch from latentScratchpad, stored for Thinker processing */
   cognitiveSketch?: string;
+  /** Version gap between Talker turn counter and Thinker committed version at turn start */
+  cognitionVersionGap?: number;
+  /** Whether the Talker proceeded with stale Thinker state (gap > threshold after soft-block) */
+  usedStaleState?: boolean;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

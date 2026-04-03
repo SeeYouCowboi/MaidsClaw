@@ -287,6 +287,64 @@ export class TurnService {
 		let bufferedResult: RpBufferedExecutionResult;
 		let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
 
+		const ownerAgentIdForGap =
+			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
+		let gap = 0;
+		let usedStaleState = false;
+
+		if (this.settlementUnitOfWork) {
+			const threshold = this.talkerThinkerConfig.stalenessThreshold;
+			const versionGap = await this.settlementUnitOfWork.run(async (repos) =>
+				repos.recentCognitionSlotRepo.getVersionGap(
+					effectiveRequest.sessionId,
+					ownerAgentIdForGap,
+				),
+			);
+			gap = versionGap?.gap ?? 0;
+
+			if (gap > threshold * 2) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`Thinker critically behind, skipping soft-block (gap=${gap}, threshold=${threshold})`,
+				);
+				usedStaleState = true;
+			} else if (gap > threshold) {
+				const deadline =
+					Date.now() + this.talkerThinkerConfig.softBlockTimeoutMs;
+				while (Date.now() < deadline) {
+					await new Promise<void>((resolve) =>
+						setTimeout(
+							resolve,
+							this.talkerThinkerConfig.softBlockPollIntervalMs,
+						),
+					);
+					const newGap = await this.settlementUnitOfWork.run(
+						async (repos) =>
+							repos.recentCognitionSlotRepo.getVersionGap(
+								effectiveRequest.sessionId,
+								ownerAgentIdForGap,
+							),
+					);
+					if ((newGap?.gap ?? 0) <= threshold) break;
+				}
+				const finalGap = await this.settlementUnitOfWork.run(async (repos) =>
+					repos.recentCognitionSlotRepo.getVersionGap(
+						effectiveRequest.sessionId,
+						ownerAgentIdForGap,
+					),
+				);
+				usedStaleState = (finalGap?.gap ?? 0) > threshold;
+				if (usedStaleState) {
+					this.traceLog(
+						requestId,
+						"warn",
+						`Thinker soft-block timeout exceeded, proceeding with stale state (gap=${gap}, finalGap=${finalGap?.gap})`,
+					);
+				}
+			}
+		}
+
 		try {
 			if (!this.agentLoop.runBuffered) {
 				throw new Error("RP buffered execution is unavailable");
@@ -452,8 +510,7 @@ export class TurnService {
 			return;
 		}
 
-		const ownerAgentId =
-			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
+		const ownerAgentId = ownerAgentIdForGap;
 		let talkerTurnVersion: number | undefined;
 		try {
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
@@ -473,6 +530,8 @@ export class TurnService {
 				privateEpisodes: undefined,
 				publications: undefined,
 				cognitiveSketch: canonicalOutcome.latentScratchpad,
+				cognitionVersionGap: gap,
+				usedStaleState,
 			};
 
 			await this.settlementUnitOfWork.run(async (repos) => {
