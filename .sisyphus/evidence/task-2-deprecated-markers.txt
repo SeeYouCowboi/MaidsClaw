@@ -1,6 +1,0 @@
-Scenario: Deprecated aliases have @deprecated marker
-Steps: grep @deprecated src/session/service.ts
-Result:
-  122:  /** @deprecated Use markRecoveryRequired instead */
-  148:  /** @deprecated Use requiresRecovery instead */
-Evidence: Both deprecated aliases confirmed annotated

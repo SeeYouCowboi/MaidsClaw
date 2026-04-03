@@ -1,4 +1,0 @@
-Scenario: SessionService methods return Promise
-Steps: bun run build
-Result: $ tsc -p tsconfig.build.json --noEmit
-Evidence: Confirms all async callers correctly await (zero TS errors)

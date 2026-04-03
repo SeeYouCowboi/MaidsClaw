@@ -1,8 +1,0 @@
-bun test v1.3.10 (30e609e0)
-Command: bun test "test/memory/area-world-history-ledger.test.ts" --test-name-pattern "dual-writes events and current"
-
- 1 pass
- 5 filtered out
- 0 fail
- 7 expect() calls
-Ran 1 test across 1 file. [173.00ms]

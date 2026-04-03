@@ -1,4 +1,0 @@
-| G7 | P1 | acceptance harness | open | acceptance harness 覆盖不足，foundation gate 强度不足，real-PG 激活语义不一致 |
-- 把这些脚本当成正式 acceptance gate，会高估当前系统完备度
-### G7. acceptance gate 与 real-PG harness 仍不足以支撑 Phase 3 判断
-- 当前更接近 “operator toolbox partially ready”，不是 “acceptance gate ready”

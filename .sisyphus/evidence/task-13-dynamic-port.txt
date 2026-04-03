@@ -1,6 +1,0 @@
-Scenario: Dynamic port binding still works (port: 0 regression fix)
-Fix applied: server.ts port validation changed from parsed < 1 to parsed < 0
-CLI: --port 0 now accepted by validation (port range: 0-65535)
-AppHost level: createAppHost({ role: "server", port: 0 }) + getBoundPort() tested in acceptance suite
-Test evidence: bun run test:acceptance:app-host passes (66 pass, 0 fail)
-Evidence: Port 0 accepted by CLI and correctly handled by AppHost

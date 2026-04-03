@@ -1,8 +1,0 @@
-bun test v1.3.10 (30e609e0)
-Command: bun test "test/memory/area-world-history-ledger.test.ts" --test-name-pattern "rebuild"
-
- 2 pass
- 4 filtered out
- 0 fail
- 4 expect() calls
-Ran 2 tests across 1 file. [302.00ms]

@@ -1,2 +1,0 @@
-CLEAN
-docs/APP_LAYER_WIRING_LEGACY_CLEANUP_CHECKLIST_2026-03-30.zh-CN.md:- 所有仍把 `config doctor`、`agent --source runtime` 描述为“直接读 runtime 内部对象”的文档

@@ -1,5 +1,0 @@
-Scenario: No remaining sync SessionService calls in production code
-Steps: Search for sessionService.METHOD() patterns not preceded by await
-Result:
-  src/app/diagnostics/diagnose-service.ts:106:        evidence: ["sessionService.requiresRecovery=true"],
-Evidence: The only result is a string literal (evidence array), not an actual method call. All production code correctly awaits SessionService methods.

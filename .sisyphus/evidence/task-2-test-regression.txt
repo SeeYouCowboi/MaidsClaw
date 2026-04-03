@@ -1,4 +1,0 @@
-Scenario: All existing tests still pass after async migration
-Steps: bun test
-Result: 1897 pass / 396 skip / 4 fail (pre-existing failures in test/runtime/private-thoughts-behavioral.test.ts)
-Evidence: No regressions introduced by T2 SessionService async migration

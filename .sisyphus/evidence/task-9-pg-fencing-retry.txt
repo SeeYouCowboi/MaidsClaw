@@ -1,8 +1,0 @@
-Scenario: Retryable failure re-schedules current row as pending with next_attempt_at
-Command: bun test test/jobs/pg-fencing.test.ts
-Observed: test suite passed (3 pass, 0 fail); includes case "retry scheduled: retryable failure re-schedules as pending with next_attempt_at".
-Assertions covered by the scenario test:
-- fail() returns outcome "retry_scheduled"
-- jobs_current transitions running -> pending with future next_attempt_at
-- last_error_message is populated; terminal_at remains null
-- job_attempts row transitions from running -> failed_retryable with finished_at set
