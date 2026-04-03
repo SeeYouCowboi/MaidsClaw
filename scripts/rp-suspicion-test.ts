@@ -76,7 +76,7 @@ type DimensionScore = {
 
 const PLAYER_MODEL_URL = "https://api.moonshot.cn/v1/chat/completions";
 const PLAYER_MODEL = "kimi-k2-turbo-preview";
-const JUDGE_MODEL = process.env.RP_JUDGE_MODEL ?? "kimi-k2.5";
+const JUDGE_MODEL = process.env.RP_JUDGE_MODEL ?? "kimi-k2-turbo-preview";
 const AGENT_ID = "rp:xuran";
 
 const PHASE_OBJECTIVES: Record<Phase, string> = {

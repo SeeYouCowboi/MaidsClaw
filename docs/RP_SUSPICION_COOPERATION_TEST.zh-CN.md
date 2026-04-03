@@ -191,7 +191,7 @@ bun run cli chat --agent rp:xuran
 
 ### 符号说明
 
-- `[SEND]` — 玩家发送的消息
+- `[SEND]` — 玩家发送的消息（可以根据回复内容和对话进程调整，只需总的剧情走向大致符合文档的剧情走向即可）
 - `[EXPECT]` — 期望 AI 角色的回复特征
 - `[CHECK]` — 人工评估的验证点
 - `[THOUGHT]` — 理想的 privateCognition / latentScratchpad 倾向
