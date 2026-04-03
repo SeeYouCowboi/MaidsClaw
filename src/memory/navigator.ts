@@ -42,6 +42,10 @@ type ModelProviderClientLike = {
   tieBreak?: (query: string, candidateA: string, candidateB: string) => number;
 };
 
+export type EmbedProviderLike = {
+  embed(texts: string[], purpose: string, modelId: string): Promise<Float32Array[]>;
+};
+
 export type NarrativeSearchServiceLike = {
   searchNarrative(query: string, viewerContext: ViewerContext): Promise<Array<{ source_ref: string }>>;
 };
@@ -181,6 +185,8 @@ export class GraphNavigator {
     visibilityPolicy?: VisibilityPolicy,
     redactionPolicy?: RedactionPolicy,
     authorizationPolicy?: AuthorizationPolicy,
+    private readonly embedProvider?: EmbedProviderLike,
+    private readonly embeddingModelId?: string,
   ) {
     const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
     this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
@@ -206,7 +212,13 @@ export class GraphNavigator {
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
 
-    const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount);
+    let queryEmbedding: Float32Array | undefined;
+    if (this.embedProvider && this.embeddingModelId) {
+      const [embedding] = await this.embedProvider.embed([query], "query_expansion", this.embeddingModelId);
+      queryEmbedding = embedding;
+    }
+
+    const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount, queryEmbedding, this.embeddingModelId);
     const supplementalSeeds = await this.collectSupplementalSeeds(query, viewerContext, rawSeeds);
     const mergedSeeds = this.mergeSeeds(rawSeeds, supplementalSeeds);
     const fallbackSeeds = this.fallbackSeedsFromAnalysis(mergedSeeds, analysis);
