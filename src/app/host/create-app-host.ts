@@ -47,6 +47,10 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 		},
 	);
 
+	runner.registerWorker("cognition.thinker", async (_job) => {
+		/* TODO T7 implements */
+	});
+
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let tickPromise: Promise<unknown> | undefined;
 

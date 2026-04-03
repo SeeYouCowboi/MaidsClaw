@@ -141,6 +141,7 @@ const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "maintenance.replay_projection:global": CONCURRENCY_CAPS.maintenance_replay_global,
   "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
   "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
+  "cognition.thinker:session:{sessionId}": 1,
 };
 
 type AdvisoryLockRow = {

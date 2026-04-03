@@ -5,7 +5,8 @@ export type JobKind =
   | "search.rebuild"
   | "maintenance.replay_projection"
   | "maintenance.rebuild_derived"
-  | "maintenance.full";
+  | "maintenance.full"
+  | "cognition.thinker";
 
 export type ExecutionClass =
   | "interactive.user_turn"
@@ -16,7 +17,8 @@ export type ExecutionClass =
   | "background.maintenance_replay"
   | "background.maintenance_rebuild_derived"
   | "background.maintenance_full"
-  | "background.autonomy";
+  | "background.autonomy"
+  | "background.cognition_thinker";
 
 export type JobKey = string;
 
@@ -50,6 +52,7 @@ export const JOB_MAX_ATTEMPTS: Record<JobKind, number> = {
   "maintenance.replay_projection": 2,
   "maintenance.rebuild_derived": 3,
   "maintenance.full": 1,
+  "cognition.thinker": 3,
 };
 
 export const CONCURRENCY_CAPS = {
@@ -74,6 +77,7 @@ export const EXECUTION_CLASS_PRIORITY: Record<ExecutionClass, number> = {
   "background.maintenance_rebuild_derived": 4,
   "background.maintenance_full": 5,
   "background.autonomy": 5,
+  "background.cognition_thinker": 3,
 };
 
 export const JOB_STATE_TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
