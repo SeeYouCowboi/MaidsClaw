@@ -184,6 +184,17 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     };
   }
 
+  // Always set talkerThinker with defaults (even if not in config)
+  const tt = typeof obj.talkerThinker === "object" && obj.talkerThinker !== null && !Array.isArray(obj.talkerThinker)
+    ? obj.talkerThinker as Record<string, unknown>
+    : {};
+  runtime.talkerThinker = {
+    enabled: typeof tt.enabled === "boolean" ? tt.enabled : false,
+    stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
+    softBlockTimeoutMs: typeof tt.softBlockTimeoutMs === "number" ? tt.softBlockTimeoutMs : 3000,
+    softBlockPollIntervalMs: typeof tt.softBlockPollIntervalMs === "number" ? tt.softBlockPollIntervalMs : 500,
+  };
+
   return { ok: true, runtime };
 }
 

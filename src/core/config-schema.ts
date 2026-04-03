@@ -91,6 +91,12 @@ export type AuthConfigResult =
 // Runtime config (file-backed via config/runtime.json)
 export type RuntimeConfig = {
   memory?: MemoryConfig;
+  talkerThinker?: {
+    enabled: boolean;
+    stalenessThreshold: number;
+    softBlockTimeoutMs: number;
+    softBlockPollIntervalMs: number;
+  };
 };
 
 export type RuntimeConfigResult =

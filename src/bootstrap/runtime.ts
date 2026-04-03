@@ -9,6 +9,8 @@ import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { TraceStore } from "../app/diagnostics/trace-store.js";
+import { loadRuntimeConfig } from "../core/config.js";
+import type { RuntimeConfig } from "../core/config-schema.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
@@ -601,6 +603,22 @@ export function bootstrapRuntime(
 			pgFactory,
 		});
 
+	// Load runtime config (from options or config/runtime.json)
+	const runtimeConfigResult = options.runtimeConfig
+		? { ok: true as const, runtime: options.runtimeConfig }
+		: loadRuntimeConfig({ cwd: runtimeCwd });
+	const runtimeConfig: RuntimeConfig = runtimeConfigResult.ok
+		? runtimeConfigResult.runtime
+		: {};
+
+	// Extract talkerThinker config with defaults
+	const talkerThinkerConfig = runtimeConfig.talkerThinker ?? {
+		enabled: false,
+		stalenessThreshold: 2,
+		softBlockTimeoutMs: 3000,
+		softBlockPollIntervalMs: 500,
+	};
+
 	const migrationStatus: RuntimeMigrationStatus = {
 		interaction: {
 			succeeded: true,
@@ -1099,6 +1117,8 @@ export function bootstrapRuntime(
 		projectionManager,
 		settlementUnitOfWork,
 		memoryPipelineReady,
+		talkerThinkerConfig,
+		resolvedJobPersistence,
 	);
 
 	const pendingFlushRepo = createLazyPgRepo(

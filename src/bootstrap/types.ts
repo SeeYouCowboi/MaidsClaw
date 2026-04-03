@@ -19,6 +19,8 @@ import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/
 import type { SharedBlockRepo } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 
+import type { RuntimeConfig } from "../core/config-schema.js";
+
 export type RuntimeHealthStatus = "ok" | "degraded" | "error";
 
 export type RuntimeMigrationStatus = {
@@ -58,6 +60,7 @@ export type RuntimeBootstrapOptions = {
 	traceCaptureEnabled?: boolean;
 	jobPersistence?: JobPersistence;
 	strictDurableMode?: boolean;
+	runtimeConfig?: RuntimeConfig;
 };
 
 export type MemoryPipelineStatus =

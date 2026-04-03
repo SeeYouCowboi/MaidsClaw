@@ -35,6 +35,7 @@ import type {
 	MemoryFlushRequest,
 	MemoryTaskAgent,
 } from "../memory/task-agent.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import type { SessionService } from "../session/service.js";
 import type {
 	SettlementRepos,
@@ -89,6 +90,8 @@ export class TurnService {
 		private readonly projectionManager?: ProjectionManager,
 		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
 		private readonly memoryPipelineReady = true,
+		private readonly talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number } = { enabled: false, stalenessThreshold: 2, softBlockTimeoutMs: 3000, softBlockPollIntervalMs: 500 },
+		private readonly jobPersistence: JobPersistence | null = null,
 	) {}
 
 	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
