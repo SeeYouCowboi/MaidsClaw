@@ -29,9 +29,9 @@ type ProjectionEpisodeRepo = {
 };
 
 type ProjectionCognitionEventRepo = {
-	append: (
-		params: Parameters<CognitionEventRepo["append"]>[0],
-	) => MaybePromise<number>;
+  append: (
+    params: Parameters<CognitionEventRepo["append"]>[0],
+  ) => MaybePromise<number | null>;
 };
 
 type ProjectionCognitionProjectionRepo = {
@@ -288,59 +288,61 @@ export class ProjectionManager {
 		return runSeries(steps);
 	}
 
-	/** Sync projection: appends cognition events and upserts private_cognition_current within the settlement transaction. */
-	private appendCognitionEvents(
-		params: SettlementProjectionParams,
-		now: number,
-		cognitionEventRepo: ProjectionCognitionEventRepo,
-		cognitionProjectionRepo: ProjectionCognitionProjectionRepo,
-	): void | Promise<void> {
-		const steps = params.cognitionOps.map((op) => () => {
-			let recordJson: string | null = null;
+  /** Sync projection: appends cognition events and upserts private_cognition_current within the settlement transaction. */
+  private appendCognitionEvents(
+    params: SettlementProjectionParams,
+    now: number,
+    cognitionEventRepo: ProjectionCognitionEventRepo,
+    cognitionProjectionRepo: ProjectionCognitionProjectionRepo,
+  ): void | Promise<void> {
+    const steps = params.cognitionOps.map((op) => () => {
+      let recordJson: string | null = null;
 
-			if (op.op === "upsert") {
-				recordJson = JSON.stringify(op.record);
-			}
+      if (op.op === "upsert") {
+        recordJson = JSON.stringify(op.record);
+      }
 
-			const applyProjection = (eventId: number): void | Promise<void> => {
-				const upsertResult = cognitionProjectionRepo.upsertFromEvent({
-					id: eventId,
-					agent_id: params.agentId,
-					cognition_key: op.op === "upsert" ? op.record.key : op.target.key,
-					kind: op.op === "upsert" ? op.record.kind : op.target.kind,
-					op: op.op,
-					record_json: recordJson,
-					settlement_id: params.settlementId,
-					committed_time: now,
-					created_at: now,
-				});
+      const applyProjection = (eventId: number): void | Promise<void> => {
+        const upsertResult = cognitionProjectionRepo.upsertFromEvent({
+          id: eventId,
+          agent_id: params.agentId,
+          cognition_key: op.op === "upsert" ? op.record.key : op.target.key,
+          kind: op.op === "upsert" ? op.record.kind : op.target.kind,
+          op: op.op,
+          record_json: recordJson,
+          settlement_id: params.settlementId,
+          committed_time: now,
+          created_at: now,
+        });
 
-				if (isPromiseLike(upsertResult)) {
-					return Promise.resolve(upsertResult);
-				}
-			};
+        if (isPromiseLike(upsertResult)) {
+          return Promise.resolve(upsertResult);
+        }
+      };
 
-			const appendResult = cognitionEventRepo.append({
-				agentId: params.agentId,
-				cognitionKey: op.op === "upsert" ? op.record.key : op.target.key,
-				kind: op.op === "upsert" ? op.record.kind : op.target.kind,
-				op: op.op,
-				recordJson,
-				settlementId: params.settlementId,
-				committedTime: now,
-			});
+      const appendResult = cognitionEventRepo.append({
+        agentId: params.agentId,
+        cognitionKey: op.op === "upsert" ? op.record.key : op.target.key,
+        kind: op.op === "upsert" ? op.record.kind : op.target.kind,
+        op: op.op,
+        recordJson,
+        settlementId: params.settlementId,
+        committedTime: now,
+      });
 
-			if (isPromiseLike<number>(appendResult)) {
-				return Promise.resolve(appendResult).then((eventId) =>
-					Promise.resolve(applyProjection(eventId)).then(() => undefined),
-				);
-			}
+      if (isPromiseLike<number | null>(appendResult)) {
+        return Promise.resolve(appendResult).then((eventId) => {
+          if (eventId === null) return;
+          return Promise.resolve(applyProjection(eventId)).then(() => undefined);
+        });
+      }
 
-			return applyProjection(appendResult);
-		});
+      if (appendResult === null) return;
+      return applyProjection(appendResult);
+    });
 
-		return runSeries(steps);
-	}
+    return runSeries(steps);
+  }
 
 	/**
 	 * Sync projection: materializes publication declarations into graph storage within the settlement transaction.

@@ -8,7 +8,7 @@ import type { CognitionEventRepo } from "../contracts/cognition-event-repo.js";
 export class PgCognitionEventRepo implements CognitionEventRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
-  async append(params: CognitionEventAppendParams): Promise<number> {
+  async append(params: CognitionEventAppendParams): Promise<number | null> {
     const now = Date.now();
 
     const rows = await this.sql`
@@ -19,9 +19,11 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
         (${params.agentId}, ${params.cognitionKey}, ${params.kind},
          ${params.op}, ${params.recordJson ?? null},
          ${params.settlementId}, ${params.committedTime}, ${now})
+      ON CONFLICT (settlement_id, agent_id, cognition_key, op) DO NOTHING
       RETURNING id
     `;
 
+    if (rows.length === 0) return null;
     return Number(rows[0].id);
   }
 

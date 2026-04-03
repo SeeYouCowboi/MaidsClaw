@@ -545,10 +545,20 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
     }
   }
 
+    // Pre-insert dedup: keep last occurrence for same (cognition_key, op) pair
+  const dedupedOps = new Map<string, CognitionOp>();
+  for (const op of normalizedOps) {
+    const key = op.op === "upsert"
+      ? `upsert:${op.record.key}`
+      : `retract:${op.target.key}`;
+    dedupedOps.set(key, op);
+  }
+  const finalOps = [...dedupedOps.values()];
+
   return {
     schemaVersion: "rp_private_cognition_v4",
     ...(typeof commit.summary === "string" ? { summary: commit.summary } : {}),
-    ops: normalizedOps,
+    ops: finalOps,
   };
 }
 

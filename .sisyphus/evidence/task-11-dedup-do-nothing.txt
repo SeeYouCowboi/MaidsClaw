@@ -1,0 +1,10 @@
+Build: PASS
+Tests: 1015 pass, 486 skip, 9 fail (pre-existing PG auth failures)
+
+Modified files:
+- src/storage/pg-app-schema-ops.ts (added UNIQUE INDEX)
+- src/storage/domain-repos/pg/cognition-event-repo.ts (ON CONFLICT DO NOTHING)
+- src/storage/domain-repos/contracts/cognition-event-repo.ts (return type number | null)
+- src/memory/projection/projection-manager.ts (null-check skip applyProjection)
+- src/runtime/rp-turn-contract.ts (pre-insert dedup)
+- src/memory/cognition/cognition-repo.ts (handle null from append)
