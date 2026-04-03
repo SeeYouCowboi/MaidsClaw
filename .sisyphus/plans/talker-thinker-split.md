@@ -251,7 +251,7 @@ Max Concurrent: 7 (Wave 1)
 
 ## TODOs
 
-- [ ] 1. Add Dual Version Columns to `recent_cognition_slots`
+- [x] 1. Add Dual Version Columns to `recent_cognition_slots`
 
   **What to do**:
   - Add TWO monotonic version columns to `recent_cognition_slots` in `src/storage/pg-app-schema-ops.ts`:
@@ -362,7 +362,7 @@ Max Concurrent: 7 (Wave 1)
 
 ---
 
-- [ ] 2. Add `cognitiveSketch` Field to `TurnSettlementPayload` + Update latentScratchpad Contract
+- [x] 2. Add `cognitiveSketch` Field to `TurnSettlementPayload` + Update latentScratchpad Contract
 
   **What to do**:
   - Add optional `cognitiveSketch?: string` field to `TurnSettlementPayload` type in `src/interaction/contracts.ts` (around line 94-122)
@@ -443,7 +443,7 @@ Max Concurrent: 7 (Wave 1)
   - Files: `src/interaction/contracts.ts`, `src/runtime/turn-service.ts`, `src/runtime/submit-rp-turn-tool.ts`, `test/runtime/rp-turn-contract.test.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 3. Register `cognition.thinker` Job Kind in BOTH Job Pipelines
+- [x] 3. Register `cognition.thinker` Job Kind in BOTH Job Pipelines
 
   **What to do**:
 
@@ -550,7 +550,7 @@ Max Concurrent: 7 (Wave 1)
 
 ---
 
-- [ ] 4. Create Talker Prompt Builder Mode
+- [x] 4. Create Talker Prompt Builder Mode
 
   **What to do**:
   - Add `isTalkerMode?: boolean` to `BuildPromptInput` type in `src/core/prompt-builder.ts`
@@ -689,7 +689,7 @@ Max Concurrent: 7 (Wave 1)
 
 ---
 
-- [ ] 11. Add Idempotency Dedup Constraint on `private_cognition_events`
+- [x] 11. Add Idempotency Dedup Constraint on `private_cognition_events`
 
   **What to do**:
   - **CRITICAL CONTEXT**: `private_cognition_events` has DB triggers (`trg_private_cognition_events_no_update`, `trg_private_cognition_events_no_delete`) that RAISE EXCEPTION on UPDATE/DELETE. The original plan's `ON CONFLICT DO UPDATE` approach is **impossible** without removing these triggers. This task uses `DO NOTHING` to preserve the append-only contract.
@@ -836,7 +836,7 @@ Max Concurrent: 7 (Wave 1)
   - Files: `src/storage/pg-app-schema-ops.ts`, `src/storage/domain-repos/pg/cognition-event-repo.ts`, `src/storage/domain-repos/contracts/cognition-event-repo.ts`, `src/memory/projection/projection-manager.ts`, `src/runtime/rp-turn-contract.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 12. Add `talkerThinker` Config Path to RuntimeConfig + TurnService Wiring
+- [x] 12. Add `talkerThinker` Config Path to RuntimeConfig + TurnService Wiring
 
   **What to do**:
 
@@ -943,7 +943,7 @@ Max Concurrent: 7 (Wave 1)
 
 ---
 
-- [ ] 13. Add AgentLoop Mode-Awareness for Talker
+- [x] 13. Add AgentLoop Mode-Awareness for Talker
 
   **What to do**:
 
@@ -1523,7 +1523,7 @@ Max Concurrent: 7 (Wave 1)
   - Files: `scripts/rp-suspicion-test.ts`
   - Pre-commit: `bun run build`
 
-- [ ] 14. Remove Non-UoW Dead Code Path in TurnService
+- [x] 14. Remove Non-UoW Dead Code Path in TurnService
 
   **What to do**:
   - **Context**: `turn-service.ts:513-573` contains an `else` branch (non-UoW path) that was designed for SQLite-only mode. It wraps writes in `InteractionStore.runInTransactionAsync()` (a SQLite `BEGIN IMMEDIATE` transaction) while calling `projectionManager.commitSettlement()` with PG pool repos — providing **zero PG transaction safety**. Now that PG is the canonical backend, this path is dead code and a misleading reference for future work.
