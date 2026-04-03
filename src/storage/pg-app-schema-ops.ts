@@ -88,6 +88,8 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
       last_settlement_id  TEXT,
       slot_payload        JSONB NOT NULL DEFAULT '[]'::jsonb,
       updated_at          BIGINT NOT NULL,
+      talker_turn_counter INTEGER NOT NULL DEFAULT 0,
+      thinker_committed_version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (session_id, agent_id)
     )
   `);

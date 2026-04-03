@@ -1,0 +1,82 @@
+# Schema Verification - Task 1: Dual Version Columns
+
+## Changes Made
+
+### 1. Migration (`src/storage/pg-app-schema-ops.ts`)
+Added two new INTEGER columns to `recent_cognition_slots`:
+- `talker_turn_counter INTEGER NOT NULL DEFAULT 0`
+- `thinker_committed_version INTEGER NOT NULL DEFAULT 0`
+
+### 2. Contract Interface (`src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts`)
+Updated interface to include:
+- `versionIncrement?: 'talker' | 'thinker'` parameter in `upsertRecentCognitionSlot()`
+- Return type: `Promise<{ talkerTurnCounter?: number; thinkerCommittedVersion?: number }>`
+- New method: `getVersionGap(sessionId, agentId)` returning `{ talkerCounter, thinkerVersion, gap }`
+- Updated `getBySession()` to include version columns in return type
+
+### 3. PG Repo Implementation (`src/storage/domain-repos/pg/recent-cognition-slot-repo.ts`)
+Implemented atomic increment logic:
+- Talker mode: Increments `talker_turn_counter` only, does NOT modify `slot_payload`
+- Thinker mode: Increments `thinker_committed_version` AND writes `slot_payload`
+- Default mode: Backwards-compatible behavior (no version columns touched)
+- Uses `column_name = column_name + 1 RETURNING column_name` pattern for atomic updates
+- New `getVersionGap()` helper returns gap = talkerCounter - thinkerVersion
+
+### 4. Interaction Store (`src/interaction/store.ts`)
+Updated `upsertRecentCognitionSlot()` to accept optional `versionIncrement` parameter for API compatibility.
+
+### 5. Projection Manager (`src/memory/projection/projection-manager.ts`)
+Fixed return type compatibility by wrapping the upsert call with `.then(() => undefined)`.
+
+### 6. Tests (`test/pg-app/pg-interaction-session-repo.test.ts`)
+Added comprehensive test coverage:
+- Talker increment without payload change
+- Thinker increment with payload write
+- `getVersionGap()` calculation accuracy
+- Version columns returned in `getBySession()`
+- Backwards compatibility without `versionIncrement`
+
+## Build Status
+✅ `bun run build` passes
+
+## Test Status
+⚠️ PG tests skipped (PostgreSQL not available in test environment)
+✅ Type-checking passes
+✅ Non-PG tests pass
+
+## SQL Patterns Used
+
+### Talker Increment (no payload change)
+```sql
+INSERT INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, updated_at, talker_turn_counter, thinker_committed_version)
+VALUES ($1, $2, $3, $4, 1, 0)
+ON CONFLICT (session_id, agent_id)
+DO UPDATE SET
+  last_settlement_id = $3,
+  updated_at = $4,
+  talker_turn_counter = recent_cognition_slots.talker_turn_counter + 1
+RETURNING talker_turn_counter
+```
+
+### Thinker Increment (with payload write)
+```sql
+INSERT INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version)
+VALUES ($1, $2, $3, $4::jsonb, $5, 0, 1)
+ON CONFLICT (session_id, agent_id)
+DO UPDATE SET
+  last_settlement_id = $3,
+  slot_payload = $4::jsonb,
+  updated_at = $5,
+  thinker_committed_version = recent_cognition_slots.thinker_committed_version + 1
+RETURNING thinker_committed_version
+```
+
+## Files Modified
+1. `src/storage/pg-app-schema-ops.ts`
+2. `src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts`
+3. `src/storage/domain-repos/pg/recent-cognition-slot-repo.ts`
+4. `src/interaction/store.ts`
+5. `src/memory/projection/projection-manager.ts`
+6. `test/pg-app/pg-interaction-session-repo.test.ts`
+
+Verification completed: 2026-04-04

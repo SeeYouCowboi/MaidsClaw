@@ -201,7 +201,7 @@ export class ProjectionManager {
 						);
 
 				if (isPromiseLike(writeResult)) {
-					return Promise.resolve(writeResult);
+					return Promise.resolve(writeResult).then(() => undefined);
 				}
 			},
 			() => this.upsertAreaStateArtifacts(params, now, areaWorldProjectionRepo),

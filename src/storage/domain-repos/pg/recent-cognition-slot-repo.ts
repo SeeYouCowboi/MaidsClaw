@@ -13,7 +13,68 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     agentId: string,
     settlementId: string,
     newEntriesJson: string = "[]",
-  ): Promise<void> {
+    versionIncrement?: 'talker' | 'thinker',
+  ): Promise<{ talkerTurnCounter?: number; thinkerCommittedVersion?: number }> {
+    const now = Date.now();
+
+    // Talker path: increment counter only, no payload change
+    if (versionIncrement === 'talker') {
+      const result = await this.sql`
+        INSERT INTO recent_cognition_slots (
+          session_id, agent_id, last_settlement_id, updated_at, talker_turn_counter, thinker_committed_version
+        )
+        VALUES (
+          ${sessionId}, ${agentId}, ${settlementId}, ${now}, 1, 0
+        )
+        ON CONFLICT (session_id, agent_id)
+        DO UPDATE SET
+          last_settlement_id = ${settlementId},
+          updated_at = ${now},
+          talker_turn_counter = recent_cognition_slots.talker_turn_counter + 1
+        RETURNING talker_turn_counter
+      `;
+      return {
+        talkerTurnCounter: result.length > 0 ? Number(result[0].talker_turn_counter) : undefined,
+      };
+    }
+
+    // Thinker path: increment version AND write payload
+    if (versionIncrement === 'thinker') {
+      let entries: unknown[];
+      try {
+        entries = JSON.parse(newEntriesJson);
+        if (!Array.isArray(entries)) entries = [];
+      } catch {
+        entries = [];
+      }
+
+      // Trim to 64 entries
+      if (entries.length > 64) {
+        entries = entries.slice(entries.length - 64);
+      }
+      const payloadJson = JSON.stringify(entries);
+
+      const result = await this.sql`
+        INSERT INTO recent_cognition_slots (
+          session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
+        )
+        VALUES (
+          ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, 1
+        )
+        ON CONFLICT (session_id, agent_id)
+        DO UPDATE SET
+          last_settlement_id = ${settlementId},
+          slot_payload = ${payloadJson}::jsonb,
+          updated_at = ${now},
+          thinker_committed_version = recent_cognition_slots.thinker_committed_version + 1
+        RETURNING thinker_committed_version
+      `;
+      return {
+        thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
+      };
+    }
+
+    // Default/backwards-compatible path: no version column touched
     const rows = await this.sql`
       SELECT slot_payload FROM recent_cognition_slots
       WHERE session_id = ${sessionId} AND agent_id = ${agentId}
@@ -41,28 +102,39 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
       entries = entries.slice(entries.length - 64);
     }
 
-    const now = Date.now();
     const payloadJson = JSON.stringify(entries);
     await this.sql`
-      INSERT INTO recent_cognition_slots (session_id, agent_id, last_settlement_id, slot_payload, updated_at)
-      VALUES (${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now})
+      INSERT INTO recent_cognition_slots (
+        session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
+      )
+      VALUES (
+        ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, 0
+      )
       ON CONFLICT (session_id, agent_id)
       DO UPDATE SET
         last_settlement_id = ${settlementId},
         slot_payload = ${payloadJson}::jsonb,
         updated_at = ${now}
     `;
+
+    return {};
   }
 
   async getBySession(
     sessionId: string,
     agentId: string,
   ): Promise<
-    | { lastSettlementId: string | null; slotPayload: unknown[]; updatedAt: number }
+    | {
+        lastSettlementId: string | null;
+        slotPayload: unknown[];
+        updatedAt: number;
+        talkerTurnCounter: number;
+        thinkerCommittedVersion: number;
+      }
     | undefined
   > {
     const rows = await this.sql`
-      SELECT last_settlement_id, slot_payload, updated_at
+      SELECT last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
       FROM recent_cognition_slots
       WHERE session_id = ${sessionId} AND agent_id = ${agentId}
     `;
@@ -73,6 +145,8 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
       lastSettlementId: (row.last_settlement_id as string) ?? null,
       slotPayload: Array.isArray(payload) ? payload : [],
       updatedAt: Number(row.updated_at),
+      talkerTurnCounter: Number(row.talker_turn_counter ?? 0),
+      thinkerCommittedVersion: Number(row.thinker_committed_version ?? 0),
     };
   }
 
@@ -84,6 +158,26 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     if (rows.length === 0) return undefined;
     const payload = rows[0].slot_payload;
     return typeof payload === "string" ? payload : JSON.stringify(payload);
+  }
+
+  async getVersionGap(
+    sessionId: string,
+    agentId: string,
+  ): Promise<{ talkerCounter: number; thinkerVersion: number; gap: number } | undefined> {
+    const rows = await this.sql`
+      SELECT talker_turn_counter, thinker_committed_version
+      FROM recent_cognition_slots
+      WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+    `;
+    if (rows.length === 0) return undefined;
+    const row = rows[0];
+    const talkerCounter = Number(row.talker_turn_counter ?? 0);
+    const thinkerVersion = Number(row.thinker_committed_version ?? 0);
+    return {
+      talkerCounter,
+      thinkerVersion,
+      gap: talkerCounter - thinkerVersion,
+    };
   }
 
   async deleteBySession(sessionId: string): Promise<void> {

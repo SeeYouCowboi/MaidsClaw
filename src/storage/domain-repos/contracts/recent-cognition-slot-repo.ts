@@ -12,7 +12,27 @@ export interface RecentCognitionSlotRepo {
     agentId: string,
     settlementId: string,
     newEntriesJson?: string,
-  ): Promise<void>;
+    versionIncrement?: 'talker' | 'thinker',
+  ): Promise<{ talkerTurnCounter?: number; thinkerCommittedVersion?: number }>;
 
   getSlotPayload(sessionId: string, agentId: string): Promise<string | undefined>;
+
+  getBySession(
+    sessionId: string,
+    agentId: string,
+  ): Promise<
+    | {
+        lastSettlementId: string | null;
+        slotPayload: unknown[];
+        updatedAt: number;
+        talkerTurnCounter: number;
+        thinkerCommittedVersion: number;
+      }
+    | undefined
+  >;
+
+  getVersionGap(
+    sessionId: string,
+    agentId: string,
+  ): Promise<{ talkerCounter: number; thinkerVersion: number; gap: number } | undefined>;
 }
