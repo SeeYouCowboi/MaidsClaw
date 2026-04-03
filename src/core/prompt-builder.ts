@@ -147,6 +147,14 @@ Example:
 5. Your structured data must reflect your TRUE internal state, not what you say aloud.
 6. Retract stale entries: when a hypothesis is disproven, a goal is fulfilled/abandoned, or a constraint no longer applies, use { op: "retract" } to remove it. Do not let outdated beliefs accumulate.`;
 
+// ---------------------------------------------------------------------------
+// Talker mode — lightweight instructions replacing the full cognition framework
+// ---------------------------------------------------------------------------
+const TALKER_INSTRUCTIONS = `## Response Instructions
+Respond in character. Before your reply, write a brief internal note (1-3 sentences) as \`latentScratchpad\`
+capturing your current reasoning, stance, and intent. Then write your \`publicReply\`.
+Use the submit_rp_turn tool with only: publicReply, latentScratchpad. Leave other fields empty.`;
+
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;
 	lore?: LoreDataSource;
@@ -162,6 +170,7 @@ export type BuildPromptInput = {
 	conversationMessages: ChatMessage[];
 	budget: TokenBudget;
 	contextText?: string;
+	isTalkerMode?: boolean;
 };
 
 export type BuildPromptOutput = {
@@ -229,7 +238,9 @@ export class PromptBuilder {
 			);
 			slotContent.set(
 				PromptSectionSlot.OPERATIONAL_STATE,
-				RP_AGENT_FRAMEWORK_INSTRUCTIONS,
+				input.isTalkerMode
+					? TALKER_INSTRUCTIONS
+					: RP_AGENT_FRAMEWORK_INSTRUCTIONS,
 			);
 		} else {
 			slotContent.set(
