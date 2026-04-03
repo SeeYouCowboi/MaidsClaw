@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import postgres from "postgres";
@@ -757,19 +758,31 @@ const TURN_SPECS: TurnSpec[] = [
 	},
 ];
 
+type TestMode = "sync" | "async";
+
 type CliOptions = {
 	phaseFilter?: Set<Phase>;
 	dryRun: boolean;
 	startFrom: number;
 	maxRounds: number;
+	mode: TestMode;
 };
 
 function parseArgs(argv: string[]): CliOptions {
-	const options: CliOptions = { dryRun: false, startFrom: 1, maxRounds: 70 };
+	const options: CliOptions = { dryRun: false, startFrom: 1, maxRounds: 70, mode: "sync" };
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--dry-run") {
 			options.dryRun = true;
+			continue;
+		}
+		if (arg === "--mode") {
+			const value = argv[i + 1];
+			if (value !== "sync" && value !== "async") {
+				throw new Error("--mode must be 'sync' or 'async'");
+			}
+			options.mode = value;
+			i += 1;
 			continue;
 		}
 		if (arg === "--max-rounds") {
@@ -1373,10 +1386,158 @@ async function seedPinnedSummary(sql: postgres.Sql, agentId: string): Promise<vo
 	`;
 }
 
+type TurnLatencyRecord = {
+	round: number;
+	talkerLatencyMs: number;
+	thinkerCompletionMs?: number;
+};
+
+/**
+ * Poll PG jobs table for Thinker job completion after a Talker turn.
+ * Polls every 2s up to 120s. Returns elapsed time in ms, or null on timeout.
+ */
+async function pollThinkerCompletion(sql: postgres.Sql, sessionId: string, timeoutMs = 120_000): Promise<number | null> {
+	const pollIntervalMs = 2_000;
+	const started = Date.now();
+
+	while (Date.now() - started < timeoutMs) {
+		const rows = await sql<{ status: string }[]>`
+			SELECT status FROM jobs
+			WHERE job_type = 'cognition.thinker'
+			  AND payload_json->>'sessionId' = ${sessionId}
+			ORDER BY created_at DESC
+			LIMIT 1
+		`;
+
+		if (rows.length > 0) {
+			const status = rows[0].status;
+			if (status === "completed" || status === "reconciled") {
+				return Date.now() - started;
+			}
+			if (status === "exhausted") {
+				logLine(`[Thinker] Job exhausted (all retries failed)`);
+				return Date.now() - started;
+			}
+		}
+
+		await delay(pollIntervalMs);
+	}
+
+	logLine(`[Thinker] Polling timed out after ${timeoutMs}ms`);
+	return null;
+}
+
+/**
+ * In async mode, ensure config/runtime.json has talkerThinker.enabled: true.
+ * Returns the original content (or null) for restoration.
+ */
+async function enableTalkerThinkerConfig(): Promise<string | null> {
+	const configPath = join(process.cwd(), "config", "runtime.json");
+	let originalContent: string | null = null;
+
+	if (existsSync(configPath)) {
+		originalContent = readFileSync(configPath, "utf-8");
+	}
+
+	let configObj: Record<string, unknown> = {};
+	if (originalContent) {
+		try {
+			configObj = JSON.parse(originalContent) as Record<string, unknown>;
+		} catch {
+			configObj = {};
+		}
+	}
+
+	configObj.talkerThinker = {
+		enabled: true,
+		stalenessThreshold: 2,
+		softBlockTimeoutMs: 3000,
+		softBlockPollIntervalMs: 500,
+	};
+
+	await mkdir(join(process.cwd(), "config"), { recursive: true });
+	await writeFile(configPath, JSON.stringify(configObj, null, 2), "utf-8");
+	logLine("[async mode] Wrote config/runtime.json with talkerThinker.enabled: true");
+
+	return originalContent;
+}
+
+/**
+ * Restore config/runtime.json to original state after async test.
+ */
+async function restoreRuntimeConfig(originalContent: string | null): Promise<void> {
+	const configPath = join(process.cwd(), "config", "runtime.json");
+	if (originalContent !== null) {
+		await writeFile(configPath, originalContent, "utf-8");
+		logLine("[async mode] Restored original config/runtime.json");
+	}
+}
+
+/**
+ * Compare async scores against baseline file if it exists.
+ * Logs warnings for any score more than 10% below baseline. Soft comparison only.
+ */
+function compareAgainstBaseline(
+	asyncWeighted: ReturnType<typeof calcWeightedResult>,
+	asyncDimensionScores: DimensionScore[],
+): { baselineExists: boolean; warnings: string[] } {
+	const baselinePath = join(process.cwd(), "data", "rp-test-results", "baseline-sync-pre-talker.json");
+
+	if (!existsSync(baselinePath)) {
+		logLine("[baseline] No baseline file found at data/rp-test-results/baseline-sync-pre-talker.json — skipping comparison");
+		return { baselineExists: false, warnings: [] };
+	}
+
+	const warnings: string[] = [];
+	try {
+		const raw = readFileSync(baselinePath, "utf-8");
+		const baseline = JSON.parse(raw) as {
+			weighted_score?: { total?: number };
+			dimensions?: Array<{ name: string; score: number }>;
+		};
+
+		const baselineTotal = baseline.weighted_score?.total;
+		if (typeof baselineTotal === "number" && baselineTotal > 0) {
+			const threshold = baselineTotal * 0.9;
+			if (asyncWeighted.total < threshold) {
+				const msg = `[baseline] WARNING: Async total score (${asyncWeighted.total}) is more than 10% below sync baseline (${baselineTotal})`;
+				warnings.push(msg);
+				logLine(msg);
+			} else {
+				logLine(`[baseline] Async total score (${asyncWeighted.total}) is within 10% of sync baseline (${baselineTotal})`);
+			}
+		}
+
+		const baselineDims = baseline.dimensions;
+		if (Array.isArray(baselineDims)) {
+			for (const asyncDim of asyncDimensionScores) {
+				const baselineDim = baselineDims.find((d) => d.name === asyncDim.name);
+				if (baselineDim && typeof baselineDim.score === "number" && baselineDim.score > 0) {
+					const dimThreshold = baselineDim.score * 0.9;
+					if (asyncDim.score < dimThreshold) {
+						const msg = `[baseline] WARNING: Dimension "${asyncDim.name}" score (${asyncDim.score}) is more than 10% below baseline (${baselineDim.score})`;
+						warnings.push(msg);
+						logLine(msg);
+					}
+				}
+			}
+		}
+	} catch (error) {
+		const msg = `[baseline] Failed to parse baseline file: ${error instanceof Error ? error.message : String(error)}`;
+		warnings.push(msg);
+		logLine(msg);
+	}
+
+	return { baselineExists: true, warnings };
+}
+
 async function main() {
 	const startedAt = new Date();
 	const options = parseArgs(process.argv.slice(2));
 	const selectedTurns = selectTurns(options);
+	const isAsync = options.mode === "async";
+
+	logLine(`Mode: ${options.mode}`);
 
 	if (selectedTurns.length === 0) {
 		throw new Error("过滤后没有可执行轮次，请检查 --phase / --start-from 参数");
@@ -1385,6 +1546,7 @@ async function main() {
 	if (options.dryRun) {
 		const dryRunView = {
 			mode: "dry-run",
+			testMode: options.mode,
 			totalTurns: selectedTurns.length,
 			rounds: selectedTurns.map((t) => ({
 				round: t.round,
@@ -1403,8 +1565,17 @@ async function main() {
 		throw new Error("未找到 MOONSHOT_API_KEY，且 config/auth.json 中也未发现 moonshot api-key");
 	}
 
+	let originalRuntimeConfig: string | null = null;
+	if (isAsync) {
+		originalRuntimeConfig = await enableTalkerThinkerConfig();
+	}
+
 	const pgUrl = process.env.PG_APP_URL;
 	const sql = pgUrl ? postgres(pgUrl) : undefined;
+
+	if (isAsync && !sql) {
+		logLine("WARNING: async mode without PG_APP_URL — Thinker polling will be skipped");
+	}
 
 	logLine("Bootstrapping runtime host...");
 	const host = await createAppHost({ role: "local", requireAllProviders: false });
@@ -1415,6 +1586,7 @@ async function main() {
 	const conversation: ConversationTurn[] = [];
 	const memorySnapshots: MemorySnapshot[] = [];
 	const executionErrors: string[] = [];
+	const turnLatencies: TurnLatencyRecord[] = [];
 
 	let sessionId = "";
 	try {
@@ -1447,6 +1619,7 @@ async function main() {
 
 			logLine(`[Phase ${turn.phase}][Round ${turn.round}] player => ${playerGen.message}`);
 
+			const turnStart = Date.now();
 			const started = nowIso();
 			const result = await runStreamTurn({
 				host,
@@ -1454,7 +1627,26 @@ async function main() {
 				text: playerGen.message,
 				agentId: AGENT_ID,
 			});
+			const talkerLatencyMs = Date.now() - turnStart;
 			const completed = nowIso();
+
+			const latencyRecord: TurnLatencyRecord = {
+				round: turn.round,
+				talkerLatencyMs,
+			};
+
+			if (isAsync && sql) {
+				logLine(`[Phase ${turn.phase}][Round ${turn.round}] polling Thinker job completion...`);
+				const thinkerMs = await pollThinkerCompletion(sql, sessionId);
+				if (thinkerMs !== null) {
+					latencyRecord.thinkerCompletionMs = thinkerMs;
+					logLine(`[Phase ${turn.phase}][Round ${turn.round}] Thinker completed in ${(thinkerMs / 1000).toFixed(1)}s`);
+				} else {
+					logLine(`[Phase ${turn.phase}][Round ${turn.round}] Thinker polling timed out`);
+				}
+			}
+
+			turnLatencies.push(latencyRecord);
 
 			const turnRecord: ConversationTurn = {
 				round: turn.round,
@@ -1477,7 +1669,7 @@ async function main() {
 			}
 
 			logLine(
-				`[Phase ${turn.phase}][Round ${turn.round}] assistant (${(result.elapsedMs / 1000).toFixed(1)}s) => ${
+				`[Phase ${turn.phase}][Round ${turn.round}] assistant (${(talkerLatencyMs / 1000).toFixed(1)}s) => ${
 					result.responseText || "（空回复）"
 				}`,
 			);
@@ -1524,6 +1716,33 @@ async function main() {
 
 		const weighted = calcWeightedResult(verificationScores, dimensionJudgement.scores);
 
+		const avgTalkerLatency = turnLatencies.length > 0
+			? turnLatencies.reduce((sum, t) => sum + t.talkerLatencyMs, 0) / turnLatencies.length
+			: 0;
+		const avgThinkerCompletion = (() => {
+			const thinkerTimes = turnLatencies.filter((t) => t.thinkerCompletionMs !== undefined);
+			if (thinkerTimes.length === 0) return null;
+			return thinkerTimes.reduce((sum, t) => sum + t.thinkerCompletionMs!, 0) / thinkerTimes.length;
+		})();
+
+		logLine(`Average Talker latency: ${(avgTalkerLatency / 1000).toFixed(1)}s`);
+		if (avgThinkerCompletion !== null) {
+			logLine(`Average Thinker completion: ${(avgThinkerCompletion / 1000).toFixed(1)}s`);
+		}
+
+		if (isAsync) {
+			if (avgTalkerLatency < 25_000) {
+				logLine(`[PASS] avgTalkerLatency (${(avgTalkerLatency / 1000).toFixed(1)}s) < 25s threshold`);
+			} else {
+				logLine(`[WARNING] avgTalkerLatency (${(avgTalkerLatency / 1000).toFixed(1)}s) >= 25s threshold — exceeds target but not failing`);
+			}
+		}
+
+		let baselineComparison: { baselineExists: boolean; warnings: string[] } | undefined;
+		if (isAsync) {
+			baselineComparison = compareAgainstBaseline(weighted, dimensionJudgement.scores);
+		}
+
 		let privateCognitionCount: number | null = null;
 		let privateEpisodesCount: number | null = null;
 		const memoryStatErrors: string[] = [];
@@ -1544,7 +1763,10 @@ async function main() {
 
 		const resultDir = join(process.cwd(), "data", "rp-test-results");
 		await mkdir(resultDir, { recursive: true });
-		const fileName = `${getFileTimestamp(new Date())}.json`;
+
+		const defaultFileName = `${getFileTimestamp(new Date())}.json`;
+		const asyncFileName = "async-talker-thinker-5round.json";
+		const fileName = isAsync ? asyncFileName : defaultFileName;
 		const filePath = join(resultDir, fileName);
 
 		const report = {
@@ -1552,6 +1774,7 @@ async function main() {
 				session_id: sessionId,
 				agent_id: AGENT_ID,
 				model: "moonshot/kimi-k2.5",
+				mode: options.mode,
 				date: new Date().toISOString(),
 				total_rounds_planned: 70,
 				total_rounds_executed: conversation.length,
@@ -1577,6 +1800,19 @@ async function main() {
 				total: weighted.total,
 				grade: weighted.grade,
 			},
+			latency: {
+				turn_latencies: turnLatencies,
+				avg_talker_latency_ms: Math.round(avgTalkerLatency),
+				avg_thinker_completion_ms: avgThinkerCompletion !== null ? Math.round(avgThinkerCompletion) : null,
+				talker_latency_threshold_ms: isAsync ? 25_000 : null,
+				talker_latency_pass: isAsync ? avgTalkerLatency < 25_000 : null,
+			},
+			...(baselineComparison ? {
+				baseline_comparison: {
+					baseline_exists: baselineComparison.baselineExists,
+					warnings: baselineComparison.warnings,
+				},
+			} : {}),
 			memory_statistics: {
 				privateCognitionCount,
 				privateEpisodesCount,
@@ -1605,6 +1841,9 @@ async function main() {
 
 		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 	} finally {
+		if (isAsync) {
+			await restoreRuntimeConfig(originalRuntimeConfig);
+		}
 		if (sql) {
 			await sql.end({ timeout: 5 });
 		}
