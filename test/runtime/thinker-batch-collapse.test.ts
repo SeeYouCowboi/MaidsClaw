@@ -2,31 +2,52 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 import type postgres from "postgres";
 import type { AgentProfile } from "../../src/agents/profile.js";
 import { AgentRegistry } from "../../src/agents/registry.js";
+import { createAppHost } from "../../src/app/host/create-app-host.js";
+import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
 import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
+import { PgJobRunner } from "../../src/jobs/pg-runner.js";
 import type {
 	CognitionThinkerJobPayload,
 	DurableJobStore,
 	PgJobCurrentRow,
 } from "../../src/jobs/durable-store.js";
 import type { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
+import type { SettlementLedger } from "../../src/memory/settlement-ledger.js";
+import * as contestConflictApplicatorModule from "../../src/memory/cognition/contest-conflict-applicator.js";
+import * as organizeEnqueueModule from "../../src/memory/organize-enqueue.js";
+import * as relationIntentResolverModule from "../../src/memory/cognition/relation-intent-resolver.js";
+import type { JobPersistence } from "../../src/jobs/persistence.js";
 import {
 	createThinkerWorker,
 	type ThinkerWorkerDeps,
 } from "../../src/runtime/thinker-worker.js";
+import * as thinkerWorkerModule from "../../src/runtime/thinker-worker.js";
 import type {
 	InteractionRepo,
 	InteractionTransactionContext,
 } from "../../src/storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../../src/storage/domain-repos/contracts/recent-cognition-slot-repo.js";
+import { PgCognitionProjectionRepo } from "../../src/storage/domain-repos/pg/cognition-projection-repo.js";
+import { PgEpisodeRepo } from "../../src/storage/domain-repos/pg/episode-repo.js";
+import { PgRecentCognitionSlotRepo } from "../../src/storage/domain-repos/pg/recent-cognition-slot-repo.js";
 
 const AGENT_ID = "rp:alice";
 const SESSION_ID = "session:batch";
 const FAIL_AFTER_PROMPT = "STOP_AFTER_PROMPT_CAPTURE";
 
 type SettlementBehavior = {
-	[settlementId: string]: string | Error | undefined;
+	[settlementId: string]: string | Error | { sketch: string; viewerLocation?: number } | undefined;
 };
+
+type MockLedger = SettlementLedger & {
+	markApplied: ReturnType<typeof jest.fn>;
+	markFailed: ReturnType<typeof jest.fn>;
+	markReplayedNoop: ReturnType<typeof jest.fn>;
+	markThinkerProjecting: ReturnType<typeof jest.fn>;
+};
+
+type MockJobPersistence = JobPersistence;
 
 function settlementIdFor(version: number): string {
 	return `stl:req-${version}`;
@@ -40,6 +61,7 @@ function makeSettlementPayload(
 	sessionId: string,
 	settlementId: string,
 	sketch: string,
+	viewerLocation = 42,
 ): TurnSettlementPayload {
 	const requestId = requestIdFromSettlement(settlementId);
 	return {
@@ -52,7 +74,7 @@ function makeSettlementPayload(
 		viewerSnapshot: {
 			selfPointerKey: "entity:self",
 			userPointerKey: "entity:user",
-			currentLocationEntityId: 42,
+			currentLocationEntityId: viewerLocation,
 		},
 		schemaVersion: "turn_settlement_v5",
 		cognitiveSketch: sketch,
@@ -101,10 +123,18 @@ function createInteractionRepo(params: {
 			if (behavior instanceof Error) {
 				throw behavior;
 			}
-			if (typeof behavior !== "string") {
+			if (!behavior) {
 				return undefined;
 			}
-			return makeSettlementPayload(sessionId, settlementId, behavior);
+			if (typeof behavior === "string") {
+				return makeSettlementPayload(sessionId, settlementId, behavior);
+			}
+			return makeSettlementPayload(
+				sessionId,
+				settlementId,
+				behavior.sketch,
+				behavior.viewerLocation,
+			);
 		},
 		async getMessageRecords(sessionId) {
 			if (sessionId !== params.sessionId) {
@@ -172,6 +202,78 @@ function createInteractionRepo(params: {
 	};
 }
 
+function createSettlementLedger(): MockLedger {
+	return {
+		check: jest.fn(async () => "pending" as const),
+		rawStatus: jest.fn(async () => "talker_committed" as const),
+		markPending: jest.fn(async () => undefined),
+		markClaimed: jest.fn(async () => undefined),
+		markApplying: jest.fn(async () => undefined),
+		markApplied: jest.fn(async () => undefined),
+		markReplayedNoop: jest.fn(async () => undefined),
+		markConflict: jest.fn(async () => undefined),
+		markFailed: jest.fn(async () => undefined),
+		markTalkerCommitted: jest.fn(async () => undefined),
+		markThinkerProjecting: jest.fn(async () => undefined),
+	};
+}
+
+function createMockJobPersistence(): MockJobPersistence {
+	return {
+		enqueue: jest.fn(async () => undefined),
+		claim: jest.fn(async () => false),
+		complete: jest.fn(async () => undefined),
+		fail: jest.fn(async () => undefined),
+		retry: jest.fn(async () => false),
+		listPending: jest.fn(async () => []),
+		listRetryable: jest.fn(async () => []),
+		countByStatus: jest.fn(async () => 0),
+	};
+}
+
+function makeSuccessOutcome(overrides?: {
+	key?: string;
+	stance?: "accepted" | "contested";
+	relationIntents?: Array<{ sourceRef: string; targetRef: string; intent: "supports" | "triggered" }>;
+	conflictFactors?: Array<{ kind: string; ref: string; note?: string }>;
+}) {
+	return {
+		schemaVersion: "rp_turn_outcome_v5" as const,
+		publicReply: "ok",
+		privateCognition: {
+			ops: [
+				{
+					op: "upsert" as const,
+					record: {
+						kind: "assertion" as const,
+						key: overrides?.key ?? "belief:test",
+						proposition: {
+							subject: { kind: "special" as const, value: "self" },
+							predicate: "trusts",
+							object: {
+								kind: "entity" as const,
+								ref: { kind: "special" as const, value: "user" },
+							},
+						},
+						stance: overrides?.stance ?? "accepted",
+						basis: "first_hand" as const,
+					},
+				},
+			],
+		},
+		privateEpisodes: [
+			{
+				category: "observation" as const,
+				summary: "episode",
+				localRef: "ep:test",
+			},
+		],
+		publications: [],
+		relationIntents: overrides?.relationIntents ?? [],
+		conflictFactors: overrides?.conflictFactors ?? [],
+	};
+}
+
 function createRegistry(): AgentRegistry {
 	const registry = new AgentRegistry();
 	const profile: AgentProfile = {
@@ -205,13 +307,53 @@ function createFixture(params: {
 	settlementBehavior: SettlementBehavior;
 	pendingPayloads?: CognitionThinkerJobPayload[];
 	withDurableJobStore?: boolean;
+	initialThinkerCommittedVersion?: number;
+	agentOutcome?: ReturnType<typeof makeSuccessOutcome>;
+	changedNodeRefs?: string[];
 }) {
 	const settlementCalls: string[] = [];
 	let capturedRequest: AgentRunRequest | undefined;
+	const settlementLedger = createSettlementLedger();
+	const jobPersistence = createMockJobPersistence();
 	const runBuffered = jest.fn(async (request: AgentRunRequest) => {
 		capturedRequest = request;
+		if (params.agentOutcome) {
+			return { outcome: params.agentOutcome };
+		}
 		return { error: FAIL_AFTER_PROMPT };
 	});
+	const payload: CognitionThinkerJobPayload = {
+		sessionId: SESSION_ID,
+		agentId: AGENT_ID,
+		settlementId: settlementIdFor(params.claimedVersion),
+		talkerTurnVersion: params.claimedVersion,
+	};
+	const getBySession = jest.fn(async () =>
+		params.initialThinkerCommittedVersion === undefined
+			? undefined
+			: {
+				lastSettlementId: payload.settlementId,
+				slotPayload: [],
+				updatedAt: Date.now(),
+				talkerTurnCounter: params.initialThinkerCommittedVersion,
+				thinkerCommittedVersion: params.initialThinkerCommittedVersion,
+			},
+	);
+	const projectionManager = {
+		commitSettlement: jest.fn(async (projectionParams, repoOverrides) => {
+			await repoOverrides?.recentCognitionSlotRepo?.upsertRecentCognitionSlot(
+				projectionParams.sessionId,
+				projectionParams.agentId,
+				projectionParams.settlementId,
+				projectionParams.recentCognitionSlotJson,
+			);
+			return {
+				changedNodeRefs: (params.changedNodeRefs ?? ["assertion:1"]) as string[],
+			};
+		}),
+	} as unknown as ProjectionManager & {
+		commitSettlement: ReturnType<typeof jest.fn>;
+	};
 
 	const listPendingByKindAndPayload = jest.fn(async () => {
 		return (params.pendingPayloads ?? []).map(makePendingRow);
@@ -224,13 +366,6 @@ function createFixture(params: {
 					listPendingByKindAndPayload,
 				} as unknown as DurableJobStore);
 
-	const payload: CognitionThinkerJobPayload = {
-		sessionId: SESSION_ID,
-		agentId: AGENT_ID,
-		settlementId: settlementIdFor(params.claimedVersion),
-		talkerTurnVersion: params.claimedVersion,
-	};
-
 	const interactionRepo = createInteractionRepo({
 		sessionId: SESSION_ID,
 		settlementBehavior: params.settlementBehavior,
@@ -239,23 +374,43 @@ function createFixture(params: {
 
 	const deps: ThinkerWorkerDeps = {
 		sql: {
-			begin: async () => {
-				throw new Error("sql.begin should not execute in prompt tests");
-			},
+			begin: async (fn: (tx: unknown) => Promise<unknown>) => fn({}),
 		} as unknown as postgres.Sql,
-		projectionManager: {} as ProjectionManager,
+		projectionManager,
 		interactionRepo,
-		recentCognitionSlotRepo: createSlotRepo(),
+		recentCognitionSlotRepo: {
+			...createSlotRepo(),
+			getBySession,
+		},
 		agentRegistry: createRegistry(),
 		createAgentLoop: () => ({ runBuffered }) as unknown as AgentLoop,
+		jobPersistence,
+		settlementLedger,
 		durableJobStore,
 	};
+
+	const readBySettlementSpy = jest
+		.spyOn(PgEpisodeRepo.prototype, "readBySettlement")
+		.mockResolvedValue([] as never[]);
+	const getCurrentSpy = jest
+		.spyOn(PgCognitionProjectionRepo.prototype, "getCurrent")
+		.mockResolvedValue(null);
+	const slotUpsertSpy = jest
+		.spyOn(PgRecentCognitionSlotRepo.prototype, "upsertRecentCognitionSlot")
+		.mockResolvedValue({});
 
 	return {
 		worker: createThinkerWorker(deps),
 		payload,
+		projectionManager,
 		runBuffered,
 		listPendingByKindAndPayload,
+		getBySession,
+		jobPersistence,
+		settlementLedger,
+		readBySettlementSpy,
+		getCurrentSpy,
+		slotUpsertSpy,
 		settlementCalls,
 		getCapturedPrompt: () => extractUserPrompt(capturedRequest),
 	};
@@ -471,5 +626,300 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		const prompt = fixture.getCapturedPrompt();
 		expect(prompt).toContain("Cognitive sketch from Talker: single-sketch-v7");
 		expect(prompt).not.toContain("Cognitive sketches from Talker (batch)");
+	});
+
+	it("commits a batch once using the effective settlement and viewer snapshot", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: { sketch: "sketch-v3", viewerLocation: 33 },
+				[settlementIdFor(4)]: { sketch: "sketch-v4", viewerLocation: 44 },
+				[settlementIdFor(5)]: { sketch: "sketch-v5", viewerLocation: 55 },
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.projectionManager.commitSettlement.mock.calls.length).toBe(1);
+		const [projectionParams] = fixture.projectionManager.commitSettlement.mock.calls[0];
+		expect(projectionParams.settlementId).toBe(settlementIdFor(5));
+		expect(projectionParams.viewerSnapshot?.currentLocationEntityId).toBe(55);
+	});
+
+	it("batch mode sets thinkerCommittedVersion via setThinkerVersion instead of versionIncrement", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		const call = fixture.slotUpsertSpy.mock.calls.at(-1);
+		expect(call?.[4]).toBeUndefined();
+		expect(call?.[5]).toBe(5);
+	});
+
+	it("markThinkerProjecting and markApplied target the effective settlement while intermediate settlements noop", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.settlementLedger.markThinkerProjecting).toHaveBeenCalledWith(
+			settlementIdFor(5),
+			AGENT_ID,
+		);
+		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
+			settlementIdFor(5),
+		);
+		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+			settlementIdFor(3),
+		);
+		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+			settlementIdFor(4),
+		);
+	});
+
+	it("routes post-commit reads, conflicts, and organizer jobs through effectiveSettlementId", async () => {
+		const resolveConflictSpy = jest
+			.spyOn(relationIntentResolverModule, "resolveConflictFactors")
+			.mockResolvedValue({
+				resolved: [{ kind: "contradicts", ref: "belief:old", nodeRef: "assertion:existing" }],
+				unresolved: [],
+			});
+		const applyContestSpy = jest
+			.spyOn(contestConflictApplicatorModule, "applyContestConflictFactors")
+			.mockResolvedValue(undefined);
+		const enqueueSpy = jest
+			.spyOn(organizeEnqueueModule, "enqueueOrganizerJobs")
+			.mockResolvedValue(undefined);
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome({
+				key: "belief:contested",
+				stance: "contested",
+				conflictFactors: [{ kind: "contradicts", ref: "belief:old" }],
+			}),
+		});
+		fixture.readBySettlementSpy.mockResolvedValue([
+			{ id: 1, source_local_ref: "ep:test" },
+			] as never[]);
+		fixture.getCurrentSpy.mockImplementation(async (_agentId, key) => {
+			if (key === "belief:contested") {
+				return { id: 9, kind: "assertion" } as never;
+			}
+			return null as never;
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.readBySettlementSpy).toHaveBeenCalledWith(
+			settlementIdFor(5),
+			AGENT_ID,
+		);
+		const resolveConflictCall = resolveConflictSpy.mock.calls[0];
+		expect(resolveConflictCall?.[2]).toEqual(
+			expect.objectContaining({ settlementId: settlementIdFor(5) }),
+		);
+		const applyContestCall = applyContestSpy.mock.calls[0];
+		expect(applyContestCall?.[2]).toBe(AGENT_ID);
+		expect(applyContestCall?.[3]).toBe(settlementIdFor(5));
+		const enqueueCall = enqueueSpy.mock.calls[0];
+		expect(enqueueCall?.[0]).toBe(fixture.jobPersistence);
+		expect(enqueueCall?.[1]).toBe(AGENT_ID);
+		expect(enqueueCall?.[2]).toBe(settlementIdFor(5));
+	});
+
+	it("idempotency skip marks the claimed settlement as replayed_noop", async () => {
+		const fixture = createFixture({
+			claimedVersion: 5,
+			initialThinkerCommittedVersion: 5,
+			settlementBehavior: {
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+			settlementIdFor(5),
+		);
+		expect(fixture.runBuffered.mock.calls.length).toBe(0);
+	});
+
+	it("single-job mode still increments thinker version with versionIncrement", async () => {
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: { sketch: "single-sketch-v7", viewerLocation: 77 },
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		const call = fixture.slotUpsertSpy.mock.calls.at(-1);
+		expect(call?.[4]).toBe("thinker");
+		expect(call?.[5]).toBeUndefined();
+	});
+
+	it("worker host wiring passes durableJobStore into createThinkerWorker", async () => {
+		const createThinkerWorkerSpy = jest
+			.spyOn(thinkerWorkerModule, "createThinkerWorker")
+			.mockReturnValue(async () => undefined);
+		let registeredHandler:
+			| ((job: { payload_json: CognitionThinkerJobPayload }) => Promise<void>)
+			| undefined;
+		const originalRegisterWorker = PgJobRunner.prototype.registerWorker;
+		const originalProcessNext = PgJobRunner.prototype.processNext;
+		PgJobRunner.prototype.registerWorker = function patchedRegisterWorker(
+			_kind,
+			handler,
+		) {
+			registeredHandler = handler as typeof registeredHandler;
+		};
+		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
+			if (registeredHandler) {
+				await registeredHandler({
+					payload_json: {
+						sessionId: SESSION_ID,
+						agentId: AGENT_ID,
+						settlementId: settlementIdFor(1),
+						talkerTurnVersion: 1,
+					},
+				});
+				registeredHandler = undefined;
+			}
+			return "none_ready" as never;
+		};
+
+		const store = {
+			enqueue: async () => ({ outcome: "created" as const, job_key: "job", status: "pending" as const, claim_version: 1 }),
+			claimNext: async () => ({ outcome: "none_ready" as const }),
+			heartbeat: async () => ({ outcome: "not_found" as const, job_key: "job", claim_version: 1 }),
+			complete: async () => ({ outcome: "not_found" as const, job_key: "job", claim_version: 1 }),
+			fail: async () => ({ outcome: "not_found" as const, job_key: "job", claim_version: 1 }),
+			cancel: async () => ({ outcome: "not_found" as const, job_key: "job", claim_version: 1 }),
+			reclaimExpiredLeases: async () => 0,
+			inspect: async () => undefined,
+			listActive: async () => [],
+			listPendingByKindAndPayload: async () => [],
+			listExpiredLeases: async () => [],
+			countByStatus: async () => ({ pending: 0, running: 0, succeeded: 0, failed_terminal: 0, cancelled: 0 }),
+			getHistory: async () => [],
+		} as DurableJobStore;
+		const runtime = {
+			backendType: "pg",
+			healthChecks: { bootstrap: "ok" },
+			traceStore: undefined,
+			sessionService: {} as RuntimeBootstrapResult["sessionService"],
+			turnService: {} as RuntimeBootstrapResult["turnService"],
+			memoryTaskAgent: null,
+			interactionRepo: {} as RuntimeBootstrapResult["interactionRepo"],
+			agentRegistry: createRegistry(),
+			memoryPipelineReady: false,
+			memoryPipelineStatus: "missing_embedding_model",
+			effectiveOrganizerEmbeddingModelId: undefined,
+			migrationStatus: {
+				interaction: { succeeded: true, appliedMigrations: [] },
+				memory: { succeeded: true },
+				succeeded: true,
+			},
+			projectionManager: {} as RuntimeBootstrapResult["projectionManager"],
+			recentCognitionSlotRepo: createSlotRepo(),
+			createAgentLoop: () => null,
+			jobPersistence: createMockJobPersistence(),
+			pgFactory: {
+				type: "pg",
+				initialize: async () => undefined,
+				close: async () => undefined,
+				getPool: () => ({}) as postgres.Sql,
+				pool: null,
+				store,
+			},
+			shutdown: () => undefined,
+		} as unknown as RuntimeBootstrapResult;
+
+		try {
+			const host = await createAppHost({ role: "worker" }, runtime);
+			await host.start();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await host.shutdown();
+
+			expect(createThinkerWorkerSpy.mock.calls.length).toBeGreaterThan(0);
+			const deps = createThinkerWorkerSpy.mock.calls[0]?.[0];
+			expect(deps?.durableJobStore).toBe(store);
+		} finally {
+			PgJobRunner.prototype.registerWorker = originalRegisterWorker;
+			PgJobRunner.prototype.processNext = originalProcessNext;
+		}
 	});
 });

@@ -1,0 +1,12 @@
+Task: R-P3-04 single-commit batch model
+Date: 2026-04-05
+
+Verification:
+- `bun run build` -> PASS
+- `bun test test/runtime/thinker-batch-collapse.test.ts` -> PASS (13 tests, 0 failures)
+- LSP diagnostics on changed files -> clean
+
+Workspace-wide `bun test` status:
+- FAIL due pre-existing unrelated failures outside T4 scope
+- Observed failing areas: `test/cli/config-doctor.test.ts`, `test/cli/gateway-mode.test.ts`, `test/gateway/gateway.test.ts`
+- Failure signatures include missing chat provider config and PostgreSQL auth/environment issues

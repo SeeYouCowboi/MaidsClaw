@@ -276,6 +276,7 @@ function sanitizeThinkerOutcome(raw: unknown): unknown {
 
 function createThinkerSlotRepo(
 	base: PgRecentCognitionSlotRepo,
+	batchVersion?: number,
 ): RecentCognitionSlotRepo {
 	return {
 		upsertRecentCognitionSlot: (
@@ -283,14 +284,26 @@ function createThinkerSlotRepo(
 			agentId,
 			settlementId,
 			newEntriesJson,
-		) =>
-			base.upsertRecentCognitionSlot(
+		) => {
+			if (batchVersion !== undefined) {
+				return base.upsertRecentCognitionSlot(
+					sessionId,
+					agentId,
+					settlementId,
+					newEntriesJson ?? "[]",
+					undefined,
+					batchVersion,
+				);
+			}
+
+			return base.upsertRecentCognitionSlot(
 				sessionId,
 				agentId,
 				settlementId,
 				newEntriesJson ?? "[]",
 				"thinker",
-			),
+			);
+		},
 		getSlotPayload: (sessionId, agentId) =>
 			base.getSlotPayload(sessionId, agentId),
 		getBySession: (sessionId, agentId) => base.getBySession(sessionId, agentId),
@@ -308,6 +321,14 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			payload.agentId,
 		);
 		if (slot && slot.thinkerCommittedVersion >= payload.talkerTurnVersion) {
+			try {
+				await deps.settlementLedger?.markReplayedNoop(payload.settlementId);
+			} catch (ledgerErr) {
+				console.warn(
+					"[thinker_worker] markReplayedNoop (idempotency skip) failed (non-fatal):",
+					ledgerErr,
+				);
+			}
 			return;
 		}
 
@@ -534,7 +555,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 
 			try {
 				await deps.settlementLedger?.markThinkerProjecting(
-					payload.settlementId,
+					effectiveSettlementId,
 					payload.agentId,
 				);
 			} catch (ledgerErr) {
@@ -559,6 +580,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
 					recentCognitionSlotRepo: createThinkerSlotRepo(
 						new PgRecentCognitionSlotRepo(txSql),
+						batchMode ? effectiveHighestVersion : undefined,
 					),
 				};
 
@@ -569,7 +591,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				changedNodeRefs = result.changedNodeRefs;
 
 				const episodeRows = await txEpisodeRepo.readBySettlement(
-					payload.settlementId,
+					effectiveSettlementId,
 					payload.agentId,
 				);
 				const localRefIndex = new Map<
@@ -615,7 +637,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 
 				if (relationIntents.length > 0) {
 					const settledArtifacts: SettledArtifacts = {
-						settlementId: payload.settlementId,
+						settlementId: effectiveSettlementId,
 						agentId: payload.agentId,
 						localRefIndex,
 						cognitionByKey,
@@ -631,7 +653,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							txRelationWriteRepo,
 						);
 						console.log(
-							`[thinker_worker] materialized ${count} relation intents for settlement ${payload.settlementId}`,
+							`[thinker_worker] materialized ${count} relation intents for settlement ${effectiveSettlementId}`,
 						);
 					} catch (intentErr) {
 						console.warn(
@@ -667,12 +689,12 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							conflictFactors,
 							txCognitionProjectionRepo,
 							{
-								settlementId: payload.settlementId,
+								settlementId: effectiveSettlementId,
 								agentId: payload.agentId,
 							},
 						);
 						console.log(
-							`[thinker_worker] resolved ${conflictResult.resolved.length} conflict factors (${conflictResult.unresolved.length} unresolved) for settlement ${payload.settlementId}`,
+							`[thinker_worker] resolved ${conflictResult.resolved.length} conflict factors (${conflictResult.unresolved.length} unresolved) for settlement ${effectiveSettlementId}`,
 						);
 
 						const txRelationBuilder = new RelationBuilder({
@@ -684,7 +706,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							txRelationBuilder,
 							txCognitionProjectionRepo,
 							payload.agentId,
-							payload.settlementId,
+							effectiveSettlementId,
 							contestedAssertions,
 							conflictResult.resolved.map((f) => f.nodeRef),
 							conflictResult.unresolved.length,
@@ -699,12 +721,26 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			});
 
 			try {
-				await deps.settlementLedger?.markApplied(payload.settlementId);
+				await deps.settlementLedger?.markApplied(effectiveSettlementId);
 			} catch (ledgerErr) {
 				console.warn(
 					"[thinker_worker] markApplied failed (non-fatal):",
 					ledgerErr,
 				);
+			}
+			if (batchMode) {
+				for (const memberId of batchMemberSettlementIds) {
+					if (memberId !== effectiveSettlementId) {
+						try {
+							await deps.settlementLedger?.markReplayedNoop(memberId);
+						} catch (ledgerErr) {
+							console.warn(
+								`[thinker_worker] markReplayedNoop for ${memberId} failed (non-fatal):`,
+								ledgerErr,
+							);
+						}
+					}
+				}
 			}
 			// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)
 			const shouldUpdateIndex =
@@ -741,11 +777,11 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					await enqueueOrganizerJobs(
 						deps.jobPersistence,
 						payload.agentId,
-						payload.settlementId,
+						effectiveSettlementId,
 						changedNodeRefs,
 					);
 					console.log(
-						`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${payload.settlementId}`,
+						`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${effectiveSettlementId}`,
 					);
 				} catch (enqueueErr) {
 					console.warn(
@@ -765,6 +801,13 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					errMsg,
 					true,
 				);
+				if (batchMode && effectiveSettlementId !== payload.settlementId) {
+					await deps.settlementLedger?.markFailed(
+						effectiveSettlementId,
+						errMsg,
+						true,
+					);
+				}
 			} catch (ledgerErr) {
 				console.warn(
 					"[thinker_worker] markFailed failed (non-fatal):",

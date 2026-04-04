@@ -66,6 +66,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			recentCognitionSlotRepo: runtime.recentCognitionSlotRepo,
 			agentRegistry: runtime.agentRegistry,
 			createAgentLoop: runtime.createAgentLoop,
+			durableJobStore: store as DurableJobStore,
 		});
 
 		await thinkerWorker({
