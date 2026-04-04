@@ -8,6 +8,7 @@ import type {
 	InteractionRepo,
 	PendingFlushRecoveryRepo,
 	RecentCognitionSlotRepo,
+	SearchProjectionRepo,
 	SessionRepo,
 	SettlementLedgerRepo,
 } from "./domain-repos/contracts/index.js";
@@ -25,6 +26,7 @@ export interface SettlementRepos {
 	interactionRepo: InteractionRepo;
 	sessionRepo: SessionRepo;
 	recentCognitionSlotRepo: RecentCognitionSlotRepo;
+	searchProjectionRepo: SearchProjectionRepo;
 	coreMemoryBlockRepo: CoreMemoryBlockRepo;
 	graphStoreRepo: GraphMutableStoreRepo;
 	pendingFlushRecoveryRepo: PendingFlushRecoveryRepo;

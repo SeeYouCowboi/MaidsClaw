@@ -18,6 +18,7 @@ import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 
 import {
 	normalizeRpTurnOutcome,
@@ -270,13 +271,18 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				episodeRepo: new PgEpisodeRepo(txSql),
 				cognitionEventRepo: new PgCognitionEventRepo(txSql),
 				cognitionProjectionRepo: new PgCognitionProjectionRepo(txSql),
+				searchProjectionRepo: new PgSearchProjectionRepo(txSql),
 				areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
 				recentCognitionSlotRepo: createThinkerSlotRepo(
 					new PgRecentCognitionSlotRepo(txSql),
 				),
 			};
 
-			await deps.projectionManager.commitSettlement(params, repoOverrides);
+			const { changedNodeRefs } = await deps.projectionManager.commitSettlement(
+				params,
+				repoOverrides,
+			);
+			void changedNodeRefs;
 		});
 	};
 }

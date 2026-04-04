@@ -16,7 +16,6 @@ import { GraphOrganizer } from "./graph-organizer.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
 import type { JobPersistence } from "../jobs/persistence.js";
-import { JOB_MAX_ATTEMPTS } from "../jobs/types.js";
 import type { CoreMemoryService } from "./core-memory.js";
 import type { EmbeddingService } from "./embeddings.js";
 import type { GraphStorageService } from "./storage.js";
@@ -39,7 +38,7 @@ import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
 import { PgPromotionQueryRepo } from "../storage/domain-repos/pg/promotion-query-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgGraphReadQueryRepo } from "../storage/domain-repos/pg/graph-read-query-repo.js";
-
+import { enqueueOrganizerJobs } from "./organize-enqueue.js";
 import type {
   GraphOrganizerResult,
   MigrationResult,
@@ -135,7 +134,6 @@ const CREATE_EPISODE_EVENT_TOOL_NAME = "create_episode_event";
 const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
 const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
 const ASSERTION_IDS_KEY = "assertion_ids";
-export const ORGANIZER_CHUNK_SIZE = 50;
 
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
@@ -718,34 +716,14 @@ export class MemoryTaskAgent {
       return;
     }
 
-    const uniqueNodeRefs = Array.from(new Set(changedNodeRefs));
-    if (uniqueNodeRefs.length === 0) {
-      return;
-    }
-
-    const chunkCount = Math.ceil(uniqueNodeRefs.length / ORGANIZER_CHUNK_SIZE);
-    const now = Date.now();
-    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-      const start = chunkIndex * ORGANIZER_CHUNK_SIZE;
-      const chunkNodeRefs = uniqueNodeRefs.slice(start, start + ORGANIZER_CHUNK_SIZE);
-      if (chunkNodeRefs.length === 0) {
-        continue;
-      }
-
-      const ordinal = String(chunkIndex + 1).padStart(4, "0");
-      await this.jobPersistence.enqueue({
-        id: `memory.organize:${settlementId}:chunk:${ordinal}`,
-        jobType: "memory.organize",
-        payload: {
-          agentId,
-          chunkNodeRefs,
-          settlementId,
-        },
-        status: "pending",
-        maxAttempts: JOB_MAX_ATTEMPTS["memory.organize"],
-        nextAttemptAt: now,
-      });
-    }
+    // Thin wrapper: delegate to standalone function
+    // Errors propagate to caller (strictDurableMode check in runMigrateInternal)
+    return enqueueOrganizerJobs(
+      this.jobPersistence,
+      agentId,
+      settlementId,
+      changedNodeRefs,
+    );
   }
 
   private assertQueueOwnership(flushRequest: MemoryFlushRequest): void {

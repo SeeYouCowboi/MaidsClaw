@@ -9,11 +9,13 @@ import type {
 
 import type { SettlementRepos } from "../../storage/unit-of-work.js";
 import type { CognitionEventRepo } from "../../storage/domain-repos/contracts/cognition-event-repo.js";
+import type { SearchProjectionRepo } from "../../storage/domain-repos/contracts/search-projection-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
 import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
 import { materializePublications } from "../materialization.js";
 import type { GraphStorageService } from "../storage.js";
+import type { NodeRef } from "../types.js";
 import type {
 	AreaStateSourceType,
 	AreaWorldProjectionRepo,
@@ -38,6 +40,23 @@ type ProjectionCognitionProjectionRepo = {
 	upsertFromEvent: (
 		event: Parameters<PrivateCognitionProjectionRepo["upsertFromEvent"]>[0],
 	) => MaybePromise<void>;
+	getCurrent?: (
+		agentId: Parameters<PrivateCognitionProjectionRepo["getCurrent"]>[0],
+		cognitionKey: Parameters<PrivateCognitionProjectionRepo["getCurrent"]>[1],
+	) => MaybePromise<ReturnType<PrivateCognitionProjectionRepo["getCurrent"]>>;
+};
+
+type ProjectionSearchProjectionRepo = {
+	upsertCognitionSearchDoc: (params: {
+		overlayId: number;
+		agentId: string;
+		kind: string;
+		content: string;
+		stance: string | null;
+		basis: string | null;
+		sourceRefKind: "assertion" | "evaluation" | "commitment";
+		now: number;
+	}) => MaybePromise<number | undefined>;
 };
 
 type ProjectionAreaWorldProjectionRepo = {
@@ -54,7 +73,74 @@ type ProjectionCommitRepos = Pick<
 	| "cognitionProjectionRepo"
 	| "areaWorldProjectionRepo"
 	| "recentCognitionSlotRepo"
->;
+> & {
+	searchProjectionRepo?: SearchProjectionRepo | ProjectionSearchProjectionRepo;
+};
+
+export type CommitSettlementResult = {
+	changedNodeRefs: NodeRef[];
+};
+
+function toPrivateEpisodeNodeRef(id: number): NodeRef {
+	return `private_episode:${id}` as NodeRef;
+}
+
+function toPrivateCognitionNodeRef(id: number): NodeRef {
+	return `private_cognition:${id}` as NodeRef;
+}
+
+function resolveSearchProjectionRepo(
+	repo: SearchProjectionRepo | ProjectionSearchProjectionRepo,
+): ProjectionSearchProjectionRepo {
+	if ("upsertCognitionSearchDoc" in repo) {
+		return repo;
+	}
+
+	return {
+		upsertCognitionSearchDoc: (params) => {
+			const result = repo.upsertCognitionDoc({
+				sourceRef: `${params.sourceRefKind}:${params.overlayId}` as NodeRef,
+				agentId: params.agentId,
+				kind: params.kind,
+				basis: params.basis,
+				stance: params.stance,
+				content: params.content,
+				updatedAt: params.now,
+				createdAt: params.now,
+			});
+
+			if (isPromiseLike(result)) {
+				return Promise.resolve(result).then(() => undefined);
+			}
+		},
+	};
+}
+
+function summarizeCognitionOpContent(op: CognitionOp): string {
+	if (op.op === "retract") {
+		return "(retracted)";
+	}
+
+	if (op.record.kind === "assertion") {
+		return `${op.record.proposition.predicate}: ${op.record.proposition.subject.value} → ${op.record.proposition.object.ref.value}`;
+	}
+
+	if (op.record.kind === "evaluation") {
+		return `evaluation: ${op.record.notes ?? ""}`;
+	}
+
+	return `${op.record.mode}: ${JSON.stringify(op.record.target)}`;
+}
+
+function resolveSearchSourceRefKind(
+	op: CognitionOp,
+): "assertion" | "evaluation" | "commitment" {
+	if (op.op === "upsert") {
+		return op.record.kind;
+	}
+
+	return op.target.kind;
+}
 
 function isPromiseLike<T = unknown>(value: unknown): value is PromiseLike<T> {
 	return (
@@ -160,24 +246,30 @@ export class ProjectionManager {
 	commitSettlement(
 		params: SettlementProjectionParams,
 		repoOverrides?: ProjectionCommitRepos,
-	): Promise<void> {
+	): Promise<CommitSettlementResult> {
 		const now = params.committedAt ?? Date.now();
 		const episodeRepo = repoOverrides?.episodeRepo ?? this.episodeRepo;
 		const cognitionEventRepo =
 			repoOverrides?.cognitionEventRepo ?? this.cognitionEventRepo;
 		const cognitionProjectionRepo =
 			repoOverrides?.cognitionProjectionRepo ?? this.cognitionProjectionRepo;
+		const searchProjectionRepo = repoOverrides?.searchProjectionRepo
+			? resolveSearchProjectionRepo(repoOverrides.searchProjectionRepo)
+			: undefined;
 		const areaWorldProjectionRepo =
 			repoOverrides?.areaWorldProjectionRepo ?? this.areaWorldProjectionRepo;
 		const recentCognitionSlotRepo = repoOverrides?.recentCognitionSlotRepo;
+		const changedNodeRefs: NodeRef[] = [];
 		const result = runSeries([
-			() => this.appendEpisodes(params, now, episodeRepo),
+			() => this.appendEpisodes(params, now, episodeRepo, changedNodeRefs),
 			() =>
 				this.appendCognitionEvents(
 					params,
 					now,
 					cognitionEventRepo,
 					cognitionProjectionRepo,
+					searchProjectionRepo,
+					changedNodeRefs,
 				),
 			() => {
 				if (!recentCognitionSlotRepo && !params.upsertRecentCognitionSlot) {
@@ -215,10 +307,10 @@ export class ProjectionManager {
 		]);
 
 		if (isPromiseLike(result)) {
-			return Promise.resolve(result);
+			return Promise.resolve(result).then(() => ({ changedNodeRefs }));
 		}
 
-		return Promise.resolve();
+		return Promise.resolve({ changedNodeRefs });
 	}
 
 	private upsertAreaStateArtifacts(
@@ -264,6 +356,7 @@ export class ProjectionManager {
 		params: SettlementProjectionParams,
 		now: number,
 		episodeRepo: ProjectionEpisodeRepo,
+		changedNodeRefs: NodeRef[],
 	): void | Promise<void> {
 		const steps = params.privateEpisodes.map((episode) => () => {
 			const appendResult = episodeRepo.append({
@@ -281,68 +374,136 @@ export class ProjectionManager {
 			});
 
 			if (isPromiseLike(appendResult)) {
-				return Promise.resolve(appendResult).then(() => undefined);
+				return Promise.resolve(appendResult).then((episodeId) => {
+					changedNodeRefs.push(toPrivateEpisodeNodeRef(episodeId));
+					return undefined;
+				});
 			}
+
+			changedNodeRefs.push(toPrivateEpisodeNodeRef(appendResult));
 		});
 
 		return runSeries(steps);
 	}
 
-  /** Sync projection: appends cognition events and upserts private_cognition_current within the settlement transaction. */
-  private appendCognitionEvents(
-    params: SettlementProjectionParams,
-    now: number,
-    cognitionEventRepo: ProjectionCognitionEventRepo,
-    cognitionProjectionRepo: ProjectionCognitionProjectionRepo,
-  ): void | Promise<void> {
-    const steps = params.cognitionOps.map((op) => () => {
-      let recordJson: string | null = null;
+	/** Sync projection: appends cognition events and upserts private_cognition_current within the settlement transaction. */
+	private appendCognitionEvents(
+		params: SettlementProjectionParams,
+		now: number,
+		cognitionEventRepo: ProjectionCognitionEventRepo,
+		cognitionProjectionRepo: ProjectionCognitionProjectionRepo,
+		searchProjectionRepo: ProjectionSearchProjectionRepo | undefined,
+		changedNodeRefs: NodeRef[],
+	): void | Promise<void> {
+		const steps = params.cognitionOps.map((op) => () => {
+			let recordJson: string | null = null;
 
-      if (op.op === "upsert") {
-        recordJson = JSON.stringify(op.record);
-      }
+			if (op.op === "upsert") {
+				recordJson = JSON.stringify(op.record);
+			}
 
-      const applyProjection = (eventId: number): void | Promise<void> => {
-        const upsertResult = cognitionProjectionRepo.upsertFromEvent({
-          id: eventId,
-          agent_id: params.agentId,
-          cognition_key: op.op === "upsert" ? op.record.key : op.target.key,
-          kind: op.op === "upsert" ? op.record.kind : op.target.kind,
-          op: op.op,
-          record_json: recordJson,
-          settlement_id: params.settlementId,
-          committed_time: now,
-          created_at: now,
-        });
+			const cognitionKey = op.op === "upsert" ? op.record.key : op.target.key;
+			const cognitionKind = op.op === "upsert" ? op.record.kind : op.target.kind;
+			const sourceRefKind = resolveSearchSourceRefKind(op);
 
-        if (isPromiseLike(upsertResult)) {
-          return Promise.resolve(upsertResult);
-        }
-      };
+			const syncSearchProjection = (eventId: number): void | Promise<void> => {
+				if (!searchProjectionRepo) {
+					return;
+				}
+				const getCurrent = cognitionProjectionRepo.getCurrent;
 
-      const appendResult = cognitionEventRepo.append({
-        agentId: params.agentId,
-        cognitionKey: op.op === "upsert" ? op.record.key : op.target.key,
-        kind: op.op === "upsert" ? op.record.kind : op.target.kind,
-        op: op.op,
-        recordJson,
-        settlementId: params.settlementId,
-        committedTime: now,
-      });
+				const upsertSearchDoc = (
+					current: ReturnType<PrivateCognitionProjectionRepo["getCurrent"]>,
+				): void | Promise<void> => {
+					const overlayId = current?.id ?? eventId;
+					const searchResult = searchProjectionRepo.upsertCognitionSearchDoc({
+						overlayId,
+						agentId: params.agentId,
+						kind: current?.kind ?? cognitionKind,
+						content: current?.summary_text ?? summarizeCognitionOpContent(op),
+						stance:
+							current?.stance ??
+							(op.op === "upsert" && op.record.kind === "assertion"
+								? op.record.stance
+								: op.op === "retract" && op.target.kind === "assertion"
+									? "rejected"
+									: null),
+						basis:
+							current?.basis ??
+							(op.op === "upsert" && op.record.kind === "assertion"
+								? (op.record.basis ?? null)
+								: null),
+						sourceRefKind,
+						now,
+					});
 
-      if (isPromiseLike<number | null>(appendResult)) {
-        return Promise.resolve(appendResult).then((eventId) => {
-          if (eventId === null) return;
-          return Promise.resolve(applyProjection(eventId)).then(() => undefined);
-        });
-      }
+					if (isPromiseLike(searchResult)) {
+						return Promise.resolve(searchResult).then(() => undefined);
+					}
+				};
 
-      if (appendResult === null) return;
-      return applyProjection(appendResult);
-    });
+				if (!getCurrent) {
+					return upsertSearchDoc(null);
+				}
 
-    return runSeries(steps);
-  }
+				const currentResult = getCurrent(params.agentId, cognitionKey);
+
+				if (isPromiseLike(currentResult)) {
+					return Promise.resolve(currentResult).then((current) =>
+						upsertSearchDoc(current),
+					);
+				}
+
+				return upsertSearchDoc(currentResult);
+			};
+
+			const applyProjection = (eventId: number): void | Promise<void> => {
+				const upsertResult = cognitionProjectionRepo.upsertFromEvent({
+					id: eventId,
+					agent_id: params.agentId,
+					cognition_key: cognitionKey,
+					kind: cognitionKind,
+					op: op.op,
+					record_json: recordJson,
+					settlement_id: params.settlementId,
+					committed_time: now,
+					created_at: now,
+				});
+
+				if (isPromiseLike(upsertResult)) {
+					return Promise.resolve(upsertResult).then(() =>
+						syncSearchProjection(eventId),
+					);
+				}
+
+				return syncSearchProjection(eventId);
+			};
+
+			const appendResult = cognitionEventRepo.append({
+				agentId: params.agentId,
+				cognitionKey,
+				kind: cognitionKind,
+				op: op.op,
+				recordJson,
+				settlementId: params.settlementId,
+				committedTime: now,
+			});
+
+			if (isPromiseLike<number | null>(appendResult)) {
+				return Promise.resolve(appendResult).then((eventId) => {
+					if (eventId === null) return;
+					changedNodeRefs.push(toPrivateCognitionNodeRef(eventId));
+					return Promise.resolve(applyProjection(eventId)).then(() => undefined);
+				});
+			}
+
+			if (appendResult === null) return;
+			changedNodeRefs.push(toPrivateCognitionNodeRef(appendResult));
+			return applyProjection(appendResult);
+		});
+
+		return runSeries(steps);
+	}
 
 	/**
 	 * Sync projection: materializes publication declarations into graph storage within the settlement transaction.

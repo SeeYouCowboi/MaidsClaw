@@ -1154,6 +1154,7 @@ export class TurnService {
 					episodeRepo: repos.episodeRepo,
 					cognitionEventRepo: repos.cognitionEventRepo,
 					cognitionProjectionRepo: repos.cognitionProjectionRepo,
+					searchProjectionRepo: repos.searchProjectionRepo,
 					areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
 					recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
 				},
