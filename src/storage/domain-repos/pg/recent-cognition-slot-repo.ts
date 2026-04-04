@@ -38,17 +38,32 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
       };
     }
 
-    // Thinker path: increment version AND write payload
+    // Thinker path: read existing payload, concat new entries, trim, write + increment version
+    // Mirrors the default path's append semantics to preserve the session-scoped prompt cache.
     if (versionIncrement === 'thinker') {
+      const existingRows = await this.sql`
+        SELECT slot_payload FROM recent_cognition_slots
+        WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+      `;
+
       let entries: unknown[];
-      try {
-        entries = JSON.parse(newEntriesJson);
-        if (!Array.isArray(entries)) entries = [];
-      } catch {
+      if (existingRows.length > 0) {
+        const existing = existingRows[0].slot_payload;
+        entries = Array.isArray(existing) ? existing : [];
+      } else {
         entries = [];
       }
 
-      // Trim to 64 entries
+      let newEntries: unknown[];
+      try {
+        newEntries = JSON.parse(newEntriesJson);
+        if (!Array.isArray(newEntries)) newEntries = [];
+      } catch {
+        newEntries = [];
+      }
+
+      entries = entries.concat(newEntries);
+
       if (entries.length > 64) {
         entries = entries.slice(entries.length - 64);
       }

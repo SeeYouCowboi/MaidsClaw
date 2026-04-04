@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import postgres from "postgres";
 import { createAppHost } from "../src/app/host/index.js";
@@ -1470,6 +1470,9 @@ async function restoreRuntimeConfig(originalContent: string | null): Promise<voi
 	if (originalContent !== null) {
 		await writeFile(configPath, originalContent, "utf-8");
 		logLine("[async mode] Restored original config/runtime.json");
+	} else {
+		await unlink(configPath).catch(() => {});
+		logLine("[async mode] Removed config/runtime.json (did not exist before test)");
 	}
 }
 

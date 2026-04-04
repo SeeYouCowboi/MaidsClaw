@@ -535,16 +535,6 @@ export class TurnService {
 			};
 
 			await this.settlementUnitOfWork.run(async (repos) => {
-				await this.commitSettlementRecordsWithRepos({
-					repos,
-					sessionId: effectiveRequest.sessionId,
-					requestId,
-					settlementId,
-					settlementPayload,
-					hasPublicReply,
-					publicReply: canonicalOutcome.publicReply,
-				});
-
 				const versionResult =
 					await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
 						effectiveRequest.sessionId,
@@ -554,6 +544,17 @@ export class TurnService {
 						"talker",
 					);
 				talkerTurnVersion = versionResult.talkerTurnCounter;
+				settlementPayload.talkerTurnVersion = talkerTurnVersion;
+
+				await this.commitSettlementRecordsWithRepos({
+					repos,
+					sessionId: effectiveRequest.sessionId,
+					requestId,
+					settlementId,
+					settlementPayload,
+					hasPublicReply,
+					publicReply: canonicalOutcome.publicReply,
+				});
 			});
 
 			settlementPayloadAfterCommit = settlementPayload;

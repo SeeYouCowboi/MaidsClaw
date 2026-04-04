@@ -125,6 +125,8 @@ export type TurnSettlementPayload = {
   cognitionVersionGap?: number;
   /** Whether the Talker proceeded with stale Thinker state (gap > threshold after soft-block) */
   usedStaleState?: boolean;
+  /** Talker turn counter at commit time — enables Phase 2 recovery sweeper to map settlement → version */
+  talkerTurnVersion?: number;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {
