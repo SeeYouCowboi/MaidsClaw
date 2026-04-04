@@ -5,11 +5,14 @@ import type { ChatMessage } from "../core/models/chat-provider.js";
 import {
 	getSketchFromSettlement,
 	type InteractionRecord,
+	type TurnSettlementPayload,
 } from "../interaction/contracts.js";
-import type { CognitionThinkerJobPayload } from "../jobs/durable-store.js";
+import type {
+	CognitionThinkerJobPayload,
+	DurableJobStore,
+} from "../jobs/durable-store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { applyContestConflictFactors } from "../memory/cognition/contest-conflict-applicator.js";
-import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import {
 	materializeRelationIntents,
@@ -18,6 +21,7 @@ import {
 	type SettledArtifacts,
 } from "../memory/cognition/relation-intent-resolver.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
+import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import type {
 	ProjectionManager,
 	SettlementProjectionParams,
@@ -96,6 +100,7 @@ export type ThinkerWorkerDeps = {
 	coreMemoryIndexUpdater?: CoreMemoryIndexUpdater;
 	jobPersistence?: JobPersistence;
 	settlementLedger?: SettlementLedger;
+	durableJobStore?: DurableJobStore;
 };
 
 function toConversationMessages(records: InteractionRecord[]): ChatMessage[] {
@@ -306,37 +311,167 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			return;
 		}
 
-		try {
-			const requestId = payload.settlementId.replace(/^stl:/, "");
-			const settlementPayload = await deps.interactionRepo.getSettlementPayload(
-				payload.sessionId,
-				requestId,
-			);
-			if (!settlementPayload) {
-				throw new Error(
-					`Settlement payload not found: session=${payload.sessionId} settlement=${payload.settlementId}`,
-				);
-			}
+		let batchMode = false;
+		let sketchChain: Array<{
+			version: number;
+			settlementId: string;
+			sketch: string;
+		}> = [];
+		let effectiveHighestVersion = payload.talkerTurnVersion;
+		let effectiveSettlementId = payload.settlementId;
+		let batchMemberSettlementIds: string[] = [payload.settlementId];
 
-			const cognitiveSketch = getSketchFromSettlement(settlementPayload) ?? "";
+		if (deps.durableJobStore) {
+			const additionalPending =
+				await deps.durableJobStore.listPendingByKindAndPayload(
+					"cognition.thinker",
+					{ sessionId: payload.sessionId, agentId: payload.agentId },
+					Date.now(),
+				);
+
+			const otherPending = additionalPending.filter((row) => {
+				const p = row.payload_json as CognitionThinkerJobPayload;
+				return p.talkerTurnVersion !== payload.talkerTurnVersion;
+			});
+
+			if (otherPending.length > 0) {
+				batchMode = true;
+				const allJobs: Array<{ version: number; settlementId: string }> = [
+					{
+						version: payload.talkerTurnVersion,
+						settlementId: payload.settlementId,
+					},
+					...otherPending.map((row) => {
+						const p = row.payload_json as CognitionThinkerJobPayload;
+						return {
+							version: p.talkerTurnVersion,
+							settlementId: p.settlementId,
+						};
+					}),
+				].sort((a, b) => a.version - b.version);
+
+				for (const jobEntry of allJobs) {
+					try {
+						const requestId = jobEntry.settlementId.replace(/^stl:/, "");
+						const sp = await deps.interactionRepo.getSettlementPayload(
+							payload.sessionId,
+							requestId,
+						);
+						if (!sp) {
+							console.warn(
+								`[thinker_worker] batch: settlement payload not found for v${jobEntry.version} (${jobEntry.settlementId}), truncating chain`,
+							);
+							break;
+						}
+						const sketch = getSketchFromSettlement(sp);
+						if (!sketch) {
+							console.warn(
+								`[thinker_worker] batch: empty sketch for v${jobEntry.version} (${jobEntry.settlementId}), truncating chain`,
+							);
+							break;
+						}
+
+						sketchChain.push({
+							version: jobEntry.version,
+							settlementId: jobEntry.settlementId,
+							sketch,
+						});
+						effectiveHighestVersion = jobEntry.version;
+						effectiveSettlementId = jobEntry.settlementId;
+					} catch (loadErr) {
+						console.warn(
+							`[thinker_worker] batch: sketch load failed for v${jobEntry.version} (${jobEntry.settlementId}), truncating chain`,
+							loadErr,
+						);
+						break;
+					}
+				}
+
+				if (sketchChain.length <= 1) {
+					batchMode = false;
+					sketchChain = [];
+					effectiveHighestVersion = payload.talkerTurnVersion;
+					effectiveSettlementId = payload.settlementId;
+				}
+
+				if (batchMode) {
+					if (sketchChain.length > 20) {
+						const excluded = sketchChain.length - 20;
+						console.warn(
+							`[thinker_worker] batch soft cap: ${excluded} older sketches excluded (batch size ${sketchChain.length})`,
+						);
+						sketchChain = sketchChain.slice(sketchChain.length - 20);
+					}
+
+					batchMemberSettlementIds = allJobs
+						.filter((j) => j.version <= effectiveHighestVersion)
+						.map((j) => j.settlementId);
+				}
+			}
+		}
+
+		try {
+			let settlementPayload: TurnSettlementPayload | undefined;
 			const messageRecords = await deps.interactionRepo.getMessageRecords(
 				payload.sessionId,
 			);
 			const messages = toConversationMessages(messageRecords);
 
-			if (cognitiveSketch) {
+			if (batchMode) {
+				const requestId = effectiveSettlementId.replace(/^stl:/, "");
+				settlementPayload = await deps.interactionRepo.getSettlementPayload(
+					payload.sessionId,
+					requestId,
+				);
+				if (!settlementPayload) {
+					throw new Error(
+						`Settlement payload not found: session=${payload.sessionId} settlement=${effectiveSettlementId}`,
+					);
+				}
+
+				const sketchChainText = sketchChain
+					.map((entry) => `[Turn ${entry.version}] ${entry.sketch}`)
+					.join("\n");
 				messages.push({
 					role: "user",
 					content:
-						`[Thinker context] Cognitive sketch from Talker: ${cognitiveSketch}\n\n` +
+						`[Thinker context] Cognitive sketches from Talker (batch):\n${sketchChainText}\n\n` +
 						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
 				});
+			} else {
+				const requestId = payload.settlementId.replace(/^stl:/, "");
+				settlementPayload = await deps.interactionRepo.getSettlementPayload(
+					payload.sessionId,
+					requestId,
+				);
+				if (!settlementPayload) {
+					throw new Error(
+						`Settlement payload not found: session=${payload.sessionId} settlement=${payload.settlementId}`,
+					);
+				}
+
+				const cognitiveSketch =
+					getSketchFromSettlement(settlementPayload) ?? "";
+				if (cognitiveSketch) {
+					messages.push({
+						role: "user",
+						content:
+							`[Thinker context] Cognitive sketch from Talker: ${cognitiveSketch}\n\n` +
+							"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
+					});
+				}
 			}
 
 			messages.push({
 				role: "user",
 				content: THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS,
 			});
+
+			if (batchMode) {
+				console.log(
+					`[thinker_worker] batch sketch chain loaded: chain=${sketchChain.length} members=${batchMemberSettlementIds.length} highest=${effectiveHighestVersion}`,
+				);
+			}
 
 			const agentLoop = deps.createAgentLoop(payload.agentId);
 			if (!agentLoop) {
@@ -374,13 +509,13 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const committedAt = Date.now();
 			const slotEntries = buildCognitionSlotPayloadForThinker(
 				cognitionOps,
-				payload.settlementId,
+				effectiveSettlementId,
 				committedAt,
 			);
 			const recentCognitionSlotJson = JSON.stringify(slotEntries);
 
 			const params: SettlementProjectionParams = {
-				settlementId: payload.settlementId,
+				settlementId: effectiveSettlementId,
 				sessionId: payload.sessionId,
 				agentId: payload.agentId,
 				cognitionOps,
@@ -600,25 +735,25 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					);
 				}
 			}
-		// [T13] enqueueOrganizerJobs (outside tx)
-		if (deps.jobPersistence && changedNodeRefs.length > 0) {
-			try {
-				await enqueueOrganizerJobs(
-					deps.jobPersistence,
-					payload.agentId,
-					payload.settlementId,
-					changedNodeRefs,
-				);
-				console.log(
-					`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${payload.settlementId}`,
-				);
-			} catch (enqueueErr) {
-				console.warn(
-					"[thinker_worker] enqueueOrganizerJobs failed (non-fatal):",
-					enqueueErr,
-				);
+			// [T13] enqueueOrganizerJobs (outside tx)
+			if (deps.jobPersistence && changedNodeRefs.length > 0) {
+				try {
+					await enqueueOrganizerJobs(
+						deps.jobPersistence,
+						payload.agentId,
+						payload.settlementId,
+						changedNodeRefs,
+					);
+					console.log(
+						`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${payload.settlementId}`,
+					);
+				} catch (enqueueErr) {
+					console.warn(
+						"[thinker_worker] enqueueOrganizerJobs failed (non-fatal):",
+						enqueueErr,
+					);
+				}
 			}
-		}
 		} catch (thinkerError: unknown) {
 			try {
 				const errMsg =
