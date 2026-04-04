@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
-import { ensureTestDb, createTestPg, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
+import { createTestPg, ensureTestDb, resetSchema, skipPgTests, teardown } from "../helpers/pg-test-utils.js";
 
 describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 	let sql: postgres.Sql;
@@ -173,6 +173,21 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 				  AND indexname = 'idx_jobs_current_concurrency_running'
 			`;
 			expect(idx.length).toBe(1);
+		});
+
+		it("has pending thinker payload composite index", async () => {
+			const idx = await sql`
+				SELECT indexname, indexdef FROM pg_indexes
+				WHERE schemaname = current_schema()
+				  AND tablename = 'jobs_current'
+				  AND indexname = 'idx_jobs_pending_thinker_session'
+			`;
+			expect(idx.length).toBe(1);
+			expect(idx[0].indexdef).toContain("job_type");
+			expect(idx[0].indexdef).toContain("status");
+			expect(idx[0].indexdef).toContain("sessionId");
+			expect(idx[0].indexdef).toContain("agentId");
+			expect(idx[0].indexdef).toContain("pending");
 		});
 
 		it("has lease expiry index", async () => {

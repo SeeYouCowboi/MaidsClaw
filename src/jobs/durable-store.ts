@@ -265,6 +265,11 @@ export interface DurableJobStore {
 
   inspect(job_key: string): Promise<PgJobCurrentRow | undefined>;
   listActive(): Promise<PgJobCurrentRow[]>;
+  listPendingByKindAndPayload(
+    jobType: JobKind,
+    payloadFilter: Record<string, string>,
+    now_ms: number,
+  ): Promise<PgJobCurrentRow[]>;
   listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]>;
   countByStatus(): Promise<PgStatusCount>;
   getHistory(job_key: string): Promise<PgJobAttemptHistoryRow[]>;

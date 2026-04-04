@@ -1028,6 +1028,33 @@ export class PgJobStore implements DurableJobStore {
     return rows.map(normalizePgJobCurrentRow);
   }
 
+  async listPendingByKindAndPayload(
+    jobType: JobKind,
+    payloadFilter: Record<string, string>,
+    now_ms: number,
+  ): Promise<PgJobCurrentRow[]> {
+    const rows = (await this.sql`
+      SELECT * FROM jobs_current
+      WHERE job_type = ${jobType}
+        AND status = 'pending'
+        AND next_attempt_at <= ${now_ms}
+        AND COALESCE(
+          payload_json->>'sessionId',
+          (payload_json #>> '{}')::jsonb->>'sessionId'
+        ) = ${payloadFilter.sessionId}
+        AND COALESCE(
+          payload_json->>'agentId',
+          (payload_json #>> '{}')::jsonb->>'agentId'
+        ) = ${payloadFilter.agentId}
+      ORDER BY COALESCE(
+        (payload_json->>'talkerTurnVersion')::int,
+        ((payload_json #>> '{}')::jsonb->>'talkerTurnVersion')::int
+      ) ASC
+    `) as PgJobCurrentRow[];
+
+    return rows.map(normalizePgJobCurrentRow);
+  }
+
   async listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]> {
     const rows = (await this.sql`
       SELECT * FROM jobs_current
