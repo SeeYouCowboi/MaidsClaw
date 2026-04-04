@@ -131,7 +131,7 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
           error_message = NULL,
           updated_at    = ${now}
       WHERE settlement_id = ${settlementId}
-        AND status IN ('pending', 'failed_retryable')
+        AND status IN ('pending', 'claimed', 'failed_retryable')
     `;
 
     if (updated.count > 0) {

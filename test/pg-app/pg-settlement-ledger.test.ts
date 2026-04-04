@@ -85,6 +85,7 @@ describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
       const sid = "stl-retry-1";
 
       await repo.markPending(sid, "agent-1");
+      await repo.markApplying(sid, "agent-1", "hash-retry");
       await repo.markFailedRetryScheduled(sid, "timeout");
 
       expect(await repo.rawStatus(sid)).toBe("failed_retryable");
@@ -102,6 +103,7 @@ describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
       const sid = "stl-terminal-1";
 
       await repo.markPending(sid, "agent-1");
+      await repo.markApplying(sid, "agent-1", "hash-terminal");
       await repo.markFailedTerminal(sid, "unrecoverable");
 
       expect(await repo.rawStatus(sid)).toBe("failed_terminal");
@@ -293,11 +295,14 @@ describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
 
       await repo.markPending(sid, "agent-1");
 
-      await expect(
-        repo.markThinkerProjecting(sid, "agent-thinker"),
-      ).rejects.toThrow(
-        /no row with status talker_committed or failed_retryable/,
-      );
+      let caught: Error | null = null;
+      try {
+        await repo.markThinkerProjecting(sid, "agent-thinker");
+      } catch (e: any) {
+        caught = e;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught!.message).toMatch(/no row with status talker_committed or failed_retryable/);
 
       expect(await repo.rawStatus(sid)).toBe("pending");
     });

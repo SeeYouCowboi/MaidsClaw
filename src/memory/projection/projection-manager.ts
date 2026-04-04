@@ -15,7 +15,8 @@ import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
 import { materializePublications } from "../materialization.js";
 import type { GraphStorageService } from "../storage.js";
-import type { NodeRef } from "../types.js";
+import type { NodeRef, NodeRefKind } from "../types.js";
+import { makeNodeRef } from "../schema.js";
 import type {
 	AreaStateSourceType,
 	AreaWorldProjectionRepo,
@@ -81,12 +82,14 @@ export type CommitSettlementResult = {
 	changedNodeRefs: NodeRef[];
 };
 
-function toPrivateEpisodeNodeRef(id: number): NodeRef {
-	return `private_episode:${id}` as NodeRef;
+/** Map an episode row id to the canonical `event:N` ref accepted by GraphOrganizer. */
+function toEpisodeNodeRef(id: number): NodeRef {
+	return makeNodeRef("event", id);
 }
 
-function toPrivateCognitionNodeRef(id: number): NodeRef {
-	return `private_cognition:${id}` as NodeRef;
+/** Build a canonical cognition ref (`assertion:N`, `evaluation:N`, `commitment:N`) from the projection row. */
+function toCognitionNodeRef(kind: string, id: number): NodeRef {
+	return makeNodeRef(kind as NodeRefKind, id);
 }
 
 function resolveSearchProjectionRepo(
@@ -375,12 +378,12 @@ export class ProjectionManager {
 
 			if (isPromiseLike(appendResult)) {
 				return Promise.resolve(appendResult).then((episodeId) => {
-					changedNodeRefs.push(toPrivateEpisodeNodeRef(episodeId));
+					changedNodeRefs.push(toEpisodeNodeRef(episodeId));
 					return undefined;
 				});
 			}
 
-			changedNodeRefs.push(toPrivateEpisodeNodeRef(appendResult));
+			changedNodeRefs.push(toEpisodeNodeRef(appendResult));
 		});
 
 		return runSeries(steps);
@@ -410,7 +413,7 @@ export class ProjectionManager {
 				if (!searchProjectionRepo) {
 					return;
 				}
-				const getCurrent = cognitionProjectionRepo.getCurrent;
+				const getCurrent = cognitionProjectionRepo.getCurrent?.bind(cognitionProjectionRepo);
 
 				const upsertSearchDoc = (
 					current: ReturnType<PrivateCognitionProjectionRepo["getCurrent"]>,
@@ -492,14 +495,47 @@ export class ProjectionManager {
 			if (isPromiseLike<number | null>(appendResult)) {
 				return Promise.resolve(appendResult).then((eventId) => {
 					if (eventId === null) return;
-					changedNodeRefs.push(toPrivateCognitionNodeRef(eventId));
-					return Promise.resolve(applyProjection(eventId)).then(() => undefined);
+					const afterProjection = (): void | Promise<void> => {
+						if (!cognitionProjectionRepo.getCurrent) {
+							return;
+						}
+						const currentResult = cognitionProjectionRepo.getCurrent(params.agentId, cognitionKey);
+						if (isPromiseLike(currentResult)) {
+							return Promise.resolve(currentResult).then((row) => {
+								if (row) changedNodeRefs.push(toCognitionNodeRef(row.kind, row.id));
+							});
+						}
+						if (currentResult) changedNodeRefs.push(toCognitionNodeRef(currentResult.kind, currentResult.id));
+					};
+					const projResult = applyProjection(eventId);
+					if (isPromiseLike(projResult)) {
+						return Promise.resolve(projResult).then(() => afterProjection()).then(() => undefined);
+					}
+					const afterResult = afterProjection();
+					if (isPromiseLike(afterResult)) {
+						return Promise.resolve(afterResult).then(() => undefined);
+					}
 				});
 			}
 
 			if (appendResult === null) return;
-			changedNodeRefs.push(toPrivateCognitionNodeRef(appendResult));
-			return applyProjection(appendResult);
+			const syncProjResult = applyProjection(appendResult);
+			const pushCognitionRef = (): void | Promise<void> => {
+				if (!cognitionProjectionRepo.getCurrent) {
+					return;
+				}
+				const currentResult = cognitionProjectionRepo.getCurrent(params.agentId, cognitionKey);
+				if (isPromiseLike(currentResult)) {
+					return Promise.resolve(currentResult).then((row) => {
+						if (row) changedNodeRefs.push(toCognitionNodeRef(row.kind, row.id));
+					});
+				}
+				if (currentResult) changedNodeRefs.push(toCognitionNodeRef(currentResult.kind, currentResult.id));
+			};
+			if (isPromiseLike(syncProjResult)) {
+				return Promise.resolve(syncProjResult).then(() => pushCognitionRef()).then(() => undefined);
+			}
+			return pushCognitionRef();
 		});
 
 		return runSeries(steps);

@@ -17,6 +17,20 @@ import { PgAreaWorldProjectionRepo } from "../../src/storage/domain-repos/pg/are
 import { PgSearchProjectionRepo } from "../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { PgRelationWriteRepo } from "../../src/storage/domain-repos/pg/relation-write-repo.js";
 import { PgSettlementUnitOfWork } from "../../src/storage/pg-settlement-uow.js";
+import {
+	createThinkerWorker,
+	type ThinkerWorkerDeps,
+} from "../../src/runtime/thinker-worker.js";
+import type { AgentLoop } from "../../src/core/agent-loop.js";
+import { AgentRegistry } from "../../src/agents/registry.js";
+import type { AgentProfile } from "../../src/agents/profile.js";
+import type {
+	InteractionRepo,
+	InteractionTransactionContext,
+} from "../../src/storage/domain-repos/contracts/interaction-repo.js";
+import type { RecentCognitionSlotRepo } from "../../src/storage/domain-repos/contracts/recent-cognition-slot-repo.js";
+import type { CognitionThinkerJobPayload } from "../../src/jobs/durable-store.js";
+import { PgRecentCognitionSlotRepo } from "../../src/storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import type { SettlementProjectionParams } from "../../src/memory/projection/projection-manager.js";
 import type { NodeRef } from "../../src/memory/types.js";
 import type { JobPersistence, JobEntry } from "../../src/jobs/persistence.js";
@@ -195,10 +209,10 @@ describe.skipIf(skipPgTests)(
 					expect(result.changedNodeRefs.length).toBe(2);
 
 					const episodeRef = result.changedNodeRefs.find((r) =>
-						r.startsWith("private_episode:"),
+						r.startsWith("event:"),
 					);
 					const cognitionRef = result.changedNodeRefs.find((r) =>
-						r.startsWith("private_cognition:"),
+						r.startsWith("assertion:"),
 					);
 					expect(episodeRef).toBeDefined();
 					expect(cognitionRef).toBeDefined();
@@ -338,7 +352,7 @@ describe.skipIf(skipPgTests)(
 						},
 					);
 
-					const cognitionProjectionRepo = new PgCognitionProjectionRepo(pool);
+					const cognitionProjectionRepo = repos.cognitionProjectionRepo;
 					const current = await cognitionProjectionRepo.getCurrent(AGENT_ID, cognitionKey);
 					expect(current).not.toBeNull();
 
@@ -456,11 +470,11 @@ describe.skipIf(skipPgTests)(
 				const mockJobs = createMockJobPersistence();
 
 				const changedNodeRefs: NodeRef[] = [
-					"private_episode:1" as NodeRef,
-					"private_episode:2" as NodeRef,
-					"private_cognition:3" as NodeRef,
-					"private_cognition:4" as NodeRef,
-					"private_episode:5" as NodeRef,
+					"event:1" as NodeRef,
+					"event:2" as NodeRef,
+					"assertion:3" as NodeRef,
+					"evaluation:4" as NodeRef,
+					"event:5" as NodeRef,
 				];
 
 				await enqueueOrganizerJobs(
@@ -496,6 +510,324 @@ describe.skipIf(skipPgTests)(
 				expect(payload1.chunkNodeRefs.length).toBe(2);
 			},
 			10_000,
+		);
+
+		it(
+			"createThinkerWorker end-to-end: LLM stub → projections → ledger → organize enqueue",
+			async () => {
+				const settlementId = "stl:e2e-worker:001";
+				const requestId = "e2e-worker:001";
+
+				const sessionId = await new PgSettlementUnitOfWork(pool).run(
+					async (repos) => {
+						const session = await repos.sessionRepo.createSession(AGENT_ID);
+						return session.sessionId;
+					},
+				);
+
+				const ledger = new PgSettlementLedgerRepo(pool);
+				await ledger.markTalkerCommitted(settlementId, AGENT_ID);
+				const settlementLedgerAdapter: NonNullable<
+					ThinkerWorkerDeps["settlementLedger"]
+				> = {
+					check: (inputSettlementId) => ledger.check(inputSettlementId),
+					rawStatus: (inputSettlementId) => ledger.rawStatus(inputSettlementId),
+					markPending: (inputSettlementId, inputAgentId) =>
+						ledger.markPending(inputSettlementId, inputAgentId),
+					markClaimed: (inputSettlementId, claimedBy) =>
+						ledger.markClaimed(inputSettlementId, claimedBy),
+					markApplying: (inputSettlementId, inputAgentId, payloadHash) =>
+						ledger.markApplying(inputSettlementId, inputAgentId, payloadHash),
+					markApplied: (inputSettlementId) => ledger.markApplied(inputSettlementId),
+					markReplayedNoop: (inputSettlementId) =>
+						ledger.markReplayedNoop(inputSettlementId),
+					markConflict: (inputSettlementId, errorMessage) =>
+						ledger.markConflict(inputSettlementId, errorMessage),
+					markFailed: (inputSettlementId, errorMessage, retryable) =>
+						retryable
+							? ledger.markFailedRetryScheduled(inputSettlementId, errorMessage)
+							: ledger.markFailedTerminal(inputSettlementId, errorMessage),
+					markTalkerCommitted: (inputSettlementId, inputAgentId) =>
+						ledger.markTalkerCommitted(inputSettlementId, inputAgentId),
+					markThinkerProjecting: (inputSettlementId, inputAgentId) =>
+						ledger.markThinkerProjecting(inputSettlementId, inputAgentId),
+				};
+
+				const projectionManager = new ProjectionManager(
+					new PgEpisodeRepo(pool),
+					new PgCognitionEventRepo(pool),
+					new PgCognitionProjectionRepo(pool),
+					null,
+					new PgAreaWorldProjectionRepo(pool),
+				);
+
+				const mockJobs = createMockJobPersistence();
+
+				const mockInteractionRepo: InteractionRepo = {
+					async getSettlementPayload(inputSessionId, inputRequestId) {
+						if (inputSessionId !== sessionId || inputRequestId !== requestId) {
+							return undefined;
+						}
+						return {
+							settlementId: `stl:${inputRequestId}`,
+							requestId: inputRequestId,
+							sessionId: inputSessionId,
+							ownerAgentId: AGENT_ID,
+							publicReply: "Hello from test",
+							hasPublicReply: true,
+							viewerSnapshot: {
+								selfPointerKey: "entity:self",
+								userPointerKey: "entity:user",
+								currentLocationEntityId: 42,
+							},
+							schemaVersion: "turn_settlement_v5",
+							cognitiveSketch: "The user greeted me warmly.",
+						};
+					},
+					async getMessageRecords(inputSessionId) {
+						if (inputSessionId !== sessionId) {
+							return [];
+						}
+						return [
+							{
+								sessionId: inputSessionId,
+								recordId: "rec:e2e:001",
+								recordIndex: 0,
+								actorType: "user",
+								recordType: "message",
+								payload: { role: "user", content: "Hello!" },
+								committedAt: Date.now(),
+							},
+						];
+					},
+					async commit() {},
+					async runInTransaction<T>(
+						fn: (tx: InteractionTransactionContext) => Promise<T>,
+					) {
+						return fn({ interactionRepo: mockInteractionRepo });
+					},
+					async settlementExists() {
+						return false;
+					},
+					async findRecordByCorrelatedTurnId() {
+						return undefined;
+					},
+					async findSessionIdByRequestId() {
+						return undefined;
+					},
+					async getBySession() {
+						return [];
+					},
+					async getByRange() {
+						return [];
+					},
+					async markProcessed() {},
+					async markRangeProcessed() {},
+					async countUnprocessedRpTurns() {
+						return 0;
+					},
+					async getMinMaxUnprocessedIndex() {
+						return undefined;
+					},
+					async getMaxIndex() {
+						return undefined;
+					},
+					async getPendingSettlementJobState() {
+						return null;
+					},
+					async countUnprocessedSettlements() {
+						return 0;
+					},
+					async getUnprocessedSettlementRange() {
+						return null;
+					},
+					async listStalePendingSettlementSessions() {
+						return [];
+					},
+					async getUnprocessedRangeForSession() {
+						return null;
+					},
+				};
+
+				const mockSlotRepo: RecentCognitionSlotRepo = {
+					async upsertRecentCognitionSlot() {
+						return {};
+					},
+					async getSlotPayload() {
+						return undefined;
+					},
+					async getBySession() {
+						return undefined;
+					},
+					async getVersionGap() {
+						return undefined;
+					},
+				};
+
+				const registry = new AgentRegistry();
+				const agentProfile: AgentProfile = {
+					id: AGENT_ID,
+					role: "rp_agent",
+					lifecycle: "persistent",
+					userFacing: true,
+					outputMode: "freeform",
+					modelId: "test-model",
+					toolPermissions: [],
+					maxDelegationDepth: 1,
+					lorebookEnabled: true,
+					narrativeContextEnabled: true,
+				};
+				registry.register(agentProfile);
+
+				const mockAgentLoop = {
+					async runBuffered() {
+						return {
+							outcome: {
+								schemaVersion: "rp_turn_outcome_v5" as const,
+								publicReply: "I appreciate the greeting!",
+								privateCognition: {
+									ops: [
+										{
+											op: "upsert" as const,
+											record: {
+												kind: "assertion" as const,
+												key: "test:e2e:belief-warmth",
+												proposition: {
+													subject: { kind: "special" as const, value: "self" },
+													predicate: "feels_warmth_toward",
+													object: {
+														kind: "entity" as const,
+														ref: { kind: "special" as const, value: "user" },
+													},
+												},
+												stance: "accepted" as const,
+												basis: "first_hand" as const,
+											},
+										},
+									],
+								},
+								privateEpisodes: [
+									{
+										category: "observation" as const,
+										summary: "User greeted me warmly during our e2e test.",
+										localRef: "ep:e2e:greeting",
+									},
+								],
+								publications: [],
+								relationIntents: [
+									{
+										sourceRef: "ep:e2e:greeting",
+										targetRef: "test:e2e:belief-warmth",
+										intent: "supports" as const,
+									},
+								],
+								conflictFactors: [],
+							},
+						};
+					},
+				} as unknown as AgentLoop;
+
+				const deps: ThinkerWorkerDeps = {
+					sql: pool,
+					projectionManager,
+					interactionRepo: mockInteractionRepo,
+					recentCognitionSlotRepo: mockSlotRepo,
+					agentRegistry: registry,
+					createAgentLoop: (agentId: string) =>
+						agentId === AGENT_ID ? mockAgentLoop : null,
+					jobPersistence: mockJobs,
+					settlementLedger: settlementLedgerAdapter,
+				};
+
+				const worker = createThinkerWorker(deps);
+				const payload: CognitionThinkerJobPayload = {
+					sessionId,
+					agentId: AGENT_ID,
+					settlementId,
+					talkerTurnVersion: 1,
+				};
+
+				await worker({ payload });
+
+				const ledgerRow = await ledger.getBySettlementId(settlementId);
+				expect(ledgerRow).not.toBeNull();
+				expect(ledgerRow!.status).toBe("applied");
+
+				const episodeRows = await pool`
+					SELECT id, summary
+					FROM private_episode_events
+					WHERE settlement_id = ${settlementId}
+					  AND agent_id = ${AGENT_ID}
+				`;
+				expect(episodeRows.length).toBe(1);
+				expect(String(episodeRows[0].summary)).toContain("e2e test");
+
+				const cognitionRows = await pool`
+					SELECT id, kind, stance, cognition_key
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:e2e:belief-warmth"}
+					LIMIT 1
+				`;
+				expect(cognitionRows.length).toBe(1);
+				expect(cognitionRows[0].kind).toBe("assertion");
+				expect(cognitionRows[0].stance).toBe("accepted");
+
+				const searchRows = await pool`
+					SELECT source_ref, kind, stance, content
+					FROM search_docs_cognition
+					WHERE agent_id = ${AGENT_ID}
+					  AND source_ref LIKE ${"assertion:%"}
+					  AND content ILIKE ${"%feels_warmth_toward%"}
+				`;
+				expect(searchRows.length).toBeGreaterThanOrEqual(1);
+
+				const relationRows = await pool`
+					SELECT source_node_ref, target_node_ref, relation_type
+					FROM memory_relations
+					WHERE source_ref = ${settlementId}
+				`;
+				expect(relationRows.length).toBe(1);
+				expect(relationRows[0].relation_type).toBe("supports");
+				expect(String(relationRows[0].source_node_ref).startsWith("private_episode:")).toBe(true);
+				expect(String(relationRows[0].target_node_ref).startsWith("assertion:")).toBe(true);
+
+				expect(mockJobs.enqueuedJobs.length).toBeGreaterThanOrEqual(1);
+				expect(mockJobs.enqueuedJobs[0].jobType).toBe("memory.organize");
+
+				const enqueuedNodeRefs = mockJobs.enqueuedJobs.flatMap((job) => {
+					const organizePayload = job.payload as {
+						agentId: string;
+						chunkNodeRefs: string[];
+						settlementId: string;
+					};
+					expect(organizePayload.agentId).toBe(AGENT_ID);
+					expect(organizePayload.settlementId).toBe(settlementId);
+					return organizePayload.chunkNodeRefs;
+				});
+
+				expect(enqueuedNodeRefs.length).toBeGreaterThanOrEqual(1);
+				expect(enqueuedNodeRefs.some((ref) => ref.startsWith("event:"))).toBe(true);
+				expect(enqueuedNodeRefs.some((ref) => ref.startsWith("assertion:"))).toBe(true);
+				expect(
+					enqueuedNodeRefs.every((ref) =>
+						/^(event|assertion|evaluation|commitment):\d+$/.test(ref),
+					),
+				).toBe(true);
+				expect(
+					enqueuedNodeRefs.every(
+						(ref) =>
+							!ref.startsWith("private_episode:") &&
+							!ref.startsWith("private_cognition:"),
+					),
+				).toBe(true);
+
+				const realRecentSlotRepo = new PgRecentCognitionSlotRepo(pool);
+				const slot = await realRecentSlotRepo.getBySession(sessionId, AGENT_ID);
+				expect(slot).toBeDefined();
+				expect(slot!.thinkerCommittedVersion).toBeGreaterThanOrEqual(1);
+			},
+			30_000,
 		);
 
 		it(
@@ -584,10 +916,10 @@ describe.skipIf(skipPgTests)(
 					expect(result.changedNodeRefs.length).toBe(5);
 
 					const episodeRefs = result.changedNodeRefs.filter((r) =>
-						r.startsWith("private_episode:"),
+						r.startsWith("event:"),
 					);
 					const cognitionRefs = result.changedNodeRefs.filter((r) =>
-						r.startsWith("private_cognition:"),
+						r.startsWith("assertion:") || r.startsWith("evaluation:") || r.startsWith("commitment:"),
 					);
 					expect(episodeRefs.length).toBe(3);
 					expect(cognitionRefs.length).toBe(2);
