@@ -1,6 +1,18 @@
-import type { MaidsClawConfig, ConfigResult, ConfigError, AnthropicProviderConfig, OpenAIProviderConfig, AuthConfig, AuthConfigResult, AuthCredential, MemoryConfig, RuntimeConfig, RuntimeConfigResult } from "./config-schema.js";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type {
+  AnthropicProviderConfig,
+  AuthConfig,
+  AuthConfigResult,
+  AuthCredential,
+  ConfigError,
+  ConfigResult,
+  MaidsClawConfig,
+  MemoryConfig,
+  OpenAIProviderConfig,
+  RuntimeConfig,
+  RuntimeConfigResult,
+} from "./config-schema.js";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
@@ -193,6 +205,9 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
     softBlockTimeoutMs: typeof tt.softBlockTimeoutMs === "number" ? tt.softBlockTimeoutMs : 3000,
     softBlockPollIntervalMs: typeof tt.softBlockPollIntervalMs === "number" ? tt.softBlockPollIntervalMs : 500,
+    ...(typeof tt.globalConcurrencyCap === "number" && Number.isFinite(tt.globalConcurrencyCap)
+      ? { globalConcurrencyCap: tt.globalConcurrencyCap }
+      : {}),
   };
 
   return { ok: true, runtime };

@@ -101,6 +101,7 @@ export type RuntimeBootstrapResult = {
 	recentCognitionSlotRepo: RecentCognitionSlotRepo;
 	sharedBlockRepo: SharedBlockRepo;
 	jobPersistence: JobPersistence;
+	thinkerGlobalConcurrencyCap?: number;
 	shutdown: () => void;
 };
 

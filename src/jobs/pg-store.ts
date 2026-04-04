@@ -159,6 +159,10 @@ type FenceMissOutcome = "not_found" | "stale_claim" | "not_running";
 
 const DEFAULT_HEARTBEAT_LEASE_EXTENSION_MS = 30_000;
 
+type PgJobStoreOptions = {
+  thinkerGlobalConcurrencyCap?: number;
+};
+
 function normalizeJsonValue<T>(value: T): T | unknown {
   if (typeof value !== "string") {
     return value;
@@ -230,10 +234,6 @@ async function markAttemptLeaseLost(
   `;
 }
 
-function getConcurrencyCap(concurrencyKey: string): number {
-  return CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
-}
-
 /**
  * Derive a global concurrency key from a per-session concurrency key.
  * e.g. "cognition.thinker:session:abc123" → "cognition.thinker:global"
@@ -268,7 +268,21 @@ function normalizePgJobCurrentRow(row: PgJobCurrentRow): PgJobCurrentRow {
  * Remaining methods are stubs for T7–T10.
  */
 export class PgJobStore implements DurableJobStore {
-  constructor(private readonly sql: postgres.Sql) {}
+  private readonly concurrencyKeyCapOverrides: Record<string, number>;
+
+  constructor(
+    private readonly sql: postgres.Sql,
+    options?: PgJobStoreOptions,
+  ) {
+    this.concurrencyKeyCapOverrides =
+      typeof options?.thinkerGlobalConcurrencyCap === "number"
+        ? { "cognition.thinker:global": options.thinkerGlobalConcurrencyCap }
+        : {};
+  }
+
+  private getConcurrencyCap(concurrencyKey: string): number {
+    return this.concurrencyKeyCapOverrides[concurrencyKey] ?? CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
+  }
 
   // ── enqueue ─────────────────────────────────────────────────────────
   async enqueue<K extends JobKind>(input: EnqueueJobInput<K>): Promise<EnqueueResult> {
@@ -529,7 +543,7 @@ export class PgJobStore implements DurableJobStore {
         }
 
         for (const candidate of candidates) {
-          const cap = getConcurrencyCap(candidate.concurrency_key);
+          const cap = this.getConcurrencyCap(candidate.concurrency_key);
 
           const lockRows = (await sqltx`
             SELECT pg_try_advisory_xact_lock(hashtext(${candidate.concurrency_key})::bigint) AS locked
@@ -554,7 +568,7 @@ export class PgJobStore implements DurableJobStore {
           // ── derived global cap check ──────────────────────────────
           const globalKey = deriveGlobalConcurrencyKey(candidate.concurrency_key);
           if (globalKey !== undefined) {
-            const globalCap = getConcurrencyCap(globalKey);
+            const globalCap = this.getConcurrencyCap(globalKey);
             const globalRunningRows = (await sqltx`
               SELECT COUNT(*)::int AS running_count
               FROM jobs_current
@@ -1079,7 +1093,8 @@ export class PgJobStore implements DurableJobStore {
       `;
       totalDeleted += deleted.count;
 
-      for (const [familyKey, windowMs] of Object.entries(familyOverrides!)) {
+      const effectiveFamilyOverrides = familyOverrides ?? {};
+      for (const [familyKey, windowMs] of Object.entries(effectiveFamilyOverrides)) {
         const familyCutoff = nowMs - windowMs;
         const familyDeleted = await this.sql`
           DELETE FROM jobs_current

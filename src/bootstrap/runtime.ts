@@ -30,8 +30,10 @@ import type {
 } from "../interaction/contracts.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
+import type { DurableJobStore } from "../jobs/durable-store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
+import { PgJobStore } from "../jobs/pg-store.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
 import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
@@ -610,11 +612,6 @@ export function bootstrapRuntime(
 	const pgFactory = new PgBackendFactory();
 
 	const runtimeCwd = resolveRuntimeCwd(options);
-	const resolvedJobPersistence: JobPersistence =
-		options.jobPersistence ??
-		createJobPersistence("pg", {
-			pgFactory,
-		});
 
 	// Load runtime config (from options or config/runtime.json)
 	const runtimeConfigResult = options.runtimeConfig
@@ -623,6 +620,14 @@ export function bootstrapRuntime(
 	const runtimeConfig: RuntimeConfig = runtimeConfigResult.ok
 		? runtimeConfigResult.runtime
 		: {};
+	const thinkerGlobalConcurrencyCap =
+		runtimeConfig.talkerThinker?.globalConcurrencyCap;
+
+	const resolvedJobPersistence: JobPersistence =
+		options.jobPersistence ??
+		createJobPersistence("pg", {
+			pgFactory,
+		});
 
 	// Extract talkerThinker config with defaults
 	const talkerThinkerConfig = runtimeConfig.talkerThinker ?? {
@@ -1201,6 +1206,7 @@ export function bootstrapRuntime(
 		recentCognitionSlotRepo,
 		sharedBlockRepo,
 		jobPersistence: resolvedJobPersistence,
+		thinkerGlobalConcurrencyCap,
 		shutdown,
 	};
 }
@@ -1213,4 +1219,27 @@ export async function initializePgBackendForRuntime(
 		type: "pg",
 		pg: { url: process.env.PG_APP_URL ?? "" },
 	});
+
+	const pgFactoryWithStore = result.pgFactory as PgBackendFactory & {
+		store?: DurableJobStore;
+	};
+	if (!pgFactoryWithStore.store) {
+		let pool: ReturnType<PgBackendFactory["getPool"]> | null = null;
+		try {
+			pool = result.pgFactory.getPool();
+		} catch {
+			pool = null;
+		}
+
+		if (pool) {
+			pgFactoryWithStore.store = new PgJobStore(
+				pool,
+				typeof result.thinkerGlobalConcurrencyCap === "number"
+					? {
+						thinkerGlobalConcurrencyCap: result.thinkerGlobalConcurrencyCap,
+					}
+					: undefined,
+			);
+		}
+	}
 }

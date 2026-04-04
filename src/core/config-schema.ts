@@ -96,6 +96,7 @@ export type RuntimeConfig = {
     stalenessThreshold: number;
     softBlockTimeoutMs: number;
     softBlockPollIntervalMs: number;
+    globalConcurrencyCap?: number;
   };
 };
 
