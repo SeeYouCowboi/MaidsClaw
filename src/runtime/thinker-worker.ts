@@ -8,14 +8,21 @@ import {
 } from "../interaction/contracts.js";
 import type { CognitionThinkerJobPayload } from "../jobs/durable-store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
-import type { RelationBuilder } from "../memory/cognition/relation-builder.js";
+import { applyContestConflictFactors } from "../memory/cognition/contest-conflict-applicator.js";
+import { RelationBuilder } from "../memory/cognition/relation-builder.js";
+import {
+	materializeRelationIntents,
+	resolveConflictFactors,
+	resolveLocalRefs,
+	type SettledArtifacts,
+} from "../memory/cognition/relation-intent-resolver.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
-import { CALL_TWO_TOOLS, type CreatedState } from "../memory/task-agent.js";
 import type {
 	ProjectionManager,
 	SettlementProjectionParams,
 } from "../memory/projection/projection-manager.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
+import { CALL_TWO_TOOLS, type CreatedState } from "../memory/task-agent.js";
 import type { NodeRef } from "../memory/types.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
@@ -26,6 +33,7 @@ import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
 import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 
@@ -294,175 +302,318 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 		}
 
 		try {
-		const requestId = payload.settlementId.replace(/^stl:/, "");
-		const settlementPayload = await deps.interactionRepo.getSettlementPayload(
-			payload.sessionId,
-			requestId,
-		);
-		if (!settlementPayload) {
-			throw new Error(
-				`Settlement payload not found: session=${payload.sessionId} settlement=${payload.settlementId}`,
+			const requestId = payload.settlementId.replace(/^stl:/, "");
+			const settlementPayload = await deps.interactionRepo.getSettlementPayload(
+				payload.sessionId,
+				requestId,
 			);
-		}
+			if (!settlementPayload) {
+				throw new Error(
+					`Settlement payload not found: session=${payload.sessionId} settlement=${payload.settlementId}`,
+				);
+			}
 
-		const cognitiveSketch = getSketchFromSettlement(settlementPayload) ?? "";
-		const messageRecords = await deps.interactionRepo.getMessageRecords(
-			payload.sessionId,
-		);
-		const messages = toConversationMessages(messageRecords);
+			const cognitiveSketch = getSketchFromSettlement(settlementPayload) ?? "";
+			const messageRecords = await deps.interactionRepo.getMessageRecords(
+				payload.sessionId,
+			);
+			const messages = toConversationMessages(messageRecords);
 
-		if (cognitiveSketch) {
+			if (cognitiveSketch) {
+				messages.push({
+					role: "user",
+					content:
+						`[Thinker context] Cognitive sketch from Talker: ${cognitiveSketch}\n\n` +
+						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
+				});
+			}
+
 			messages.push({
 				role: "user",
-				content:
-					`[Thinker context] Cognitive sketch from Talker: ${cognitiveSketch}\n\n` +
-					"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
+				content: THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS,
 			});
-		}
 
-		messages.push({
-			role: "user",
-			content: THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS,
-		});
-
-		const agentLoop = deps.createAgentLoop(payload.agentId);
-		if (!agentLoop) {
-			throw new Error(`No agent loop for agent ${payload.agentId}`);
-		}
-
-		if (!deps.agentRegistry.get(payload.agentId)) {
-			throw new Error(`Agent not found: ${payload.agentId}`);
-		}
-
-		const agentRunRequest: AgentRunRequest = {
-			sessionId: payload.sessionId,
-			requestId: payload.settlementId,
-			messages,
-			isTalkerMode: false,
-		};
-
-		const bufferedResult = await agentLoop.runBuffered(agentRunRequest);
-		if ("error" in bufferedResult) {
-			throw new Error(bufferedResult.error);
-		}
-
-		const canonicalOutcome = normalizeRpTurnOutcome(
-			sanitizeThinkerOutcome(structuredClone(bufferedResult.outcome)),
-		);
-		const areaStateArtifacts = (
-			canonicalOutcome as CanonicalRpTurnOutcome & {
-				areaStateArtifacts?: SettlementProjectionParams["areaStateArtifacts"];
+			const agentLoop = deps.createAgentLoop(payload.agentId);
+			if (!agentLoop) {
+				throw new Error(`No agent loop for agent ${payload.agentId}`);
 			}
-		).areaStateArtifacts;
-		const relationIntents = canonicalOutcome.relationIntents ?? [];
-		const conflictFactors = canonicalOutcome.conflictFactors ?? [];
 
-		const cognitionOps = canonicalOutcome.privateCognition?.ops ?? [];
-		const committedAt = Date.now();
-		const slotEntries = buildCognitionSlotPayloadForThinker(
-			cognitionOps,
-			payload.settlementId,
-			committedAt,
-		);
-		const recentCognitionSlotJson = JSON.stringify(slotEntries);
+			if (!deps.agentRegistry.get(payload.agentId)) {
+				throw new Error(`Agent not found: ${payload.agentId}`);
+			}
 
-		const params: SettlementProjectionParams = {
-			settlementId: payload.settlementId,
-			sessionId: payload.sessionId,
-			agentId: payload.agentId,
-			cognitionOps,
-			privateEpisodes: canonicalOutcome.privateEpisodes ?? [],
-			publications: canonicalOutcome.publications ?? [],
-			areaStateArtifacts: areaStateArtifacts ?? [],
-			recentCognitionSlotJson,
-			committedAt,
-			viewerSnapshot: settlementPayload.viewerSnapshot
-				? {
-						currentLocationEntityId:
-							settlementPayload.viewerSnapshot.currentLocationEntityId,
-					}
-				: undefined,
-		};
-
-		try {
-			await deps.settlementLedger?.markThinkerProjecting(payload.settlementId, payload.agentId);
-		} catch (ledgerErr) {
-			console.warn('[thinker_worker] markThinkerProjecting failed (non-fatal):', ledgerErr);
-		}
-
-		let changedNodeRefs: NodeRef[] = [];
-		await deps.sql.begin(async (tx) => {
-			const txSql = tx as unknown as postgres.Sql;
-			const txEpisodeRepo = new PgEpisodeRepo(txSql);
-			const txCognitionProjectionRepo = new PgCognitionProjectionRepo(txSql);
-			const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
-			const repoOverrides = {
-				episodeRepo: txEpisodeRepo,
-				cognitionEventRepo: new PgCognitionEventRepo(txSql),
-				cognitionProjectionRepo: txCognitionProjectionRepo,
-				relationWriteRepo: txRelationWriteRepo,
-				searchProjectionRepo: new PgSearchProjectionRepo(txSql),
-				areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
-				recentCognitionSlotRepo: createThinkerSlotRepo(
-					new PgRecentCognitionSlotRepo(txSql),
-				),
+			const agentRunRequest: AgentRunRequest = {
+				sessionId: payload.sessionId,
+				requestId: payload.settlementId,
+				messages,
+				isTalkerMode: false,
 			};
 
-			const result = await deps.projectionManager.commitSettlement(
-				params,
-				repoOverrides,
-			);
-			changedNodeRefs = result.changedNodeRefs;
-			void relationIntents;
-			void conflictFactors;
+			const bufferedResult = await agentLoop.runBuffered(agentRunRequest);
+			if ("error" in bufferedResult) {
+				throw new Error(bufferedResult.error);
+			}
 
-			// [T10] materializeRelationIntents (inside tx, after commitSettlement)
-			// [T11] conflict factor resolution + application (inside tx)
-		});
-
-		try {
-			await deps.settlementLedger?.markApplied(payload.settlementId);
-		} catch (ledgerErr) {
-			console.warn('[thinker_worker] markApplied failed (non-fatal):', ledgerErr);
-		}
-		// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)
-		const shouldUpdateIndex =
-			cognitionOps.length >= 3 ||
-			cognitionOps.some(
-				(op) =>
-					op.op === "upsert" &&
-					(op.record as AssertionRecordV4).stance === "contested",
+			const canonicalOutcome = normalizeRpTurnOutcome(
+				sanitizeThinkerOutcome(structuredClone(bufferedResult.outcome)),
 			);
-		if (deps.coreMemoryIndexUpdater && shouldUpdateIndex) {
+			const areaStateArtifacts = (
+				canonicalOutcome as CanonicalRpTurnOutcome & {
+					areaStateArtifacts?: SettlementProjectionParams["areaStateArtifacts"];
+				}
+			).areaStateArtifacts;
+			const relationIntents = canonicalOutcome.relationIntents ?? [];
+			const conflictFactors = canonicalOutcome.conflictFactors ?? [];
+
+			const cognitionOps = canonicalOutcome.privateCognition?.ops ?? [];
+			const committedAt = Date.now();
+			const slotEntries = buildCognitionSlotPayloadForThinker(
+				cognitionOps,
+				payload.settlementId,
+				committedAt,
+			);
+			const recentCognitionSlotJson = JSON.stringify(slotEntries);
+
+			const params: SettlementProjectionParams = {
+				settlementId: payload.settlementId,
+				sessionId: payload.sessionId,
+				agentId: payload.agentId,
+				cognitionOps,
+				privateEpisodes: canonicalOutcome.privateEpisodes ?? [],
+				publications: canonicalOutcome.publications ?? [],
+				areaStateArtifacts: areaStateArtifacts ?? [],
+				recentCognitionSlotJson,
+				committedAt,
+				viewerSnapshot: settlementPayload.viewerSnapshot
+					? {
+							currentLocationEntityId:
+								settlementPayload.viewerSnapshot.currentLocationEntityId,
+						}
+					: undefined,
+			};
+
 			try {
-				const createdState: CreatedState = {
-					episodeEventIds: [],
-					assertionIds: [],
-					entityIds: [],
-					factIds: [],
-					changedNodeRefs,
-				};
-				await deps.coreMemoryIndexUpdater.updateIndex(
+				await deps.settlementLedger?.markThinkerProjecting(
+					payload.settlementId,
 					payload.agentId,
-					createdState,
-					CALL_TWO_TOOLS,
 				);
-			} catch (indexErr) {
+			} catch (ledgerErr) {
 				console.warn(
-					"[thinker_worker] coreMemoryIndexUpdater failed (non-fatal):",
-					indexErr,
+					"[thinker_worker] markThinkerProjecting failed (non-fatal):",
+					ledgerErr,
 				);
 			}
-		}
-		// [T13] enqueueOrganizerJobs (outside tx)
-		if (deps.jobPersistence && changedNodeRefs.length > 0) {
-		}
+
+			let changedNodeRefs: NodeRef[] = [];
+			await deps.sql.begin(async (tx) => {
+				const txSql = tx as unknown as postgres.Sql;
+				const txEpisodeRepo = new PgEpisodeRepo(txSql);
+				const txCognitionProjectionRepo = new PgCognitionProjectionRepo(txSql);
+				const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
+				const repoOverrides = {
+					episodeRepo: txEpisodeRepo,
+					cognitionEventRepo: new PgCognitionEventRepo(txSql),
+					cognitionProjectionRepo: txCognitionProjectionRepo,
+					relationWriteRepo: txRelationWriteRepo,
+					searchProjectionRepo: new PgSearchProjectionRepo(txSql),
+					areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
+					recentCognitionSlotRepo: createThinkerSlotRepo(
+						new PgRecentCognitionSlotRepo(txSql),
+					),
+				};
+
+				const result = await deps.projectionManager.commitSettlement(
+					params,
+					repoOverrides,
+				);
+				changedNodeRefs = result.changedNodeRefs;
+
+				const episodeRows = await txEpisodeRepo.readBySettlement(
+					payload.settlementId,
+					payload.agentId,
+				);
+				const localRefIndex = new Map<
+					string,
+					{
+						kind: "episode" | "publication" | "cognition" | "proposal";
+						nodeRef: string;
+					}
+				>();
+				for (const row of episodeRows) {
+					if (row.source_local_ref) {
+						localRefIndex.set(row.source_local_ref, {
+							kind: "episode",
+							nodeRef: `private_episode:${row.id}`,
+						});
+					}
+				}
+
+				const cognitionByKey = new Map<
+					string,
+					{ kind: CognitionKind; nodeRef: string }
+				>();
+				for (const op of cognitionOps) {
+					if (op.op === "upsert") {
+						const projection = await txCognitionProjectionRepo.getCurrent(
+							payload.agentId,
+							op.record.key,
+						);
+						if (
+							projection &&
+							(projection.kind === "assertion" ||
+								projection.kind === "evaluation" ||
+								projection.kind === "commitment")
+						) {
+							const nodeRef = `${projection.kind}:${projection.id}`;
+							cognitionByKey.set(op.record.key, {
+								kind: projection.kind,
+								nodeRef,
+							});
+						}
+					}
+				}
+
+				if (relationIntents.length > 0) {
+					const settledArtifacts: SettledArtifacts = {
+						settlementId: payload.settlementId,
+						agentId: payload.agentId,
+						localRefIndex,
+						cognitionByKey,
+					};
+					const resolvedRefs = resolveLocalRefs(
+						{ relationIntents, conflictFactors },
+						settledArtifacts,
+					);
+					try {
+						const count = await materializeRelationIntents(
+							relationIntents,
+							resolvedRefs,
+							txRelationWriteRepo,
+						);
+						console.log(
+							`[thinker_worker] materialized ${count} relation intents for settlement ${payload.settlementId}`,
+						);
+					} catch (intentErr) {
+						console.warn(
+							`[thinker_worker] materializeRelationIntents failed (non-fatal):`,
+							intentErr,
+						);
+					}
+				}
+
+				const contestedAssertions: Array<{
+					cognitionKey: string;
+					nodeRef: string;
+				}> = [];
+				for (const op of cognitionOps) {
+					if (
+						op.op === "upsert" &&
+						op.record.kind === "assertion" &&
+						(op.record as AssertionRecordV4).stance === "contested"
+					) {
+						const projection = cognitionByKey.get(op.record.key);
+						if (projection) {
+							contestedAssertions.push({
+								cognitionKey: op.record.key,
+								nodeRef: projection.nodeRef,
+							});
+						}
+					}
+				}
+
+				if (conflictFactors.length > 0 || contestedAssertions.length > 0) {
+					try {
+						const conflictResult = await resolveConflictFactors(
+							conflictFactors,
+							txCognitionProjectionRepo,
+							{
+								settlementId: payload.settlementId,
+								agentId: payload.agentId,
+							},
+						);
+						console.log(
+							`[thinker_worker] resolved ${conflictResult.resolved.length} conflict factors (${conflictResult.unresolved.length} unresolved) for settlement ${payload.settlementId}`,
+						);
+
+						const txRelationBuilder = new RelationBuilder({
+							relationWriteRepo: txRelationWriteRepo,
+							relationReadRepo: new PgRelationReadRepo(txSql),
+							cognitionProjectionRepo: txCognitionProjectionRepo,
+						});
+						await applyContestConflictFactors(
+							txRelationBuilder,
+							txCognitionProjectionRepo,
+							payload.agentId,
+							payload.settlementId,
+							contestedAssertions,
+							conflictResult.resolved.map((f) => f.nodeRef),
+							conflictResult.unresolved.length,
+						);
+					} catch (conflictErr) {
+						console.warn(
+							`[thinker_worker] conflict factor processing failed (non-fatal):`,
+							conflictErr,
+						);
+					}
+				}
+			});
+
+			try {
+				await deps.settlementLedger?.markApplied(payload.settlementId);
+			} catch (ledgerErr) {
+				console.warn(
+					"[thinker_worker] markApplied failed (non-fatal):",
+					ledgerErr,
+				);
+			}
+			// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)
+			const shouldUpdateIndex =
+				cognitionOps.length >= 3 ||
+				cognitionOps.some(
+					(op) =>
+						op.op === "upsert" &&
+						(op.record as AssertionRecordV4).stance === "contested",
+				);
+			if (deps.coreMemoryIndexUpdater && shouldUpdateIndex) {
+				try {
+					const createdState: CreatedState = {
+						episodeEventIds: [],
+						assertionIds: [],
+						entityIds: [],
+						factIds: [],
+						changedNodeRefs,
+					};
+					await deps.coreMemoryIndexUpdater.updateIndex(
+						payload.agentId,
+						createdState,
+						CALL_TWO_TOOLS,
+					);
+				} catch (indexErr) {
+					console.warn(
+						"[thinker_worker] coreMemoryIndexUpdater failed (non-fatal):",
+						indexErr,
+					);
+				}
+			}
+			// [T13] enqueueOrganizerJobs (outside tx)
+			if (deps.jobPersistence && changedNodeRefs.length > 0) {
+			}
 		} catch (thinkerError: unknown) {
 			try {
-				const errMsg = thinkerError instanceof Error ? thinkerError.message : String(thinkerError);
-				await deps.settlementLedger?.markFailed(payload.settlementId, errMsg, true);
+				const errMsg =
+					thinkerError instanceof Error
+						? thinkerError.message
+						: String(thinkerError);
+				await deps.settlementLedger?.markFailed(
+					payload.settlementId,
+					errMsg,
+					true,
+				);
 			} catch (ledgerErr) {
-				console.warn('[thinker_worker] markFailed failed (non-fatal):', ledgerErr);
+				console.warn(
+					"[thinker_worker] markFailed failed (non-fatal):",
+					ledgerErr,
+				);
 			}
 			throw thinkerError;
 		}
