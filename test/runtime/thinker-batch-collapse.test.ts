@@ -922,4 +922,219 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			PgJobRunner.prototype.processNext = originalProcessNext;
 		}
 	});
+
+	it("LLM failure produces zero commits and marks both claimed and effective settlements as failed", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+		});
+
+		fixture.runBuffered.mockImplementation(async () => {
+			throw new Error("LLM timeout");
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			"LLM timeout",
+		);
+
+		expect(fixture.projectionManager.commitSettlement.mock.calls.length).toBe(0);
+		expect(fixture.settlementLedger.markApplied.mock.calls.length).toBe(0);
+		expect(fixture.settlementLedger.markFailed).toHaveBeenCalledWith(
+			settlementIdFor(3),
+			"LLM timeout",
+			true,
+		);
+		expect(fixture.settlementLedger.markFailed).toHaveBeenCalledWith(
+			settlementIdFor(5),
+			"LLM timeout",
+			true,
+		);
+		expect(fixture.settlementLedger.markReplayedNoop.mock.calls.length).toBe(0);
+	});
+
+	it("partial sketch load failure truncates to contiguous prefix and commits as single-job", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: new Error("v4 payload missing"),
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("Cognitive sketch from Talker: sketch-v3");
+		expect(prompt).not.toContain("(batch)");
+		expect(prompt).not.toContain("[Turn 5]");
+
+		const call = fixture.slotUpsertSpy.mock.calls.at(-1);
+		expect(call?.[4]).toBe("thinker");
+		expect(call?.[5]).toBeUndefined();
+
+		expect(fixture.settlementCalls).not.toContain(settlementIdFor(5));
+
+		expect(fixture.projectionManager.commitSettlement.mock.calls.length).toBe(
+			1,
+		);
+		const [projParams] =
+			fixture.projectionManager.commitSettlement.mock.calls[0];
+		expect(projParams.settlementId).toBe(settlementIdFor(3));
+
+		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
+			settlementIdFor(3),
+		);
+		expect(fixture.settlementLedger.markReplayedNoop.mock.calls.length).toBe(0);
+	});
+
+	it("commitSettlement failure prevents ledger update and marks both settlements as failed", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		fixture.projectionManager.commitSettlement.mockImplementation(async () => {
+			throw new Error("DB write failed");
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			"DB write failed",
+		);
+
+		expect(fixture.settlementLedger.markApplied.mock.calls.length).toBe(0);
+		expect(fixture.settlementLedger.markReplayedNoop.mock.calls.length).toBe(0);
+		expect(
+			fixture.settlementLedger.markThinkerProjecting,
+		).toHaveBeenCalledWith(settlementIdFor(5), AGENT_ID);
+		expect(fixture.settlementLedger.markFailed).toHaveBeenCalledWith(
+			settlementIdFor(3),
+			"DB write failed",
+			true,
+		);
+		expect(fixture.settlementLedger.markFailed).toHaveBeenCalledWith(
+			settlementIdFor(5),
+			"DB write failed",
+			true,
+		);
+		expect(fixture.slotUpsertSpy.mock.calls.length).toBe(0);
+	});
+
+	it("retry rebuilds batch dynamically from changed pending set", async () => {
+		let pendingCallCount = 0;
+		const fixture = createFixture({
+			claimedVersion: 3,
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+		});
+
+		fixture.listPendingByKindAndPayload.mockImplementation(async () => {
+			pendingCallCount++;
+			if (pendingCallCount === 1) {
+				return [
+					makePendingRow({
+						sessionId: SESSION_ID,
+						agentId: AGENT_ID,
+						settlementId: settlementIdFor(4),
+						talkerTurnVersion: 4,
+					}),
+					makePendingRow({
+						sessionId: SESSION_ID,
+						agentId: AGENT_ID,
+						settlementId: settlementIdFor(5),
+						talkerTurnVersion: 5,
+					}),
+				];
+			}
+			return [
+				makePendingRow({
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				}),
+			];
+		});
+
+		const capturedRequests: AgentRunRequest[] = [];
+		fixture.runBuffered.mockImplementation(
+			async (request: AgentRunRequest) => {
+				capturedRequests.push(request);
+				if (capturedRequests.length === 1) {
+					throw new Error("first fail");
+				}
+				return { outcome: makeSuccessOutcome() };
+			},
+		);
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			"first fail",
+		);
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(capturedRequests.length).toBe(2);
+		const secondPrompt = capturedRequests[1].messages
+			.filter((m) => m.role === "user" && typeof m.content === "string")
+			.map((m) => m.content)
+			.join("\n");
+		expect(secondPrompt).toContain("[Turn 3]");
+		expect(secondPrompt).toContain("[Turn 5]");
+		expect(secondPrompt).not.toContain("[Turn 4]");
+	});
 });
