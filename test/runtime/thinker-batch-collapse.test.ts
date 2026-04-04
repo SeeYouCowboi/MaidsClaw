@@ -6,18 +6,18 @@ import { createAppHost } from "../../src/app/host/create-app-host.js";
 import type { RuntimeBootstrapResult } from "../../src/bootstrap/types.js";
 import type { AgentLoop, AgentRunRequest } from "../../src/core/agent-loop.js";
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
-import { PgJobRunner } from "../../src/jobs/pg-runner.js";
 import type {
 	CognitionThinkerJobPayload,
 	DurableJobStore,
 	PgJobCurrentRow,
 } from "../../src/jobs/durable-store.js";
+import type { JobPersistence } from "../../src/jobs/persistence.js";
+import { PgJobRunner } from "../../src/jobs/pg-runner.js";
+import * as contestConflictApplicatorModule from "../../src/memory/cognition/contest-conflict-applicator.js";
+import * as relationIntentResolverModule from "../../src/memory/cognition/relation-intent-resolver.js";
+import * as organizeEnqueueModule from "../../src/memory/organize-enqueue.js";
 import type { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
 import type { SettlementLedger } from "../../src/memory/settlement-ledger.js";
-import * as contestConflictApplicatorModule from "../../src/memory/cognition/contest-conflict-applicator.js";
-import * as organizeEnqueueModule from "../../src/memory/organize-enqueue.js";
-import * as relationIntentResolverModule from "../../src/memory/cognition/relation-intent-resolver.js";
-import type { JobPersistence } from "../../src/jobs/persistence.js";
 import {
 	createThinkerWorker,
 	type ThinkerWorkerDeps,
@@ -1136,5 +1136,119 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(secondPrompt).toContain("[Turn 3]");
 		expect(secondPrompt).toContain("[Turn 5]");
 		expect(secondPrompt).not.toContain("[Turn 4]");
+	});
+
+	it("S6: version monotonicity keeps thinkerCommittedVersion at 5 when late v3 retries", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: "sketch-v3",
+				[settlementIdFor(4)]: "sketch-v4",
+				[settlementIdFor(5)]: "sketch-v5",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		fixture.getBySession
+			.mockImplementationOnce(async () => undefined)
+			.mockImplementation(async () => ({
+				lastSettlementId: settlementIdFor(5),
+				slotPayload: [],
+				updatedAt: Date.now(),
+				talkerTurnCounter: 5,
+				thinkerCommittedVersion: 5,
+			}));
+
+		await fixture.worker({ payload: fixture.payload });
+
+		const firstUpsertCall = fixture.slotUpsertSpy.mock.calls.at(-1);
+		expect(firstUpsertCall?.[5]).toBe(5);
+
+		fixture.runBuffered.mockClear();
+		fixture.projectionManager.commitSettlement.mockClear();
+		fixture.settlementLedger.markReplayedNoop.mockClear();
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.runBuffered.mock.calls.length).toBe(0);
+		expect(fixture.projectionManager.commitSettlement.mock.calls.length).toBe(0);
+		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+			settlementIdFor(3),
+		);
+	});
+
+	it("S8: cross-session isolation batches only jobs from the claimed session", async () => {
+		const sessionB = "session:other";
+		const fixture = createFixture({
+			claimedVersion: 3,
+			settlementBehavior: {
+				[settlementIdFor(3)]: "session-a-v3",
+				[settlementIdFor(4)]: "session-a-v4",
+				[settlementIdFor(5)]: "session-a-v5",
+			},
+		});
+
+		fixture.listPendingByKindAndPayload.mockImplementation(
+			async (...args: unknown[]) => {
+				const filter = args[1] as
+					| { sessionId?: string; agentId?: string }
+					| undefined;
+				if (filter?.sessionId === SESSION_ID) {
+					return [
+						makePendingRow({
+							sessionId: SESSION_ID,
+							agentId: AGENT_ID,
+							settlementId: settlementIdFor(4),
+							talkerTurnVersion: 4,
+						}),
+						makePendingRow({
+							sessionId: SESSION_ID,
+							agentId: AGENT_ID,
+							settlementId: settlementIdFor(5),
+							talkerTurnVersion: 5,
+						}),
+					];
+				}
+
+				return [
+					makePendingRow({
+						sessionId: sessionB,
+						agentId: AGENT_ID,
+						settlementId: "stl:req-99",
+						talkerTurnVersion: 99,
+					}),
+				];
+			},
+		);
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		expect(fixture.listPendingByKindAndPayload).toHaveBeenCalledWith(
+			"cognition.thinker",
+			expect.objectContaining({ sessionId: SESSION_ID, agentId: AGENT_ID }),
+			expect.any(Number),
+		);
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("[Turn 3] session-a-v3");
+		expect(prompt).toContain("[Turn 4] session-a-v4");
+		expect(prompt).toContain("[Turn 5] session-a-v5");
+		expect(prompt).not.toContain("session-b");
+		expect(prompt).not.toContain("[Turn 99]");
 	});
 });
