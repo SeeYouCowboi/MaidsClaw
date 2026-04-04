@@ -220,7 +220,7 @@ Max Concurrent: 5 (Wave 1)
 
 ## TODOs
 
-- [ ] 1. Extract `enqueueOrganizerJobs()` as Standalone Exported Function
+- [x] 1. Extract `enqueueOrganizerJobs()` as Standalone Exported Function
 
   **What to do**:
   - Extract `enqueueOrganizerJobs()` (currently private on `MemoryTaskAgent`, line 712-749) into a standalone exported function
@@ -311,7 +311,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 2. Extract `applyContestConflictFactors()` as Standalone Exported Function
+- [x] 2. Extract `applyContestConflictFactors()` as Standalone Exported Function
 
   **What to do**:
   - Extract `applyContestConflictFactors()` (currently private on `ExplicitSettlementProcessor`, line 391-426) into a standalone exported function
@@ -389,7 +389,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 3. Settlement Ledger: Extend Status Type + PgSettlementLedgerRepo Methods (R-P2-03)
+- [x] 3. Settlement Ledger: Extend Status Type + PgSettlementLedgerRepo Methods (R-P2-03)
 
   **What to do**:
   - Extend `SettlementLedgerStatus` union type in `src/memory/settlement-ledger.ts` with two new states:
@@ -476,7 +476,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/settlement-ledger.ts`, `src/storage/domain-repos/pg/settlement-ledger-repo.ts`, `src/storage/pg-app-schema-truth.ts`, `test/pg-app/pg-settlement-ledger.test.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 4. Global Thinker Concurrency Cap (R-P2-06)
+- [x] 4. Global Thinker Concurrency Cap (R-P2-06)
 
   **What to do**:
 
@@ -582,7 +582,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 5. Upgrade `commitSettlement()`: Search Sync + changedNodeRefs Return (R-P2-00 Diff 1+2)
+- [x] 5. Upgrade `commitSettlement()`: Search Sync + changedNodeRefs Return (R-P2-00 Diff 1+2)
 
   **What to do**:
 
@@ -693,7 +693,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/memory/projection/projection-manager.ts`, callers of commitSettlement
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 6. Expand ThinkerWorkerDeps + Transaction Scaffolding (R-P2-00 Integration)
+- [x] 6. Expand ThinkerWorkerDeps + Transaction Scaffolding (R-P2-00 Integration)
 
   **What to do**:
   - Extend `ThinkerWorkerDeps` interface (thinker-worker.ts:43-50) with new dependencies:
@@ -791,7 +791,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 7. Extend Thinker Prompt: `relationIntents` + `conflictFactors` Schema (R-P2-01 + R-P2-02 Prompt)
+- [x] 7. Extend Thinker Prompt: `relationIntents` + `conflictFactors` Schema (R-P2-01 + R-P2-02 Prompt)
 
   **What to do**:
   - Find the Thinker prompt template/instruction that defines the structured output schema for the Thinker LLM call
@@ -888,7 +888,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 8. Integrate Settlement Ledger into Talker + Thinker Flow (R-P2-03 Integration)
+- [x] 8. Integrate Settlement Ledger into Talker + Thinker Flow (R-P2-03 Integration)
 
   **What to do**:
   - **Talker side**: In `runRpTalkerTurn()` (find in src/runtime), after the settlement transaction commits, call `settlementLedger.markTalkerCommitted(settlementId, agentId)`. This should be a best-effort call — failure to mark the ledger must NOT block the Talker turn.
@@ -963,7 +963,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/runtime/thinker-worker.ts`, Talker settlement file
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 9. CoreMemoryIndexUpdater Conditional Trigger in Thinker (R-P2-00 Diff 3)
+- [x] 9. CoreMemoryIndexUpdater Conditional Trigger in Thinker (R-P2-00 Diff 3)
 
   **What to do**:
   - In the Thinker worker, AFTER the `sql.begin()` transaction completes (outside the tx), conditionally call `deps.coreMemoryIndexUpdater.updateIndex(agentId, created, CALL_TWO_TOOLS)`

@@ -222,7 +222,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   },
 ];
 
-const CALL_TWO_TOOLS: ChatToolDefinition[] = [
+export const CALL_TWO_TOOLS: ChatToolDefinition[] = [
   {
     name: "update_index_block",
     description: "Rewrite the memory index block using pointer addresses like @pointer_key, #topic, e:id, and f:id.",

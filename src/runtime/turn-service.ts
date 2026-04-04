@@ -558,6 +558,18 @@ export class TurnService {
 			});
 
 			settlementPayloadAfterCommit = settlementPayload;
+
+			try {
+				await this.settlementUnitOfWork!.run(async (repos) => {
+					await repos.settlementLedger.markTalkerCommitted(settlementId, ownerAgentId);
+				});
+			} catch (ledgerErr) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`markTalkerCommitted failed (non-fatal): ${ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr)}`,
+				);
+			}
 		} catch (error: unknown) {
 			this.traceLog(requestId, "error", "Turn settlement transaction failed");
 			const errorChunk = {
