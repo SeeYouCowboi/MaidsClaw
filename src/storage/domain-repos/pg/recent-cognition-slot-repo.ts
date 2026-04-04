@@ -14,8 +14,13 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     settlementId: string,
     newEntriesJson: string = "[]",
     versionIncrement?: 'talker' | 'thinker',
+    setThinkerVersion?: number,
   ): Promise<{ talkerTurnCounter?: number; thinkerCommittedVersion?: number }> {
     const now = Date.now();
+
+    if (versionIncrement !== undefined && setThinkerVersion !== undefined) {
+      throw new Error('Cannot provide both versionIncrement and setThinkerVersion simultaneously');
+    }
 
     // Talker path: increment counter only, no payload change
     if (versionIncrement === 'talker') {
@@ -82,6 +87,55 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
           slot_payload = ${payloadJson}::jsonb,
           updated_at = ${now},
           thinker_committed_version = recent_cognition_slots.thinker_committed_version + 1
+        RETURNING thinker_committed_version
+      `;
+      return {
+        thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
+      };
+    }
+
+    if (setThinkerVersion !== undefined) {
+      const existingRows = await this.sql`
+        SELECT slot_payload FROM recent_cognition_slots
+        WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+      `;
+
+      let entries: unknown[];
+      if (existingRows.length > 0) {
+        const existing = existingRows[0].slot_payload;
+        entries = Array.isArray(existing) ? existing : [];
+      } else {
+        entries = [];
+      }
+
+      let newEntries: unknown[];
+      try {
+        newEntries = JSON.parse(newEntriesJson);
+        if (!Array.isArray(newEntries)) newEntries = [];
+      } catch {
+        newEntries = [];
+      }
+
+      entries = entries.concat(newEntries);
+
+      if (entries.length > 64) {
+        entries = entries.slice(entries.length - 64);
+      }
+      const payloadJson = JSON.stringify(entries);
+
+      const result = await this.sql`
+        INSERT INTO recent_cognition_slots (
+          session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
+        )
+        VALUES (
+          ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, ${setThinkerVersion}
+        )
+        ON CONFLICT (session_id, agent_id)
+        DO UPDATE SET
+          last_settlement_id = ${settlementId},
+          slot_payload = ${payloadJson}::jsonb,
+          updated_at = ${now},
+          thinker_committed_version = GREATEST(recent_cognition_slots.thinker_committed_version, ${setThinkerVersion})
         RETURNING thinker_committed_version
       `;
       return {
