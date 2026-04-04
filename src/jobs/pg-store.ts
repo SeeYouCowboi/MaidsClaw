@@ -142,6 +142,7 @@ const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
   "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
   "cognition.thinker:session:{sessionId}": 1,
+  "cognition.thinker:global": CONCURRENCY_CAPS.cognition_thinker_global,
 };
 
 type AdvisoryLockRow = {
@@ -231,6 +232,18 @@ async function markAttemptLeaseLost(
 
 function getConcurrencyCap(concurrencyKey: string): number {
   return CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
+}
+
+/**
+ * Derive a global concurrency key from a per-session concurrency key.
+ * e.g. "cognition.thinker:session:abc123" → "cognition.thinker:global"
+ * Returns undefined if the key has no session segment or no global cap entry exists.
+ */
+function deriveGlobalConcurrencyKey(concurrencyKey: string): string | undefined {
+  const sessionSegment = concurrencyKey.indexOf(":session:");
+  if (sessionSegment < 0) return undefined;
+  const globalKey = `${concurrencyKey.slice(0, sessionSegment)}:global`;
+  return globalKey in CONCURRENCY_KEY_CAPS ? globalKey : undefined;
 }
 
 function normalizePgJobCurrentRow(row: PgJobCurrentRow): PgJobCurrentRow {
@@ -536,6 +549,22 @@ export class PgJobStore implements DurableJobStore {
           const runningCount = Number(runningCountRows[0]?.running_count ?? 0);
           if (runningCount >= cap) {
             continue;
+          }
+
+          // ── derived global cap check ──────────────────────────────
+          const globalKey = deriveGlobalConcurrencyKey(candidate.concurrency_key);
+          if (globalKey !== undefined) {
+            const globalCap = getConcurrencyCap(globalKey);
+            const globalRunningRows = (await sqltx`
+              SELECT COUNT(*)::int AS running_count
+              FROM jobs_current
+              WHERE job_type = ${candidate.job_type}
+                AND status = 'running'
+            `) as RunningCountRow[];
+            const globalRunning = Number(globalRunningRows[0]?.running_count ?? 0);
+            if (globalRunning >= globalCap) {
+              continue;
+            }
           }
 
           const claimedRows = (await sqltx`

@@ -65,6 +65,7 @@ export const CONCURRENCY_CAPS = {
   maintenance_full_global: 1,
   chat_completions_global: 4,
   embedding_batches_global: 2,
+  cognition_thinker_global: 4,
 } as const;
 
 export const EXECUTION_CLASS_PRIORITY: Record<ExecutionClass, number> = {
