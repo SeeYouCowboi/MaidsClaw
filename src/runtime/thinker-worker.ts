@@ -60,7 +60,11 @@ relationIntents: Array of {
   intent: "supports" | "triggered" — relationship type
 }
 
+Coverage rule (strict): for EVERY privateEpisode you generate, include at least one relationIntent anchored from that episode via sourceRef="episode:{local_key}".
+
 For every new assertion you generate, identify the episode (from privateEpisodes) that motivated it, and add a relationIntent linking them. Use "supports" when the episode provides evidence; use "triggered" when the episode directly prompted the assertion.
+
+If an episode does not produce a new assertion, still create an evaluation or commitment that captures its significance and link that episode to the created cognition with relationIntents so episode coverage remains explicit and complete.
 
 conflictFactors: Array of {
   kind: string — type of conflict (e.g., "contradicts", "supersedes")
