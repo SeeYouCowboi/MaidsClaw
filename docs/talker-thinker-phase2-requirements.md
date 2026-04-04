@@ -228,13 +228,13 @@ Thinker fails terminal → failed_terminal
 实现步骤:
 1. 扩展 `SettlementLedgerStatus` 类型
 2. 在 `PgSettlementLedgerRepo` 中添加 `markTalkerCommitted()` 和 `markThinkerProjecting()` 方法
-3. Talker 的 `runRpTalkerTurn()` 在 settlement transaction 内调用 `markTalkerCommitted()`
+3. Talker 的 `runRpTalkerTurn()` 在 settlement transaction **提交后**调用 `markTalkerCommitted()`。该写入是 **best-effort observability write**，必须包在 `try/catch` 中，失败不得影响 Talker 的功能结果、延迟或 settlement 数据提交
 4. Thinker worker 在 `commitSettlement()` 前调用 `markThinkerProjecting()`，完成后调用 `markApplied()`
 5. Thinker 失败时调用 `markFailedRetryable()` 或 `markFailedTerminal()`
 
 **为什么要这么做**
 
-没有状态追踪的异步系统是不可观测的。Ledger 是已有的状态追踪基础设施，复用它比新建一套追踪机制成本更低。此外，R-P2-04 的 recovery sweeper 依赖 ledger 来发现 "stuck" 的 settlement。
+没有状态追踪的异步系统是不可观测的。Ledger 是已有的状态追踪基础设施，复用它比新建一套追踪机制成本更低。它也为 R-P2-04 提供有价值的补充上下文，但恢复主信号仍应以 version gap 为准，而不是只依赖 ledger。
 
 **引用**
 
@@ -259,9 +259,9 @@ Phase 1 接受了 enqueue 丢失退化：如果 Thinker job enqueue 两次重试
 
 **复用现有 `PendingSettlementSweeper` 基础设施**，而非从零新建 sweeper。
 
-当前代码库已存在完整的定期扫描恢复机制:
-- `PendingSettlementSweeper`（`src/memory/pending-settlement-sweeper.ts`）: 每 30 秒扫描 stale pending settlements，具备分布式锁（`tryAcquireSweepGuard()`）、指数退避重试、hard-fail 阈值
-- `PendingFlushRecoveryRepo`（`src/storage/domain-repos/pg/pending-flush-recovery-repo.ts`）: 提供 `recordPending()`, `queryActive(nowMs)`, `markAttempted()`, `markResolved()`, `markHardFail()` 等完整的恢复状态追踪 API
+当前代码库已存在可复用的扫描基础设施:
+- `PendingSettlementSweeper`（`src/memory/pending-settlement-sweeper.ts`）: 每 30 秒扫描 stale pending settlements，具备定时循环与 sweep guard
+- `PendingFlushRecoveryRepo`（`src/storage/domain-repos/pg/pending-flush-recovery-repo.ts`）: 这是 **flush recovery 专用、session 粒度** 的恢复表/仓储，不适合 thinker recovery；它的 active-row 唯一约束会屏蔽同一 session 内多个丢失 settlement 的独立追踪
 
 **推荐方案 — 扩展 `PendingSettlementSweeper`**:
 
@@ -269,45 +269,40 @@ Phase 1 接受了 enqueue 丢失退化：如果 Thinker job enqueue 两次重试
 
 **前提 — settlement→version 持久化**:
 
-当前 `talkerTurnVersion` **仅**存在于 `CognitionThinkerJobPayload` 中（`src/jobs/durable-store.ts:49-54`），不在 `TurnSettlementPayload`（`src/interaction/contracts.ts:94-128`）或 `InteractionRecord` 中。`TurnSettlementPayload` 只存 `cognitionVersionGap`（差值），`recent_cognition_slots` 只存最新计数器。如果 enqueue 丢失，job payload 一起丢失，sweeper 无法得知 lost settlement 对应的绝对版本号。
-
-因此，recovery sweeper 依赖以下 **Phase 1 补丁**（可与 R-P2-04 同步实施）:
-
-- 在 `TurnSettlementPayload` 中新增 `talkerTurnVersion?: number` 字段
-- Phase 1 Talker 的 `commitSettlement()` 事务中，将 `talkerTurnVersion` 写入 settlement payload（与 `cognitionVersionGap` 并列）
-- sweeper 从 `interaction_records` 的 settlement payload 中读取该字段以构建 re-enqueue payload
+`talkerTurnVersion` 必须持久化在 `TurnSettlementPayload` 中，并随 `turn_settlement` interaction record 一起提交。这样即使原始 thinker job enqueue 丢失，sweeper 仍可从 `interaction_records` 还原正确的 `CognitionThinkerJobPayload`。
 
 1. **检测逻辑**（新增于 `PendingSettlementSweeper.sweepThinkerJobs()`）:
-   - 查询 `recent_cognition_slots` 中 `talker_turn_counter > thinker_committed_version` 的 session/agent 对
-   - 对每对，查询 `interaction_records` 中最近 N 条 `turn_settlement` 记录
+   - **主信号**: 查询 `recent_cognition_slots` 中 `talker_turn_counter > thinker_committed_version` 的 session/agent 对
+   - 对每对，查询 `interaction_records` 中 `turn_settlement` 记录，并筛选 `talkerTurnVersion` 落在 gap 区间内的 settlement
    - 对每条 settlement，查询 `jobs_current` 是否存在对应 `cognition.thinker` job（通过 `payload_json->>'settlementId'` 匹配）
-   - 对于既无 pending/running job、又未在 `thinker_committed_version` 范围内的 settlement → 视为 lost enqueue
+   - 对于无 pending/running job 的 settlement → 视为 lost enqueue
+   - 若对应 ledger 行存在且状态为 `talker_committed`，可将其作为补充上下文，在 re-enqueue 后更新到 `thinker_projecting`；但 ledger 缺失不得阻止恢复
 
 2. **补偿动作**: 为 lost settlement 重新 enqueue `cognition.thinker` job，payload 中的 `talkerTurnVersion` 从 settlement payload 的同名字段读取（参见上方前提）
 
 3. **执行频率**: 复用 `PendingSettlementSweeper` 的 `PERIODIC_INTERVAL_MS`（当前 30s），Thinker 扫描可使用独立频率（每 5 分钟，由 `thinkerRecoveryIntervalMs` 配置，内部用 modulo 跳过中间 tick）
 
-4. **状态追踪**: 复用 `PendingFlushRecoveryRepo` 记录每次恢复尝试的状态，避免对同一 settlement 反复 re-enqueue
+4. **状态追踪**: 不复用 `PendingFlushRecoveryRepo`，也不依赖 in-memory retry map。持久化的重试信号直接来自 version gap 本身: 只要 gap 仍存在且 `jobs_current` 中没有对应 thinker job，sweeper 就会再次 re-enqueue。若需要升级告警，可根据 `interaction_records.created_at` 或 ledger 上的时间戳判断某个 gap 已持续超过阈值，并在 ledger 行存在时标记 `failed_terminal`
 
 5. **安全性**: Thinker 的 version-based idempotency check（`thinkerCommittedVersion >= talkerTurnVersion`）保证即使重复 enqueue 也不会重复处理
 
 **为什么要这么做**
 
-Phase 1 的 "enqueue 丢失 = 永久认知缺口" 在生产环境中不可接受。即使 enqueue 失败率很低（< 0.1%），长期累积的认知缺口会导致角色行为逐渐偏离预期。复用现有 sweeper 基础设施而非新建，可减少约 60% 的实现工作量（定时循环、分布式锁、退避机制、状态持久化均已就绪）。
+Phase 1 的 "enqueue 丢失 = 永久认知缺口" 在生产环境中不可接受。即使 enqueue 失败率很低（< 0.1%），长期累积的认知缺口会导致角色行为逐渐偏离预期。复用现有 sweeper 的扫描骨架而把恢复主信号放在 version gap 上，可以避免 session 粒度 recovery 表带来的误判，并保证在 ledger best-effort 写失败时仍能恢复。
 
 **引用**
 
 | 引用 | 位置 | 说明 |
 |------|------|------|
-| `PendingSettlementSweeper` | `src/memory/pending-settlement-sweeper.ts:36-120` | 现有定期扫描基础设施: 30s 间隔、分布式锁、指数退避 |
-| `PendingFlushRecoveryRepo` | `src/storage/domain-repos/pg/pending-flush-recovery-repo.ts` | `recordPending()`, `queryActive()`, `markAttempted()`, `markResolved()`, `markHardFail()` |
-| `tryAcquireSweepGuard()` | `src/memory/pending-settlement-sweeper.ts` | 分布式锁，防止多实例重复扫描 |
-| Phase 1 enqueue 失败模式 | `.sisyphus/plans/talker-thinker-split.md` T6 第 7 步 | 1 次重试后放弃 |
-| `recent_cognition_slots` 版本列 | Phase 1 T1 | `talker_turn_counter`, `thinker_committed_version` |
+| `PendingSettlementSweeper` | `src/memory/pending-settlement-sweeper.ts:36-120` | 现有定期扫描基础设施: 30s 间隔、sweep guard、定时循环 |
+| `recent_cognition_slots` 版本列 | Phase 1 T1 | `talker_turn_counter`, `thinker_committed_version` — thinker recovery 的主信号 |
+| `interaction_records` / settlement payload | `src/interaction/contracts.ts:94-130` | `TurnSettlementPayload.talkerTurnVersion` 可用于恢复 job payload |
 | `jobs_current.payload_json` | `src/jobs/pg-schema.ts:17-54` | JSONB 列，可按 `->>'settlementId'` 查询 |
+| `PendingFlushRecoveryRepo` | `src/storage/domain-repos/pg/pending-flush-recovery-repo.ts` | 仅适合 flush recovery；session 粒度，不可直接复用到 thinker recovery |
+| `trySweepLock()` in pending-flush repo | `src/storage/domain-repos/pg/pending-flush-recovery-repo.ts:155-157` | 当前实现返回 `true`，不能作为可靠的跨实例状态协调依据 |
+| Phase 1 enqueue 失败模式 | `.sisyphus/plans/talker-thinker-split.md` T6 第 7 步 | 1 次重试后放弃 |
 | Version-based idempotency | Phase 1 T7 第 2 步 | 保证重复 enqueue 安全 |
-| `TurnSettlementPayload` 缺少版本 | `src/interaction/contracts.ts:94-128` | 当前无 `talkerTurnVersion` 字段；需 Phase 1 补丁 |
-| `CognitionThinkerJobPayload` | `src/jobs/durable-store.ts:49-54` | `talkerTurnVersion` 当前仅存于此，丢 job 即丢版本号 |
+| `CognitionThinkerJobPayload` | `src/jobs/durable-store.ts:49-54` | re-enqueue 时需要重建的 payload 结构 |
 
 ---
 
@@ -329,14 +324,14 @@ Phase 1 的 Guardrail G9 禁止 Thinker 触发 `flushIfDue()` / `memoryTaskAgent
 
 在 Thinker worker 完成 `commitSettlement()` 后，有条件地触发一次 lightweight flush:
 
-1. **触发条件**: 仅当 Thinker 产出了 publications 或 episodes（非空数组）时触发
+1. **触发条件**: 仅当 `changedNodeRefs` 非空时触发。不要用 publications / episodes 作为代理条件。Thinker 可能产出纯 cognition 更新（assertion / evaluation / commitment）而没有 episode/publication；这些节点同样需要进入 organizer 管线。
 2. **触发方式**: 不直接调用 `flushIfDue()`（它会重入 TurnService），而是调用**现有的 `enqueueOrganizerJobs()` 方法**（`src/memory/task-agent.ts:712-749`）。该方法已具备:
    - `ORGANIZER_CHUNK_SIZE=50` 分块逻辑（避免单个 job 处理过多节点）
    - enqueue 容错（`try/catch` + 日志，不因 enqueue 失败阻塞 Thinker 流程）
    - 接受 `changedNodeRefs` 参数（来自 R-P2-00 差异 2 的产出）
    需要将 `enqueueOrganizerJobs()` 从 `MemoryTaskAgent` 的 private 方法提取为可独立调用的函数（或在 `ThinkerWorkerDeps` 中注入 enqueue 能力），与 R-P2-00 差异 2 的提取工作合并。
-3. **不触发完整 flush**: 只触发图谱组织部分（`memory.organize`），不触发 migration（`memory.migrate`）
-4. **频率限制**: 每个 session 每 5 分钟最多触发一次（检查 `jobs_current` 是否已有 pending `memory.organize` job）
+3. **每个 settlement 独立 enqueue**: 每个 settlement 的 `changedNodeRefs` 都必须进入自己的 organize job。不要因为“已有 pending organize job”而跳过本次 enqueue；`GraphOrganizer.run()` 只处理 job payload 中显式提供的 refs，跳过即代表这些 refs 永久丢失组织机会。
+4. **不触发完整 flush**: 只触发图谱组织部分（`memory.organize`），不触发 migration（`memory.migrate`）。节流依赖现有的 `ORGANIZER_CHUNK_SIZE` 与 `memory.organize:global` 并发上限，而不是通过跳过 enqueue 来实现。
 
 **为什么要这么做**
 
@@ -366,7 +361,9 @@ Phase 1 仅限制每 session 1 个 Thinker（通过 `CONCURRENCY_KEY_CAPS` 的 `
 
 **解决方案**
 
-在 `CONCURRENCY_KEY_CAPS`（`src/jobs/pg-store.ts:138-144`）中添加全局上限:
+仅在 `CONCURRENCY_KEY_CAPS` 中添加 `cognition.thinker:global` 还不够。当前每条 thinker job row 只存一个 `concurrency_key`，实际值为 `cognition.thinker:session:{sessionId}`。如果不修改 claim 逻辑，global cap 永远不会被读取到。
+
+因此，方案应为:
 
 ```
 "cognition.thinker:global": 4
@@ -377,7 +374,13 @@ Phase 1 仅限制每 session 1 个 Thinker（通过 `CONCURRENCY_KEY_CAPS` 的 `
 "cognition.thinker:session:{sessionId}": 1
 ```
 
-`claimNext()` 的现有逻辑已支持多 concurrency key 检查（advisory lock + running count），无需修改核心 claim 逻辑。
+并修改 `claimNext()` 的 thinker claim 路径:
+- 先执行现有的 per-session key 检查
+- 再从 `cognition.thinker:session:{sessionId}` 派生出 `cognition.thinker:global`
+- 若 `CONCURRENCY_KEY_CAPS` 中存在该 global key，则额外统计所有 running 的 `cognition.thinker` jobs
+- 当 running thinker 数量达到 global cap 时，跳过当前 candidate
+
+这仍然保持单 job row 只存一个 `concurrency_key` 的 schema 约束；全局限流发生在 claim 时，而不是通过给 job 写入多个 key。
 
 全局上限的具体值应可通过 `RuntimeConfig.talkerThinker.globalConcurrencyCap` 配置（默认 4）。
 
@@ -389,9 +392,10 @@ LLM 调用是系统最昂贵的资源。无上限并发会导致: (1) API rate l
 
 | 引用 | 位置 | 说明 |
 |------|------|------|
-| `CONCURRENCY_KEY_CAPS` | `src/jobs/pg-store.ts:138-144` | 现有 cap 格式: `"kind:scope" → number` |
+| `CONCURRENCY_KEY_CAPS` | `src/jobs/pg-store.ts:138-145` | 现有 cap 格式: `"kind:scope" → number` |
 | `CONCURRENCY_CAPS` 值 | `src/jobs/types.ts:55-65` | 现有 cap 值定义 |
-| `claimNext()` 并发检查 | `src/jobs/pg-store.ts:517-538` | Advisory lock + running count，已支持多 key |
+| `claimNext()` 并发检查 | `src/jobs/pg-store.ts:517-538` | 现状只检查 job row 上的单个 `concurrency_key`；需扩展 thinker 的 global cap 检查 |
+| thinker job key assignment | `src/jobs/job-persistence-factory.ts:215-228` | thinker job 当前只写入 `cognition.thinker:session:{sessionId}` |
 
 ---
 
@@ -403,12 +407,18 @@ Phase 1 的 Thinker prompt 以功能正确为目标（"能产出 valid structure
 
 **解决方案**
 
-1. **建立评估基线**: 运行 10 轮 sync vs async 对比测试，对每轮的 `private_cognition_current` 内容进行人工盲评（按 assertion 准确性、evaluation 深度、commitment 一致性评分）
-2. **迭代 prompt**: 基于评估结果调整 Thinker 指令，重点关注:
+1. **建立评估基线**: 运行 10 轮 sync vs async 对比测试，收集自动化 proxy metrics，而不是人工盲评。推荐至少覆盖:
+   - cognition op count parity（assertion / evaluation / commitment 数量比）
+   - stance distribution similarity（confident / tentative / contested 分布差异）
+   - conflict detection rate（`contested` assertions 占比）
+   - assertion-to-episode ratio（认知密度）
+   - relation intent coverage（有 episode 的回合里，`supports` / `triggered` 覆盖率）
+   - sketch utilization（Thinker 输出对 `cognitiveSketch` 关键概念的利用程度）
+2. **迭代 prompt**: 基于自动化指标结果调整 Thinker 指令，重点关注:
    - cognitiveSketch 的利用效率（Thinker 是否能从 sketch 中恢复关键推理链）
    - 多轮上下文的认知一致性（Thinker 是否与角色已有信念保持一致）
    - 冲突检测敏感度（Thinker 是否能主动发现新信息与已有认知的矛盾）
-3. **验收标准**: 盲评得分差异 ≤15%
+3. **验收标准**: 自动化指标建立基线，并在目标指标上将 sync / async 差距控制在可接受范围内；以 ≤15% gap 作为目标线，而非要求人工盲评结论
 
 **为什么要这么做**
 
@@ -453,9 +463,9 @@ R-P2-00 + R-P2-01 + R-P2-02 → R-P2-05  (受控 flush 依赖: R-P2-00 提供 ch
 - [ ] split 模式下有 contested assertion 时存在 `conflicts_with` 记录（R-P2-02）
 - [ ] `settlement_processing_ledger` 正确追踪 Talker/Thinker 各阶段状态（R-P2-03）
 - [ ] 模拟 enqueue 失败后，recovery sweeper 在 5 分钟内补回 Thinker job（R-P2-04）
-- [ ] Thinker 产出 episodes/publications 后 `memory.organize` job 被 enqueue（R-P2-05）
+- [ ] Thinker 提交后只要 `changedNodeRefs` 非空（包括 cognition-only 输出），`memory.organize` job 就会被 enqueue（R-P2-05）
 - [ ] 全局 Thinker 并发不超过配置上限（R-P2-06）
-- [ ] 认知质量盲评差异 ≤15%（R-P2-07）
+- [ ] 自动化质量指标已建立基线，目标指标的 sync / async 差距 ≤15%（R-P2-07）
 
 ### 回归验证
 - [ ] `bun run build && bun test` 零失败
