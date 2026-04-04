@@ -259,6 +259,12 @@ function createSettlementLedgerAdapter(
 				errorMessage,
 			);
 		},
+		markTalkerCommitted(settlementId: string, agentId: string) {
+			return settlementLedgerRepo.markTalkerCommitted(settlementId, agentId);
+		},
+		markThinkerProjecting(settlementId: string, agentId: string) {
+			return settlementLedgerRepo.markThinkerProjecting(settlementId, agentId);
+		},
 	};
 }
 

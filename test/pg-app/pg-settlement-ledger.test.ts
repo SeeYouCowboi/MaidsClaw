@@ -219,4 +219,102 @@ describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
       expect(record!.attemptCount).toBe(1);
     });
   });
+
+  it("split-mode lifecycle: talker_committed → thinker_projecting → applied", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgSettlementLedgerRepo(sql);
+      const sid = "stl-split-lifecycle-1";
+
+      await repo.markTalkerCommitted(sid, "agent-talker");
+      expect(await repo.rawStatus(sid)).toBe("talker_committed");
+      expect(await repo.check(sid)).toBe("pending");
+
+      await repo.markThinkerProjecting(sid, "agent-thinker");
+      expect(await repo.rawStatus(sid)).toBe("thinker_projecting");
+      expect(await repo.check(sid)).toBe("pending");
+
+      const record = await repo.getBySettlementId(sid);
+      expect(record!.attemptCount).toBe(1);
+      expect(record!.claimedBy).toBe("agent-thinker");
+
+      await repo.markApplied(sid);
+      expect(await repo.rawStatus(sid)).toBe("applied");
+      expect(await repo.check(sid)).toBe("applied");
+    });
+  });
+
+  it("split-mode retry: thinker_projecting → failed_retryable → thinker_projecting", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgSettlementLedgerRepo(sql);
+      const sid = "stl-split-retry-1";
+
+      await repo.markTalkerCommitted(sid, "agent-talker");
+      await repo.markThinkerProjecting(sid, "agent-thinker");
+      await repo.markFailedRetryScheduled(sid, "transient error");
+
+      expect(await repo.rawStatus(sid)).toBe("failed_retryable");
+      expect(await repo.check(sid)).toBe("pending");
+
+      await repo.markThinkerProjecting(sid, "agent-thinker-2");
+      expect(await repo.rawStatus(sid)).toBe("thinker_projecting");
+
+      const record = await repo.getBySettlementId(sid);
+      expect(record!.attemptCount).toBe(2);
+      expect(record!.claimedBy).toBe("agent-thinker-2");
+      expect(record!.errorMessage).toBeNull();
+    });
+  });
+
+  it("split-mode terminal failure: thinker_projecting → failed_terminal", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgSettlementLedgerRepo(sql);
+      const sid = "stl-split-terminal-1";
+
+      await repo.markTalkerCommitted(sid, "agent-talker");
+      await repo.markThinkerProjecting(sid, "agent-thinker");
+      await repo.markFailedTerminal(sid, "unrecoverable split error");
+
+      expect(await repo.rawStatus(sid)).toBe("failed_terminal");
+      expect(await repo.check(sid)).toBe("failed");
+
+      const record = await repo.getBySettlementId(sid);
+      expect(record!.errorMessage).toBe("unrecoverable split error");
+    });
+  });
+
+  it("markThinkerProjecting rejects invalid transition from pending", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgSettlementLedgerRepo(sql);
+      const sid = "stl-split-invalid-1";
+
+      await repo.markPending(sid, "agent-1");
+
+      await expect(
+        repo.markThinkerProjecting(sid, "agent-thinker"),
+      ).rejects.toThrow(
+        /no row with status talker_committed or failed_retryable/,
+      );
+
+      expect(await repo.rawStatus(sid)).toBe("pending");
+    });
+  });
+
+  it("markTalkerCommitted is idempotent — second call is ignored", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgSettlementLedgerRepo(sql);
+      const sid = "stl-split-idempotent-1";
+
+      await repo.markTalkerCommitted(sid, "agent-1");
+      await repo.markTalkerCommitted(sid, "agent-2");
+
+      const record = await repo.getBySettlementId(sid);
+      expect(record!.agentId).toBe("agent-1");
+      expect(record!.status).toBe("talker_committed");
+    });
+  });
 });

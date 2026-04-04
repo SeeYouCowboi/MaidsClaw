@@ -6,7 +6,9 @@ export type SettlementLedgerStatus =
   | "replayed_noop"
   | "conflict"
   | "failed_retryable"
-  | "failed_terminal";
+  | "failed_terminal"
+  | "talker_committed"
+  | "thinker_projecting";
 
 export type SettlementLedgerCheckResult = "pending" | "applied" | "not_found" | "failed";
 
@@ -20,4 +22,6 @@ export interface SettlementLedger {
   markReplayedNoop(settlementId: string): Promise<void>;
   markConflict(settlementId: string, errorMessage: string): Promise<void>;
   markFailed(settlementId: string, errorMessage: string, retryable: boolean): Promise<void>;
+  markTalkerCommitted(settlementId: string, agentId: string): Promise<void>;
+  markThinkerProjecting(settlementId: string, agentId: string): Promise<void>;
 }

@@ -17,6 +17,8 @@ const VALID_STATUSES: ReadonlySet<string> = new Set<SettlementLedgerStatus>([
   "conflict",
   "failed_retryable",
   "failed_terminal",
+  "talker_committed",
+  "thinker_projecting",
 ]);
 
 function isSettlementLedgerStatus(s: string): s is SettlementLedgerStatus {
@@ -156,6 +158,7 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
           error_message = NULL,
           updated_at    = ${now}
       WHERE settlement_id = ${settlementId}
+        AND status IN ('applying', 'thinker_projecting')
     `;
   }
 
@@ -192,6 +195,7 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
           error_message = ${errorMessage},
           updated_at    = ${now}
       WHERE settlement_id = ${settlementId}
+        AND status IN ('applying', 'thinker_projecting')
     `;
   }
 
@@ -206,7 +210,42 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
           error_message = ${errorMessage},
           updated_at    = ${now}
       WHERE settlement_id = ${settlementId}
+        AND status IN ('applying', 'thinker_projecting')
     `;
+  }
+
+  async markTalkerCommitted(settlementId: string, agentId: string): Promise<void> {
+    const now = Date.now();
+    await this.sql`
+      INSERT INTO settlement_processing_ledger
+        (settlement_id, agent_id, status, attempt_count, max_attempts, created_at, updated_at)
+      VALUES
+        (${settlementId}, ${agentId}, 'talker_committed', 0, 4, ${now}, ${now})
+      ON CONFLICT (settlement_id) DO NOTHING
+    `;
+  }
+
+  async markThinkerProjecting(settlementId: string, agentId: string): Promise<void> {
+    const now = Date.now();
+
+    const updated = await this.sql`
+      UPDATE settlement_processing_ledger
+      SET status        = 'thinker_projecting',
+          agent_id      = ${agentId},
+          attempt_count = attempt_count + 1,
+          claimed_by    = ${agentId},
+          claimed_at    = ${now},
+          error_message = NULL,
+          updated_at    = ${now}
+      WHERE settlement_id = ${settlementId}
+        AND status IN ('talker_committed', 'failed_retryable')
+    `;
+
+    if (updated.count === 0) {
+      throw new Error(
+        `markThinkerProjecting: no row with status talker_committed or failed_retryable for settlement ${settlementId}`,
+      );
+    }
   }
 
   async getBySettlementId(settlementId: string): Promise<SettlementLedgerRecord | null> {
