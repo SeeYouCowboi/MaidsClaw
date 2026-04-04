@@ -1046,7 +1046,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 10. Relation Intent Materialization in Thinker Worker (R-P2-01 Landing)
+- [x] 10. Relation Intent Materialization in Thinker Worker (R-P2-01 Landing)
 
   **What to do**:
   - After `commitSettlement()` returns inside the Thinker's `sql.begin()` block, build `ResolvedLocalRefs`:
@@ -1130,7 +1130,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 11. Conflict Factor Resolution + Application in Thinker Worker (R-P2-02 Landing)
+- [x] 11. Conflict Factor Resolution + Application in Thinker Worker (R-P2-02 Landing)
 
   **What to do**:
   - After `materializeRelationIntents()` (T10) inside the Thinker's `sql.begin()` block:
@@ -1210,7 +1210,7 @@ Max Concurrent: 5 (Wave 1)
   - Files: `src/runtime/thinker-worker.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 12. Recovery Sweeper: `sweepThinkerJobs` in PendingSettlementSweeper (R-P2-04)
+- [x] 12. Recovery Sweeper: `sweepThinkerJobs` in PendingSettlementSweeper (R-P2-04)
 
   **What to do**:
   - Add `sweepThinkerJobs()` method to `PendingSettlementSweeper` (src/memory/pending-settlement-sweeper.ts)
@@ -1335,7 +1335,7 @@ Max Concurrent: 5 (Wave 1)
 
 ---
 
-- [ ] 13. Thinker Controlled Flush: Enqueue `memory.organize` After Settlement (R-P2-05)
+- [x] 13. Thinker Controlled Flush: Enqueue `memory.organize` After Settlement (R-P2-05)
 
   **What to do**:
   - In the Thinker worker, AFTER the `sql.begin()` transaction completes (outside the tx), enqueue `memory.organize` jobs:
