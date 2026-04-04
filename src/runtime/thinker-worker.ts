@@ -9,6 +9,7 @@ import {
 import type { CognitionThinkerJobPayload } from "../jobs/durable-store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { applyContestConflictFactors } from "../memory/cognition/contest-conflict-applicator.js";
+import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import {
 	materializeRelationIntents,
@@ -595,9 +596,25 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					);
 				}
 			}
-			// [T13] enqueueOrganizerJobs (outside tx)
-			if (deps.jobPersistence && changedNodeRefs.length > 0) {
+		// [T13] enqueueOrganizerJobs (outside tx)
+		if (deps.jobPersistence && changedNodeRefs.length > 0) {
+			try {
+				await enqueueOrganizerJobs(
+					deps.jobPersistence,
+					payload.agentId,
+					payload.settlementId,
+					changedNodeRefs,
+				);
+				console.log(
+					`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${payload.settlementId}`,
+				);
+			} catch (enqueueErr) {
+				console.warn(
+					"[thinker_worker] enqueueOrganizerJobs failed (non-fatal):",
+					enqueueErr,
+				);
 			}
+		}
 		} catch (thinkerError: unknown) {
 			try {
 				const errMsg =
