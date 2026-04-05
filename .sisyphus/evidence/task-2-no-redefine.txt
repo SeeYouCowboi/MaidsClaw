@@ -1,0 +1,11 @@
+2:  AssertionStance,
+3:  AssertionBasis,
+6:  PrivateEventCategory,
+7:  LogicEdgeType,
+12:export type { AssertionStance, AssertionBasis };
+13:export type { PrivateEventCategory, LogicEdgeType, VisibilityScope, MemoryScope };
+15:export type EpisodeCategory = Exclude<PrivateEventCategory, "thought">;
+88:  stance: AssertionStance;
+89:  basis: AssertionBasis;
+90:  preContestedStance?: AssertionStance; // required when stance === "contested"
+115:  edgeType: LogicEdgeType;

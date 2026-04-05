@@ -1,0 +1,13 @@
+Task 17 full scripted baseline scenario coverage:
+
+- The new test suite `test/scenario-engine/scenarios/manor-intrigue.test.ts` defines
+  `describe.skipIf(skipPgTests)("Manor Intrigue Full Scenario", ...)` so PG-dependent
+  execution is skipped cleanly when `PG_TEST_URL` is not set.
+- In `beforeAll` (30-minute timeout), the suite runs:
+  1) `runScenario(manorIntrigue, { writePath: "scripted", phase: "full", compareWithSettlement: true })`
+  2) `runGraphOrganizer(handle.infra, manorIntrigue)`
+  3) `executeProbes(manorIntrigue, handle)`
+- This validates the complete end-to-end scripted path: beat ingestion, write-path execution,
+  graph organization, retrieval probes, and report persistence.
+- The assertion `expect(handle.runResult.errors).toHaveLength(0)` enforces that all beats process
+  without run-result errors.

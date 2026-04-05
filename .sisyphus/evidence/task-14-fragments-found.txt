@@ -1,0 +1,29 @@
+Task 14: Fragment Matching Pipeline
+
+Pipeline: hits -> matchProbeResults -> ProbeResult
+=================================================
+
+1. executeProbes iterates story.probes sequentially
+2. For each probe, executeSingleProbe dispatches to the correct retrieval method
+3. Retrieval results are normalized to RetrievalHit[]:
+   - content: text payload to match expectedFragments against
+   - score: relevance score (0-1)
+   - source_ref: node reference or ID string
+   - scope: result type category (narrative scope, cognition kind, or "graph" for explore)
+
+4. matchProbeResults(probe, hits, { mode }) from probe-matcher.ts:
+   - Slices hits to topK
+   - For each expectedFragment: case-insensitive substring match against hit.content
+   - For each expectedMissing: checks absence in top hits
+   - score = matched.length / expectedFragments.length
+   - deterministic mode: passed = (score >= 1.0 && no unexpected present)
+   - live mode: passed = (score >= threshold, default 0.7)
+
+5. ProbeResult returned with: probe, hits, matched, missed, unexpectedPresent, score, passed
+
+Key Design Decisions
+====================
+- CognitionHit has no native relevance score; position-based scoring used (1.0, 0.9, 0.8, ...)
+- NavigatorResult evidence_paths mapped using ep.summary for content, path_score for score
+- memory_read proxies through narrativeSearch (readByEntity not exposed on ScenarioInfra.services)
+- Match mode derived from handle.runResult.writePath (live vs scripted/settlement)

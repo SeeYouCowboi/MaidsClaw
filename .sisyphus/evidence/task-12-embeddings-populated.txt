@@ -1,0 +1,39 @@
+Task 12 Evidence: Embeddings Populated by runGraphOrganizer
+
+What runGraphOrganizer does step-by-step:
+
+1. COLLECT NODE REFS
+   - Queries entities table -> entity:{id} refs
+   - Queries episode_events table -> event:{id} refs
+   - Queries explicit_assertions (non-retracted) -> assertion:{id} refs
+   - Queries explicit_evaluations (non-retracted) -> evaluation:{id} refs
+   - Queries explicit_commitments (non-retracted) -> commitment:{id} refs
+
+2. BUILD EMBEDDING INFRASTRUCTURE
+   - Bootstraps model registry from env (OPENAI_API_KEY / ANTHROPIC_API_KEY)
+   - Creates MemoryTaskModelProviderAdapter with embed capability
+   - Prefers openai/text-embedding-3-small for embeddings when OPENAI_API_KEY present
+   - Creates PgEmbeddingRepo, PgNodeScoringQueryRepo, PgNodeScoreRepo, PgSemanticEdgeRepo
+   - Creates GraphStorageService with full domain repo registry
+   - Creates EmbeddingService with PgTransactionBatcher
+
+3. CONSTRUCT AND RUN GRAPHORGANIZER
+   - Chunks node refs into batches of 50 (mirrors ORGANIZER_CHUNK_SIZE)
+   - For each chunk, builds GraphOrganizerJob with scenario agent/session IDs
+   - GraphOrganizer.run(job) internally:
+     a. Parses each node ref, renders content via NodeScoringQueryRepo.getNodeRenderingPayload
+     b. Calls modelProvider.embed() to get real embedding vectors
+     c. Calls EmbeddingService.batchStoreEmbeddings() -> populates node_embeddings table
+     d. Registers graph-node shadows via NodeScoringQueryRepo.registerGraphNodeShadows
+     e. EmbeddingLinker.link() computes cross-node similarity -> populates semantic_edges table
+     f. Computes node scores (salience, centrality, bridge_score) -> populates node_scores table
+     g. Syncs search projections for each node ref
+
+4. DB TABLES POPULATED
+   - node_embeddings: Float32 vectors for each node (primary view, configured model)
+   - semantic_edges: similarity/conflict/bridge edges between nodes
+   - node_scores: salience, centrality, bridge_score per node
+   - search_docs_private / search_docs_area / search_docs_world: search projection entries
+
+5. RESULT
+   - Returns GraphOrganizerStepResult with jobsRun, nodesProcessed, errors[], elapsedMs

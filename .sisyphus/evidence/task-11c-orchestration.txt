@@ -1,0 +1,24 @@
+Task 11c — Orchestrator wiring flow
+=====================================
+
+runScenario(story, options?) wiring:
+
+1. Resolve options with defaults (writePath:"settlement", phase:"full", compareWithSettlement:false)
+2. bootstrapScenarioSchema(story, options) → ScenarioInfra
+3. If phase === "probe_only": return immediately with zero-count ScenarioRunResult
+4. generateOrLoadDialogue(story) → GeneratedDialogue[] (cache-aware)
+5. seedInteractionHistory: iterate all dialogue entries/turns, call infra.repos.interaction.commit()
+   for each turn with sequential recordIndex, actorType mapped from role, recordType "message"
+6. dispatchWritePath: exhaustive switch on writePath → executeSettlementPath / executeScriptedPath / executeLivePath
+7. If compareWithSettlement && writePath !== "settlement": bootstrap secondary infra with writePath:"settlement",
+   seed its interaction history, run executeSettlementPath on it
+8. Build ScenarioRunResult from writeResult + elapsed timing
+9. Return ScenarioHandleExtended { infra, runResult, settlementInfra? }
+
+Types exported:
+- ScenarioHandleExtended = ScenarioHandle & { settlementInfra?: ScenarioInfra }
+- runScenario(story: Story, options?: RunOptions): Promise<ScenarioHandleExtended>
+
+Re-exported from runner/index.ts.
+
+LSP diagnostics: 0 errors on orchestrator.ts and index.ts.

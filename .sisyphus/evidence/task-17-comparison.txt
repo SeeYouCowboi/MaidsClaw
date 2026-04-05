@@ -1,0 +1,12 @@
+Task 17 comparison-report generation evidence:
+
+- In `beforeAll`, after scripted probes and primary report generation, the suite checks
+  `if (handle.settlementInfra)` and computes settlement-path probe results using
+  `executeProbes(manorIntrigue, { infra: handle.settlementInfra, runResult: ...writePath:"settlement" })`.
+- It then calls:
+  `generateComparisonReport(probeResults, settlementProbeResults, manorIntrigue)`
+  and persists output via `saveReport(..., manorIntrigue.id, "comparison")`.
+- The `reports generated` test asserts both expected files exist:
+  - `test/scenario-engine/reports/manor-intrigue-scripted-report.md`
+  - `test/scenario-engine/reports/manor-intrigue-comparison-report.md`
+- This confirms comparison generation is wired into the end-to-end scenario flow.

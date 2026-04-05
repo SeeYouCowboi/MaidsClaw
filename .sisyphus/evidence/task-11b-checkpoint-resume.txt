@@ -1,0 +1,27 @@
+Task 11b — Live checkpoint evidence
+===================================
+
+File:
+  - test/scenario-engine/runner/write-paths.ts
+
+Exported API:
+  - executeLivePath(infra, story, dialogue)
+
+Checkpoint behavior:
+1) Loads existing checkpoint via loadCheckpoint(story.id)
+   - Restores completedBeatIds and partial beat tool-call log
+2) Iterates beats in story order, skipping completed beats
+3) For each active beat:
+   - startBeat(beat.id)
+   - runs MemoryTaskAgent.runMigrate(flushRequest)
+   - on success adds beat.id to completedBeatIds
+   - endBeat() captures beat log (when capture started)
+4) In finally block (runs after each beat attempt):
+   - builds partial log ordered by story beat order
+   - calls saveCheckpoint(story.id, { storyId, completedBeatIds, partialToolCallLog, savedAt })
+5) After all beats:
+   - saves final cache via saveCachedToolCalls(story.id, fullLog)
+
+Guarantee:
+- Checkpoint write occurs after each beat attempt (success or error path), not only at the end.
+- Per-beat failures are captured in WritePathResult.errors and do not abort subsequent beats.

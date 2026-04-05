@@ -1,0 +1,23 @@
+Task 11c — Compare-both schema creation
+=========================================
+
+When compareWithSettlement: true AND writePath is "live" or "scripted":
+
+1. Primary infra bootstrapped via bootstrapScenarioSchema(story, { writePath: "live"|"scripted", ... })
+   → creates schema scenario_{storyId}_{writePath} via createPgTestDb
+   → seeds entities, runs the selected write path
+
+2. Secondary infra bootstrapped via bootstrapScenarioSchema(story, { writePath: "settlement", phase: "full" })
+   → creates a SEPARATE schema scenario_{storyId}_settlement via a new createPgTestDb call
+   → interaction history seeded identically (same dialogue turns)
+   → runs executeSettlementPath on the secondary infra
+
+3. Both infras returned in ScenarioHandleExtended:
+   - infra: primary (live/scripted path results)
+   - settlementInfra: secondary (settlement path results for comparison)
+
+This allows probe tests (T12+) to query both schemas independently and
+compare graph state between write paths.
+
+When compareWithSettlement is false or writePath is already "settlement",
+settlementInfra is undefined and no secondary schema is created.

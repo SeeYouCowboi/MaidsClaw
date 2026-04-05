@@ -1,0 +1,11 @@
+Task 17 probe-only re-run evidence:
+
+- The test `it("probe-only re-run produces identical results", ...)` performs:
+  `runScenario(manorIntrigue, { writePath: "scripted", phase: "probe_only" })`.
+- It re-executes probes against the probe-only handle and compares with baseline results from
+  the full scripted run.
+- Assertions enforce:
+  1) identical probe count (`probeOnlyResults.length === probeResults.length`)
+  2) identical pass/fail status per probe index.
+- This verifies probe-only mode can be used as a quick re-check path without changing
+  probe outcome semantics.

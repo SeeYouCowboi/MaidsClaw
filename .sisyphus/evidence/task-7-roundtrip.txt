@@ -1,0 +1,21 @@
+Roundtrip evidence: capture → serialize → deserialize → replay
+
+Test: "roundtrip: capture → serialize → deserialize → replay"
+- Created fake provider with incrementing tool names (tool_1, tool_2, tool_3)
+- Captured 2 beats: beat-a (2 calls), beat-b (1 call)
+- Serialized via JSON.stringify(getFullLog())
+- Deserialized via JSON.parse()
+- Replayed all calls through createScriptedProviderFromCache
+- All tool call results matched exactly
+
+bun test output:
+  6 pass, 0 fail, 16 expect() calls
+  Ran 6 tests across 1 file. [72.00ms]
+
+Files created:
+  test/scenario-engine/generators/scripted-provider.ts
+  test/scenario-engine/generators/scripted-provider.test.ts
+
+Exported types: CachedToolCallLog, FlushCallEntry, BeatCallLog, ScriptedBeatProvider, LiveCapturingResult
+Exported functions: createScriptedProviderFromCache, createLiveCapturingProvider
+LSP diagnostics: 0 errors on both files

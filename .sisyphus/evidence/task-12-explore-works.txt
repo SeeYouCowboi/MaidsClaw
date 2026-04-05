@@ -1,0 +1,37 @@
+Task 12 Evidence: How memory_explore via GraphNavigator works after this step
+
+After runGraphOrganizer completes, the scenario database has all three data layers
+that GraphNavigator requires for memory_explore queries:
+
+1. SEED DISCOVERY (search projections)
+   GraphNavigator.explore(query, viewerContext) starts by searching:
+   - search_docs_private (agent-scoped memories)
+   - search_docs_area (location-scoped events)
+   - search_docs_world (world-public knowledge)
+   These tables are populated by GraphOrganizer.syncSearchProjection during step 3.
+   The search yields SeedCandidate[] with lexical + semantic fused scores.
+
+2. SEMANTIC EXPANSION (embeddings + semantic edges)
+   For each seed, GraphNavigator performs beam search:
+   - node_embeddings provides cosine-similarity lookups via EmbeddingRepo.query()
+   - semantic_edges provides pre-computed links (semantic_similar, conflict_or_update,
+     entity_bridge) created by EmbeddingLinker.link()
+   Together these let the navigator traverse from seeds to related nodes.
+
+3. PATH SCORING (node scores)
+   Each beam path is scored using:
+   - node_scores.salience: how important/recent a node is
+   - node_scores.centrality: how connected a node is in the graph
+   - node_scores.bridge_score: whether a node bridges topic clusters
+   These are used in PathScore computation (seed_score, temporal_consistency,
+   query_intent_match, support_score, recency_score, hop_penalty, etc.)
+
+4. RESULT ASSEMBLY
+   GraphNavigator assembles NavigatorResult with:
+   - evidence_paths: ranked BeamPath[] with supporting nodes/facts
+   - summary: optional text summary of findings
+   - drilldown: optional mode-specific deep dive
+
+Without runGraphOrganizer, these tables would be empty and GraphNavigator.explore()
+would return zero evidence paths. After this step, the full memory_explore pipeline
+is functional for any scenario story data.

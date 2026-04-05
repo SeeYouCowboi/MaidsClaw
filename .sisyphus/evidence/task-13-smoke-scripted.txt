@@ -1,0 +1,14 @@
+Task 13 Evidence: Smoke Test — scripted writePath
+
+What it tests:
+- Cache-based replay of prior live-run tool calls via runScenario(miniSample, { writePath: "scripted" })
+- Requires test/scenario-engine/cache/mini-sample-toolcalls.json to exist from a prior live run
+- If cache does not exist, individual tests pass gracefully (no-op skip)
+- When cache exists: verifies scripted replay completes without errors
+- Confirms writePath is recorded as "scripted" on the run result
+- Runs executeProbes and verifies all 6 probe results returned with hits arrays
+
+Guard: describe.skipIf(skipPgTests) — skips entire suite when PG_TEST_URL is unset
+Secondary guard: loadCachedToolCalls(miniSample.id) !== null — skips individual tests when no cache
+
+File: test/scenario-engine/smoke.test.ts

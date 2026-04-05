@@ -1,0 +1,10 @@
+Task 17 probe assertion evidence:
+
+- The full scenario suite executes all manor-intrigue probes via
+  `probeResults = await executeProbes(manorIntrigue, handle)`.
+- It then calls `assertAllProbesPass(probeResults)` in test case
+  `it("all probes pass", ...)`.
+- `assertAllProbesPass` throws a detailed failure report if any probe fails,
+  including per-probe method, score, matched/missed fragments, and unexpected hits.
+- Therefore, this test provides strict pass/fail coverage for all configured probes,
+  not just partial scoring.

@@ -1,0 +1,39 @@
+Task 14: Probe Executor — All Probe Types Execution
+
+File: test/scenario-engine/probes/probe-executor.ts
+Export: executeProbes(story: Story, handle: ScenarioHandle | ScenarioHandleExtended): Promise<ProbeResult[]>
+
+Retrieval Method Dispatch
+=========================
+
+1. narrative_search
+   - Calls: handle.infra.services.narrativeSearch.searchNarrative(query, viewerContext)
+   - Returns: NarrativeSearchResult[] with { source_ref, doc_type, content, scope, score }
+   - Mapped to RetrievalHit via content/score/source_ref/scope
+
+2. cognition_search
+   - Calls: handle.infra.services.cognitionSearch.searchCognition({ agentId, query, limit: topK })
+   - Returns: CognitionHit[] with { kind, source_ref, content, updated_at, ... }
+   - Score derived from result position (no native relevance score on CognitionHit)
+
+3. memory_read
+   - Routes through narrativeSearch.searchNarrative(query, viewerContext)
+   - ScenarioInfra.services does not expose RetrievalService.readByEntity()
+   - Narrative search surface serves as the read path for probe queries
+
+4. memory_explore
+   - Calls: handle.infra.services.navigator.explore(query, viewerContext, { seedCount: topK, maxCandidates: topK })
+   - Returns: NavigatorResult with evidence_paths[]
+   - Each evidence path mapped to RetrievalHit using ep.summary or result.summary, path_score clamped to [0,1]
+
+ViewerContext Construction
+==========================
+- viewer_agent_id: String(entityIdMap.get(probe.viewerPerspective))  [numeric ID as string]
+- viewer_role: "rp_agent"
+- session_id: SCENARIO_DEFAULT_SESSION_ID
+- current_area_id: undefined
+
+Match Mode Resolution
+=====================
+- handle.runResult.writePath === "live" -> mode: "live"
+- writePath === "scripted" or "settlement" -> mode: "deterministic"

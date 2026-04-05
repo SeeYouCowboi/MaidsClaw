@@ -1,0 +1,34 @@
+Task 11b — Settlement writePath evidence
+========================================
+
+File:
+  - test/scenario-engine/runner/write-paths.ts
+
+Exported API:
+  - WritePathResult
+  - executeSettlementPath(infra, story)
+
+executeSettlementPath flow (per beat):
+1) Calls generateSettlements(story) to get GeneratedSettlement[]
+2) For each settlement:
+   - Creates entities via infra.repos.graphStore.upsertEntity(...)
+   - Stores pointer_key -> entity_id in infra.entityIdMap
+   - Adds aliases via infra.repos.graphStore.createEntityAlias(...)
+   - Builds SettlementProjectionParams with:
+     - cognitionOps mapped into runtime CognitionOp format
+     - privateEpisodes mapped into PrivateEpisodeArtifact[]
+     - recentCognitionSlotJson = JSON.stringify(settlement.recentSlotEntries)
+     - viewerSnapshot.currentLocationEntityId resolved from beat.locationId
+   - Calls infra.repos.settlementLedger.markApplying(settlementId, agentId)
+   - Constructs ProjectionManager and calls commitSettlement(params, repoOverrides)
+     - repoOverrides includes recentCognitionSlotRepo (required)
+   - Appends episodes locally via infra.repos.episode.append(...)
+     - Handles idempotent append returning 0 by resolving existing row from readBySettlement
+   - Calls infra.repos.settlementLedger.markApplied(settlementId)
+   - Resolves localRef -> appended episode id mapping and writes logic edges via createLogicEdge(...)
+3) Errors are captured as { beatId, error } and processing continues to next beat
+4) Returns WritePathResult { beatsProcessed, errors }
+
+Notes:
+- Projection commit path is direct ProjectionManager.commitSettlement(), not ExplicitSettlementProcessor.
+- recentCognitionSlotRepo is supplied in repo overrides to satisfy commitSettlement requirements.

@@ -45,3 +45,5 @@ reference/
 /config/runtime.json
 /.sisyphus/drafts
 .env.pg
+test/scenario-engine/cache/
+test/scenario-engine/reports/

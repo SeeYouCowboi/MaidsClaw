@@ -1,0 +1,19 @@
+Evidence: Type alignment verification
+Date: 2026-04-06
+
+generateReport() accepts:
+- probeResults: ProbeResult[] (from probe-types.ts)
+- runResult: ScenarioRunResult (from runner/infra.ts)
+- storyTitle?: string (optional)
+
+generateComparisonReport() accepts:
+- scriptedResults: ProbeResult[]
+- settlementResults: ProbeResult[]
+- story: Story (from dsl/story-types.ts — uses story.title)
+
+Joins results by probe.id via Map<string, ProbeResult>.
+Comparison uses score delta (scripted - settlement).
+
+saveReport() uses import.meta.url resolution for reports directory path.
+
+All types imported cleanly, zero LSP errors across all files.

@@ -1,0 +1,33 @@
+Task 11a — Bootstrap Evidence
+=============================
+
+File: test/scenario-engine/runner/infra.ts
+
+Types exported:
+  - RunOptions (writePath, phase, compareWithSettlement, keepSchema)
+  - ScenarioInfra (sql, entityIdMap, schemaName, repos, services, _testDb)
+  - ScenarioRunResult (entityIdMap, settlementCount, projectionStats, errors, elapsedMs, schemaName, writePath, phase)
+  - ScenarioHandle (infra, runResult)
+
+Functions exported:
+  - bootstrapScenarioSchema(story, options?) -> Promise<ScenarioInfra>
+  - cleanupSchema(sql, storyId, writePath?) -> Promise<void>
+  - cleanupAllSchemas(sql) -> Promise<void>
+
+Bootstrap behavior:
+  - phase:"full" uses createPgTestDb() with SCENARIO_EMBEDDING_DIM=1536
+  - Creates all story entities (characters, locations, clues) via upsertEntity
+  - Builds entityIdMap: pointer_key -> numeric entity_id
+  - Initializes all repos and services (navigator, narrativeSearch, cognitionSearch)
+  - Includes standard seeded entities (__self__, __user__, test-room, bob)
+
+Test: "bootstrap with phase:full creates entityIdMap and schema"
+  - Verified entityIdMap has detective_rin, library, torn_letter, __self__, __user__
+  - Verified numeric entity IDs returned
+  - Verified schemaName non-empty
+  - Verified repos.graphStore and services.navigator defined
+
+Test run: bun test test/scenario-engine/runner/infra.test.ts
+  - Exit code: 0
+  - Result: 0 pass, 4 skip (PG_TEST_URL not set), 0 fail
+  - LSP diagnostics: zero errors on infra.ts and infra.test.ts
