@@ -45,9 +45,11 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
     // Thinker path: read existing payload, concat new entries, trim, write + increment version.
     // Uses transaction + FOR UPDATE to serialize concurrent thinker workers on the same session.
+    // When this.sql is already a transaction handle (e.g. inside thinker-worker's outer
+    // deps.sql.begin()), .begin() is unavailable — run the queries directly since we're
+    // already serialized by the enclosing transaction.
     if (versionIncrement === 'thinker') {
-      return this.sql.begin(async (rawTx) => {
-        const tx = rawTx as unknown as postgres.Sql;
+      const doThinkerUpsert = async (tx: postgres.Sql) => {
         const existingRows = await tx`
           SELECT slot_payload FROM recent_cognition_slots
           WHERE session_id = ${sessionId} AND agent_id = ${agentId}
@@ -95,7 +97,12 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
         return {
           thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
         };
-      });
+      };
+
+      if (typeof (this.sql as unknown as Record<string, unknown>).begin === 'function') {
+        return this.sql.begin(async (rawTx) => doThinkerUpsert(rawTx as unknown as postgres.Sql));
+      }
+      return doThinkerUpsert(this.sql);
     }
 
     // setThinkerVersion path: used by batch-split sub-jobs with explicit version numbers.
@@ -103,9 +110,9 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     // Both higher- and lower-version workers always merge their entries into slot_payload
     // (the FOR UPDATE lock guarantees they see each other's writes). Only the version
     // column advances via GREATEST — it never regresses, and no entries are dropped.
+    // Same as thinker path: when already inside an outer transaction, run directly.
     if (setThinkerVersion !== undefined) {
-      return this.sql.begin(async (rawTx) => {
-        const tx = rawTx as unknown as postgres.Sql;
+      const doSetVersionUpsert = async (tx: postgres.Sql) => {
         const existingRows = await tx`
           SELECT slot_payload, thinker_committed_version FROM recent_cognition_slots
           WHERE session_id = ${sessionId} AND agent_id = ${agentId}
@@ -161,7 +168,12 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
         return {
           thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
         };
-      });
+      };
+
+      if (typeof (this.sql as unknown as Record<string, unknown>).begin === 'function') {
+        return this.sql.begin(async (rawTx) => doSetVersionUpsert(rawTx as unknown as postgres.Sql));
+      }
+      return doSetVersionUpsert(this.sql);
     }
 
     // Default/backwards-compatible path: no version column touched

@@ -1,9 +1,0 @@
-Command:
-MAIDSCLAW_SQLITE_FREEZE=true MAIDSCLAW_BACKEND=sqlite bun -e "import { bootstrapRuntime } from './src/bootstrap/runtime.ts'; const runtime = bootstrapRuntime(); runtime.shutdown();"
-
-Result:
-error: SQLite writes are frozen (MAIDSCLAW_SQLITE_FREEZE=true). Use MAIDSCLAW_BACKEND=pg to start in PG mode.
-
-Stack excerpt:
-at resolveBackendType (src/storage/backend-types.ts)
-at bootstrapRuntime (src/bootstrap/runtime.ts)

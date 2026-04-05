@@ -500,7 +500,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(idx5).toBeGreaterThan(idx4);
 	});
 
-	it("soft cap keeps only newest 20 sketches and warns about excluded count", async () => {
+	it("soft cap keeps only newest 20 sketches and warns about excluded count, then batch split processes first chunk", async () => {
 		const warnSpy = jest
 			.spyOn(console, "warn")
 			.mockImplementation(() => undefined);
@@ -531,9 +531,19 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 
 		const prompt = fixture.getCapturedPrompt();
 		const turnMatches = prompt.match(/\[Turn \d+\]/g) ?? [];
-		expect(turnMatches).toHaveLength(20);
+		// Soft cap trims 25 → 20 (excludes oldest 5: v1-v5).
+		// Batch split (threshold=3) then takes only the first 3 (v6-v8)
+		// for this worker, enqueueing the rest as sub-jobs.
+		expect(turnMatches).toHaveLength(3);
 		expect(prompt).not.toContain("[Turn 1]");
-		expect(prompt).toContain("[Turn 25]");
+		expect(prompt).not.toContain("[Turn 5]");
+		expect(prompt).toContain("[Turn 6]");
+		expect(prompt).toContain("[Turn 8]");
+		// v9+ are in enqueued sub-jobs, not in this worker's prompt
+		expect(prompt).not.toContain("[Turn 9]");
+		expect(prompt).not.toContain("[Turn 25]");
+
+		// Soft cap warning was emitted (5 older sketches excluded)
 		expect(
 			warnSpy.mock.calls.some((call) =>
 				call.some(
@@ -544,6 +554,10 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 				),
 			),
 		).toBe(true);
+
+		// Batch split enqueued sub-jobs for the remainder (v9-v25 = 17 items → 6 sub-batches)
+		const enqueueCall = fixture.jobPersistence.enqueue as ReturnType<typeof jest.fn>;
+		expect(enqueueCall.mock.calls.length).toBe(6);
 	});
 
 	it("contiguous prefix truncates at first sketch-load failure and excludes later turns", async () => {

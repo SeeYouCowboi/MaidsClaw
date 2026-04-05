@@ -1,9 +1,0 @@
-Command: PG_TEST_URL=1 bun test "test/storage/pg-recent-cognition-set-version.test.ts" --test-name-pattern "keeps max version when explicit set is lower"
-
-Result:
-- 1 pass
-- 0 fail
-- Ran 1 test across 1 file
-
-Assertion target:
-- setThinkerVersion=5 then setThinkerVersion=3 keeps thinker_committed_version=5 (GREATEST monotonic semantics)

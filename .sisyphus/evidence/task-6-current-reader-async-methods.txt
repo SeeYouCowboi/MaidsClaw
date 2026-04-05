@@ -1,5 +1,0 @@
-$ grep -n "async getCurrent\|async getAllCurrent\|async getAllCurrentByKind\|async getActiveCurrent" "src/memory/cognition/cognition-search.ts"
-231:  async getCurrent(agentId: string, cognitionKey: string): Promise<CognitionCurrentRow | null> {
-235:  async getAllCurrent(agentId: string): Promise<CognitionCurrentRow[]> {
-239:  async getAllCurrentByKind(agentId: string, kind: CognitionKind): Promise<CognitionCurrentRow[]> {
-244:  async getActiveCurrent(agentId: string): Promise<CognitionCurrentRow[]> {

@@ -1,8 +1,0 @@
-[command]
-PG_APP_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app_test PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test bun test test/pg-app/e2e-migration.test.ts
-
-[parity-output]
-[multi-agent truth parity] surfaces=11, mismatches=0
-
-[source]
-.sisyphus/evidence/task-2-e2e-multi-agent.txt (line 878)

@@ -123,7 +123,28 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(npx -p typescript tsc --noEmit)"
+      "Bash(npx -p typescript tsc --noEmit)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test bun test test/runtime/)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test bun test test/memory/)",
+      "Read(//c/Users/TeaCat/.bun/install//**)",
+      "Bash(export PATH=\"/c/Users/TeaCat/.bun/bin:$PATH\")",
+      "Bash(npx --yes bun --version)",
+      "Bash(volta which:*)",
+      "Bash(fnm exec:*)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/rp-turn-contract.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/thinker-worker-phase2.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/thinker-batch-collapse.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/dev-prod-parity.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/prompt-data-pg.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/cognition-search-pg.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/retrieval-service-pg.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/cognition-repo-pg.test.ts test/memory/cognition-event-repo-pg.test.ts test/memory/pending-settlement-sweeper-thinker.test.ts)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/relation-intent-resolver-pg.test.ts test/memory/relation-builder-pg.test.ts test/memory/navigator-vector.test.ts test/memory/pg-memory-chain-integration.test.ts test/memory/explicit-settlement-processor-pg.test.ts)",
+      "Bash(PGPASSWORD=maidsclaw psql:*)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/memory/)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/)",
+      "Bash(PG_TEST_URL=postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test npx --yes bun test test/runtime/ test/memory/)"
     ]
   }
 }
