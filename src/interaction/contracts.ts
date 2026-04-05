@@ -119,8 +119,26 @@ export type TurnSettlementPayload = {
     validTime?: number;
     committedTime?: number;
   }>;
+  /** Durable cognitive sketch from latentScratchpad, stored for Thinker processing */
+  cognitiveSketch?: string;
+  /** Version gap between Talker turn counter and Thinker committed version at turn start */
+  cognitionVersionGap?: number;
+  /** Whether the Talker proceeded with stale Thinker state (gap > threshold after soft-block) */
+  usedStaleState?: boolean;
+  /** Talker turn counter at commit time — enables Phase 2 recovery sweeper to map settlement → version */
+  talkerTurnVersion?: number;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {
   settlementId?: string;
 };
+
+/**
+ * Extracts the cognitive sketch from a TurnSettlementPayload.
+ * Returns undefined if no cognitive sketch was stored.
+ */
+export function getSketchFromSettlement(
+  payload: TurnSettlementPayload,
+): string | undefined {
+  return payload.cognitiveSketch;
+}

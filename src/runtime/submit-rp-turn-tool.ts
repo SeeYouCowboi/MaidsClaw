@@ -74,7 +74,7 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         },
         latentScratchpad: {
           type: "string",
-          description: "Optional internal reasoning scratchpad (trace-only, not a durable artifact)",
+          description: "Durable cognitive sketch. Stored in settlement for Thinker processing when Talker/Thinker split is active. Always populated even in sync mode.",
         },
         privateCognition: {
           type: "object",

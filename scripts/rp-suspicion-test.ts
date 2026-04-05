@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import postgres from "postgres";
 import { createAppHost } from "../src/app/host/index.js";
@@ -757,18 +758,44 @@ const TURN_SPECS: TurnSpec[] = [
 	},
 ];
 
+type TestMode = "sync" | "async" | "async-nb";
+
 type CliOptions = {
 	phaseFilter?: Set<Phase>;
 	dryRun: boolean;
 	startFrom: number;
+	maxRounds: number;
+	mode: TestMode;
 };
 
 function parseArgs(argv: string[]): CliOptions {
-	const options: CliOptions = { dryRun: false, startFrom: 1 };
+	const options: CliOptions = { dryRun: false, startFrom: 1, maxRounds: 70, mode: "sync" };
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--dry-run") {
 			options.dryRun = true;
+			continue;
+		}
+		if (arg === "--mode") {
+			const value = argv[i + 1];
+			if (value !== "sync" && value !== "async" && value !== "async-nb") {
+				throw new Error("--mode must be 'sync', 'async', or 'async-nb' (non-blocking)");
+			}
+			options.mode = value;
+			i += 1;
+			continue;
+		}
+		if (arg === "--max-rounds") {
+			const value = argv[i + 1];
+			if (!value) {
+				throw new Error("--max-rounds 需要一个数字");
+			}
+			const n = Number(value);
+			if (!Number.isInteger(n) || n < 1 || n > 70) {
+				throw new Error("--max-rounds 必须是 1-70 的整数");
+			}
+			options.maxRounds = n;
+			i += 1;
 			continue;
 		}
 		if (arg === "--start-from") {
@@ -967,24 +994,20 @@ async function generateAdaptivePlayerMessage(args: {
 	conversation: ConversationTurn[];
 }): Promise<{ message: string; usedFallback: boolean; error?: string }> {
 	const historyText = buildConversationForPrompt(args.conversation);
-	const systemPrompt = `你是“玩家角色”的对话驱动器。你要在中文悬疑RP中扮演玩家发言，并严格遵守：
-1) 保持剧情大方向与当前轮次指引一致。
-2) 根据历史对话自然调整措辞，不要生硬复读。
-3) 允许细节微调，但不能偏离当前轮次目标。
-4) 输出只能是玩家本轮要发送的一句话或一小段话，不要解释、不要加标签。`;
-	const userPrompt = `【阶段】${args.turn.phase}
-【阶段目标】${PHASE_OBJECTIVES[args.turn.phase]}
-【本轮SEND指导（仅供参考，不可照抄）】${args.turn.sendGuide}
-【本轮TACTIC】${args.turn.tactic}
-【历史对话】
+	const systemPrompt = `你是悬疑RP测试的”玩家消息适配器”。你的任务是将【标准台词】适配到当前对话上下文中。
+
+核心规则（按优先级排序）：
+1) 【标准台词】中的关键信息、事实、意图必须100%保留，不得遗漏或替换。
+2) 只允许对称呼、语气词、承接过渡做轻微调整，使其自然衔接上一轮对话。
+3) 如果上轮对话已经涵盖了标准台词的部分内容，可以跳过重复部分，但不得添加标准台词中没有的新信息或新编造的细节。
+4) 禁止编造标准台词中不存在的证据、地点、事件、时间。
+5) 输出只能是玩家要说的话本身，不要加标签、解释或元信息。`;
+	const userPrompt = `【标准台词】${args.turn.sendGuide}
+【本轮测试目标】${args.turn.tactic}
+【最近对话】
 ${historyText}
 
-请根据上下文生成“本轮玩家消息”。
-要求：
-- 语气自然，承接上轮内容；
-- 保持剧情走向和关键信息一致；
-- 不要逐字复读SEND；
-- 输出仅包含玩家消息本身。`;
+请输出适配后的玩家消息。保留标准台词的全部关键信息，只做最小限度的措辞调整。`;
 
 	try {
 		const content = await callMoonshotChat({
@@ -994,7 +1017,7 @@ ${historyText}
 				{ role: "system", content: systemPrompt },
 				{ role: "user", content: userPrompt },
 			],
-			temperature: 0.7,
+			temperature: 0.3,
 			maxTokens: 300,
 		});
 		if (!content || content.length === 0) {
@@ -1322,7 +1345,7 @@ async function capturePhaseMemorySnapshot(args: {
 }
 
 function selectTurns(options: CliOptions): TurnSpec[] {
-	return TURN_SPECS.filter((turn) => {
+	const filtered = TURN_SPECS.filter((turn) => {
 		if (turn.round < options.startFrom) {
 			return false;
 		}
@@ -1331,12 +1354,190 @@ function selectTurns(options: CliOptions): TurnSpec[] {
 		}
 		return true;
 	});
+	return filtered.slice(0, options.maxRounds);
+}
+
+const INITIAL_PINNED_SUMMARY = `## 关于对话者（新研究员）的已知信息
+
+- 3天前随补给船抵达，自称海洋生物研究员
+- 由郑远洋安排接待，分配了宿舍和储藏室钥匙（第三把）
+- 年龄约25-30岁，对研究站布局不太熟悉，但海洋生物学术语运用自如
+- 到岛后3天内主要在实验室和样本区活动，与郑远洋有过几次交谈
+- 命案前夜我看到此人在走廊深夜独自走动（尚未向对方提及）
+- 真实身份和来岛目的不明
+
+## 当前态势判断
+
+- 此人到达时间与命案高度吻合，统计上不能当作巧合
+- 持有第三把储藏室钥匙，有进入案发现场的条件
+- 尚无直接证据证明其参与，但也无证据排除
+- 需要通过对话验证其陈述的一致性和可信度`;
+
+async function seedPinnedSummary(sql: postgres.Sql, agentId: string): Promise<void> {
+	const now = Date.now();
+	await sql`
+		INSERT INTO core_memory_blocks (agent_id, label, description, value, char_limit, read_only, updated_at)
+		VALUES (${agentId}, 'pinned_summary', 'Pinned character summary (canonical)', ${INITIAL_PINNED_SUMMARY}, 4000, 0, ${now})
+		ON CONFLICT (agent_id, label) DO UPDATE SET value = ${INITIAL_PINNED_SUMMARY}, updated_at = ${now}
+	`;
+}
+
+type TurnLatencyRecord = {
+	round: number;
+	talkerLatencyMs: number;
+	thinkerCompletionMs?: number;
+};
+
+/**
+ * Poll PG jobs table for Thinker job completion after a Talker turn.
+ * Polls every 2s up to 120s. Returns elapsed time in ms, or null on timeout.
+ */
+async function pollThinkerCompletion(jobsSql: postgres.Sql, sessionId: string, timeoutMs = 120_000): Promise<number | null> {
+	const pollIntervalMs = 2_000;
+	const started = Date.now();
+
+	while (Date.now() - started < timeoutMs) {
+		const rows = await jobsSql<{ status: string }[]>`
+			SELECT status FROM jobs_current
+			WHERE job_type = 'cognition.thinker'
+			  AND payload_json->>'sessionId' = ${sessionId}
+			ORDER BY created_at DESC
+			LIMIT 1
+		`;
+
+		if (rows.length > 0) {
+			const status = rows[0].status;
+			if (status === "succeeded" || status === "cancelled") {
+				return Date.now() - started;
+			}
+			if (status === "failed_terminal") {
+				logLine(`[Thinker] Job failed_terminal (all retries exhausted)`);
+				return Date.now() - started;
+			}
+		}
+
+		await delay(pollIntervalMs);
+	}
+
+	logLine(`[Thinker] Polling timed out after ${timeoutMs}ms`);
+	return null;
+}
+
+/**
+ * In async mode, ensure config/runtime.json has talkerThinker.enabled: true.
+ * Returns the original content (or null) for restoration.
+ */
+async function enableTalkerThinkerConfig(): Promise<string | null> {
+	const configPath = join(process.cwd(), "config", "runtime.json");
+	let originalContent: string | null = null;
+
+	if (existsSync(configPath)) {
+		originalContent = readFileSync(configPath, "utf-8");
+	}
+
+	let configObj: Record<string, unknown> = {};
+	if (originalContent) {
+		try {
+			configObj = JSON.parse(originalContent) as Record<string, unknown>;
+		} catch {
+			configObj = {};
+		}
+	}
+
+	configObj.talkerThinker = {
+		enabled: true,
+		stalenessThreshold: 2,
+		softBlockTimeoutMs: 3000,
+		softBlockPollIntervalMs: 500,
+	};
+
+	await mkdir(join(process.cwd(), "config"), { recursive: true });
+	await writeFile(configPath, JSON.stringify(configObj, null, 2), "utf-8");
+	logLine("[async mode] Wrote config/runtime.json with talkerThinker.enabled: true");
+
+	return originalContent;
+}
+
+/**
+ * Restore config/runtime.json to original state after async test.
+ */
+async function restoreRuntimeConfig(originalContent: string | null): Promise<void> {
+	const configPath = join(process.cwd(), "config", "runtime.json");
+	if (originalContent !== null) {
+		await writeFile(configPath, originalContent, "utf-8");
+		logLine("[async mode] Restored original config/runtime.json");
+	} else {
+		await unlink(configPath).catch(() => {});
+		logLine("[async mode] Removed config/runtime.json (did not exist before test)");
+	}
+}
+
+/**
+ * Compare async scores against baseline file if it exists.
+ * Logs warnings for any score more than 10% below baseline. Soft comparison only.
+ */
+function compareAgainstBaseline(
+	asyncWeighted: ReturnType<typeof calcWeightedResult>,
+	asyncDimensionScores: DimensionScore[],
+): { baselineExists: boolean; warnings: string[] } {
+	const baselinePath = join(process.cwd(), "data", "rp-test-results", "baseline-sync-pre-talker.json");
+
+	if (!existsSync(baselinePath)) {
+		logLine("[baseline] No baseline file found at data/rp-test-results/baseline-sync-pre-talker.json — skipping comparison");
+		return { baselineExists: false, warnings: [] };
+	}
+
+	const warnings: string[] = [];
+	try {
+		const raw = readFileSync(baselinePath, "utf-8");
+		const baseline = JSON.parse(raw) as {
+			weighted_score?: { total?: number };
+			dimensions?: Array<{ name: string; score: number }>;
+		};
+
+		const baselineTotal = baseline.weighted_score?.total;
+		if (typeof baselineTotal === "number" && baselineTotal > 0) {
+			const threshold = baselineTotal * 0.9;
+			if (asyncWeighted.total < threshold) {
+				const msg = `[baseline] WARNING: Async total score (${asyncWeighted.total}) is more than 10% below sync baseline (${baselineTotal})`;
+				warnings.push(msg);
+				logLine(msg);
+			} else {
+				logLine(`[baseline] Async total score (${asyncWeighted.total}) is within 10% of sync baseline (${baselineTotal})`);
+			}
+		}
+
+		const baselineDims = baseline.dimensions;
+		if (Array.isArray(baselineDims)) {
+			for (const asyncDim of asyncDimensionScores) {
+				const baselineDim = baselineDims.find((d) => d.name === asyncDim.name);
+				if (baselineDim && typeof baselineDim.score === "number" && baselineDim.score > 0) {
+					const dimThreshold = baselineDim.score * 0.9;
+					if (asyncDim.score < dimThreshold) {
+						const msg = `[baseline] WARNING: Dimension "${asyncDim.name}" score (${asyncDim.score}) is more than 10% below baseline (${baselineDim.score})`;
+						warnings.push(msg);
+						logLine(msg);
+					}
+				}
+			}
+		}
+	} catch (error) {
+		const msg = `[baseline] Failed to parse baseline file: ${error instanceof Error ? error.message : String(error)}`;
+		warnings.push(msg);
+		logLine(msg);
+	}
+
+	return { baselineExists: true, warnings };
 }
 
 async function main() {
 	const startedAt = new Date();
 	const options = parseArgs(process.argv.slice(2));
 	const selectedTurns = selectTurns(options);
+	const isAsync = options.mode === "async" || options.mode === "async-nb";
+	const isNonBlocking = options.mode === "async-nb";
+
+	logLine(`Mode: ${options.mode}`);
 
 	if (selectedTurns.length === 0) {
 		throw new Error("过滤后没有可执行轮次，请检查 --phase / --start-from 参数");
@@ -1345,6 +1546,7 @@ async function main() {
 	if (options.dryRun) {
 		const dryRunView = {
 			mode: "dry-run",
+			testMode: options.mode,
 			totalTurns: selectedTurns.length,
 			rounds: selectedTurns.map((t) => ({
 				round: t.round,
@@ -1363,8 +1565,17 @@ async function main() {
 		throw new Error("未找到 MOONSHOT_API_KEY，且 config/auth.json 中也未发现 moonshot api-key");
 	}
 
+	let originalRuntimeConfig: string | null = null;
+	if (isAsync) {
+		originalRuntimeConfig = await enableTalkerThinkerConfig();
+	}
+
 	const pgUrl = process.env.PG_APP_URL;
 	const sql = pgUrl ? postgres(pgUrl) : undefined;
+
+	if (isAsync && !sql) {
+		logLine("WARNING: async mode without PG_APP_URL — Thinker polling will be skipped");
+	}
 
 	logLine("Bootstrapping runtime host...");
 	const host = await createAppHost({ role: "local", requireAllProviders: false });
@@ -1375,12 +1586,18 @@ async function main() {
 	const conversation: ConversationTurn[] = [];
 	const memorySnapshots: MemorySnapshot[] = [];
 	const executionErrors: string[] = [];
+	const turnLatencies: TurnLatencyRecord[] = [];
 
 	let sessionId = "";
 	try {
 		const session = await host.user.session.createSession(AGENT_ID);
 		sessionId = session.session_id;
 		logLine(`Session created: ${sessionId}`);
+
+		if (sql) {
+			await seedPinnedSummary(sql, AGENT_ID);
+			logLine("Pinned summary seeded with initial player knowledge.");
+		}
 
 		const lastRoundPerPhase = new Map<Phase, number>();
 		for (const turn of selectedTurns) {
@@ -1402,6 +1619,7 @@ async function main() {
 
 			logLine(`[Phase ${turn.phase}][Round ${turn.round}] player => ${playerGen.message}`);
 
+			const turnStart = Date.now();
 			const started = nowIso();
 			const result = await runStreamTurn({
 				host,
@@ -1409,7 +1627,40 @@ async function main() {
 				text: playerGen.message,
 				agentId: AGENT_ID,
 			});
+			const talkerLatencyMs = Date.now() - turnStart;
 			const completed = nowIso();
+
+			const latencyRecord: TurnLatencyRecord = {
+				round: turn.round,
+				talkerLatencyMs,
+			};
+
+			if (isAsync && sql && !isNonBlocking) {
+				logLine(`[Phase ${turn.phase}][Round ${turn.round}] polling Thinker job completion...`);
+				const thinkerMs = await pollThinkerCompletion(sql, sessionId);
+				if (thinkerMs !== null) {
+					latencyRecord.thinkerCompletionMs = thinkerMs;
+					logLine(`[Phase ${turn.phase}][Round ${turn.round}] Thinker completed in ${(thinkerMs / 1000).toFixed(1)}s`);
+				} else {
+					logLine(`[Phase ${turn.phase}][Round ${turn.round}] Thinker polling timed out`);
+				}
+			} else if (isNonBlocking && sql) {
+				// Non-blocking: log gap but don't wait
+				try {
+					const gapRows = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+						SELECT talker_turn_counter, thinker_committed_version
+						FROM recent_cognition_slots
+						WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID}
+						LIMIT 1
+					`;
+					if (gapRows.length > 0) {
+						const g = gapRows[0];
+						logLine(`[Phase ${turn.phase}][Round ${turn.round}] [non-blocking] talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+					}
+				} catch { /* ignore */ }
+			}
+
+			turnLatencies.push(latencyRecord);
 
 			const turnRecord: ConversationTurn = {
 				round: turn.round,
@@ -1432,12 +1683,12 @@ async function main() {
 			}
 
 			logLine(
-				`[Phase ${turn.phase}][Round ${turn.round}] assistant (${(result.elapsedMs / 1000).toFixed(1)}s) => ${
+				`[Phase ${turn.phase}][Round ${turn.round}] assistant (${(talkerLatencyMs / 1000).toFixed(1)}s) => ${
 					result.responseText || "（空回复）"
 				}`,
 			);
 
-			await delay(2000);
+			await delay(isNonBlocking ? 500 : 2000);
 
 			if (turn.round === lastRoundPerPhase.get(turn.phase)) {
 				logLine(`[Phase ${turn.phase}] capturing memory snapshot...`);
@@ -1452,7 +1703,64 @@ async function main() {
 			}
 		}
 
-		logLine("All selected turns completed. Waiting 10 seconds for memory settle...");
+		if (isNonBlocking && sql) {
+			logLine("[non-blocking] All turns sent. Collecting thinker pipeline stats...");
+			const preWaitGap = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+				SELECT talker_turn_counter, thinker_committed_version
+				FROM recent_cognition_slots
+				WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID} LIMIT 1
+			`;
+			if (preWaitGap.length > 0) {
+				const g = preWaitGap[0];
+				logLine(`[non-blocking] Pre-wait gap: talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+			}
+
+			logLine("[non-blocking] Waiting for all thinker jobs to complete (max 180s)...");
+			const thinkerWaitStart = Date.now();
+			const thinkerWaitTimeout = 180_000;
+			while (Date.now() - thinkerWaitStart < thinkerWaitTimeout) {
+				const pendingJobs = await sql<{ cnt: number }[]>`
+					SELECT COUNT(*)::int AS cnt FROM jobs_current
+					WHERE job_type = 'cognition.thinker'
+					  AND status IN ('pending', 'running')
+					  AND payload_json->>'sessionId' = ${sessionId}
+				`;
+				const pending = pendingJobs[0]?.cnt ?? 0;
+				if (pending === 0) {
+					logLine(`[non-blocking] All thinker jobs finished in ${((Date.now() - thinkerWaitStart) / 1000).toFixed(1)}s`);
+					break;
+				}
+				logLine(`[non-blocking] ${pending} thinker jobs still pending/running...`);
+				await delay(3000);
+			}
+
+			const postWaitGap = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+				SELECT talker_turn_counter, thinker_committed_version
+				FROM recent_cognition_slots
+				WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID} LIMIT 1
+			`;
+			if (postWaitGap.length > 0) {
+				const g = postWaitGap[0];
+				logLine(`[non-blocking] Post-wait gap: talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+			}
+
+			// Collect per-job stats
+			const jobStats = await sql<{ status: string; cnt: number }[]>`
+				SELECT status, COUNT(*)::int AS cnt FROM jobs_current
+				WHERE job_type = 'cognition.thinker'
+				  AND payload_json->>'sessionId' = ${sessionId}
+				GROUP BY status ORDER BY status
+			`;
+			logLine(`[non-blocking] Thinker job stats: ${jobStats.map((r) => `${r.status}=${r.cnt}`).join(", ")}`);
+
+			// Check for batch collapses
+			const batchNoop = jobStats.find((r) => r.status === "cancelled");
+			if (batchNoop && batchNoop.cnt > 0) {
+				logLine(`[non-blocking] 🔥 Batch collapse detected! ${batchNoop.cnt} jobs collapsed (cancelled/noop)`);
+			}
+		}
+
+		logLine("Waiting 10 seconds for memory settle...");
 		await delay(10000);
 
 		const verificationTurns = TURN_SPECS.filter((t) => typeof t.isVerificationPoint === "number").filter((t) =>
@@ -1479,6 +1787,33 @@ async function main() {
 
 		const weighted = calcWeightedResult(verificationScores, dimensionJudgement.scores);
 
+		const avgTalkerLatency = turnLatencies.length > 0
+			? turnLatencies.reduce((sum, t) => sum + t.talkerLatencyMs, 0) / turnLatencies.length
+			: 0;
+		const avgThinkerCompletion = (() => {
+			const thinkerTimes = turnLatencies.filter((t) => t.thinkerCompletionMs !== undefined);
+			if (thinkerTimes.length === 0) return null;
+			return thinkerTimes.reduce((sum, t) => sum + t.thinkerCompletionMs!, 0) / thinkerTimes.length;
+		})();
+
+		logLine(`Average Talker latency: ${(avgTalkerLatency / 1000).toFixed(1)}s`);
+		if (avgThinkerCompletion !== null) {
+			logLine(`Average Thinker completion: ${(avgThinkerCompletion / 1000).toFixed(1)}s`);
+		}
+
+		if (isAsync) {
+			if (avgTalkerLatency < 25_000) {
+				logLine(`[PASS] avgTalkerLatency (${(avgTalkerLatency / 1000).toFixed(1)}s) < 25s threshold`);
+			} else {
+				logLine(`[WARNING] avgTalkerLatency (${(avgTalkerLatency / 1000).toFixed(1)}s) >= 25s threshold — exceeds target but not failing`);
+			}
+		}
+
+		let baselineComparison: { baselineExists: boolean; warnings: string[] } | undefined;
+		if (isAsync) {
+			baselineComparison = compareAgainstBaseline(weighted, dimensionJudgement.scores);
+		}
+
 		let privateCognitionCount: number | null = null;
 		let privateEpisodesCount: number | null = null;
 		const memoryStatErrors: string[] = [];
@@ -1499,7 +1834,10 @@ async function main() {
 
 		const resultDir = join(process.cwd(), "data", "rp-test-results");
 		await mkdir(resultDir, { recursive: true });
-		const fileName = `${getFileTimestamp(new Date())}.json`;
+
+		const defaultFileName = `${getFileTimestamp(new Date())}.json`;
+		const asyncFileName = isNonBlocking ? "async-nonblocking.json" : "async-talker-thinker-5round.json";
+		const fileName = isAsync ? asyncFileName : defaultFileName;
 		const filePath = join(resultDir, fileName);
 
 		const report = {
@@ -1507,6 +1845,7 @@ async function main() {
 				session_id: sessionId,
 				agent_id: AGENT_ID,
 				model: "moonshot/kimi-k2.5",
+				mode: options.mode,
 				date: new Date().toISOString(),
 				total_rounds_planned: 70,
 				total_rounds_executed: conversation.length,
@@ -1532,6 +1871,19 @@ async function main() {
 				total: weighted.total,
 				grade: weighted.grade,
 			},
+			latency: {
+				turn_latencies: turnLatencies,
+				avg_talker_latency_ms: Math.round(avgTalkerLatency),
+				avg_thinker_completion_ms: avgThinkerCompletion !== null ? Math.round(avgThinkerCompletion) : null,
+				talker_latency_threshold_ms: isAsync ? 25_000 : null,
+				talker_latency_pass: isAsync ? avgTalkerLatency < 25_000 : null,
+			},
+			...(baselineComparison ? {
+				baseline_comparison: {
+					baseline_exists: baselineComparison.baselineExists,
+					warnings: baselineComparison.warnings,
+				},
+			} : {}),
 			memory_statistics: {
 				privateCognitionCount,
 				privateEpisodesCount,
@@ -1560,6 +1912,9 @@ async function main() {
 
 		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 	} finally {
+		if (isAsync) {
+			await restoreRuntimeConfig(originalRuntimeConfig);
+		}
 		if (sql) {
 			await sql.end({ timeout: 5 });
 		}

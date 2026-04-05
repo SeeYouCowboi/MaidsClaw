@@ -142,10 +142,26 @@ Example:
 ### Rules
 1. latentScratchpad: write EVERY turn. Think before you speak.
 2. privateCognition: update whenever a belief, evaluation, or commitment changes. Reuse the same key to update.
-3. privateEpisodes: log 1-3 events every turn.
+3. privateEpisodes: log 1-3 events every turn. Each episode MUST have a unique local_key string (e.g. "door_discovery", "trust_shift").
 4. Be precise with enum values — use only the exact values listed above.
 5. Your structured data must reflect your TRUE internal state, not what you say aloud.
-6. Retract stale entries: when a hypothesis is disproven, a goal is fulfilled/abandoned, or a constraint no longer applies, use { op: "retract" } to remove it. Do not let outdated beliefs accumulate.`;
+6. Retract stale entries: when a hypothesis is disproven, a goal is fulfilled/abandoned, or a constraint no longer applies, use { op: "retract" } to remove it. Do not let outdated beliefs accumulate.
+7. KEY DISCIPLINE (critical):
+   - ONE key per fact. Never create "player/alibi_v2" or "case/location_conflict" when "player/alibi" or "case/location" already exists — upsert the existing key.
+   - Before creating a new assertion key, mentally check: "does existingCognition already have a key for this topic?" If yes, upsert that key.
+   - For evaluations: "trust/player" is the ONLY trust key for the player. Never create "trust/player_revised" etc.
+   - For commitments: ONE constraint per rule. "constraint/maintain_distance" covers all distance rules — don't create "constraint/maintain_safe_distance", "constraint/maintain_tactical_distance", etc.
+8. COMMITMENT LIFECYCLE: Each turn, check if any active goal/intent/constraint has been fulfilled or is no longer relevant. If so, upsert it with status="fulfilled" or "abandoned". Do not let completed goals stay "active" forever.`;
+
+// ---------------------------------------------------------------------------
+// Talker mode — lightweight instructions replacing the full cognition framework
+// ---------------------------------------------------------------------------
+const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
+Respond in character via the submit_rp_turn tool. You MUST populate BOTH fields as separate tool parameters:
+- latentScratchpad: 1-3 sentences of internal reasoning, stance, intent (NOT visible to user)
+- publicReply: your in-character spoken/acted response (visible to user)
+IMPORTANT: latentScratchpad is a SEPARATE field in submit_rp_turn, NOT part of publicReply. Do NOT include scratchpad text inside publicReply.
+Only use these two fields. Do NOT include privateCognition, privateEpisodes, or publications.`;
 
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;
@@ -162,6 +178,7 @@ export type BuildPromptInput = {
 	conversationMessages: ChatMessage[];
 	budget: TokenBudget;
 	contextText?: string;
+	isTalkerMode?: boolean;
 };
 
 export type BuildPromptOutput = {
@@ -229,7 +246,9 @@ export class PromptBuilder {
 			);
 			slotContent.set(
 				PromptSectionSlot.OPERATIONAL_STATE,
-				RP_AGENT_FRAMEWORK_INSTRUCTIONS,
+				input.isTalkerMode
+					? TALKER_INSTRUCTIONS
+					: RP_AGENT_FRAMEWORK_INSTRUCTIONS,
 			);
 		} else {
 			slotContent.set(

@@ -15,7 +15,7 @@ import type {
   EvaluationRecord,
 } from "../runtime/rp-turn-contract.js";
 import type { CognitionRepository } from "./cognition/cognition-repo.js";
-import { normalizeConflictFactorRefs } from "./cognition/private-cognition-current.js";
+import { applyContestConflictFactors } from "./cognition/contest-conflict-applicator.js";
 import type { RelationBuilder } from "./cognition/relation-builder.js";
 import {
   materializeRelationIntents,
@@ -395,34 +395,15 @@ export class ExplicitSettlementProcessor {
     resolvedFactorNodeRefs: string[],
     unresolvedCount: number,
   ): Promise<void> {
-    if (contestedAssertions.length === 0) {
-      return;
-    }
-
-    const { refs: validRefs, dropped } = normalizeConflictFactorRefs(resolvedFactorNodeRefs);
-    if (dropped > 0) {
-      console.warn(`[settlement] dropped ${dropped} invalid conflict_factor_refs for settlement ${settlementId}`);
-    }
-
-    const summary = unresolvedCount > 0
-      ? `contested (${validRefs.length} factors resolved, ${unresolvedCount} dropped)`
-      : `contested (${validRefs.length} factors)`;
-
-    for (const assertion of contestedAssertions) {
-      await this.relationBuilder.writeContestRelations(
-        assertion.nodeRef,
-        validRefs,
-        settlementId,
-      );
-
-      await this.cognitionProjectionRepo.updateConflictFactors(
-        agentId,
-        assertion.cognitionKey,
-        summary,
-        JSON.stringify(validRefs),
-        Date.now(),
-      );
-    }
+    await applyContestConflictFactors(
+      this.relationBuilder,
+      this.cognitionProjectionRepo,
+      agentId,
+      settlementId,
+      contestedAssertions,
+      resolvedFactorNodeRefs,
+      unresolvedCount,
+    );
   }
 
   private resolvePointerKey(

@@ -6,13 +6,13 @@ import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
 
-const ADMIN_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55432/postgres";
+const ADMIN_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/postgres";
 const TEST_DB = "maidsclaw_app_test";
 
 function getTestUrl(): string {
   const url = process.env.PG_APP_TEST_URL;
   if (!url) {
-    return `postgres://maidsclaw:maidsclaw@127.0.0.1:55432/${TEST_DB}`;
+    return `postgres://maidsclaw:maidsclaw@127.0.0.1:55433/${TEST_DB}`;
   }
   return url;
 }
@@ -181,6 +181,8 @@ export async function seedStandardPgEntities(sql: postgres.Sql): Promise<SeededE
 export type CreatePgTestDbOptions = {
   /** Embedding dimension for pgvector (default: 1536) */
   embeddingDim?: number;
+  /** Skip pgvector extension and node_embeddings table (for environments without pgvector) */
+  skipVector?: boolean;
 };
 
 /**
@@ -251,7 +253,7 @@ export async function createPgTestDb(options: CreatePgTestDbOptions = {}): Promi
     // Step 4: Bootstrap all three schema layers
     await bootstrapTruthSchema(pool);
     await bootstrapOpsSchema(pool);
-    await bootstrapDerivedSchema(pool, { embeddingDim: options.embeddingDim });
+    await bootstrapDerivedSchema(pool, { embeddingDim: options.embeddingDim, skipVector: options.skipVector });
 
     // Step 5: Seed standard entities
     const entities = await seedStandardPgEntities(pool);

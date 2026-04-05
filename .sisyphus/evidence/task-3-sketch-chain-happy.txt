@@ -1,0 +1,19 @@
+$ tsc -p tsconfig.build.json --noEmit
+bun test v1.3.10 (30e609e0)
+
+test\runtime\thinker-batch-collapse.test.ts:
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=20 members=25 highest=25
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: boom-v4
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:413:31)
+
+[thinker_worker] batch: sketch load failed for v3 (stl:req-3), truncating chain warn: claimed-sketch-fail
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:442:31)
+
+
+ 6 pass
+ 12 skip
+ 0 fail
+ 28 expect() calls
+Ran 18 tests across 2 files. [132.00ms]

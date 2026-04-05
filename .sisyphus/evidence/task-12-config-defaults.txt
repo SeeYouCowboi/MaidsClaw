@@ -1,0 +1,18 @@
+Task 12: Add talkerThinker config path + wire TurnService with config and JobPersistence
+
+Build: PASSED
+Tests: 1510 ran, 9 failures (pre-existing PG auth failures - expected)
+
+Changes:
+1. src/core/config-schema.ts - Added talkerThinker to RuntimeConfig type
+2. src/core/config.ts - Added talkerThinker parsing with defaults in loadRuntimeConfig()
+3. src/bootstrap/types.ts - Added runtimeConfig?: RuntimeConfig to RuntimeBootstrapOptions
+4. src/bootstrap/runtime.ts - Wired TurnService with talkerThinkerConfig and resolvedJobPersistence
+5. src/runtime/turn-service.ts - Added talkerThinkerConfig and jobPersistence constructor params
+6. config/runtime.example.json - Added talkerThinker section with defaults
+
+talkerThinker defaults:
+- enabled: false
+- stalenessThreshold: 2
+- softBlockTimeoutMs: 3000
+- softBlockPollIntervalMs: 500

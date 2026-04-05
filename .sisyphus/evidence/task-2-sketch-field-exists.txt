@@ -1,0 +1,20 @@
+Task 2 Evidence: cognitiveSketch field exists in TurnSettlementPayload
+
+File: src/interaction/contracts.ts
+
+1. TurnSettlementPayload type (line 122-123):
+   cognitiveSketch?: string;
+
+2. getSketchFromSettlement helper function (line 131-138):
+   export function getSketchFromSettlement(
+     payload: TurnSettlementPayload,
+   ): string | undefined {
+     return payload.cognitiveSketch;
+   }
+
+File: src/runtime/turn-service.ts
+
+3. Settlement payload construction (line 479):
+   cognitiveSketch: canonicalOutcome.latentScratchpad,
+
+Status: PASS

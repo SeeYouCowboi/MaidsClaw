@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
+import type { EnqueueJobInput } from "../../src/jobs/durable-store.js";
 import {
   buildOrganizeEnqueueInput,
   buildSearchRebuildEnqueueInput,
 } from "../../src/jobs/pg-job-builders.js";
 import { bootstrapPgJobsSchema } from "../../src/jobs/pg-schema.js";
 import { PgJobStore } from "../../src/jobs/pg-store.js";
+import { CONCURRENCY_CAPS } from "../../src/jobs/types.js";
 import { createTestPg, ensureTestDb, resetSchema, teardown, skipPgTests } from "../helpers/pg-test-utils.js";
 
 type CountRow = { cnt: number };
@@ -259,5 +261,195 @@ describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
         AND status = 'running'
     `;
     expect(runningSearchCount[0].cnt).toBe(1);
+  });
+});
+
+// ── helpers for thinker / task.run global-cap tests ───────────────────
+
+function buildThinkerEnqueueInput(params: {
+  sessionId: string;
+  agentId: string;
+  settlementId: string;
+  talkerTurnVersion: number;
+  nowMs: number;
+}): EnqueueJobInput<"cognition.thinker"> {
+  return {
+    job_key: `cognition.thinker:${params.settlementId}`,
+    job_type: "cognition.thinker",
+    execution_class: "background.cognition_thinker",
+    concurrency_key: `cognition.thinker:session:${params.sessionId}`,
+    payload_schema_version: 1,
+    payload_json: {
+      sessionId: params.sessionId,
+      agentId: params.agentId,
+      settlementId: params.settlementId,
+      talkerTurnVersion: params.talkerTurnVersion,
+    },
+    max_attempts: 3,
+    now_ms: params.nowMs,
+    next_attempt_at: params.nowMs,
+  };
+}
+
+function buildTaskRunEnqueueInput(params: {
+  taskId: string;
+  nowMs: number;
+}): EnqueueJobInput<"task.run"> {
+  return {
+    job_key: `task.run:${params.taskId}`,
+    job_type: "task.run",
+    execution_class: "background.autonomy",
+    concurrency_key: `task.run:parent:${params.taskId}`,
+    payload_schema_version: 1,
+    payload_json: { taskId: params.taskId },
+    max_attempts: 1,
+    now_ms: params.nowMs,
+    next_attempt_at: params.nowMs,
+  };
+}
+
+describe.skipIf(skipPgTests)("pg claimNext thinker global cap", () => {
+  let sql: postgres.Sql;
+  let store: PgJobStore;
+
+  beforeAll(async () => {
+    await ensureTestDb();
+    sql = createTestPg();
+    store = new PgJobStore(sql);
+  });
+
+  beforeEach(async () => {
+    await resetSchema(sql);
+    await bootstrapPgJobsSchema(sql);
+  });
+
+  afterAll(async () => {
+    await teardown(sql);
+  });
+
+  const GLOBAL_CAP = CONCURRENCY_CAPS.cognition_thinker_global;
+
+  it("global cap: only N thinker jobs claimed across many sessions", async () => {
+    const baseNow = 1_700_020_000_000;
+    const sessionCount = GLOBAL_CAP + 1;
+
+    for (let i = 0; i < sessionCount; i++) {
+      await store.enqueue(
+        buildThinkerEnqueueInput({
+          sessionId: `session-${i}`,
+          agentId: "agent-thinker",
+          settlementId: `settlement-${i}`,
+          talkerTurnVersion: 1,
+          nowMs: baseNow + i,
+        }),
+      );
+    }
+
+    const results = [];
+    for (let i = 0; i < sessionCount; i++) {
+      results.push(
+        await store.claimNext({
+          worker_id: `worker-global-${i}`,
+          now_ms: baseNow + 100 + i,
+          lease_duration_ms: 60_000,
+        }),
+      );
+    }
+
+    const claimed = results.filter((r) => r.outcome === "claimed");
+    const blocked = results.filter((r) => r.outcome === "none_ready");
+    expect(claimed.length).toBe(GLOBAL_CAP);
+    expect(blocked.length).toBe(1);
+
+    const runningCount = await sql<CountRow[]>`
+      SELECT COUNT(*)::int AS cnt
+      FROM jobs_current
+      WHERE job_type = 'cognition.thinker'
+        AND status = 'running'
+    `;
+    expect(runningCount[0].cnt).toBe(GLOBAL_CAP);
+
+    const pendingCount = await sql<CountRow[]>`
+      SELECT COUNT(*)::int AS cnt
+      FROM jobs_current
+      WHERE job_type = 'cognition.thinker'
+        AND status = 'pending'
+    `;
+    expect(pendingCount[0].cnt).toBe(1);
+  });
+
+  it("per-session cap: only 1 thinker job per session even when global cap allows more", async () => {
+    const baseNow = 1_700_020_100_000;
+    const sameSessionId = "session-dup";
+
+    for (let i = 0; i < 3; i++) {
+      await store.enqueue(
+        buildThinkerEnqueueInput({
+          sessionId: sameSessionId,
+          agentId: "agent-thinker",
+          settlementId: `settlement-dup-${i}`,
+          talkerTurnVersion: i + 1,
+          nowMs: baseNow + i,
+        }),
+      );
+    }
+
+    const r1 = await store.claimNext({
+      worker_id: "worker-session-1",
+      now_ms: baseNow + 100,
+      lease_duration_ms: 60_000,
+    });
+    const r2 = await store.claimNext({
+      worker_id: "worker-session-2",
+      now_ms: baseNow + 101,
+      lease_duration_ms: 60_000,
+    });
+
+    expect(r1.outcome).toBe("claimed");
+    expect(r2.outcome).toBe("none_ready");
+
+    const runningCount = await sql<CountRow[]>`
+      SELECT COUNT(*)::int AS cnt
+      FROM jobs_current
+      WHERE concurrency_key = ${`cognition.thinker:session:${sameSessionId}`}
+        AND status = 'running'
+    `;
+    expect(runningCount[0].cnt).toBe(1);
+  });
+
+  it("non-thinker jobs: task.run not affected by global cap logic", async () => {
+    const baseNow = 1_700_020_200_000;
+    const taskCount = GLOBAL_CAP + 2;
+
+    for (let i = 0; i < taskCount; i++) {
+      await store.enqueue(
+        buildTaskRunEnqueueInput({
+          taskId: `task-${i}`,
+          nowMs: baseNow + i,
+        }),
+      );
+    }
+
+    const results = [];
+    for (let i = 0; i < taskCount; i++) {
+      results.push(
+        await store.claimNext({
+          worker_id: `worker-task-${i}`,
+          now_ms: baseNow + 100 + i,
+          lease_duration_ms: 60_000,
+        }),
+      );
+    }
+
+    const claimed = results.filter((r) => r.outcome === "claimed");
+    expect(claimed.length).toBe(taskCount);
+
+    const runningCount = await sql<CountRow[]>`
+      SELECT COUNT(*)::int AS cnt
+      FROM jobs_current
+      WHERE job_type = 'task.run'
+        AND status = 'running'
+    `;
+    expect(runningCount[0].cnt).toBe(taskCount);
   });
 });

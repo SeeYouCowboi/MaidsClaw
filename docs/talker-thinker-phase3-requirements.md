@@ -43,6 +43,7 @@ Batch collapse 将这 5 个 sketch 合并为一次 LLM 调用:
 async listPendingByKindAndPayload(
   jobType: JobKind,
   payloadFilter: Record<string, string>,  // e.g., { sessionId: "xxx", agentId: "yyy" }
+  now_ms: number,                          // 当前时间戳，用于过滤 backoff 中的 retry job
 ): Promise<PgJobCurrentRow[]>
 ```
 
@@ -51,10 +52,13 @@ SQL 实现:
 SELECT * FROM jobs_current
 WHERE job_type = $1
   AND status = 'pending'
+  AND next_attempt_at <= $4
   AND payload_json->>'sessionId' = $2
   AND payload_json->>'agentId' = $3
 ORDER BY (payload_json->>'talkerTurnVersion')::int ASC
 ```
+
+> **为什么需要 `next_attempt_at <= $4`**: `PgJobStore.fail()` 在 retryable failure 后会将 job 重设为 `status = 'pending'` 并将 `next_attempt_at` 推到未来（`src/jobs/pg-store.ts:796-800`）。`claimNext()` 通过 `next_attempt_at <= now` 正确过滤这些 backoff job（`src/jobs/pg-store.ts:493-497`）。如果 batch query 不加此条件，会将仍在 backoff 期的 retry job 纳入 batch，破坏 exponential backoff 和 failure-isolation 语义。
 
 同时添加复合索引以保证查询性能:
 ```sql
@@ -73,11 +77,12 @@ WHERE status = 'pending';
 
 | 引用 | 位置 | 说明 |
 |------|------|------|
-| `claimNext()` | `src/jobs/pg-store.ts:484-607` | Single-job claim，`FOR UPDATE SKIP LOCKED` |
+| `claimNext()` | `src/jobs/pg-store.ts:484-607` | Single-job claim，`FOR UPDATE SKIP LOCKED`；含 `next_attempt_at <= now` 过滤 |
+| `fail()` retry 逻辑 | `src/jobs/pg-store.ts:796-800` | Retryable failure 后设 `status='pending'` + 未来 `next_attempt_at` |
 | `listActive()` | `src/jobs/pg-store.ts:977-985` | 现有 read-only 查询模式（无 payload 过滤） |
 | `jobs_current` 表 | `src/jobs/pg-schema.ts:17-54` | `payload_json JSONB` 列，无 session 索引 |
 | `CognitionThinkerJobPayload` | `src/jobs/durable-store.ts` (Phase 1 T3) | `{ sessionId, agentId, settlementId, talkerTurnVersion }` |
-| `DurableJobStore` 接口 | `src/jobs/durable-store.ts:140-200` | 需要新增方法签名 |
+| `DurableJobStore` 接口 | `src/jobs/durable-store.ts:140-200` | 需要新增方法签名（含 `now_ms` 参数） |
 
 ---
 

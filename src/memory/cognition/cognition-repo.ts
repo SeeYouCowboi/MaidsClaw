@@ -542,6 +542,14 @@ export class CognitionRepository {
 
   private async appendAndProject(params: CognitionEventAppendParams): Promise<number> {
     const event = await this.appendEvent(params);
+    if (event === null) {
+      // Conflict hit — event already exists. Get existing projection id.
+      const projection = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, params.cognitionKey);
+      if (!projection) {
+        throw new Error(`Failed to sync projection id for ${params.agentId}/${params.cognitionKey}`);
+      }
+      return projection.id;
+    }
     await this.deps.cognitionProjectionRepo.upsertFromEvent(event);
     const projection = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, params.cognitionKey);
     if (!projection) {
@@ -550,8 +558,9 @@ export class CognitionRepository {
     return projection.id;
   }
 
-  private async appendEvent(params: CognitionEventAppendParams): Promise<CognitionEventRow> {
+  private async appendEvent(params: CognitionEventAppendParams): Promise<CognitionEventRow | null> {
     const eventId = await this.deps.cognitionEventRepo.append(params);
+    if (eventId === null) return null;
     return {
       id: eventId,
       agent_id: params.agentId,

@@ -6,6 +6,17 @@ import type { CognitionProjectionRepo } from "../../storage/domain-repos/contrac
 
 type LocalRefKind = "episode" | "publication" | "cognition" | "proposal";
 
+/**
+ * Strip common prefixes the model adds to refs.
+ * "episode:door_evidence" → "door_evidence", "cognition:trust/player" → "trust/player"
+ */
+function stripRefPrefix(ref: string): string {
+  if (ref.startsWith("episode:")) return ref.slice("episode:".length);
+  if (ref.startsWith("cognition:")) return ref.slice("cognition:".length);
+  if (ref.startsWith("publication:")) return ref.slice("publication:".length);
+  return ref;
+}
+
 type ResolvedEndpoint = {
   kind: LocalRefKind | "assertion" | "evaluation" | "commitment";
   nodeRef: string;
@@ -82,13 +93,16 @@ export function prevalidateRelationIntents(outcome: CanonicalRpTurnOutcome): voi
     if (!ALLOWED_INTENTS.has(intent.intent)) {
       continue;
     }
-    const sourceKind = localRefKinds.get(intent.sourceRef);
+    // Strip prefixes: model often writes "episode:foo" instead of just "foo"
+    const sourceKey = stripRefPrefix(intent.sourceRef);
+    const targetKey = stripRefPrefix(intent.targetRef);
+    const sourceKind = localRefKinds.get(sourceKey);
     if (sourceKind !== "episode") {
       continue;
     }
 
-    const targetLocalKind = localRefKinds.get(intent.targetRef);
-    const targetCognitionKind = cognitionKinds.get(intent.targetRef);
+    const targetLocalKind = localRefKinds.get(targetKey);
+    const targetCognitionKind = cognitionKinds.get(targetKey);
     if (!targetLocalKind && !targetCognitionKind) {
       continue;
     }
@@ -268,22 +282,26 @@ export async function resolveConflictFactors(
 }
 
 function resolveIntentRef(ref: string, resolvedRefs: ResolvedLocalRefs): ResolvedEndpoint {
-  const localResolved = resolvedRefs.localRefIndex.get(ref);
-  if (localResolved) {
-    return {
-      kind: localResolved.kind,
-      nodeRef: localResolved.nodeRef,
-      origin: "local_ref",
-    };
-  }
+  // Try raw ref first, then stripped prefix (model often writes "episode:foo" or "cognition:bar")
+  const candidates = [ref, stripRefPrefix(ref)];
+  for (const candidate of candidates) {
+    const localResolved = resolvedRefs.localRefIndex.get(candidate);
+    if (localResolved) {
+      return {
+        kind: localResolved.kind,
+        nodeRef: localResolved.nodeRef,
+        origin: "local_ref",
+      };
+    }
 
-  const cognition = resolvedRefs.cognitionByKey.get(ref);
-  if (cognition) {
-    return {
-      kind: cognition.kind,
-      nodeRef: cognition.nodeRef,
-      origin: "cognition_key",
-    };
+    const cognition = resolvedRefs.cognitionByKey.get(candidate);
+    if (cognition) {
+      return {
+        kind: cognition.kind,
+        nodeRef: cognition.nodeRef,
+        origin: "cognition_key",
+      };
+    }
   }
 
   throw new MaidsClawError({
@@ -299,14 +317,17 @@ async function resolveFactorNodeRef(
   cognitionProjectionRepo: Pick<CognitionProjectionRepo, "getCurrent">,
   options?: ResolveConflictFactorOptions,
 ): Promise<string | null> {
-  const localResolved = options?.settledRefs?.localRefIndex.get(ref);
-  if (localResolved) {
-    return localResolved.nodeRef;
-  }
+  const candidates = [ref, stripRefPrefix(ref)];
+  for (const candidate of candidates) {
+    const localResolved = options?.settledRefs?.localRefIndex.get(candidate);
+    if (localResolved) {
+      return localResolved.nodeRef;
+    }
 
-  const cognition = options?.settledRefs?.cognitionByKey.get(ref);
-  if (cognition) {
-    return cognition.nodeRef;
+    const cognition = options?.settledRefs?.cognitionByKey.get(candidate);
+    if (cognition) {
+      return cognition.nodeRef;
+    }
   }
 
   const raw = ref.trim();

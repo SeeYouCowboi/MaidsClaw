@@ -1,0 +1,11 @@
+Task 2 Evidence: latentScratchpad tool description updated
+
+File: src/runtime/submit-rp-turn-tool.ts
+
+Old description (line 76-77):
+  "Optional internal reasoning scratchpad (trace-only, not a durable artifact)"
+
+New description (line 76-77):
+  "Durable cognitive sketch. Stored in settlement for Thinker processing when Talker/Thinker split is active. Always populated even in sync mode."
+
+Status: PASS

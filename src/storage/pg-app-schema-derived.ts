@@ -4,7 +4,7 @@ const DEFAULT_EMBEDDING_DIM = 1536;
 
 export async function bootstrapDerivedSchema(
   sql: postgres.Sql,
-  opts: { embeddingDim?: number } = {},
+  opts: { embeddingDim?: number; skipVector?: boolean } = {},
 ): Promise<void> {
   const embeddingDim = opts.embeddingDim ?? DEFAULT_EMBEDDING_DIM;
   if (!Number.isInteger(embeddingDim) || embeddingDim <= 0) {
@@ -12,7 +12,9 @@ export async function bootstrapDerivedSchema(
   }
 
   await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-  await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
+  if (!opts.skipVector) {
+    await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
+  }
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS private_cognition_current (
@@ -186,25 +188,27 @@ export async function bootstrapDerivedSchema(
       ON search_docs_cognition USING GIN (content gin_trgm_ops)
   `);
 
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS node_embeddings (
-      id         BIGSERIAL PRIMARY KEY,
-      node_ref   TEXT NOT NULL,
-      node_kind  TEXT NOT NULL
-                 CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')),
-      view_type  TEXT NOT NULL
-                 CHECK (view_type IN ('primary', 'keywords', 'context')),
-      model_id   TEXT NOT NULL,
-      embedding  VECTOR(${embeddingDim}) NOT NULL,
-      updated_at BIGINT NOT NULL,
-      UNIQUE(node_ref, view_type, model_id)
-    )
-  `);
+  if (!opts.skipVector) {
+    await sql.unsafe(`
+      CREATE TABLE IF NOT EXISTS node_embeddings (
+        id         BIGSERIAL PRIMARY KEY,
+        node_ref   TEXT NOT NULL,
+        node_kind  TEXT NOT NULL
+                   CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')),
+        view_type  TEXT NOT NULL
+                   CHECK (view_type IN ('primary', 'keywords', 'context')),
+        model_id   TEXT NOT NULL,
+        embedding  VECTOR(${embeddingDim}) NOT NULL,
+        updated_at BIGINT NOT NULL,
+        UNIQUE(node_ref, view_type, model_id)
+      )
+    `);
 
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_node_embeddings_embedding_hnsw
-      ON node_embeddings USING hnsw (embedding vector_cosine_ops)
-  `);
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS idx_node_embeddings_embedding_hnsw
+        ON node_embeddings USING hnsw (embedding vector_cosine_ops)
+    `);
+  }
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS semantic_edges (

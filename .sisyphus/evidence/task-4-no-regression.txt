@@ -1,0 +1,20 @@
+Task 4 Evidence: Non-Thinker Jobs Unaffected
+
+Test: "non-thinker jobs: task.run not affected by global cap logic"
+Location: test/jobs/pg-claim-lease.test.ts
+
+Setup:
+- taskCount = GLOBAL_CAP + 2 (= 6) task.run jobs
+- Each has unique concurrency_key: "task.run:parent:task-{0..5}"
+- No "task.run:global" entry in CONCURRENCY_KEY_CAPS
+
+Assertions:
+- All 6 claimed (claimed.length === taskCount)
+- DB: 6 running task.run jobs
+
+Mechanism:
+- task.run concurrency_key = "task.run:parent:task-X" (no ":session:" segment)
+- deriveGlobalConcurrencyKey("task.run:parent:task-X") returns undefined
+  (no ":session:" found → no global key derivation)
+- Global cap check completely skipped
+- Per-key cap defaults to 1, each key is unique → no blocking
