@@ -1155,6 +1155,13 @@ export function bootstrapRuntime(
 					{
 						isEnabled: () => memoryPipelineReady,
 					},
+					talkerThinkerConfig.enabled
+						? {
+								sql: resolvePgPool(),
+								jobPersistence: resolvedJobPersistence,
+								settlementLedger,
+							}
+						: undefined,
 				)
 			: null;
 	const publicationRecoverySweeper =

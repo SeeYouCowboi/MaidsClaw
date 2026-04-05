@@ -536,14 +536,14 @@ export class TurnService {
 
 		const ownerAgentId = ownerAgentIdForGap;
 		let talkerTurnVersion: number | undefined;
+		let effectivePublicReply = canonicalOutcome.publicReply;
+		let effectiveSketch = canonicalOutcome.latentScratchpad;
 		try {
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
 				effectiveRequest.sessionId,
 				"rp_agent",
 			);
 			// Extract embedded scratchpad from publicReply if model didn't use the tool field
-			let effectivePublicReply = canonicalOutcome.publicReply;
-			let effectiveSketch = canonicalOutcome.latentScratchpad;
 			if (!effectiveSketch && effectivePublicReply) {
 				const extracted = extractEmbeddedScratchpad(effectivePublicReply);
 				if (extracted) {
@@ -598,7 +598,8 @@ export class TurnService {
 					settlementId,
 					settlementPayload,
 					hasPublicReply,
-					publicReply: canonicalOutcome.publicReply,
+					publicReply: effectivePublicReply,
+					userText: getLatestUserMessage(effectiveRequest.messages),
 				});
 			});
 
@@ -681,7 +682,7 @@ export class TurnService {
 		if (hasPublicReply) {
 			const textChunk: Chunk = {
 				type: "text_delta",
-				text: canonicalOutcome.publicReply,
+				text: effectivePublicReply,
 			};
 			this.traceChunk(requestId, textChunk);
 			yield textChunk;

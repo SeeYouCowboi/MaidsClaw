@@ -43,104 +43,122 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
       };
     }
 
-    // Thinker path: read existing payload, concat new entries, trim, write + increment version
-    // Mirrors the default path's append semantics to preserve the session-scoped prompt cache.
+    // Thinker path: read existing payload, concat new entries, trim, write + increment version.
+    // Uses transaction + FOR UPDATE to serialize concurrent thinker workers on the same session.
     if (versionIncrement === 'thinker') {
-      const existingRows = await this.sql`
-        SELECT slot_payload FROM recent_cognition_slots
-        WHERE session_id = ${sessionId} AND agent_id = ${agentId}
-      `;
+      return this.sql.begin(async (rawTx) => {
+        const tx = rawTx as unknown as postgres.Sql;
+        const existingRows = await tx`
+          SELECT slot_payload FROM recent_cognition_slots
+          WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+          FOR UPDATE
+        `;
 
-      let entries: unknown[];
-      if (existingRows.length > 0) {
-        const existing = existingRows[0].slot_payload;
-        entries = Array.isArray(existing) ? existing : [];
-      } else {
-        entries = [];
-      }
+        let entries: unknown[];
+        if (existingRows.length > 0) {
+          const existing = existingRows[0].slot_payload;
+          entries = Array.isArray(existing) ? existing : [];
+        } else {
+          entries = [];
+        }
 
-      let newEntries: unknown[];
-      try {
-        newEntries = JSON.parse(newEntriesJson);
-        if (!Array.isArray(newEntries)) newEntries = [];
-      } catch {
-        newEntries = [];
-      }
+        let newEntries: unknown[];
+        try {
+          newEntries = JSON.parse(newEntriesJson);
+          if (!Array.isArray(newEntries)) newEntries = [];
+        } catch {
+          newEntries = [];
+        }
 
-      entries = entries.concat(newEntries);
+        entries = entries.concat(newEntries);
 
-      if (entries.length > 64) {
-        entries = entries.slice(entries.length - 64);
-      }
-      const payloadJson = JSON.stringify(entries);
+        if (entries.length > 64) {
+          entries = entries.slice(entries.length - 64);
+        }
+        const payloadJson = JSON.stringify(entries);
 
-      const result = await this.sql`
-        INSERT INTO recent_cognition_slots (
-          session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
-        )
-        VALUES (
-          ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, 1
-        )
-        ON CONFLICT (session_id, agent_id)
-        DO UPDATE SET
-          last_settlement_id = ${settlementId},
-          slot_payload = ${payloadJson}::jsonb,
-          updated_at = ${now},
-          thinker_committed_version = recent_cognition_slots.thinker_committed_version + 1
-        RETURNING thinker_committed_version
-      `;
-      return {
-        thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
-      };
+        const result = await tx`
+          INSERT INTO recent_cognition_slots (
+            session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
+          )
+          VALUES (
+            ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, 1
+          )
+          ON CONFLICT (session_id, agent_id)
+          DO UPDATE SET
+            last_settlement_id = ${settlementId},
+            slot_payload = ${payloadJson}::jsonb,
+            updated_at = ${now},
+            thinker_committed_version = recent_cognition_slots.thinker_committed_version + 1
+          RETURNING thinker_committed_version
+        `;
+        return {
+          thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
+        };
+      });
     }
 
+    // setThinkerVersion path: used by batch-split sub-jobs with explicit version numbers.
+    // Uses transaction + FOR UPDATE to serialize concurrent workers and prevent payload regression.
     if (setThinkerVersion !== undefined) {
-      const existingRows = await this.sql`
-        SELECT slot_payload FROM recent_cognition_slots
-        WHERE session_id = ${sessionId} AND agent_id = ${agentId}
-      `;
+      return this.sql.begin(async (rawTx) => {
+        const tx = rawTx as unknown as postgres.Sql;
+        const existingRows = await tx`
+          SELECT slot_payload, thinker_committed_version FROM recent_cognition_slots
+          WHERE session_id = ${sessionId} AND agent_id = ${agentId}
+          FOR UPDATE
+        `;
 
-      let entries: unknown[];
-      if (existingRows.length > 0) {
-        const existing = existingRows[0].slot_payload;
-        entries = Array.isArray(existing) ? existing : [];
-      } else {
-        entries = [];
-      }
+        // If a higher version already committed, skip this write to prevent payload regression
+        if (existingRows.length > 0) {
+          const currentVersion = Number(existingRows[0].thinker_committed_version ?? 0);
+          if (setThinkerVersion < currentVersion) {
+            return { thinkerCommittedVersion: currentVersion };
+          }
+        }
 
-      let newEntries: unknown[];
-      try {
-        newEntries = JSON.parse(newEntriesJson);
-        if (!Array.isArray(newEntries)) newEntries = [];
-      } catch {
-        newEntries = [];
-      }
+        let entries: unknown[];
+        if (existingRows.length > 0) {
+          const existing = existingRows[0].slot_payload;
+          entries = Array.isArray(existing) ? existing : [];
+        } else {
+          entries = [];
+        }
 
-      entries = entries.concat(newEntries);
+        let newEntries: unknown[];
+        try {
+          newEntries = JSON.parse(newEntriesJson);
+          if (!Array.isArray(newEntries)) newEntries = [];
+        } catch {
+          newEntries = [];
+        }
 
-      if (entries.length > 64) {
-        entries = entries.slice(entries.length - 64);
-      }
-      const payloadJson = JSON.stringify(entries);
+        entries = entries.concat(newEntries);
 
-      const result = await this.sql`
-        INSERT INTO recent_cognition_slots (
-          session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
-        )
-        VALUES (
-          ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, ${setThinkerVersion}
-        )
-        ON CONFLICT (session_id, agent_id)
-        DO UPDATE SET
-          last_settlement_id = ${settlementId},
-          slot_payload = ${payloadJson}::jsonb,
-          updated_at = ${now},
-          thinker_committed_version = GREATEST(recent_cognition_slots.thinker_committed_version, ${setThinkerVersion})
-        RETURNING thinker_committed_version
-      `;
-      return {
-        thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
-      };
+        if (entries.length > 64) {
+          entries = entries.slice(entries.length - 64);
+        }
+        const payloadJson = JSON.stringify(entries);
+
+        const result = await tx`
+          INSERT INTO recent_cognition_slots (
+            session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
+          )
+          VALUES (
+            ${sessionId}, ${agentId}, ${settlementId}, ${payloadJson}::jsonb, ${now}, 0, ${setThinkerVersion}
+          )
+          ON CONFLICT (session_id, agent_id)
+          DO UPDATE SET
+            last_settlement_id = ${settlementId},
+            slot_payload = ${payloadJson}::jsonb,
+            updated_at = ${now},
+            thinker_committed_version = GREATEST(recent_cognition_slots.thinker_committed_version, ${setThinkerVersion})
+          RETURNING thinker_committed_version
+        `;
+        return {
+          thinkerCommittedVersion: result.length > 0 ? Number(result[0].thinker_committed_version) : undefined,
+        };
+      });
     }
 
     // Default/backwards-compatible path: no version column touched
