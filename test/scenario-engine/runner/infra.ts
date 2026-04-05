@@ -3,6 +3,7 @@ import type { Story } from "../dsl/story-types.js";
 import { SCENARIO_EMBEDDING_DIM } from "../constants.js";
 import {
   createPgTestDb,
+  ensureTestPgAppDb,
   type PgTestDb,
 } from "../../helpers/pg-app-test-utils.js";
 
@@ -25,6 +26,14 @@ import { CognitionSearchService } from "../../../src/memory/cognition/cognition-
 import { GraphNavigator } from "../../../src/memory/navigator.js";
 import { RetrievalService } from "../../../src/memory/retrieval.js";
 import { AliasService } from "../../../src/memory/alias.js";
+import type { EmbeddingService } from "../../../src/memory/embeddings.js";
+import { RetrievalOrchestrator } from "../../../src/memory/retrieval/retrieval-orchestrator.js";
+
+const DEFAULT_APP_TEST_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app_test";
+
+function getAppTestUrl(): string {
+  return process.env.PG_APP_TEST_URL ?? DEFAULT_APP_TEST_URL;
+}
 
 export type RunOptions = {
   writePath: "live" | "scripted" | "settlement";
@@ -50,6 +59,7 @@ export type ScenarioInfra = {
     narrativeSearch: NarrativeSearchService;
     cognitionSearch: CognitionSearchService;
     navigator: GraphNavigator;
+    retrieval: RetrievalService;
   };
   _testDb: PgTestDb;
 };
@@ -107,7 +117,20 @@ function buildServices(sql: postgres.Sql) {
     new PgRelationReadRepo(sql),
     new PgCognitionProjectionRepo(sql),
   );
-  const retrieval = new RetrievalService({ retrievalRepo: new PgRetrievalReadRepo(sql) });
+
+  const orchestrator = new RetrievalOrchestrator({
+    narrativeService: narrativeSearch,
+    cognitionService: cognitionSearch,
+  });
+
+  const retrieval = new RetrievalService({
+    retrievalRepo: new PgRetrievalReadRepo(sql),
+    embeddingService: {} as EmbeddingService,
+    narrativeSearch,
+    cognitionSearch,
+    orchestrator,
+  });
+
   const navigator = new GraphNavigator(
     new PgGraphReadQueryRepo(sql),
     retrieval,
@@ -117,7 +140,7 @@ function buildServices(sql: postgres.Sql) {
     cognitionSearch,
   );
 
-  return { narrativeSearch, cognitionSearch, navigator };
+  return { narrativeSearch, cognitionSearch, navigator, retrieval };
 }
 
 export async function bootstrapScenarioSchema(
@@ -174,9 +197,52 @@ async function fullBootstrap(story: Story, _schemaName: string): Promise<Scenari
 }
 
 async function probeOnlyBootstrap(_story: Story, schemaName: string): Promise<ScenarioInfra> {
-  throw new Error(
-    `Schema '${schemaName}' not found — run with phase: 'full' first`,
-  );
+  await ensureTestPgAppDb();
+
+  const checkSql = postgres(getAppTestUrl(), { max: 1 });
+  let schemaExists = false;
+  try {
+    const rows = await checkSql`
+      SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName}
+    `;
+    schemaExists = rows.length > 0;
+  } finally {
+    await checkSql.end();
+  }
+
+  if (!schemaExists) {
+    throw new Error(
+      `Schema '${schemaName}' not found — run with phase: 'full' first`,
+    );
+  }
+
+  const sql = postgres(getAppTestUrl(), {
+    max: 3,
+    connection: { search_path: `${schemaName},public` },
+  });
+
+  const repos = buildRepos(sql);
+  const services = buildServices(sql);
+
+  const entityIdMap = new Map<string, number>();
+  const entityRows = await sql`SELECT id, pointer_key FROM entity_nodes`;
+  for (const row of entityRows) {
+    entityIdMap.set(row.pointer_key as string, Number(row.id));
+  }
+
+  const testDb: PgTestDb = {
+    pool: sql,
+    schemaName,
+    entities: {
+      selfId: entityIdMap.get("__self__") ?? 0,
+      userId: entityIdMap.get("__user__") ?? 0,
+      locationId: entityIdMap.get("test-room") ?? 0,
+      bobId: entityIdMap.get("bob") ?? 0,
+    },
+    cleanup: async () => { await sql.end(); },
+  };
+
+  return { sql, entityIdMap, schemaName, repos, services, _testDb: testDb };
 }
 
 async function resumeBootstrap(_story: Story, schemaName: string): Promise<ScenarioInfra> {

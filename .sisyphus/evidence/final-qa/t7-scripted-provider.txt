@@ -1,0 +1,11 @@
+== T7 Scripted Provider ==
+Command: bun test test/scenario-engine/generators/scripted-provider.test.ts
+
+Result:
+  6 pass
+  0 fail
+  16 expect() calls
+
+Required assertion: roundtrip capture -> serialize -> deserialize -> replay works
+
+VERDICT: PASS

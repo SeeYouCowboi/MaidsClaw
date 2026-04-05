@@ -69,20 +69,53 @@ async function executeMemoryRead(
   viewerContext: ViewerContext,
   handle: AnyHandle,
 ): Promise<RetrievalHit[]> {
-  // memory_read uses narrative search as a read-oriented query.
-  // The query typically targets a specific entity or topic, so
-  // the narrative search surface doubles as a read path.
-  const results = await handle.infra.services.narrativeSearch.searchNarrative(
+  const result = await handle.infra.services.retrieval.readByEntity(
     probe.query,
     viewerContext,
   );
 
-  return results.map((r) => ({
-    content: r.content,
-    score: r.score,
-    source_ref: String(r.source_ref),
-    scope: r.scope,
-  }));
+  const hits: RetrievalHit[] = [];
+
+  if (result.entity?.summary) {
+    hits.push({
+      content: result.entity.summary,
+      score: 1.0,
+      source_ref: `entity:${result.entity.id}`,
+      scope: "entity",
+    });
+  }
+
+  for (const fact of result.facts) {
+    hits.push({
+      content: fact.predicate,
+      score: 0.9,
+      source_ref: `fact:${fact.id}`,
+      scope: "fact",
+    });
+  }
+
+  for (const event of result.events) {
+    const text = event.summary ?? event.raw_text;
+    if (text) {
+      hits.push({
+        content: text,
+        score: 0.8,
+        source_ref: `event:${event.id}`,
+        scope: "event",
+      });
+    }
+  }
+
+  for (const episode of result.episodes) {
+    hits.push({
+      content: episode.summary,
+      score: 0.7,
+      source_ref: `episode:${episode.id}`,
+      scope: "episode",
+    });
+  }
+
+  return hits;
 }
 
 async function executeMemoryExplore(

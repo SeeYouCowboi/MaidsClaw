@@ -1,0 +1,8 @@
+== Manor-Intrigue Story Completeness ==
+
+Inline verification script results:
+  beats: 25 (>= 25 required) PASS
+  probes: 17 (>= 15 required) PASS
+  validateStory: { valid: true, errors: [] } PASS
+
+VERDICT: PASS

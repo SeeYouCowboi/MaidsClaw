@@ -1,8 +1,27 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { ProbeResult } from "./probe-types.js";
-import type { ScenarioRunResult } from "../runner/infra.js";
+import type { ScenarioRunResult, ScenarioInfra } from "../runner/infra.js";
 import type { Story } from "../dsl/story-types.js";
+import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
+
+export type AlignedComparison = {
+  probeId: string;
+  query: string;
+  scriptedScore: number;
+  settlementScore: number;
+  delta: number;
+  scriptedPassed: boolean;
+  settlementPassed: boolean;
+};
+
+export type CognitionAlignment = {
+  pointerKeyPair: string;
+  predicate: string;
+  inSettlement: boolean;
+  inScripted: boolean;
+  status: "match" | "gap" | "surprise";
+};
 
 /**
  * Generate a markdown report from probe results and scenario run result.
@@ -29,14 +48,29 @@ export function generateReport(
   );
   lines.push(`- Probes: ${passedProbes}/${totalProbes} passed`);
   lines.push("");
-  lines.push("## Per-Beat Error Summary");
-  lines.push("| Beat ID | Error |");
-  lines.push("|---------|-------|");
-  if (runResult.errors.length === 0) {
-    lines.push("| No errors | |");
+  lines.push("## Per-Beat Memory Write Summary");
+  lines.push("| Beat ID | Entities | Episodes | Assertions | Evaluations | Errors |");
+  lines.push("|---------|----------|----------|------------|-------------|--------|");
+
+  const errorsByBeat = new Map<string, number>();
+  for (const err of runResult.errors) {
+    errorsByBeat.set(err.beatId, (errorsByBeat.get(err.beatId) ?? 0) + 1);
+  }
+
+  const stats = runResult.projectionStats;
+  const entities = stats["entities_created"] ?? "?";
+  const episodes = stats["episodes_created"] ?? "?";
+  const assertions = stats["assertions_created"] ?? "?";
+  const evaluations = stats["evaluations_created"] ?? "?";
+
+  if (runResult.settlementCount === 0 && runResult.errors.length === 0) {
+    lines.push("| (none) | - | - | - | - | 0 |");
   } else {
-    for (const err of runResult.errors) {
-      lines.push(`| ${err.beatId} | ${err.error.message} |`);
+    lines.push(
+      `| (all) | ${entities} | ${episodes} | ${assertions} | ${evaluations} | ${runResult.errors.length} |`,
+    );
+    for (const [beatId, count] of errorsByBeat) {
+      lines.push(`| ${beatId} | - | - | - | - | ${count} |`);
     }
   }
   lines.push("");
@@ -133,4 +167,135 @@ export function generateComparisonReport(
   );
 
   return lines.join("\n");
+}
+
+export function alignProbeResults(
+  scriptedResults: ProbeResult[],
+  settlementResults: ProbeResult[],
+  _story: Story,
+): AlignedComparison[] {
+  const settlementMap = new Map<string, ProbeResult>();
+  for (const r of settlementResults) {
+    settlementMap.set(r.probe.id, r);
+  }
+
+  const comparisons: AlignedComparison[] = [];
+
+  for (const scripted of scriptedResults) {
+    const settlement = settlementMap.get(scripted.probe.id);
+    const settlementScore = settlement?.score ?? 0;
+    const settlementPassed = settlement?.passed ?? false;
+
+    comparisons.push({
+      probeId: scripted.probe.id,
+      query: scripted.probe.query,
+      scriptedScore: scripted.score,
+      settlementScore,
+      delta: scripted.score - settlementScore,
+      scriptedPassed: scripted.passed,
+      settlementPassed,
+    });
+
+    settlementMap.delete(scripted.probe.id);
+  }
+
+  for (const settlement of settlementMap.values()) {
+    comparisons.push({
+      probeId: settlement.probe.id,
+      query: settlement.probe.query,
+      scriptedScore: 0,
+      settlementScore: settlement.score,
+      delta: -settlement.score,
+      scriptedPassed: false,
+      settlementPassed: settlement.passed,
+    });
+  }
+
+  return comparisons;
+}
+
+type ParsedRecord = {
+  sourcePointerKey?: string;
+  predicate?: string;
+  targetPointerKey?: string;
+};
+
+function safeParseRecordJson(json: string): ParsedRecord {
+  try {
+    return JSON.parse(json) as ParsedRecord;
+  } catch {
+    return {};
+  }
+}
+
+export async function alignCognitionState(
+  scriptedInfra: ScenarioInfra,
+  settlementInfra: ScenarioInfra,
+  _story: Story,
+): Promise<CognitionAlignment[]> {
+  const agentId = SCENARIO_DEFAULT_AGENT_ID;
+
+  let scriptedRows: Array<{ cognition_key: string; record_json: string }>;
+  let settlementRows: Array<{ cognition_key: string; record_json: string }>;
+
+  try {
+    scriptedRows = await scriptedInfra.repos.cognition.getAllCurrent(agentId);
+    settlementRows = await settlementInfra.repos.cognition.getAllCurrent(agentId);
+  } catch {
+    // TODO: getAllCurrent may not be available in all repo implementations
+    return [];
+  }
+
+  type AlignKey = string;
+  function makeKey(pointerKeyPair: string, predicate: string): AlignKey {
+    return `${pointerKeyPair}||${predicate}`;
+  }
+
+  const scriptedSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string }>();
+  for (const row of scriptedRows) {
+    const parsed = safeParseRecordJson(row.record_json);
+    const pair = parsed.targetPointerKey
+      ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
+      : (parsed.sourcePointerKey ?? row.cognition_key);
+    const predicate = parsed.predicate ?? row.cognition_key;
+    scriptedSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate });
+  }
+
+  const settlementSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string }>();
+  for (const row of settlementRows) {
+    const parsed = safeParseRecordJson(row.record_json);
+    const pair = parsed.targetPointerKey
+      ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
+      : (parsed.sourcePointerKey ?? row.cognition_key);
+    const predicate = parsed.predicate ?? row.cognition_key;
+    settlementSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate });
+  }
+
+  const allKeys = new Set([...scriptedSet.keys(), ...settlementSet.keys()]);
+  const alignments: CognitionAlignment[] = [];
+
+  for (const key of allKeys) {
+    const inScripted = scriptedSet.has(key);
+    const inSettlement = settlementSet.has(key);
+    const entry = scriptedSet.get(key) ?? settlementSet.get(key)!;
+
+    let status: CognitionAlignment["status"];
+    if (inScripted && inSettlement) {
+      status = "match";
+    } else if (inSettlement && !inScripted) {
+      status = "gap";
+    } else {
+      status = "surprise";
+    }
+
+    alignments.push({
+      pointerKeyPair: entry.pointerKeyPair,
+      predicate: entry.predicate,
+      inSettlement,
+      inScripted,
+      status,
+    });
+  }
+
+  return alignments;
 }

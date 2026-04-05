@@ -1,0 +1,59 @@
+== Directory Structure Verification ==
+
+test/scenario-engine/:
+  cache/
+  constants.ts
+  docs/
+  dsl/
+  generators/
+  probes/
+  reports/
+  runner/
+  scenarios/
+  smoke.test.ts
+  stories/
+
+test/scenario-engine/dsl/:
+  index.ts
+  story-types.ts
+  story-validation.test.ts
+  story-validation.ts
+
+test/scenario-engine/generators/:
+  dialogue-generator.ts
+  index.ts
+  scenario-cache.test.ts
+  scenario-cache.ts
+  scripted-provider.test.ts
+  scripted-provider.ts
+  settlement-generator.test.ts
+  settlement-generator.ts
+
+test/scenario-engine/runner/:
+  graph-organizer-step.ts
+  index.ts
+  infra.test.ts
+  infra.ts
+  orchestrator.ts
+  write-paths.ts
+
+test/scenario-engine/probes/:
+  index.ts
+  probe-assertions.test.ts
+  probe-assertions.ts
+  probe-executor.ts
+  probe-matcher.test.ts
+  probe-matcher.ts
+  probe-types.ts
+  report-generator.ts
+
+test/scenario-engine/stories/:
+  index.ts
+  manor-intrigue.ts
+  mini-sample-coverage.test.ts
+  mini-sample.ts
+
+test/scenario-engine/scenarios/:
+  manor-intrigue.test.ts
+
+VERDICT: PASS - All required directories present

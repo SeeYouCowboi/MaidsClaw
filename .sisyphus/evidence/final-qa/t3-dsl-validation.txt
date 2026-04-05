@@ -1,0 +1,14 @@
+== T3 DSL Validation ==
+Command: bun test test/scenario-engine/dsl/story-validation.test.ts
+
+Result:
+  8 pass
+  0 fail
+  17 expect() calls
+
+Required tests confirmed present:
+  - '"thought" category is rejected' (line 57)
+  - 'illegal stance transition is caught' (line 81)
+  - 'contested without preContestedStance is caught' (line 119)
+
+VERDICT: PASS

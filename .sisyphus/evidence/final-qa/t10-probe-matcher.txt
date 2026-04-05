@@ -1,0 +1,11 @@
+== T10 Probe Matcher ==
+Command: bun test test/scenario-engine/probes/probe-matcher.test.ts
+
+Result:
+  7 pass
+  0 fail
+  25 expect() calls
+
+Required assertions: score 1.0 for full match, partial match fails, case-insensitive, topK respected
+
+VERDICT: PASS

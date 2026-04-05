@@ -1,0 +1,27 @@
+Fix: probe_only bootstrap now checks schema existence
+=====================================================
+
+File: test/scenario-engine/runner/infra.ts
+
+Before: probeOnlyBootstrap always threw unconditionally.
+
+After: probeOnlyBootstrap now:
+  1. Calls ensureTestPgAppDb() to ensure the test database exists
+  2. Creates a temporary PG connection (checkSql)
+  3. Queries information_schema.schemata WHERE schema_name = target
+  4. If schema NOT found: throws "Schema '...' not found — run with phase: 'full' first"
+  5. If schema found:
+     - Creates a new PG pool with search_path = "schemaName,public"
+     - Builds repos and services pointing at that schema
+     - Queries entity_nodes to rebuild entityIdMap (pointer_key -> id)
+     - Constructs a PgTestDb handle (cleanup only closes connection, does NOT drop schema)
+     - Returns fully functional ScenarioInfra
+
+Supporting changes:
+  - Added getAppTestUrl() helper (mirrors pg-app-test-utils.ts getTestUrl logic)
+  - Imported ensureTestPgAppDb from pg-app-test-utils
+  - Imported postgres for raw connection creation
+
+Verification:
+  - bun test test/scenario-engine/runner/infra.test.ts: 0 fail, 4 skip, exit 0
+  - LSP diagnostics: zero errors on infra.ts

@@ -1,0 +1,11 @@
+== T9 Cache ==
+Command: bun test test/scenario-engine/generators/scenario-cache.test.ts
+
+Result:
+  5 pass
+  0 fail
+  10 expect() calls
+
+Required assertions: save->load roundtrip, invalidateAllCaches removes both files
+
+VERDICT: PASS
