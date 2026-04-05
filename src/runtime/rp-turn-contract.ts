@@ -505,37 +505,60 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
 
   const normalizedOps: CognitionOp[] = [];
   for (const op of commit.ops as Array<Record<string, unknown>>) {
-    if (op.op === "upsert") {
-      const record = op.record as Record<string, unknown> | undefined;
-      if (!record || typeof record !== "object") {
-        throw new Error("upsert op must have a record object");
+    try {
+      if (op.op === "upsert") {
+        const record = op.record as Record<string, unknown> | undefined;
+        if (!record || typeof record !== "object") {
+          throw new Error("upsert op must have a record object");
+        }
+        if (typeof record.key !== "string" || record.key.trim() === "") {
+          throw new Error("upsert record.key must be a non-empty string");
+        }
+        if (record.kind === "assertion") {
+          normalizeAssertionRecord(record);
+        }
+        normalizedOps.push({ op: "upsert", record: record as CognitionRecord });
+        continue;
       }
-      if (typeof record.key !== "string" || record.key.trim() === "") {
-        throw new Error("upsert record.key must be a non-empty string");
+
+      if (op.op === "retract") {
+        const target = op.target as Record<string, unknown> | undefined;
+        if (!target || typeof target.key !== "string" || target.key.trim() === "") {
+          throw new Error("retract target.key must be a non-empty string");
+        }
+        normalizedOps.push({ op: "retract", target: target as CognitionSelector });
+        continue;
       }
-      if (record.kind === "assertion") {
-        normalizeAssertionRecord(record);
-      }
-      normalizedOps.push({ op: "upsert", record: record as CognitionRecord });
+
+      // Unknown op type — skip gracefully instead of killing the turn
+      continue;
+    } catch (opError) {
+      // Graceful degradation: skip malformed ops, preserve valid ones + publicReply.
+      // A single bad cognition op should never kill the entire RP turn.
+      const key = typeof op.record === "object" && op.record !== null
+        ? (op.record as Record<string, unknown>).key ?? "?"
+        : "?";
+      console.warn(
+        `[rp-turn-contract] skipping malformed cognition op (key=${key}): ${opError instanceof Error ? opError.message : String(opError)}`,
+      );
       continue;
     }
-
-    if (op.op === "retract") {
-      const target = op.target as Record<string, unknown> | undefined;
-      if (!target || typeof target.key !== "string" || target.key.trim() === "") {
-        throw new Error("retract target.key must be a non-empty string");
-      }
-      normalizedOps.push({ op: "retract", target: target as CognitionSelector });
-      continue;
-    }
-
-    throw new Error(`unsupported privateCognition op: ${JSON.stringify(op.op)}`);
   }
+
+    // Pre-insert dedup: keep last occurrence for same (cognition_key, op) pair
+  const dedupedOps = new Map<string, CognitionOp>();
+  for (const op of normalizedOps) {
+    const key = op.op === "upsert"
+      ? `upsert:${op.record.key}`
+      : `retract:${op.target.key}`;
+    dedupedOps.set(key, op);
+  }
+  const finalOps = [...dedupedOps.values()];
 
   return {
     schemaVersion: "rp_private_cognition_v4",
     ...(typeof commit.summary === "string" ? { summary: commit.summary } : {}),
-    ops: normalizedOps,
+    ops: finalOps,
   };
 }
 
@@ -545,10 +568,10 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
     const object = proposition.object as Record<string, unknown> | undefined;
     if (isCognitionEntityRef(object)) {
       proposition.object = { kind: "entity", ref: object };
+    } else if (typeof object === "string") {
+      proposition.object = { kind: "entity", ref: { kind: "pointer_key", value: object } };
     } else if (!isEntityPropositionObject(object)) {
-      throw new Error(
-        "assertion proposition.object must be entity-based (kind: 'entity')"
-      );
+      proposition.object = { kind: "entity", ref: { kind: "pointer_key", value: "unknown" } };
     }
   }
 
@@ -563,17 +586,18 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
 
   if (record.basis !== undefined) {
     if (typeof record.basis !== "string") {
-      throw new Error("assertion basis must be a string when present");
-    }
-    const rawBasis = record.basis as string;
-    if (!V4_ASSERTION_BASES.has(rawBasis as AssertionBasis)) {
-      throw new Error(`invalid assertion basis: ${rawBasis}`);
+      record.basis = undefined;
+    } else {
+      const rawBasis = record.basis as string;
+      if (!V4_ASSERTION_BASES.has(rawBasis as AssertionBasis)) {
+        record.basis = undefined;
+      }
     }
   }
 
   if (record.stance === "contested") {
     if (typeof record.preContestedStance !== "string" || !V4_PRE_CONTESTABLE_STANCES.has(record.preContestedStance as AssertionStance)) {
-      throw new Error("assertion preContestedStance must be a forward-progress stance (hypothetical|tentative|accepted|confirmed) when stance is 'contested'");
+      record.preContestedStance = "tentative";
     }
   }
 }

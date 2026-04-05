@@ -44,3 +44,4 @@ reference/
 /config/providers.json
 /config/runtime.json
 /.sisyphus/drafts
+.env.pg

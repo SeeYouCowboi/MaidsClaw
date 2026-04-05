@@ -34,7 +34,8 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
                       CHECK (status IN (
                         'pending', 'claimed', 'applying', 'applied',
                         'replayed_noop', 'conflict',
-                        'failed_retryable', 'failed_terminal'
+                        'failed_retryable', 'failed_terminal',
+                        'talker_committed', 'thinker_projecting'
                       )),
       attempt_count   INTEGER NOT NULL DEFAULT 0,
       max_attempts    INTEGER NOT NULL DEFAULT 4,

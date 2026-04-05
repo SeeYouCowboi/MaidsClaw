@@ -434,6 +434,7 @@ function isJobKind(value: string | undefined): value is JobKind {
     || value === "maintenance.replay_projection"
     || value === "maintenance.rebuild_derived"
     || value === "maintenance.full"
+    || value === "cognition.thinker"
   );
 }
 
@@ -448,6 +449,7 @@ function isExecutionClass(value: string | undefined): value is Job["executionCla
     || value === "background.maintenance_rebuild_derived"
     || value === "background.maintenance_full"
     || value === "background.autonomy"
+    || value === "background.cognition_thinker"
   );
 }
 
@@ -469,6 +471,9 @@ function defaultExecutionClass(kind: JobKind): Job["executionClass"] {
   }
   if (kind === "maintenance.full") {
     return "background.maintenance_full";
+  }
+  if (kind === "cognition.thinker") {
+    return "background.cognition_thinker";
   }
   return "background.autonomy";
 }

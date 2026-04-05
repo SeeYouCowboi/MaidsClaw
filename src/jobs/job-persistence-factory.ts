@@ -212,6 +212,22 @@ export class PgJobPersistence implements JobPersistence {
       };
     }
 
+    if (entry.jobType === "cognition.thinker") {
+      const p = entry.payload as { sessionId?: string };
+      const sessionId = p?.sessionId ?? "unknown";
+      return {
+        job_key: entry.id,
+        job_type: "cognition.thinker",
+        execution_class: "background.cognition_thinker",
+        concurrency_key: `cognition.thinker:session:${sessionId}`,
+        payload_schema_version: 1,
+        payload_json: entry.payload as never,
+        max_attempts: entry.maxAttempts,
+        now_ms: Date.now(),
+        next_attempt_at: entry.nextAttemptAt,
+      };
+    }
+
     return {
       job_key: entry.id,
       job_type: "task.run",

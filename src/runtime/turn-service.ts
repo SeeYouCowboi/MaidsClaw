@@ -9,9 +9,9 @@ import {
 	defaultViewerCanReadAdminOnly,
 	type ViewerContext,
 } from "../core/contracts/viewer-context.js";
+import { MaidsClawError } from "../core/errors.js";
 import type { ChatMessage } from "../core/models/chat-provider.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
-
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
 	CommitInput,
@@ -26,6 +26,7 @@ import type { FlushSelector } from "../interaction/flush-selector.js";
 import { redactInteractionRecord } from "../interaction/redaction.js";
 import { normalizeSettlementPayload } from "../interaction/settlement-adapter.js";
 import type { InteractionStore } from "../interaction/store.js";
+import type { JobPersistence } from "../jobs/persistence.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
 import { materializePublications } from "../memory/materialization.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
@@ -88,14 +89,40 @@ export class TurnService {
 		private readonly projectionManager?: ProjectionManager,
 		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
 		private readonly memoryPipelineReady = true,
+		private readonly talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number } = { enabled: false, stalenessThreshold: 2, softBlockTimeoutMs: 3000, softBlockPollIntervalMs: 500 },
+		private readonly jobPersistence: JobPersistence | null = null,
 	) {}
 
 	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
 		const messages: ChatMessage[] = [];
 
+		// Dynamic conversation window: sized to cover all turns the thinker hasn't processed yet,
+		// plus a few extra turns for continuity overlap with thinker cognition.
+		// Each turn = 2 messages (user + assistant). Minimum 3 turns overlap.
+		const OVERLAP_TURNS = 3;
+		const MIN_WINDOW_MESSAGES = OVERLAP_TURNS * 2;
+		let conversationWindowSize: number | undefined; // undefined = no limit (full history)
+
+		if (this.settlementUnitOfWork && this.talkerThinkerConfig.enabled) {
+			try {
+				const ownerAgentId = await this.resolveQueueOwnerAgentId(params.sessionId) ?? "";
+				if (ownerAgentId) {
+					const versionGap = await this.settlementUnitOfWork.run(async (repos) =>
+						repos.recentCognitionSlotRepo.getVersionGap(params.sessionId, ownerAgentId),
+					);
+					if (versionGap) {
+						const gap = Math.max(0, versionGap.gap);
+						conversationWindowSize = Math.max(MIN_WINDOW_MESSAGES, (gap + OVERLAP_TURNS) * 2);
+					}
+				}
+			} catch { /* fall through to full history */ }
+		}
+
 		if (this.settlementUnitOfWork) {
 			const pgRecords = await this.settlementUnitOfWork.run(
-				async (repos) => repos.interactionRepo.getMessageRecords(params.sessionId),
+				async (repos) => repos.interactionRepo.getMessageRecords(params.sessionId, {
+					maxMessages: conversationWindowSize,
+				}),
 			);
 			for (const record of pgRecords) {
 				const payload = record.payload as { role?: unknown; content?: unknown };
@@ -188,7 +215,11 @@ export class TurnService {
 		);
 
 		if (assistantActorType === "rp_agent") {
-			yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
+			if (this.talkerThinkerConfig.enabled) {
+				yield* this.runRpTalkerTurn(effectiveRequest, turnRangeStart);
+			} else {
+				yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
+			}
 			return;
 		}
 
@@ -262,6 +293,408 @@ export class TurnService {
 		});
 		this.traceLog(requestId, "error", "Turn failed and recovery path executed");
 		activeTraceStore?.finalizeTrace(requestId);
+	}
+
+	private async *runRpTalkerTurn(
+		request: AgentRunRequest,
+		turnRangeStart: number,
+	): AsyncGenerator<Chunk> {
+		const requestId = request.requestId ?? `req:${Date.now()}`;
+		const effectiveRequest: AgentRunRequest = {
+			...request,
+			requestId,
+			traceStore: request.traceStore ?? this.traceStore,
+			isTalkerMode: true,
+		};
+		const rpTraceStore = effectiveRequest.traceStore;
+
+		let bufferedResult: RpBufferedExecutionResult;
+		let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
+
+		const ownerAgentIdForGap =
+			(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
+		let gap = 0;
+		let usedStaleState = false;
+
+		if (this.settlementUnitOfWork) {
+			const threshold = this.talkerThinkerConfig.stalenessThreshold;
+			const versionGap = await this.settlementUnitOfWork.run(async (repos) =>
+				repos.recentCognitionSlotRepo.getVersionGap(
+					effectiveRequest.sessionId,
+					ownerAgentIdForGap,
+				),
+			);
+			gap = versionGap?.gap ?? 0;
+
+			if (gap > threshold * 2) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`Thinker critically behind, skipping soft-block (gap=${gap}, threshold=${threshold})`,
+				);
+				usedStaleState = true;
+			} else if (gap > threshold) {
+				const deadline =
+					Date.now() + this.talkerThinkerConfig.softBlockTimeoutMs;
+				while (Date.now() < deadline) {
+					await new Promise<void>((resolve) =>
+						setTimeout(
+							resolve,
+							this.talkerThinkerConfig.softBlockPollIntervalMs,
+						),
+					);
+					const newGap = await this.settlementUnitOfWork.run(
+						async (repos) =>
+							repos.recentCognitionSlotRepo.getVersionGap(
+								effectiveRequest.sessionId,
+								ownerAgentIdForGap,
+							),
+					);
+					if ((newGap?.gap ?? 0) <= threshold) break;
+				}
+				const finalGap = await this.settlementUnitOfWork.run(async (repos) =>
+					repos.recentCognitionSlotRepo.getVersionGap(
+						effectiveRequest.sessionId,
+						ownerAgentIdForGap,
+					),
+				);
+				usedStaleState = (finalGap?.gap ?? 0) > threshold;
+				if (usedStaleState) {
+					this.traceLog(
+						requestId,
+						"warn",
+						`Thinker soft-block timeout exceeded, proceeding with stale state (gap=${gap}, finalGap=${finalGap?.gap})`,
+					);
+				}
+			}
+		}
+
+		try {
+			if (!this.agentLoop.runBuffered) {
+				throw new Error("RP buffered execution is unavailable");
+			}
+			bufferedResult = await this.agentLoop.runBuffered(effectiveRequest);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP buffered execution threw");
+			const errorChunk = {
+				code: "AGENT_LOOP_EXCEPTION",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if ("error" in bufferedResult) {
+			const errorChunk = {
+				code: "RP_BUFFERED_EXECUTION_FAILED",
+				message: bufferedResult.error,
+			};
+			this.traceLog(
+				requestId,
+				"error",
+				`RP buffered execution failed: ${bufferedResult.error}`,
+			);
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		let canonicalOutcome: CanonicalRpTurnOutcome;
+		try {
+			canonicalOutcome = normalizeRpTurnOutcome(
+				structuredClone(bufferedResult.outcome),
+			);
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "RP outcome normalization failed");
+			const errorChunk = {
+				code: "RP_OUTCOME_NORMALIZATION_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText:
+					typeof bufferedResult.outcome?.publicReply === "string"
+						? bufferedResult.outcome.publicReply
+						: "",
+				hasAssistantVisibleActivity: false,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const hasPublicReply = canonicalOutcome.publicReply.length > 0;
+		const hasAssistantVisibleActivity = hasPublicReply;
+		if (!hasPublicReply) {
+			const errorChunk = {
+				code: "RP_EMPTY_TURN",
+				message: "empty turn: publicReply is empty",
+			};
+			this.traceLog(requestId, "warn", "RP talker outcome was empty");
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const settlementId = `stl:${requestId}`;
+		const existingPayload = await this.getExistingSettlementPayload(
+			effectiveRequest.sessionId,
+			requestId,
+			settlementId,
+		);
+		if (existingPayload) {
+			const replayPublicReply =
+				typeof existingPayload?.publicReply === "string"
+					? existingPayload.publicReply
+					: "";
+
+			if (replayPublicReply.length > 0) {
+				const chunk: Chunk = {
+					type: "text_delta",
+					text: replayPublicReply,
+				};
+				this.traceChunk(requestId, chunk);
+				yield chunk;
+			}
+			const messageEndChunk: Chunk = {
+				type: "message_end",
+				stopReason: "end_turn",
+			};
+			this.traceChunk(requestId, messageEndChunk);
+			yield messageEndChunk;
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if (!this.settlementUnitOfWork) {
+			const errorChunk = {
+				code: "SETTLEMENT_UOW_REQUIRED",
+				message:
+					"PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
+			};
+			this.traceLog(requestId, "error", errorChunk.message);
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		const ownerAgentId = ownerAgentIdForGap;
+		let talkerTurnVersion: number | undefined;
+		let effectivePublicReply = canonicalOutcome.publicReply;
+		let effectiveSketch = canonicalOutcome.latentScratchpad;
+		try {
+			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
+				effectiveRequest.sessionId,
+				"rp_agent",
+			);
+			// Extract embedded scratchpad from publicReply if model didn't use the tool field
+			if (!effectiveSketch && effectivePublicReply) {
+				const extracted = extractEmbeddedScratchpad(effectivePublicReply);
+				if (extracted) {
+					effectiveSketch = extracted.scratchpad;
+					effectivePublicReply = extracted.cleanedReply;
+				}
+			}
+			// Fallback: if model still didn't produce a sketch, derive one from publicReply
+			// This ensures pending cognition entries always have content for prompt continuity
+			if (!effectiveSketch && effectivePublicReply) {
+				const replyText = effectivePublicReply.replace(/[（(].*?[）)]/g, "").trim();
+				if (replyText.length > 0) {
+					effectiveSketch = replyText.length <= 200
+						? `[auto-sketch] ${replyText}`
+						: `[auto-sketch] ${replyText.substring(0, 200)}…`;
+				}
+			}
+
+			const settlementPayload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: effectiveRequest.sessionId,
+				ownerAgentId,
+				publicReply: effectivePublicReply,
+				hasPublicReply,
+				viewerSnapshot: resolvedViewerSnapshot,
+				schemaVersion: "turn_settlement_v5",
+				privateCognition: undefined,
+				privateEpisodes: undefined,
+				publications: undefined,
+				cognitiveSketch: effectiveSketch,
+				cognitionVersionGap: gap,
+				usedStaleState,
+			};
+
+			await this.settlementUnitOfWork.run(async (repos) => {
+				const versionResult =
+					await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
+						effectiveRequest.sessionId,
+						ownerAgentId,
+						settlementId,
+						"[]",
+						"talker",
+					);
+				talkerTurnVersion = versionResult.talkerTurnCounter;
+				settlementPayload.talkerTurnVersion = talkerTurnVersion;
+
+				await this.commitSettlementRecordsWithRepos({
+					repos,
+					sessionId: effectiveRequest.sessionId,
+					requestId,
+					settlementId,
+					settlementPayload,
+					hasPublicReply,
+					publicReply: effectivePublicReply,
+					userText: getLatestUserMessage(effectiveRequest.messages),
+				});
+			});
+
+			settlementPayloadAfterCommit = settlementPayload;
+
+			try {
+				await this.settlementUnitOfWork!.run(async (repos) => {
+					await repos.settlementLedger.markTalkerCommitted(settlementId, ownerAgentId);
+				});
+			} catch (ledgerErr) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`markTalkerCommitted failed (non-fatal): ${ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr)}`,
+				);
+			}
+		} catch (error: unknown) {
+			this.traceLog(requestId, "error", "Turn settlement transaction failed");
+			const errorChunk = {
+				code: "TURN_SETTLEMENT_FAILED",
+				message: error instanceof Error ? error.message : String(error),
+			};
+			yield {
+				type: "error" as const,
+				code: errorChunk.code,
+				message: errorChunk.message,
+				retriable: false,
+			};
+			await this.handleFailedTurn({
+				request: effectiveRequest,
+				turnRangeStart,
+				errorChunk,
+				assistantText: canonicalOutcome.publicReply,
+				hasAssistantVisibleActivity,
+			});
+			rpTraceStore?.finalizeTrace(requestId);
+			return;
+		}
+
+		if (settlementPayloadAfterCommit) {
+			const normalizedSettlementPayload = normalizeSettlementPayload(
+				settlementPayloadAfterCommit,
+			);
+			this.traceStore?.addSettlement(
+				requestId,
+				this.toRedactedSettlementSummary(
+					effectiveRequest.sessionId,
+					normalizedSettlementPayload,
+				),
+			);
+		}
+
+		if (this.jobPersistence && talkerTurnVersion !== undefined) {
+			const thinkerJobEntry = {
+				id: `thinker:${effectiveRequest.sessionId}:${settlementId}`,
+				jobType: "cognition.thinker" as const,
+				payload: {
+					sessionId: effectiveRequest.sessionId,
+					agentId: ownerAgentId,
+					settlementId,
+					talkerTurnVersion,
+				} satisfies import("../jobs/durable-store.js").CognitionThinkerJobPayload,
+				status: "pending" as const,
+				maxAttempts: 3,
+			};
+
+			try {
+				await this.jobPersistence.enqueue(thinkerJobEntry);
+			} catch (error: unknown) {
+				this.traceLog(
+					requestId,
+					"warn",
+					`Thinker enqueue failed, retrying once: ${error instanceof Error ? error.message : String(error)}`,
+				);
+				await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+				await this.jobPersistence.enqueue(thinkerJobEntry); // no catch — propagate
+			}
+		}
+
+		if (hasPublicReply) {
+			const textChunk: Chunk = {
+				type: "text_delta",
+				text: effectivePublicReply,
+			};
+			this.traceChunk(requestId, textChunk);
+			yield textChunk;
+		}
+		const messageEndChunk: Chunk = {
+			type: "message_end",
+			stopReason: "end_turn",
+		};
+		this.traceChunk(requestId, messageEndChunk);
+		yield messageEndChunk;
+
+		rpTraceStore?.finalizeTrace(requestId);
 	}
 
 	private async *runRpBufferedTurn(
@@ -447,35 +880,36 @@ export class TurnService {
 			const ownerAgentId =
 				(await this.resolveQueueOwnerAgentId(effectiveRequest.sessionId)) ?? "";
 			viewerSnapshot = resolvedViewerSnapshot;
-			const settlementPayload: TurnSettlementPayload = {
-				settlementId,
-				requestId,
-				sessionId: effectiveRequest.sessionId,
-				ownerAgentId,
-				publicReply: canonicalOutcome.publicReply,
-				hasPublicReply,
-				viewerSnapshot: resolvedViewerSnapshot,
-				schemaVersion: "turn_settlement_v5",
-				privateCognition: hasPrivateOps
-					? canonicalOutcome.privateCognition
-					: undefined,
-				privateEpisodes:
-					canonicalOutcome.privateEpisodes.length > 0
-						? canonicalOutcome.privateEpisodes
-						: undefined,
-				publications,
-				...(canonicalOutcome.pinnedSummaryProposal
-					? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
-					: {}),
-				relationIntents:
-					canonicalOutcome.relationIntents.length > 0
-						? canonicalOutcome.relationIntents
-						: undefined,
-				conflictFactors:
-					canonicalOutcome.conflictFactors.length > 0
-						? canonicalOutcome.conflictFactors
-						: undefined,
-			};
+      const settlementPayload: TurnSettlementPayload = {
+        settlementId,
+        requestId,
+        sessionId: effectiveRequest.sessionId,
+        ownerAgentId,
+        publicReply: canonicalOutcome.publicReply,
+        hasPublicReply,
+        viewerSnapshot: resolvedViewerSnapshot,
+        schemaVersion: "turn_settlement_v5",
+        privateCognition: hasPrivateOps
+          ? canonicalOutcome.privateCognition
+          : undefined,
+        privateEpisodes:
+          canonicalOutcome.privateEpisodes.length > 0
+            ? canonicalOutcome.privateEpisodes
+            : undefined,
+        publications,
+        ...(canonicalOutcome.pinnedSummaryProposal
+          ? { pinnedSummaryProposal: canonicalOutcome.pinnedSummaryProposal }
+          : {}),
+        relationIntents:
+          canonicalOutcome.relationIntents.length > 0
+            ? canonicalOutcome.relationIntents
+            : undefined,
+        conflictFactors:
+          canonicalOutcome.conflictFactors.length > 0
+            ? canonicalOutcome.conflictFactors
+            : undefined,
+        cognitiveSketch: canonicalOutcome.latentScratchpad,
+      };
 
 			const slotEntries = buildCognitionSlotPayload(
 				canonicalOutcome.privateCognition?.ops ?? [],
@@ -483,94 +917,39 @@ export class TurnService {
 				committedAt,
 			);
 
-		if (this.settlementUnitOfWork) {
-			await this.settlementUnitOfWork.run(async (repos) => {
-				await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
-				await this.commitSettlementRecordsWithRepos({
-					repos,
-					sessionId: effectiveRequest.sessionId,
-					requestId,
-					settlementId,
-					settlementPayload,
-					hasPublicReply,
-					publicReply: canonicalOutcome.publicReply,
-					userText: getLatestUserMessage(effectiveRequest.messages),
-				});
-				await this.commitSettlementProjectionWithRepos({
-					repos,
-					effectiveRequest,
-					settlementId,
-					settlementPayload,
-					resolvedViewerSnapshot,
-					ownerAgentId,
-					publications,
-					slotEntries,
-					committedAt,
-					canonicalOutcome,
-				});
-				await repos.settlementLedger.markApplied(settlementId);
-			});
-			} else {
-				await this.interactionStore.runInTransactionAsync(async () => {
-					this.commitService.commitWithId({
-						sessionId: effectiveRequest.sessionId,
-						actorType: "rp_agent",
-						recordId: settlementId,
-						recordType: "turn_settlement",
-						payload: settlementPayload,
-						correlatedTurnId: requestId,
-					});
-
-					if (hasPublicReply) {
-						const assistantPayload: AssistantMessagePayloadV3 = {
-							role: "assistant",
-							content: canonicalOutcome.publicReply,
-							settlementId,
-						};
-
-						this.commitService.commit({
-							sessionId: effectiveRequest.sessionId,
-							actorType: "rp_agent",
-							recordType: "message",
-							payload: assistantPayload,
-							correlatedTurnId: requestId,
-						});
-					}
-
-					if (this.projectionManager) {
-						await this.projectionManager.commitSettlement({
-							settlementId,
-							sessionId: effectiveRequest.sessionId,
-							agentId: ownerAgentId,
-							cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
-							privateEpisodes: canonicalOutcome.privateEpisodes,
-							publications,
-							areaStateArtifacts: settlementPayload.areaStateArtifacts,
-							viewerSnapshot: resolvedViewerSnapshot,
-							upsertRecentCognitionSlot:
-								this.interactionStore.upsertRecentCognitionSlot.bind(
-									this.interactionStore,
-								),
-							recentCognitionSlotJson: JSON.stringify(slotEntries),
-							agentRole: "rp_agent",
-							artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
-							artifactEnforcementContext: {
-								writingAgentId: ownerAgentId || undefined,
-								ownerAgentId,
-								writeOperation: "append",
-							},
-							committedAt,
-						});
-					} else {
-						this.interactionStore.upsertRecentCognitionSlot(
-							effectiveRequest.sessionId,
-							ownerAgentId,
-							settlementId,
-							JSON.stringify(slotEntries),
-						);
-					}
-				});
-			}
+      if (!this.settlementUnitOfWork) {
+        throw new MaidsClawError({
+          code: "SETTLEMENT_UOW_REQUIRED",
+          message: "PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
+          retriable: false,
+        });
+      }
+      await this.settlementUnitOfWork.run(async (repos) => {
+        await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
+        await this.commitSettlementRecordsWithRepos({
+          repos,
+          sessionId: effectiveRequest.sessionId,
+          requestId,
+          settlementId,
+          settlementPayload,
+          hasPublicReply,
+          publicReply: canonicalOutcome.publicReply,
+          userText: getLatestUserMessage(effectiveRequest.messages),
+        });
+        await this.commitSettlementProjectionWithRepos({
+          repos,
+          effectiveRequest,
+          settlementId,
+          settlementPayload,
+          resolvedViewerSnapshot,
+          ownerAgentId,
+          publications,
+          slotEntries,
+          committedAt,
+          canonicalOutcome,
+        });
+        await repos.settlementLedger.markApplied(settlementId);
+      });
 
 			settlementPayloadAfterCommit = settlementPayload;
 		} catch (error: unknown) {
@@ -833,6 +1212,7 @@ export class TurnService {
 					episodeRepo: repos.episodeRepo,
 					cognitionEventRepo: repos.cognitionEventRepo,
 					cognitionProjectionRepo: repos.cognitionProjectionRepo,
+					searchProjectionRepo: repos.searchProjectionRepo,
 					areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
 					recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
 				},
@@ -1345,4 +1725,24 @@ function getLatestUserMessage(messages: ChatMessage[]): string {
 	}
 
 	return "";
+}
+
+/**
+ * Extract latentScratchpad text that was embedded inside publicReply by the model.
+ * Common patterns: `**latentScratchpad**：...` or `**latentScratchpad**: ...` at the start.
+ */
+function extractEmbeddedScratchpad(
+	publicReply: string,
+): { scratchpad: string; cleanedReply: string } | undefined {
+	// Match **latentScratchpad** (or variant) at the start, capture until **publicReply** or double newline
+	const pattern =
+		/^\s*\*{0,2}latentScratchpad\*{0,2}\s*[：:]\s*([\s\S]*?)(?:\n\s*\*{0,2}publicReply\*{0,2}\s*[：:]\s*|\n\n)([\s\S]*)$/i;
+	const match = publicReply.match(pattern);
+	if (!match) return undefined;
+
+	const scratchpad = match[1].trim();
+	const cleanedReply = match[2].trim();
+	if (!scratchpad || !cleanedReply) return undefined;
+
+	return { scratchpad, cleanedReply };
 }

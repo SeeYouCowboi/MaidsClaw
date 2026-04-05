@@ -42,7 +42,7 @@ export class PgInteractionRepo implements InteractionRepo {
         ) VALUES (
           ${record.sessionId}, ${record.recordId}, ${record.recordIndex},
           ${record.actorType}, ${record.recordType},
-          ${JSON.stringify(record.payload)}::jsonb,
+          ${record.payload}::jsonb,
           ${record.correlatedTurnId ?? null}, ${record.committedAt}, 0
         )
       `;
@@ -134,29 +134,50 @@ export class PgInteractionRepo implements InteractionRepo {
     `;
     if (rows.length === 0) return undefined;
 
-    const payload = rows[0].payload;
+    let payload = rows[0].payload;
+    // Handle legacy double-JSON-encoded payloads stored as JSONB strings
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch { return undefined; }
+    }
     if (!payload || typeof payload !== "object") return undefined;
     return payload as TurnSettlementPayload;
   }
 
   async getMessageRecords(sessionId: string, options?: GetMessageRecordsOptions): Promise<InteractionRecord[]> {
     const mode = options?.mode ?? "full";
-    const rows = mode === "truncated"
-      ? await this.sql`
+    const maxMessages = options?.maxMessages;
+
+    let rows;
+    if (mode === "truncated") {
+      rows = await this.sql`
           SELECT *
           FROM interaction_records
           WHERE session_id = ${sessionId}
             AND record_type = 'message'
             AND is_processed = 0
           ORDER BY record_index ASC
-        `
-      : await this.sql`
+        `;
+    } else if (maxMessages && maxMessages > 0) {
+      // Return the last N messages by record_index (conversation window)
+      rows = await this.sql`
+          SELECT * FROM (
+            SELECT *
+            FROM interaction_records
+            WHERE session_id = ${sessionId}
+              AND record_type = 'message'
+            ORDER BY record_index DESC
+            LIMIT ${maxMessages}
+          ) sub ORDER BY record_index ASC
+        `;
+    } else {
+      rows = await this.sql`
           SELECT *
           FROM interaction_records
           WHERE session_id = ${sessionId}
             AND record_type = 'message'
           ORDER BY record_index ASC
         `;
+    }
     return rows.map((r) => rowToRecord(r));
   }
 

@@ -1,0 +1,65 @@
+== F3 Batch Collapse QA Results ==
+Date: 2026-04-05
+Runner: bun test v1.3.10
+
+== Test Suite: test/runtime/thinker-batch-collapse.test.ts ==
+Result: 19 pass | 0 fail | 89 expect() calls | 231ms
+
+== S1-S9 Scenario Mapping ==
+
+S1 - PASS [batch detection finds 2 additional pending jobs and injects 3-turn sketch chain]
+S1 - PASS [sketch chain ordering is ascending by talkerTurnVersion]
+S1 - PASS [commits a batch once using the effective settlement and viewer snapshot]
+S1 - PASS [batch mode sets thinkerCommittedVersion via setThinkerVersion instead of versionIncrement]
+S1 - PASS [markThinkerProjecting and markApplied target the effective settlement while intermediate settlements noop]
+S1 - PASS [routes post-commit reads, conflicts, and organizer jobs through effectiveSettlementId]
+S1 - PASS [single-job mode still increments thinker version with versionIncrement]
+S1 - PASS [worker host wiring passes durableJobStore into createThinkerWorker]
+
+S2 - PASS [soft cap keeps only newest 20 sketches and warns about excluded count]
+
+S3 - PASS [LLM failure produces zero commits and marks both claimed and effective settlements as failed]
+S3 - PASS [commitSettlement failure prevents ledger update and marks both settlements as failed]
+
+S4 - PASS [retry rebuilds batch dynamically from changed pending set]
+
+S5 - PASS [no durableJobStore keeps single-job path for backward compatibility]
+
+S6 - PASS [S6: version monotonicity keeps thinkerCommittedVersion at 5 when late v3 retries]
+
+S7 - PASS [idempotency skip marks the claimed settlement as replayed_noop]
+
+S8 - PASS [S8: cross-session isolation batches only jobs from the claimed session]
+
+S9 - PASS [contiguous prefix truncates at first sketch-load failure and excludes later turns]
+S9 - PASS [claimed-job sketch failure falls back to single-job error path]
+S9 - PASS [partial sketch load failure truncates to contiguous prefix and commits as single-job]
+
+== Raw Log ==
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=20 members=25 highest=25
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: boom-v4
+[thinker_worker] batch: sketch load failed for v3 (stl:req-3), truncating chain warn: claimed-sketch-fail
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] resolved 1 conflict factors (0 unresolved) for settlement stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: v4 payload missing
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-3
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+
+19 pass | 0 fail | 89 expect() calls | Ran 19 tests across 1 file [231.00ms]

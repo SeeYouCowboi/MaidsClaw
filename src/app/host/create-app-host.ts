@@ -1,4 +1,5 @@
 import { isAbsolute, join, resolve } from "node:path";
+import type postgres from "postgres";
 import {
 	bootstrapRuntime,
 	initializePgBackendForRuntime,
@@ -9,6 +10,7 @@ import { GatewayServer } from "../../gateway/server.js";
 import type { DurableJobStore } from "../../jobs/durable-store.js";
 import { LeaseReclaimSweeper } from "../../jobs/lease-reclaim-sweeper.js";
 import { PgJobRunner } from "../../jobs/pg-runner.js";
+import { createThinkerWorker } from "../../runtime/thinker-worker.js";
 import { LocalHealthClient } from "../clients/local/local-health-client.js";
 import { LocalInspectClient } from "../clients/local/local-inspect-client.js";
 import { LocalSessionClient } from "../clients/local/local-session-client.js";
@@ -36,7 +38,9 @@ type JobConsumer = {
 function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 	const store = (runtime.pgFactory as { store?: unknown } | null)?.store;
 	if (!store) {
-		throw new Error("PG worker role requires pgFactory.store durable job store");
+		throw new Error(
+			"PG worker role requires pgFactory.store durable job store",
+		);
 	}
 
 	const runner = new PgJobRunner(
@@ -47,20 +51,46 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 		},
 	);
 
+	runner.registerWorker("cognition.thinker", async (job) => {
+		const sql = (
+			runtime.pgFactory as { getPool?: () => postgres.Sql } | null
+		)?.getPool?.();
+		if (!sql) {
+			throw new Error("T7: pgFactory.getPool() unavailable for Thinker worker");
+		}
+
+		const thinkerWorker = createThinkerWorker({
+			sql,
+			projectionManager: runtime.projectionManager,
+			interactionRepo: runtime.interactionRepo,
+			recentCognitionSlotRepo: runtime.recentCognitionSlotRepo,
+			agentRegistry: runtime.agentRegistry,
+			createAgentLoop: runtime.createAgentLoop,
+			durableJobStore: store as DurableJobStore,
+			jobPersistence: runtime.jobPersistence,
+		});
+
+		await thinkerWorker({
+			payload: job.payload_json,
+		});
+	});
+
 	let timer: ReturnType<typeof setInterval> | undefined;
-	let tickPromise: Promise<unknown> | undefined;
+	const MAX_CONCURRENT_TICKS = 4; // Match global thinker concurrency cap
+	const activeTickPromises = new Set<Promise<unknown>>();
 
 	const runTick = (): void => {
-		if (tickPromise) {
+		if (activeTickPromises.size >= MAX_CONCURRENT_TICKS) {
 			return;
 		}
 
-		tickPromise = runner
+		const tickPromise = runner
 			.processNext()
 			.catch(() => undefined)
 			.finally(() => {
-				tickPromise = undefined;
+				activeTickPromises.delete(tickPromise);
 			});
+		activeTickPromises.add(tickPromise);
 	};
 
 	return {
@@ -79,8 +109,8 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 
 			clearInterval(timer);
 			timer = undefined;
-			if (tickPromise) {
-				await tickPromise;
+			if (activeTickPromises.size > 0) {
+				await Promise.allSettled([...activeTickPromises]);
 			}
 		},
 	};
@@ -183,15 +213,17 @@ export async function createAppHost(
 	const strictDurableMode =
 		options.role === "worker" || options.enableDurableOrchestration === true;
 
-	const runtime = _injectedRuntime ?? bootstrapRuntime({
-		cwd: options.cwd,
-		dataDir,
-		memoryMigrationModelId,
-		memoryEmbeddingModelId,
-		memoryOrganizerEmbeddingModelId,
-		traceCaptureEnabled: options.traceCaptureEnabled,
-		strictDurableMode,
-	});
+	const runtime =
+		_injectedRuntime ??
+		bootstrapRuntime({
+			cwd: options.cwd,
+			dataDir,
+			memoryMigrationModelId,
+			memoryEmbeddingModelId,
+			memoryOrganizerEmbeddingModelId,
+			traceCaptureEnabled: options.traceCaptureEnabled,
+			strictDurableMode,
+		});
 
 	if (runtime.backendType === "pg") {
 		if (options.pgUrl) {
@@ -209,30 +241,28 @@ export async function createAppHost(
 
 	const inspectTraceStore =
 		runtime.traceStore ??
-		(dataDir
-			? new TraceStore(join(dataDir, "debug", "traces"))
-			: undefined);
+		(dataDir ? new TraceStore(join(dataDir, "debug", "traces")) : undefined);
 
 	const user =
 		options.role === "local" || options.role === "server"
 			? {
-				session: new LocalSessionClient({
-					sessionService: runtime.sessionService,
-					turnService: runtime.turnService,
-					memoryTaskAgent: runtime.memoryTaskAgent,
-				}),
-				turn: new LocalTurnClient({
-					sessionService: runtime.sessionService,
-					turnService: runtime.turnService,
-					interactionRepo: runtime.interactionRepo,
-					traceStore: runtime.traceStore,
-				}),
-				inspect: new LocalInspectClient(runtime, inspectTraceStore),
-				health: new LocalHealthClient({
-					memoryPipelineReady: runtime.memoryPipelineReady,
-					healthChecks: runtime.healthChecks,
-				}),
-			}
+					session: new LocalSessionClient({
+						sessionService: runtime.sessionService,
+						turnService: runtime.turnService,
+						memoryTaskAgent: runtime.memoryTaskAgent,
+					}),
+					turn: new LocalTurnClient({
+						sessionService: runtime.sessionService,
+						turnService: runtime.turnService,
+						interactionRepo: runtime.interactionRepo,
+						traceStore: runtime.traceStore,
+					}),
+					inspect: new LocalInspectClient(runtime, inspectTraceStore),
+					health: new LocalHealthClient({
+						memoryPipelineReady: runtime.memoryPipelineReady,
+						healthChecks: runtime.healthChecks,
+					}),
+				}
 			: undefined;
 
 	const server =
@@ -263,8 +293,8 @@ export async function createAppHost(
 			: undefined;
 
 	const isOrchestrated =
-		options.role === "worker"
-		|| (options.role === "server" && options.enableDurableOrchestration === true);
+		options.role === "worker" ||
+		(options.role === "server" && options.enableDurableOrchestration === true);
 
 	const admin: AppHostAdmin = {
 		async getHostStatus() {
@@ -294,7 +324,8 @@ export async function createAppHost(
 		async getCapabilities() {
 			return {
 				orchestration: {
-					durableJobProcessing: options.role === "worker" || options.role === "server",
+					durableJobProcessing:
+						options.role === "worker" || options.role === "server",
 					leaseReclaim: runtime.backendType === "pg",
 					maintenanceFacade: !!maintenance,
 				},
@@ -311,12 +342,24 @@ export async function createAppHost(
 		options.role === "server" && options.enableDurableOrchestration
 			? createJobConsumer(runtime)
 			: undefined;
+	// Local mode: start a job consumer when talkerThinker is enabled and PG store is available
+	const localDurableConsumer = (() => {
+		if (options.role !== "local") return undefined;
+		const store = (runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+		if (!store) return undefined;
+		if (!runtime.talkerThinkerConfig?.enabled) return undefined;
+		try {
+			return createJobConsumer(runtime);
+		} catch {
+			return undefined;
+		}
+	})();
 	const shouldRunLeaseReclaimSweeper =
-		options.role === "worker"
-		|| options.role === "maintenance"
-		|| (options.role === "server" && options.enableDurableOrchestration === true);
-	const pgStore =
-		(runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+		options.role === "worker" ||
+		options.role === "maintenance" ||
+		(options.role === "server" && options.enableDurableOrchestration === true);
+	const pgStore = (runtime.pgFactory as { store?: DurableJobStore } | null)
+		?.store;
 	const leaseReclaimSweeper =
 		runtime.backendType === "pg" && shouldRunLeaseReclaimSweeper && pgStore
 			? new LeaseReclaimSweeper(pgStore)
@@ -338,6 +381,8 @@ export async function createAppHost(
 			leaseReclaimSweeper?.start();
 		} else if (options.role === "maintenance") {
 			leaseReclaimSweeper?.start();
+		} else if (options.role === "local" && localDurableConsumer) {
+			await localDurableConsumer.start();
 		}
 	};
 
@@ -359,6 +404,8 @@ export async function createAppHost(
 				await workerConsumer?.stop();
 			} else if (options.role === "maintenance") {
 				leaseReclaimSweeper?.stop();
+			} else if (options.role === "local" && localDurableConsumer) {
+				await localDurableConsumer.stop();
 			}
 		} finally {
 			runtime.shutdown();
@@ -382,6 +429,11 @@ export async function createAppHost(
 			return server.getPort();
 		},
 	};
+
+	// Auto-start local job consumer for thinker-talker mode
+	if (localDurableConsumer) {
+		await localDurableConsumer.start();
+	}
 
 	return hostResult;
 }

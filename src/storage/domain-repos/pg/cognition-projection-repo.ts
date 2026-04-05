@@ -190,6 +190,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         record_json = excluded.record_json,
         source_event_id = excluded.source_event_id,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= private_cognition_current.updated_at
     `;
   }
 
@@ -219,6 +220,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         record_json = excluded.record_json,
         source_event_id = excluded.source_event_id,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= private_cognition_current.updated_at
     `;
   }
 
@@ -249,6 +251,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         record_json = excluded.record_json,
         source_event_id = excluded.source_event_id,
         updated_at = excluded.updated_at
+      WHERE excluded.updated_at >= private_cognition_current.updated_at
     `;
   }
 

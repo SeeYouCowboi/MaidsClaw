@@ -241,8 +241,9 @@ export class InteractionStore {
    * Append structured cognition entries to the recent cognition slot.
    * Reads existing entries, appends new ones, trims to newest 64, updates last_settlement_id.
    * @param newEntriesJson - JSON array of RecentCognitionEntry objects from this settlement
+   * @param versionIncrement - 'talker' to increment talker counter only, 'thinker' to write payload and increment thinker version (PG only)
    */
-  upsertRecentCognitionSlot(sessionId: string, agentId: string, settlementId: string, newEntriesJson: string = "[]"): void {
+  upsertRecentCognitionSlot(sessionId: string, agentId: string, settlementId: string, newEntriesJson: string = "[]", _versionIncrement?: 'talker' | 'thinker'): void {
     const existing = this.db.get<{ slot_payload: string }>(
       `SELECT slot_payload FROM recent_cognition_slots WHERE session_id = ? AND agent_id = ?`,
       [sessionId, agentId],

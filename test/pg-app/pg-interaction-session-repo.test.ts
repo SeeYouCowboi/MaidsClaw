@@ -518,5 +518,149 @@ describe.skipIf(skipPgTests)("pg-interaction-session-repos", () => {
         expect(slot!.slotPayload.length).toBe(0);
       });
     });
+
+    it("talker versionIncrement increments counter without changing payload", async () => {
+      await withTestAppSchema(sql, async (pool) => {
+        await bootstrapOpsSchema(pool);
+        const repo = new PgRecentCognitionSlotRepo(pool);
+
+        // First create a slot with some payload via thinker mode
+        await repo.upsertRecentCognitionSlot(
+          "sess-talker",
+          "agent-1",
+          "settle-1",
+          JSON.stringify([{ type: "thought", content: "initial" }]),
+          "thinker",
+        );
+
+        const slot1 = await repo.getBySession("sess-talker", "agent-1");
+        expect(slot1!.talkerTurnCounter).toBe(0);
+        expect(slot1!.thinkerCommittedVersion).toBe(1);
+        expect(slot1!.slotPayload.length).toBe(1);
+
+        // Now call with talker mode - counter increments, payload unchanged
+        const result = await repo.upsertRecentCognitionSlot(
+          "sess-talker",
+          "agent-1",
+          "settle-2",
+          JSON.stringify([{ type: "thought", content: "new" }]),
+          "talker",
+        );
+
+        expect(result.talkerTurnCounter).toBe(1);
+        expect(result.thinkerCommittedVersion).toBeUndefined();
+
+        const slot2 = await repo.getBySession("sess-talker", "agent-1");
+        expect(slot2!.talkerTurnCounter).toBe(1);
+        expect(slot2!.thinkerCommittedVersion).toBe(1);
+        expect(slot2!.slotPayload.length).toBe(1);
+        expect((slot2!.slotPayload[0] as { content: string }).content).toBe("initial");
+      });
+    });
+
+    it("thinker versionIncrement increments version AND writes payload", async () => {
+      await withTestAppSchema(sql, async (pool) => {
+        await bootstrapOpsSchema(pool);
+        const repo = new PgRecentCognitionSlotRepo(pool);
+
+        // First call as talker to increment counter
+        await repo.upsertRecentCognitionSlot("sess-thinker", "agent-1", "settle-1", "[]", "talker");
+        await repo.upsertRecentCognitionSlot("sess-thinker", "agent-1", "settle-2", "[]", "talker");
+
+        const slot1 = await repo.getBySession("sess-thinker", "agent-1");
+        expect(slot1!.talkerTurnCounter).toBe(2);
+        expect(slot1!.thinkerCommittedVersion).toBe(0);
+
+        // Now call as thinker - writes payload and increments thinker version
+        const result = await repo.upsertRecentCognitionSlot(
+          "sess-thinker",
+          "agent-1",
+          "settle-3",
+          JSON.stringify([{ type: "thought", content: "committed" }]),
+          "thinker",
+        );
+
+        expect(result.thinkerCommittedVersion).toBe(1);
+        expect(result.talkerTurnCounter).toBeUndefined();
+
+        const slot2 = await repo.getBySession("sess-thinker", "agent-1");
+        expect(slot2!.talkerTurnCounter).toBe(2);
+        expect(slot2!.thinkerCommittedVersion).toBe(1);
+        expect(slot2!.slotPayload.length).toBe(1);
+        expect((slot2!.slotPayload[0] as { content: string }).content).toBe("committed");
+      });
+    });
+
+    it("getVersionGap returns correct gap calculation", async () => {
+      await withTestAppSchema(sql, async (pool) => {
+        await bootstrapOpsSchema(pool);
+        const repo = new PgRecentCognitionSlotRepo(pool);
+
+        // No slot exists yet
+        const gap0 = await repo.getVersionGap("sess-gap", "agent-1");
+        expect(gap0).toBeUndefined();
+
+        // Create slot with thinker (thinker version = 1)
+        await repo.upsertRecentCognitionSlot(
+          "sess-gap",
+          "agent-1",
+          "settle-1",
+          JSON.stringify([{ type: "thought" }]),
+          "thinker",
+        );
+
+        // Increment talker 3 times (talker counter = 3)
+        await repo.upsertRecentCognitionSlot("sess-gap", "agent-1", "settle-2", "[]", "talker");
+        await repo.upsertRecentCognitionSlot("sess-gap", "agent-1", "settle-3", "[]", "talker");
+        await repo.upsertRecentCognitionSlot("sess-gap", "agent-1", "settle-4", "[]", "talker");
+
+        const gap = await repo.getVersionGap("sess-gap", "agent-1");
+        expect(gap).toBeDefined();
+        expect(gap!.talkerCounter).toBe(3);
+        expect(gap!.thinkerVersion).toBe(1);
+        expect(gap!.gap).toBe(2); // 3 - 1 = 2
+      });
+    });
+
+    it("getBySession returns version columns", async () => {
+      await withTestAppSchema(sql, async (pool) => {
+        await bootstrapOpsSchema(pool);
+        const repo = new PgRecentCognitionSlotRepo(pool);
+
+        await repo.upsertRecentCognitionSlot(
+          "sess-versions",
+          "agent-1",
+          "settle-1",
+          JSON.stringify([{ type: "thought" }]),
+          "thinker",
+        );
+
+        const slot = await repo.getBySession("sess-versions", "agent-1");
+        expect(slot).toBeDefined();
+        expect(slot!.talkerTurnCounter).toBe(0);
+        expect(slot!.thinkerCommittedVersion).toBe(1);
+      });
+    });
+
+    it("backwards compatible without versionIncrement", async () => {
+      await withTestAppSchema(sql, async (pool) => {
+        await bootstrapOpsSchema(pool);
+        const repo = new PgRecentCognitionSlotRepo(pool);
+
+        // Call without versionIncrement (old behavior)
+        const result = await repo.upsertRecentCognitionSlot(
+          "sess-compat",
+          "agent-1",
+          "settle-1",
+          JSON.stringify([{ type: "thought" }]),
+        );
+
+        expect(result).toEqual({}); // No version returned when no increment specified
+
+        const slot = await repo.getBySession("sess-compat", "agent-1");
+        expect(slot).toBeDefined();
+        expect(slot!.slotPayload.length).toBe(1);
+      });
+    });
   });
 });

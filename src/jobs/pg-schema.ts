@@ -124,6 +124,12 @@ export async function bootstrapPgJobsSchema(sql: postgres.Sql): Promise<void> {
       WHERE status = 'running'
   `);
 
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_jobs_pending_thinker_session
+      ON jobs_current(job_type, status, (payload_json->>'sessionId'), (payload_json->>'agentId'))
+      WHERE status = 'pending'
+  `);
+
   // Stale lease detection
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS idx_jobs_current_lease_expiry

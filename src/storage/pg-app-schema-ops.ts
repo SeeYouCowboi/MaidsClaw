@@ -88,8 +88,31 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
       last_settlement_id  TEXT,
       slot_payload        JSONB NOT NULL DEFAULT '[]'::jsonb,
       updated_at          BIGINT NOT NULL,
+      talker_turn_counter INTEGER NOT NULL DEFAULT 0,
+      thinker_committed_version INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (session_id, agent_id)
     )
+  `);
+
+  // ── recent_cognition_slots migrations ──────────────────────────────
+  // Idempotent ALTER TABLE for columns added after initial schema.
+  // ADD COLUMN IF NOT EXISTS is safe to run on existing tables.
+  await sql.unsafe(`
+    ALTER TABLE recent_cognition_slots
+      ADD COLUMN IF NOT EXISTS talker_turn_counter INTEGER NOT NULL DEFAULT 0
+  `);
+  await sql.unsafe(`
+    ALTER TABLE recent_cognition_slots
+      ADD COLUMN IF NOT EXISTS thinker_committed_version INTEGER NOT NULL DEFAULT 0
+  `);
+
+  // ── cognition_events dedup index ────────────────────────────────────
+  // Idempotency constraint: prevents duplicate events on Thinker job retry.
+  // Uses ON CONFLICT DO NOTHING at insert time; null-safe chain skips
+  // applyProjection when conflict hit (event already applied in prior run).
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cognition_events_settlement_dedup
+    ON private_cognition_events (settlement_id, agent_id, cognition_key, op)
   `);
 
   // ── pending_settlement_recovery ─────────────────────────────────────

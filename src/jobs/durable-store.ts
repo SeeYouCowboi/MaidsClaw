@@ -46,6 +46,13 @@ export type DurableSearchRebuildPayload =
       requestedAt?: number;
     };
 
+export type CognitionThinkerJobPayload = {
+  sessionId: string;
+  agentId: string;
+  settlementId: string;
+  talkerTurnVersion: number;
+};
+
 export type DurablePayloadByKind = {
   "memory.migrate": unknown;
   "memory.organize": unknown;
@@ -54,6 +61,7 @@ export type DurablePayloadByKind = {
   "maintenance.replay_projection": unknown;
   "maintenance.rebuild_derived": unknown;
   "maintenance.full": unknown;
+  "cognition.thinker": CognitionThinkerJobPayload;
 };
 
 export type PgJobCurrentRow<K extends JobKind = JobKind> = {
@@ -257,6 +265,11 @@ export interface DurableJobStore {
 
   inspect(job_key: string): Promise<PgJobCurrentRow | undefined>;
   listActive(): Promise<PgJobCurrentRow[]>;
+  listPendingByKindAndPayload(
+    jobType: JobKind,
+    payloadFilter: Record<string, string>,
+    now_ms: number,
+  ): Promise<PgJobCurrentRow[]>;
   listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]>;
   countByStatus(): Promise<PgStatusCount>;
   getHistory(job_key: string): Promise<PgJobAttemptHistoryRow[]>;

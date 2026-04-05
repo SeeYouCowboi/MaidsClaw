@@ -1,0 +1,6 @@
+bun test v1.3.10 (30e609e0)
+
+ 0 pass
+ 8 skip
+ 0 fail
+Ran 8 tests across 1 file. [101.00ms]

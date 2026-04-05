@@ -11,6 +11,8 @@ import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { TraceStore } from "../app/diagnostics/trace-store.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
+import { loadRuntimeConfig } from "../core/config.js";
+import type { RuntimeConfig } from "../core/config-schema.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import {
@@ -28,8 +30,11 @@ import type {
 } from "../interaction/contracts.js";
 import { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
+import type { DurableJobStore } from "../jobs/durable-store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
+import { PgJobStore } from "../jobs/pg-store.js";
+import { bootstrapPgJobsSchema } from "../jobs/pg-schema.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
 import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
@@ -230,7 +235,11 @@ function createSettlementLedgerAdapter(
 			return settlementLedgerRepo.markClaimed(settlementId, claimedBy);
 		},
 		markApplying(settlementId: string, agentId: string, payloadHash?: string) {
-			return settlementLedgerRepo.markApplying(settlementId, agentId, payloadHash);
+			return settlementLedgerRepo.markApplying(
+				settlementId,
+				agentId,
+				payloadHash,
+			);
 		},
 		markApplied(settlementId: string) {
 			return settlementLedgerRepo.markApplied(settlementId);
@@ -248,7 +257,16 @@ function createSettlementLedgerAdapter(
 					errorMessage,
 				);
 			}
-			return settlementLedgerRepo.markFailedTerminal(settlementId, errorMessage);
+			return settlementLedgerRepo.markFailedTerminal(
+				settlementId,
+				errorMessage,
+			);
+		},
+		markTalkerCommitted(settlementId: string, agentId: string) {
+			return settlementLedgerRepo.markTalkerCommitted(settlementId, agentId);
+		},
+		markThinkerProjecting(settlementId: string, agentId: string) {
+			return settlementLedgerRepo.markThinkerProjecting(settlementId, agentId);
 		},
 	};
 }
@@ -595,11 +613,30 @@ export function bootstrapRuntime(
 	const pgFactory = new PgBackendFactory();
 
 	const runtimeCwd = resolveRuntimeCwd(options);
+
+	// Load runtime config (from options or config/runtime.json)
+	const runtimeConfigResult = options.runtimeConfig
+		? { ok: true as const, runtime: options.runtimeConfig }
+		: loadRuntimeConfig({ cwd: runtimeCwd });
+	const runtimeConfig: RuntimeConfig = runtimeConfigResult.ok
+		? runtimeConfigResult.runtime
+		: {};
+	const thinkerGlobalConcurrencyCap =
+		runtimeConfig.talkerThinker?.globalConcurrencyCap;
+
 	const resolvedJobPersistence: JobPersistence =
 		options.jobPersistence ??
 		createJobPersistence("pg", {
 			pgFactory,
 		});
+
+	// Extract talkerThinker config with defaults
+	const talkerThinkerConfig = runtimeConfig.talkerThinker ?? {
+		enabled: false,
+		stalenessThreshold: 2,
+		softBlockTimeoutMs: 3000,
+		softBlockPollIntervalMs: 500,
+	};
 
 	const migrationStatus: RuntimeMigrationStatus = {
 		interaction: {
@@ -1042,10 +1079,12 @@ export function bootstrapRuntime(
 						cognitionRepo,
 						relationBuilder,
 						relationWriteRepo: {
-							upsertRelation: (params) => pgRelationWriteRepo.upsertRelation(params),
+							upsertRelation: (params) =>
+								pgRelationWriteRepo.upsertRelation(params),
 						},
 						cognitionProjectionRepo: {
-							getCurrent: (agentId, cognitionKey) => cognitionProjectionRepo.getCurrent(agentId, cognitionKey),
+							getCurrent: (agentId, cognitionKey) =>
+								cognitionProjectionRepo.getCurrent(agentId, cognitionKey),
 							updateConflictFactors: (
 								agentId,
 								cognitionKey,
@@ -1099,6 +1138,8 @@ export function bootstrapRuntime(
 		projectionManager,
 		settlementUnitOfWork,
 		memoryPipelineReady,
+		talkerThinkerConfig,
+		resolvedJobPersistence,
 	);
 
 	const pendingFlushRepo = createLazyPgRepo(
@@ -1114,6 +1155,13 @@ export function bootstrapRuntime(
 					{
 						isEnabled: () => memoryPipelineReady,
 					},
+					talkerThinkerConfig.enabled
+						? {
+								get sql() { return resolvePgPool(); },
+								jobPersistence: resolvedJobPersistence,
+								settlementLedger,
+							}
+						: undefined,
 				)
 			: null;
 	const publicationRecoverySweeper =
@@ -1160,11 +1208,14 @@ export function bootstrapRuntime(
 		backendType: "pg",
 		pgFactory,
 		settlementUnitOfWork,
+		projectionManager,
 		interactionRepo,
 		coreMemoryBlockRepo,
 		recentCognitionSlotRepo,
 		sharedBlockRepo,
 		jobPersistence: resolvedJobPersistence,
+		thinkerGlobalConcurrencyCap,
+		talkerThinkerConfig,
 		shutdown,
 	};
 }
@@ -1177,4 +1228,28 @@ export async function initializePgBackendForRuntime(
 		type: "pg",
 		pg: { url: process.env.PG_APP_URL ?? "" },
 	});
+
+	const pgFactoryWithStore = result.pgFactory as PgBackendFactory & {
+		store?: DurableJobStore;
+	};
+	if (!pgFactoryWithStore.store) {
+		let pool: ReturnType<PgBackendFactory["getPool"]> | null = null;
+		try {
+			pool = result.pgFactory.getPool();
+		} catch {
+			pool = null;
+		}
+
+		if (pool) {
+			await bootstrapPgJobsSchema(pool);
+			pgFactoryWithStore.store = new PgJobStore(
+				pool,
+				typeof result.thinkerGlobalConcurrencyCap === "number"
+					? {
+						thinkerGlobalConcurrencyCap: result.thinkerGlobalConcurrencyCap,
+					}
+					: undefined,
+			);
+		}
+	}
 }

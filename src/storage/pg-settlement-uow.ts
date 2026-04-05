@@ -8,6 +8,7 @@ import { PgGraphMutableStoreRepo } from "./domain-repos/pg/graph-mutable-store-r
 import { PgInteractionRepo } from "./domain-repos/pg/interaction-repo.js";
 import { PgPendingFlushRecoveryRepo } from "./domain-repos/pg/pending-flush-recovery-repo.js";
 import { PgRecentCognitionSlotRepo } from "./domain-repos/pg/recent-cognition-slot-repo.js";
+import { PgSearchProjectionRepo } from "./domain-repos/pg/search-projection-repo.js";
 import { PgSessionRepo } from "./domain-repos/pg/session-repo.js";
 import { PgSettlementLedgerRepo } from "./domain-repos/pg/settlement-ledger-repo.js";
 import type { SettlementRepos, SettlementUnitOfWork } from "./unit-of-work.js";
@@ -27,6 +28,7 @@ export class PgSettlementUnitOfWork implements SettlementUnitOfWork {
 				interactionRepo: new PgInteractionRepo(txSql),
 				sessionRepo: new PgSessionRepo(txSql),
 				recentCognitionSlotRepo: new PgRecentCognitionSlotRepo(txSql),
+				searchProjectionRepo: new PgSearchProjectionRepo(txSql),
 				coreMemoryBlockRepo: new PgCoreMemoryBlockRepo(txSql),
 				graphStoreRepo: new PgGraphMutableStoreRepo(txSql),
 				pendingFlushRecoveryRepo: new PgPendingFlushRecoveryRepo(txSql),

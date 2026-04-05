@@ -29,6 +29,8 @@ export interface SettlementLedgerRepo {
   markConflict(settlementId: string, errorMessage: string): Promise<void>;
   markFailedRetryScheduled(settlementId: string, errorMessage: string): Promise<void>;
   markFailedTerminal(settlementId: string, errorMessage: string): Promise<void>;
+  markTalkerCommitted(settlementId: string, agentId: string): Promise<void>;
+  markThinkerProjecting(settlementId: string, agentId: string): Promise<void>;
   getBySettlementId(settlementId: string): Promise<SettlementLedgerRecord | null>;
   getByHash(payloadHash: string): Promise<SettlementLedgerRecord | null>;
 }

@@ -141,6 +141,8 @@ const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "maintenance.replay_projection:global": CONCURRENCY_CAPS.maintenance_replay_global,
   "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
   "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
+  "cognition.thinker:session:{sessionId}": 2,
+  "cognition.thinker:global": CONCURRENCY_CAPS.cognition_thinker_global,
 };
 
 type AdvisoryLockRow = {
@@ -156,6 +158,10 @@ type FenceLookupRow = Pick<PgJobCurrentRow, "status" | "claim_version">;
 type FenceMissOutcome = "not_found" | "stale_claim" | "not_running";
 
 const DEFAULT_HEARTBEAT_LEASE_EXTENSION_MS = 30_000;
+
+type PgJobStoreOptions = {
+  thinkerGlobalConcurrencyCap?: number;
+};
 
 function normalizeJsonValue<T>(value: T): T | unknown {
   if (typeof value !== "string") {
@@ -228,8 +234,16 @@ async function markAttemptLeaseLost(
   `;
 }
 
-function getConcurrencyCap(concurrencyKey: string): number {
-  return CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
+/**
+ * Derive a global concurrency key from a per-session concurrency key.
+ * e.g. "cognition.thinker:session:abc123" → "cognition.thinker:global"
+ * Returns undefined if the key has no session segment or no global cap entry exists.
+ */
+function deriveGlobalConcurrencyKey(concurrencyKey: string): string | undefined {
+  const sessionSegment = concurrencyKey.indexOf(":session:");
+  if (sessionSegment < 0) return undefined;
+  const globalKey = `${concurrencyKey.slice(0, sessionSegment)}:global`;
+  return globalKey in CONCURRENCY_KEY_CAPS ? globalKey : undefined;
 }
 
 function normalizePgJobCurrentRow(row: PgJobCurrentRow): PgJobCurrentRow {
@@ -254,7 +268,21 @@ function normalizePgJobCurrentRow(row: PgJobCurrentRow): PgJobCurrentRow {
  * Remaining methods are stubs for T7–T10.
  */
 export class PgJobStore implements DurableJobStore {
-  constructor(private readonly sql: postgres.Sql) {}
+  private readonly concurrencyKeyCapOverrides: Record<string, number>;
+
+  constructor(
+    private readonly sql: postgres.Sql,
+    options?: PgJobStoreOptions,
+  ) {
+    this.concurrencyKeyCapOverrides =
+      typeof options?.thinkerGlobalConcurrencyCap === "number"
+        ? { "cognition.thinker:global": options.thinkerGlobalConcurrencyCap }
+        : {};
+  }
+
+  private getConcurrencyCap(concurrencyKey: string): number {
+    return this.concurrencyKeyCapOverrides[concurrencyKey] ?? CONCURRENCY_KEY_CAPS[concurrencyKey] ?? 1;
+  }
 
   // ── enqueue ─────────────────────────────────────────────────────────
   async enqueue<K extends JobKind>(input: EnqueueJobInput<K>): Promise<EnqueueResult> {
@@ -440,8 +468,8 @@ export class PgJobStore implements DurableJobStore {
           ${input.concurrency_key},
           ${"pending"},
           ${input.payload_schema_version},
-          ${JSON.stringify(input.payload_json)},
-          ${JSON.stringify({})},
+          ${input.payload_json},
+          ${{}},
           ${0},
           ${0},
           ${input.max_attempts},
@@ -515,7 +543,7 @@ export class PgJobStore implements DurableJobStore {
         }
 
         for (const candidate of candidates) {
-          const cap = getConcurrencyCap(candidate.concurrency_key);
+          const cap = this.getConcurrencyCap(candidate.concurrency_key);
 
           const lockRows = (await sqltx`
             SELECT pg_try_advisory_xact_lock(hashtext(${candidate.concurrency_key})::bigint) AS locked
@@ -535,6 +563,22 @@ export class PgJobStore implements DurableJobStore {
           const runningCount = Number(runningCountRows[0]?.running_count ?? 0);
           if (runningCount >= cap) {
             continue;
+          }
+
+          // ── derived global cap check ──────────────────────────────
+          const globalKey = deriveGlobalConcurrencyKey(candidate.concurrency_key);
+          if (globalKey !== undefined) {
+            const globalCap = this.getConcurrencyCap(globalKey);
+            const globalRunningRows = (await sqltx`
+              SELECT COUNT(*)::int AS running_count
+              FROM jobs_current
+              WHERE job_type = ${candidate.job_type}
+                AND status = 'running'
+            `) as RunningCountRow[];
+            const globalRunning = Number(globalRunningRows[0]?.running_count ?? 0);
+            if (globalRunning >= globalCap) {
+              continue;
+            }
           }
 
           const claimedRows = (await sqltx`
@@ -587,8 +631,8 @@ export class PgJobStore implements DurableJobStore {
               ${input.worker_id},
               ${"running"},
               ${normalizedClaimed.payload_schema_version},
-              ${JSON.stringify(normalizedClaimed.payload_json)},
-              ${JSON.stringify(normalizedClaimed.family_state_json)},
+              ${normalizedClaimed.payload_json},
+              ${normalizedClaimed.family_state_json ?? {}},
               ${input.now_ms},
               ${input.now_ms},
               ${leaseExpiresAt}
@@ -984,6 +1028,33 @@ export class PgJobStore implements DurableJobStore {
     return rows.map(normalizePgJobCurrentRow);
   }
 
+  async listPendingByKindAndPayload(
+    jobType: JobKind,
+    payloadFilter: Record<string, string>,
+    now_ms: number,
+  ): Promise<PgJobCurrentRow[]> {
+    const rows = (await this.sql`
+      SELECT * FROM jobs_current
+      WHERE job_type = ${jobType}
+        AND status = 'pending'
+        AND next_attempt_at <= ${now_ms}
+        AND COALESCE(
+          payload_json->>'sessionId',
+          (payload_json #>> '{}')::jsonb->>'sessionId'
+        ) = ${payloadFilter.sessionId}
+        AND COALESCE(
+          payload_json->>'agentId',
+          (payload_json #>> '{}')::jsonb->>'agentId'
+        ) = ${payloadFilter.agentId}
+      ORDER BY COALESCE(
+        (payload_json->>'talkerTurnVersion')::int,
+        ((payload_json #>> '{}')::jsonb->>'talkerTurnVersion')::int
+      ) ASC
+    `) as PgJobCurrentRow[];
+
+    return rows.map(normalizePgJobCurrentRow);
+  }
+
   async listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]> {
     const rows = (await this.sql`
       SELECT * FROM jobs_current
@@ -1049,7 +1120,8 @@ export class PgJobStore implements DurableJobStore {
       `;
       totalDeleted += deleted.count;
 
-      for (const [familyKey, windowMs] of Object.entries(familyOverrides!)) {
+      const effectiveFamilyOverrides = familyOverrides ?? {};
+      for (const [familyKey, windowMs] of Object.entries(effectiveFamilyOverrides)) {
         const familyCutoff = nowMs - windowMs;
         const familyDeleted = await this.sql`
           DELETE FROM jobs_current
