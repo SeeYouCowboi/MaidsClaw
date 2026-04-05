@@ -99,7 +99,10 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     }
 
     // setThinkerVersion path: used by batch-split sub-jobs with explicit version numbers.
-    // Uses transaction + FOR UPDATE to serialize concurrent workers and prevent payload regression.
+    // Uses transaction + FOR UPDATE to serialize concurrent workers.
+    // Both higher- and lower-version workers always merge their entries into slot_payload
+    // (the FOR UPDATE lock guarantees they see each other's writes). Only the version
+    // column advances via GREATEST — it never regresses, and no entries are dropped.
     if (setThinkerVersion !== undefined) {
       return this.sql.begin(async (rawTx) => {
         const tx = rawTx as unknown as postgres.Sql;
@@ -108,14 +111,6 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
           WHERE session_id = ${sessionId} AND agent_id = ${agentId}
           FOR UPDATE
         `;
-
-        // If a higher version already committed, skip this write to prevent payload regression
-        if (existingRows.length > 0) {
-          const currentVersion = Number(existingRows[0].thinker_committed_version ?? 0);
-          if (setThinkerVersion < currentVersion) {
-            return { thinkerCommittedVersion: currentVersion };
-          }
-        }
 
         let entries: unknown[];
         if (existingRows.length > 0) {
@@ -140,6 +135,14 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
         }
         const payloadJson = JSON.stringify(entries);
 
+        // Only advance last_settlement_id if this is the highest version seen so far
+        const currentVersion = existingRows.length > 0
+          ? Number(existingRows[0].thinker_committed_version ?? 0)
+          : 0;
+        const effectiveSettlementId: string | null = setThinkerVersion >= currentVersion
+          ? settlementId
+          : null;
+
         const result = await tx`
           INSERT INTO recent_cognition_slots (
             session_id, agent_id, last_settlement_id, slot_payload, updated_at, talker_turn_counter, thinker_committed_version
@@ -149,7 +152,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
           )
           ON CONFLICT (session_id, agent_id)
           DO UPDATE SET
-            last_settlement_id = ${settlementId},
+            last_settlement_id = COALESCE(${effectiveSettlementId}, recent_cognition_slots.last_settlement_id),
             slot_payload = ${payloadJson}::jsonb,
             updated_at = ${now},
             thinker_committed_version = GREATEST(recent_cognition_slots.thinker_committed_version, ${setThinkerVersion})
