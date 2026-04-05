@@ -1157,7 +1157,7 @@ export function bootstrapRuntime(
 					},
 					talkerThinkerConfig.enabled
 						? {
-								sql: resolvePgPool(),
+								get sql() { return resolvePgPool(); },
 								jobPersistence: resolvedJobPersistence,
 								settlementLedger,
 							}
