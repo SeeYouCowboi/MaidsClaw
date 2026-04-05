@@ -231,7 +231,7 @@ Max Concurrent: 2 (Waves 1 & 2)
 
 ## TODOs
 
-- [ ] 1. R-P3-01: Read-Only Batch Detection Query + Interface + Index
+- [x] 1. R-P3-01: Read-Only Batch Detection Query + Interface + Index
 
   **What to do**:
   1. Add `listPendingByKindAndPayload()` method to `DurableJobStore` interface (`src/jobs/durable-store.ts:255-271`):
@@ -357,7 +357,7 @@ Max Concurrent: 2 (Waves 1 & 2)
 
 ---
 
-- [ ] 2. R-P3-03: setThinkerVersion — GREATEST() Monotonic Max Semantics
+- [x] 2. R-P3-03: setThinkerVersion — GREATEST() Monotonic Max Semantics
 
   **What to do**:
   1. Add `setThinkerVersion?: number` parameter to `RecentCognitionSlotRepo` contract (`src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts:9-16`):
@@ -468,7 +468,7 @@ Max Concurrent: 2 (Waves 1 & 2)
   - Files: `src/storage/domain-repos/contracts/recent-cognition-slot-repo.ts`, `src/storage/domain-repos/pg/recent-cognition-slot-repo.ts`, `test/storage/pg-recent-cognition-set-version.test.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 3. R-P3-02: Sketch Chain Construction + ThinkerWorkerDeps Augmentation
+- [x] 3. R-P3-02: Sketch Chain Construction + ThinkerWorkerDeps Augmentation
 
   **What to do**:
   1. **Augment `ThinkerWorkerDeps`** (`src/runtime/thinker-worker.ts:86-99`):
@@ -613,7 +613,7 @@ Max Concurrent: 2 (Waves 1 & 2)
 
 ---
 
-- [ ] 4. R-P3-04: Single-Commit Model + Wrapper Update + Ledger Handling
+- [x] 4. R-P3-04: Single-Commit Model + Wrapper Update + Ledger Handling
 
   **What to do**:
   1. **Modify `createThinkerSlotRepo` wrapper** (`src/runtime/thinker-worker.ts:272-295`):
@@ -861,7 +861,7 @@ Max Concurrent: 2 (Waves 1 & 2)
   - Files: `src/runtime/thinker-worker.ts`, `src/app/host/create-app-host.ts`, `test/runtime/thinker-batch-collapse.test.ts`
   - Pre-commit: `bun run build && bun test`
 
-- [ ] 5. R-P3-05: Failure Isolation + Error Handling in Batch Mode
+- [x] 5. R-P3-05: Failure Isolation + Error Handling in Batch Mode
 
   **What to do**:
   1. **Verify commit ordering** in batch path:
@@ -983,7 +983,7 @@ Max Concurrent: 2 (Waves 1 & 2)
 
 ---
 
-- [ ] 6. R-P3-06: Integration QA Test Suite — 9 Scenarios
+- [x] 6. R-P3-06: Integration QA Test Suite — 9 Scenarios
 
   **What to do**:
   1. **Consolidate and complete** `test/runtime/thinker-batch-collapse.test.ts` with all 9 test scenarios (8 from requirements + S9 contiguous prefix)
@@ -1110,19 +1110,19 @@ Max Concurrent: 2 (Waves 1 & 2)
 >
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read `.sisyphus/plans/thinker-batch-collapse.md` end-to-end. For each "Must Have": verify implementation exists (read file, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files in `.sisyphus/evidence/`. Compare deliverables against plan.
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `bun run build` (tsc) + `bun test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod (except batch warning log), commented-out code, unused imports. Check for AI slop: excessive comments, over-abstraction, generic names. Verify `GREATEST()` SQL is correct. Verify index is `IF NOT EXISTS`.
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Execute ALL 9 QA scenarios from test suite directly: `bun test test/runtime/thinker-batch-collapse.test.ts`. Verify each scenario passes individually. Then run `bun test` for full regression. Save output to `.sisyphus/evidence/final-qa/`.
   Output: `Scenarios [9/9 pass] | Regression [N/N] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (`git diff`). Verify 1:1 — everything in spec was built, nothing beyond spec was built. Check "Must NOT Have" compliance: no PgJobRunner changes, no sync mode changes, no config knobs. Flag unaccounted changes.
   Output: `Tasks [N/N compliant] | Scope [CLEAN/N issues] | VERDICT`
 
