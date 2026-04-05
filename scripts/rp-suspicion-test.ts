@@ -758,7 +758,7 @@ const TURN_SPECS: TurnSpec[] = [
 	},
 ];
 
-type TestMode = "sync" | "async";
+type TestMode = "sync" | "async" | "async-nb";
 
 type CliOptions = {
 	phaseFilter?: Set<Phase>;
@@ -778,8 +778,8 @@ function parseArgs(argv: string[]): CliOptions {
 		}
 		if (arg === "--mode") {
 			const value = argv[i + 1];
-			if (value !== "sync" && value !== "async") {
-				throw new Error("--mode must be 'sync' or 'async'");
+			if (value !== "sync" && value !== "async" && value !== "async-nb") {
+				throw new Error("--mode must be 'sync', 'async', or 'async-nb' (non-blocking)");
 			}
 			options.mode = value;
 			i += 1;
@@ -994,24 +994,20 @@ async function generateAdaptivePlayerMessage(args: {
 	conversation: ConversationTurn[];
 }): Promise<{ message: string; usedFallback: boolean; error?: string }> {
 	const historyText = buildConversationForPrompt(args.conversation);
-	const systemPrompt = `你是“玩家角色”的对话驱动器。你要在中文悬疑RP中扮演玩家发言，并严格遵守：
-1) 保持剧情大方向与当前轮次指引一致。
-2) 根据历史对话自然调整措辞，不要生硬复读。
-3) 允许细节微调，但不能偏离当前轮次目标。
-4) 输出只能是玩家本轮要发送的一句话或一小段话，不要解释、不要加标签。`;
-	const userPrompt = `【阶段】${args.turn.phase}
-【阶段目标】${PHASE_OBJECTIVES[args.turn.phase]}
-【本轮SEND指导（仅供参考，不可照抄）】${args.turn.sendGuide}
-【本轮TACTIC】${args.turn.tactic}
-【历史对话】
+	const systemPrompt = `你是悬疑RP测试的”玩家消息适配器”。你的任务是将【标准台词】适配到当前对话上下文中。
+
+核心规则（按优先级排序）：
+1) 【标准台词】中的关键信息、事实、意图必须100%保留，不得遗漏或替换。
+2) 只允许对称呼、语气词、承接过渡做轻微调整，使其自然衔接上一轮对话。
+3) 如果上轮对话已经涵盖了标准台词的部分内容，可以跳过重复部分，但不得添加标准台词中没有的新信息或新编造的细节。
+4) 禁止编造标准台词中不存在的证据、地点、事件、时间。
+5) 输出只能是玩家要说的话本身，不要加标签、解释或元信息。`;
+	const userPrompt = `【标准台词】${args.turn.sendGuide}
+【本轮测试目标】${args.turn.tactic}
+【最近对话】
 ${historyText}
 
-请根据上下文生成“本轮玩家消息”。
-要求：
-- 语气自然，承接上轮内容；
-- 保持剧情走向和关键信息一致；
-- 不要逐字复读SEND；
-- 输出仅包含玩家消息本身。`;
+请输出适配后的玩家消息。保留标准台词的全部关键信息，只做最小限度的措辞调整。`;
 
 	try {
 		const content = await callMoonshotChat({
@@ -1021,7 +1017,7 @@ ${historyText}
 				{ role: "system", content: systemPrompt },
 				{ role: "user", content: userPrompt },
 			],
-			temperature: 0.7,
+			temperature: 0.3,
 			maxTokens: 300,
 		});
 		if (!content || content.length === 0) {
@@ -1396,13 +1392,13 @@ type TurnLatencyRecord = {
  * Poll PG jobs table for Thinker job completion after a Talker turn.
  * Polls every 2s up to 120s. Returns elapsed time in ms, or null on timeout.
  */
-async function pollThinkerCompletion(sql: postgres.Sql, sessionId: string, timeoutMs = 120_000): Promise<number | null> {
+async function pollThinkerCompletion(jobsSql: postgres.Sql, sessionId: string, timeoutMs = 120_000): Promise<number | null> {
 	const pollIntervalMs = 2_000;
 	const started = Date.now();
 
 	while (Date.now() - started < timeoutMs) {
-		const rows = await sql<{ status: string }[]>`
-			SELECT status FROM jobs
+		const rows = await jobsSql<{ status: string }[]>`
+			SELECT status FROM jobs_current
 			WHERE job_type = 'cognition.thinker'
 			  AND payload_json->>'sessionId' = ${sessionId}
 			ORDER BY created_at DESC
@@ -1411,11 +1407,11 @@ async function pollThinkerCompletion(sql: postgres.Sql, sessionId: string, timeo
 
 		if (rows.length > 0) {
 			const status = rows[0].status;
-			if (status === "completed" || status === "reconciled") {
+			if (status === "succeeded" || status === "cancelled") {
 				return Date.now() - started;
 			}
-			if (status === "exhausted") {
-				logLine(`[Thinker] Job exhausted (all retries failed)`);
+			if (status === "failed_terminal") {
+				logLine(`[Thinker] Job failed_terminal (all retries exhausted)`);
 				return Date.now() - started;
 			}
 		}
@@ -1538,7 +1534,8 @@ async function main() {
 	const startedAt = new Date();
 	const options = parseArgs(process.argv.slice(2));
 	const selectedTurns = selectTurns(options);
-	const isAsync = options.mode === "async";
+	const isAsync = options.mode === "async" || options.mode === "async-nb";
+	const isNonBlocking = options.mode === "async-nb";
 
 	logLine(`Mode: ${options.mode}`);
 
@@ -1638,7 +1635,7 @@ async function main() {
 				talkerLatencyMs,
 			};
 
-			if (isAsync && sql) {
+			if (isAsync && sql && !isNonBlocking) {
 				logLine(`[Phase ${turn.phase}][Round ${turn.round}] polling Thinker job completion...`);
 				const thinkerMs = await pollThinkerCompletion(sql, sessionId);
 				if (thinkerMs !== null) {
@@ -1647,6 +1644,20 @@ async function main() {
 				} else {
 					logLine(`[Phase ${turn.phase}][Round ${turn.round}] Thinker polling timed out`);
 				}
+			} else if (isNonBlocking && sql) {
+				// Non-blocking: log gap but don't wait
+				try {
+					const gapRows = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+						SELECT talker_turn_counter, thinker_committed_version
+						FROM recent_cognition_slots
+						WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID}
+						LIMIT 1
+					`;
+					if (gapRows.length > 0) {
+						const g = gapRows[0];
+						logLine(`[Phase ${turn.phase}][Round ${turn.round}] [non-blocking] talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+					}
+				} catch { /* ignore */ }
 			}
 
 			turnLatencies.push(latencyRecord);
@@ -1677,7 +1688,7 @@ async function main() {
 				}`,
 			);
 
-			await delay(2000);
+			await delay(isNonBlocking ? 500 : 2000);
 
 			if (turn.round === lastRoundPerPhase.get(turn.phase)) {
 				logLine(`[Phase ${turn.phase}] capturing memory snapshot...`);
@@ -1692,7 +1703,64 @@ async function main() {
 			}
 		}
 
-		logLine("All selected turns completed. Waiting 10 seconds for memory settle...");
+		if (isNonBlocking && sql) {
+			logLine("[non-blocking] All turns sent. Collecting thinker pipeline stats...");
+			const preWaitGap = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+				SELECT talker_turn_counter, thinker_committed_version
+				FROM recent_cognition_slots
+				WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID} LIMIT 1
+			`;
+			if (preWaitGap.length > 0) {
+				const g = preWaitGap[0];
+				logLine(`[non-blocking] Pre-wait gap: talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+			}
+
+			logLine("[non-blocking] Waiting for all thinker jobs to complete (max 180s)...");
+			const thinkerWaitStart = Date.now();
+			const thinkerWaitTimeout = 180_000;
+			while (Date.now() - thinkerWaitStart < thinkerWaitTimeout) {
+				const pendingJobs = await sql<{ cnt: number }[]>`
+					SELECT COUNT(*)::int AS cnt FROM jobs_current
+					WHERE job_type = 'cognition.thinker'
+					  AND status IN ('pending', 'running')
+					  AND payload_json->>'sessionId' = ${sessionId}
+				`;
+				const pending = pendingJobs[0]?.cnt ?? 0;
+				if (pending === 0) {
+					logLine(`[non-blocking] All thinker jobs finished in ${((Date.now() - thinkerWaitStart) / 1000).toFixed(1)}s`);
+					break;
+				}
+				logLine(`[non-blocking] ${pending} thinker jobs still pending/running...`);
+				await delay(3000);
+			}
+
+			const postWaitGap = await sql<{ talker_turn_counter: number; thinker_committed_version: number }[]>`
+				SELECT talker_turn_counter, thinker_committed_version
+				FROM recent_cognition_slots
+				WHERE session_id = ${sessionId} AND agent_id = ${AGENT_ID} LIMIT 1
+			`;
+			if (postWaitGap.length > 0) {
+				const g = postWaitGap[0];
+				logLine(`[non-blocking] Post-wait gap: talker_v=${g.talker_turn_counter} thinker_v=${g.thinker_committed_version} gap=${g.talker_turn_counter - g.thinker_committed_version}`);
+			}
+
+			// Collect per-job stats
+			const jobStats = await sql<{ status: string; cnt: number }[]>`
+				SELECT status, COUNT(*)::int AS cnt FROM jobs_current
+				WHERE job_type = 'cognition.thinker'
+				  AND payload_json->>'sessionId' = ${sessionId}
+				GROUP BY status ORDER BY status
+			`;
+			logLine(`[non-blocking] Thinker job stats: ${jobStats.map((r) => `${r.status}=${r.cnt}`).join(", ")}`);
+
+			// Check for batch collapses
+			const batchNoop = jobStats.find((r) => r.status === "cancelled");
+			if (batchNoop && batchNoop.cnt > 0) {
+				logLine(`[non-blocking] 🔥 Batch collapse detected! ${batchNoop.cnt} jobs collapsed (cancelled/noop)`);
+			}
+		}
+
+		logLine("Waiting 10 seconds for memory settle...");
 		await delay(10000);
 
 		const verificationTurns = TURN_SPECS.filter((t) => typeof t.isVerificationPoint === "number").filter((t) =>
@@ -1768,7 +1836,7 @@ async function main() {
 		await mkdir(resultDir, { recursive: true });
 
 		const defaultFileName = `${getFileTimestamp(new Date())}.json`;
-		const asyncFileName = "async-talker-thinker-5round.json";
+		const asyncFileName = isNonBlocking ? "async-nonblocking.json" : "async-talker-thinker-5round.json";
 		const fileName = isAsync ? asyncFileName : defaultFileName;
 		const filePath = join(resultDir, fileName);
 

@@ -67,6 +67,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			agentRegistry: runtime.agentRegistry,
 			createAgentLoop: runtime.createAgentLoop,
 			durableJobStore: store as DurableJobStore,
+			jobPersistence: runtime.jobPersistence,
 		});
 
 		await thinkerWorker({
@@ -75,19 +76,21 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 	});
 
 	let timer: ReturnType<typeof setInterval> | undefined;
-	let tickPromise: Promise<unknown> | undefined;
+	const MAX_CONCURRENT_TICKS = 4; // Match global thinker concurrency cap
+	const activeTickPromises = new Set<Promise<unknown>>();
 
 	const runTick = (): void => {
-		if (tickPromise) {
+		if (activeTickPromises.size >= MAX_CONCURRENT_TICKS) {
 			return;
 		}
 
-		tickPromise = runner
+		const tickPromise = runner
 			.processNext()
 			.catch(() => undefined)
 			.finally(() => {
-				tickPromise = undefined;
+				activeTickPromises.delete(tickPromise);
 			});
+		activeTickPromises.add(tickPromise);
 	};
 
 	return {
@@ -106,8 +109,8 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 
 			clearInterval(timer);
 			timer = undefined;
-			if (tickPromise) {
-				await tickPromise;
+			if (activeTickPromises.size > 0) {
+				await Promise.allSettled([...activeTickPromises]);
 			}
 		},
 	};
@@ -339,6 +342,18 @@ export async function createAppHost(
 		options.role === "server" && options.enableDurableOrchestration
 			? createJobConsumer(runtime)
 			: undefined;
+	// Local mode: start a job consumer when talkerThinker is enabled and PG store is available
+	const localDurableConsumer = (() => {
+		if (options.role !== "local") return undefined;
+		const store = (runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+		if (!store) return undefined;
+		if (!runtime.talkerThinkerConfig?.enabled) return undefined;
+		try {
+			return createJobConsumer(runtime);
+		} catch {
+			return undefined;
+		}
+	})();
 	const shouldRunLeaseReclaimSweeper =
 		options.role === "worker" ||
 		options.role === "maintenance" ||
@@ -366,6 +381,8 @@ export async function createAppHost(
 			leaseReclaimSweeper?.start();
 		} else if (options.role === "maintenance") {
 			leaseReclaimSweeper?.start();
+		} else if (options.role === "local" && localDurableConsumer) {
+			await localDurableConsumer.start();
 		}
 	};
 
@@ -387,6 +404,8 @@ export async function createAppHost(
 				await workerConsumer?.stop();
 			} else if (options.role === "maintenance") {
 				leaseReclaimSweeper?.stop();
+			} else if (options.role === "local" && localDurableConsumer) {
+				await localDurableConsumer.stop();
 			}
 		} finally {
 			runtime.shutdown();
@@ -410,6 +429,11 @@ export async function createAppHost(
 			return server.getPort();
 		},
 	};
+
+	// Auto-start local job consumer for thinker-talker mode
+	if (localDurableConsumer) {
+		await localDurableConsumer.start();
+	}
 
 	return hostResult;
 }

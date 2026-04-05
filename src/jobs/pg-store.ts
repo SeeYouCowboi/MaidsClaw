@@ -141,7 +141,7 @@ const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "maintenance.replay_projection:global": CONCURRENCY_CAPS.maintenance_replay_global,
   "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
   "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
-  "cognition.thinker:session:{sessionId}": 1,
+  "cognition.thinker:session:{sessionId}": 2,
   "cognition.thinker:global": CONCURRENCY_CAPS.cognition_thinker_global,
 };
 
@@ -468,8 +468,8 @@ export class PgJobStore implements DurableJobStore {
           ${input.concurrency_key},
           ${"pending"},
           ${input.payload_schema_version},
-          ${JSON.stringify(input.payload_json)},
-          ${JSON.stringify({})},
+          ${input.payload_json},
+          ${{}},
           ${0},
           ${0},
           ${input.max_attempts},
@@ -631,8 +631,8 @@ export class PgJobStore implements DurableJobStore {
               ${input.worker_id},
               ${"running"},
               ${normalizedClaimed.payload_schema_version},
-              ${JSON.stringify(normalizedClaimed.payload_json)},
-              ${JSON.stringify(normalizedClaimed.family_state_json)},
+              ${normalizedClaimed.payload_json},
+              ${normalizedClaimed.family_state_json ?? {}},
               ${input.now_ms},
               ${input.now_ms},
               ${leaseExpiresAt}

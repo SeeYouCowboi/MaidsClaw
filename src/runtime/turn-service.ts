@@ -96,9 +96,33 @@ export class TurnService {
 	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
 		const messages: ChatMessage[] = [];
 
+		// Dynamic conversation window: sized to cover all turns the thinker hasn't processed yet,
+		// plus a few extra turns for continuity overlap with thinker cognition.
+		// Each turn = 2 messages (user + assistant). Minimum 3 turns overlap.
+		const OVERLAP_TURNS = 3;
+		const MIN_WINDOW_MESSAGES = OVERLAP_TURNS * 2;
+		let conversationWindowSize: number | undefined; // undefined = no limit (full history)
+
+		if (this.settlementUnitOfWork && this.talkerThinkerConfig.enabled) {
+			try {
+				const ownerAgentId = await this.resolveQueueOwnerAgentId(params.sessionId) ?? "";
+				if (ownerAgentId) {
+					const versionGap = await this.settlementUnitOfWork.run(async (repos) =>
+						repos.recentCognitionSlotRepo.getVersionGap(params.sessionId, ownerAgentId),
+					);
+					if (versionGap) {
+						const gap = Math.max(0, versionGap.gap);
+						conversationWindowSize = Math.max(MIN_WINDOW_MESSAGES, (gap + OVERLAP_TURNS) * 2);
+					}
+				}
+			} catch { /* fall through to full history */ }
+		}
+
 		if (this.settlementUnitOfWork) {
 			const pgRecords = await this.settlementUnitOfWork.run(
-				async (repos) => repos.interactionRepo.getMessageRecords(params.sessionId),
+				async (repos) => repos.interactionRepo.getMessageRecords(params.sessionId, {
+					maxMessages: conversationWindowSize,
+				}),
 			);
 			for (const record of pgRecords) {
 				const payload = record.payload as { role?: unknown; content?: unknown };
@@ -517,19 +541,40 @@ export class TurnService {
 				effectiveRequest.sessionId,
 				"rp_agent",
 			);
+			// Extract embedded scratchpad from publicReply if model didn't use the tool field
+			let effectivePublicReply = canonicalOutcome.publicReply;
+			let effectiveSketch = canonicalOutcome.latentScratchpad;
+			if (!effectiveSketch && effectivePublicReply) {
+				const extracted = extractEmbeddedScratchpad(effectivePublicReply);
+				if (extracted) {
+					effectiveSketch = extracted.scratchpad;
+					effectivePublicReply = extracted.cleanedReply;
+				}
+			}
+			// Fallback: if model still didn't produce a sketch, derive one from publicReply
+			// This ensures pending cognition entries always have content for prompt continuity
+			if (!effectiveSketch && effectivePublicReply) {
+				const replyText = effectivePublicReply.replace(/[（(].*?[）)]/g, "").trim();
+				if (replyText.length > 0) {
+					effectiveSketch = replyText.length <= 200
+						? `[auto-sketch] ${replyText}`
+						: `[auto-sketch] ${replyText.substring(0, 200)}…`;
+				}
+			}
+
 			const settlementPayload: TurnSettlementPayload = {
 				settlementId,
 				requestId,
 				sessionId: effectiveRequest.sessionId,
 				ownerAgentId,
-				publicReply: canonicalOutcome.publicReply,
+				publicReply: effectivePublicReply,
 				hasPublicReply,
 				viewerSnapshot: resolvedViewerSnapshot,
 				schemaVersion: "turn_settlement_v5",
 				privateCognition: undefined,
 				privateEpisodes: undefined,
 				publications: undefined,
-				cognitiveSketch: canonicalOutcome.latentScratchpad,
+				cognitiveSketch: effectiveSketch,
 				cognitionVersionGap: gap,
 				usedStaleState,
 			};
@@ -1679,4 +1724,24 @@ function getLatestUserMessage(messages: ChatMessage[]): string {
 	}
 
 	return "";
+}
+
+/**
+ * Extract latentScratchpad text that was embedded inside publicReply by the model.
+ * Common patterns: `**latentScratchpad**：...` or `**latentScratchpad**: ...` at the start.
+ */
+function extractEmbeddedScratchpad(
+	publicReply: string,
+): { scratchpad: string; cleanedReply: string } | undefined {
+	// Match **latentScratchpad** (or variant) at the start, capture until **publicReply** or double newline
+	const pattern =
+		/^\s*\*{0,2}latentScratchpad\*{0,2}\s*[：:]\s*([\s\S]*?)(?:\n\s*\*{0,2}publicReply\*{0,2}\s*[：:]\s*|\n\n)([\s\S]*)$/i;
+	const match = publicReply.match(pattern);
+	if (!match) return undefined;
+
+	const scratchpad = match[1].trim();
+	const cleanedReply = match[2].trim();
+	if (!scratchpad || !cleanedReply) return undefined;
+
+	return { scratchpad, cleanedReply };
 }

@@ -34,6 +34,7 @@ import type { DurableJobStore } from "../jobs/durable-store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { PgJobStore } from "../jobs/pg-store.js";
+import { bootstrapPgJobsSchema } from "../jobs/pg-schema.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
 import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
@@ -1207,6 +1208,7 @@ export function bootstrapRuntime(
 		sharedBlockRepo,
 		jobPersistence: resolvedJobPersistence,
 		thinkerGlobalConcurrencyCap,
+		talkerThinkerConfig,
 		shutdown,
 	};
 }
@@ -1232,6 +1234,7 @@ export async function initializePgBackendForRuntime(
 		}
 
 		if (pool) {
+			await bootstrapPgJobsSchema(pool);
 			pgFactoryWithStore.store = new PgJobStore(
 				pool,
 				typeof result.thinkerGlobalConcurrencyCap === "number"

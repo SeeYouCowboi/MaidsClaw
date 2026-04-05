@@ -8,6 +8,8 @@ export type GetMessageRecordsOptions = {
    *  - "truncated": return only records where is_processed = 0 (post-flush)
    */
   mode?: ConversationHistoryMode;
+  /** Maximum number of most-recent messages to return. When set, returns the last N messages (by record_index). */
+  maxMessages?: number;
 };
 
 export type InteractionTransactionContext = {

@@ -102,6 +102,7 @@ export type RuntimeBootstrapResult = {
 	sharedBlockRepo: SharedBlockRepo;
 	jobPersistence: JobPersistence;
 	thinkerGlobalConcurrencyCap?: number;
+	talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number };
 	shutdown: () => void;
 };
 

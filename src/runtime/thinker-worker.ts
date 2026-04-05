@@ -56,27 +56,44 @@ import {
 	type RelationIntent,
 } from "./rp-turn-contract.js";
 
-const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `Thinker-only structured output requirements for submit_rp_turn:
+const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
 
-relationIntents: Array of {
-  sourceRef: string — reference to the episode that CAUSED the cognition (format: "episode:{local_key}")
-  targetRef: string — reference to the cognition assertion being supported/triggered (format: "cognition:{key}")
-  intent: "supports" | "triggered" — relationship type
-}
+### A. Cognition Hygiene (MANDATORY — apply BEFORE generating new ops)
 
-Coverage rule (strict): for EVERY privateEpisode you generate, include at least one relationIntent anchored from that episode via sourceRef="episode:{local_key}".
+1. KEY REUSE: Before creating any new assertion/commitment, scan existingCognition for a key covering the SAME topic. If found, upsert that SAME key with updated stance/proposition. NEVER create a variant key (e.g. "player/alibi_v2", "case/corpse_location_conflict").
 
-For every new assertion you generate, identify the episode (from privateEpisodes) that motivated it, and add a relationIntent linking them. Use "supports" when the episode provides evidence; use "triggered" when the episode directly prompted the assertion.
+2. MANDATORY RETRACT: For every upsert you generate, check if it supersedes or invalidates any existing key. If so, include { op: "retract" } for each superseded key. Typical retract triggers:
+   - A hypothesis is now confirmed or rejected → retract the old hypothetical
+   - A new assertion covers the same fact with better evidence → retract the weaker version
+   - A constraint/intent has been fulfilled by actions this turn → retract and re-add as fulfilled
+   Example: if you upsert "case/third_person_exists" with stance "confirmed", retract "case/third_person_hypothesis" and "case/third_person_involvement".
 
-If an episode does not produce a new assertion, still create an evaluation or commitment that captures its significance and link that episode to the created cognition with relationIntents so episode coverage remains explicit and complete.
+3. COMMITMENT LIFECYCLE: Scan existingCognition commitments each turn:
+   - If a goal/intent/constraint has been ACHIEVED by events → change status to "fulfilled" via upsert
+   - If a goal is no longer relevant → change status to "abandoned" via upsert
+   - If duplicate commitments express the same intent → retract all but one, keep the most specific
+   Example: "intent/verify_storeroom_evidence" once verified → upsert with status "fulfilled"
 
-conflictFactors: Array of {
-  kind: string — type of conflict (e.g., "contradicts", "supersedes")
-  ref: string — cognition key of the conflicting existing assertion (from existingCognition context)
-  note?: string — optional explanation
-}
+4. EVALUATION STABILITY: For trust/X evaluations, the key MUST be exactly "trust/{entity}" (e.g. "trust/player"). NEVER create variant keys like "trust/player_revised". Upsert the same key.
 
-When generating an assertion with stance='contested', identify any existing assertions (from the existingCognition context) that it contradicts or supersedes, and add a conflictFactor for each.`;
+### B. relationIntents
+
+Array of { sourceRef, targetRef, intent }:
+- sourceRef: "episode:{local_key}" — MUST match a privateEpisode's local_key from THIS turn
+- targetRef: "cognition:{key}" — MUST match an assertion/evaluation/commitment key you are upserting THIS turn
+- intent: "supports" | "triggered"
+
+Rules:
+- Every privateEpisode MUST have at least one relationIntent with sourceRef pointing to it
+- Every new assertion MUST have at least one relationIntent with targetRef pointing to it
+- local_key in episodes and sourceRef MUST use the SAME string (e.g. episode generates local_key="door_evidence", sourceRef="episode:door_evidence")
+
+### C. conflictFactors
+
+Array of { kind, ref, note? }:
+- kind: "contradicts" | "supersedes"
+- ref: exact cognition key from existingCognition that conflicts
+- When generating stance="contested", MUST include at least one conflictFactor`;
 
 type RecentCognitionEntry = {
 	settlementId: string;
@@ -314,7 +331,9 @@ function createThinkerSlotRepo(
 
 export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 	return async (job: { payload: unknown }): Promise<void> => {
-		const payload = job.payload as CognitionThinkerJobPayload;
+		// Handle both object payloads and legacy double-JSON-encoded string payloads
+		const rawPayload = job.payload;
+		const payload = (typeof rawPayload === "string" ? JSON.parse(rawPayload) : rawPayload) as CognitionThinkerJobPayload;
 
 		const slot = await deps.recentCognitionSlotRepo.getBySession(
 			payload.sessionId,
@@ -351,7 +370,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				);
 
 			const otherPending = additionalPending.filter((row) => {
-				const p = row.payload_json as CognitionThinkerJobPayload;
+				const raw = row.payload_json;
+				const p = (typeof raw === "string" ? JSON.parse(raw) : raw) as CognitionThinkerJobPayload;
 				return p.talkerTurnVersion !== payload.talkerTurnVersion;
 			});
 
@@ -363,7 +383,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						settlementId: payload.settlementId,
 					},
 					...otherPending.map((row) => {
-						const p = row.payload_json as CognitionThinkerJobPayload;
+						const raw = row.payload_json;
+						const p = (typeof raw === "string" ? JSON.parse(raw) : raw) as CognitionThinkerJobPayload;
 						return {
 							version: p.talkerTurnVersion,
 							settlementId: p.settlementId,
@@ -384,13 +405,10 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							);
 							break;
 						}
-						const sketch = getSketchFromSettlement(sp);
-						if (!sketch) {
-							console.warn(
-								`[thinker_worker] batch: empty sketch for v${jobEntry.version} (${jobEntry.settlementId}), truncating chain`,
-							);
-							break;
-						}
+						const rawSketch = getSketchFromSettlement(sp);
+						const sketch =
+							rawSketch ||
+							"(no explicit sketch — derive from conversation context)";
 
 						sketchChain.push({
 							version: jobEntry.version,
@@ -408,6 +426,12 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					}
 				}
 
+				if (sketchChain.length > 3) {
+					console.warn(
+						`[thinker_worker] batch: thinker falling behind — ${sketchChain.length} pending turns queued (versions ${sketchChain[0]?.version}..${sketchChain[sketchChain.length - 1]?.version})`,
+					);
+				}
+
 				if (sketchChain.length <= 1) {
 					batchMode = false;
 					sketchChain = [];
@@ -422,6 +446,55 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							`[thinker_worker] batch soft cap: ${excluded} older sketches excluded (batch size ${sketchChain.length})`,
 						);
 						sketchChain = sketchChain.slice(sketchChain.length - 20);
+					}
+
+					// ── Batch split: if chain is large, split and enqueue remainder as parallel jobs ──
+					const BATCH_SPLIT_THRESHOLD = 3;
+					if (sketchChain.length > BATCH_SPLIT_THRESHOLD && deps.jobPersistence) {
+						const myChain = sketchChain.slice(0, BATCH_SPLIT_THRESHOLD);
+						const remainder = sketchChain.slice(BATCH_SPLIT_THRESHOLD);
+
+						// Split remainder into sub-batches of BATCH_SPLIT_THRESHOLD
+						const subBatches: typeof sketchChain[] = [];
+						for (let i = 0; i < remainder.length; i += BATCH_SPLIT_THRESHOLD) {
+							subBatches.push(remainder.slice(i, i + BATCH_SPLIT_THRESHOLD));
+						}
+
+						// Enqueue each sub-batch as a new thinker job keyed to its highest version
+						for (const sub of subBatches) {
+							const subHighest = sub[sub.length - 1];
+							const subJobId = `thinker:${payload.sessionId}:${subHighest.settlementId}:split`;
+							try {
+								await deps.jobPersistence.enqueue({
+									id: subJobId,
+									jobType: "cognition.thinker" as const,
+									payload: {
+										sessionId: payload.sessionId,
+										agentId: payload.agentId,
+										settlementId: subHighest.settlementId,
+										talkerTurnVersion: subHighest.version,
+									},
+									status: "pending" as const,
+									maxAttempts: 3,
+								});
+								console.log(
+									`[thinker_worker] batch split: enqueued sub-batch (v${sub[0].version}..${subHighest.version}) as parallel job`,
+								);
+							} catch (enqueueErr) {
+								console.warn(
+									`[thinker_worker] batch split: failed to enqueue sub-batch v${sub[0].version}..${subHighest.version}, will be processed by next worker:`,
+									enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr),
+								);
+							}
+						}
+
+						// Current worker processes only myChain
+						console.log(
+							`[thinker_worker] batch split: processing v${myChain[0].version}..${myChain[myChain.length - 1].version} (${myChain.length}), split off ${remainder.length} into ${subBatches.length} parallel job(s)`,
+						);
+						sketchChain = myChain;
+						effectiveHighestVersion = myChain[myChain.length - 1].version;
+						effectiveSettlementId = myChain[myChain.length - 1].settlementId;
 					}
 
 					batchMemberSettlementIds = allJobs
@@ -453,10 +526,17 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				const sketchChainText = sketchChain
 					.map((entry) => `[Turn ${entry.version}] ${entry.sketch}`)
 					.join("\n");
+				const sketchlessCount = sketchChain.filter((e) =>
+					e.sketch.startsWith("(no explicit sketch"),
+				).length;
+				const sketchNote =
+					sketchlessCount > 0
+						? `\nNote: ${sketchlessCount} of ${sketchChain.length} turns had no explicit sketch from Talker — use the conversation context to infer cognition for those turns.\n`
+						: "";
 				messages.push({
 					role: "user",
 					content:
-						`[Thinker context] Cognitive sketches from Talker (batch):\n${sketchChainText}\n\n` +
+						`[Thinker context] Cognitive sketches from Talker (batch):\n${sketchChainText}\n${sketchNote}\n` +
 						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
 				});
 			} else {
