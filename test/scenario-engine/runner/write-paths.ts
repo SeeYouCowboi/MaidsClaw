@@ -293,6 +293,28 @@ export async function executeSettlementPath(
     }
   }
 
+  // Sync episode summaries into search_docs_world so narrative_search
+  // probes can find them via pg_trgm text matching (no embeddings needed).
+  for (const [localRef, episodeId] of cumulativeEpisodeIdByLocalRef) {
+    const settlement = settlements.find((s) =>
+      s.privateEpisodes.some((ep) => ep.localRef === localRef),
+    );
+    const episode = settlement?.privateEpisodes.find(
+      (ep) => ep.localRef === localRef,
+    );
+    if (episode?.summary) {
+      try {
+        await infra.repos.searchProjection.syncSearchDoc(
+          "world",
+          `event:${episodeId}` as import("../../../src/memory/types.js").NodeRef,
+          episode.summary,
+        );
+      } catch {
+        // Non-fatal: search doc sync failure doesn't break settlement
+      }
+    }
+  }
+
   return {
     beatsProcessed,
     errors,

@@ -1,5 +1,8 @@
 import type { ViewerContext } from "../../../src/memory/types.js";
-import { SCENARIO_DEFAULT_SESSION_ID } from "../constants.js";
+import {
+  SCENARIO_DEFAULT_AGENT_ID,
+  SCENARIO_DEFAULT_SESSION_ID,
+} from "../constants.js";
 import type { Story, StoryProbe } from "../dsl/story-types.js";
 import type { ScenarioHandle } from "../runner/infra.js";
 import type { ScenarioHandleExtended } from "../runner/orchestrator.js";
@@ -20,7 +23,7 @@ function buildViewerContext(
   }
 
   return {
-    viewer_agent_id: String(entityId),
+    viewer_agent_id: SCENARIO_DEFAULT_AGENT_ID,
     viewer_role: "rp_agent",
     session_id: SCENARIO_DEFAULT_SESSION_ID,
     current_area_id: undefined,
