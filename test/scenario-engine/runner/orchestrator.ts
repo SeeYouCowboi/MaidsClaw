@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Story } from "../dsl/story-types.js";
 import type { GeneratedDialogue } from "../generators/dialogue-generator.js";
-import { generateOrLoadDialogue } from "../generators/scenario-cache.js";
+import {
+  generateOrLoadDialogue,
+  loadCachedDialogue,
+} from "../generators/scenario-cache.js";
 import {
   SCENARIO_DEFAULT_SESSION_ID,
   SCENARIO_ENGINE_BASE_TIME,
@@ -32,7 +35,7 @@ export async function runScenario(
     writePath: options?.writePath ?? "settlement",
     phase: options?.phase ?? "full",
     compareWithSettlement: options?.compareWithSettlement ?? false,
-    keepSchema: options?.keepSchema ?? false,
+    keepSchema: options?.keepSchema ?? true,
   };
 
   const startMs = performance.now();
@@ -46,6 +49,7 @@ export async function runScenario(
         entityIdMap: infra.entityIdMap,
         settlementCount: 0,
         projectionStats: {},
+        perBeatStats: [],
         errors: [],
         elapsedMs: 0,
         schemaName: infra.schemaName,
@@ -55,7 +59,12 @@ export async function runScenario(
     };
   }
 
-  const dialogue = await generateOrLoadDialogue(story);
+  // Settlement path doesn't need dialogue for its core processing. Avoid
+  // triggering LLM-based dialogue generation when no cache exists.
+  const dialogue: GeneratedDialogue[] =
+    resolvedOptions.writePath === "settlement"
+      ? (loadCachedDialogue(story.id) ?? [])
+      : await generateOrLoadDialogue(story);
 
   await seedInteractionHistory(infra, dialogue);
 
@@ -83,6 +92,7 @@ export async function runScenario(
     entityIdMap: infra.entityIdMap,
     settlementCount: writeResult.beatsProcessed,
     projectionStats: {},
+    perBeatStats: writeResult.perBeatStats ?? [],
     errors: writeResult.errors,
     elapsedMs,
     schemaName: infra.schemaName,

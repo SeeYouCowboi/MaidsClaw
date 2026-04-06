@@ -4,9 +4,17 @@ import { miniSample } from "./stories/mini-sample.js";
 import { runScenario } from "./runner/orchestrator.js";
 import { runGraphOrganizer } from "./runner/graph-organizer-step.js";
 import { executeProbes } from "./probes/probe-executor.js";
+import { assertAllProbesPass } from "./probes/probe-assertions.js";
 import { matchProbeResults } from "./probes/probe-matcher.js";
+import { loadCachedToolCalls } from "./generators/scenario-cache.js";
+import { SCENARIO_DEFAULT_AGENT_ID } from "./constants.js";
 import type { ScenarioHandleExtended } from "./runner/orchestrator.js";
 import type { ProbeResult } from "./probes/probe-types.js";
+
+const hasMiniSampleCache = loadCachedToolCalls(miniSample.id) !== null;
+const hasEmbeddingApi = Boolean(
+  process.env.OPENAI_API_KEY?.trim() || process.env.ANTHROPIC_API_KEY?.trim(),
+);
 
 describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
   let handle: ScenarioHandleExtended;
@@ -17,7 +25,11 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
       writePath: "settlement",
       phase: "full",
     });
-    // graph organizer requires embedding API — skip in settlement-only smoke
+
+    if (hasEmbeddingApi) {
+      await runGraphOrganizer(handle.infra, miniSample);
+    }
+
     probeResults = await executeProbes(miniSample, handle);
   }, 5 * 60 * 1000);
 
@@ -41,15 +53,54 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
     expect(handle.runResult.settlementCount).toBe(miniSample.beats.length);
   });
 
-  it("probe results returned for all probes", () => {
-    expect(probeResults).toHaveLength(miniSample.probes.length);
+  it("private_cognition_current has expected entries", async () => {
+    const agentId = SCENARIO_DEFAULT_AGENT_ID;
+    const rows = await handle.infra.sql`
+      SELECT cognition_key FROM private_cognition_current
+      WHERE agent_id = ${agentId}
+    `;
+    expect(rows.length).toBeGreaterThan(0);
   });
 
-  it("every probe result has a hits array", () => {
-    for (const result of probeResults) {
-      expect(result.hits).toBeDefined();
-      expect(Array.isArray(result.hits)).toBe(true);
+  it("search_docs_cognition has searchable content", async () => {
+    const rows = await handle.infra.sql`
+      SELECT id FROM search_docs_cognition LIMIT 1
+    `;
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it("narrative_search returns hits for story content", () => {
+    const narrativeProbes = probeResults.filter(
+      (r) => r.probe.retrievalMethod === "narrative_search",
+    );
+    expect(narrativeProbes.length).toBeGreaterThan(0);
+    for (const p of narrativeProbes) {
+      expect(p.hits.length).toBeGreaterThan(0);
     }
+  });
+
+  it("cognition_search returns hits for assertion content", () => {
+    const cognitionProbes = probeResults.filter(
+      (r) => r.probe.retrievalMethod === "cognition_search",
+    );
+    expect(cognitionProbes.length).toBeGreaterThan(0);
+    for (const p of cognitionProbes) {
+      expect(p.hits.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("memory_explore returns evidence paths", () => {
+    const exploreProbes = probeResults.filter(
+      (r) => r.probe.retrievalMethod === "memory_explore",
+    );
+    expect(exploreProbes.length).toBeGreaterThan(0);
+    for (const p of exploreProbes) {
+      expect(p.hits.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("all probes pass", () => {
+    assertAllProbesPass(probeResults);
   });
 
   it("matchProbeResults is importable and callable", () => {
@@ -63,58 +114,41 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
   });
 });
 
-describe.skipIf(skipPgTests)("Smoke Test - scripted writePath", () => {
-  let handle: ScenarioHandleExtended;
-  let probeResults: ProbeResult[];
-  let cacheExists: boolean;
+describe.skipIf(skipPgTests || !hasMiniSampleCache)(
+  "Smoke Test - scripted writePath",
+  () => {
+    let handle: ScenarioHandleExtended;
+    let probeResults: ProbeResult[];
 
-  beforeAll(async () => {
-    const { loadCachedToolCalls } = await import(
-      "./generators/scenario-cache.js"
-    );
-    cacheExists = loadCachedToolCalls(miniSample.id) !== null;
-    if (!cacheExists) return;
+    beforeAll(async () => {
+      handle = await runScenario(miniSample, {
+        writePath: "scripted",
+        phase: "full",
+      });
+      probeResults = await executeProbes(miniSample, handle);
+    }, 3 * 60 * 1000);
 
-    handle = await runScenario(miniSample, {
-      writePath: "scripted",
-      phase: "full",
+    it("scripted baseline completes without errors", () => {
+      expect(handle.runResult.errors).toHaveLength(0);
     });
-    probeResults = await executeProbes(miniSample, handle);
-  }, 3 * 60 * 1000);
 
-  it("scripted baseline completes without errors (or skips if no cache)", () => {
-    if (!cacheExists) {
-      // No cached tool calls — nothing to replay; pass gracefully
-      expect(true).toBe(true);
-      return;
-    }
-    expect(handle.runResult.errors).toHaveLength(0);
-  });
+    it("scripted writePath recorded correctly", () => {
+      expect(handle.runResult.writePath).toBe("scripted");
+    });
 
-  it("scripted writePath recorded correctly (or skips if no cache)", () => {
-    if (!cacheExists) {
-      expect(true).toBe(true);
-      return;
-    }
-    expect(handle.runResult.writePath).toBe("scripted");
-  });
+    it("scripted probe results returned", () => {
+      expect(probeResults).toHaveLength(miniSample.probes.length);
+    });
 
-  it("scripted probe results returned (or skips if no cache)", () => {
-    if (!cacheExists) {
-      expect(true).toBe(true);
-      return;
-    }
-    expect(probeResults).toHaveLength(miniSample.probes.length);
-  });
+    it("scripted probe results have hits", () => {
+      for (const result of probeResults) {
+        expect(result.hits).toBeDefined();
+        expect(Array.isArray(result.hits)).toBe(true);
+      }
+    });
 
-  it("scripted probe results have hits (or skips if no cache)", () => {
-    if (!cacheExists) {
-      expect(true).toBe(true);
-      return;
-    }
-    for (const result of probeResults) {
-      expect(result.hits).toBeDefined();
-      expect(Array.isArray(result.hits)).toBe(true);
-    }
-  });
-});
+    it("all probes pass", () => {
+      assertAllProbesPass(probeResults);
+    });
+  },
+);

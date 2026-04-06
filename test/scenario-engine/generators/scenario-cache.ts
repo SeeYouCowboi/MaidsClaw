@@ -4,7 +4,16 @@ import { generateDialogue } from "./dialogue-generator.js";
 import type { Story } from "../dsl/story-types.js";
 import type { ToolCallResult, ChatMessage } from "@memory/task-agent";
 
-const CACHE_DIR = "test/scenario-engine/cache";
+const DEFAULT_CACHE_DIR = "test/scenario-engine/cache";
+let activeCacheDir = DEFAULT_CACHE_DIR;
+
+export function setCacheDir(dir: string): void {
+  activeCacheDir = dir;
+}
+
+export function resetCacheDir(): void {
+  activeCacheDir = DEFAULT_CACHE_DIR;
+}
 
 export type CachedToolCallLog = {
   beats: {
@@ -25,15 +34,15 @@ export type CheckpointData = {
 };
 
 function dialoguePath(storyId: string): string {
-  return `${CACHE_DIR}/${storyId}-dialogue.json`;
+  return `${activeCacheDir}/${storyId}-dialogue.json`;
 }
 
 function toolCallsPath(storyId: string): string {
-  return `${CACHE_DIR}/${storyId}-toolcalls.json`;
+  return `${activeCacheDir}/${storyId}-toolcalls.json`;
 }
 
 function checkpointPath(storyId: string): string {
-  return `${CACHE_DIR}/${storyId}-checkpoint.json`;
+  return `${activeCacheDir}/${storyId}-checkpoint.json`;
 }
 
 export function loadCachedDialogue(storyId: string): GeneratedDialogue[] | null {

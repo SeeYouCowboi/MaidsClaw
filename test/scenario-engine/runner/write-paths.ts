@@ -57,9 +57,20 @@ import {
 } from "../generators/settlement-generator.js";
 import type { ScenarioInfra } from "./infra.js";
 
+export type BeatStats = {
+  beatId: string;
+  entitiesCreated: number;
+  episodesCreated: number;
+  assertionsCreated: number;
+  evaluationsCreated: number;
+  commitmentsCreated: number;
+  errors: number;
+};
+
 export type WritePathResult = {
   beatsProcessed: number;
   errors: { beatId: string; error: Error }[];
+  perBeatStats?: BeatStats[];
   capturedToolCallLog?: CachedToolCallLog;
 };
 
@@ -97,6 +108,7 @@ export async function executeSettlementPath(
 ): Promise<WritePathResult> {
   const settlements = generateSettlements(story);
   const errors: Array<{ beatId: string; error: Error }> = [];
+  const perBeatStats: BeatStats[] = [];
   const beatById = new Map(story.beats.map((beat) => [beat.id, beat]));
   const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
   const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
@@ -105,6 +117,15 @@ export async function executeSettlementPath(
 
   for (const settlement of settlements) {
     beatsProcessed += 1;
+    const beatStat: BeatStats = {
+      beatId: settlement.beatId,
+      entitiesCreated: 0,
+      episodesCreated: 0,
+      assertionsCreated: 0,
+      evaluationsCreated: 0,
+      commitmentsCreated: 0,
+      errors: 0,
+    };
 
     try {
       for (const entity of settlement.entityCreations) {
@@ -115,6 +136,7 @@ export async function executeSettlementPath(
           memoryScope: "shared_public",
         });
         infra.entityIdMap.set(entity.pointerId, entityId);
+        beatStat.entitiesCreated += 1;
       }
 
       for (const alias of settlement.aliasAdditions) {
@@ -134,9 +156,16 @@ export async function executeSettlementPath(
       const cognitionOps = settlement.cognitionOps.map((op) =>
         toProjectionCognitionOp(infra, op),
       );
+      for (const op of settlement.cognitionOps) {
+        if (op.op === "retract") continue;
+        if (op.kind === "assertion") beatStat.assertionsCreated += 1;
+        else if (op.kind === "evaluation") beatStat.evaluationsCreated += 1;
+        else if (op.kind === "commitment") beatStat.commitmentsCreated += 1;
+      }
       const privateEpisodes = settlement.privateEpisodes.map((episode) =>
         toPrivateEpisodeArtifact(episode),
       );
+      beatStat.episodesCreated += privateEpisodes.length;
 
       const projectionParams: SettlementProjectionParams = {
         settlementId: settlement.settlementId,
@@ -197,13 +226,16 @@ export async function executeSettlementPath(
         );
       }
     } catch (error) {
+      beatStat.errors += 1;
       errors.push({ beatId: settlement.beatId, error: toError(error) });
     }
+    perBeatStats.push(beatStat);
   }
 
   return {
     beatsProcessed,
     errors,
+    perBeatStats,
   };
 }
 
@@ -225,11 +257,21 @@ export async function executeScriptedPath(
 
   const runtime = await createMemoryTaskRuntime(infra);
   const errors: Array<{ beatId: string; error: Error }> = [];
+  const perBeatStats: BeatStats[] = [];
   let beatsProcessed = 0;
 
   for (const [beatIndex, beat] of story.beats.entries()) {
     beatsProcessed += 1;
     const turns = turnsForBeat(dialogue, beat.id);
+    const beatStat: BeatStats = {
+      beatId: beat.id,
+      entitiesCreated: 0,
+      episodesCreated: 0,
+      assertionsCreated: 0,
+      evaluationsCreated: 0,
+      commitmentsCreated: 0,
+      errors: 0,
+    };
 
     try {
       const provider = scriptedBeatProvider.getProviderForBeat(beat.id);
@@ -237,13 +279,16 @@ export async function executeScriptedPath(
       const agent = createMemoryTaskAgent(infra, runtime, provider);
       await agent.runMigrate(flushRequest);
     } catch (error) {
+      beatStat.errors += 1;
       errors.push({ beatId: beat.id, error: toError(error) });
     }
+    perBeatStats.push(beatStat);
   }
 
   return {
     beatsProcessed,
     errors,
+    perBeatStats,
   };
 }
 
@@ -268,6 +313,7 @@ export async function executeLivePath(
   }
 
   const errors: Array<{ beatId: string; error: Error }> = [];
+  const perBeatStats: BeatStats[] = [];
   let beatsProcessed = 0;
 
   for (const [beatIndex, beat] of story.beats.entries()) {
@@ -278,6 +324,15 @@ export async function executeLivePath(
     beatsProcessed += 1;
     const turns = turnsForBeat(dialogue, beat.id);
     let beatCaptureStarted = false;
+    const beatStat: BeatStats = {
+      beatId: beat.id,
+      entitiesCreated: 0,
+      episodesCreated: 0,
+      assertionsCreated: 0,
+      evaluationsCreated: 0,
+      commitmentsCreated: 0,
+      errors: 0,
+    };
 
     try {
       capturingWrapper.startBeat(beat.id);
@@ -288,6 +343,7 @@ export async function executeLivePath(
       await agent.runMigrate(flushRequest);
       completedBeatIds.add(beat.id);
     } catch (error) {
+      beatStat.errors += 1;
       errors.push({ beatId: beat.id, error: toError(error) });
     } finally {
       if (beatCaptureStarted) {
@@ -295,6 +351,7 @@ export async function executeLivePath(
           const beatLog = capturingWrapper.endBeat();
           beatLogByBeatId.set(beat.id, beatLog);
         } catch (error) {
+          beatStat.errors += 1;
           errors.push({ beatId: beat.id, error: toError(error) });
         }
       }
@@ -308,6 +365,7 @@ export async function executeLivePath(
       };
       saveCheckpoint(story.id, checkpointData);
     }
+    perBeatStats.push(beatStat);
   }
 
   const fullLog = buildOrderedScriptedLog(story, beatLogByBeatId);
@@ -316,6 +374,7 @@ export async function executeLivePath(
   return {
     beatsProcessed,
     errors,
+    perBeatStats,
     capturedToolCallLog: fullLog,
   };
 }

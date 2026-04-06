@@ -33,8 +33,8 @@ export async function ensureTestPgAppDb(): Promise<void> {
   }
 }
 
-export function createTestPgAppPool(): postgres.Sql {
-  const schemaName = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+export function createTestPgAppPool(explicitSchemaName?: string): postgres.Sql {
+  const schemaName = explicitSchemaName ?? `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const sql = postgres(getTestUrl(), {
     max: 3,
     connection: { search_path: `${schemaName},public` },
@@ -183,6 +183,8 @@ export type CreatePgTestDbOptions = {
   embeddingDim?: number;
   /** Skip pgvector extension and node_embeddings table (for environments without pgvector) */
   skipVector?: boolean;
+  /** Explicit schema name (default: random test_<uuid> name) */
+  schemaName?: string;
 };
 
 /**
@@ -240,7 +242,7 @@ export async function createPgTestDb(options: CreatePgTestDbOptions = {}): Promi
   await ensureTestPgAppDb();
 
   // Step 2: Create connection pool with isolated schema
-  const pool = createTestPgAppPool();
+  const pool = createTestPgAppPool(options.schemaName);
   const schemaName = schemaRegistry.get(pool);
   if (!schemaName) {
     throw new Error("Failed to create test pool with registered schema");

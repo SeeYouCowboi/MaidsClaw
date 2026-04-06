@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executeProbes } from "../probes/probe-executor.js";
@@ -45,10 +45,11 @@ describe.skipIf(skipPgTests)("Manor Intrigue Full Scenario", () => {
         },
       });
 
-      const comparison = generateComparisonReport(
+      const comparison = await generateComparisonReport(
         probeResults,
         settlementProbeResults,
         manorIntrigue,
+        { scripted: handle.infra, settlement: handle.settlementInfra },
       );
       saveReport(comparison, manorIntrigue.id, "comparison");
     }
@@ -62,13 +63,20 @@ describe.skipIf(skipPgTests)("Manor Intrigue Full Scenario", () => {
     assertAllProbesPass(probeResults);
   });
 
-  it("reports generated", () => {
-    expect(
-      existsSync("test/scenario-engine/reports/manor-intrigue-scripted-report.md"),
-    ).toBe(true);
-    expect(
-      existsSync("test/scenario-engine/reports/manor-intrigue-comparison-report.md"),
-    ).toBe(true);
+  it("reports generated with expected sections", () => {
+    const scriptedPath = "test/scenario-engine/reports/manor-intrigue-scripted-report.md";
+    const comparisonPath = "test/scenario-engine/reports/manor-intrigue-comparison-report.md";
+
+    expect(existsSync(scriptedPath)).toBe(true);
+    expect(existsSync(comparisonPath)).toBe(true);
+
+    const scriptedContent = readFileSync(scriptedPath, "utf-8");
+    expect(scriptedContent).toContain("## Per-Beat Memory Write Summary");
+    expect(scriptedContent).toContain("## Probe Results");
+
+    const comparisonContent = readFileSync(comparisonPath, "utf-8");
+    expect(comparisonContent).toContain("## Extraction Summary");
+    expect(comparisonContent).toContain("## Cognition Alignment");
   });
 
   it("probe-only re-run produces identical results", async () => {

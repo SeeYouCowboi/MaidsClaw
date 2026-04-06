@@ -64,10 +64,21 @@ export type ScenarioInfra = {
   _testDb: PgTestDb;
 };
 
+export type BeatStatsSummary = {
+  beatId: string;
+  entitiesCreated: number;
+  episodesCreated: number;
+  assertionsCreated: number;
+  evaluationsCreated: number;
+  commitmentsCreated: number;
+  errors: number;
+};
+
 export type ScenarioRunResult = {
   entityIdMap: Map<string, number>;
   settlementCount: number;
   projectionStats: Record<string, number>;
+  perBeatStats: BeatStatsSummary[];
   errors: { beatId: string; error: Error }[];
   elapsedMs: number;
   schemaName: string;
@@ -149,6 +160,7 @@ export async function bootstrapScenarioSchema(
 ): Promise<ScenarioInfra> {
   const writePath = options?.writePath ?? "settlement";
   const phase = options?.phase ?? "full";
+  const keepSchema = options?.keepSchema ?? true;
   const schemaName = buildSchemaName(story.id, writePath);
 
   if (phase === "probe_only") {
@@ -159,11 +171,11 @@ export async function bootstrapScenarioSchema(
     return resumeBootstrap(story, schemaName);
   }
 
-  return fullBootstrap(story, schemaName);
+  return fullBootstrap(story, schemaName, keepSchema);
 }
 
-async function fullBootstrap(story: Story, _schemaName: string): Promise<ScenarioInfra> {
-  const testDb = await createPgTestDb({ embeddingDim: SCENARIO_EMBEDDING_DIM });
+async function fullBootstrap(story: Story, schemaName: string, keepSchema = true): Promise<ScenarioInfra> {
+  const testDb = await createPgTestDb({ embeddingDim: SCENARIO_EMBEDDING_DIM, schemaName });
   const sql = testDb.pool;
 
   const repos = buildRepos(sql);
@@ -186,13 +198,19 @@ async function fullBootstrap(story: Story, _schemaName: string): Promise<Scenari
   entityIdMap.set("test-room", testDb.entities.locationId);
   entityIdMap.set("bob", testDb.entities.bobId);
 
+  // When keepSchema is true, override cleanup to only close the pool
+  // without dropping the schema — enables probe_only re-runs.
+  const adjustedTestDb = keepSchema
+    ? { ...testDb, cleanup: async () => { await sql.end(); } }
+    : testDb;
+
   return {
     sql,
     entityIdMap,
     schemaName: testDb.schemaName,
     repos,
     services,
-    _testDb: testDb,
+    _testDb: adjustedTestDb,
   };
 }
 
@@ -246,8 +264,13 @@ async function probeOnlyBootstrap(_story: Story, schemaName: string): Promise<Sc
 }
 
 async function resumeBootstrap(_story: Story, schemaName: string): Promise<ScenarioInfra> {
+  // Per plan: check schema exists AND checkpoint file exists. Connect to
+  // existing schema and load checkpoint to know which beats are done.
+  // Implementation deferred — callers should use "full" + checkpoint-based
+  // resume inside executeLivePath for now.
   throw new Error(
-    `Resume not yet implemented — schema '${schemaName}' and checkpoint required`,
+    `Resume bootstrap not yet implemented for schema '${schemaName}'. ` +
+    `Use phase: "full" with the live write-path, which supports checkpoint-based resume internally.`,
   );
 }
 

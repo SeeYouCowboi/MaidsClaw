@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   loadCachedDialogue,
   saveCachedDialogue,
@@ -8,22 +10,25 @@ import {
   loadCheckpoint,
   saveCheckpoint,
   invalidateAllCaches,
+  setCacheDir,
+  resetCacheDir,
   type CachedToolCallLog,
 } from "./scenario-cache.js";
 
 const STORY_ID = "test-cache-story";
-const CACHE_DIR = "test/scenario-engine/cache";
-
-function cleanup(): void {
-  for (const suffix of ["-dialogue.json", "-toolcalls.json", "-checkpoint.json"]) {
-    const path = `${CACHE_DIR}/${STORY_ID}${suffix}`;
-    if (existsSync(path)) unlinkSync(path);
-  }
-}
 
 describe("scenario-cache", () => {
-  beforeEach(cleanup);
-  afterEach(cleanup);
+  let tempDir: string;
+
+  beforeAll(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "scenario-cache-test-"));
+    setCacheDir(tempDir);
+  });
+
+  afterAll(() => {
+    resetCacheDir();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 
   it("dialogue save → load roundtrip", () => {
     const dialogue = [

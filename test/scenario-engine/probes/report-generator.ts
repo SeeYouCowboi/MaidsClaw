@@ -57,18 +57,15 @@ export function generateReport(
     errorsByBeat.set(err.beatId, (errorsByBeat.get(err.beatId) ?? 0) + 1);
   }
 
-  const stats = runResult.projectionStats;
-  const entities = stats["entities_created"] ?? "?";
-  const episodes = stats["episodes_created"] ?? "?";
-  const assertions = stats["assertions_created"] ?? "?";
-  const evaluations = stats["evaluations_created"] ?? "?";
-
-  if (runResult.settlementCount === 0 && runResult.errors.length === 0) {
+  if (runResult.perBeatStats.length > 0) {
+    for (const beat of runResult.perBeatStats) {
+      lines.push(
+        `| ${beat.beatId} | ${beat.entitiesCreated} | ${beat.episodesCreated} | ${beat.assertionsCreated} | ${beat.evaluationsCreated} | ${beat.errors} |`,
+      );
+    }
+  } else if (runResult.settlementCount === 0 && runResult.errors.length === 0) {
     lines.push("| (none) | - | - | - | - | 0 |");
   } else {
-    lines.push(
-      `| (all) | ${entities} | ${episodes} | ${assertions} | ${evaluations} | ${runResult.errors.length} |`,
-    );
     for (const [beatId, count] of errorsByBeat) {
       lines.push(`| ${beatId} | - | - | - | - | ${count} |`);
     }
@@ -112,12 +109,14 @@ export function saveReport(
 
 /**
  * Generate a comparison report between scripted (thinker actual) and settlement (DSL expected) probe results.
+ * When infra references are provided, includes Cognition Alignment and Extraction Gaps/Surprises sections.
  */
-export function generateComparisonReport(
+export async function generateComparisonReport(
   scriptedResults: ProbeResult[],
   settlementResults: ProbeResult[],
   story: Story,
-): string {
+  infra?: { scripted: ScenarioInfra; settlement: ScenarioInfra },
+): Promise<string> {
   const settlementMap = new Map<string, ProbeResult>();
   for (const r of settlementResults) {
     settlementMap.set(r.probe.id, r);
@@ -165,6 +164,76 @@ export function generateComparisonReport(
   lines.push(
     `- Unexpected extras in thinker (not in DSL): ${unexpectedExtrasCount}`,
   );
+
+  // Probe alignment detail
+  const aligned = alignProbeResults(scriptedResults, settlementResults, story);
+  const gaps = aligned.filter((a) => !a.scriptedPassed && a.settlementPassed);
+  const surprises = aligned.filter((a) => a.scriptedPassed && !a.settlementPassed);
+
+  if (gaps.length > 0) {
+    lines.push("");
+    lines.push("## Extraction Gaps");
+    lines.push("Probes the DSL expected to pass but the thinker missed:");
+    lines.push("");
+    for (const g of gaps) {
+      lines.push(
+        `- **${g.probeId}**: "${g.query}" — settlement ${g.settlementScore.toFixed(2)}, scripted ${g.scriptedScore.toFixed(2)}`,
+      );
+    }
+  }
+
+  if (surprises.length > 0) {
+    lines.push("");
+    lines.push("## Surprises");
+    lines.push("Probes the thinker passed that the DSL did not:");
+    lines.push("");
+    for (const s of surprises) {
+      lines.push(
+        `- **${s.probeId}**: "${s.query}" — scripted ${s.scriptedScore.toFixed(2)}, settlement ${s.settlementScore.toFixed(2)}`,
+      );
+    }
+  }
+
+  // Cognition alignment (requires infra)
+  if (infra) {
+    const cognitionAlignments = await alignCognitionState(
+      infra.scripted,
+      infra.settlement,
+      story,
+    );
+
+    if (cognitionAlignments.length > 0) {
+      const matches = cognitionAlignments.filter((a) => a.status === "match");
+      const cognitionGaps = cognitionAlignments.filter((a) => a.status === "gap");
+      const cognitionSurprises = cognitionAlignments.filter((a) => a.status === "surprise");
+
+      lines.push("");
+      lines.push("## Cognition Alignment");
+      lines.push(
+        `- Matches: ${matches.length} | Gaps: ${cognitionGaps.length} | Surprises: ${cognitionSurprises.length}`,
+      );
+
+      if (cognitionGaps.length > 0) {
+        lines.push("");
+        lines.push("### Knowledge Gaps (in DSL but missing from thinker)");
+        lines.push("| Entity Pair | Predicate |");
+        lines.push("|-------------|-----------|");
+        for (const g of cognitionGaps) {
+          lines.push(`| ${g.pointerKeyPair} | ${g.predicate} |`);
+        }
+      }
+
+      if (cognitionSurprises.length > 0) {
+        lines.push("");
+        lines.push("### Knowledge Surprises (in thinker but not in DSL)");
+        lines.push("| Entity Pair | Predicate |");
+        lines.push("|-------------|-----------|");
+        for (const s of cognitionSurprises) {
+          lines.push(`| ${s.pointerKeyPair} | ${s.predicate} |`);
+        }
+      }
+    }
+  }
 
   return lines.join("\n");
 }
