@@ -364,6 +364,10 @@ export async function executeScriptedPath(
     perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
   }
 
+  // Same search doc sync as live path — scripted replays LLM tool calls
+  // which also skip search_docs_world population.
+  await syncLiveEpisodesToSearchDocs(infra);
+
   return {
     beatsProcessed,
     errors,
@@ -445,6 +449,13 @@ export async function executeLivePath(
   const fullLog = buildOrderedScriptedLog(story, beatLogByBeatId);
   saveCachedToolCalls(story.id, toScenarioCacheLog(fullLog));
 
+  // Sync episode summaries into search_docs_world so narrative_search
+  // probes can find them via pg_trgm text matching. The task agent
+  // writes to private_episode_events but does not sync search docs
+  // (that work is normally deferred to the GraphOrganizer job queue,
+  // which is stubbed out in the scenario engine).
+  await syncLiveEpisodesToSearchDocs(infra);
+
   return {
     beatsProcessed,
     errors,
@@ -523,21 +534,27 @@ function createMemoryTaskAgent(
   );
 }
 
-function createEnvironmentMemoryTaskModelProvider(): MemoryTaskModelProvider {
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
-  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
-  if (!hasAnthropic && !hasOpenAI) {
-    throw new Error(
-      "executeLivePath requires ANTHROPIC_API_KEY or OPENAI_API_KEY in environment",
-    );
-  }
+function resolveChatModelId(): string {
+  if (process.env.ANTHROPIC_API_KEY?.trim()) return "anthropic/claude-sonnet-4-20250514";
+  if (process.env.MINIMAX_API_KEY?.trim()) return "minimax/MiniMax-M2.7-highspeed";
+  if (process.env.MOONSHOT_API_KEY?.trim()) return "moonshot/kimi-k2.5";
+  if (process.env.KIMI_CODING_API_KEY?.trim()) return "kimi-coding/kimi-for-coding";
+  if (process.env.OPENAI_API_KEY?.trim()) return "openai/gpt-4o-mini";
+  throw new Error(
+    "executeLivePath requires at least one LLM API key (ANTHROPIC_API_KEY, MINIMAX_API_KEY, MOONSHOT_API_KEY, KIMI_CODING_API_KEY, or OPENAI_API_KEY)",
+  );
+}
 
-  const chatModelId = hasAnthropic
-    ? "anthropic/claude-sonnet-4-20250514"
-    : "openai/gpt-4o-mini";
-  const embeddingModelId = hasOpenAI
-    ? "openai/text-embedding-3-small"
-    : chatModelId;
+function resolveEmbeddingModelId(): string {
+  if (process.env.BAILIAN_API_KEY?.trim()) return "bailian/text-embedding-v4";
+  if (process.env.OPENAI_API_KEY?.trim()) return "openai/text-embedding-3-small";
+  // Fallback: use chat model (embed calls may fail but won't block the live path)
+  return resolveChatModelId();
+}
+
+function createEnvironmentMemoryTaskModelProvider(): MemoryTaskModelProvider {
+  const chatModelId = resolveChatModelId();
+  const embeddingModelId = resolveEmbeddingModelId();
 
   const registry = bootstrapRegistry();
   return new MemoryTaskModelProviderAdapter(
@@ -545,6 +562,30 @@ function createEnvironmentMemoryTaskModelProvider(): MemoryTaskModelProvider {
     chatModelId,
     embeddingModelId,
   );
+}
+
+async function syncLiveEpisodesToSearchDocs(infra: ScenarioInfra): Promise<void> {
+  const episodes = await infra.sql<Array<{ id: number; summary: string | null; private_notes: string | null }>>`
+    SELECT id, summary, private_notes
+    FROM private_episode_events
+    WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+  `;
+
+  let synced = 0;
+  for (const ep of episodes) {
+    const content = ep.summary || ep.private_notes;
+    if (!content) continue;
+    await infra.repos.searchProjection.syncSearchDoc(
+      "world",
+      `event:${ep.id}` as import("../../../src/memory/types.js").NodeRef,
+      content,
+    );
+    synced += 1;
+  }
+
+  if (episodes.length > 0 && synced === 0) {
+    console.warn(`[syncLiveEpisodesToSearchDocs] ${episodes.length} episodes found but 0 synced`);
+  }
 }
 
 function turnsForBeat(dialogue: GeneratedDialogue[], beatId: string): DialogueTurn[] {

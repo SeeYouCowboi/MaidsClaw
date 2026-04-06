@@ -8,6 +8,8 @@ import type {
   ToolCallResult,
 } from "./task-agent.js";
 
+const EMBED_BATCH_LIMIT = 10;
+
 export class MemoryTaskModelProviderAdapter implements MemoryTaskModelProvider {
   private readonly chatProvider: ChatModelProvider;
 
@@ -49,10 +51,23 @@ export class MemoryTaskModelProviderAdapter implements MemoryTaskModelProvider {
     }));
   }
 
-  embed(texts: string[], purpose: EmbeddingPurpose, modelId: string): Promise<Float32Array[]> {
+  async embed(texts: string[], purpose: EmbeddingPurpose, modelId: string): Promise<Float32Array[]> {
     const resolvedModelId = modelId || this.embeddingModelId;
     const embeddingProvider = this.modelRegistry.resolveEmbedding(resolvedModelId);
-    return embeddingProvider.embed(texts, purpose, resolvedModelId);
+
+    // Some providers (e.g. Bailian/DashScope) limit batch size to 10.
+    // Split large batches automatically to avoid 400 errors.
+    if (texts.length <= EMBED_BATCH_LIMIT) {
+      return embeddingProvider.embed(texts, purpose, resolvedModelId);
+    }
+
+    const results: Float32Array[] = [];
+    for (let i = 0; i < texts.length; i += EMBED_BATCH_LIMIT) {
+      const batch = texts.slice(i, i + EMBED_BATCH_LIMIT);
+      const batchResults = await embeddingProvider.embed(batch, purpose, resolvedModelId);
+      results.push(...batchResults);
+    }
+    return results;
   }
 }
 

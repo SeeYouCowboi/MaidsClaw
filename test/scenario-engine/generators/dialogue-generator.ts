@@ -20,15 +20,57 @@ type LlmBackend = "anthropic" | "openai";
 
 type RawTurn = { role: "user" | "assistant"; content: string };
 
-function detectBackend(): { backend: LlmBackend; apiKey: string } {
+type DetectedBackend = {
+  backend: LlmBackend;
+  apiKey: string;
+  baseUrl?: string;
+  modelOverride?: string;
+  extraHeaders?: Record<string, string>;
+};
+
+function detectBackend(): DetectedBackend {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) return { backend: "anthropic", apiKey: anthropicKey };
+
+  // MiniMax uses Anthropic-compatible protocol
+  const minimaxKey = process.env.MINIMAX_API_KEY;
+  if (minimaxKey) {
+    return {
+      backend: "anthropic",
+      apiKey: minimaxKey,
+      baseUrl: "https://api.minimaxi.com/anthropic",
+      modelOverride: "MiniMax-M2.7-highspeed",
+    };
+  }
 
   const openaiKey = process.env.OPENAI_API_KEY;
   if (openaiKey) return { backend: "openai", apiKey: openaiKey };
 
+  // Moonshot uses OpenAI-compatible protocol
+  const moonshotKey = process.env.MOONSHOT_API_KEY;
+  if (moonshotKey) {
+    return {
+      backend: "openai",
+      apiKey: moonshotKey,
+      baseUrl: "https://api.moonshot.cn",
+      modelOverride: "kimi-k2.5",
+    };
+  }
+
+  // Kimi Coding uses OpenAI-compatible protocol
+  const kimiKey = process.env.KIMI_CODING_API_KEY;
+  if (kimiKey) {
+    return {
+      backend: "openai",
+      apiKey: kimiKey,
+      baseUrl: "https://api.kimi.com/coding",
+      modelOverride: "kimi-for-coding",
+      extraHeaders: { "user-agent": "claude-code/1.0" },
+    };
+  }
+
   throw new Error(
-    "dialogue-generator: neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set",
+    "dialogue-generator: no supported LLM API key found in environment",
   );
 }
 
@@ -92,13 +134,16 @@ async function callAnthropicRaw(
   apiKey: string,
   systemPrompt: string,
   modelId: string,
+  baseUrl?: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<string> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(`${baseUrl ?? "https://api.anthropic.com"}/v1/messages`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model: modelId,
@@ -133,12 +178,15 @@ async function callOpenAIRaw(
   apiKey: string,
   systemPrompt: string,
   modelId: string,
+  baseUrl?: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch(`${baseUrl ?? "https://api.openai.com"}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`,
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model: modelId,
@@ -171,14 +219,13 @@ function defaultModelId(backend: LlmBackend): string {
 }
 
 async function callLlm(
-  backend: LlmBackend,
-  apiKey: string,
+  detected: DetectedBackend,
   systemPrompt: string,
   modelId: string,
 ): Promise<string> {
-  return backend === "anthropic"
-    ? callAnthropicRaw(apiKey, systemPrompt, modelId)
-    : callOpenAIRaw(apiKey, systemPrompt, modelId);
+  return detected.backend === "anthropic"
+    ? callAnthropicRaw(detected.apiKey, systemPrompt, modelId, detected.baseUrl, detected.extraHeaders)
+    : callOpenAIRaw(detected.apiKey, systemPrompt, modelId, detected.baseUrl, detected.extraHeaders);
 }
 
 function parseDialogueTurns(raw: string): RawTurn[] {
@@ -234,9 +281,9 @@ export async function generateDialogue(
   story: Story,
   options?: DialogueGenOptions,
 ): Promise<GeneratedDialogue[]> {
-  const { backend, apiKey } = detectBackend();
+  const detected = detectBackend();
   const turnsPerBeat = clampTurns(options?.turnsPerBeat);
-  const modelId = options?.modelId ?? defaultModelId(backend);
+  const modelId = options?.modelId ?? detected.modelOverride ?? defaultModelId(detected.backend);
 
   const results: GeneratedDialogue[] = [];
 
@@ -246,11 +293,11 @@ export async function generateDialogue(
     let rawTurns: RawTurn[];
 
     try {
-      rawText = await callLlm(backend, apiKey, systemPrompt, modelId);
+      rawText = await callLlm(detected, systemPrompt, modelId);
       rawTurns = parseDialogueTurns(rawText);
     } catch {
       try {
-        rawText = await callLlm(backend, apiKey, systemPrompt, modelId);
+        rawText = await callLlm(detected, systemPrompt, modelId);
         rawTurns = parseDialogueTurns(rawText);
       } catch (retryError) {
         throw new Error(

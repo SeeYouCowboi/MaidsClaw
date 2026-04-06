@@ -64,22 +64,27 @@ async function collectAllNodeRefs(infra: ScenarioInfra): Promise<NodeRef[]> {
   return refs;
 }
 
+function resolveEmbeddingModelId(): string {
+  if (process.env.BAILIAN_API_KEY?.trim()) return "bailian/text-embedding-v4";
+  if (process.env.OPENAI_API_KEY?.trim()) return "openai/text-embedding-3-small";
+  // No dedicated embedding provider — fall back to chat model
+  return resolveChatModelIdForOrganizer();
+}
+
+function resolveChatModelIdForOrganizer(): string {
+  if (process.env.ANTHROPIC_API_KEY?.trim()) return "anthropic/claude-sonnet-4-20250514";
+  if (process.env.MINIMAX_API_KEY?.trim()) return "minimax/MiniMax-M2.7-highspeed";
+  if (process.env.MOONSHOT_API_KEY?.trim()) return "moonshot/kimi-k2.5";
+  if (process.env.KIMI_CODING_API_KEY?.trim()) return "kimi-coding/kimi-for-coding";
+  if (process.env.OPENAI_API_KEY?.trim()) return "openai/gpt-4o-mini";
+  throw new Error(
+    "runGraphOrganizer requires at least one LLM API key in environment",
+  );
+}
+
 function createEmbedModelProvider() {
-  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
-
-  if (!hasOpenAI && !hasAnthropic) {
-    throw new Error(
-      "runGraphOrganizer requires OPENAI_API_KEY or ANTHROPIC_API_KEY in environment",
-    );
-  }
-
-  const chatModelId = hasAnthropic
-    ? "anthropic/claude-sonnet-4-20250514"
-    : "openai/gpt-4o-mini";
-  const embeddingModelId = hasOpenAI
-    ? "openai/text-embedding-3-small"
-    : chatModelId;
+  const chatModelId = resolveChatModelIdForOrganizer();
+  const embeddingModelId = resolveEmbeddingModelId();
 
   const registry = bootstrapRegistry();
   const adapter = new MemoryTaskModelProviderAdapter(

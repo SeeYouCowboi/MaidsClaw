@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Story } from "../dsl/story-types.js";
 import type { GeneratedDialogue } from "../generators/dialogue-generator.js";
 import {
+  deleteCheckpoint,
   generateOrLoadDialogue,
   loadCachedDialogue,
 } from "../generators/scenario-cache.js";
@@ -57,6 +58,11 @@ export async function runScenario(
         phase: "probe_only",
       },
     };
+  }
+
+  // Full live run: clear stale checkpoint so every beat is reprocessed.
+  if (resolvedOptions.writePath === "live" && resolvedOptions.phase === "full") {
+    deleteCheckpoint(story.id);
   }
 
   // Settlement path doesn't need dialogue for its core processing. Avoid

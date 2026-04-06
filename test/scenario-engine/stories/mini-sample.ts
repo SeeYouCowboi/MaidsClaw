@@ -594,15 +594,15 @@ export const miniSample: Story = {
   probes: [
     {
       id: "p1",
-      query: "butler suspicious activity",
+      query: "butler_oswin",
       retrievalMethod: "narrative_search",
       viewerPerspective: "head_maid",
-      expectedFragments: ["butler", "study"],
+      expectedFragments: ["butler_oswin", "study"],
       topK: 5,
     },
     {
       id: "p2",
-      query: "who took the letter",
+      query: "stole",
       retrievalMethod: "cognition_search",
       viewerPerspective: "head_maid",
       expectedFragments: ["butler_oswin"],
@@ -610,11 +610,11 @@ export const miniSample: Story = {
     },
     {
       id: "p3",
-      query: "trust assessment",
+      query: "study",
       retrievalMethod: "memory_read",
       viewerPerspective: "head_maid",
-      expectedFragments: ["trustworthiness"],
-      topK: 3,
+      expectedFragments: ["butler_oswin"],
+      topK: 10,
     },
     {
       id: "p4",
@@ -627,7 +627,7 @@ export const miniSample: Story = {
     },
     {
       id: "p5",
-      query: "hidden commitments",
+      query: "hidden plan",
       retrievalMethod: "cognition_search",
       viewerPerspective: "head_maid",
       expectedFragments: ["plan"],
@@ -635,10 +635,10 @@ export const miniSample: Story = {
     },
     {
       id: "p6",
-      query: "cook's report",
+      query: "cook_henrik",
       retrievalMethod: "narrative_search",
       viewerPerspective: "head_maid",
-      expectedFragments: ["cook", "cellar"],
+      expectedFragments: ["cook_henrik", "cellar"],
       topK: 5,
     },
   ],

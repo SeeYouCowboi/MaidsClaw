@@ -3,12 +3,22 @@ import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import type { CognitionSearchRepo } from "../../storage/domain-repos/contracts/cognition-search-repo.js";
+import type { EmbeddingRepo } from "../../storage/domain-repos/contracts/embedding-repo.js";
+import type { MemoryTaskModelProvider } from "../task-agent.js";
 import type {
   ConflictEvidence as RelationConflictEvidence,
   ConflictHistoryEntry as RelationConflictHistoryEntry,
   RelationReadRepo,
 } from "../../storage/domain-repos/contracts/relation-read-repo.js";
 import type { CognitionProjectionRepo } from "../../storage/domain-repos/contracts/cognition-projection-repo.js";
+
+export type CognitionEmbeddingConfig = {
+  embeddingRepo: EmbeddingRepo;
+  modelProvider: Pick<MemoryTaskModelProvider, "embed">;
+  embeddingModelId: string;
+  /** SQL connection for resolving content from cognition tables */
+  sql: import("postgres").Sql;
+};
 
 const COGNITION_KINDS: CognitionKind[] = ["assertion", "evaluation", "commitment"];
 
@@ -49,21 +59,32 @@ type CognitionHit = {
 };
 
 export class CognitionSearchService {
+  private embeddingConfig: CognitionEmbeddingConfig | null = null;
+
   constructor(
     private readonly searchRepo: CognitionSearchRepo,
     private readonly relationReadRepo: RelationReadRepo,
     private readonly projectionRepo: CognitionProjectionRepo,
   ) {}
 
+  setEmbeddingConfig(config: CognitionEmbeddingConfig): void {
+    this.embeddingConfig = config;
+  }
+
   async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
     const effectiveActiveOnly = params.activeOnly ?? (params.kind === "commitment");
     const limit = params.limit ?? 100;
 
     let hits: CognitionHit[];
-    if (params.query && params.query.trim().length >= 3) {
+    if (params.query && params.query.trim().length >= 2) {
       hits = await this.searchByFts(params, effectiveActiveOnly, limit);
     } else {
       hits = await this.searchByIndex(params, effectiveActiveOnly, limit);
+    }
+
+    // RRF merge with embedding results when configured
+    if (this.embeddingConfig && params.query && params.query.trim().length >= 2) {
+      hits = await this.rrfMergeCognition(params.query, params.agentId, hits);
     }
 
     return this.enrichContestedHits(params.agentId, hits);
@@ -128,6 +149,79 @@ export class CognitionSearchService {
     }
 
     return hits;
+  }
+
+  private async rrfMergeCognition(
+    query: string,
+    agentId: string,
+    textHits: CognitionHit[],
+  ): Promise<CognitionHit[]> {
+    const cfg = this.embeddingConfig;
+    if (!cfg) return textHits;
+
+    const RRF_K = 60;
+    let embeddingHits: CognitionHit[] = [];
+
+    try {
+      const [queryVector] = await cfg.modelProvider.embed(
+        [query],
+        "query_expansion",
+        cfg.embeddingModelId,
+      );
+      if (!queryVector || queryVector.length === 0) return textHits;
+
+      const neighbors = await cfg.embeddingRepo.query(queryVector, {
+        agentId,
+        modelId: cfg.embeddingModelId,
+        limit: 20,
+      });
+
+      for (const neighbor of neighbors) {
+        // Resolve cognition content from search_docs_cognition
+        const rows = await cfg.sql<Array<{ content: string }>>`
+          SELECT content FROM search_docs_cognition
+          WHERE source_ref = ${neighbor.nodeRef}
+          LIMIT 1
+        `;
+        const content = rows[0]?.content;
+        if (!content) continue;
+
+        embeddingHits.push({
+          kind: neighbor.nodeKind as CognitionKind,
+          basis: null,
+          stance: null,
+          source_ref: neighbor.nodeRef as NodeRef,
+          content,
+          updated_at: 0,
+        });
+      }
+    } catch {
+      return textHits;
+    }
+
+    // RRF fusion
+    const rrfScores = new Map<string, { hit: CognitionHit; score: number }>();
+
+    for (const [rank, hit] of textHits.entries()) {
+      const key = String(hit.source_ref);
+      const entry = rrfScores.get(key) ?? { hit, score: 0 };
+      entry.score += 1 / (RRF_K + rank + 1);
+      rrfScores.set(key, entry);
+    }
+
+    for (const [rank, hit] of embeddingHits.entries()) {
+      const key = String(hit.source_ref);
+      const existing = rrfScores.get(key);
+      if (existing) {
+        existing.score += 1 / (RRF_K + rank + 1);
+      } else {
+        rrfScores.set(key, { hit, score: 1 / (RRF_K + rank + 1) });
+      }
+    }
+
+    return Array.from(rrfScores.values())
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.hit);
   }
 
   private async filterActiveCommitments(hits: CognitionHit[], agentId: string): Promise<CognitionHit[]> {

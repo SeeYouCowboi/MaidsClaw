@@ -28,7 +28,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     viewerContext: ViewerContext,
   ): Promise<NarrativeSearchHit[]> {
     const trimmed = query.text.trim();
-    if (trimmed.length < 3) {
+    if (trimmed.length < 2) {
       return [];
     }
 
@@ -42,6 +42,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     const minScore = query.minScore ?? DEFAULT_MIN_SCORE;
     const normalizedQuery = trimmed.toLowerCase();
     const pattern = `%${trimmed}%`;
+    const ilikeFloor = minScore;
     const results: NarrativeSearchHit[] = [];
 
     if (includeArea && viewerContext.current_area_id != null) {
@@ -49,7 +50,11 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
         SELECT d.source_ref,
                d.doc_type,
                d.content,
-               GREATEST(similarity(lower(d.content), ${normalizedQuery}), word_similarity(lower(d.content), ${normalizedQuery})) AS score
+               GREATEST(
+                 similarity(lower(d.content), ${normalizedQuery}),
+                 word_similarity(lower(d.content), ${normalizedQuery}),
+                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${ilikeFloor}::real ELSE 0::real END
+               ) AS score
         FROM search_docs_area d
         WHERE d.location_entity_id = ${viewerContext.current_area_id}
           AND (
@@ -68,7 +73,11 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
         SELECT d.source_ref,
                d.doc_type,
                d.content,
-               GREATEST(similarity(lower(d.content), ${normalizedQuery}), word_similarity(lower(d.content), ${normalizedQuery})) AS score
+               GREATEST(
+                 similarity(lower(d.content), ${normalizedQuery}),
+                 word_similarity(lower(d.content), ${normalizedQuery}),
+                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${ilikeFloor}::real ELSE 0::real END
+               ) AS score
         FROM search_docs_world d
         WHERE (
           lower(d.content) % ${normalizedQuery}

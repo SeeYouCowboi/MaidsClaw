@@ -99,6 +99,7 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
       isAutoDefault: false,
     },
     defaultEmbeddingModelId: "text-embedding-v4",
+    embeddingDimensions: 1536,
     models: [
       {
         id: "text-embedding-v3",

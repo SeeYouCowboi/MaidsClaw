@@ -21,9 +21,12 @@ import { PgGraphReadQueryRepo } from "../../../src/storage/domain-repos/pg/graph
 import { PgRetrievalReadRepo } from "../../../src/storage/domain-repos/pg/retrieval-read-repo.js";
 import { PgAliasRepo } from "../../../src/storage/domain-repos/pg/alias-repo.js";
 import { PgRelationReadRepo } from "../../../src/storage/domain-repos/pg/relation-read-repo.js";
+import { PgEmbeddingRepo } from "../../../src/storage/domain-repos/pg/embedding-repo.js";
+import { bootstrapRegistry } from "../../../src/core/models/bootstrap.js";
+import { MemoryTaskModelProviderAdapter } from "../../../src/memory/model-provider-adapter.js";
 
-import { NarrativeSearchService } from "../../../src/memory/narrative/narrative-search.js";
-import { CognitionSearchService } from "../../../src/memory/cognition/cognition-search.js";
+import { NarrativeSearchService, type EmbeddingFallbackConfig } from "../../../src/memory/narrative/narrative-search.js";
+import { CognitionSearchService, type CognitionEmbeddingConfig } from "../../../src/memory/cognition/cognition-search.js";
 import { GraphNavigator } from "../../../src/memory/navigator.js";
 import { RetrievalService } from "../../../src/memory/retrieval.js";
 import { AliasService } from "../../../src/memory/alias.js";
@@ -368,4 +371,42 @@ export async function cleanupAllSchemas(sql: postgres.Sql): Promise<void> {
   for (const row of rows) {
     await sql.unsafe(`DROP SCHEMA IF EXISTS "${row.schema_name}" CASCADE`);
   }
+}
+
+/**
+ * Enable RRF hybrid search (pg_trgm + embedding) on the scenario services.
+ * Call AFTER embeddings have been generated via `generateEmbeddings()`.
+ */
+export function configureEmbeddingSearch(infra: ScenarioInfra): void {
+  const embeddingRepo = new PgEmbeddingRepo(infra.sql);
+
+  // Resolve embedding model + provider
+  let chatModelId: string;
+  let embeddingModelId: string;
+  if (process.env.ANTHROPIC_API_KEY?.trim()) chatModelId = "anthropic/claude-sonnet-4-20250514";
+  else if (process.env.MINIMAX_API_KEY?.trim()) chatModelId = "minimax/MiniMax-M2.7-highspeed";
+  else if (process.env.MOONSHOT_API_KEY?.trim()) chatModelId = "moonshot/kimi-k2.5";
+  else if (process.env.KIMI_CODING_API_KEY?.trim()) chatModelId = "kimi-coding/kimi-for-coding";
+  else if (process.env.OPENAI_API_KEY?.trim()) chatModelId = "openai/gpt-4o-mini";
+  else return; // No LLM key — skip embedding config
+
+  if (process.env.BAILIAN_API_KEY?.trim()) embeddingModelId = "bailian/text-embedding-v4";
+  else if (process.env.OPENAI_API_KEY?.trim()) embeddingModelId = "openai/text-embedding-3-small";
+  else embeddingModelId = chatModelId;
+
+  const registry = bootstrapRegistry();
+  const adapter = new MemoryTaskModelProviderAdapter(registry, chatModelId, embeddingModelId);
+
+  infra.services.narrativeSearch.setEmbeddingFallback({
+    embeddingRepo,
+    modelProvider: adapter,
+    embeddingModelId,
+  });
+
+  infra.services.cognitionSearch.setEmbeddingConfig({
+    embeddingRepo,
+    modelProvider: adapter,
+    embeddingModelId,
+    sql: infra.sql,
+  });
 }

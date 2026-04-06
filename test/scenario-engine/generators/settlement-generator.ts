@@ -139,6 +139,54 @@ export function generateSettlements(story: Story): GeneratedSettlement[] {
   );
   const cognitionKeyHistory = new Map<string, TrackedCognitionKey>();
 
+  // Pre-seed cognitionKeyHistory and collect initial ops from character definitions.
+  // hiddenCommitments and initialEvaluations are part of the character's starting
+  // state and must be tracked so that later beat retractions can reference them.
+  const initialCognitionOps: CognitionOpSpec[] = [];
+  for (const character of story.characters) {
+    for (const commitment of character.hiddenCommitments) {
+      cognitionKeyHistory.set(commitment.cognitionKey, {
+        beatId: "__initial__",
+        round: 0,
+        kind: "commitment",
+        subjectPointerId: commitment.subjectId,
+      });
+      initialCognitionOps.push({
+        op: "upsert",
+        kind: "commitment",
+        cognitionKey: commitment.cognitionKey,
+        subjectPointerId: commitment.subjectId,
+        commitmentData: {
+          mode: commitment.mode,
+          content: commitment.content,
+          isPrivate: commitment.isPrivate,
+        },
+      });
+    }
+    for (const [index, evaluation] of character.initialEvaluations.entries()) {
+      const cognitionKey = `scenario_${story.id}_initial_${character.id}_evaluation_${index}`;
+      cognitionKeyHistory.set(cognitionKey, {
+        beatId: "__initial__",
+        round: 0,
+        kind: "evaluation",
+        subjectPointerId: evaluation.subjectId,
+        objectPointerId: evaluation.objectId,
+      });
+      initialCognitionOps.push({
+        op: "upsert",
+        kind: "evaluation",
+        cognitionKey,
+        subjectPointerId: evaluation.subjectId,
+        objectPointerId: evaluation.objectId,
+        evaluationData: {
+          dimensions: evaluation.dimensions.map((d) => ({ name: d.name, value: d.value })),
+        },
+      });
+    }
+  }
+
+  let isFirstBeat = true;
+
   return story.beats.map((beat) => {
     const settlementId = `scenario_${story.id}_beat_${beat.id}`;
 
@@ -161,6 +209,11 @@ export function generateSettlements(story: Story): GeneratedSettlement[] {
     }));
 
     const cognitionOps: CognitionOpSpec[] = [];
+    // Inject initial character cognition (commitments, evaluations) into the first beat.
+    if (isFirstBeat) {
+      cognitionOps.push(...initialCognitionOps);
+      isFirstBeat = false;
+    }
     cognitionOps.push(
       ...buildAssertionOps(beat.id, beat.round, beat.memoryEffects.assertions ?? [], cognitionKeyHistory),
     );

@@ -89,7 +89,7 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
     options: CognitionSearchQueryOptions = {},
   ): Promise<CognitionHit[]> {
     const trimmedQuery = query.trim();
-    if (trimmedQuery.length < 3) {
+    if (trimmedQuery.length < 2) {
       return [];
     }
 
@@ -139,7 +139,11 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
               d.stance,
               d.content,
               d.updated_at,
-              GREATEST(similarity(lower(d.content), $2), word_similarity(lower(d.content), $2)) AS score
+              GREATEST(
+                similarity(lower(d.content), $2),
+                word_similarity(lower(d.content), $2),
+                CASE WHEN lower(d.content) ILIKE $3 THEN $4::real ELSE 0 END
+              ) AS score
        FROM search_docs_cognition d
        WHERE ${conditions.join(" AND ")}
        ORDER BY score DESC, d.updated_at DESC
