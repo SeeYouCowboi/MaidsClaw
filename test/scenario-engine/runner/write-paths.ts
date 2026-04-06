@@ -146,6 +146,8 @@ export async function executeSettlementPath(
   const beatById = new Map(story.beats.map((beat) => [beat.id, beat]));
   const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
   const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
+  // Cumulative map across all beats so cross-beat logic edges can resolve.
+  const cumulativeEpisodeIdByLocalRef = new Map<string, number>();
 
   let beatsProcessed = 0;
 
@@ -238,16 +240,20 @@ export async function executeSettlementPath(
         recentCognitionSlotRepo: infra.repos.recentCognitionSlot,
       });
 
-      const episodeIdByLocalRef = await appendEpisodesForSettlement(
+      const beatEpisodeIds = await appendEpisodesForSettlement(
         infra,
         settlement,
       );
+      // Merge into cumulative map so later beats can reference earlier episodes.
+      for (const [ref, id] of beatEpisodeIds) {
+        cumulativeEpisodeIdByLocalRef.set(ref, id);
+      }
 
       await infra.repos.settlementLedger.markApplied(settlement.settlementId);
 
       for (const edge of settlement.logicEdges) {
-        const sourceId = episodeIdByLocalRef.get(edge.fromLocalRef);
-        const targetId = episodeIdByLocalRef.get(edge.toLocalRef);
+        const sourceId = cumulativeEpisodeIdByLocalRef.get(edge.fromLocalRef);
+        const targetId = cumulativeEpisodeIdByLocalRef.get(edge.toLocalRef);
         if (!sourceId || !targetId) {
           throw new Error(
             `Missing episode mapping for logic edge '${edge.fromLocalRef}' -> '${edge.toLocalRef}' in settlement '${settlement.settlementId}'`,

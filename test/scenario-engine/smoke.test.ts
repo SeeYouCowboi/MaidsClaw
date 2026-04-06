@@ -114,8 +114,10 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
   });
 });
 
+// Scripted path requires cached tool calls from a prior live run.
+// Skipped when no cache exists — run with writePath:'live' first to populate.
 describe.skipIf(skipPgTests || !hasMiniSampleCache)(
-  "Smoke Test - scripted writePath",
+  "Smoke Test - scripted writePath (requires cached live run)",
   () => {
     let handle: ScenarioHandleExtended;
     let probeResults: ProbeResult[];

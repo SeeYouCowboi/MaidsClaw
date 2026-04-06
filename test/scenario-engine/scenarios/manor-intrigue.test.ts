@@ -9,11 +9,14 @@ import {
   generateReport,
   saveReport,
 } from "../probes/report-generator.js";
+import { loadCachedToolCalls } from "../generators/scenario-cache.js";
 import { runGraphOrganizer } from "../runner/graph-organizer-step.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
 import { manorIntrigue } from "../stories/manor-intrigue.js";
 
-describe.skipIf(skipPgTests)("Manor Intrigue Full Scenario", () => {
+const hasManorIntrigueCache = loadCachedToolCalls(manorIntrigue.id) !== null;
+
+describe.skipIf(skipPgTests || !hasManorIntrigueCache)("Manor Intrigue Full Scenario", () => {
   let handle!: ScenarioHandleExtended;
   let probeResults!: ProbeResult[];
 
