@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import type { Story } from "../dsl/story-types.js";
 import { SCENARIO_EMBEDDING_DIM } from "../constants.js";
+import { loadCheckpoint } from "../generators/scenario-cache.js";
 import {
   createPgTestDb,
   ensureTestPgAppDb,
@@ -263,15 +264,72 @@ async function probeOnlyBootstrap(_story: Story, schemaName: string): Promise<Sc
   return { sql, entityIdMap, schemaName, repos, services, _testDb: testDb };
 }
 
-async function resumeBootstrap(_story: Story, schemaName: string): Promise<ScenarioInfra> {
-  // Per plan: check schema exists AND checkpoint file exists. Connect to
-  // existing schema and load checkpoint to know which beats are done.
-  // Implementation deferred — callers should use "full" + checkpoint-based
-  // resume inside executeLivePath for now.
-  throw new Error(
-    `Resume bootstrap not yet implemented for schema '${schemaName}'. ` +
-    `Use phase: "full" with the live write-path, which supports checkpoint-based resume internally.`,
-  );
+async function resumeBootstrap(story: Story, schemaName: string): Promise<ScenarioInfra> {
+  // Per plan: check schema exists AND checkpoint file exists.
+  // If both present, connect to existing schema and load entity map.
+  // If either missing, throw with clear message.
+  await ensureTestPgAppDb();
+
+  const checkSql = postgres(getAppTestUrl(), { max: 1 });
+  let schemaExists = false;
+  try {
+    const rows = await checkSql`
+      SELECT 1 FROM information_schema.schemata WHERE schema_name = ${schemaName}
+    `;
+    schemaExists = rows.length > 0;
+  } finally {
+    await checkSql.end();
+  }
+
+  const checkpoint = loadCheckpoint(story.id);
+
+  if (!schemaExists && !checkpoint) {
+    throw new Error(
+      `Resume failed: schema '${schemaName}' not found and no checkpoint for story '${story.id}'. ` +
+      `Run with phase: 'full' first.`,
+    );
+  }
+  if (!schemaExists) {
+    throw new Error(
+      `Resume failed: schema '${schemaName}' not found. ` +
+      `The checkpoint exists but the schema was dropped. Run with phase: 'full' first.`,
+    );
+  }
+  if (!checkpoint) {
+    throw new Error(
+      `Resume failed: no checkpoint found for story '${story.id}'. ` +
+      `The schema '${schemaName}' exists but no checkpoint was saved. ` +
+      `Run with phase: 'full' and writePath: 'live' to create a checkpoint.`,
+    );
+  }
+
+  const sql = postgres(getAppTestUrl(), {
+    max: 3,
+    connection: { search_path: `${schemaName},public` },
+  });
+
+  const repos = buildRepos(sql);
+  const services = buildServices(sql);
+
+  const entityIdMap = new Map<string, number>();
+  const entityRows = await sql`SELECT id, pointer_key FROM entity_nodes`;
+  for (const row of entityRows) {
+    entityIdMap.set(row.pointer_key as string, Number(row.id));
+  }
+
+  const testDb: PgTestDb = {
+    pool: sql,
+    schemaName,
+    entities: {
+      selfId: entityIdMap.get("__self__") ?? 0,
+      userId: entityIdMap.get("__user__") ?? 0,
+      locationId: entityIdMap.get("test-room") ?? 0,
+      bobId: entityIdMap.get("bob") ?? 0,
+    },
+    cleanup: async () => { await sql.end(); },
+  };
+
+  return { sql, entityIdMap, schemaName, repos, services, _testDb: testDb };
 }
 
 export async function cleanupSchema(

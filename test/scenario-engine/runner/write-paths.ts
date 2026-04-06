@@ -67,6 +67,40 @@ export type BeatStats = {
   errors: number;
 };
 
+type DbCountSnapshot = {
+  entities: number;
+  episodes: number;
+  assertions: number;
+  evaluations: number;
+  commitments: number;
+};
+
+async function snapshotDbCounts(infra: ScenarioInfra): Promise<DbCountSnapshot> {
+  const sql = infra.sql;
+  const [entities] = await sql`SELECT count(*)::int AS c FROM entity_nodes`;
+  const [episodes] = await sql`SELECT count(*)::int AS c FROM event_nodes`;
+  const [assertions] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'assertion'`;
+  const [evaluations] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'evaluation'`;
+  const [commitments] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'commitment'`;
+  return {
+    entities: entities.c as number,
+    episodes: episodes.c as number,
+    assertions: assertions.c as number,
+    evaluations: evaluations.c as number,
+    commitments: commitments.c as number,
+  };
+}
+
+function diffSnapshots(before: DbCountSnapshot, after: DbCountSnapshot): Omit<BeatStats, "beatId" | "errors"> {
+  return {
+    entitiesCreated: Math.max(0, after.entities - before.entities),
+    episodesCreated: Math.max(0, after.episodes - before.episodes),
+    assertionsCreated: Math.max(0, after.assertions - before.assertions),
+    evaluationsCreated: Math.max(0, after.evaluations - before.evaluations),
+    commitmentsCreated: Math.max(0, after.commitments - before.commitments),
+  };
+}
+
 export type WritePathResult = {
   beatsProcessed: number;
   errors: { beatId: string; error: Error }[];
@@ -263,26 +297,22 @@ export async function executeScriptedPath(
   for (const [beatIndex, beat] of story.beats.entries()) {
     beatsProcessed += 1;
     const turns = turnsForBeat(dialogue, beat.id);
-    const beatStat: BeatStats = {
-      beatId: beat.id,
-      entitiesCreated: 0,
-      episodesCreated: 0,
-      assertionsCreated: 0,
-      evaluationsCreated: 0,
-      commitmentsCreated: 0,
-      errors: 0,
-    };
+    let beatErrors = 0;
 
+    const before = await snapshotDbCounts(infra);
     try {
       const provider = scriptedBeatProvider.getProviderForBeat(beat.id);
       const flushRequest = buildFlushRequest(infra, beat, turns, beatIndex);
       const agent = createMemoryTaskAgent(infra, runtime, provider);
       await agent.runMigrate(flushRequest);
     } catch (error) {
-      beatStat.errors += 1;
+      beatErrors += 1;
       errors.push({ beatId: beat.id, error: toError(error) });
     }
-    perBeatStats.push(beatStat);
+    const after = await snapshotDbCounts(infra);
+    const delta = diffSnapshots(before, after);
+
+    perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
   }
 
   return {
@@ -324,16 +354,9 @@ export async function executeLivePath(
     beatsProcessed += 1;
     const turns = turnsForBeat(dialogue, beat.id);
     let beatCaptureStarted = false;
-    const beatStat: BeatStats = {
-      beatId: beat.id,
-      entitiesCreated: 0,
-      episodesCreated: 0,
-      assertionsCreated: 0,
-      evaluationsCreated: 0,
-      commitmentsCreated: 0,
-      errors: 0,
-    };
+    let beatErrors = 0;
 
+    const before = await snapshotDbCounts(infra);
     try {
       capturingWrapper.startBeat(beat.id);
       beatCaptureStarted = true;
@@ -343,7 +366,7 @@ export async function executeLivePath(
       await agent.runMigrate(flushRequest);
       completedBeatIds.add(beat.id);
     } catch (error) {
-      beatStat.errors += 1;
+      beatErrors += 1;
       errors.push({ beatId: beat.id, error: toError(error) });
     } finally {
       if (beatCaptureStarted) {
@@ -351,7 +374,7 @@ export async function executeLivePath(
           const beatLog = capturingWrapper.endBeat();
           beatLogByBeatId.set(beat.id, beatLog);
         } catch (error) {
-          beatStat.errors += 1;
+          beatErrors += 1;
           errors.push({ beatId: beat.id, error: toError(error) });
         }
       }
@@ -365,7 +388,9 @@ export async function executeLivePath(
       };
       saveCheckpoint(story.id, checkpointData);
     }
-    perBeatStats.push(beatStat);
+    const after = await snapshotDbCounts(infra);
+    const delta = diffSnapshots(before, after);
+    perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
   }
 
   const fullLog = buildOrderedScriptedLog(story, beatLogByBeatId);

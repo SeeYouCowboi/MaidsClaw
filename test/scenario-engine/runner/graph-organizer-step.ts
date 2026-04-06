@@ -30,32 +30,32 @@ async function collectAllNodeRefs(infra: ScenarioInfra): Promise<NodeRef[]> {
   const sql = infra.sql;
   const refs: NodeRef[] = [];
 
-  const entities = await sql`SELECT id FROM entities`;
+  const entities = await sql`SELECT id FROM entity_nodes`;
   for (const row of entities) {
     refs.push(`entity:${row.id}` as NodeRef);
   }
 
-  const events = await sql`SELECT id FROM episode_events`;
+  const events = await sql`SELECT id FROM event_nodes`;
   for (const row of events) {
     refs.push(`event:${row.id}` as NodeRef);
   }
 
   const assertions = await sql`
-    SELECT id FROM explicit_assertions WHERE retracted_at IS NULL
+    SELECT id FROM private_cognition_current WHERE kind = 'assertion'
   `;
   for (const row of assertions) {
     refs.push(`assertion:${row.id}` as NodeRef);
   }
 
   const evaluations = await sql`
-    SELECT id FROM explicit_evaluations WHERE retracted_at IS NULL
+    SELECT id FROM private_cognition_current WHERE kind = 'evaluation'
   `;
   for (const row of evaluations) {
     refs.push(`evaluation:${row.id}` as NodeRef);
   }
 
   const commitments = await sql`
-    SELECT id FROM explicit_commitments WHERE retracted_at IS NULL
+    SELECT id FROM private_cognition_current WHERE kind = 'commitment'
   `;
   for (const row of commitments) {
     refs.push(`commitment:${row.id}` as NodeRef);
