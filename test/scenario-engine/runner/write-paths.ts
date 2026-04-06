@@ -146,8 +146,10 @@ export async function executeSettlementPath(
   const beatById = new Map(story.beats.map((beat) => [beat.id, beat]));
   const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
   const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
-  // Cumulative map across all beats so cross-beat logic edges can resolve.
+  // Cumulative map across all beats — supports both backward and forward refs.
   const cumulativeEpisodeIdByLocalRef = new Map<string, number>();
+  // Deferred logic edges: created after all episodes exist to handle forward refs.
+  const deferredEdges: Array<{ beatId: string; fromLocalRef: string; toLocalRef: string; edgeType: string }> = [];
 
   let beatsProcessed = 0;
 
@@ -251,25 +253,44 @@ export async function executeSettlementPath(
 
       await infra.repos.settlementLedger.markApplied(settlement.settlementId);
 
+      // Collect logic edges for deferred creation (handles forward refs).
       for (const edge of settlement.logicEdges) {
-        const sourceId = cumulativeEpisodeIdByLocalRef.get(edge.fromLocalRef);
-        const targetId = cumulativeEpisodeIdByLocalRef.get(edge.toLocalRef);
-        if (!sourceId || !targetId) {
-          throw new Error(
-            `Missing episode mapping for logic edge '${edge.fromLocalRef}' -> '${edge.toLocalRef}' in settlement '${settlement.settlementId}'`,
-          );
-        }
-        await infra.repos.graphStore.createLogicEdge(
-          sourceId,
-          targetId,
-          asLogicEdgeType(edge.edgeType),
-        );
+        deferredEdges.push({
+          beatId: settlement.beatId,
+          fromLocalRef: edge.fromLocalRef,
+          toLocalRef: edge.toLocalRef,
+          edgeType: edge.edgeType,
+        });
       }
     } catch (error) {
       beatStat.errors += 1;
       errors.push({ beatId: settlement.beatId, error: toError(error) });
     }
     perBeatStats.push(beatStat);
+  }
+
+  // Second pass: create all logic edges now that every episode exists.
+  for (const edge of deferredEdges) {
+    const sourceId = cumulativeEpisodeIdByLocalRef.get(edge.fromLocalRef);
+    const targetId = cumulativeEpisodeIdByLocalRef.get(edge.toLocalRef);
+    if (!sourceId || !targetId) {
+      errors.push({
+        beatId: edge.beatId,
+        error: new Error(
+          `Missing episode mapping for logic edge '${edge.fromLocalRef}' -> '${edge.toLocalRef}'`,
+        ),
+      });
+      continue;
+    }
+    try {
+      await infra.repos.graphStore.createLogicEdge(
+        sourceId,
+        targetId,
+        asLogicEdgeType(edge.edgeType),
+      );
+    } catch (error) {
+      errors.push({ beatId: edge.beatId, error: toError(error) });
+    }
   }
 
   return {

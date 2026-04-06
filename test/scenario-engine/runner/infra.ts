@@ -176,6 +176,15 @@ export async function bootstrapScenarioSchema(
 }
 
 async function fullBootstrap(story: Story, schemaName: string, keepSchema = true): Promise<ScenarioInfra> {
+  // Per plan: full phase drops existing schema first to ensure fresh state.
+  await ensureTestPgAppDb();
+  const dropSql = postgres(getAppTestUrl(), { max: 1 });
+  try {
+    await dropSql.unsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+  } finally {
+    await dropSql.end();
+  }
+
   const testDb = await createPgTestDb({ embeddingDim: SCENARIO_EMBEDDING_DIM, schemaName });
   const sql = testDb.pool;
 
