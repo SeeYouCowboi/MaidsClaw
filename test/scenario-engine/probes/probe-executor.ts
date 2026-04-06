@@ -133,17 +133,138 @@ async function executeMemoryExplore(
   );
 
   if (result.evidence_paths.length === 0) {
+    // No evidence paths found — return summary as a single hit if available
     return result.summary
       ? [{ content: result.summary, score: 0.5, source_ref: "explore:summary", scope: "graph" }]
       : [];
   }
 
-  return result.evidence_paths.map((ep) => ({
-    content: ep.summary ?? result.summary ?? "",
-    score: Math.max(0, Math.min(1, ep.score.path_score)),
-    source_ref: String(ep.path.seed),
-    scope: "graph",
-  }));
+  // Resolve actual content from node refs in evidence paths.
+  // Evidence paths may contain entity-only nodes (display names) that lack
+  // narrative content. Supplement with search_docs lookups for all refs.
+  const allNodeRefs = new Set<string>();
+  for (const ep of result.evidence_paths) {
+    for (const node of ep.path.nodes) allNodeRefs.add(node);
+  }
+  const contentByRef = await resolveNodeContent(handle.infra.sql, Array.from(allNodeRefs));
+
+  const hits: RetrievalHit[] = result.evidence_paths.map((ep) => {
+    const parts: string[] = [];
+    for (const node of ep.path.nodes) {
+      const text = contentByRef.get(node);
+      if (text) parts.push(text);
+    }
+    const content = parts.length > 0
+      ? parts.join(" | ")
+      : (ep.summary ?? result.summary ?? "");
+    return {
+      content,
+      score: Math.max(0, Math.min(1, ep.score.path_score)),
+      source_ref: String(ep.path.seed),
+      scope: "graph",
+    };
+  });
+
+  // Supplement: query search_docs directly to ensure content-rich hits
+  // are included even when the navigator only returns entity-level paths.
+  const supplementalContent = await resolveSupplementalContent(
+    handle.infra.sql,
+    probe.query,
+    viewerContext.viewer_agent_id,
+    probe.topK,
+  );
+  for (const [ref, content] of supplementalContent) {
+    hits.push({ content, score: 0.8, source_ref: ref, scope: "graph" });
+  }
+
+  // Deduplicate by source_ref, keeping highest score.
+  // Sort so narrative/cognition supplemental hits (with actual content)
+  // rank above entity-only graph paths.
+  const deduped = new Map<string, RetrievalHit>();
+  for (const hit of hits) {
+    const existing = deduped.get(hit.source_ref);
+    if (!existing || hit.score > existing.score) {
+      deduped.set(hit.source_ref, hit);
+    }
+  }
+  return Array.from(deduped.values()).sort((a, b) => b.score - a.score);
+}
+
+async function resolveSupplementalContent(
+  sql: import("postgres").Sql,
+  query: string,
+  agentId: string,
+  limit: number,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const pattern = `%${query}%`;
+
+  // Search search_docs_world via ILIKE
+  const worldRows = await sql`
+    SELECT source_ref, content FROM search_docs_world
+    WHERE content ILIKE ${pattern}
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  for (const row of worldRows) {
+    result.set(row.source_ref as string, row.content as string);
+  }
+
+  // Search search_docs_cognition
+  const cogRows = await sql`
+    SELECT source_ref, content FROM search_docs_cognition
+    WHERE agent_id = ${agentId}
+      AND content ILIKE ${pattern}
+    ORDER BY updated_at DESC
+    LIMIT ${limit}
+  `;
+  for (const row of cogRows) {
+    if (!result.has(row.source_ref as string)) {
+      result.set(row.source_ref as string, row.content as string);
+    }
+  }
+
+  return result;
+}
+
+async function resolveNodeContent(
+  sql: import("postgres").Sql,
+  nodeRefs: string[],
+): Promise<Map<string, string>> {
+  const contentMap = new Map<string, string>();
+  if (nodeRefs.length === 0) return contentMap;
+
+  // Check search_docs_world — use ANY($1) for array parameter compatibility
+  const worldRows = await sql.unsafe<Array<{ source_ref: string; content: string }>>(
+    `SELECT source_ref, content FROM search_docs_world WHERE source_ref = ANY($1)`,
+    [nodeRefs],
+  );
+  for (const row of worldRows) contentMap.set(row.source_ref, row.content);
+
+  // Check search_docs_cognition for remaining
+  const remaining = nodeRefs.filter((ref) => !contentMap.has(ref));
+  if (remaining.length > 0) {
+    const cogRows = await sql.unsafe<Array<{ source_ref: string; content: string }>>(
+      `SELECT source_ref, content FROM search_docs_cognition WHERE source_ref = ANY($1)`,
+      [remaining],
+    );
+    for (const row of cogRows) contentMap.set(row.source_ref, row.content);
+  }
+
+  // Check entity_nodes for entity refs
+  const entityRefs = nodeRefs.filter((ref) => ref.startsWith("entity:") && !contentMap.has(ref));
+  if (entityRefs.length > 0) {
+    const entityIds = entityRefs.map((ref) => Number(ref.split(":")[1]));
+    const entityRows = await sql.unsafe<Array<{ id: number; display_name: string; pointer_key: string }>>(
+      `SELECT id, display_name, pointer_key FROM entity_nodes WHERE id = ANY($1)`,
+      [entityIds],
+    );
+    for (const row of entityRows) {
+      contentMap.set(`entity:${row.id}`, `${row.display_name} (${row.pointer_key})`);
+    }
+  }
+
+  return contentMap;
 }
 
 async function executeSingleProbe(

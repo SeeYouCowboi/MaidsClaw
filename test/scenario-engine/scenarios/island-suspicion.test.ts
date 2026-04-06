@@ -4,19 +4,43 @@ import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import type { ProbeResult } from "../probes/probe-types.js";
 import { generateReport, saveReport } from "../probes/report-generator.js";
+import { generateEmbeddings } from "../runner/embedding-step.js";
+import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
 import { islandSuspicion } from "../stories/island-suspicion.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
 
+const hasEmbeddingKey =
+  Boolean(process.env.BAILIAN_API_KEY?.trim()) ||
+  Boolean(process.env.OPENAI_API_KEY?.trim()) ||
+  Boolean(process.env.ANTHROPIC_API_KEY?.trim()) ||
+  Boolean(process.env.MINIMAX_API_KEY?.trim()) ||
+  Boolean(process.env.MOONSHOT_API_KEY?.trim()) ||
+  Boolean(process.env.KIMI_CODING_API_KEY?.trim());
+
 describe.skipIf(skipPgTests)("Island Suspicion — Settlement Path", () => {
   let handle: ScenarioHandleExtended;
   let probeResults: ProbeResult[];
+  let embeddingsGenerated = 0;
 
   beforeAll(async () => {
     handle = await runScenario(islandSuspicion, {
       writePath: "settlement",
       phase: "full",
     });
+
+    // Generate embeddings and enable RRF hybrid search when an API key is available
+    if (hasEmbeddingKey) {
+      try {
+        const embedResult = await generateEmbeddings(handle.infra);
+        embeddingsGenerated = embedResult.embeddingsGenerated;
+        console.log(`[Embeddings] generated=${embedResult.embeddingsGenerated} errors=${embedResult.errors.length} elapsed=${embedResult.elapsedMs.toFixed(0)}ms`);
+        configureEmbeddingSearch(handle.infra);
+      } catch (e) {
+        console.warn("[Embeddings] skipped:", e instanceof Error ? e.message : String(e));
+      }
+    }
+
     probeResults = await executeProbes(islandSuspicion, handle);
 
     const report = generateReport(
@@ -104,10 +128,24 @@ describe.skipIf(skipPgTests)("Island Suspicion — Settlement Path", () => {
     }
   });
 
+  it("memory_explore probes pass", () => {
+    const exploreResults = probeResults.filter(
+      (r) => r.probe.retrievalMethod === "memory_explore",
+    );
+    const failed = exploreResults.filter((r) => !r.passed);
+    if (failed.length > 0) {
+      assertAllProbesPass(exploreResults);
+    }
+  });
+
   it("per-beat stats recorded for all beats", () => {
     expect(handle.runResult.perBeatStats).toHaveLength(35);
     for (const stat of handle.runResult.perBeatStats) {
       expect(stat.beatId).toBeTruthy();
     }
+  });
+
+  it.skipIf(!hasEmbeddingKey)("embeddings generated when API key available", () => {
+    expect(embeddingsGenerated).toBeGreaterThan(0);
   });
 });

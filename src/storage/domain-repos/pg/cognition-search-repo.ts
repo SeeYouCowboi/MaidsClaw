@@ -9,6 +9,7 @@ import type {
   CognitionSearchQueryOptions,
   CognitionSearchRepo,
 } from "../contracts/cognition-search-repo.js";
+import { isCjkQuery, decomposeCjk, buildCjkScoreSql, buildCjkWhereSql } from "./cjk-search-utils.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key:";
 const DEFAULT_LIMIT = 100;
@@ -97,19 +98,40 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
     const pattern = `%${trimmedQuery}%`;
     const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
     const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
+    const isCjk = isCjkQuery(trimmedQuery);
 
-    const params: Array<string | number> = [agentId, normalizedQuery, pattern, minScore];
+    const params: Array<string | number> = [agentId];
+    let next = 2;
+
+    let scoreExpr: string;
+    let matchExpr: string;
+
+    if (isCjk) {
+      const decomp = decomposeCjk(trimmedQuery);
+      const [scoreSql, scoreParams, nextIdx1] = buildCjkScoreSql("d.content", decomp, next);
+      params.push(...scoreParams);
+      next = nextIdx1;
+
+      const [whereSql, whereParams, nextIdx2] = buildCjkWhereSql("d.content", decomp, next);
+      params.push(...whereParams);
+      next = nextIdx2;
+
+      scoreExpr = scoreSql;
+      matchExpr = whereSql;
+    } else {
+      params.push(normalizedQuery, pattern, minScore);
+      const qIdx = next++;
+      const pIdx = next++;
+      const msIdx = next++;
+      scoreExpr = `GREATEST(similarity(lower(d.content), $${qIdx}), word_similarity(lower(d.content), $${qIdx}), CASE WHEN lower(d.content) ILIKE $${pIdx} THEN $${msIdx}::real ELSE 0 END)`;
+      matchExpr = `(lower(d.content) % $${qIdx} OR lower(d.content) ILIKE $${pIdx} OR similarity(lower(d.content), $${qIdx}) >= $${msIdx} OR word_similarity(lower(d.content), $${qIdx}) >= $${msIdx})`;
+    }
+
     const conditions: string[] = [
       "d.agent_id = $1",
-      `(
-         lower(d.content) % $2
-         OR lower(d.content) ILIKE $3
-         OR similarity(lower(d.content), $2) >= $4
-         OR word_similarity(lower(d.content), $2) >= $4
-       )`,
+      matchExpr,
     ];
 
-    let next = 5;
     if (options.kind) {
       conditions.push(`d.kind = $${next}`);
       params.push(options.kind);
@@ -129,7 +151,8 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
       conditions.push("(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))");
     }
 
-    params.push(limit);
+    params.push(minScore, limit);
+    const minScoreParam = next++;
     const limitParam = next;
 
     const rows = await this.sql.unsafe(
@@ -139,13 +162,10 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
               d.stance,
               d.content,
               d.updated_at,
-              GREATEST(
-                similarity(lower(d.content), $2),
-                word_similarity(lower(d.content), $2),
-                CASE WHEN lower(d.content) ILIKE $3 THEN $4::real ELSE 0 END
-              ) AS score
+              ${scoreExpr} AS score
        FROM search_docs_cognition d
        WHERE ${conditions.join(" AND ")}
+         AND ${scoreExpr} >= $${minScoreParam}
        ORDER BY score DESC, d.updated_at DESC
        LIMIT $${limitParam}`,
       params,

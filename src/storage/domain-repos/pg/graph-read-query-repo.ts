@@ -683,6 +683,12 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
     const snapshots = new Map<NodeRef, GraphNodeSnapshot>();
 
     await this.populateSnapshots(snapshots, "event", byKind.get("event"), "event_nodes", "summary", "timestamp");
+    // Fallback: private_episode_events for event IDs not resolved from event_nodes
+    const snapshotEventIds = byKind.get("event") ?? [];
+    const missingSnapshotEventIds = snapshotEventIds.filter((id) => !snapshots.has(`event:${id}` as NodeRef));
+    if (missingSnapshotEventIds.length > 0) {
+      await this.populateSnapshots(snapshots, "event", missingSnapshotEventIds, "private_episode_events", "summary", "valid_time");
+    }
     await this.populateSnapshots(snapshots, "entity", byKind.get("entity"), "entity_nodes", "summary", "updated_at");
     await this.populateSnapshots(snapshots, "fact", byKind.get("fact"), "fact_edges", "predicate", "t_valid");
     await this.populatePrivateSnapshots(snapshots, "assertion", byKind.get("assertion"));
@@ -733,7 +739,9 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
         FROM event_nodes
         WHERE id IN ${this.sql(eventIds)}
       `;
+      const foundEventIds = new Set<number>();
       for (const row of rows) {
+        foundEventIds.add(Number(row.id));
         records.push({
           nodeRef: `event:${Number(row.id)}` as NodeRef,
           kind: "event",
@@ -741,6 +749,31 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
           locationEntityId: Number(row.location_entity_id),
           ownerAgentId: null,
         });
+      }
+
+      // Fallback: check private_episode_events for event IDs not found in event_nodes.
+      // This handles the scenario where episodes are stored only as private events
+      // (e.g. settlement path writes private_episode_events but not event_nodes).
+      const missingEventIds = eventIds.filter((id) => !foundEventIds.has(id));
+      if (missingEventIds.length > 0) {
+        const privateRows = await this.sql<{
+          id: number | string;
+          agent_id: string;
+          location_entity_id: number | string | null;
+        }[]>`
+          SELECT id, agent_id, location_entity_id
+          FROM private_episode_events
+          WHERE id IN ${this.sql(missingEventIds)}
+        `;
+        for (const row of privateRows) {
+          records.push({
+            nodeRef: `event:${Number(row.id)}` as NodeRef,
+            kind: "event",
+            visibilityScope: "world_public",
+            locationEntityId: Number(row.location_entity_id ?? 0),
+            ownerAgentId: row.agent_id,
+          });
+        }
       }
     }
 
