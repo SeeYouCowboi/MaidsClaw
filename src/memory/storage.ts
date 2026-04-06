@@ -283,6 +283,21 @@ export class GraphStorageService {
     return this.resolveNow(this.delegates.nodeScoreRepo.getEmbeddingStatsByModel());
   }
 
+  /**
+   * Async API surface — delegates directly to the underlying repo promises.
+   * Use this when the storage is backed by PG (or any async backend) where
+   * `Bun.peek()` in the sync facade would fail on unresolved promises.
+   *
+   * Usage:
+   * ```typescript
+   * const id = await storage.async.upsertEntity(params);
+   * await storage.async.upsertNodeScores(ref, s, c, b);
+   * ```
+   */
+  get async(): GraphStorageAsyncApi {
+    return new GraphStorageAsyncApi(this.delegates);
+  }
+
   private resolveNow<T>(value: Promise<T> | T): T {
     if (!(value instanceof Promise)) {
       return value;
@@ -292,6 +307,124 @@ export class GraphStorageService {
       throw new Error("GraphStorageService sync facade received unresolved async repo result");
     }
     return settledValue as T;
+  }
+}
+
+export class GraphStorageAsyncApi {
+  constructor(private readonly delegates: GraphStorageDelegateRegistry) {}
+
+  createProjectedEvent(params: CreateProjectedEventInput): Promise<number> {
+    return this.delegates.graphStoreRepo.createProjectedEvent(params);
+  }
+
+  createPromotedEvent(params: CreatePromotedEventInput): Promise<number> {
+    return this.delegates.graphStoreRepo.createPromotedEvent(params);
+  }
+
+  createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType): Promise<number> {
+    return this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType);
+  }
+
+  createTopic(name: string, description?: string): Promise<number> {
+    return this.delegates.graphStoreRepo.createTopic(name, description);
+  }
+
+  upsertEntity(params: UpsertEntityInput): Promise<number> {
+    return this.delegates.graphStoreRepo.upsertEntity(params);
+  }
+
+  resolveEntityByPointerKey(pointerKey: string, agentId: string): Promise<number | null> {
+    return this.delegates.graphStoreRepo.resolveEntityByPointerKey(pointerKey, agentId);
+  }
+
+  getEntityById(id: number): Promise<{ pointerKey: string } | null> {
+    return this.delegates.graphStoreRepo.getEntityById(id);
+  }
+
+  upsertExplicitAssertion(params: UpsertExplicitAssertionInput): Promise<{ id: number; ref: NodeRef }> {
+    return this.delegates.graphStoreRepo.upsertExplicitAssertion(params);
+  }
+
+  upsertExplicitEvaluation(params: UpsertExplicitEvaluationInput): Promise<{ id: number; ref: NodeRef }> {
+    return this.delegates.graphStoreRepo.upsertExplicitEvaluation(params);
+  }
+
+  upsertExplicitCommitment(params: UpsertExplicitCommitmentInput): Promise<{ id: number; ref: NodeRef }> {
+    return this.delegates.graphStoreRepo.upsertExplicitCommitment(params);
+  }
+
+  retractExplicitCognition(
+    agentId: string,
+    cognitionKey: string,
+    kind: "assertion" | "evaluation" | "commitment",
+    settlementId?: string,
+  ): Promise<void> {
+    return this.delegates.graphStoreRepo.retractExplicitCognition(agentId, cognitionKey, kind, settlementId);
+  }
+
+  createEntityAlias(canonicalId: number, alias: string, aliasType?: string, ownerAgentId?: string): Promise<number> {
+    return this.delegates.graphStoreRepo.createEntityAlias(canonicalId, alias, aliasType, ownerAgentId);
+  }
+
+  createFact(sourceEntityId: number, targetEntityId: number, predicate: string, sourceEventId?: number): Promise<number> {
+    return this.delegates.graphStoreRepo.createFact(sourceEntityId, targetEntityId, predicate, sourceEventId);
+  }
+
+  invalidateFact(factId: number): Promise<void> {
+    return this.delegates.graphStoreRepo.invalidateFact(factId);
+  }
+
+  createPrivateEvent(params: CreatePrivateEventInput): Promise<number> {
+    return this.delegates.graphStoreRepo.createPrivateEvent(params);
+  }
+
+  createPrivateBelief(params: CreatePrivateBeliefInput): Promise<number> {
+    return this.delegates.graphStoreRepo.createPrivateBelief(params);
+  }
+
+  syncSearchDoc(
+    scope: SearchScope,
+    sourceRef: NodeRef,
+    content: string,
+    agentId?: string,
+    locationEntityId?: number,
+  ): Promise<number> {
+    return this.delegates.searchProjectionRepo.syncSearchDoc(scope, sourceRef, content, agentId, locationEntityId);
+  }
+
+  removeSearchDoc(scope: SearchScope, sourceRef: NodeRef): Promise<void> {
+    return this.delegates.searchProjectionRepo.removeSearchDoc(scope, sourceRef);
+  }
+
+  upsertNodeEmbedding(
+    nodeRef: NodeRef,
+    nodeKind: NodeRefKind,
+    viewType: "primary" | "keywords" | "context",
+    modelId: string,
+    embedding: Float32Array,
+  ): Promise<void> {
+    return this.delegates.embeddingRepo.upsert(nodeRef, nodeKind, viewType, modelId, embedding);
+  }
+
+  upsertSemanticEdge(
+    sourceRef: NodeRef,
+    targetRef: NodeRef,
+    relationType: SemanticEdgeType,
+    weight: number,
+  ): Promise<void> {
+    return this.delegates.semanticEdgeRepo.upsert(sourceRef, targetRef, relationType, weight);
+  }
+
+  upsertNodeScores(nodeRef: NodeRef, salience: number, centrality: number, bridgeScore: number): Promise<void> {
+    return this.delegates.nodeScoreRepo.upsert(nodeRef, salience, centrality, bridgeScore);
+  }
+
+  createSameEpisodeEdges(events: SameEpisodeEvent[]): Promise<void> {
+    return this.delegates.graphStoreRepo.createSameEpisodeEdges(events);
+  }
+
+  getEmbeddingStatsByModel(): Promise<Array<{ model_id: string; count: number; dimension: number }>> {
+    return this.delegates.nodeScoreRepo.getEmbeddingStatsByModel();
   }
 }
 
