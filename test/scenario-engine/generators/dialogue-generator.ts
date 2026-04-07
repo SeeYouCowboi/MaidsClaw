@@ -14,6 +14,8 @@ export type GeneratedDialogue = {
 export type DialogueGenOptions = {
   turnsPerBeat?: number; // default: 6 (range 4-8)
   modelId?: string; // which LLM model to use for generation
+  onBeatGenerated?: (beat: GeneratedDialogue, allSoFar: GeneratedDialogue[]) => void;
+  skipBeatIds?: Set<string>; // beats already cached — skip generation
 };
 
 type LlmBackend = "anthropic" | "openai";
@@ -181,17 +183,25 @@ async function callOpenAIRaw(
   baseUrl?: string,
   extraHeaders?: Record<string, string>,
 ): Promise<string> {
-  // Some third-party providers (e.g. Kimi K2.5) reject custom temperature.
-  const supportsTemperature = !baseUrl || baseUrl.includes("openai.com");
+  const isMoonshot = !!baseUrl && baseUrl.includes("moonshot.cn");
+  const isThirdParty = !!baseUrl && !baseUrl.includes("openai.com");
+  const maxTokens = isThirdParty ? 8192 : 2048;
   const reqBody: Record<string, unknown> = {
     model: modelId,
-    max_tokens: 2048,
+    max_tokens: maxTokens,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: "Generate the dialogue now." },
     ],
   };
-  if (supportsTemperature) reqBody.temperature = 0.7;
+  // Kimi K2.5: disable thinking for dialogue generation — structured output
+  // doesn't benefit from reasoning and it wastes ~35s per call.
+  if (isMoonshot) {
+    reqBody.thinking = { type: "disabled" };
+    reqBody.temperature = 0.7;
+  } else if (!isThirdParty) {
+    reqBody.temperature = 0.7;
+  }
 
   const response = await fetch(`${baseUrl ?? "https://api.openai.com"}/v1/chat/completions`, {
     method: "POST",
@@ -209,9 +219,13 @@ async function callOpenAIRaw(
   }
 
   const json = (await response.json()) as {
-    choices: Array<{ message?: { content?: string } }>;
+    choices: Array<{ message?: { content?: string; reasoning_content?: string } }>;
   };
-  const content = json.choices?.[0]?.message?.content;
+  const message = json.choices?.[0]?.message;
+  // Reasoning models (e.g. Kimi K2.5) may place the actual output in
+  // reasoning_content when the content field is empty or when the model's
+  // internal reasoning accidentally includes the structured output.
+  const content = message?.content || message?.reasoning_content;
   if (!content) {
     throw new Error("OpenAI response contained no message content");
   }
@@ -278,10 +292,11 @@ async function callLlmWithCorrection(
     return json.content.find((b) => b.type === "text")?.text ?? "";
   } else {
     const url = `${detected.baseUrl ?? "https://api.openai.com"}/v1/chat/completions`;
-    const supportsTemp = !detected.baseUrl || detected.baseUrl.includes("openai.com");
+    const isMoonshot = !!detected.baseUrl && detected.baseUrl.includes("moonshot.cn");
+    const isThirdParty = !!detected.baseUrl && !detected.baseUrl.includes("openai.com");
     const reqBody: Record<string, unknown> = {
       model: modelId,
-      max_tokens: 2048,
+      max_tokens: isThirdParty ? 8192 : 2048,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: "Generate the dialogue now." },
@@ -289,7 +304,12 @@ async function callLlmWithCorrection(
         { role: "user", content: correctionMsg },
       ],
     };
-    if (supportsTemp) reqBody.temperature = 0.7;
+    if (isMoonshot) {
+      reqBody.thinking = { type: "disabled" };
+      reqBody.temperature = 0.7;
+    } else if (!isThirdParty) {
+      reqBody.temperature = 0.7;
+    }
 
     const resp = await fetch(url, {
       method: "POST",
@@ -301,8 +321,9 @@ async function callLlmWithCorrection(
       body: JSON.stringify(reqBody),
     });
     if (!resp.ok) throw new Error(`OpenAI correction API ${resp.status}: ${await resp.text()}`);
-    const json = (await resp.json()) as { choices: Array<{ message?: { content?: string } }> };
-    return json.choices?.[0]?.message?.content ?? "";
+    const json = (await resp.json()) as { choices: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+    const message = json.choices?.[0]?.message;
+    return message?.content || message?.reasoning_content || "";
   }
 }
 
@@ -367,6 +388,10 @@ export async function generateDialogue(
 
   for (let beatIdx = 0; beatIdx < story.beats.length; beatIdx++) {
     const beat = story.beats[beatIdx];
+    if (options?.skipBeatIds?.has(beat.id)) {
+      console.log(`[dialogue-gen] (${beatIdx + 1}/${story.beats.length}) beat "${beat.id}" — skipped (cached)`);
+      continue;
+    }
     console.log(`[dialogue-gen] (${beatIdx + 1}/${story.beats.length}) generating beat "${beat.id}"...`);
     const systemPrompt = buildSystemPrompt(story, beat, turnsPerBeat);
     let rawTurns: RawTurn[] | undefined;
@@ -419,10 +444,12 @@ export async function generateDialogue(
       );
     }
 
-    results.push({
+    const entry: GeneratedDialogue = {
       beatId: beat.id,
       turns: assignTimestamps(rawTurns, beat.timestamp),
-    });
+    };
+    results.push(entry);
+    options?.onBeatGenerated?.(entry, results);
   }
 
   return results;

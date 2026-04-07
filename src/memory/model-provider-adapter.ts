@@ -30,6 +30,8 @@ export class MemoryTaskModelProviderAdapter implements MemoryTaskModelProvider {
       modelId: this.chatModelId,
       messages,
       tools,
+      toolChoice: { type: "any" },
+      disableThinking: true,
     })) {
       if (chunk.type === "tool_use_start") {
         calls.set(chunk.id, { name: chunk.name, partialJson: "" });

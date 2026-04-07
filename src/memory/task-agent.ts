@@ -64,6 +64,7 @@ export type MemoryFlushRequest = CoreMemoryFlushRequest & {
   interactionRecords?: InteractionRecord[];
   agentRole?: AgentRole;
   writeTemplateOverride?: WriteTemplate;
+  outputLanguageHint?: string;
 };
 
 export type GraphOrganizerJob = {
@@ -135,6 +136,36 @@ const UPSERT_ASSERTION_TOOL_NAME = "upsert_assertion";
 const EPISODE_EVENT_IDS_KEY = "episode_event_ids";
 const ASSERTION_IDS_KEY = "assertion_ids";
 
+const MIGRATION_SYSTEM_PROMPT_EN =
+  "You are a memory migration engine. " +
+  "Phase 1 Extract: identify durable events/entities/relationships. " +
+  "Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. " +
+  "Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private." +
+  "\n\nKey rules:" +
+  "\n1. Every episode MUST include projectable_summary (a one-sentence keyword-rich summary). Use original key nouns and proper names from the dialogue — do not paraphrase." +
+  "\n2. private_notes should capture detailed event information, preserving original wording for evidence, actions, and important details." +
+  "\n3. Each dialogue segment should produce at least 1 episode and relevant assertions. When dialogue involves character relationships, factual judgments, or behavioral observations, call upsert_assertion to record key facts." +
+  "\n4. Avoid creating duplicate entities — check existingContext first.";
+
+const MIGRATION_SYSTEM_PROMPT_ZH =
+  "你是一个记忆迁移引擎。" +
+  "第一阶段：提取——识别持久的事件、实体和关系。" +
+  "第二阶段：比较——仅在相同作用域内检查现有图上下文中的重复项和冲突。" +
+  "第三阶段：综合——保留令人意外和持久的信息。将每个输出分类为 shared_public 或 owner_private。" +
+  "\n\n关键规则：" +
+  "\n1. 所有文本字段（private_notes、projectable_summary、role、emotion、predicate、provenance）必须使用中文输出。" +
+  "\n2. 每个 episode 必须提供 projectable_summary（一句话关键词摘要）。projectable_summary 必须包含对话中出现的原始关键词和专有名词，禁止用同义词替换。" +
+  "\n3. private_notes 应详细记录事件细节，保留对话中的关键证据描述、人物行为和重要细节的原始措辞。" +
+  "\n4. 每段对话通常应产出至少 1 个 episode 和相关的 assertion。当对话涉及人物关系、事实判断、行为观察时，必须同时调用 upsert_assertion 记录关键事实。predicate 应使用中文描述（如\"监视入口\"、\"伪装成邮差\"、\"进入并离开\"）。" +
+  "\n5. 避免创建重复实体——先检查 existingContext 中是否已有同名或同义实体。";
+
+function buildMigrationSystemPrompt(languageHint?: string): string {
+  if (languageHint && /chinese|中文|zh/i.test(languageHint)) {
+    return MIGRATION_SYSTEM_PROMPT_ZH;
+  }
+  return MIGRATION_SYSTEM_PROMPT_EN;
+}
+
 const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   {
     name: CREATE_EPISODE_EVENT_TOOL_NAME,
@@ -142,7 +173,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
       "Create private episode events. Use for owner-private thoughts, observations, and public-candidate emission.",
     inputSchema: {
       type: "object",
-      required: ["role", "private_notes", "salience", "emotion", "event_category", "primary_actor_entity_id", "projection_class"],
+      required: ["role", "private_notes", "salience", "emotion", "event_category", "primary_actor_entity_id", "projection_class", "projectable_summary"],
       properties: {
         role: { type: "string" },
         private_notes: { type: "string" },
@@ -153,7 +184,7 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
         projection_class: { type: "string" },
         location_entity_id: { type: ["number", "string", "null"] },
         event_id: { type: ["number", "null"] },
-        projectable_summary: { type: ["string", "null"] },
+        projectable_summary: { type: "string", description: "Required. One-sentence searchable summary of this episode — used as the primary text search index. Must include key nouns, names, and evidence terms from the dialogue." },
         source_record_id: { type: ["string", "null"] },
       },
       additionalProperties: false,
@@ -538,12 +569,13 @@ export class MemoryTaskAgent {
         explicitSettlements: [],
       };
 
+      const systemPrompt = buildMigrationSystemPrompt(flushRequest.outputLanguageHint);
+
       const callOne = await this.modelProvider.chat(
         [
           {
             role: "system",
-            content:
-              "You are a memory migration engine. Phase 1 Extract: identify durable events/entities/relationships. Phase 2 Compare: check current graph context for duplicates/conflicts within same scope only. Phase 3 Synthesize: keep surprising and persistent information. Classify each output as shared_public or owner_private.",
+            content: systemPrompt,
           },
           {
             role: "user",

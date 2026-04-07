@@ -108,9 +108,22 @@ export async function generateOrLoadDialogue(
   options?: DialogueGenOptions,
 ): Promise<GeneratedDialogue[]> {
   const cached = loadCachedDialogue(story.id);
-  if (cached) return cached;
+  if (cached && cached.length >= story.beats.length) return cached;
 
-  const generated = await generateDialogue(story, options);
-  saveCachedDialogue(story.id, generated);
-  return generated;
+  // Partial cache: resume from where we left off
+  const existing = cached ?? [];
+  const existingBeatIds = new Set(existing.map((d) => d.beatId));
+
+  const generated = await generateDialogue(story, {
+    ...options,
+    skipBeatIds: existingBeatIds,
+    onBeatGenerated: (beat, allNew) => {
+      // Incrementally save after each beat so progress is not lost
+      saveCachedDialogue(story.id, [...existing, ...allNew]);
+    },
+  });
+
+  const merged = [...existing, ...generated];
+  saveCachedDialogue(story.id, merged);
+  return merged;
 }

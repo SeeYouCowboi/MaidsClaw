@@ -19,12 +19,17 @@ export function matchProbeResults(
   const missed: string[] = [];
 
   for (const fragment of probe.expectedFragments) {
-    const lower = fragment.toLowerCase();
-    const found = topHits.some((h) => h.content.toLowerCase().includes(lower));
-    if (found) {
-      matched.push(fragment);
+    // Support OR matching: if fragment is an array, any alternative counts as a match.
+    const alternatives = Array.isArray(fragment) ? fragment : [fragment];
+    const matchedAlt = alternatives.find((alt) => {
+      const lower = alt.toLowerCase();
+      return topHits.some((h) => h.content.toLowerCase().includes(lower));
+    });
+    const label = Array.isArray(fragment) ? fragment.join("|") : fragment;
+    if (matchedAlt) {
+      matched.push(matchedAlt);
     } else {
-      missed.push(fragment);
+      missed.push(label);
     }
   }
 

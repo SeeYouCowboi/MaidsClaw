@@ -45,6 +45,7 @@ export type ChatCompletionRequest = {
   maxTokens?: number;
   temperature?: number;
   systemPrompt?: string;
+  disableThinking?: boolean;
 };
 
 export interface ChatModelProvider {

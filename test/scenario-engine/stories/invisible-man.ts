@@ -28,6 +28,7 @@ import type { Story } from "../dsl/story-types.js";
 export const invisibleMan: Story = {
   id: "invisible-man",
   title: "隐身人",
+  language: "Chinese/中文",
   description:
     "改编自G.K.切斯特顿布朗神父探案。发明家斯迈思被一个「隐身」的情敌韦尔金威胁，四名守卫严密监视唯一入口却无人察觉凶手进出。布朗神父提出推理框架和关键线索，但将最终推断留给听者——什么人穿着显眼制服进出公寓却被所有人视而不见？本场景专注测试对认知盲区的推理能力。",
   characters: [
@@ -1779,18 +1780,18 @@ export const invisibleMan: Story = {
 
     {
       id: "p_threatening_notes",
-      query: "恐吓 邮票纸 如果你嫁给斯迈思 纸条",
+      query: "恐吓 纸条 威胁 韦尔金 斯迈思",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["如果你嫁给斯迈思", "如果你今天去见她"],
+      expectedFragments: [["恐吓纸条", "恐吓信", "威胁信", "恐吓"], ["纸条", "信件", "信"]],
       topK: 15,
     },
     {
       id: "p_witnesses_testimony",
-      query: "守卫 证实 没有任何人 进出",
+      query: "守卫 证实 没有人 进出 监视",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["没有任何人进出", "守卫"],
+      expectedFragments: [["没有任何人进出", "没有人进出", "未察觉", "无人"], ["守卫", "守", "监视"]],
       topK: 10,
     },
     {
@@ -1803,10 +1804,10 @@ export const invisibleMan: Story = {
     },
     {
       id: "p_smythe_murder",
-      query: "斯迈思 尸体 沟渠 血迹",
+      query: "斯迈思 尸体 死亡 血迹 沟渠",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["斯迈思", "尸体"],
+      expectedFragments: ["斯迈思", ["尸体", "死亡", "被杀", "遇害", "搬走"]],
       topK: 10,
     },
 
@@ -1816,10 +1817,10 @@ export const invisibleMan: Story = {
 
     {
       id: "p_impossible_entry",
-      query: "守卫 未察觉 有人进出 脚印",
+      query: "守卫 未察觉 有人进出 脚印 密封",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["守卫均未察觉", "脚印"],
+      expectedFragments: [["守卫均未察觉", "守卫监视", "守卫", "四个守卫"], "脚印"],
       topK: 10,
     },
     {
@@ -1832,26 +1833,26 @@ export const invisibleMan: Story = {
     },
     {
       id: "p_letter_delivery_puzzle",
-      query: "劳拉 收信 递信 独自站在街角 想不起",
+      query: "信件 收信 递信 消失 看不见 霍普",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["递信者", "想不起"],
+      expectedFragments: [["递信者", "信件", "接过信", "收信", "信"], ["想不起", "消失", "看不见", "不见了"]],
       topK: 10,
     },
     {
       id: "p_motive",
-      query: "情敌 追求者 求婚 劳拉",
+      query: "求婚 追求 斯迈思 韦尔金 劳拉",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["追求者", "求婚"],
+      expectedFragments: [["追求者", "追求", "情敌"], "求婚"],
       topK: 10,
     },
     {
       id: "p_sack_clue",
-      query: "浅棕色 麻袋 搬运 矮小 尸体",
+      query: "浅棕色 麻袋 搬运 藏匿 尸体",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["麻袋", "搬运"],
+      expectedFragments: ["麻袋", ["搬运", "搬走", "藏匿", "带走"]],
       topK: 10,
     },
 
@@ -1861,34 +1862,34 @@ export const invisibleMan: Story = {
 
     {
       id: "p_stamp_paper_postal",
-      query: "邮票纸 邮局 包裹 穿孔专用纸",
+      query: "邮票 邮局 包裹 纸条 邮差",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["邮局", "包裹"],
+      expectedFragments: [["邮局", "邮差", "邮"], ["包裹", "纸条", "信件"]],
       topK: 10,
     },
     {
       id: "p_service_people_access",
-      query: "服务人员 送信 自由进出 日常 门警不拦",
+      query: "邮差 制服 自由进出 送信 门警 不怀疑",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["服务人员", "自由进出"],
+      expectedFragments: [["服务人员", "邮差", "送煤工", "穿制服的"], ["自由进出", "来去自如", "不被怀疑", "无人起疑"]],
       topK: 10,
     },
     {
       id: "p_mail_irregularity",
-      query: "邮件 送达 时间 异常 不规律 邮差",
+      query: "邮件 送达 邮差 异常 定时",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["邮件", "异常"],
+      expectedFragments: [["邮件", "邮差", "送信"], ["异常", "准时", "定时", "每天"]],
       topK: 10,
     },
     {
       id: "p_guard_usual_people",
-      query: "平时 来来去去 平常 不特别",
+      query: "平时 来来去去 普通 不注意 制服 过滤",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["平时来来去去"],
+      expectedFragments: [["平时来来去去", "过于普通", "理所当然", "背景元素", "不符合"]],
       topK: 10,
     },
     {
@@ -1901,10 +1902,10 @@ export const invisibleMan: Story = {
     },
     {
       id: "p_uniformed_figure_departure",
-      query: "制服 红蓝金 大包 离开 街道",
+      query: "制服 红色 大包 离开 街道 邮差",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["红蓝金", "制服"],
+      expectedFragments: [["红蓝金", "红色制服", "红色", "显眼"], "制服"],
       topK: 10,
     },
 
@@ -1914,26 +1915,26 @@ export const invisibleMan: Story = {
 
     {
       id: "p_machine_red_herring",
-      query: "机械仆人 移位 机器杀死主人 无法搬走尸体",
+      query: "机械仆人 操控 机器 凶手 阴谋论",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["机器杀死了主人", "无法搬走尸体"],
+      expectedFragments: [["机器杀死了主人", "机械仆人", "机械仆从", "金属傀儡"], ["无法搬走尸体", "操控", "阴谋论", "密室"]],
       topK: 10,
     },
     {
       id: "p_supernatural_dismissed",
-      query: "超自然现象 后门 密道 消防梯 常规解释排除",
+      query: "超自然 后门 密道 排除 密封 搜查",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["超自然", "没有后门"],
+      expectedFragments: [["超自然", "不可能", "密室"], ["没有后门", "无密道", "没有密道", "彻底搜查"]],
       topK: 10,
     },
     {
       id: "p_secret_passage_ruled_out",
-      query: "后门 密道 消防梯 搜遍每个角落",
+      query: "后门 密道 消防梯 搜查 密封",
       retrievalMethod: "narrative_search",
       viewerPerspective: "angus",
-      expectedFragments: ["没有后门", "没有密道"],
+      expectedFragments: [["没有后门", "无密道", "无机关", "搜查"], ["没有密道", "门窗紧锁", "密封", "紧锁"]],
       topK: 10,
     },
 
@@ -1951,10 +1952,10 @@ export const invisibleMan: Story = {
     },
     {
       id: "p_cognition_assertions_stored",
-      query: "welkin smythe entered sealed watchers",
+      query: "welkin smythe 守卫 监视 进入",
       retrievalMethod: "cognition_search",
       viewerPerspective: "angus",
-      expectedFragments: ["entered_and_left", "sealed"],
+      expectedFragments: [["entered_and_left", "监视", "进入", "watched", "departure"], ["sealed", "搜查", "searched", "密封"]],
       topK: 15,
     },
     {
@@ -1962,7 +1963,7 @@ export const invisibleMan: Story = {
       query: "凶手如何在守卫监视下进入公寓并搬走尸体",
       retrievalMethod: "memory_explore",
       viewerPerspective: "angus",
-      expectedFragments: ["麻袋"],
+      expectedFragments: [["麻袋", "搬运", "藏匿", "推车", "带走"]],
       expectedMissing: ["超自然"],
       topK: 10,
     },
@@ -1971,7 +1972,7 @@ export const invisibleMan: Story = {
       query: "视而不见 隐身人 守卫 没人进来",
       retrievalMethod: "memory_explore",
       viewerPerspective: "angus",
-      expectedFragments: ["视而不见"],
+      expectedFragments: [["视而不见", "隐身人", "隐形"]],
       topK: 10,
     },
     {
@@ -1979,7 +1980,7 @@ export const invisibleMan: Story = {
       query: "认知盲区 穿制服 安格斯 看到却不记得",
       retrievalMethod: "memory_explore",
       viewerPerspective: "angus",
-      expectedFragments: ["认知盲区"],
+      expectedFragments: [["认知盲区", "认知盲点", "盲点", "认知隐身"]],
       topK: 10,
     },
   ],

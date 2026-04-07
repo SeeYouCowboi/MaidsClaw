@@ -278,13 +278,20 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       ? request.modelId.slice(request.modelId.indexOf("/") + 1)
       : request.modelId;
 
+    // When disableThinking is requested on a thinking-capable provider
+    // (identified by disableToolChoiceRequired), we can safely send
+    // tool_choice: "required" because non-thinking mode supports it.
+    const thinkingDisabled = request.disableThinking && this.options.disableToolChoiceRequired;
+
     // Map provider-agnostic toolChoice to OpenAI's tool_choice format
     let toolChoice: string | Record<string, unknown> | undefined;
     if (request.toolChoice) {
       if (request.toolChoice.type === "auto") {
         toolChoice = "auto";
       } else if (request.toolChoice.type === "any") {
-        toolChoice = this.options.disableToolChoiceRequired ? "auto" : "required";
+        // With thinking disabled, "required" is supported even on Moonshot/Kimi
+        const forceAuto = this.options.disableToolChoiceRequired && !thinkingDisabled;
+        toolChoice = forceAuto ? "auto" : "required";
       } else if (request.toolChoice.type === "tool") {
         toolChoice = { type: "function", function: { name: request.toolChoice.name } };
       }
@@ -306,6 +313,12 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       })),
       tool_choice: toolChoice,
     };
+
+    // Kimi K2.5: disable thinking for structured extraction tasks
+    // Only add this param for providers that have thinking capability
+    if (thinkingDisabled) {
+      result.thinking = { type: "disabled" };
+    }
 
     if (this.options.supportsStreamingUsage) {
       result.stream_options = { include_usage: true };

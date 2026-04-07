@@ -78,7 +78,7 @@ type DbCountSnapshot = {
 async function snapshotDbCounts(infra: ScenarioInfra): Promise<DbCountSnapshot> {
   const sql = infra.sql;
   const [entities] = await sql`SELECT count(*)::int AS c FROM entity_nodes`;
-  const [episodes] = await sql`SELECT count(*)::int AS c FROM event_nodes`;
+  const [episodes] = await sql`SELECT count(*)::int AS c FROM private_episode_events`;
   const [assertions] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'assertion'`;
   const [evaluations] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'evaluation'`;
   const [commitments] = await sql`SELECT count(*)::int AS c FROM private_cognition_current WHERE kind = 'commitment'`;
@@ -417,7 +417,7 @@ export async function executeLivePath(
       capturingWrapper.startBeat(beat.id);
       beatCaptureStarted = true;
 
-      const flushRequest = buildFlushRequest(infra, beat, turns, beatIndex);
+      const flushRequest = buildFlushRequest(infra, beat, turns, beatIndex, story.language);
       const agent = createMemoryTaskAgent(infra, runtime, capturingWrapper.provider);
       await agent.runMigrate(flushRequest);
       completedBeatIds.add(beat.id);
@@ -473,6 +473,7 @@ function buildFlushRequest(
   beat: StoryBeat,
   turns: DialogueTurn[],
   beatIndex: number,
+  outputLanguageHint?: string,
 ): MemoryFlushRequest {
   const rangeStart = beatIndex * 10;
   const rangeEnd = turns.length > 0 ? rangeStart + turns.length - 1 : rangeStart;
@@ -493,6 +494,7 @@ function buildFlushRequest(
     interactionRecords: [],
     queueOwnerAgentId: SCENARIO_DEFAULT_AGENT_ID,
     agentRole: "rp_agent",
+    outputLanguageHint,
   };
 }
 
@@ -577,7 +579,10 @@ async function syncLiveEpisodesToSearchDocs(infra: ScenarioInfra): Promise<void>
 
   let synced = 0;
   for (const ep of episodes) {
-    const content = ep.summary || ep.private_notes;
+    // Combine summary + private_notes for maximum search coverage.
+    // Summary is the concise keyword-rich line; private_notes has full detail.
+    const parts = [ep.summary, ep.private_notes].filter(Boolean);
+    const content = parts.join(" | ");
     if (!content) continue;
     await infra.repos.searchProjection.syncSearchDoc(
       "world",

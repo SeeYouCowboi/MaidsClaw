@@ -144,7 +144,7 @@ export type StoryProbe = {
   query: string;
   retrievalMethod: "narrative_search" | "cognition_search" | "memory_read" | "memory_explore";
   viewerPerspective: string; // pointer_key of querying character
-  expectedFragments: string[]; // substrings expected in top-K hits
+  expectedFragments: (string | string[])[]; // substrings expected in top-K hits — array = any-of (OR match)
   expectedMissing?: string[]; // should NOT appear in top-K hits
   topK: number;
 };
@@ -161,6 +161,7 @@ export type Story = {
   id: string; // used for cache file naming
   title: string;
   description: string;
+  language?: string; // e.g. "Chinese/中文", "English" — guides LLM output language
   characters: StoryCharacter[];
   locations: StoryLocation[];
   clues: StoryClue[];
