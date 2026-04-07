@@ -1,0 +1,31 @@
+Fix: Added retrieval service to ScenarioInfra.services
+======================================================
+
+File: test/scenario-engine/runner/infra.ts
+
+Before: buildServices() created RetrievalService with only retrievalRepo.
+  - Would throw at runtime: RetrievalService constructor requires embeddingService,
+    narrativeSearch, cognitionSearch, and orchestrator (IIFE throws on missing deps).
+  - retrieval was returned but never fully constructed.
+
+After: buildServices() now properly constructs RetrievalService with all deps:
+  - retrievalRepo: PgRetrievalReadRepo(sql)
+  - embeddingService: {} as EmbeddingService (stub — scenario-engine never calls
+    embedding methods; fresh DB has 0 embeddings so localizeSeedsHybrid skips
+    the vector path)
+  - narrativeSearch: NarrativeSearchService (already constructed)
+  - cognitionSearch: CognitionSearchService (already constructed)
+  - orchestrator: RetrievalOrchestrator (newly constructed from narrativeSearch
+    and cognitionSearch)
+
+Type change:
+  - ScenarioInfra.services now includes retrieval: RetrievalService
+  - Needed for memory_read probe type in the scenario runner
+
+New imports:
+  - import type { EmbeddingService } from "../../../src/memory/embeddings.js"
+  - import { RetrievalOrchestrator } from "../../../src/memory/retrieval/retrieval-orchestrator.js"
+
+Verification:
+  - bun test test/scenario-engine/runner/infra.test.ts: 0 fail, 4 skip, exit 0
+  - LSP diagnostics: zero errors on infra.ts, infra.test.ts, index.ts

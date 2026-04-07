@@ -1,0 +1,13 @@
+Task 5: Coverage verification for mini-sample.ts
+
+Assertion stances found: hypothetical, tentative, accepted, confirmed, contested, rejected, abandoned (7/7)
+Assertion bases found: first_hand, hearsay, inference, introspection, belief (5/5)
+Cognition kinds found: assertions, evaluations, commitments (3/3)
+Episode categories found: speech, action, observation, state_change (4/4)
+Logic edge types found: causal, temporal_prev, temporal_next, same_episode (4/4)
+Aliases: 1 (guest_ashworth -> Lord_Ashworth)
+Retractions: 1 (butler_innocent)
+Contested assertions with preContestedStance: 1 (butler_innocent in beat b5)
+
+Test result: 9 pass, 0 fail
+Timestamp: 2026-04-06

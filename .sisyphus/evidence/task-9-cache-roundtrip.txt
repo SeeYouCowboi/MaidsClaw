@@ -1,0 +1,23 @@
+Scenario: Dialogue and tool call cache roundtrips
+Tool: bun test
+Steps:
+  1. bun test test/scenario-engine/generators/scenario-cache.test.ts
+  2. Assert dialogue save → load produces identical GeneratedDialogue[]
+  3. Assert tool call save → load produces identical CachedToolCallLog
+
+Result: PASS
+
+Test output:
+bun test v1.3.10 (30e609e0)
+
+scenario-cache
+  ✓ dialogue save → load roundtrip
+  ✓ tool call save → load roundtrip
+  ✓ missing cache returns null
+  ✓ invalidateAllCaches removes all files
+  ✓ checkpoint save → load roundtrip
+
+ 5 pass
+ 0 fail
+ 10 expect() calls
+Ran 5 tests across 1 file. [103.00ms]

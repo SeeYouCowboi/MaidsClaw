@@ -1,0 +1,11 @@
+== T6 Settlement Generator ==
+Command: bun test test/scenario-engine/generators/settlement-generator.test.ts
+
+Result:
+  5 pass
+  0 fail
+  8 expect() calls
+
+Required assertions: entity ordering correct, same cognitionKey across beats, retractions work
+
+VERDICT: PASS

@@ -1,0 +1,30 @@
+Task 16a — Manor Intrigue Story Skeleton Evidence
+
+Story file: test/scenario-engine/stories/manor-intrigue.ts
+Story id: manor-intrigue
+Title: The Silver Key Affair
+
+Entity counts:
+- characters: 8
+- locations: 6
+- clues: 5
+
+Required array stubs:
+- beats: [] (present, intentionally empty for T16b)
+- probes: [] (present, intentionally empty for T16c)
+- eventRelations: [] (present, intentionally empty for T16c)
+
+Phase outline summary:
+- Phase A (beats 1-5): Initial Discovery
+- Phase B (beats 6-10): False Trails
+- Phase C (beats 11-15): Witness Testimony
+- Phase D (beats 16-20): Confrontation
+- Phase E (beats 21-25): Resolution
+- Phase F (beats 26-30): Aftermath
+
+Narrative documentation included in file comments:
+- Main causal chain linking Ashworth -> Oswin -> silver key -> ledger tampering -> Elara testimony -> head_maid investigation.
+- Red herrings RH1-RH3 documented.
+
+Index export update:
+- test/scenario-engine/stories/index.ts exports manorIntrigue.

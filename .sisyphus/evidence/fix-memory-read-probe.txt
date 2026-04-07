@@ -1,0 +1,29 @@
+Fix: memory_read probe execution now uses RetrievalService.readByEntity()
+
+Problem
+=======
+executeMemoryRead was delegating to narrativeSearch.searchNarrative(), which is a
+text-search surface. memory_read should perform a structured entity read via
+RetrievalService.readByEntity(pointerKey, viewerContext).
+
+Changes
+=======
+
+1. test/scenario-engine/runner/infra.ts
+   - Added `retrieval: RetrievalService` to ScenarioInfra.services type (line 53)
+   - Added `retrieval` to buildServices return value (line 120)
+   - RetrievalService was already constructed (line 110) but not exposed
+
+2. test/scenario-engine/probes/probe-executor.ts
+   - Rewrote executeMemoryRead to call handle.infra.services.retrieval.readByEntity()
+   - EntityReadResult flattened to RetrievalHit[] from 4 sources:
+     * entity.summary -> scope "entity", score 1.0
+     * facts[].predicate -> scope "fact", score 0.9
+     * events[].summary|raw_text -> scope "event", score 0.8
+     * episodes[].summary -> scope "episode", score 0.7
+   - source_ref format: "entity:N", "fact:N", "event:N", "episode:N"
+
+Verification
+============
+- Zero LSP errors on both changed files
+- probe-matcher.test.ts: 7/7 pass, 25 expect() calls

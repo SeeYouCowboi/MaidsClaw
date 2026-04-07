@@ -1,0 +1,5 @@
+beatsLength=25
+errorsLength=0
+valid=true
+validateStoryInline=valid: true errors: 0 []
+miniSampleCoverage=pass

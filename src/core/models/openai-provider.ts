@@ -15,6 +15,7 @@ type OpenAIChatProviderOptions = {
   supportsStreamingUsage?: boolean;
   extraHeaders?: Record<string, string>;
   disableToolChoiceRequired?: boolean;
+  embeddingDimensions?: number;
 };
 
 type OpenAIChatDeltaToolCall = {
@@ -247,6 +248,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
         model: bareModelId || this.defaultEmbeddingModel,
         input: texts,
         user: purpose,
+        ...(this.options.embeddingDimensions ? { dimensions: this.options.embeddingDimensions } : {}),
       }),
     });
 

@@ -434,13 +434,16 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     aliasType?: string,
     ownerAgentId?: string,
   ): Promise<number> {
+    const aliasTypeVal = aliasType ?? null;
+    const ownerVal = ownerAgentId ?? null;
+
     const existing = await this.sql`
       SELECT id
       FROM entity_aliases
       WHERE canonical_id = ${canonicalId}
         AND alias = ${alias}
-        AND ((alias_type = ${aliasType ?? null}) OR (alias_type IS NULL AND ${aliasType ?? null} IS NULL))
-        AND ((owner_agent_id = ${ownerAgentId ?? null}) OR (owner_agent_id IS NULL AND ${ownerAgentId ?? null} IS NULL))
+        AND alias_type IS NOT DISTINCT FROM ${aliasTypeVal}::text
+        AND owner_agent_id IS NOT DISTINCT FROM ${ownerVal}::text
       LIMIT 1
     `;
     if (existing.length > 0) {
@@ -449,7 +452,7 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
 
     const inserted = await this.sql`
       INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id)
-      VALUES (${canonicalId}, ${alias}, ${aliasType ?? null}, ${ownerAgentId ?? null})
+      VALUES (${canonicalId}, ${alias}, ${aliasTypeVal}::text, ${ownerVal}::text)
       RETURNING id
     `;
     return Number(inserted[0].id);

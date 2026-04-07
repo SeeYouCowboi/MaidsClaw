@@ -1,0 +1,14 @@
+Task 13 Evidence: Smoke Test — settlement writePath
+
+What it tests:
+- The full deterministic DSL-to-DB pipeline via runScenario(miniSample, { writePath: "settlement" })
+- No LLM or embedding API required — pure DSL settlement writes memory effects directly
+- Verifies all 12 beats process without errors
+- Confirms entity count >= characters(4) + locations(3) + clues(2) = 9
+- Confirms settlementCount matches total beats (12)
+- Runs executeProbes and verifies all 6 probe results are returned with hits arrays
+- Validates matchProbeResults is importable and callable standalone
+
+Guard: describe.skipIf(skipPgTests) — skips entire suite when PG_TEST_URL is unset
+
+File: test/scenario-engine/smoke.test.ts

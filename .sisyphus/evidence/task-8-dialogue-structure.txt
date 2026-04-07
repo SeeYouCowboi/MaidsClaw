@@ -1,0 +1,38 @@
+Task 8: Dialogue Generator — Evidence
+======================================
+
+## GeneratedDialogue Type Structure
+
+DialogueTurn = {
+  role: "user" | "assistant"
+  content: string
+  timestamp: number  (game-world time in ms)
+}
+
+GeneratedDialogue = {
+  beatId: string
+  turns: DialogueTurn[]
+}
+
+DialogueGenOptions = {
+  turnsPerBeat?: number  (default: 6, clamped to 4-8)
+  modelId?: string       (defaults to claude-sonnet-4-20250514 or gpt-4o-mini)
+}
+
+## Exported function
+
+generateDialogue(story: Story, options?: DialogueGenOptions): Promise<GeneratedDialogue[]>
+
+- One LLM call per beat producing 4-8 dialogue turns
+- Supports Anthropic and OpenAI backends via ANTHROPIC_API_KEY / OPENAI_API_KEY env vars
+- Timestamps spread evenly across a 60-second beat window
+- Retries once on JSON parse failure, then throws with clear error
+
+## Note
+
+Actual LLM calls require API keys and are not executed during scaffold/build.
+This is the type definition and implementation skeleton that calls real LLM APIs at runtime.
+
+## Build verification
+
+`bun run build 2>&1 | grep "scenario-engine"` — no output (zero errors)

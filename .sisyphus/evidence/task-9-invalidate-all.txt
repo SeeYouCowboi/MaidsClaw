@@ -1,0 +1,25 @@
+Scenario: invalidateAllCaches removes both files
+Tool: bun test
+Steps:
+  1. Save both dialogue and tool call caches
+  2. Call invalidateAllCaches(storyId)
+  3. Assert both loadCachedDialogue and loadCachedToolCalls return null
+
+Result: PASS
+
+Test output:
+bun test v1.3.10 (30e609e0)
+
+scenario-cache
+  ✓ dialogue save → load roundtrip
+  ✓ tool call save → load roundtrip
+  ✓ missing cache returns null
+  ✓ invalidateAllCaches removes all files
+  ✓ checkpoint save → load roundtrip
+
+ 5 pass
+ 0 fail
+ 10 expect() calls
+Ran 5 tests across 1 file. [103.00ms]
+
+Cache directory state after tests: empty (test cleanup successful)

@@ -1,0 +1,293 @@
+import type { Story, StoryBeat, AssertionStance } from "./story-types.js";
+
+export type ValidationError = { field: string; message: string; beatId?: string };
+export type ValidationResult = { valid: boolean; errors: ValidationError[] };
+
+const LEGAL_STANCE_TRANSITIONS: Record<AssertionStance, AssertionStance[] | undefined> = {
+  hypothetical: undefined,
+  tentative: ["accepted", "contested", "rejected", "abandoned"],
+  accepted: ["confirmed", "contested", "rejected", "abandoned"],
+  confirmed: ["accepted", "contested", "rejected", "abandoned"],
+  contested: ["accepted", "rejected", "abandoned"],
+  rejected: [],
+  abandoned: [],
+};
+
+export function validateStory(story: Story): ValidationResult {
+  const errors: ValidationError[] = [];
+
+  errors.push(...validatePointerKeyRefs(story));
+  errors.push(...validateProbes(story));
+
+  if (story.beats) {
+    errors.push(...validateStanceTransitions(story.beats));
+    errors.push(...validateEpisodeCategories(story.beats));
+    errors.push(...validateContestedAssertions(story.beats));
+    errors.push(...validateLogicEdgeTargets(story.beats));
+
+    for (const beat of story.beats) {
+      errors.push(...validateBeat(beat, story));
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function validateBeat(beat: StoryBeat, story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  if (!beat.id) errors.push({ field: "id", message: "Beat id is required", beatId: beat.id });
+  if (!beat.phase) errors.push({ field: "phase", message: "Beat phase is required", beatId: beat.id });
+  if (typeof beat.round !== "number") errors.push({ field: "round", message: "Beat round is required", beatId: beat.id });
+  if (typeof beat.timestamp !== "number") errors.push({ field: "timestamp", message: "Beat timestamp is required", beatId: beat.id });
+  if (!beat.locationId) errors.push({ field: "locationId", message: "Beat locationId is required", beatId: beat.id });
+  if (!Array.isArray(beat.participantIds)) errors.push({ field: "participantIds", message: "Beat participantIds is required", beatId: beat.id });
+  if (typeof beat.dialogueGuidance !== "string") errors.push({ field: "dialogueGuidance", message: "Beat dialogueGuidance is required", beatId: beat.id });
+  if (!beat.memoryEffects) errors.push({ field: "memoryEffects", message: "Beat memoryEffects is required", beatId: beat.id });
+
+  const characterIds = new Set(story.characters?.map((c) => c.id) ?? []);
+  const locationIds = new Set(story.locations?.map((l) => l.id) ?? []);
+
+  if (beat.locationId && !locationIds.has(beat.locationId) && !characterIds.has(beat.locationId)) {
+    errors.push({
+      field: "locationId",
+      message: `locationId '${beat.locationId}' does not reference a valid location or character`,
+      beatId: beat.id,
+    });
+  }
+
+  if (Array.isArray(beat.participantIds)) {
+    for (const pid of beat.participantIds) {
+      if (!characterIds.has(pid)) {
+        errors.push({
+          field: "participantIds",
+          message: `participantIds contains invalid character reference '${pid}'`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateStanceTransitions(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const grouped = new Map<string, { stance: AssertionStance; round: number; beatId: string }[]>();
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.assertions) continue;
+    for (const assertion of beat.memoryEffects.assertions) {
+      if (!grouped.has(assertion.cognitionKey)) {
+        grouped.set(assertion.cognitionKey, []);
+      }
+      grouped.get(assertion.cognitionKey)?.push({
+        stance: assertion.stance,
+        round: beat.round,
+        beatId: beat.id,
+      });
+    }
+  }
+
+  for (const [key, entries] of grouped) {
+    entries.sort((a, b) => a.round - b.round);
+    for (let i = 1; i < entries.length; i++) {
+      const prev = entries[i - 1].stance;
+      const next = entries[i].stance;
+      const allowed = LEGAL_STANCE_TRANSITIONS[prev];
+      if (allowed !== undefined && !allowed.includes(next)) {
+        errors.push({
+          field: "stanceTransition",
+          message: `Illegal stance transition for key '${key}': ${prev} → ${next}`,
+          beatId: entries[i].beatId,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateEpisodeCategories(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.episodes) continue;
+    for (const episode of beat.memoryEffects.episodes) {
+      if ((episode.category as string) === "thought") {
+        errors.push({
+          field: "episodeCategory",
+          message: `Invalid episode category 'thought' in beat '${beat.id}' — 'thought' is not a valid EpisodeCategory`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateContestedAssertions(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.assertions) continue;
+    for (const assertion of beat.memoryEffects.assertions) {
+      if (assertion.stance === "contested" && assertion.preContestedStance === undefined) {
+        errors.push({
+          field: "preContestedStance",
+          message: `Assertion '${assertion.cognitionKey}' in beat '${beat.id}' has stance 'contested' but missing required field 'preContestedStance'`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateLogicEdgeTargets(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const episodeIds = new Set<string>();
+
+  for (const beat of beats) {
+    if (beat.memoryEffects?.episodes) {
+      for (const episode of beat.memoryEffects.episodes) {
+        episodeIds.add(episode.id);
+      }
+    }
+  }
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.logicEdges) continue;
+    for (const edge of beat.memoryEffects.logicEdges) {
+      if (!episodeIds.has(edge.fromEpisodeId)) {
+        errors.push({
+          field: "logicEdge",
+          message: `LogicEdge in beat '${beat.id}' references unknown episode ID '${edge.fromEpisodeId}' in fromEpisodeId/toEpisodeId`,
+          beatId: beat.id,
+        });
+      }
+      if (!episodeIds.has(edge.toEpisodeId)) {
+        errors.push({
+          field: "logicEdge",
+          message: `LogicEdge in beat '${beat.id}' references unknown episode ID '${edge.toEpisodeId}' in fromEpisodeId/toEpisodeId`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validatePointerKeyRefs(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const validIds = new Set<string>([
+    ...(story.characters?.map((c) => c.id) ?? []),
+    ...(story.locations?.map((l) => l.id) ?? []),
+    ...(story.clues?.map((c) => c.id) ?? []),
+  ]);
+
+  for (const beat of story.beats ?? []) {
+    if (beat.locationId && !validIds.has(beat.locationId)) {
+      errors.push({
+        field: "locationId",
+        message: `Unknown pointer_key '${beat.locationId}' referenced in beat '${beat.id}' field 'locationId'`,
+        beatId: beat.id,
+      });
+    }
+
+    if (Array.isArray(beat.participantIds)) {
+      for (const pid of beat.participantIds) {
+        if (!validIds.has(pid)) {
+          errors.push({
+            field: "participantIds",
+            message: `Unknown pointer_key '${pid}' referenced in beat '${beat.id}' field 'participantIds'`,
+            beatId: beat.id,
+          });
+        }
+      }
+    }
+
+    if (beat.memoryEffects?.newAliases) {
+      for (const alias of beat.memoryEffects.newAliases) {
+        if (!validIds.has(alias.entityId)) {
+          errors.push({
+            field: "newAliases",
+            message: `Unknown pointer_key '${alias.entityId}' referenced in beat '${beat.id}' field 'newAliases'`,
+            beatId: beat.id,
+          });
+        }
+      }
+    }
+
+    if (beat.memoryEffects?.assertions) {
+      for (const assertion of beat.memoryEffects.assertions) {
+        if (!validIds.has(assertion.subjectId)) {
+          errors.push({
+            field: "assertion.subjectId",
+            message: `Unknown pointer_key '${assertion.subjectId}' referenced in beat '${beat.id}' field 'assertion.subjectId'`,
+            beatId: beat.id,
+          });
+        }
+        if (!validIds.has(assertion.objectId)) {
+          errors.push({
+            field: "assertion.objectId",
+            message: `Unknown pointer_key '${assertion.objectId}' referenced in beat '${beat.id}' field 'assertion.objectId'`,
+            beatId: beat.id,
+          });
+        }
+      }
+    }
+
+    if (beat.memoryEffects?.evaluations) {
+      for (const evaluation of beat.memoryEffects.evaluations) {
+        if (!validIds.has(evaluation.subjectId)) {
+          errors.push({
+            field: "evaluation.subjectId",
+            message: `Unknown pointer_key '${evaluation.subjectId}' referenced in beat '${beat.id}' field 'evaluation.subjectId'`,
+            beatId: beat.id,
+          });
+        }
+        if (!validIds.has(evaluation.objectId)) {
+          errors.push({
+            field: "evaluation.objectId",
+            message: `Unknown pointer_key '${evaluation.objectId}' referenced in beat '${beat.id}' field 'evaluation.objectId'`,
+            beatId: beat.id,
+          });
+        }
+      }
+    }
+
+    if (beat.memoryEffects?.commitments) {
+      for (const commitment of beat.memoryEffects.commitments) {
+        if (!validIds.has(commitment.subjectId)) {
+          errors.push({
+            field: "commitment.subjectId",
+            message: `Unknown pointer_key '${commitment.subjectId}' referenced in beat '${beat.id}' field 'commitment.subjectId'`,
+            beatId: beat.id,
+          });
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateProbes(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const characterIds = new Set(story.characters?.map((c) => c.id) ?? []);
+
+  for (const probe of story.probes ?? []) {
+    if (!characterIds.has(probe.viewerPerspective)) {
+      errors.push({
+        field: "viewerPerspective",
+        message: `Probe '${probe.id}' viewerPerspective '${probe.viewerPerspective}' does not match any character.id`,
+      });
+    }
+  }
+
+  return errors;
+}

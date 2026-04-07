@@ -1,0 +1,20 @@
+Evidence: report-generator.ts report format verification
+Date: 2026-04-06
+
+generateReport() produces markdown with:
+- # Scenario Report: {title}
+- WritePath, Duration, Generated timestamp
+- ## Summary with beats processed/errors and probes passed/total
+- ## Per-Beat Error Summary table (Beat ID | Error)
+- ## Probe Results with per-probe sections: icon + method + query + score
+  - Matched/Missed/Unexpected/Status lines as specified
+
+generateComparisonReport() produces:
+- Probe Score Comparison table (Probe ID | Scripted | Settlement | Delta)
+- Extraction Summary with matched/fell-short/unexpected counts
+
+saveReport() writes to test/scenario-engine/reports/{storyId}-{suffix}-report.md
+with mkdirSync recursive.
+
+All three functions exported from report-generator.ts and re-exported via index.ts.
+Zero LSP errors.

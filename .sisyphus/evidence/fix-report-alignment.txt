@@ -1,0 +1,22 @@
+Evidence: Alignment functions added to report-generator.ts
+Date: 2026-04-06
+
+Types added:
+- AlignedComparison: probeId, query, scriptedScore, settlementScore, delta, scriptedPassed, settlementPassed
+- CognitionAlignment: pointerKeyPair, predicate, inSettlement, inScripted, status (match|gap|surprise)
+
+Functions added:
+1. alignProbeResults(scriptedResults, settlementResults, story) -> AlignedComparison[]
+   - Matches by probe.id
+   - delta = scriptedScore - settlementScore
+   - Handles probes present in only one side
+
+2. alignCognitionState(scriptedInfra, settlementInfra, story) -> Promise<CognitionAlignment[]>
+   - Uses SCENARIO_DEFAULT_AGENT_ID with repos.cognition.getAllCurrent()
+   - Parses record_json for sourcePointerKey+targetPointerKey and predicate
+   - Aligns by composite key (pointerKeyPair||predicate)
+   - Falls back to [] on error (with TODO for repo availability)
+
+All exported via index.ts wildcard re-export.
+LSP: 0 errors
+Tests: 3 pass, 0 fail

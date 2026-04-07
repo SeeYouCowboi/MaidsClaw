@@ -1,0 +1,25 @@
+Task 16c: Fill probes array in manor-intrigue.ts
+================================================
+
+Validation Result:
+  valid: true
+  errors: 0
+
+Probes:
+  probes.length: 17
+  All 4 retrieval methods present: narrative_search, cognition_search, memory_read, memory_explore
+  Viewer perspectives: head_maid, gardener_elara, housekeeper_chen (count: 3)
+  Negative probes (expectedMissing): 4 (p1, p4, p5, p17)
+
+Scale Check:
+  beats.length: 25
+  estimated dialogue turns: 25 × 6 = 150 (≥ 100 requirement met)
+
+LSP Diagnostics:
+  manor-intrigue.ts: 0 errors
+
+Probe Breakdown:
+  Group 1 - narrative_search (5): p1, p2, p3, p4, p5
+  Group 2 - cognition_search (5): p6, p7, p8, p9, p10
+  Group 3 - memory_read (3): p11, p12, p13
+  Group 4 - memory_explore (4): p14, p15, p16, p17

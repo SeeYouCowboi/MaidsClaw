@@ -5,6 +5,7 @@ import type {
   NarrativeSearchQuery,
   NarrativeSearchRepo,
 } from "../contracts/narrative-search-repo.js";
+import { isCjkQuery, decomposeCjk, type CjkDecomposition } from "./cjk-search-utils.js";
 
 type PgNarrativeSearchRow = {
   source_ref: string;
@@ -28,7 +29,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     viewerContext: ViewerContext,
   ): Promise<NarrativeSearchHit[]> {
     const trimmed = query.text.trim();
-    if (trimmed.length < 3) {
+    if (trimmed.length < 2) {
       return [];
     }
 
@@ -40,6 +41,84 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
 
     const limit = Math.max(1, query.limit ?? DEFAULT_LIMIT);
     const minScore = query.minScore ?? DEFAULT_MIN_SCORE;
+
+    if (isCjkQuery(trimmed)) {
+      return this.searchCjk(trimmed, viewerContext, includeArea, includeWorld, limit, minScore);
+    }
+
+    return this.searchLatin(trimmed, viewerContext, includeArea, includeWorld, limit, minScore);
+  }
+
+  private async searchCjk(
+    trimmed: string,
+    viewerContext: ViewerContext,
+    includeArea: boolean,
+    includeWorld: boolean,
+    limit: number,
+    minScore: number,
+  ): Promise<NarrativeSearchHit[]> {
+    const decomp = decomposeCjk(trimmed);
+    const results: NarrativeSearchHit[] = [];
+
+    // Build ILIKE patterns for WHERE and scoring.
+    // Uses tagged templates (not sql.unsafe) to preserve search_path in bun test.
+    const exactPattern = `%${decomp.original}%`;
+    const bigramPatterns = decomp.bigrams.map((bg) => `%${bg}%`);
+    const unigramPatterns = decomp.unigrams.map((ug) => `%${ug}%`);
+
+    // Pre-filter: match any unigram or exact pattern
+    const filterPatterns = [exactPattern, ...unigramPatterns.slice(0, 3)];
+
+    if (includeArea && viewerContext.current_area_id != null) {
+      const areaRows = await this.sql<PgNarrativeSearchRow[]>`
+        SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
+        FROM search_docs_area d
+        WHERE d.location_entity_id = ${viewerContext.current_area_id}
+          AND lower(d.content) ILIKE ANY(${filterPatterns})
+        LIMIT ${limit * 2}
+      `;
+      results.push(...areaRows.map((row) => this.mapRow(row, "area")));
+    }
+
+    if (includeWorld) {
+      const worldRows = await this.sql<PgNarrativeSearchRow[]>`
+        SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
+        FROM search_docs_world d
+        WHERE lower(d.content) ILIKE ANY(${filterPatterns})
+        LIMIT ${limit * 2}
+      `;
+      results.push(...worldRows.map((row) => this.mapRow(row, "world")));
+    }
+
+    // Compute CJK bigram scores in application code
+    for (const hit of results) {
+      hit.score = this.computeCjkScore(hit.content, decomp);
+    }
+
+    return this.dedup(results, limit, minScore);
+  }
+
+  private computeCjkScore(content: string, decomp: CjkDecomposition): number {
+    const lower = content.toLowerCase();
+    let raw = 0;
+    if (lower.includes(decomp.original.toLowerCase())) raw += 5;
+    for (const bg of decomp.bigrams) {
+      if (lower.includes(bg)) raw += 3;
+    }
+    for (const ug of decomp.unigrams) {
+      if (lower.includes(ug)) raw += 1;
+    }
+    return decomp.maxScore > 0 ? raw / decomp.maxScore : 0;
+  }
+
+  private async searchLatin(
+    trimmed: string,
+    viewerContext: ViewerContext,
+    includeArea: boolean,
+    includeWorld: boolean,
+    limit: number,
+    minScore: number,
+  ): Promise<NarrativeSearchHit[]> {
     const normalizedQuery = trimmed.toLowerCase();
     const pattern = `%${trimmed}%`;
     const results: NarrativeSearchHit[] = [];
@@ -49,7 +128,11 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
         SELECT d.source_ref,
                d.doc_type,
                d.content,
-               GREATEST(similarity(lower(d.content), ${normalizedQuery}), word_similarity(lower(d.content), ${normalizedQuery})) AS score
+               GREATEST(
+                 similarity(lower(d.content), ${normalizedQuery}),
+                 word_similarity(lower(d.content), ${normalizedQuery}),
+                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${minScore}::real ELSE 0::real END
+               ) AS score
         FROM search_docs_area d
         WHERE d.location_entity_id = ${viewerContext.current_area_id}
           AND (
@@ -68,7 +151,11 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
         SELECT d.source_ref,
                d.doc_type,
                d.content,
-               GREATEST(similarity(lower(d.content), ${normalizedQuery}), word_similarity(lower(d.content), ${normalizedQuery})) AS score
+               GREATEST(
+                 similarity(lower(d.content), ${normalizedQuery}),
+                 word_similarity(lower(d.content), ${normalizedQuery}),
+                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${minScore}::real ELSE 0::real END
+               ) AS score
         FROM search_docs_world d
         WHERE (
           lower(d.content) % ${normalizedQuery}
@@ -81,6 +168,10 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
       results.push(...worldRows.map((row) => this.mapRow(row, "world")));
     }
 
+    return this.dedup(results, limit, minScore);
+  }
+
+  private dedup(results: NarrativeSearchHit[], limit: number, minScore: number): NarrativeSearchHit[] {
     const deduped = new Map<string, NarrativeSearchHit>();
     for (const result of results) {
       if (result.score < minScore) {

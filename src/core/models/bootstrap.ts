@@ -36,6 +36,7 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       supportsStreamingUsage: entry.supportsStreamingUsage,
       extraHeaders: entry.extraHeaders,
       disableToolChoiceRequired: entry.disableToolChoiceRequired,
+      embeddingDimensions: entry.embeddingDimensions,
     });
     return { chatProvider: provider, embeddingProvider: provider };
   },
@@ -126,6 +127,13 @@ function resolveBootstrapCredential(providerId: string, auth: AuthConfig | undef
     const apiKey = process.env.MOONSHOT_API_KEY;
     if (apiKey && apiKey.trim() !== "") {
       return { type: "api-key", provider: "moonshot", apiKey };
+    }
+  }
+
+  if (providerId === "minimax") {
+    const apiKey = process.env.MINIMAX_API_KEY;
+    if (apiKey && apiKey.trim() !== "") {
+      return { type: "api-key", provider: "minimax", apiKey };
     }
   }
 

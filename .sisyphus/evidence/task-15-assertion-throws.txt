@@ -1,0 +1,16 @@
+Evidence: assertAllProbesPass throw behavior verification
+Date: 2026-04-06
+
+Test results (bun test):
+  3 pass, 0 fail, 5 expect() calls across 1 file [76ms]
+
+Test cases:
+1. All probes pass → no throw ✅
+2. One probe fails → throws with "who saw the letter", "secret", "1 of 2 probes failed" ✅
+3. Empty results → no throw (vacuously true) ✅
+
+Error message format includes:
+- Failed count / total count
+- Per-failed-probe: query, method, score, expected, matched, missed, unexpected
+
+Zero LSP errors on probe-assertions.ts and probe-assertions.test.ts.

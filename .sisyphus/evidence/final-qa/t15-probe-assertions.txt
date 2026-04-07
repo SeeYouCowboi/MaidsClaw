@@ -1,0 +1,11 @@
+== T15 Probe Assertions ==
+Command: bun test test/scenario-engine/probes/probe-assertions.test.ts
+
+Result:
+  3 pass
+  0 fail
+  5 expect() calls
+
+Required assertion: throws on failure with descriptive message
+
+VERDICT: PASS

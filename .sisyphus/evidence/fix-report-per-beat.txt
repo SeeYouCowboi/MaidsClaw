@@ -1,0 +1,16 @@
+Evidence: Per-Beat Memory Write Summary fix
+Date: 2026-04-06
+
+Changed: "Per-Beat Error Summary" -> "Per-Beat Memory Write Summary"
+Old columns: Beat ID | Error
+New columns: Beat ID | Entities | Episodes | Assertions | Evaluations | Errors
+
+Implementation:
+- Uses runResult.projectionStats with keys: entities_created, episodes_created,
+  assertions_created, evaluations_created
+- Falls back to "?" when stats keys are not present
+- Aggregates errors per beat via Map for per-beat error rows
+- Shows aggregate (all) row with totals, plus per-beat error rows
+
+LSP: 0 errors on report-generator.ts
+Tests: 3 pass, 0 fail (probe-assertions.test.ts)

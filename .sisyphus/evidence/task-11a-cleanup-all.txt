@@ -1,0 +1,22 @@
+Task 11a — CleanupAllSchemas Evidence
+======================================
+
+File: test/scenario-engine/runner/infra.test.ts
+
+Test: "cleanupAllSchemas removes scenario schemas"
+
+Behavior verified:
+  - Creates a test schema named "scenario_cleanup_test_live"
+  - Verifies it exists via information_schema.schemata query
+  - Calls cleanupAllSchemas(sql)
+  - Verifies no schemas matching 'scenario_cleanup_%' remain
+  - Uses CASCADE to drop dependent objects
+
+Implementation:
+  - cleanupAllSchemas queries information_schema.schemata WHERE schema_name LIKE 'scenario_%'
+  - Drops each matching schema with CASCADE
+  - cleanupSchema supports targeted cleanup by storyId and optional writePath
+
+Test run: bun test test/scenario-engine/runner/infra.test.ts
+  - Exit code: 0
+  - Result: 4 skip (PG_TEST_URL not set), 0 fail
