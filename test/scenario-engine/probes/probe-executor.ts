@@ -197,12 +197,20 @@ async function resolveSupplementalContent(
   limit: number,
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
-  const pattern = `%${query}%`;
 
-  // Search search_docs_world via ILIKE
+  // Tokenize query: split on whitespace, filter empties.
+  // Search each token individually so "视而不见 隐身人" matches docs
+  // containing either term, rather than requiring the exact full string.
+  const tokens = query.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return result;
+
+  // Build OR-combined ILIKE conditions for each token
+  const tokenPatterns = tokens.map((t) => `%${t}%`);
+
+  // Search search_docs_world via ILIKE (any token matches)
   const worldRows = await sql`
     SELECT source_ref, content FROM search_docs_world
-    WHERE content ILIKE ${pattern}
+    WHERE ${sql`content ILIKE ANY(${sql.array(tokenPatterns)})`}
     ORDER BY created_at DESC
     LIMIT ${limit}
   `;
@@ -210,11 +218,11 @@ async function resolveSupplementalContent(
     result.set(row.source_ref as string, row.content as string);
   }
 
-  // Search search_docs_cognition
+  // Search search_docs_cognition (any token matches)
   const cogRows = await sql`
     SELECT source_ref, content FROM search_docs_cognition
     WHERE agent_id = ${agentId}
-      AND content ILIKE ${pattern}
+      AND ${sql`content ILIKE ANY(${sql.array(tokenPatterns)})`}
     ORDER BY updated_at DESC
     LIMIT ${limit}
   `;

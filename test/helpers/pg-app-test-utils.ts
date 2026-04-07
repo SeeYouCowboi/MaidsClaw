@@ -6,21 +6,27 @@ import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
 
-const ADMIN_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/postgres";
+const DEFAULT_HOST_PORT = "127.0.0.1:55433";
 const TEST_DB = "maidsclaw_app_test";
 
 function getTestUrl(): string {
   const url = process.env.PG_APP_TEST_URL;
   if (!url) {
-    return `postgres://maidsclaw:maidsclaw@127.0.0.1:55433/${TEST_DB}`;
+    return `postgres://maidsclaw:maidsclaw@${DEFAULT_HOST_PORT}/${TEST_DB}`;
   }
   return url;
+}
+
+function getAdminUrl(): string {
+  const testUrl = getTestUrl();
+  // Derive admin URL (postgres db) from the test URL so port stays consistent
+  return testUrl.replace(/\/[^/]+$/, "/postgres");
 }
 
 const schemaRegistry = new Map<postgres.Sql, string>();
 
 export async function ensureTestPgAppDb(): Promise<void> {
-  const admin = postgres(ADMIN_URL, { max: 1 });
+  const admin = postgres(getAdminUrl(), { max: 1 });
   try {
     const rows = await admin`
       SELECT 1 FROM pg_database WHERE datname = ${TEST_DB}
