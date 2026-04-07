@@ -399,11 +399,14 @@ export async function executeLivePath(
   const perBeatStats: BeatStats[] = [];
   let beatsProcessed = 0;
 
+  const totalBeats = story.beats.length;
   for (const [beatIndex, beat] of story.beats.entries()) {
     if (completedBeatIds.has(beat.id)) {
+      console.log(`[live] (${beatIndex + 1}/${totalBeats}) beat "${beat.id}" — skipped (checkpoint)`);
       continue;
     }
 
+    console.log(`[live] (${beatIndex + 1}/${totalBeats}) beat "${beat.id}" — running LLM reasoning...`);
     beatsProcessed += 1;
     const turns = turnsForBeat(dialogue, beat.id);
     let beatCaptureStarted = false;
@@ -444,6 +447,7 @@ export async function executeLivePath(
     const after = await snapshotDbCounts(infra);
     const delta = diffSnapshots(before, after);
     perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
+    console.log(`[live] (${beatIndex + 1}/${totalBeats}) beat "${beat.id}" — done (episodes=${delta.episodesCreated} assertions=${delta.assertionsCreated} errors=${beatErrors})`);
   }
 
   const fullLog = buildOrderedScriptedLog(story, beatLogByBeatId);

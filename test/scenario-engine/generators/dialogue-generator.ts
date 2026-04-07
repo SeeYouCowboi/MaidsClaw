@@ -137,6 +137,17 @@ async function callAnthropicRaw(
   baseUrl?: string,
   extraHeaders?: Record<string, string>,
 ): Promise<string> {
+  // Some third-party providers (e.g. MiniMax) reject custom temperature.
+  // Only include it for native Anthropic.
+  const isNative = !baseUrl || baseUrl.includes("anthropic.com");
+  const body: Record<string, unknown> = {
+    model: modelId,
+    max_tokens: 2048,
+    system: systemPrompt,
+    messages: [{ role: "user", content: "Generate the dialogue now." }],
+  };
+  if (isNative) body.temperature = 0.7;
+
   const response = await fetch(`${baseUrl ?? "https://api.anthropic.com"}/v1/messages`, {
     method: "POST",
     headers: {
@@ -145,18 +156,7 @@ async function callAnthropicRaw(
       "anthropic-version": "2023-06-01",
       ...extraHeaders,
     },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: 2048,
-      temperature: 0.7,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: "Generate the dialogue now.",
-        },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -181,6 +181,18 @@ async function callOpenAIRaw(
   baseUrl?: string,
   extraHeaders?: Record<string, string>,
 ): Promise<string> {
+  // Some third-party providers (e.g. Kimi K2.5) reject custom temperature.
+  const supportsTemperature = !baseUrl || baseUrl.includes("openai.com");
+  const reqBody: Record<string, unknown> = {
+    model: modelId,
+    max_tokens: 2048,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: "Generate the dialogue now." },
+    ],
+  };
+  if (supportsTemperature) reqBody.temperature = 0.7;
+
   const response = await fetch(`${baseUrl ?? "https://api.openai.com"}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -188,15 +200,7 @@ async function callOpenAIRaw(
       authorization: `Bearer ${apiKey}`,
       ...extraHeaders,
     },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: 2048,
-      temperature: 0.7,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: "Generate the dialogue now." },
-      ],
-    }),
+    body: JSON.stringify(reqBody),
   });
 
   if (!response.ok) {
@@ -226,6 +230,80 @@ async function callLlm(
   return detected.backend === "anthropic"
     ? callAnthropicRaw(detected.apiKey, systemPrompt, modelId, detected.baseUrl, detected.extraHeaders)
     : callOpenAIRaw(detected.apiKey, systemPrompt, modelId, detected.baseUrl, detected.extraHeaders);
+}
+
+/**
+ * Send the LLM's malformed output back to it with the parse error,
+ * asking it to return corrected valid JSON.
+ */
+async function callLlmWithCorrection(
+  detected: DetectedBackend,
+  systemPrompt: string,
+  modelId: string,
+  badOutput: string,
+  parseError: string,
+): Promise<string> {
+  const correctionMsg =
+    `Your previous response was invalid JSON. Error: ${parseError}\n` +
+    `Here is what you returned:\n\`\`\`\n${badOutput.slice(0, 2000)}\n\`\`\`\n` +
+    `Please return ONLY a corrected, valid JSON array with the same dialogue content.`;
+
+  if (detected.backend === "anthropic") {
+    const url = `${detected.baseUrl ?? "https://api.anthropic.com"}/v1/messages`;
+    const isNative = !detected.baseUrl || detected.baseUrl.includes("anthropic.com");
+    const body: Record<string, unknown> = {
+      model: modelId,
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: "Generate the dialogue now." },
+        { role: "assistant", content: badOutput.slice(0, 3000) },
+        { role: "user", content: correctionMsg },
+      ],
+    };
+    if (isNative) body.temperature = 0.7;
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": detected.apiKey,
+        "anthropic-version": "2023-06-01",
+        ...detected.extraHeaders,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(`Anthropic correction API ${resp.status}: ${await resp.text()}`);
+    const json = (await resp.json()) as { content: Array<{ type: string; text?: string }> };
+    return json.content.find((b) => b.type === "text")?.text ?? "";
+  } else {
+    const url = `${detected.baseUrl ?? "https://api.openai.com"}/v1/chat/completions`;
+    const supportsTemp = !detected.baseUrl || detected.baseUrl.includes("openai.com");
+    const reqBody: Record<string, unknown> = {
+      model: modelId,
+      max_tokens: 2048,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "Generate the dialogue now." },
+        { role: "assistant", content: badOutput.slice(0, 3000) },
+        { role: "user", content: correctionMsg },
+      ],
+    };
+    if (supportsTemp) reqBody.temperature = 0.7;
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${detected.apiKey}`,
+        ...detected.extraHeaders,
+      },
+      body: JSON.stringify(reqBody),
+    });
+    if (!resp.ok) throw new Error(`OpenAI correction API ${resp.status}: ${await resp.text()}`);
+    const json = (await resp.json()) as { choices: Array<{ message?: { content?: string } }> };
+    return json.choices?.[0]?.message?.content ?? "";
+  }
 }
 
 function parseDialogueTurns(raw: string): RawTurn[] {
@@ -287,25 +365,58 @@ export async function generateDialogue(
 
   const results: GeneratedDialogue[] = [];
 
-  for (const beat of story.beats) {
+  for (let beatIdx = 0; beatIdx < story.beats.length; beatIdx++) {
+    const beat = story.beats[beatIdx];
+    console.log(`[dialogue-gen] (${beatIdx + 1}/${story.beats.length}) generating beat "${beat.id}"...`);
     const systemPrompt = buildSystemPrompt(story, beat, turnsPerBeat);
-    let rawText: string;
-    let rawTurns: RawTurn[];
+    let rawTurns: RawTurn[] | undefined;
 
-    try {
-      rawText = await callLlm(detected, systemPrompt, modelId);
-      rawTurns = parseDialogueTurns(rawText);
-    } catch {
+    const maxAttempts = 5;
+    let lastError: unknown;
+    let lastRawText: string | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        rawText = await callLlm(detected, systemPrompt, modelId);
+        let rawText: string;
+        if (lastRawText && attempt > 1) {
+          // Previous attempt returned text but it failed to parse —
+          // send the bad output back to the LLM for correction.
+          const errMsg = lastError instanceof Error ? lastError.message : String(lastError);
+          console.warn(`[dialogue-gen] beat "${beat.id}" attempt ${attempt}: asking LLM to correct parse error...`);
+          rawText = await callLlmWithCorrection(detected, systemPrompt, modelId, lastRawText, errMsg);
+        } else {
+          rawText = await callLlm(detected, systemPrompt, modelId);
+        }
+        lastRawText = rawText;
         rawTurns = parseDialogueTurns(rawText);
-      } catch (retryError) {
-        throw new Error(
-          `Failed to generate dialogue for beat "${beat.id}" after retry: ${
-            retryError instanceof Error ? retryError.message : String(retryError)
-          }`,
-        );
+        break;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isRateLimit = msg.includes("429") || msg.includes("overloaded") || msg.includes("rate");
+        const isParseError = msg.includes("Parse") || msg.includes("parse") || msg.includes("JSON")
+          || msg.includes("Unterminated") || msg.includes("not a JSON");
+        const isEmptyResponse = msg.includes("no text block") || msg.includes("no message content");
+        if ((!isRateLimit && !isParseError && !isEmptyResponse) || attempt === maxAttempts) {
+          throw new Error(
+            `Failed to generate dialogue for beat "${beat.id}" after ${attempt} attempt(s): ${msg}`,
+          );
+        }
+        if (isRateLimit || isEmptyResponse) {
+          // Exponential backoff for rate limits and empty responses
+          lastRawText = undefined; // no output to correct
+          const delayMs = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+          console.warn(`[dialogue-gen] beat "${beat.id}" attempt ${attempt} ${isRateLimit ? "rate-limited" : "empty response"}, retrying in ${delayMs}ms...`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        // For parse errors, lastRawText is preserved and correction is attempted next loop
       }
+    }
+    if (!rawTurns) {
+      throw new Error(
+        `Failed to generate dialogue for beat "${beat.id}": ${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }`,
+      );
     }
 
     results.push({
