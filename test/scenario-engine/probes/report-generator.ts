@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { ProbeResult } from "./probe-types.js";
+import type { DiagnosisResult } from "./probe-diagnosis.js";
 import type { ScenarioRunResult, ScenarioInfra } from "../runner/infra.js";
 import type { Story } from "../dsl/story-types.js";
 import type {
@@ -38,6 +39,7 @@ export function generateReport(
   storyTitle?: string,
   chainResults?: ReasoningChainResult[],
   toolCallAssertionResults?: ToolCallAssertionResult[],
+  diagnosisResults?: Map<string, DiagnosisResult[]>,
 ): string {
   const title = storyTitle ?? "Untitled Scenario";
   const totalProbes = probeResults.length;
@@ -92,6 +94,17 @@ export function generateReport(
     }
     if (!r.passed) {
       lines.push("- Status: FAILED");
+
+      const diagnoses = diagnosisResults?.get(r.probe.id) ?? [];
+      if (diagnoses.length > 0) {
+        lines.push("- 🔍 Diagnosis:");
+        for (const item of diagnoses) {
+          lines.push(`  - "${item.fragment}": ${item.layer} ${item.diagnosis}`);
+          if (item.detail) {
+            lines.push(`    → ${item.detail}`);
+          }
+        }
+      }
     }
   }
 

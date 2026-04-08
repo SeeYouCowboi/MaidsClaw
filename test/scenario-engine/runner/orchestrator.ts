@@ -25,6 +25,12 @@ import {
 } from "./write-paths.js";
 import { assertToolCallPatterns } from "../probes/tool-call-asserter.js";
 import { verifyReasoningChains } from "../probes/reasoning-chain-verifier.js";
+import { executeProbes } from "../probes/probe-executor.js";
+import {
+  diagnoseProbeFailure,
+  type DiagnosisResult,
+} from "../probes/probe-diagnosis.js";
+import type { ProbeResult } from "../probes/probe-types.js";
 import type {
   ReasoningChainResult,
   ToolCallAssertionResult,
@@ -35,7 +41,43 @@ export type ScenarioHandleExtended = ScenarioHandle & {
   capturedToolCallLog?: WritePathResult["capturedToolCallLog"];
   toolCallAssertionResults?: ToolCallAssertionResult[];
   chainResults?: ReasoningChainResult[];
+  diagnosisResults?: Map<string, DiagnosisResult[]>;
 };
+
+export async function runProbeFailureDiagnosis(
+  probeResults: ProbeResult[],
+  infra: ScenarioInfra,
+  writePath: RunOptions["writePath"],
+): Promise<Map<string, DiagnosisResult[]>> {
+  const diagnosisResults = new Map<string, DiagnosisResult[]>();
+
+  for (const result of probeResults) {
+    if (!result.passed) {
+      const diagnosis = await diagnoseProbeFailure(
+        result.probe,
+        result.missed,
+        infra,
+        writePath,
+      );
+      diagnosisResults.set(result.probe.id, diagnosis);
+    }
+  }
+
+  return diagnosisResults;
+}
+
+export async function executeProbesWithDiagnosis(
+  story: Story,
+  handle: ScenarioHandleExtended,
+): Promise<ProbeResult[]> {
+  const probeResults = await executeProbes(story, handle);
+  handle.diagnosisResults = await runProbeFailureDiagnosis(
+    probeResults,
+    handle.infra,
+    handle.runResult.writePath,
+  );
+  return probeResults;
+}
 
 export async function runScenario(
   story: Story,
@@ -74,6 +116,7 @@ export async function runScenario(
       capturedToolCallLog: undefined,
       toolCallAssertionResults: [],
       chainResults,
+      diagnosisResults: new Map<string, DiagnosisResult[]>(),
     };
   }
 
@@ -139,6 +182,7 @@ export async function runScenario(
     capturedToolCallLog: writeResult.capturedToolCallLog,
     toolCallAssertionResults,
     chainResults,
+    diagnosisResults: new Map<string, DiagnosisResult[]>(),
   };
 }
 
