@@ -24,7 +24,9 @@ export type CognitionAlignment = {
   predicate: string;
   inSettlement: boolean;
   inScripted: boolean;
-  status: "match" | "gap" | "surprise";
+  status: "match" | "gap" | "surprise" | "drift";
+  settlementStance?: string;
+  scriptedStance?: string;
 };
 
 /**
@@ -254,6 +256,38 @@ export async function generateComparisonReport(
 
   // Cognition alignment (requires infra)
   if (infra) {
+    // Coverage Ratio
+    const settlementEpisodes = await countTableRows(infra.settlement, "private_episode_events");
+    const settlementCognitions = await countTableRows(infra.settlement, "private_cognition_current");
+    const settlementEntities = await countTableRows(infra.settlement, "entity_nodes");
+    const liveEpisodes = await countTableRows(infra.scripted, "private_episode_events");
+    const liveCognitions = await countTableRows(infra.scripted, "private_cognition_current");
+    const liveEntities = await countTableRows(infra.scripted, "entity_nodes");
+
+    const ratioEpisodes = settlementEpisodes > 0 ? liveEpisodes / settlementEpisodes : (liveEpisodes > 0 ? Infinity : 1);
+    const ratioCognitions = settlementCognitions > 0 ? liveCognitions / settlementCognitions : (liveCognitions > 0 ? Infinity : 1);
+    const ratioEntities = settlementEntities > 0 ? liveEntities / settlementEntities : (liveEntities > 0 ? Infinity : 1);
+
+    const fmtRatio = (r: number) => r === Infinity ? "∞" : `${(r * 100).toFixed(1)}%`;
+
+    lines.push("");
+    lines.push("## Coverage Ratio");
+    lines.push("");
+    lines.push("| Dimension   | Settlement | Live | Ratio |");
+    lines.push("|-------------|-----------|------|-------|");
+    lines.push(`| Episodes    | ${settlementEpisodes}        | ${liveEpisodes}   | ${fmtRatio(ratioEpisodes)} |`);
+    lines.push(`| Cognitions  | ${settlementCognitions}        | ${liveCognitions}   | ${fmtRatio(ratioCognitions)} |`);
+    lines.push(`| Entities    | ${settlementEntities}        | ${liveEntities}   | ${fmtRatio(ratioEntities)} |`);
+
+    const lowCoverage: string[] = [];
+    if (ratioEpisodes < 0.8) lowCoverage.push("Episodes");
+    if (ratioCognitions < 0.8) lowCoverage.push("Cognitions");
+    if (ratioEntities < 0.8) lowCoverage.push("Entities");
+    if (lowCoverage.length > 0) {
+      lines.push("");
+      lines.push(`⚠️ Low coverage ratio detected (< 80%) for ${lowCoverage.join(", ")}`);
+    }
+
     const cognitionAlignments = await alignCognitionState(
       infra.scripted,
       infra.settlement,
@@ -262,13 +296,14 @@ export async function generateComparisonReport(
 
     if (cognitionAlignments.length > 0) {
       const matches = cognitionAlignments.filter((a) => a.status === "match");
+      const drifts = cognitionAlignments.filter((a) => a.status === "drift");
       const cognitionGaps = cognitionAlignments.filter((a) => a.status === "gap");
       const cognitionSurprises = cognitionAlignments.filter((a) => a.status === "surprise");
 
       lines.push("");
       lines.push("## Cognition Alignment");
       lines.push(
-        `- Matches: ${matches.length} | Gaps: ${cognitionGaps.length} | Surprises: ${cognitionSurprises.length}`,
+        `- Matches: ${matches.length} | Drifts: ${drifts.length} | Gaps: ${cognitionGaps.length} | Surprises: ${cognitionSurprises.length}`,
       );
 
       if (cognitionGaps.length > 0) {
@@ -289,6 +324,25 @@ export async function generateComparisonReport(
         for (const s of cognitionSurprises) {
           lines.push(`| ${s.pointerKeyPair} | ${s.predicate} |`);
         }
+      }
+
+      // Per-Assertion Alignment
+      lines.push("");
+      lines.push("## Per-Assertion Alignment");
+      lines.push("");
+      lines.push("| CognitionKey | Settlement Stance | Live Stance | Status |");
+      lines.push("|-------------|-------------------|-------------|--------|");
+      for (const a of cognitionAlignments) {
+        const sStance = a.settlementStance ?? "—";
+        const lStance = a.scriptedStance ?? "—";
+        let statusLabel: string;
+        switch (a.status) {
+          case "match": statusLabel = "✅ match"; break;
+          case "drift": statusLabel = "⚠️ drift"; break;
+          case "gap": statusLabel = "❌ gap"; break;
+          case "surprise": statusLabel = "🆕 surprise"; break;
+        }
+        lines.push(`| ${a.pointerKeyPair}:${a.predicate} | ${sStance} | ${lStance} | ${statusLabel} |`);
       }
     }
   }
@@ -355,6 +409,13 @@ function safeParseRecordJson(json: string): ParsedRecord {
   }
 }
 
+async function countTableRows(infra: ScenarioInfra, tableName: string): Promise<number> {
+  const rows = await infra.sql<[{ count: string }]>`
+    SELECT COUNT(*)::text AS count FROM ${infra.sql(tableName)}
+  `;
+  return parseInt(rows[0]?.count ?? "0", 10);
+}
+
 export async function alignCognitionState(
   scriptedInfra: ScenarioInfra,
   settlementInfra: ScenarioInfra,
@@ -378,24 +439,26 @@ export async function alignCognitionState(
     return `${pointerKeyPair}||${predicate}`;
   }
 
-  const scriptedSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string }>();
+  const scriptedSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string; stance?: string }>();
   for (const row of scriptedRows) {
     const parsed = safeParseRecordJson(row.record_json);
     const pair = parsed.targetPointerKey
       ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
       : (parsed.sourcePointerKey ?? row.cognition_key);
     const predicate = parsed.predicate ?? row.cognition_key;
-    scriptedSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate });
+    const stance = (row as Record<string, unknown>).stance as string | undefined;
+    scriptedSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate, stance });
   }
 
-  const settlementSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string }>();
+  const settlementSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string; stance?: string }>();
   for (const row of settlementRows) {
     const parsed = safeParseRecordJson(row.record_json);
     const pair = parsed.targetPointerKey
       ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
       : (parsed.sourcePointerKey ?? row.cognition_key);
     const predicate = parsed.predicate ?? row.cognition_key;
-    settlementSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate });
+    const stance = (row as Record<string, unknown>).stance as string | undefined;
+    settlementSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate, stance });
   }
 
   const allKeys = new Set([...scriptedSet.keys(), ...settlementSet.keys()]);
@@ -404,11 +467,15 @@ export async function alignCognitionState(
   for (const key of allKeys) {
     const inScripted = scriptedSet.has(key);
     const inSettlement = settlementSet.has(key);
-    const entry = scriptedSet.get(key) ?? settlementSet.get(key)!;
+    const scriptedEntry = scriptedSet.get(key);
+    const settlementEntry = settlementSet.get(key);
+    const entry = scriptedEntry ?? settlementEntry!;
 
     let status: CognitionAlignment["status"];
     if (inScripted && inSettlement) {
-      status = "match";
+      const sStance = settlementEntry?.stance;
+      const lStance = scriptedEntry?.stance;
+      status = (sStance && lStance && sStance !== lStance) ? "drift" : "match";
     } else if (inSettlement && !inScripted) {
       status = "gap";
     } else {
@@ -421,6 +488,8 @@ export async function alignCognitionState(
       inSettlement,
       inScripted,
       status,
+      settlementStance: settlementEntry?.stance,
+      scriptedStance: scriptedEntry?.stance,
     });
   }
 
