@@ -1,5 +1,9 @@
 # 记忆类型模型重构分析报告（episode / event / cognition / fact）
 
+> **配套文档**：本文是语义建模与设计方向文档。  
+> 如需了解逐文件代码审计结果、数据库影响与分阶段实施路线图，请参阅：  
+> **[`docs/EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md`](./EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md)**
+
 ## 适用范围
 
 本文聚焦当前系统里最需要重新厘清的四类核心记忆对象：
@@ -708,4 +712,9 @@
 - **把 episode 的 canonical node kind、ref、graph/retrieval 语义统一下来**
 
 这是后续所有 episode/event/cognition/fact 边界修复的前提。
+
+---
+
+> **下一步**：上述"统一"的具体代码文件、数据库层影响、分阶段改造路线，请参阅  
+> [`docs/EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md`](./EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md)
 

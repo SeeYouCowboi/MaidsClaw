@@ -1,5 +1,9 @@
 # Memory Feedback / Retrieval 改进分析报告（实践版）
 
+> **配套文档**：本文聚焦 GAP-1~GAP-6 的代码级复核，着重于 retrieval / graph 管道改进。  
+> `private_episode` / `event_node` 统一改造的逐文件审计、数据库影响、分阶段路线图见：  
+> **[`docs/EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md`](./EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md)**
+
 基于 `docs/MEMORY_FEEDBACK_AND_RETRIEVAL_IMPROVEMENTS.md` 的 6 个 gap，对当前仓库实现做了逐项核查。结论是：原文方向大体正确，但其中至少有 3 类问题被混在了一起：
 
 1. 有些结论已经被 2026-04-08 的代码演进部分修正了。
