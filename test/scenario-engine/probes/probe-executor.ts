@@ -64,6 +64,11 @@ async function executeCognitionSearch(
     score: hit.updated_at > 0 ? Math.max(0.1, 1 - index * 0.1) : 1.0,
     source_ref: String(hit.source_ref),
     scope: hit.kind,
+    conflictSummary: hit.conflictSummary ?? null,
+    conflictFactorRefs: hit.conflictFactorRefs?.map((ref) => String(ref)) ?? [],
+    resolution: hit.resolution
+      ? { type: hit.resolution.type, by_node_ref: String(hit.resolution.by_node_ref) }
+      : null,
   }));
 }
 

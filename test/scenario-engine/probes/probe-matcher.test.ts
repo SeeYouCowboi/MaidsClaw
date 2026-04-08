@@ -9,6 +9,25 @@ function hit(content: string, score = 0.9, scope = "narrative"): RetrievalHit {
   return { content, score, source_ref: `ref-${Math.random().toString(36).slice(2, 6)}`, scope };
 }
 
+function cognitionHit(
+  content: string,
+  opts: {
+    conflictSummary?: string | null;
+    conflictFactorRefs?: string[];
+    resolution?: { type: string; by_node_ref: string } | null;
+  } = {},
+): RetrievalHit {
+  return {
+    content,
+    score: 1.0,
+    source_ref: "cog-ref",
+    scope: "cognition",
+    conflictSummary: opts.conflictSummary,
+    conflictFactorRefs: opts.conflictFactorRefs,
+    resolution: opts.resolution,
+  };
+}
+
 function probe(overrides: Partial<ProbeDefinition> = {}): ProbeDefinition {
   return {
     id: "test-probe",
@@ -147,5 +166,105 @@ describe("matchProbeResults", () => {
     expect(result.matched).toHaveLength(0);
     expect(result.missed).toHaveLength(0);
     expect(result.passed).toBe(true);
+  });
+});
+
+describe("matchProbeResults — conflict field checking", () => {
+  it("passes when hasConflictSummary=true and hit has non-empty summary", () => {
+    const p = probe({
+      retrievalMethod: "cognition_search",
+      expectedFragments: ["conflict detected"],
+      expectedConflictFields: { hasConflictSummary: true },
+      topK: 3,
+    });
+    const hits = [
+      cognitionHit("conflict detected between assertions", {
+        conflictSummary: "Assertion X contradicts Assertion Y",
+      }),
+    ];
+
+    const result = matchProbeResults(p, hits, { mode: "deterministic" });
+
+    expect(result.passed).toBe(true);
+    expect(result.conflictFieldResults).toEqual([
+      { field: "hasConflictSummary", expected: true, actual: true },
+    ]);
+  });
+
+  it("fails when hasConflictSummary=true but hit has null/empty summary", () => {
+    const p = probe({
+      retrievalMethod: "cognition_search",
+      expectedFragments: ["conflict detected"],
+      expectedConflictFields: { hasConflictSummary: true },
+      topK: 3,
+    });
+    const hits = [
+      cognitionHit("conflict detected but no summary", {
+        conflictSummary: null,
+      }),
+    ];
+
+    const result = matchProbeResults(p, hits, { mode: "deterministic" });
+
+    expect(result.score).toBe(1.0);
+    expect(result.passed).toBe(false);
+    expect(result.conflictFieldResults).toEqual([
+      { field: "hasConflictSummary", expected: true, actual: false },
+    ]);
+  });
+
+  it("passes when expectedFactorRefs are all present across hits", () => {
+    const p = probe({
+      retrievalMethod: "cognition_search",
+      expectedFragments: ["factor analysis"],
+      expectedConflictFields: { expectedFactorRefs: ["ref_a", "ref_b"] },
+      topK: 3,
+    });
+    const hits = [
+      cognitionHit("factor analysis part 1", { conflictFactorRefs: ["ref_a"] }),
+      cognitionHit("factor analysis part 2", { conflictFactorRefs: ["ref_b", "ref_c"] }),
+    ];
+
+    const result = matchProbeResults(p, hits, { mode: "deterministic" });
+
+    expect(result.passed).toBe(true);
+    expect(result.conflictFieldResults).toEqual([
+      { field: "expectedFactorRefs", expected: true, actual: true },
+    ]);
+  });
+
+  it("fails when only some expectedFactorRefs are present", () => {
+    const p = probe({
+      retrievalMethod: "cognition_search",
+      expectedFragments: ["factor analysis"],
+      expectedConflictFields: { expectedFactorRefs: ["ref_a", "ref_b"] },
+      topK: 3,
+    });
+    const hits = [
+      cognitionHit("factor analysis partial", { conflictFactorRefs: ["ref_a"] }),
+    ];
+
+    const result = matchProbeResults(p, hits, { mode: "deterministic" });
+
+    expect(result.score).toBe(1.0);
+    expect(result.passed).toBe(false);
+    expect(result.conflictFieldResults).toEqual([
+      { field: "expectedFactorRefs", expected: true, actual: false },
+    ]);
+  });
+
+  it("skips conflict checking for non-cognition probes even with expectedConflictFields", () => {
+    const p = probe({
+      retrievalMethod: "narrative_search",
+      expectedFragments: ["silver key"],
+      expectedConflictFields: { hasConflictSummary: true },
+      topK: 3,
+    });
+    const hits = [hit("The silver key was found")];
+
+    const result = matchProbeResults(p, hits, { mode: "deterministic" });
+
+    expect(result.passed).toBe(true);
+    expect(result.conflictFieldResults).toBeUndefined();
   });
 });

@@ -42,6 +42,55 @@ export function matchProbeResults(
     }
   }
 
+  let conflictFieldResults:
+    | { field: string; expected: boolean; actual: boolean }[]
+    | undefined;
+  let conflictFieldsPassed = true;
+
+  if (
+    probe.expectedConflictFields &&
+    probe.retrievalMethod === "cognition_search"
+  ) {
+    conflictFieldResults = [];
+    const { hasConflictSummary, expectedFactorRefs, hasResolution } =
+      probe.expectedConflictFields;
+
+    if (hasConflictSummary !== undefined) {
+      const actual = topHits.some(
+        (h) => h.conflictSummary != null && h.conflictSummary !== "",
+      );
+      conflictFieldResults.push({
+        field: "hasConflictSummary",
+        expected: hasConflictSummary,
+        actual,
+      });
+      if (actual !== hasConflictSummary) conflictFieldsPassed = false;
+    }
+
+    if (expectedFactorRefs && expectedFactorRefs.length > 0) {
+      const allRefs = topHits.flatMap((h) => h.conflictFactorRefs ?? []);
+      const actual = expectedFactorRefs.every((ref) => allRefs.includes(ref));
+      conflictFieldResults.push({
+        field: "expectedFactorRefs",
+        expected: true,
+        actual,
+      });
+      if (!actual) conflictFieldsPassed = false;
+    }
+
+    if (hasResolution !== undefined) {
+      const actual = topHits.some(
+        (h) => h.resolution != null,
+      );
+      conflictFieldResults.push({
+        field: "hasResolution",
+        expected: hasResolution,
+        actual,
+      });
+      if (actual !== hasResolution) conflictFieldsPassed = false;
+    }
+  }
+
   const score =
     probe.expectedFragments.length === 0
       ? 1.0
@@ -49,10 +98,13 @@ export function matchProbeResults(
 
   let passed: boolean;
   if (mode === "deterministic") {
-    passed = score >= 1.0 && unexpectedPresent.length === 0;
+    passed =
+      score >= 1.0 &&
+      unexpectedPresent.length === 0 &&
+      conflictFieldsPassed;
   } else {
     const threshold = options?.liveThreshold ?? DEFAULT_LIVE_THRESHOLD;
-    passed = score >= threshold;
+    passed = score >= threshold && conflictFieldsPassed;
   }
 
   return {
@@ -63,5 +115,6 @@ export function matchProbeResults(
     unexpectedPresent,
     score,
     passed,
+    conflictFieldResults,
   };
 }

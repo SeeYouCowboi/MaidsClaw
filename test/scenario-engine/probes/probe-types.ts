@@ -5,6 +5,10 @@ export type RetrievalHit = {
   score: number;
   source_ref: string;
   scope: string;
+  // Populated only when coming from cognition_search
+  conflictSummary?: string | null;
+  conflictFactorRefs?: string[];
+  resolution?: { type: string; by_node_ref: string } | null;
 };
 
 export type ProbeDefinition = StoryProbe;
@@ -17,6 +21,7 @@ export type ProbeResult = {
   unexpectedPresent: string[];
   score: number;
   passed: boolean;
+  conflictFieldResults?: { field: string; expected: boolean; actual: boolean }[];
 };
 
 export type ScenarioProbeReport = {
