@@ -21,8 +21,9 @@ export type AlignedComparison = {
 };
 
 export type CognitionAlignment = {
-  pointerKeyPair: string;
-  predicate: string;
+  holderKey: string;
+  entityKeys: string[];
+  claim: string;
   inSettlement: boolean;
   inScripted: boolean;
   status: "match" | "gap" | "surprise" | "drift";
@@ -322,20 +323,20 @@ export async function generateComparisonReport(
       if (cognitionGaps.length > 0) {
         lines.push("");
         lines.push("### Knowledge Gaps (in DSL but missing from thinker)");
-        lines.push("| Entity Pair | Predicate |");
-        lines.push("|-------------|-----------|");
+        lines.push("| Holder | Entities | Claim |");
+        lines.push("|--------|----------|-------|");
         for (const g of cognitionGaps) {
-          lines.push(`| ${g.pointerKeyPair} | ${g.predicate} |`);
+          lines.push(`| ${g.holderKey} | ${g.entityKeys.join(", ")} | ${g.claim} |`);
         }
       }
 
       if (cognitionSurprises.length > 0) {
         lines.push("");
         lines.push("### Knowledge Surprises (in thinker but not in DSL)");
-        lines.push("| Entity Pair | Predicate |");
-        lines.push("|-------------|-----------|");
+        lines.push("| Holder | Entities | Claim |");
+        lines.push("|--------|----------|-------|");
         for (const s of cognitionSurprises) {
-          lines.push(`| ${s.pointerKeyPair} | ${s.predicate} |`);
+          lines.push(`| ${s.holderKey} | ${s.entityKeys.join(", ")} | ${s.claim} |`);
         }
       }
 
@@ -343,8 +344,8 @@ export async function generateComparisonReport(
       lines.push("");
       lines.push("## Per-Assertion Alignment");
       lines.push("");
-      lines.push("| CognitionKey | Settlement Stance | Live Stance | Status |");
-      lines.push("|-------------|-------------------|-------------|--------|");
+      lines.push("| Holder | Claim | Settlement Stance | Live Stance | Status |");
+      lines.push("|--------|-------|-------------------|-------------|--------|");
       for (const a of cognitionAlignments) {
         const sStance = a.settlementStance ?? "—";
         const lStance = a.scriptedStance ?? "—";
@@ -355,7 +356,7 @@ export async function generateComparisonReport(
           case "gap": statusLabel = "❌ gap"; break;
           case "surprise": statusLabel = "🆕 surprise"; break;
         }
-        lines.push(`| ${a.pointerKeyPair}:${a.predicate} | ${sStance} | ${lStance} | ${statusLabel} |`);
+        lines.push(`| ${a.holderKey} | ${a.claim} | ${sStance} | ${lStance} | ${statusLabel} |`);
       }
     }
   }
@@ -409,9 +410,9 @@ export function alignProbeResults(
 }
 
 type ParsedRecord = {
-  sourcePointerKey?: string;
-  predicate?: string;
-  targetPointerKey?: string;
+  holderPointerKey?: string;
+  claim?: string;
+  entityPointerKeys?: string[];
 };
 
 function safeParseRecordJson(json: string): ParsedRecord {
@@ -448,30 +449,28 @@ export async function alignCognitionState(
   }
 
   type AlignKey = string;
-  function makeKey(pointerKeyPair: string, predicate: string): AlignKey {
-    return `${pointerKeyPair}||${predicate}`;
+  function makeKey(holderKey: string, claim: string): AlignKey {
+    return `${holderKey}||${claim}`;
   }
 
-  const scriptedSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string; stance?: string }>();
+  const scriptedSet = new Map<AlignKey, { holderKey: string; entityKeys: string[]; claim: string; stance?: string }>();
   for (const row of scriptedRows) {
     const parsed = safeParseRecordJson(row.record_json);
-    const pair = parsed.targetPointerKey
-      ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
-      : (parsed.sourcePointerKey ?? row.cognition_key);
-    const predicate = parsed.predicate ?? row.cognition_key;
+    const holderKey = parsed.holderPointerKey ?? row.cognition_key;
+    const entityKeys = parsed.entityPointerKeys ?? [];
+    const claim = parsed.claim ?? row.cognition_key;
     const stance = (row as Record<string, unknown>).stance as string | undefined;
-    scriptedSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate, stance });
+    scriptedSet.set(makeKey(holderKey, claim), { holderKey, entityKeys, claim, stance });
   }
 
-  const settlementSet = new Map<AlignKey, { pointerKeyPair: string; predicate: string; stance?: string }>();
+  const settlementSet = new Map<AlignKey, { holderKey: string; entityKeys: string[]; claim: string; stance?: string }>();
   for (const row of settlementRows) {
     const parsed = safeParseRecordJson(row.record_json);
-    const pair = parsed.targetPointerKey
-      ? `${parsed.sourcePointerKey ?? "?"}+${parsed.targetPointerKey}`
-      : (parsed.sourcePointerKey ?? row.cognition_key);
-    const predicate = parsed.predicate ?? row.cognition_key;
+    const holderKey = parsed.holderPointerKey ?? row.cognition_key;
+    const entityKeys = parsed.entityPointerKeys ?? [];
+    const claim = parsed.claim ?? row.cognition_key;
     const stance = (row as Record<string, unknown>).stance as string | undefined;
-    settlementSet.set(makeKey(pair, predicate), { pointerKeyPair: pair, predicate, stance });
+    settlementSet.set(makeKey(holderKey, claim), { holderKey, entityKeys, claim, stance });
   }
 
   const allKeys = new Set([...scriptedSet.keys(), ...settlementSet.keys()]);
@@ -496,8 +495,9 @@ export async function alignCognitionState(
     }
 
     alignments.push({
-      pointerKeyPair: entry.pointerKeyPair,
-      predicate: entry.predicate,
+      holderKey: entry.holderKey,
+      entityKeys: entry.entityKeys,
+      claim: entry.claim,
       inSettlement,
       inScripted,
       status,

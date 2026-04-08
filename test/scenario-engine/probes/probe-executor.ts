@@ -59,17 +59,23 @@ async function executeCognitionSearch(
     limit: probe.topK,
   });
 
-  return results.map((hit, index) => ({
-    content: hit.content,
-    score: hit.updated_at > 0 ? Math.max(0.1, 1 - index * 0.1) : 1.0,
-    source_ref: String(hit.source_ref),
-    scope: hit.kind,
-    conflictSummary: hit.conflictSummary ?? null,
-    conflictFactorRefs: hit.conflictFactorRefs?.map((ref) => String(ref)) ?? [],
-    resolution: hit.resolution
-      ? { type: hit.resolution.type, by_node_ref: String(hit.resolution.by_node_ref) }
-      : null,
-  }));
+  return results.map((hit, index) => {
+    // Include cognitionKey in content so probe matcher can match by key
+    // (e.g., expectedFragment "xu_ran_paid_by_yuanchao" matches even when
+    // the predicate content is in Chinese).
+    const contentParts = [hit.cognitionKey, hit.content].filter(Boolean);
+    return {
+      content: contentParts.join(" | "),
+      score: hit.updated_at > 0 ? Math.max(0.1, 1 - index * 0.1) : 1.0,
+      source_ref: String(hit.source_ref),
+      scope: hit.kind,
+      conflictSummary: hit.conflictSummary ?? null,
+      conflictFactorRefs: hit.conflictFactorRefs?.map((ref) => String(ref)) ?? [],
+      resolution: hit.resolution
+        ? { type: hit.resolution.type, by_node_ref: String(hit.resolution.by_node_ref) }
+        : null,
+    };
+  });
 }
 
 async function executeMemoryRead(

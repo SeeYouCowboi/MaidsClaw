@@ -1634,7 +1634,7 @@ function refValue(ref: CognitionEntityRef | CognitionSelector): string {
 }
 
 function summarizeAssertion(record: AssertionRecordV4): string {
-	return `${record.proposition.subject.value} ${record.proposition.predicate} ${record.proposition.object.ref.value} (${record.stance})`;
+	return `[${record.holderId.value}] ${record.claim} (${record.stance})`;
 }
 
 function summarizeEvaluation(record: EvaluationRecord): string {

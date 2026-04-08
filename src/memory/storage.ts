@@ -94,9 +94,9 @@ type UpsertExplicitAssertionInput = {
   cognitionKey?: string;
   settlementId: string;
   opIndex: number;
-  sourcePointerKey: string;
-  predicate: string;
-  targetPointerKey: string;
+  holderPointerKey: string;
+  claim: string;
+  entityPointerKeys: string[];
   stance: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;

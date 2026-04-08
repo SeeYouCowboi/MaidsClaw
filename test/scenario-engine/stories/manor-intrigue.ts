@@ -361,9 +361,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "key_missing",
-            subjectId: "silver_key",
-            objectId: "archive_annex",
-            predicate: "is_missing_from",
+            holderId: "__self__",
+            claim: "The silver key is missing from the archive annex",
+            entityIds: ["silver_key", "archive_annex"],
             stance: "tentative",
             basis: "first_hand",
             sourceEpisodeId: "a1_ep",
@@ -394,9 +394,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "oswin_last_had_key",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "last_had_custody_of",
+            holderId: "__self__",
+            claim: "Butler Oswin last had custody of the silver key",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "tentative",
             basis: "hearsay",
             sourceEpisodeId: "a2_ep",
@@ -427,9 +427,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "mira_suspicious_ledger",
-            subjectId: "maid_mira",
-            objectId: "household_ledger",
-            predicate: "may_have_tampered_with",
+            holderId: "__self__",
+            claim: "Maid Mira may have tampered with the household ledger",
+            entityIds: ["maid_mira", "household_ledger"],
             stance: "hypothetical",
             basis: "inference",
             sourceEpisodeId: "a3_ep",
@@ -460,9 +460,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "henrik_suspicious_meetings",
-            subjectId: "cook_henrik",
-            objectId: "courtyard",
-            predicate: "held_unexplained_meetings_in",
+            holderId: "__self__",
+            claim: "Cook Henrik held unexplained meetings in the courtyard",
+            entityIds: ["cook_henrik", "courtyard"],
             stance: "hypothetical",
             basis: "inference",
             sourceEpisodeId: "a4_ep",
@@ -493,9 +493,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "intruder_used_latch",
-            subjectId: "door_latch",
-            objectId: "archive_annex",
-            predicate: "was_tampered_for_entry_to",
+            holderId: "__self__",
+            claim: "The archive door latch was tampered with to gain entry to the annex",
+            entityIds: ["door_latch", "archive_annex"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "a5_ep",
@@ -544,9 +544,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "mira_ledger_personal",
-            subjectId: "maid_mira",
-            objectId: "household_ledger",
-            predicate: "checked_for_personal_accounts",
+            holderId: "__self__",
+            claim: "Maid Mira was checking the household ledger for personal account entries",
+            entityIds: ["maid_mira", "household_ledger"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "b1_ep",
@@ -591,9 +591,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "henrik_meetings_party",
-            subjectId: "cook_henrik",
-            objectId: "kitchen",
-            predicate: "planned_surprise_supper_in",
+            holderId: "__self__",
+            claim: "Cook Henrik was planning a surprise supper in the kitchen",
+            entityIds: ["cook_henrik", "kitchen"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "b2_ep",
@@ -630,9 +630,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "clock_misplaced",
-            subjectId: "broken_clock",
-            objectId: "courtyard",
-            predicate: "appeared_misplaced_in",
+            holderId: "__self__",
+            claim: "The broken clock appeared misplaced in the courtyard",
+            entityIds: ["broken_clock", "courtyard"],
             stance: "hypothetical",
             basis: "first_hand",
             sourceEpisodeId: "b3_ep",
@@ -663,9 +663,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "oswin_alibi",
-            subjectId: "butler_oswin",
-            objectId: "archive_annex",
-            predicate: "was_elsewhere_during_key_theft",
+            holderId: "__self__",
+            claim: "Butler Oswin was elsewhere during the key theft from the archive annex",
+            entityIds: ["butler_oswin", "archive_annex"],
             stance: "contested",
             basis: "hearsay",
             preContestedStance: "tentative",
@@ -698,9 +698,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "oswin_alibi",
-            subjectId: "butler_oswin",
-            objectId: "archive_annex",
-            predicate: "was_elsewhere_during_key_theft",
+            holderId: "__self__",
+            claim: "Butler Oswin was elsewhere during the key theft from the archive annex",
+            entityIds: ["butler_oswin", "archive_annex"],
             stance: "rejected",
             basis: "first_hand",
             sourceEpisodeId: "b5_ep",
@@ -740,9 +740,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "elara_saw_exchange",
-            subjectId: "gardener_elara",
-            objectId: "butler_oswin",
-            predicate: "claims_to_have_seen_exchange_involving",
+            holderId: "__self__",
+            claim: "Gardener Elara claims to have witnessed an exchange involving Butler Oswin",
+            entityIds: ["gardener_elara", "butler_oswin"],
             stance: "tentative",
             basis: "first_hand",
             sourceEpisodeId: "c1_ep",
@@ -773,18 +773,18 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_oswin_meeting",
-            subjectId: "lord_ashworth",
-            objectId: "butler_oswin",
-            predicate: "met_privately_near_greenhouse",
+            holderId: "__self__",
+            claim: "Lord Ashworth and Butler Oswin met privately near the greenhouse",
+            entityIds: ["lord_ashworth", "butler_oswin"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "c2_ep",
           },
           {
             cognitionKey: "oswin_last_had_key",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "was_seen_with_before_transfer",
+            holderId: "__self__",
+            claim: "Butler Oswin was seen with the silver key before the transfer",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "c2_ep",
@@ -823,9 +823,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "wax_letter_connects_ashworth",
-            subjectId: "wax_letter",
-            objectId: "lord_ashworth",
-            predicate: "appears_connected_to",
+            holderId: "__self__",
+            claim: "The wax-sealed letter appears connected to Lord Ashworth",
+            entityIds: ["wax_letter", "lord_ashworth"],
             stance: "tentative",
             basis: "inference",
             sourceEpisodeId: "c3_ep",
@@ -856,9 +856,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "mira_innocent_clock",
-            subjectId: "maid_mira",
-            objectId: "broken_clock",
-            predicate: "moved_for_cleaning",
+            holderId: "__self__",
+            claim: "Maid Mira moved the broken clock for routine cleaning",
+            entityIds: ["maid_mira", "broken_clock"],
             stance: "accepted",
             basis: "hearsay",
             sourceEpisodeId: "c4_ep",
@@ -895,18 +895,18 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "key_transfer_confirmed",
-            subjectId: "butler_oswin",
-            objectId: "lord_ashworth",
-            predicate: "handed_silver_key_to",
+            holderId: "__self__",
+            claim: "Butler Oswin handed the silver key to Lord Ashworth",
+            entityIds: ["butler_oswin", "lord_ashworth"],
             stance: "confirmed",
             basis: "first_hand",
             sourceEpisodeId: "c5_ep",
           },
           {
             cognitionKey: "oswin_last_had_key",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "transferred_custody_of",
+            holderId: "__self__",
+            claim: "Butler Oswin transferred custody of the silver key",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "c5_ep",
@@ -955,9 +955,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "oswin_denies",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "denied_transferring",
+            holderId: "__self__",
+            claim: "Butler Oswin denied transferring the silver key",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "hypothetical",
             basis: "first_hand",
             sourceEpisodeId: "d1_ep",
@@ -988,9 +988,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_ordered_tamper",
-            subjectId: "lord_ashworth",
-            objectId: "household_ledger",
-            predicate: "ordered_tampering_of",
+            holderId: "__self__",
+            claim: "Lord Ashworth ordered tampering of the household ledger",
+            entityIds: ["lord_ashworth", "household_ledger"],
             stance: "accepted",
             basis: "inference",
             sourceEpisodeId: "d2_ep",
@@ -1029,9 +1029,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_evasive",
-            subjectId: "lord_ashworth",
-            objectId: "head_maid",
-            predicate: "responded_evasively_to",
+            holderId: "__self__",
+            claim: "Lord Ashworth responded evasively when confronted by the Head Maid",
+            entityIds: ["lord_ashworth", "head_maid"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "d3_ep",
@@ -1072,18 +1072,18 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "oswin_guilty",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "admitted_key_transfer_misconduct_for",
+            holderId: "__self__",
+            claim: "Butler Oswin admitted misconduct in the silver key transfer",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "confirmed",
             basis: "first_hand",
             sourceEpisodeId: "d4_ep",
           },
           {
             cognitionKey: "oswin_last_had_key",
-            subjectId: "butler_oswin",
-            objectId: "silver_key",
-            predicate: "confirmed_prior_custody_of",
+            holderId: "__self__",
+            claim: "Butler Oswin confirmed his prior custody of the silver key",
+            entityIds: ["butler_oswin", "silver_key"],
             stance: "confirmed",
             basis: "first_hand",
             sourceEpisodeId: "d4_ep",
@@ -1114,9 +1114,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_motivated",
-            subjectId: "lord_ashworth",
-            objectId: "household_ledger",
-            predicate: "pursued_financial_leverage_through",
+            holderId: "__self__",
+            claim: "Lord Ashworth pursued financial leverage through the household ledger",
+            entityIds: ["lord_ashworth", "household_ledger"],
             stance: "confirmed",
             basis: "inference",
             sourceEpisodeId: "d5_ep",
@@ -1156,9 +1156,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "ledger_tampered",
-            subjectId: "household_ledger",
-            objectId: "archive_annex",
-            predicate: "was_tampered_with_in",
+            holderId: "__self__",
+            claim: "The household ledger was systematically tampered with in the archive annex",
+            entityIds: ["household_ledger", "archive_annex"],
             stance: "confirmed",
             basis: "first_hand",
             sourceEpisodeId: "e1_ep",
@@ -1206,18 +1206,18 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "silver_key_recovered",
-            subjectId: "silver_key",
-            objectId: "guest_quarters",
-            predicate: "was_recovered_in",
+            holderId: "__self__",
+            claim: "The silver key was recovered in the guest quarters",
+            entityIds: ["silver_key", "guest_quarters"],
             stance: "confirmed",
             basis: "first_hand",
             sourceEpisodeId: "e2_ep",
           },
           {
             cognitionKey: "key_missing",
-            subjectId: "silver_key",
-            objectId: "archive_annex",
-            predicate: "was_missing_from",
+            holderId: "__self__",
+            claim: "The silver key was missing from the archive annex",
+            entityIds: ["silver_key", "archive_annex"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "e2_ep",
@@ -1258,9 +1258,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "timeline_reconstructed",
-            subjectId: "head_maid",
-            objectId: "silver_key",
-            predicate: "reconstructed_full_incident_timeline_for",
+            holderId: "__self__",
+            claim: "The full incident timeline for the silver key theft has been reconstructed",
+            entityIds: ["head_maid", "silver_key"],
             stance: "confirmed",
             basis: "inference",
             sourceEpisodeId: "e3_ep",
@@ -1306,9 +1306,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "protocol_announced",
-            subjectId: "head_maid",
-            objectId: "archive_annex",
-            predicate: "announced_new_security_protocol_for",
+            holderId: "__self__",
+            claim: "A new security protocol has been announced for the archive annex",
+            entityIds: ["head_maid", "archive_annex"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "f1_ep",
@@ -1349,9 +1349,9 @@ export const manorIntrigue: Story = {
         assertions: [
           {
             cognitionKey: "investigation_complete",
-            subjectId: "head_maid",
-            objectId: "silver_key",
-            predicate: "considers_investigation_complete_for",
+            holderId: "__self__",
+            claim: "The investigation into the silver key theft is considered complete",
+            entityIds: ["head_maid", "silver_key"],
             stance: "confirmed",
             basis: "introspection",
             sourceEpisodeId: "f2_ep",

@@ -104,9 +104,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_oswin_suspicious",
-            subjectId: "butler_oswin",
-            objectId: "study",
-            predicate: "acted_strangely_in",
+            holderId: "__self__",
+            claim: "Butler Oswin acted strangely in the study",
+            entityIds: ["butler_oswin", "study"],
             stance: "hypothetical",
             basis: "first_hand",
             sourceEpisodeId: "b1_ep",
@@ -144,9 +144,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_oswin_suspicious",
-            subjectId: "butler_oswin",
-            objectId: "cellar",
-            predicate: "seen_near",
+            holderId: "__self__",
+            claim: "Butler Oswin was seen near the cellar late at night",
+            entityIds: ["butler_oswin", "cellar"],
             stance: "tentative",
             basis: "hearsay",
             sourceEpisodeId: "b2_ep",
@@ -184,9 +184,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_oswin_suspicious",
-            subjectId: "butler_oswin",
-            objectId: "silver_letter",
-            predicate: "moved",
+            holderId: "__self__",
+            claim: "Butler Oswin moved the silver letter from its drawer",
+            entityIds: ["butler_oswin", "silver_letter"],
             stance: "accepted",
             basis: "inference",
             sourceEpisodeId: "b3_ep",
@@ -227,9 +227,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_innocent",
-            subjectId: "butler_oswin",
-            objectId: "silver_letter",
-            predicate: "is_innocent_of",
+            holderId: "__self__",
+            claim: "Butler Oswin may be innocent regarding the silver letter theft",
+            entityIds: ["butler_oswin", "silver_letter"],
             stance: "tentative",
             basis: "introspection",
             sourceEpisodeId: "b4_ep",
@@ -269,9 +269,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_innocent",
-            subjectId: "butler_oswin",
-            objectId: "cellar",
-            predicate: "was_elsewhere",
+            holderId: "__self__",
+            claim: "Butler Oswin was elsewhere and not near the cellar",
+            entityIds: ["butler_oswin", "cellar"],
             stance: "contested",
             basis: "hearsay",
             preContestedStance: "tentative",
@@ -311,9 +311,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_innocent",
-            subjectId: "butler_oswin",
-            objectId: "cellar",
-            predicate: "is_not_innocent_of",
+            holderId: "__self__",
+            claim: "Butler Oswin is not innocent regarding the cellar evidence",
+            entityIds: ["butler_oswin", "cellar"],
             stance: "rejected",
             basis: "inference",
             sourceEpisodeId: "b6_ep",
@@ -351,9 +351,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_oswin_suspicious",
-            subjectId: "butler_oswin",
-            objectId: "head_maid",
-            predicate: "is_confirmed_suspicious_to",
+            holderId: "__self__",
+            claim: "Butler Oswin is confirmed to be acting suspiciously",
+            entityIds: ["butler_oswin", "head_maid"],
             stance: "confirmed",
             basis: "belief",
             sourceEpisodeId: "b7_ep",
@@ -399,9 +399,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_involved",
-            subjectId: "guest_ashworth",
-            objectId: "silver_letter",
-            predicate: "is_involved_in",
+            holderId: "__self__",
+            claim: "Guest Ashworth is involved in the silver letter affair",
+            entityIds: ["guest_ashworth", "silver_letter"],
             stance: "hypothetical",
             basis: "belief",
             sourceEpisodeId: "b8_ep",
@@ -439,9 +439,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "cook_credibility",
-            subjectId: "cook_henrik",
-            objectId: "head_maid",
-            predicate: "is_credible_to",
+            holderId: "__self__",
+            claim: "Cook Henrik is a credible witness",
+            entityIds: ["cook_henrik", "head_maid"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "b9_ep",
@@ -485,9 +485,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "ashworth_involved",
-            subjectId: "guest_ashworth",
-            objectId: "silver_letter",
-            predicate: "is_involved_in",
+            holderId: "__self__",
+            claim: "Guest Ashworth is involved in the silver letter affair",
+            entityIds: ["guest_ashworth", "silver_letter"],
             stance: "abandoned",
             basis: "introspection",
             sourceEpisodeId: "b10_ep",
@@ -525,9 +525,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_thief",
-            subjectId: "butler_oswin",
-            objectId: "brass_key",
-            predicate: "stole",
+            holderId: "__self__",
+            claim: "Butler Oswin stole the brass key",
+            entityIds: ["butler_oswin", "brass_key"],
             stance: "tentative",
             basis: "first_hand",
             sourceEpisodeId: "b11_ep",
@@ -565,9 +565,9 @@ export const miniSample: Story = {
         assertions: [
           {
             cognitionKey: "butler_thief",
-            subjectId: "butler_oswin",
-            objectId: "brass_key",
-            predicate: "stole",
+            holderId: "__self__",
+            claim: "Butler Oswin stole the brass key",
+            entityIds: ["butler_oswin", "brass_key"],
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "b12_ep",

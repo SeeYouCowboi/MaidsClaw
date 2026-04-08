@@ -2,6 +2,10 @@ export type CognitionEntityRef =
   | { kind: "pointer_key"; value: string }
   | { kind: "special"; value: "self" | "user" | "current_location" };
 
+/**
+ * @deprecated Retained only for CommitmentRecord.target union type.
+ * Will be removed in a follow-up when commitments are migrated to holderId model.
+ */
 export type EntityProposition = {
   subject: CognitionEntityRef;
   predicate: string;
@@ -41,7 +45,12 @@ export type AssertionBasis =
 
 export type AssertionRecordV4 = CognitionRecordBase & {
   kind: "assertion";
-  proposition: EntityProposition;
+  /** Who holds this belief — must be a character/agent, not a location or item. */
+  holderId: CognitionEntityRef;
+  /** Free-text natural language proposition (e.g., "困岛是蓄意为之"). */
+  claim: string;
+  /** Related entities for retrieval indexing — no implied grammar role. */
+  entityRefs: CognitionEntityRef[];
   stance: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
@@ -563,17 +572,56 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
 }
 
 function normalizeAssertionRecord(record: Record<string, unknown>): void {
-  const proposition = record.proposition as Record<string, unknown> | undefined;
-  if (proposition) {
-    const object = proposition.object as Record<string, unknown> | undefined;
-    if (isCognitionEntityRef(object)) {
-      proposition.object = { kind: "entity", ref: object };
-    } else if (typeof object === "string") {
-      proposition.object = { kind: "entity", ref: { kind: "pointer_key", value: object } };
-    } else if (!isEntityPropositionObject(object)) {
-      proposition.object = { kind: "entity", ref: { kind: "pointer_key", value: "unknown" } };
+  // Normalize holderId: must be a valid CognitionEntityRef
+  if (typeof record.holderId === "string") {
+    record.holderId = { kind: "pointer_key", value: record.holderId };
+  } else if (!isCognitionEntityRef(record.holderId)) {
+    // Backward compat: try migrating from old proposition.subject
+    const proposition = record.proposition as Record<string, unknown> | undefined;
+    if (proposition && isCognitionEntityRef(proposition.subject)) {
+      record.holderId = proposition.subject;
+    } else {
+      record.holderId = { kind: "pointer_key", value: "unknown" };
     }
   }
+
+  // Normalize claim: must be a non-empty string
+  if (typeof record.claim !== "string" || record.claim.length === 0) {
+    // Backward compat: try migrating from old proposition.predicate
+    const proposition = record.proposition as Record<string, unknown> | undefined;
+    if (proposition && typeof proposition.predicate === "string") {
+      record.claim = proposition.predicate;
+    } else {
+      record.claim = "(unknown claim)";
+    }
+  }
+
+  // Normalize entityRefs: must be an array of CognitionEntityRef
+  if (!Array.isArray(record.entityRefs)) {
+    // Backward compat: try migrating from old proposition.object
+    const proposition = record.proposition as Record<string, unknown> | undefined;
+    const refs: unknown[] = [];
+    if (proposition) {
+      const obj = proposition.object as Record<string, unknown> | undefined;
+      if (isEntityPropositionObject(obj) && isCognitionEntityRef(obj.ref)) {
+        refs.push(obj.ref);
+      } else if (isCognitionEntityRef(obj)) {
+        refs.push(obj);
+      } else if (typeof obj === "string") {
+        refs.push({ kind: "pointer_key", value: obj });
+      }
+    }
+    record.entityRefs = refs;
+  } else {
+    record.entityRefs = (record.entityRefs as unknown[]).map((ref) => {
+      if (typeof ref === "string") return { kind: "pointer_key", value: ref };
+      if (isCognitionEntityRef(ref)) return ref;
+      return { kind: "pointer_key", value: "unknown" };
+    });
+  }
+
+  // Remove legacy proposition field after migration
+  delete record.proposition;
 
   const stance = record.stance;
   if (typeof stance !== "string") {

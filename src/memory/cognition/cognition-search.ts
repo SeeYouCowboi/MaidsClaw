@@ -230,7 +230,14 @@ export class CognitionSearchService {
 
   private async enrichContestedHits(agentId: string, hits: CognitionHit[]): Promise<CognitionHit[]> {
     for (const hit of hits) {
-      if (hit.stance !== "contested") continue;
+      // Enrich currently-contested assertions AND resolved assertions that
+      // were formerly contested (rejected/confirmed). Without this, conflict
+      // history is lost once an assertion is resolved — breaking downstream
+      // probes and reasoning chain visibility.
+      const isContested = hit.stance === "contested";
+      const isResolvedAssertion = hit.kind === "assertion" &&
+        (hit.stance === "rejected" || hit.stance === "confirmed");
+      if (!isContested && !isResolvedAssertion) continue;
 
       const cognitionKey = hit.cognitionKey ?? await this.resolveCognitionKey(hit.source_ref, agentId);
       if (cognitionKey) {
@@ -238,6 +245,18 @@ export class CognitionSearchService {
       }
 
       const current = cognitionKey ? await this.projectionRepo.getCurrent(agentId, cognitionKey) : null;
+
+      // For resolved assertions, only enrich if there's evidence they were contested
+      if (isResolvedAssertion && !isContested) {
+        const wasContested = current?.pre_contested_stance != null || current?.conflict_summary != null;
+        if (!wasContested) {
+          // Check relation store as fallback — conflict evidence may exist
+          // even when pre_contested_stance was not recorded.
+          const evidence = await this.relationReadRepo.getConflictEvidence(String(hit.source_ref), 1);
+          if (evidence.length === 0) continue;
+        }
+      }
+
       const projectionFactorRefs = this.parseFactorRefsJson(current?.conflict_factor_refs_json ?? null);
       const summaryFromProjection = current?.conflict_summary?.trim() || null;
 
@@ -245,10 +264,19 @@ export class CognitionSearchService {
       const evidenceRefs = evidence.map((row) => row.targetRef as NodeRef);
 
       const factorRefs = projectionFactorRefs.length > 0 ? projectionFactorRefs : evidenceRefs;
-      const summary = summaryFromProjection
-        ?? (factorRefs.length > 0 ? `contested (${factorRefs.length} factors)` : "contested cognition");
 
-      hit.conflictSummary = summary;
+      if (isContested) {
+        const summary = summaryFromProjection
+          ?? (factorRefs.length > 0 ? `contested (${factorRefs.length} factors)` : "contested cognition");
+        hit.conflictSummary = summary;
+      } else {
+        // Resolved assertion: indicate resolution in summary
+        const resolutionLabel = hit.stance === "rejected" ? "rejected" : "confirmed";
+        const summary = summaryFromProjection
+          ?? (factorRefs.length > 0 ? `${resolutionLabel} after contest (${factorRefs.length} factors)` : `${resolutionLabel} (formerly contested)`);
+        hit.conflictSummary = summary;
+      }
+
       hit.conflictFactorRefs = factorRefs;
       hit.conflictEvidence = this.toConflictEvidenceItems(evidence);
       hit.resolution = await this.extractResolution(String(hit.source_ref));

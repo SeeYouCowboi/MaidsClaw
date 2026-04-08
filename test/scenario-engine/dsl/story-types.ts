@@ -83,9 +83,12 @@ export type EpisodeSpec = {
 
 export type AssertionSpec = {
   cognitionKey: string; // stable key for stance tracking across beats
-  subjectId: string; // pointer_key ref
-  objectId: string; // pointer_key ref
-  predicate: string;
+  /** Who holds this belief — must reference a character pointer_key. */
+  holderId: string;
+  /** Free-text natural language proposition. */
+  claim: string;
+  /** Related entity pointer_keys — for retrieval indexing, no grammar role implied. */
+  entityIds: string[];
   stance: AssertionStance;
   basis: AssertionBasis;
   preContestedStance?: AssertionStance; // required when stance === "contested"

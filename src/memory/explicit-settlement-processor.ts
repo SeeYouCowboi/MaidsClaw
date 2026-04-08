@@ -284,8 +284,8 @@ export class ExplicitSettlementProcessor {
     currentLocationEntityId?: number,
   ): Promise<{ nodeRef: NodeRef }> {
     if (record.kind === "assertion") {
-      const sourcePointerKey = this.resolvePointerKey(record.proposition.subject, currentLocationEntityId, agentId);
-      const targetPointerKey = this.resolvePointerKey(record.proposition.object.ref, currentLocationEntityId, agentId);
+      const holderPointerKey = this.resolvePointerKey(record.holderId, currentLocationEntityId, agentId);
+      const entityPointerKeys = record.entityRefs.map(ref => this.resolvePointerKey(ref, currentLocationEntityId, agentId));
       const basis = this.normalizeAssertionBasis(record.basis);
       const preContestedStance = "preContestedStance" in record
         ? (record as AssertionRecordV4).preContestedStance
@@ -296,9 +296,9 @@ export class ExplicitSettlementProcessor {
         cognitionKey: record.key,
         settlementId,
         opIndex,
-        sourcePointerKey,
-        predicate: record.proposition.predicate,
-        targetPointerKey,
+        holderPointerKey,
+        claim: record.claim,
+        entityPointerKeys,
         stance: record.stance,
         basis,
         preContestedStance,

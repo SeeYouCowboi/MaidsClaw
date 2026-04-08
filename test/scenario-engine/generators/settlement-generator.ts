@@ -42,8 +42,10 @@ export type CognitionOpSpec = {
   cognitionKey: string;
   subjectPointerId: string;
   objectPointerId?: string;
+  holderPointerId?: string;
+  entityPointerIds?: string[];
   assertionData?: {
-    predicate: string;
+    claim: string;
     stance: string;
     basis: string;
     preContestedStance?: string;
@@ -97,6 +99,8 @@ type TrackedCognitionKey = {
   kind: "assertion" | "evaluation" | "commitment";
   subjectPointerId: string;
   objectPointerId?: string;
+  holderPointerId?: string;
+  entityPointerIds?: string[];
 };
 
 export function getEntityCreationOrder(story: Story): EntityCreation[] {
@@ -281,10 +285,11 @@ function buildAssertionOps(
       op: "upsert",
       kind: "assertion",
       cognitionKey: assertion.cognitionKey,
-      subjectPointerId: assertion.subjectId,
-      objectPointerId: assertion.objectId,
+      subjectPointerId: assertion.holderId,
+      holderPointerId: assertion.holderId,
+      entityPointerIds: assertion.entityIds,
       assertionData: {
-        predicate: assertion.predicate,
+        claim: assertion.claim,
         stance: assertion.stance,
         basis: assertion.basis,
         preContestedStance: assertion.preContestedStance,
@@ -298,8 +303,9 @@ function buildAssertionOps(
       beatId,
       round,
       kind: "assertion",
-      subjectPointerId: assertion.subjectId,
-      objectPointerId: assertion.objectId,
+      subjectPointerId: assertion.holderId,
+      holderPointerId: assertion.holderId,
+      entityPointerIds: assertion.entityIds,
     });
   }
 
@@ -401,6 +407,8 @@ function buildRetractionOps(
       cognitionKey: retraction.cognitionKey,
       subjectPointerId,
       objectPointerId,
+      holderPointerId: tracked.holderPointerId,
+      entityPointerIds: tracked.entityPointerIds,
     });
 
     cognitionKeyHistory.set(retraction.cognitionKey, {
@@ -443,7 +451,8 @@ function buildRecentSlotEntries(
 
 function summarizeUpsert(op: CognitionOpSpec): string {
   if (op.kind === "assertion" && op.assertionData) {
-    return `${op.assertionData.predicate}: ${op.subjectPointerId} → ${op.objectPointerId ?? "unknown"}`;
+    const entities = op.entityPointerIds?.join(", ") ?? "unknown";
+    return `${op.assertionData.claim}: ${op.holderPointerId ?? op.subjectPointerId} → [${entities}]`;
   }
 
   if (op.kind === "evaluation") {

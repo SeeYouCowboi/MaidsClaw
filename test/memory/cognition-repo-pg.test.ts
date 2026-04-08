@@ -253,9 +253,9 @@ describe("CognitionRepository (PG repos, unit)", () => {
         cognitionKey: key,
         settlementId: "settlement-1",
         opIndex: index,
-        sourcePointerKey: "maid:a",
-        predicate: "knows",
-        targetPointerKey: "maid:b",
+        holderPointerKey: "maid:a",
+        claim: "knows",
+        entityPointerKeys: ["maid:a", "maid:b"],
         stance: input.stance,
         basis: input.basis,
         preContestedStance: input.pre,
@@ -288,9 +288,9 @@ describe("CognitionRepository (PG repos, unit)", () => {
       cognitionKey: "atomic:key",
       settlementId: "settlement-atomic",
       opIndex: 0,
-      sourcePointerKey: "src",
-      predicate: "supports",
-      targetPointerKey: "dst",
+      holderPointerKey: "src",
+      claim: "supports",
+      entityPointerKeys: ["src", "dst"],
       stance: "tentative",
       basis: "hearsay",
     })).rejects.toThrow("projection failed");
@@ -338,9 +338,9 @@ describe("CognitionRepository (PG repos, unit)", () => {
       cognitionKey: "resolve:key",
       settlementId: "settlement-resolve",
       opIndex: 1,
-      sourcePointerKey: "pointer:shared",
-      predicate: "trusts",
-      targetPointerKey: "pointer:target",
+      holderPointerKey: "pointer:shared",
+      claim: "trusts",
+      entityPointerKeys: ["pointer:shared", "pointer:target"],
       stance: "accepted",
       basis: "first_hand",
     });
@@ -351,9 +351,10 @@ describe("CognitionRepository (PG repos, unit)", () => {
     expect(row!.targetEntityId).toBe(202);
     expect(resolverCalls).toEqual([
       { pointerKey: "pointer:shared", agentId: "agent-1" },
-      { pointerKey: "pointer:target", agentId: "agent-1" },
       { pointerKey: "pointer:shared", agentId: "agent-1" },
       { pointerKey: "pointer:target", agentId: "agent-1" },
+      { pointerKey: "pointer:shared", agentId: "agent-1" },
+      { pointerKey: "pointer:shared", agentId: "agent-1" },
     ]);
   });
 
@@ -374,9 +375,9 @@ describe("CognitionRepository (PG repos, unit)", () => {
       cognitionKey: "search:key",
       settlementId: "settlement-search",
       opIndex: 0,
-      sourcePointerKey: "src",
-      predicate: "claims",
-      targetPointerKey: "dst",
+      holderPointerKey: "src",
+      claim: "claims",
+      entityPointerKeys: ["src", "dst"],
       stance: "tentative",
       basis: "hearsay",
     });

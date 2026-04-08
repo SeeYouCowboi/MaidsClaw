@@ -265,13 +265,22 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
   async upsertExplicitAssertion(
     params: Parameters<GraphMutableStoreRepo["upsertExplicitAssertion"]>[0],
   ): Promise<{ id: number; ref: NodeRef }> {
-    const sourceEntityId = await this.resolveEntityByPointerKey(params.sourcePointerKey, params.agentId);
-    const targetEntityId = await this.resolveEntityByPointerKey(params.targetPointerKey, params.agentId);
-    if (sourceEntityId === null || targetEntityId === null) {
-      const unresolved: string[] = [];
-      if (sourceEntityId === null) unresolved.push(params.sourcePointerKey);
-      if (targetEntityId === null) unresolved.push(params.targetPointerKey);
-      throw new Error(`Unresolved entity refs in explicit assertion: ${unresolved.join(", ")}`);
+    const holderEntityId = await this.resolveEntityByPointerKey(params.holderPointerKey, params.agentId);
+    if (holderEntityId === null) {
+      throw new Error(`Unresolved holder entity ref in explicit assertion: ${params.holderPointerKey}`);
+    }
+    const entityIds: number[] = [];
+    const unresolvedEntities: string[] = [];
+    for (const key of params.entityPointerKeys) {
+      const id = await this.resolveEntityByPointerKey(key, params.agentId);
+      if (id === null) {
+        unresolvedEntities.push(key);
+      } else {
+        entityIds.push(id);
+      }
+    }
+    if (unresolvedEntities.length > 0) {
+      throw new Error(`Unresolved entity refs in explicit assertion: ${unresolvedEntities.join(", ")}`);
     }
 
     const now = Date.now();
@@ -289,9 +298,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       kind: "assertion",
       op: "upsert",
       record: {
-        sourcePointerKey: params.sourcePointerKey,
-        predicate: params.predicate,
-        targetPointerKey: params.targetPointerKey,
+        holderPointerKey: params.holderPointerKey,
+        claim: params.claim,
+        entityPointerKeys: params.entityPointerKeys,
         stance: params.stance,
         basis: params.basis ?? null,
         preContestedStance: params.preContestedStance ?? null,
@@ -305,8 +314,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
 
     await this.expireActiveCognitionFacts(params.agentId, cognitionKey, "assertion", now);
 
+    const targetEntityId = entityIds[0] ?? holderEntityId;
     const id = await this.insertCognitionFact(
-      sourceEntityId,
+      holderEntityId,
       targetEntityId,
       "explicit_assertion",
       eventId,
@@ -608,9 +618,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       cognitionKey: `assert:${params.agentId}:${source.pointerKey}:${params.predicate}:${target.pointerKey}`,
       settlementId: `storage:upsert_assertion:${params.agentId}`,
       opIndex: 0,
-      sourcePointerKey: source.pointerKey,
-      predicate: params.predicate,
-      targetPointerKey: target.pointerKey,
+      holderPointerKey: source.pointerKey,
+      claim: params.predicate,
+      entityPointerKeys: [source.pointerKey, target.pointerKey],
       stance: params.stance,
       basis: params.basis,
       provenance: params.provenance,

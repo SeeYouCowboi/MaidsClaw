@@ -67,9 +67,9 @@ function makeMiniStory(): Story {
           assertions: [
             {
               cognitionKey: "oswin-ledger-access",
-              subjectId: "butler_oswin",
-              objectId: "cellar_ledger",
-              predicate: "controls_access_to",
+              holderId: "butler_oswin",
+              entityIds: ["cellar_ledger"],
+              claim: "controls_access_to",
               stance: "tentative",
               basis: "hearsay",
             },
@@ -134,9 +134,9 @@ function makeMiniStory(): Story {
           assertions: [
             {
               cognitionKey: "oswin-ledger-access",
-              subjectId: "butler_oswin",
-              objectId: "cellar_ledger",
-              predicate: "controls_access_to",
+              holderId: "butler_oswin",
+              entityIds: ["cellar_ledger"],
+              claim: "controls_access_to",
               stance: "accepted",
               basis: "inference",
             },

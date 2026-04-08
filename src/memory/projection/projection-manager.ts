@@ -124,15 +124,18 @@ function summarizeCognitionOpContent(op: CognitionOp): string {
 		return "(retracted)";
 	}
 
+	const key = op.record.key;
+
 	if (op.record.kind === "assertion") {
-		return `${op.record.proposition.predicate}: ${op.record.proposition.subject.value} → ${op.record.proposition.object.ref.value}`;
+		const entityValues = op.record.entityRefs.map(ref => ref.value).join(", ");
+		return `[${key}] [${op.record.holderId.value}] ${op.record.claim}${entityValues ? ` | entities: ${entityValues}` : ""}`;
 	}
 
 	if (op.record.kind === "evaluation") {
-		return `evaluation: ${op.record.notes ?? ""}`;
+		return `[${key}] evaluation: ${op.record.notes ?? ""}`;
 	}
 
-	return `${op.record.mode}: ${JSON.stringify(op.record.target)}`;
+	return `[${key}] ${op.record.mode}: ${JSON.stringify(op.record.target)}`;
 }
 
 function resolveSearchSourceRefKind(

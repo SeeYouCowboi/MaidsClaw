@@ -21,9 +21,9 @@ type UpsertAssertionParams = {
   cognitionKey?: string;
   settlementId: string;
   opIndex: number;
-  sourcePointerKey: string;
-  predicate: string;
-  targetPointerKey: string;
+  holderPointerKey: string;
+  claim: string;
+  entityPointerKeys: string[];
   stance: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
@@ -109,9 +109,9 @@ type CanonicalCommitmentRow = {
 };
 
 type AssertionProjectionRecord = {
-  sourcePointerKey?: string;
-  predicate?: string;
-  targetPointerKey?: string;
+  holderPointerKey?: string;
+  claim?: string;
+  entityPointerKeys?: string[];
   stance?: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
@@ -141,12 +141,25 @@ export class CognitionRepository {
   }
 
   async upsertAssertion(params: UpsertAssertionParams): Promise<{ id: number }> {
-    const sourceEntityId = await this.resolveEntityByPointerKey(params.sourcePointerKey, params.agentId);
-    const targetEntityId = await this.resolveEntityByPointerKey(params.targetPointerKey, params.agentId);
-    if (sourceEntityId === null || targetEntityId === null) {
-      const unresolvedPointerKeys: string[] = [];
-      if (sourceEntityId === null) unresolvedPointerKeys.push(params.sourcePointerKey);
-      if (targetEntityId === null) unresolvedPointerKeys.push(params.targetPointerKey);
+    const holderEntityId = await this.resolveEntityByPointerKey(params.holderPointerKey, params.agentId);
+    if (holderEntityId === null) {
+      throw new MaidsClawError({
+        code: "COGNITION_UNRESOLVED_REFS",
+        message: `Unresolved holder entity ref in explicit assertion: ${params.holderPointerKey}`,
+        retriable: true,
+        details: {
+          unresolvedPointerKeys: [params.holderPointerKey],
+          cognitionKey: params.cognitionKey,
+          settlementId: params.settlementId,
+        },
+      });
+    }
+    const unresolvedPointerKeys: string[] = [];
+    for (const key of params.entityPointerKeys) {
+      const id = await this.resolveEntityByPointerKey(key, params.agentId);
+      if (id === null) unresolvedPointerKeys.push(key);
+    }
+    if (unresolvedPointerKeys.length > 0) {
       throw new MaidsClawError({
         code: "COGNITION_UNRESOLVED_REFS",
         message: `Unresolved entity refs in explicit assertion: ${unresolvedPointerKeys.join(", ")}`,
@@ -172,9 +185,9 @@ export class CognitionRepository {
     }
 
     const recordJson = JSON.stringify({
-      sourcePointerKey: params.sourcePointerKey,
-      predicate: params.predicate,
-      targetPointerKey: params.targetPointerKey,
+      holderPointerKey: params.holderPointerKey,
+      claim: params.claim,
+      entityPointerKeys: params.entityPointerKeys,
       stance: params.stance,
       basis: params.basis ?? null,
       preContestedStance: params.preContestedStance ?? null,
@@ -219,7 +232,7 @@ export class CognitionRepository {
         overlayId: projectionId,
         agentId: params.agentId,
         kind: "assertion",
-        content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+        content: `[${params.holderPointerKey}] ${params.claim}`,
         stance: params.stance,
         basis: params.basis ?? null,
         sourceRefKind: "assertion",
@@ -244,7 +257,7 @@ export class CognitionRepository {
       overlayId: projectionId,
       agentId: params.agentId,
       kind: "assertion",
-      content: `${params.predicate}: ${params.sourcePointerKey} → ${params.targetPointerKey}`,
+      content: `[${params.holderPointerKey}] ${params.claim}`,
       stance: params.stance,
       basis: params.basis ?? null,
       sourceRefKind: "assertion",
@@ -579,13 +592,17 @@ export class CognitionRepository {
       return null;
     }
     const parsed = safeParseJson(row.record_json) as AssertionProjectionRecord;
-    const sourceEntityId = typeof parsed.sourcePointerKey === "string"
-      ? await this.resolveEntityByPointerKey(parsed.sourcePointerKey, row.agent_id)
+    const holderEntityId = typeof parsed.holderPointerKey === "string"
+      ? await this.resolveEntityByPointerKey(parsed.holderPointerKey, row.agent_id)
       : null;
-    const targetEntityId = typeof parsed.targetPointerKey === "string"
-      ? await this.resolveEntityByPointerKey(parsed.targetPointerKey, row.agent_id)
+    // Use first entityPointerKey as targetEntityId for backward compat with CanonicalAssertionRow shape
+    const firstEntityKey = Array.isArray(parsed.entityPointerKeys) && parsed.entityPointerKeys.length > 0
+      ? parsed.entityPointerKeys[0]
+      : undefined;
+    const targetEntityId = typeof firstEntityKey === "string"
+      ? await this.resolveEntityByPointerKey(firstEntityKey, row.agent_id)
       : null;
-    if (sourceEntityId == null || targetEntityId == null || typeof parsed.predicate !== "string") {
+    if (holderEntityId == null || targetEntityId == null || typeof parsed.claim !== "string") {
       return null;
     }
 
@@ -593,9 +610,9 @@ export class CognitionRepository {
     return {
       id: row.id,
       agentId: row.agent_id,
-      sourceEntityId,
+      sourceEntityId: holderEntityId,
       targetEntityId,
-      predicate: parsed.predicate,
+      predicate: parsed.claim,
       cognitionKey: row.cognition_key,
       settlementId: typeof projectionRecord.settlementId === "string" ? projectionRecord.settlementId : null,
       opIndex: typeof projectionRecord.opIndex === "number" ? projectionRecord.opIndex : null,

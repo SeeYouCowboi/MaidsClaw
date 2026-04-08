@@ -375,14 +375,12 @@ describe.skipIf(skipPgTests)("T13 memtask PG full-chain integration", () => {
                 record: {
                   kind: "assertion",
                   key: "t13:settlement:assertion:1",
-                  proposition: {
-                    subject: { kind: "special", value: "self" },
-                    predicate: "serves",
-                    object: {
-                      kind: "entity",
-                      ref: { kind: "special", value: "user" },
-                    },
-                  },
+                  holderId: { kind: "special", value: "self" },
+                  claim: "serves",
+                  entityRefs: [
+                    { kind: "special", value: "self" },
+                    { kind: "special", value: "user" },
+                  ],
                   stance: "accepted",
                   basis: "first_hand",
                 },

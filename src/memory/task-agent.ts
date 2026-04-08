@@ -144,7 +144,7 @@ const MIGRATION_SYSTEM_PROMPT_EN =
   "\n\nKey rules:" +
   "\n1. Every episode MUST include projectable_summary (a one-sentence keyword-rich summary). Use original key nouns and proper names from the dialogue — do not paraphrase." +
   "\n2. private_notes should capture detailed event information, preserving original wording for evidence, actions, and important details." +
-  "\n3. Each dialogue segment should produce at least 1 episode and relevant assertions. When dialogue involves character relationships, factual judgments, or behavioral observations, call upsert_assertion to record key facts." +
+  "\n3. Each dialogue segment should produce at least 1 episode and relevant assertions. When dialogue involves character relationships, factual judgments, or behavioral observations, call upsert_assertion with holder (who believes), claim (what they believe), and entities (related entity IDs)." +
   "\n4. Avoid creating duplicate entities — check existingContext first.";
 
 const MIGRATION_SYSTEM_PROMPT_ZH =
@@ -156,7 +156,7 @@ const MIGRATION_SYSTEM_PROMPT_ZH =
   "\n1. 所有文本字段（private_notes、projectable_summary、role、emotion、predicate、provenance）必须使用中文输出。" +
   "\n2. 每个 episode 必须提供 projectable_summary（一句话关键词摘要）。projectable_summary 必须包含对话中出现的原始关键词和专有名词，禁止用同义词替换。" +
   "\n3. private_notes 应详细记录事件细节，保留对话中的关键证据描述、人物行为和重要细节的原始措辞。" +
-  "\n4. 每段对话通常应产出至少 1 个 episode 和相关的 assertion。当对话涉及人物关系、事实判断、行为观察时，必须同时调用 upsert_assertion 记录关键事实。predicate 应使用中文描述（如\"监视入口\"、\"伪装成邮差\"、\"进入并离开\"）。" +
+  "\n4. 每段对话通常应产出至少 1 个 episode 和相关的 assertion。当对话涉及人物关系、事实判断、行为观察时，必须同时调用 upsert_assertion 记录关键事实。holder 为相信此事的角色，claim 为自然语言命题（如\"管家在事发当晚行为异常\"），entities 为命题中涉及的所有实体ID列表。" +
   "\n5. 避免创建重复实体——先检查 existingContext 中是否已有同名或同义实体。";
 
 function buildMigrationSystemPrompt(languageHint?: string): string {
@@ -207,14 +207,14 @@ const CALL_ONE_TOOLS: ChatToolDefinition[] = [
   },
   {
     name: UPSERT_ASSERTION_TOOL_NAME,
-    description: "Upsert private assertions between entities.",
+    description: "Record a factual belief or cognitive judgment. The holder is the character who believes this claim. The claim is a free-text natural language proposition. entities lists all related entity IDs mentioned in the claim (for retrieval). Call this whenever dialogue reveals: character traits, trust/distrust, possession, location facts, causal claims, alibis, suspicions, or behavioral patterns. Each dialogue segment should produce at least one assertion alongside its episode.",
     inputSchema: {
       type: "object",
-      required: ["source", "target", "predicate", "basis", "stance"],
+      required: ["holder", "claim", "basis", "stance"],
       properties: {
-        source: { type: ["number", "string"] },
-        target: { type: ["number", "string"] },
-        predicate: { type: "string" },
+        holder: { type: ["number", "string"], description: "Entity ID or pointer_key of who holds this belief" },
+        claim: { type: "string", description: "Natural language proposition describing the belief" },
+        entities: { type: "array", items: { type: ["number", "string"] }, description: "Entity IDs or pointer_keys of all entities mentioned in the claim" },
         basis: { type: "string", enum: ["first_hand", "hearsay", "inference", "introspection", "belief"] },
         stance: { type: "string", enum: ["hypothetical", "tentative", "accepted", "confirmed", "rejected", "abandoned"] },
         provenance: { type: ["string", "null"] },
@@ -950,30 +950,43 @@ export class MemoryTaskAgent {
             },
           });
         }
-        const source = await this.resolveEntityReference(call.arguments.source, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
-        const target = await this.resolveEntityReference(call.arguments.target, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
-        if (!source || !target) {
+        // Backward compat: old tool schema used source/target/predicate
+        const holder = call.arguments.holder ?? call.arguments.source;
+        const claim = call.arguments.claim ?? call.arguments.predicate;
+        const entities = call.arguments.entities ?? (call.arguments.target !== undefined ? [call.arguments.target] : []);
+
+        const holderEntity = await this.resolveEntityReference(holder, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
+        if (!holderEntity) {
           continue;
         }
-        const sourcePointerKey =
-          typeof call.arguments.source === "string"
-            ? call.arguments.source
-            : await this.getPointerKeyByEntityIdCompat(source, txGraphMutableStoreRepo);
-        const targetPointerKey =
-          typeof call.arguments.target === "string"
-            ? call.arguments.target
-            : await this.getPointerKeyByEntityIdCompat(target, txGraphMutableStoreRepo);
-        if (!sourcePointerKey || !targetPointerKey) {
+        const holderPointerKey =
+          typeof holder === "string"
+            ? holder
+            : await this.getPointerKeyByEntityIdCompat(holderEntity, txGraphMutableStoreRepo);
+        if (!holderPointerKey) {
           continue;
+        }
+
+        const entityPointerKeys: string[] = [holderPointerKey];
+        for (const entityRef of (entities as unknown[])) {
+          const resolved = await this.resolveEntityReference(entityRef, flushRequest.agentId, pointerToEntityId, txGraphMutableStoreRepo);
+          if (!resolved) continue;
+          const pk =
+            typeof entityRef === "string"
+              ? entityRef
+              : await this.getPointerKeyByEntityIdCompat(resolved, txGraphMutableStoreRepo);
+          if (pk && !entityPointerKeys.includes(pk)) {
+            entityPointerKeys.push(pk);
+          }
         }
 
         const beliefId = (await cognitionRepo.upsertAssertion({
           agentId: flushRequest.agentId,
           settlementId: beliefSettlementId,
           opIndex: beliefOpIndex,
-          sourcePointerKey,
-          predicate: this.asString(call.arguments.predicate),
-          targetPointerKey,
+          holderPointerKey,
+          claim: this.asString(claim),
+          entityPointerKeys,
           basis: this.asString(call.arguments.basis) as AssertionBasis,
           stance: stance as AssertionStance,
           provenance: this.asOptionalString(call.arguments.provenance) ?? undefined,

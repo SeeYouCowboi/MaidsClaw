@@ -7,9 +7,9 @@ import {
 import type { CognitionProjectionRepo } from "../contracts/cognition-projection-repo.js";
 
 type ParsedAssertionRecord = {
-  sourcePointerKey?: string;
-  predicate?: string;
-  targetPointerKey?: string;
+  holderPointerKey?: string;
+  claim?: string;
+  entityPointerKeys?: string[];
   stance?: string;
   basis?: string;
   preContestedStance?: string;
@@ -44,6 +44,69 @@ function stringifyJsonbNullable(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+/**
+ * Extract flat pointer keys from the nested record_json structure.
+ * record_json stores holderId as {kind, value} and entityRefs as [{kind, value}, ...],
+ * but ParsedAssertionRecord expects holderPointerKey (string) and entityPointerKeys (string[]).
+ * Also handles backward compat from old SPO model (sourcePointerKey/predicate/targetPointerKey).
+ */
+function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRecord {
+  const record = raw as Record<string, unknown>;
+
+  // Extract holderPointerKey from holderId (new model) or sourcePointerKey (old model)
+  let holderPointerKey: string | undefined;
+  const holderId = record.holderId as Record<string, unknown> | string | undefined;
+  if (typeof holderId === "string") {
+    holderPointerKey = holderId;
+  } else if (holderId && typeof holderId === "object" && typeof holderId.value === "string") {
+    holderPointerKey = holderId.value;
+  } else if (typeof record.holderPointerKey === "string") {
+    holderPointerKey = record.holderPointerKey;
+  } else if (typeof record.sourcePointerKey === "string") {
+    // Backward compat: old SPO model
+    holderPointerKey = record.sourcePointerKey;
+  }
+
+  // Extract claim from claim (new model) or predicate (old model)
+  let claim: string | undefined;
+  if (typeof record.claim === "string") {
+    claim = record.claim;
+  } else if (typeof record.predicate === "string") {
+    claim = record.predicate;
+  }
+
+  // Extract entityPointerKeys from entityRefs (new model) or targetPointerKey (old model)
+  let entityPointerKeys: string[] | undefined;
+  const entityRefs = record.entityRefs as unknown[] | undefined;
+  if (Array.isArray(entityRefs)) {
+    entityPointerKeys = entityRefs
+      .map((ref) => {
+        if (typeof ref === "string") return ref;
+        if (ref && typeof ref === "object" && typeof (ref as Record<string, unknown>).value === "string") {
+          return (ref as Record<string, unknown>).value as string;
+        }
+        return null;
+      })
+      .filter((v): v is string => v !== null);
+  } else if (Array.isArray(record.entityPointerKeys)) {
+    entityPointerKeys = record.entityPointerKeys as string[];
+  } else if (typeof record.targetPointerKey === "string") {
+    // Backward compat: old SPO model
+    entityPointerKeys = [record.targetPointerKey];
+  }
+
+  return {
+    holderPointerKey,
+    claim,
+    entityPointerKeys,
+    stance: typeof record.stance === "string" ? record.stance : undefined,
+    basis: typeof record.basis === "string" ? record.basis : undefined,
+    preContestedStance: typeof record.preContestedStance === "string" ? record.preContestedStance : undefined,
+    conflictSummary: typeof record.conflictSummary === "string" ? record.conflictSummary : undefined,
+    conflictFactorRefs: record.conflictFactorRefs,
+  };
+}
+
 export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
@@ -56,7 +119,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
     const parsed = safeParseJson(event.record_json);
 
     if (event.kind === "assertion") {
-      await this.applyAssertionUpsert(event, parsed as ParsedAssertionRecord);
+      await this.applyAssertionUpsert(event, extractAssertionRecord(parsed));
     } else if (event.kind === "evaluation") {
       await this.applyEvaluationUpsert(event, parsed);
     } else if (event.kind === "commitment") {
@@ -159,8 +222,11 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
     const conflictFactorRefsJsonb = isContested
       ? this.jsonb(normalizedFactors.refs)
       : null;
-    const summaryText = record.predicate
-      ? `${record.predicate}: ${record.sourcePointerKey ?? "?"} → ${record.targetPointerKey ?? "?"}`
+    const entitySuffix = Array.isArray(record.entityPointerKeys) && record.entityPointerKeys.length > 0
+      ? ` | entities: ${record.entityPointerKeys.join(", ")}`
+      : "";
+    const summaryText = record.claim
+      ? `[${event.cognition_key}] [${record.holderPointerKey ?? "?"}] ${record.claim}${entitySuffix}`
       : null;
 
     const recordJsonb = this.jsonb(safeParseJson(event.record_json));
@@ -183,9 +249,25 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         basis = CASE WHEN excluded.basis IS NOT NULL THEN excluded.basis
                      ELSE private_cognition_current.basis END,
         status = 'active',
-        pre_contested_stance = excluded.pre_contested_stance,
-        conflict_summary = excluded.conflict_summary,
-        conflict_factor_refs_json = excluded.conflict_factor_refs_json,
+        -- Auto-track pre_contested_stance: when transitioning away from contested,
+        -- preserve the contested stance. If the new record provides an explicit value, use it.
+        -- Otherwise, if current row is contested, save it before overwriting.
+        pre_contested_stance = COALESCE(
+          excluded.pre_contested_stance,
+          CASE WHEN private_cognition_current.stance = 'contested'
+                    AND excluded.stance IS DISTINCT FROM 'contested'
+               THEN private_cognition_current.stance
+               ELSE private_cognition_current.pre_contested_stance END
+        ),
+        -- Preserve conflict metadata when resolving a contested assertion
+        conflict_summary = COALESCE(
+          excluded.conflict_summary,
+          private_cognition_current.conflict_summary
+        ),
+        conflict_factor_refs_json = COALESCE(
+          excluded.conflict_factor_refs_json,
+          private_cognition_current.conflict_factor_refs_json
+        ),
         summary_text = excluded.summary_text,
         record_json = excluded.record_json,
         source_event_id = excluded.source_event_id,

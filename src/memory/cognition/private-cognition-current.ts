@@ -27,9 +27,9 @@ export type CognitionCurrentRow = {
 };
 
 type ParsedAssertionRecord = {
-  sourcePointerKey?: string;
-  predicate?: string;
-  targetPointerKey?: string;
+  holderPointerKey?: string;
+  claim?: string;
+  entityPointerKeys?: string[];
   stance?: string;
   basis?: string;
   preContestedStance?: string;
@@ -45,6 +45,45 @@ type ParsedCommitmentRecord = {
   priority?: number;
   horizon?: string;
 };
+
+function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRecord {
+  let holderPointerKey: string | undefined;
+  const holderId = raw.holderId as Record<string, unknown> | string | undefined;
+  if (typeof holderId === "string") holderPointerKey = holderId;
+  else if (holderId && typeof holderId === "object" && typeof holderId.value === "string") holderPointerKey = holderId.value;
+  else if (typeof raw.holderPointerKey === "string") holderPointerKey = raw.holderPointerKey;
+  else if (typeof raw.sourcePointerKey === "string") holderPointerKey = raw.sourcePointerKey;
+
+  let claim: string | undefined;
+  if (typeof raw.claim === "string") claim = raw.claim;
+  else if (typeof raw.predicate === "string") claim = raw.predicate;
+
+  let entityPointerKeys: string[] | undefined;
+  const entityRefs = raw.entityRefs as unknown[] | undefined;
+  if (Array.isArray(entityRefs)) {
+    entityPointerKeys = entityRefs
+      .map((ref) => {
+        if (typeof ref === "string") return ref;
+        if (ref && typeof ref === "object" && typeof (ref as Record<string, unknown>).value === "string") return (ref as Record<string, unknown>).value as string;
+        return null;
+      })
+      .filter((v): v is string => v !== null);
+  } else if (Array.isArray(raw.entityPointerKeys)) {
+    entityPointerKeys = raw.entityPointerKeys as string[];
+  } else if (typeof raw.targetPointerKey === "string") {
+    entityPointerKeys = [raw.targetPointerKey];
+  }
+
+  return {
+    holderPointerKey, claim, entityPointerKeys,
+    stance: typeof raw.stance === "string" ? raw.stance : undefined,
+    basis: typeof raw.basis === "string" ? raw.basis : undefined,
+    preContestedStance: typeof raw.preContestedStance === "string" ? raw.preContestedStance : undefined,
+    conflictSummary: typeof raw.conflictSummary === "string" ? raw.conflictSummary : undefined,
+    conflictFactorRefs: raw.conflictFactorRefs,
+    provenance: typeof raw.provenance === "string" ? raw.provenance : undefined,
+  };
+}
 
 function safeParseJson(value: string | null): Record<string, unknown> {
   if (!value) return {};
@@ -102,7 +141,7 @@ export class PrivateCognitionProjectionRepo {
     const parsed = safeParseJson(event.record_json);
 
     if (event.kind === "assertion") {
-      this.applyAssertionUpsert(event, parsed as ParsedAssertionRecord);
+      this.applyAssertionUpsert(event, extractAssertionRecord(parsed));
     } else if (event.kind === "evaluation") {
       this.applyEvaluationUpsert(event, parsed);
     } else if (event.kind === "commitment") {
@@ -158,8 +197,11 @@ export class PrivateCognitionProjectionRepo {
       ? JSON.stringify(normalizedFactors.refs)
       : null;
 
-    const summaryText = record.predicate
-      ? `${record.predicate}: ${record.sourcePointerKey ?? "?"} → ${record.targetPointerKey ?? "?"}`
+    const entitySuffix = Array.isArray(record.entityPointerKeys) && record.entityPointerKeys.length > 0
+      ? ` | entities: ${record.entityPointerKeys.join(", ")}`
+      : "";
+    const summaryText = record.claim
+      ? `[${event.cognition_key}] [${record.holderPointerKey ?? "?"}] ${record.claim}${entitySuffix}`
       : null;
 
     this.db

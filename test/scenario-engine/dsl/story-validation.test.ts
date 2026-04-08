@@ -93,7 +93,7 @@ describe("validateStanceTransitions", () => {
         dialogueGuidance: "A",
         memoryEffects: {
           assertions: [
-            { cognitionKey: "key-1", subjectId: "char_a", objectId: "char_b", predicate: "is", stance: "rejected", basis: "belief" },
+            { cognitionKey: "key-1", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "rejected", basis: "belief" },
           ],
         },
       },
@@ -107,7 +107,7 @@ describe("validateStanceTransitions", () => {
         dialogueGuidance: "B",
         memoryEffects: {
           assertions: [
-            { cognitionKey: "key-1", subjectId: "char_a", objectId: "char_b", predicate: "is", stance: "accepted", basis: "belief" },
+            { cognitionKey: "key-1", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "accepted", basis: "belief" },
           ],
         },
       },
@@ -130,7 +130,7 @@ describe("validateContestedAssertions", () => {
       dialogueGuidance: "C",
       memoryEffects: {
         assertions: [
-          { cognitionKey: "key-c", subjectId: "char_a", objectId: "char_b", predicate: "is", stance: "contested", basis: "belief" },
+          { cognitionKey: "key-c", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "contested", basis: "belief" },
         ],
       },
     };
@@ -179,7 +179,7 @@ describe("validatePointerKeyRefs", () => {
         dialogueGuidance: "Ptr",
         memoryEffects: {
           assertions: [
-            { cognitionKey: "key-ptr", subjectId: "char_a", objectId: "no_such_entity", predicate: "is", stance: "hypothetical", basis: "belief" },
+            { cognitionKey: "key-ptr", holderId: "char_a", entityIds: ["no_such_entity"], claim: "is", stance: "hypothetical", basis: "belief" },
           ],
         },
       },

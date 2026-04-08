@@ -66,17 +66,17 @@ export class CognitionOpCommitter {
 
   private commitUpsert(record: CognitionRecord, settlementId: string, opIndex: number): NodeRef {
     if (record.kind === "assertion") {
-      const sourcePointerKey = this.resolveEntityPointerKey(record.proposition.subject);
-      const targetPointerKey = this.resolveEntityPointerKey(record.proposition.object.ref);
+      const holderPointerKey = this.resolveEntityPointerKey(record.holderId);
+      const entityPointerKeys = record.entityRefs.map(ref => this.resolveEntityPointerKey(ref));
 
       const result = this.storage.upsertExplicitAssertion({
         agentId: this.agentId,
         cognitionKey: record.key,
         settlementId,
         opIndex,
-        sourcePointerKey,
-        predicate: record.proposition.predicate,
-        targetPointerKey,
+        holderPointerKey,
+        claim: record.claim,
+        entityPointerKeys,
         stance: record.stance,
         basis: this.normalizeAssertionBasis(record.basis),
         preContestedStance: "preContestedStance" in record ? record.preContestedStance : undefined,

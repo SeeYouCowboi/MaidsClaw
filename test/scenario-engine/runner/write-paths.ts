@@ -315,6 +315,12 @@ export async function executeSettlementPath(
     }
   }
 
+  // Enrich search docs with display names for CJK search recall
+  const enrichedCount = await enrichCognitionSearchDocsWithDisplayNames(infra);
+  if (enrichedCount > 0) {
+    console.log(`[settlement] enriched ${enrichedCount} cognition search docs with display names`);
+  }
+
   return {
     beatsProcessed,
     errors,
@@ -367,6 +373,7 @@ export async function executeScriptedPath(
   // Same search doc sync as live path — scripted replays LLM tool calls
   // which also skip search_docs_world population.
   await syncLiveEpisodesToSearchDocs(infra);
+  await enrichCognitionSearchDocsWithDisplayNames(infra);
 
   return {
     beatsProcessed,
@@ -459,6 +466,7 @@ export async function executeLivePath(
   // (that work is normally deferred to the GraphOrganizer job queue,
   // which is stubbed out in the scenario engine).
   await syncLiveEpisodesToSearchDocs(infra);
+  await enrichCognitionSearchDocsWithDisplayNames(infra);
 
   return {
     beatsProcessed,
@@ -597,6 +605,64 @@ async function syncLiveEpisodesToSearchDocs(infra: ScenarioInfra): Promise<void>
   }
 }
 
+/**
+ * Enrich search_docs_cognition content with entity display names.
+ *
+ * The projection pipeline stores assertion content as:
+ *   "[key] predicate: pointer_key → pointer_key"
+ * which uses English pointer keys (e.g., "xu_ran"). CJK queries like "徐然"
+ * cannot match "xu_ran", crippling recall for Chinese stories.
+ *
+ * This post-processing step appends display names so the content becomes:
+ *   "[key] predicate: xu_ran (徐然) → transfer_record (转账记录)"
+ */
+async function enrichCognitionSearchDocsWithDisplayNames(infra: ScenarioInfra): Promise<number> {
+  // Build pointer_key → display_name map from entity_nodes
+  const entityRows = await infra.sql<Array<{ pointer_key: string; display_name: string }>>`
+    SELECT pointer_key, display_name FROM entity_nodes
+  `;
+  const displayNameMap = new Map<string, string>();
+  for (const row of entityRows) {
+    displayNameMap.set(row.pointer_key, row.display_name);
+  }
+
+  // Read all cognition search docs
+  const docs = await infra.sql<Array<{ id: number; source_ref: string; content: string }>>`
+    SELECT id, source_ref, content FROM search_docs_cognition
+    WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+  `;
+
+  let enriched = 0;
+  for (const doc of docs) {
+    // Split content into [key] prefix and body to avoid corrupting cognition keys.
+    // Content format: "[cognition_key] predicate: subject → object"
+    const bracketMatch = doc.content.match(/^(\[[^\]]*\])\s*(.*)/s);
+    const keyPrefix = bracketMatch ? bracketMatch[1] : "";
+    const keySep = bracketMatch ? " " : "";
+    let body = bracketMatch ? bracketMatch[2] : doc.content;
+
+    // For each pointer key that appears in the body, append "(display_name)"
+    // if the display name differs from the pointer key.
+    for (const [pointerKey, displayName] of displayNameMap) {
+      if (pointerKey === displayName) continue;
+      const escaped = pointerKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`${escaped}(?!\\s*\\()`, "g");
+      body = body.replace(re, `${pointerKey} (${displayName})`);
+    }
+
+    const newContent = keyPrefix ? `${keyPrefix}${keySep}${body}` : body;
+
+    if (newContent !== doc.content) {
+      await infra.sql`
+        UPDATE search_docs_cognition SET content = ${newContent} WHERE id = ${doc.id}
+      `;
+      enriched += 1;
+    }
+  }
+
+  return enriched;
+}
+
 function turnsForBeat(dialogue: GeneratedDialogue[], beatId: string): DialogueTurn[] {
   return dialogue.find((entry) => entry.beatId === beatId)?.turns ?? [];
 }
@@ -635,28 +701,21 @@ function toProjectionCognitionOp(
   }
 
   if (op.kind === "assertion") {
-    if (!op.objectPointerId || !op.assertionData) {
+    if (!op.holderPointerId || !op.assertionData) {
       throw new Error(
-        `Invalid assertion cognition op '${op.cognitionKey}': objectPointerId and assertionData are required`,
+        `Invalid assertion cognition op '${op.cognitionKey}': holderPointerId and assertionData are required`,
       );
     }
 
     const record: AssertionRecordV4 = {
       kind: "assertion",
       key: op.cognitionKey,
-      proposition: {
-        subject: pointerEntityRef(infra, op.subjectPointerId),
-        predicate: op.assertionData.predicate,
-        object: {
-          kind: "entity",
-          ref: pointerEntityRef(infra, op.objectPointerId),
-        },
-      },
+      holderId: pointerEntityRef(infra, op.holderPointerId),
+      claim: op.assertionData.claim,
+      entityRefs: (op.entityPointerIds ?? []).map((id) => pointerEntityRef(infra, id)),
       stance: op.assertionData.stance as AssertionStance,
       basis: op.assertionData.basis as AssertionBasis,
-      preContestedStance: op.assertionData.preContestedStance as
-        | AssertionStance
-        | undefined,
+      preContestedStance: op.assertionData.preContestedStance as AssertionStance | undefined,
     };
 
     return {

@@ -120,14 +120,12 @@ describe.skipIf(skipPgTests)(
 									record: {
 										kind: "assertion",
 										key: "uow:atomic:belief",
-										proposition: {
-											subject: { kind: "special", value: "self" },
-											predicate: "trusts",
-											object: {
-												kind: "entity",
-												ref: { kind: "special", value: "user" },
-											},
-										},
+										holderId: { kind: "special", value: "self" },
+										claim: "trusts",
+										entityRefs: [
+											{ kind: "special", value: "self" },
+											{ kind: "special", value: "user" },
+										],
 										stance: "accepted",
 										basis: "first_hand",
 									},

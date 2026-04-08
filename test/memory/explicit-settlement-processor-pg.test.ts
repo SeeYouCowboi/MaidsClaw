@@ -60,14 +60,12 @@ function makeSettlementPayload(settlementId: string, requestId: string, ownerAge
           record: {
             kind: "assertion",
             key: "ck-1",
-            proposition: {
-              subject: { kind: "special", value: "self" },
-              predicate: "trusts",
-              object: {
-                kind: "entity",
-                ref: { kind: "special", value: "user" },
-              },
-            },
+            holderId: { kind: "special", value: "self" },
+            claim: "trusts",
+            entityRefs: [
+              { kind: "special", value: "self" },
+              { kind: "special", value: "user" },
+            ],
             stance: "contested",
             basis: "first_hand",
             preContestedStance: "accepted",

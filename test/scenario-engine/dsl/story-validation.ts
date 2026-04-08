@@ -227,19 +227,21 @@ export function validatePointerKeyRefs(story: Story): ValidationError[] {
 
     if (beat.memoryEffects?.assertions) {
       for (const assertion of beat.memoryEffects.assertions) {
-        if (!validIds.has(assertion.subjectId)) {
+        if (!validIds.has(assertion.holderId)) {
           errors.push({
-            field: "assertion.subjectId",
-            message: `Unknown pointer_key '${assertion.subjectId}' referenced in beat '${beat.id}' field 'assertion.subjectId'`,
+            field: "assertion.holderId",
+            message: `Unknown pointer_key '${assertion.holderId}' referenced in beat '${beat.id}' field 'assertion.holderId'`,
             beatId: beat.id,
           });
         }
-        if (!validIds.has(assertion.objectId)) {
-          errors.push({
-            field: "assertion.objectId",
-            message: `Unknown pointer_key '${assertion.objectId}' referenced in beat '${beat.id}' field 'assertion.objectId'`,
-            beatId: beat.id,
-          });
+        for (const entityId of assertion.entityIds) {
+          if (!validIds.has(entityId)) {
+            errors.push({
+              field: "assertion.entityIds",
+              message: `Unknown pointer_key '${entityId}' referenced in beat '${beat.id}' field 'assertion.entityIds'`,
+              beatId: beat.id,
+            });
+          }
         }
       }
     }

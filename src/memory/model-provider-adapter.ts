@@ -83,8 +83,10 @@ function parseToolInput(input: string): Record<string, unknown> {
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
+    console.warn(`[parseToolInput] unexpected JSON type (not object): ${input.slice(0, 200)}`);
     return {};
-  } catch {
+  } catch (err) {
+    console.warn(`[parseToolInput] JSON parse failed: ${err instanceof Error ? err.message : String(err)} | input: ${input.slice(0, 200)}`);
     return {};
   }
 }
