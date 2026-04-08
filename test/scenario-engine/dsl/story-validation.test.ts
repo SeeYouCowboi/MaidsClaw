@@ -8,6 +8,9 @@ import {
   validateLogicEdgeTargets,
   validatePointerKeyRefs,
   validateProbes,
+  validateToolCallPatterns,
+  validateReasoningChainProbes,
+  validateConflictFields,
 } from "./story-validation.js";
 import type { Story, StoryBeat } from "./story-types.js";
 
@@ -214,5 +217,104 @@ describe("validateBeat", () => {
     };
     const errors = validateBeat(beat, story);
     expect(errors.some((e) => e.message.includes("ghost"))).toBe(true);
+  });
+});
+
+describe("validateToolCallPatterns", () => {
+  it("rejects minCalls greater than maxCalls", () => {
+    const story = makeValidStory();
+    story.beats[0]!.expectedToolPattern = {
+      minCalls: 3,
+      maxCalls: 1,
+    };
+
+    const errors = validateToolCallPatterns(story);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message).toContain("minCalls");
+  });
+
+  it("accepts empty mustContain array", () => {
+    const story = makeValidStory();
+    story.beats[0]!.expectedToolPattern = {
+      mustContain: [],
+    };
+
+    const errors = validateToolCallPatterns(story);
+    expect(errors.length).toBe(0);
+  });
+
+  it("accepts valid cardinality pattern", () => {
+    const story = makeValidStory();
+    story.beats[0]!.expectedToolPattern = {
+      mustContain: ["upsert_private_cognition"],
+      mustNotContain: ["delete_entity"],
+      minCalls: 1,
+      maxCalls: 3,
+    };
+
+    const errors = validateToolCallPatterns(story);
+    expect(errors.length).toBe(0);
+  });
+});
+
+describe("validateReasoningChainProbes", () => {
+  it("rejects empty expectedCognitions", () => {
+    const story = makeValidStory();
+    story.reasoningChainProbes = [
+      {
+        id: "rc-1",
+        description: "empty cognitions",
+        expectedCognitions: [],
+      },
+    ];
+
+    const errors = validateReasoningChainProbes(story);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message).toContain("expected cognition");
+  });
+});
+
+describe("validateConflictFields", () => {
+  it("rejects expectedConflictFields on narrative_search probe", () => {
+    const story = makeValidStory();
+    story.probes = [
+      {
+        id: "probe-conflict-invalid",
+        query: "who is conflicted",
+        retrievalMethod: "narrative_search",
+        viewerPerspective: "char_a",
+        expectedFragments: [],
+        topK: 3,
+        expectedConflictFields: {
+          hasConflictSummary: true,
+        },
+      },
+    ];
+
+    const errors = validateConflictFields(story);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message).toContain("cognition_search");
+  });
+
+  it("accepts expectedConflictFields on cognition_search probe", () => {
+    const story = makeValidStory();
+    story.probes = [
+      {
+        id: "probe-conflict-valid",
+        query: "who is conflicted",
+        retrievalMethod: "cognition_search",
+        viewerPerspective: "char_a",
+        expectedFragments: [],
+        topK: 3,
+        expectedConflictFields: {
+          hasConflictSummary: true,
+          expectedFactorRefs: ["factor:1"],
+          hasResolution: false,
+        },
+      },
+    ];
+
+    const errors = validateConflictFields(story);
+    expect(errors.length).toBe(0);
   });
 });

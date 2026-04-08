@@ -55,6 +55,7 @@ export type StoryBeat = {
   whoIsLying?: { characterId: string; about: string };
   memoryEffects: MemoryEffect;
   publicationDeclarations?: PublicationDeclaration[];
+  expectedToolPattern?: ToolCallPattern;
 };
 
 // What a beat produces in memory
@@ -147,6 +148,11 @@ export type StoryProbe = {
   expectedFragments: (string | string[])[]; // substrings expected in top-K hits — array = any-of (OR match)
   expectedMissing?: string[]; // should NOT appear in top-K hits
   topK: number;
+  expectedConflictFields?: {
+    hasConflictSummary?: boolean;
+    expectedFactorRefs?: string[];
+    hasResolution?: boolean;
+  };
 };
 
 // Event relations between beats
@@ -154,6 +160,28 @@ export type EventRelation = {
   fromBeatId: string;
   toBeatId: string;
   relationType: "causal" | "temporal_prev" | "temporal_next" | "same_episode";
+};
+
+export type ToolCallPattern = {
+  mustContain?: string[];
+  mustNotContain?: string[];
+  minCalls?: number;
+  maxCalls?: number;
+};
+
+export type ReasoningChainProbe = {
+  id: string;
+  description: string;
+  expectedCognitions: {
+    cognitionKey: string;
+    expectedStance: AssertionStance;
+  }[];
+  expectEdges?: boolean;
+  expectedEdges?: {
+    fromEpisodeLocalRef: string;
+    toEpisodeLocalRef: string;
+    edgeType: LogicEdgeType;
+  }[];
 };
 
 // The full story definition
@@ -167,5 +195,6 @@ export type Story = {
   clues: StoryClue[];
   beats: StoryBeat[];
   probes: StoryProbe[];
+  reasoningChainProbes?: ReasoningChainProbe[];
   eventRelations?: EventRelation[];
 };

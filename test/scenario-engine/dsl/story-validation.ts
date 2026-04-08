@@ -18,6 +18,9 @@ export function validateStory(story: Story): ValidationResult {
 
   errors.push(...validatePointerKeyRefs(story));
   errors.push(...validateProbes(story));
+  errors.push(...validateToolCallPatterns(story));
+  errors.push(...validateReasoningChainProbes(story));
+  errors.push(...validateConflictFields(story));
 
   if (story.beats) {
     errors.push(...validateStanceTransitions(story.beats));
@@ -286,6 +289,127 @@ export function validateProbes(story: Story): ValidationError[] {
         field: "viewerPerspective",
         message: `Probe '${probe.id}' viewerPerspective '${probe.viewerPerspective}' does not match any character.id`,
       });
+    }
+  }
+
+  return errors;
+}
+
+export function validateToolCallPatterns(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const beat of story.beats ?? []) {
+    const pattern = beat.expectedToolPattern;
+    if (!pattern) continue;
+
+    if (
+      typeof pattern.minCalls === "number" &&
+      typeof pattern.maxCalls === "number" &&
+      pattern.minCalls > pattern.maxCalls
+    ) {
+      errors.push({
+        field: "expectedToolPattern",
+        message: `Beat '${beat.id}' expectedToolPattern has minCalls (${pattern.minCalls}) greater than maxCalls (${pattern.maxCalls})`,
+        beatId: beat.id,
+      });
+    }
+
+    for (const toolName of pattern.mustContain ?? []) {
+      if (typeof toolName !== "string" || toolName.trim().length === 0) {
+        errors.push({
+          field: "expectedToolPattern.mustContain",
+          message: `Beat '${beat.id}' expectedToolPattern.mustContain contains an empty tool name`,
+          beatId: beat.id,
+        });
+      }
+    }
+
+    for (const toolName of pattern.mustNotContain ?? []) {
+      if (typeof toolName !== "string" || toolName.trim().length === 0) {
+        errors.push({
+          field: "expectedToolPattern.mustNotContain",
+          message: `Beat '${beat.id}' expectedToolPattern.mustNotContain contains an empty tool name`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateReasoningChainProbes(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const episodeIds = new Set<string>();
+
+  for (const beat of story.beats ?? []) {
+    for (const episode of beat.memoryEffects?.episodes ?? []) {
+      episodeIds.add(episode.id);
+    }
+  }
+
+  for (const probe of story.reasoningChainProbes ?? []) {
+    if (!Array.isArray(probe.expectedCognitions) || probe.expectedCognitions.length === 0) {
+      errors.push({
+        field: "reasoningChainProbes.expectedCognitions",
+        message: `Reasoning chain probe '${probe.id}' must define at least one expected cognition`,
+      });
+    }
+
+    for (const expected of probe.expectedCognitions ?? []) {
+      if (
+        typeof expected.cognitionKey !== "string" ||
+        expected.cognitionKey.trim().length === 0
+      ) {
+        errors.push({
+          field: "reasoningChainProbes.expectedCognitions.cognitionKey",
+          message: `Reasoning chain probe '${probe.id}' contains an empty cognitionKey`,
+        });
+      }
+    }
+
+    if (probe.expectEdges === true && Array.isArray(probe.expectedEdges)) {
+      for (const edge of probe.expectedEdges) {
+        if (!episodeIds.has(edge.fromEpisodeLocalRef)) {
+          errors.push({
+            field: "reasoningChainProbes.expectedEdges.fromEpisodeLocalRef",
+            message: `Reasoning chain probe '${probe.id}' references unknown fromEpisodeLocalRef '${edge.fromEpisodeLocalRef}'`,
+          });
+        }
+        if (!episodeIds.has(edge.toEpisodeLocalRef)) {
+          errors.push({
+            field: "reasoningChainProbes.expectedEdges.toEpisodeLocalRef",
+            message: `Reasoning chain probe '${probe.id}' references unknown toEpisodeLocalRef '${edge.toEpisodeLocalRef}'`,
+          });
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateConflictFields(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const probe of story.probes ?? []) {
+    const expectedConflictFields = probe.expectedConflictFields;
+    if (!expectedConflictFields) continue;
+
+    if (probe.retrievalMethod !== "cognition_search") {
+      errors.push({
+        field: "expectedConflictFields",
+        message: `Probe '${probe.id}' uses expectedConflictFields but retrievalMethod is '${probe.retrievalMethod}' (must be 'cognition_search')`,
+      });
+    }
+
+    for (const factorRef of expectedConflictFields.expectedFactorRefs ?? []) {
+      if (typeof factorRef !== "string" || factorRef.trim().length === 0) {
+        errors.push({
+          field: "expectedConflictFields.expectedFactorRefs",
+          message: `Probe '${probe.id}' expectedConflictFields.expectedFactorRefs contains an empty factor ref`,
+        });
+      }
     }
   }
 

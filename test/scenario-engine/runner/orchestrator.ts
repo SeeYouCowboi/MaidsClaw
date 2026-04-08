@@ -26,6 +26,7 @@ import {
 
 export type ScenarioHandleExtended = ScenarioHandle & {
   settlementInfra?: ScenarioInfra;
+  capturedToolCallLog?: WritePathResult["capturedToolCallLog"];
 };
 
 export async function runScenario(
@@ -57,6 +58,7 @@ export async function runScenario(
         writePath: resolvedOptions.writePath,
         phase: "probe_only",
       },
+      capturedToolCallLog: undefined,
     };
   }
 
@@ -106,7 +108,12 @@ export async function runScenario(
     phase: resolvedOptions.phase ?? "full",
   };
 
-  return { infra, runResult, settlementInfra };
+  return {
+    infra,
+    runResult,
+    settlementInfra,
+    capturedToolCallLog: writeResult.capturedToolCallLog,
+  };
 }
 
 async function seedInteractionHistory(
