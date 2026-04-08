@@ -1,7 +1,7 @@
 # episode / private_episode / event / event_nodes 语义审计 — 可执行修复路线图
 
 > **文档性质**：本文是基于代码逐文件扫描的"可执行审计结果 + 分阶段实施路线图"，不是设计方向文档。  
-> **扫描基准**：2026-04-08 当前工作树代码事实（文档修订未改变代码结论）。  
+> **扫描基准**：2026-04-08 当前工作树代码事实（文档修订未改变代码结论）。
 > **阅读方式**：从"当前事实"开始，了解系统现状；再看"已知问题"，了解改造动因；最后按 Phase 顺序推进。
 
 ---
@@ -61,7 +61,7 @@ export type NodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
 export const NODE_REF_REGEX = /^(assertion|evaluation|commitment|event|entity|fact):(.+)$/;
 ```
 
-**`private_episode` 不是 canonical `NodeRefKind`**。`parseGraphNodeRef()` 对 `private_episode:*` 会抛异常。  
+**`private_episode` 不是 canonical `NodeRefKind`**。`parseGraphNodeRef()` 对 `private_episode:*` 会抛异常。
 这也意味着：当前代码里的 `private_episode` 更接近**兼容 ref 名称**，而不是 graph 层正式承认的对象 kind。
 
 ### 1.3 三套 Episode Ref 的现状
@@ -343,8 +343,8 @@ visibilityScope: "world_public",  // ← 错误：私有 episode 被标记为全
    `private_episode_events` 和 `event_nodes` 均保留，不做表合并。
 
 3. **确认 canonical ref 方向**  
-   短期：继续用 `event:{id}` 作为 graph 侧 carrier ref 承载 private episode（这是兼容策略，不代表语义上把 `episode` 视为 `event`）；  
-   中期：可引入 `episode:{id}` 作为真正 canonical ref，但须配套修改 NodeRefKind + 所有消费层；  
+   短期：继续用 `event:{id}` 作为 graph 侧 carrier ref 承载 private episode（这是兼容策略，不代表语义上把 `episode` 视为 `event`）；
+   中期：可引入 `episode:{id}` 作为真正 canonical ref，但须配套修改 NodeRefKind + 所有消费层；
    长期：`private_episode_events` 可重命名为 `episode_events`，但这是 P3+ 范围。
 
 4. **确认第一阶段只修可见性和 rendering fallback**，不做大规模 schema overhaul。
