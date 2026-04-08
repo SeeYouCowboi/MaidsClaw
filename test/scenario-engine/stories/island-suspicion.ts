@@ -2383,6 +2383,17 @@ export const islandSuspicion: Story = {
       topK: 5,
     },
     {
+      id: "p11",
+      query: "转账记录 徐然 付款",
+      retrievalMethod: "cognition_search",
+      viewerPerspective: "xu_ran",
+      expectedFragments: ["xu_ran_paid_by_yuanchao"],
+      topK: 5,
+      expectedConflictFields: {
+        hasConflictSummary: true, // d1 sets xu_ran_paid_by_yuanchao as contested with 3 conflictFactors
+      },
+    },
+    {
       id: "p9",
       query: "北区设备舱",
       retrievalMethod: "memory_explore",

@@ -1437,6 +1437,9 @@ export const manorIntrigue: Story = {
       viewerPerspective: "housekeeper_chen",
       expectedFragments: ["oswin_alibi", "rejected"],
       topK: 5,
+      expectedConflictFields: {
+        hasConflictSummary: true, // b4 sets oswin_alibi as contested with conflictFactors
+      },
     },
     {
       id: "p10",
@@ -1445,6 +1448,17 @@ export const manorIntrigue: Story = {
       viewerPerspective: "head_maid",
       expectedFragments: ["gardener_elara"],
       topK: 5,
+    },
+    {
+      id: "p18",
+      query: "oswin alibi contested custody",
+      retrievalMethod: "cognition_search",
+      viewerPerspective: "head_maid",
+      expectedFragments: ["oswin_alibi"],
+      topK: 5,
+      expectedConflictFields: {
+        hasConflictSummary: true, // b4 contested assertion with conflictFactors
+      },
     },
 
     // ── Group 3: Memory Read (3 probes) ──
