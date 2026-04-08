@@ -1039,6 +1039,9 @@ export const invisibleMan: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
 
     {
@@ -1294,6 +1297,9 @@ export const invisibleMan: Story = {
             weight: 0.8,
           },
         ],
+      },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
       },
     },
 
@@ -1691,6 +1697,9 @@ export const invisibleMan: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
 
     {
@@ -2013,5 +2022,27 @@ export const invisibleMan: Story = {
     { fromBeatId: "e1", toBeatId: "e2", relationType: "causal" },
     { fromBeatId: "e2", toBeatId: "e2b", relationType: "causal" },
     { fromBeatId: "e2b", toBeatId: "e3", relationType: "causal" },
+  ],
+  reasoningChainProbes: [
+    {
+      id: "chain_cognitive_blindness",
+      description:
+        "No one entered contested then rejected, angus memory gap confirmed",
+      expectedCognitions: [
+        {
+          cognitionKey: "no_one_entered",
+          expectedStance: "contested",
+        },
+        {
+          cognitionKey: "no_one_entered",
+          expectedStance: "rejected",
+        },
+        {
+          cognitionKey: "angus_memory_gap",
+          expectedStance: "confirmed",
+        },
+      ],
+      expectEdges: false,
+    },
   ],
 };

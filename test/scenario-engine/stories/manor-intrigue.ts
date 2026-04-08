@@ -516,6 +516,9 @@ export const manorIntrigue: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge"],
+      },
     },
 
     {
@@ -924,6 +927,9 @@ export const manorIntrigue: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
 
     {
@@ -1172,6 +1178,9 @@ export const manorIntrigue: Story = {
             weight: 0.41,
           },
         ],
+      },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
       },
     },
     {
@@ -1532,4 +1541,30 @@ export const manorIntrigue: Story = {
     { fromBeatId: "c2", toBeatId: "c5", relationType: "same_episode" },
     { fromBeatId: "c5", toBeatId: "c2", relationType: "same_episode" },
   ], // Filled in T16b
+  reasoningChainProbes: [
+    {
+      id: "chain_alibi_collapse",
+      description:
+        "Oswin's alibi contested then rejected, key custody confirmed, guilt confirmed",
+      expectedCognitions: [
+        {
+          cognitionKey: "oswin_alibi",
+          expectedStance: "contested",
+        },
+        {
+          cognitionKey: "oswin_alibi",
+          expectedStance: "rejected",
+        },
+        {
+          cognitionKey: "oswin_last_had_key",
+          expectedStance: "confirmed",
+        },
+        {
+          cognitionKey: "oswin_guilty",
+          expectedStance: "confirmed",
+        },
+      ],
+      expectEdges: false,
+    },
+  ],
 };

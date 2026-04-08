@@ -201,6 +201,9 @@ export const miniSample: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
     {
       id: "b4",
@@ -589,6 +592,9 @@ export const miniSample: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
   ],
   probes: [
@@ -640,6 +646,24 @@ export const miniSample: Story = {
       viewerPerspective: "head_maid",
       expectedFragments: ["cook_henrik", "cellar"],
       topK: 5,
+    },
+  ],
+  reasoningChainProbes: [
+    {
+      id: "chain_butler_suspicion",
+      description:
+        "Butler suspicion arc from tentative to confirmed",
+      expectedCognitions: [
+        {
+          cognitionKey: "butler_oswin_suspicious",
+          expectedStance: "tentative",
+        },
+        {
+          cognitionKey: "butler_oswin_suspicious",
+          expectedStance: "confirmed",
+        },
+      ],
+      expectEdges: false,
     },
   ],
 };

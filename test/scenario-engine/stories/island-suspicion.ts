@@ -1283,6 +1283,9 @@ export const islandSuspicion: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
+      },
     },
     {
       id: "d5",
@@ -1523,6 +1526,9 @@ export const islandSuspicion: Story = {
             weight: 0.7,
           },
         ],
+      },
+      expectedToolPattern: {
+        mustContain: ["create_logic_edge", "upsert_assertion"],
       },
     },
     {
@@ -2045,6 +2051,14 @@ export const islandSuspicion: Story = {
           },
         ],
       },
+      expectedToolPattern: {
+        mustContain: [
+          "create_logic_edge",
+          "upsert_assertion",
+          "create_entity",
+          "create_alias",
+        ],
+      },
     },
     {
       id: "g2",
@@ -2441,5 +2455,23 @@ export const islandSuspicion: Story = {
     { fromBeatId: "e5", toBeatId: "f1", relationType: "temporal_next" },
     { fromBeatId: "f5", toBeatId: "g1", relationType: "temporal_next" },
     { fromBeatId: "g4", toBeatId: "g5", relationType: "temporal_next" },
+  ],
+  reasoningChainProbes: [
+    {
+      id: "chain_framing_evidence",
+      description:
+        "Xu Ran framing rejected and killer computer use accepted",
+      expectedCognitions: [
+        {
+          cognitionKey: "xu_ran_paid_by_yuanchao",
+          expectedStance: "rejected",
+        },
+        {
+          cognitionKey: "killer_used_computer",
+          expectedStance: "accepted",
+        },
+      ],
+      expectEdges: false,
+    },
   ],
 };
