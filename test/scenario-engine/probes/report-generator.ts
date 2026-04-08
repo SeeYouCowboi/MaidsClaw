@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import type { ProbeResult } from "./probe-types.js";
 import type { ScenarioRunResult, ScenarioInfra } from "../runner/infra.js";
 import type { Story } from "../dsl/story-types.js";
+import type { ToolCallAssertionResult } from "./scenario-assertion-types.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
 
 export type AlignedComparison = {
@@ -30,6 +31,7 @@ export function generateReport(
   probeResults: ProbeResult[],
   runResult: ScenarioRunResult,
   storyTitle?: string,
+  toolCallAssertionResults?: ToolCallAssertionResult[],
 ): string {
   const title = storyTitle ?? "Untitled Scenario";
   const totalProbes = probeResults.length;
@@ -84,6 +86,24 @@ export function generateReport(
     }
     if (!r.passed) {
       lines.push("- Status: FAILED");
+    }
+  }
+
+  if (toolCallAssertionResults && toolCallAssertionResults.length > 0) {
+    lines.push("");
+    lines.push("## Tool Call Pattern Assertions");
+    lines.push("");
+    lines.push("| Beat | Passed | Violations |");
+    lines.push("|------|--------|------------|");
+
+    for (const result of toolCallAssertionResults) {
+      const passedIcon = result.passed ? "✅" : "❌";
+      const violations = result.violations.length > 0
+        ? result.violations
+          .map((violation) => `${violation.rule}: ${violation.detail}`)
+          .join("<br>")
+        : "—";
+      lines.push(`| ${result.beatId} | ${passedIcon} | ${violations} |`);
     }
   }
 

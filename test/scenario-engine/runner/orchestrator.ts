@@ -23,10 +23,13 @@ import {
   executeSettlementPath,
   type WritePathResult,
 } from "./write-paths.js";
+import { assertToolCallPatterns } from "../probes/tool-call-asserter.js";
+import type { ToolCallAssertionResult } from "../probes/scenario-assertion-types.js";
 
 export type ScenarioHandleExtended = ScenarioHandle & {
   settlementInfra?: ScenarioInfra;
   capturedToolCallLog?: WritePathResult["capturedToolCallLog"];
+  toolCallAssertionResults?: ToolCallAssertionResult[];
 };
 
 export async function runScenario(
@@ -59,6 +62,7 @@ export async function runScenario(
         phase: "probe_only",
       },
       capturedToolCallLog: undefined,
+      toolCallAssertionResults: [],
     };
   }
 
@@ -81,6 +85,11 @@ export async function runScenario(
     infra,
     story,
     dialogue,
+  );
+
+  const toolCallAssertionResults = assertToolCallPatterns(
+    story.beats,
+    writeResult.capturedToolCallLog?.beats ?? [],
   );
 
   let settlementInfra: ScenarioInfra | undefined;
@@ -113,6 +122,7 @@ export async function runScenario(
     runResult,
     settlementInfra,
     capturedToolCallLog: writeResult.capturedToolCallLog,
+    toolCallAssertionResults,
   };
 }
 
