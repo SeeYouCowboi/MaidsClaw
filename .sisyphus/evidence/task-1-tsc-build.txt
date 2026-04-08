@@ -1,0 +1,1 @@
+PASS: bun run build — zero new errors in test/scenario-engine/

@@ -1,0 +1,1 @@
+14 pass (was 8) — new validators tested: validateToolCallPatterns, validateReasoningChainProbes, validateConflictFields
