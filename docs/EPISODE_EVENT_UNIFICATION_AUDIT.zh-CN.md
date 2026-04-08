@@ -1,7 +1,7 @@
-# private_episode / event_node 统一改造 — 可执行审计报告与实施路线图
+# episode / private_episode / event / event_nodes 语义审计 — 可执行修复路线图
 
 > **文档性质**：本文是基于代码逐文件扫描的"可执行审计结果 + 分阶段实施路线图"，不是设计方向文档。  
-> **扫描基准**：2026-04-08 最新提交（`19c44777`）。  
+> **扫描基准**：2026-04-08 当前工作树代码事实（文档修订未改变代码结论）。  
 > **阅读方式**：从"当前事实"开始，了解系统现状；再看"已知问题"，了解改造动因；最后按 Phase 顺序推进。
 
 ---
@@ -13,6 +13,17 @@
 - 消除 `episode` 在不同子系统里的三套身份（`event:{id}` / `private_episode:{id}` / `episode:{local_key}`）
 - 统一 canonical ref，使 graph / relation / retrieval / visibility 对同一 episode 的解析保持一致
 - 保持 `episode / event / cognition / fact` 的语义分层，不合并语义层
+
+这里最容易混淆的不是代码路径，而是**语义层级**。当前 PR 里同时出现了四种名字，它们不在同一层：
+
+| 名字 | 所属层级 | 当前含义 |
+|------|----------|----------|
+| `episode` | 本体语义 | agent 视角下的经历片段 |
+| `event` | 本体语义 / graph canonical kind | 共享叙事层事件；当前 graph 侧也暂时借它承载部分 private episode ref |
+| `private_episode` | legacy ref / storage 命名 | 不是 canonical ontology kind；当前主要是 relation/intent 层兼容 ref 和物理表名前缀 |
+| `event_nodes` / `private_episode_events` | 物理表 | 存储落点，不等于本体类型名 |
+
+**一句话版本**：本次要修的是“同一 `episode` 在 ref/读写/可见性层被拆成多套身份”的问题，不是把 `episode` 的语义并入 `event`，也不是要求立刻把两张表合并。
 
 **五个高优先级已知问题**，按严重程度：
 
@@ -50,7 +61,8 @@ export type NodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
 export const NODE_REF_REGEX = /^(assertion|evaluation|commitment|event|entity|fact):(.+)$/;
 ```
 
-**`private_episode` 不是 canonical `NodeRefKind`**。`parseGraphNodeRef()` 对 `private_episode:*` 会抛异常。
+**`private_episode` 不是 canonical `NodeRefKind`**。`parseGraphNodeRef()` 对 `private_episode:*` 会抛异常。  
+这也意味着：当前代码里的 `private_episode` 更接近**兼容 ref 名称**，而不是 graph 层正式承认的对象 kind。
 
 ### 1.3 三套 Episode Ref 的现状
 
@@ -59,6 +71,12 @@ export const NODE_REF_REGEX = /^(assertion|evaluation|commitment|event|entity|fa
 | `event:{id}` | `explicit-settlement-processor.ts:378`（publication 路径）；`thinker-worker.ts`（projection 侧）；`graph-read-query-repo.ts`（图读取）；`node-scoring-query-repo.ts`（rendering/scoring） | ✅ 是 |
 | `private_episode:{id}` | `explicit-settlement-processor.ts:361`（episode 路径）；`thinker-worker.ts:688`；`relation-read-repo.ts:102-109,177`；`relation-builder.ts:223`；`cognition-search.ts:335`；`private-cognition-current.ts:111`；`relation-intent-resolver.ts:334` | ❌ 否（会抛异常） |
 | `episode:{local_key}` | `thinker-worker.ts:82,89`（LLM prompt 模板，local ref）；`relation-intent-resolver.ts:11,14,96,285`（前缀剥离后用于匹配） | ❌ 否（是 turn-level 临时 key，不是数据库 ID） |
+
+**不要把这三种 ref 当成三个平级对象**：
+
+- `event:{id}`：当前 graph 侧的 canonical 载体 ref
+- `private_episode:{id}`：当前 relation/intent 侧的兼容 ref
+- `episode:{local_key}`：turn 内局部引用，不是持久化 ID
 
 ---
 
@@ -325,8 +343,8 @@ visibilityScope: "world_public",  // ← 错误：私有 episode 被标记为全
    `private_episode_events` 和 `event_nodes` 均保留，不做表合并。
 
 3. **确认 canonical ref 方向**  
-   短期：继续用 `event:{id}` 承载 private episode 在 graph 侧的 ref（成本最低）；  
-   中期：可引入 `episode:{id}` 作为 canonical ref，但须配套修改 NodeRefKind + 所有消费层；  
+   短期：继续用 `event:{id}` 作为 graph 侧 carrier ref 承载 private episode（这是兼容策略，不代表语义上把 `episode` 视为 `event`）；  
+   中期：可引入 `episode:{id}` 作为真正 canonical ref，但须配套修改 NodeRefKind + 所有消费层；  
    长期：`private_episode_events` 可重命名为 `episode_events`，但这是 P3+ 范围。
 
 4. **确认第一阶段只修可见性和 rendering fallback**，不做大规模 schema overhaul。

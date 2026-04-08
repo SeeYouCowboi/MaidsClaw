@@ -25,9 +25,17 @@
 
 - graph 侧把它当成 `event:{id}` 使用
 - relation 侧把它当成 `private_episode:{id}` 使用
-- retrieval 侧又把它当成 `episode:{id}` 输出
+- turn-local prompt / relation-intent 层又把它当成 `episode:{local_key}` 使用
 
 这不是单点 bug，而是模型层未收敛导致的系统性不一致。
+
+这里要特别区分三层名字：
+
+- `episode` / `event`：本体语义对象
+- `private_episode:*` / `event:*` / `episode:*`：ref 命名
+- `private_episode_events` / `event_nodes`：物理表名
+
+如果不先把这三层拆开，后面的“统一”会很容易误写成“对象合并”或“表合并”。
 
 推荐的目标模型不是把一切并成一种对象，而是明确四条语义主线：
 
@@ -371,13 +379,13 @@
 
 - `ProjectionManager` 把 episode 映射成 `event:{id}` 推给 graph organizer
 - relation/read 层支持并使用 `private_episode:{id}`
-- `RetrievalOrchestrator` 又输出 `episode:{id}`
+- turn-local prompt / relation-intent 层又保留 `episode:{local_key}`
 
 这会带来三个直接后果：
 
 - graph 层无法拥有真正稳定的 episode kind
 - relation 层需要单独适配 private_episode
-- retrieval/prompt 层和 graph/parser 层不能共享同一套 ref 规则
+- prompt / relation-intent 层和 graph/parser 层不能共享同一套 ref 规则
 
 ## 2. canonical node kind 不含 `episode`
 
@@ -458,7 +466,7 @@
 - 统一称为 `episode`
 - visibility 决定它是否私有
 
-短期内可以保留物理表名 `private_episode_events`，但服务层和 node ref 层应视其为 canonical `episode`
+短期内可以保留物理表名 `private_episode_events`，但这只是存储层 legacy 命名；不要再把这个表名反推成一个叫 `private_episode` 的本体 kind。服务层和 node ref 层最终应收敛到 canonical `episode`
 
 ## 3. 不合并 `event`
 
@@ -717,4 +725,3 @@
 
 > **下一步**：上述"统一"的具体代码文件、数据库层影响、分阶段改造路线，请参阅  
 > [`docs/EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md`](./EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md)
-
