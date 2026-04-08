@@ -24,12 +24,17 @@ import {
   type WritePathResult,
 } from "./write-paths.js";
 import { assertToolCallPatterns } from "../probes/tool-call-asserter.js";
-import type { ToolCallAssertionResult } from "../probes/scenario-assertion-types.js";
+import { verifyReasoningChains } from "../probes/reasoning-chain-verifier.js";
+import type {
+  ReasoningChainResult,
+  ToolCallAssertionResult,
+} from "../probes/scenario-assertion-types.js";
 
 export type ScenarioHandleExtended = ScenarioHandle & {
   settlementInfra?: ScenarioInfra;
   capturedToolCallLog?: WritePathResult["capturedToolCallLog"];
   toolCallAssertionResults?: ToolCallAssertionResult[];
+  chainResults?: ReasoningChainResult[];
 };
 
 export async function runScenario(
@@ -48,6 +53,11 @@ export async function runScenario(
   const infra = await bootstrapScenarioSchema(story, resolvedOptions);
 
   if (resolvedOptions.phase === "probe_only") {
+    const chainResults = await verifyReasoningChains(
+      story.reasoningChainProbes ?? [],
+      infra,
+    );
+
     return {
       infra,
       runResult: {
@@ -63,6 +73,7 @@ export async function runScenario(
       },
       capturedToolCallLog: undefined,
       toolCallAssertionResults: [],
+      chainResults,
     };
   }
 
@@ -90,6 +101,10 @@ export async function runScenario(
   const toolCallAssertionResults = assertToolCallPatterns(
     story.beats,
     writeResult.capturedToolCallLog?.beats ?? [],
+  );
+  const chainResults = await verifyReasoningChains(
+    story.reasoningChainProbes ?? [],
+    infra,
   );
 
   let settlementInfra: ScenarioInfra | undefined;
@@ -123,6 +138,7 @@ export async function runScenario(
     settlementInfra,
     capturedToolCallLog: writeResult.capturedToolCallLog,
     toolCallAssertionResults,
+    chainResults,
   };
 }
 

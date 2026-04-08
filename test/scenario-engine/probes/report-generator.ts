@@ -3,7 +3,10 @@ import { join, dirname } from "node:path";
 import type { ProbeResult } from "./probe-types.js";
 import type { ScenarioRunResult, ScenarioInfra } from "../runner/infra.js";
 import type { Story } from "../dsl/story-types.js";
-import type { ToolCallAssertionResult } from "./scenario-assertion-types.js";
+import type {
+  ReasoningChainResult,
+  ToolCallAssertionResult,
+} from "./scenario-assertion-types.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
 
 export type AlignedComparison = {
@@ -31,6 +34,7 @@ export function generateReport(
   probeResults: ProbeResult[],
   runResult: ScenarioRunResult,
   storyTitle?: string,
+  chainResults?: ReasoningChainResult[],
   toolCallAssertionResults?: ToolCallAssertionResult[],
 ): string {
   const title = storyTitle ?? "Untitled Scenario";
@@ -86,6 +90,40 @@ export function generateReport(
     }
     if (!r.passed) {
       lines.push("- Status: FAILED");
+    }
+  }
+
+  if (chainResults && chainResults.length > 0) {
+    lines.push("");
+    lines.push("## Reasoning Chain Verification");
+    lines.push("");
+    lines.push("| Probe | Passed | Cognitions | Edges |");
+    lines.push("|-------|--------|------------|-------|");
+
+    for (const result of chainResults) {
+      const cognitionTotal = result.cognitionResults.length;
+      const cognitionMatched = result.cognitionResults.filter(
+        (r) => r.found && r.stanceMatch,
+      ).length;
+
+      const firstIssue = result.cognitionResults.find((r) => !r.found || !r.stanceMatch);
+      const cognitionSummary = firstIssue
+        ? `${cognitionMatched}/${cognitionTotal} (${firstIssue.cognitionKey}: ${!firstIssue.found ? "not found" : "stance mismatch"})`
+        : `${cognitionMatched}/${cognitionTotal} match`;
+
+      let edgeSummary = "N/A";
+      if (result.edgeResults) {
+        const edgeTotal = result.edgeResults.length;
+        const edgeMatched = result.edgeResults.filter((edge) => edge.found).length;
+        const firstMissing = result.edgeResults.find((edge) => !edge.found);
+        edgeSummary = firstMissing
+          ? `${edgeMatched}/${edgeTotal} (${firstMissing.fromRef}->${firstMissing.toRef}: missing)`
+          : `${edgeMatched}/${edgeTotal} match`;
+      }
+
+      lines.push(
+        `| ${result.probeId} | ${result.passed ? "✅" : "❌"} | ${cognitionSummary} | ${edgeSummary} |`,
+      );
     }
   }
 
