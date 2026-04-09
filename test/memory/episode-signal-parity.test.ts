@@ -43,6 +43,16 @@ const LEGACY_EPISODE_DETECTIVE_TRIGGER =
 const LEGACY_EPISODE_SCENE_TRIGGER =
   /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景|大厅|厨房|花园)/i;
 
+// The §4 follow-up commit deleted `queryEpisodeBoost` / `sceneEpisodeBoost`
+// from `RetrievalTemplate`, but this fixture must still represent the
+// PRE-DELETION ceiling (the level the signal-driven path needs to match
+// or exceed) — so the boost constants are now hard-coded here. They are
+// frozen at 1 (the value they had in role defaults at the prereq commit
+// `ff8a44e`). Any future change to the role defaults' bumped baseline
+// must keep this fixture in sync.
+const LEGACY_QUERY_EPISODE_BOOST = 1;
+const LEGACY_SCENE_EPISODE_BOOST = 1;
+
 function legacyEpisodeBudget(
   query: string,
   template: Required<RetrievalTemplate>,
@@ -55,12 +65,12 @@ function legacyEpisodeBudget(
     (LEGACY_EPISODE_QUERY_TRIGGER.test(trimmed) ||
       LEGACY_EPISODE_DETECTIVE_TRIGGER.test(trimmed));
   if (queryOrDetective) {
-    budget += template.queryEpisodeBoost;
+    budget += LEGACY_QUERY_EPISODE_BOOST;
   }
   const sceneTriggered =
     currentAreaId != null && LEGACY_EPISODE_SCENE_TRIGGER.test(trimmed);
   if (sceneTriggered) {
-    budget += template.sceneEpisodeBoost;
+    budget += LEGACY_SCENE_EPISODE_BOOST;
   }
   return {
     budget: Math.max(0, budget),
@@ -178,8 +188,10 @@ describe("Episode signal/regex parity (GAP-4 §4 prereq)", () => {
   it("rp_agent template has the bumped episode defaults", () => {
     expect(template.episodicBudget).toBe(3);
     expect(template.episodeBudget).toBe(3);
-    expect(template.queryEpisodeBoost).toBe(1);
-    expect(template.sceneEpisodeBoost).toBe(1);
+    // queryEpisodeBoost / sceneEpisodeBoost were deleted from the template
+    // in the §4 follow-up commit; the +1 they used to add is now baked
+    // into the bumped baseline above. The legacy fixture replicas above
+    // hard-code 1 to preserve the pre-deletion ceiling for parity checks.
   });
 
   it("non-regression: signal episode budget >= legacy regex episode budget for every fixture row", async () => {

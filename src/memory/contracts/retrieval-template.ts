@@ -15,8 +15,6 @@ export type RetrievalTemplate = {
   conflictNotesTokenBudget?: number;
   episodicTokenBudget?: number;
   conflictBoostFactor?: number;
-  queryEpisodeBoost?: number;
-  sceneEpisodeBoost?: number;
   maxNarrativeHits?: number;
   maxCognitionHits?: number;
 };
@@ -29,13 +27,17 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3);
 }
 
-// GAP-4 §4 prereq: episodicBudget/episodeBudget for rp_agent and maiden
-// were bumped from 2 → 3 to absorb the +1 queryEpisodeBoost that the legacy
-// EPISODE_*_TRIGGER regex path adds in retrieval-orchestrator.ts. The
-// conservation-based plan allocator (budget-allocator.ts) cannot exceed the
-// template baseline, so the baseline itself has to carry the boost. The
-// queryEpisodeBoost / sceneEpisodeBoost fields stay non-zero here for the
-// legacy regex path until the EPISODE_*_TRIGGER deletion follow-up.
+// GAP-4 §4: episodicBudget/episodeBudget for rp_agent and maiden carry the
+// +1 that used to be added at runtime by EPISODE_*_TRIGGER regex boosts in
+// retrieval-orchestrator.ts. The §4 prereq commit (ff8a44e) bumped the
+// defaults from 2 → 3; the §4 follow-up (this commit) deleted the regex
+// path and the queryEpisodeBoost / sceneEpisodeBoost template fields,
+// leaving the bumped baseline as the new ceiling. Episode budget is now
+// driven entirely by:
+//   1. Role-default `episodicBudget` (this constant)
+//   2. signal-driven reallocation in budget-allocator.ts when a QueryPlan
+//      is supplied with non-zero needsEpisode (router consumes the
+//      EPISODE_MEMORY/DETECTIVE/SCENE keyword buckets)
 const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
   rp_agent: {
     narrativeEnabled: true,
@@ -52,8 +54,6 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesTokenBudget: 0,
     episodicTokenBudget: 0,
     conflictBoostFactor: 1,
-    queryEpisodeBoost: 1,
-    sceneEpisodeBoost: 1,
     maxNarrativeHits: 3,
     maxCognitionHits: 5,
   },
@@ -72,8 +72,6 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesTokenBudget: 0,
     episodicTokenBudget: 0,
     conflictBoostFactor: 0,
-    queryEpisodeBoost: 1,
-    sceneEpisodeBoost: 1,
     maxNarrativeHits: 3,
     maxCognitionHits: 0,
   },
@@ -92,8 +90,6 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     conflictNotesTokenBudget: 0,
     episodicTokenBudget: 0,
     conflictBoostFactor: 0,
-    queryEpisodeBoost: 0,
-    sceneEpisodeBoost: 0,
     maxNarrativeHits: 0,
     maxCognitionHits: 0,
   },
@@ -127,8 +123,6 @@ export function resolveTemplate(
     conflictNotesTokenBudget: override.conflictNotesTokenBudget ?? base.conflictNotesTokenBudget,
     episodicTokenBudget: override.episodicTokenBudget ?? base.episodicTokenBudget,
     conflictBoostFactor: override.conflictBoostFactor ?? base.conflictBoostFactor,
-    queryEpisodeBoost: override.queryEpisodeBoost ?? base.queryEpisodeBoost,
-    sceneEpisodeBoost: override.sceneEpisodeBoost ?? base.sceneEpisodeBoost,
     maxNarrativeHits: narrativeBudget,
     maxCognitionHits: cognitionBudget,
   };

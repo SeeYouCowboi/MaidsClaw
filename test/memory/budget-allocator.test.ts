@@ -230,8 +230,6 @@ describe("BudgetAllocator — non-budget fields preserved", () => {
     expect(allocated.cognitionTokenBudget).toBe(template.cognitionTokenBudget);
     expect(allocated.conflictNotesTokenBudget).toBe(template.conflictNotesTokenBudget);
     expect(allocated.episodicTokenBudget).toBe(template.episodicTokenBudget);
-    expect(allocated.queryEpisodeBoost).toBe(template.queryEpisodeBoost);
-    expect(allocated.sceneEpisodeBoost).toBe(template.sceneEpisodeBoost);
     expect(allocated.conflictBoostFactor).toBe(template.conflictBoostFactor);
     expect(allocated.narrativeEnabled).toBe(template.narrativeEnabled);
     expect(allocated.cognitionEnabled).toBe(template.cognitionEnabled);

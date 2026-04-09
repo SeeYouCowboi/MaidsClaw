@@ -87,15 +87,18 @@ export type RetrievalSearchOptions = {
   queryPlan?: QueryPlan;
 };
 
-const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次|记得|昨天|上次|以前|从前|经历)/i;
-const EPISODE_DETECTIVE_TRIGGER = /(detective|investigate|investigation|clue|evidence|timeline|who|why|how did|线索|证据|调查|推理|案发|时间线|谁|为什么|怎么回事|真相|原因)/i;
-const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景|大厅|厨房|花园)/i;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 /**
  * Phase 3 feature flag: when "off", disables plan-driven budget allocation
- * and falls back to the legacy template + EPISODE_*_TRIGGER path. Default
- * is ON — if a QueryPlan is supplied, it will drive the budget.
+ * and falls back to the strategy-adjusted template directly. Default is ON
+ * — if a QueryPlan is supplied, it will drive the budget reallocation.
+ *
+ * The §4 follow-up (this commit) removed the legacy `EPISODE_*_TRIGGER`
+ * regex path entirely — `MAIDSCLAW_RETRIEVAL_USE_PLAN=off` now means "use
+ * the strategy-adjusted template without plan reallocation", not "go back
+ * to the regex boost path". The signal-driven router is the only episode
+ * boost mechanism now; see test/memory/episode-signal-parity.test.ts.
  */
 function isPlanDrivenRetrievalEnabled(): boolean {
   return process.env.MAIDSCLAW_RETRIEVAL_USE_PLAN !== "off";
@@ -162,7 +165,7 @@ export class RetrievalOrchestrator {
       allSurfacedTexts.add(normalized);
     }
 
-    const effectiveEpisodeBudget = this.resolveEpisodeBudget(query, template, viewerContext);
+    const effectiveEpisodeBudget = this.resolveEpisodeBudget(template);
     const episodeHints = await this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
 
     const narrativeHints: MemoryHint[] =
@@ -228,8 +231,6 @@ export class RetrievalOrchestrator {
       conflictNotesBudget: template.conflictNotesBudget + 1,
       episodicBudget: template.episodicBudget + 1,
       episodeBudget: template.episodeBudget + 1,
-      queryEpisodeBoost: template.queryEpisodeBoost + 1,
-      sceneEpisodeBoost: template.sceneEpisodeBoost + 1,
       maxNarrativeHits: narrativeBudget,
       maxCognitionHits: cognitionBudget,
     };
@@ -536,20 +537,18 @@ export class RetrievalOrchestrator {
     return filtered;
   }
 
-  private resolveEpisodeBudget(
-    query: string,
-    template: Required<RetrievalTemplate>,
-    viewerContext: ViewerContext,
-  ): number {
-    let budget = Math.max(template.episodicBudget, template.episodeBudget);
-    const trimmed = query.trim();
-    if (trimmed.length > 0 && (EPISODE_QUERY_TRIGGER.test(trimmed) || EPISODE_DETECTIVE_TRIGGER.test(trimmed))) {
-      budget += template.queryEpisodeBoost;
-    }
-    if (viewerContext.current_area_id != null && EPISODE_SCENE_TRIGGER.test(trimmed)) {
-      budget += template.sceneEpisodeBoost;
-    }
-    return Math.max(0, budget);
+  private resolveEpisodeBudget(template: Required<RetrievalTemplate>): number {
+    // GAP-4 §4 follow-up: the EPISODE_*_TRIGGER regex boosts that used to
+    // ride on top of the template were removed in favor of the
+    // signal-driven router path. The router's needsEpisode signal (fed by
+    // EPISODE_MEMORY_KEYWORDS / EPISODE_DETECTIVE_KEYWORDS /
+    // EPISODE_SCENE_KEYWORDS in query-routing-keywords.ts) drives episode
+    // budget reallocation via budget-allocator before this function runs;
+    // the role-default `episodicBudget` was bumped from 2 → 3 in the §4
+    // prereq commit (ff8a44e) to absorb the +1 boost the regex used to
+    // add. The signal path is strictly broader than the regex path on the
+    // bilingual parity fixture (test/memory/episode-signal-parity.test.ts).
+    return Math.max(0, Math.max(template.episodicBudget, template.episodeBudget));
   }
 
   private resolveConflictNotesBudget(
