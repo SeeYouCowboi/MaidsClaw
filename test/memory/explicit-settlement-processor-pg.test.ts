@@ -429,7 +429,7 @@ describe("ExplicitSettlementProcessor (PG repos, async)", () => {
 
     expect(relationUpserts).toEqual([
       {
-        sourceNodeRef: "private_episode:91",
+        sourceNodeRef: "episode:91",
         targetNodeRef: "assertion:101",
         relationType: "supports",
       },

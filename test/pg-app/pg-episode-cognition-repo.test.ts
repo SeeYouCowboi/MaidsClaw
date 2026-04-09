@@ -143,7 +143,7 @@ describe.skipIf(skipPgTests)("PgEpisodeRepo", () => {
     });
   });
 
-  it("rejects thought category", async () => {
+  it("rejects thought category via VALID_CATEGORIES guard", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);
       const repo = new PgEpisodeRepo(sql);
@@ -153,11 +153,11 @@ describe.skipIf(skipPgTests)("PgEpisodeRepo", () => {
           agentId: "agent-1",
           sessionId: "sess-1",
           settlementId: "stl-1",
-          category: "thought",
+          category: "thought" as string,
           summary: "thinking",
           committedTime: 1000,
         }),
-      ).toThrow('episode category "thought" is not allowed');
+      ).toThrow('invalid episode category: "thought"');
     });
   });
 

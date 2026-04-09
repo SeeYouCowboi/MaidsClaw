@@ -4,6 +4,7 @@ import type {
   SearchProjectionRepo,
   SearchProjectionScope,
   UpsertCognitionDocParams,
+  UpsertEpisodeDocParams,
 } from "../contracts/search-projection-repo.js";
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
@@ -153,6 +154,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
 
     if (scope === "world") {
       await this.sql`DELETE FROM search_docs_world`;
+      return;
+    }
+
+    if (scope === "episode") {
+      if (agentId === ALL_AGENTS_SENTINEL) {
+        await this.sql`DELETE FROM search_docs_episode`;
+      } else {
+        await this.sql`
+          DELETE FROM search_docs_episode
+          WHERE agent_id = ${agentId}
+        `;
+      }
       return;
     }
 
@@ -511,6 +524,86 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       stance: row.stance,
       content: row.content,
       updatedAt: toNumber(row.updated_at),
+      createdAt: toNumber(row.created_at),
+      score: toNumber(row.score),
+    }));
+  }
+
+  async upsertEpisodeDoc(params: UpsertEpisodeDocParams): Promise<number> {
+    const now = params.createdAt ?? Date.now();
+
+    const existing = await this.sql<{ id: string | number; content: string; category: string }[]>`
+      SELECT id, content, category
+      FROM search_docs_episode
+      WHERE source_ref = ${params.sourceRef}
+        AND agent_id = ${params.agentId}
+      LIMIT 1
+    `;
+
+    if (existing.length === 0) {
+      const inserted = await this.sql<{ id: string | number }[]>`
+        INSERT INTO search_docs_episode (doc_type, source_ref, agent_id, category, content, committed_at, created_at)
+        VALUES ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category}, ${params.content}, ${params.committedAt}, ${now})
+        RETURNING id
+      `;
+      return toNumber(inserted[0]?.id);
+    }
+
+    const row = existing[0];
+    if (row.content !== params.content || row.category !== params.category) {
+      await this.sql`
+        UPDATE search_docs_episode
+        SET content = ${params.content},
+            category = ${params.category},
+            committed_at = ${params.committedAt}
+        WHERE id = ${row.id}
+      `;
+    }
+
+    return toNumber(row.id);
+  }
+
+  async searchEpisode(
+    query: string,
+    agentId: string,
+    limit = 20,
+  ): Promise<Array<{
+    id: number;
+    sourceRef: string;
+    agentId: string;
+    category: string;
+    content: string;
+    committedAt: number;
+    createdAt: number;
+    score: number;
+  }>> {
+    const pattern = `%${query}%`;
+    const rows = await this.sql<{
+      id: string | number;
+      source_ref: string;
+      agent_id: string;
+      category: string;
+      content: string;
+      committed_at: string | number;
+      created_at: string | number;
+      score?: string | number;
+    }[]>`
+      SELECT id, source_ref, agent_id, category, content, committed_at, created_at,
+             similarity(content, ${query}) AS score
+      FROM search_docs_episode
+      WHERE agent_id = ${agentId}
+        AND (content % ${query} OR content ILIKE ${pattern})
+      ORDER BY score DESC, committed_at DESC
+      LIMIT ${limit}
+    `;
+
+    return rows.map((row) => ({
+      id: toNumber(row.id),
+      sourceRef: row.source_ref,
+      agentId: row.agent_id,
+      category: row.category,
+      content: row.content,
+      committedAt: toNumber(row.committed_at),
       createdAt: toNumber(row.created_at),
       score: toNumber(row.score),
     }));

@@ -1099,8 +1099,8 @@ export class GraphNavigator {
   private async isSameAgentPrivateCompatibility(from: NodeRef, to: NodeRef, viewerAgentId: string): Promise<boolean> {
     const fromKind = this.parseNodeRef(from)?.kind;
     const toKind = this.parseNodeRef(to)?.kind;
-    const fromPrivate = fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment";
-    const toPrivate = toKind === "assertion" || toKind === "evaluation" || toKind === "commitment";
+    const fromPrivate = fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment" || fromKind === "episode";
+    const toPrivate = toKind === "assertion" || toKind === "evaluation" || toKind === "commitment" || toKind === "episode";
 
     if (!fromPrivate && !toPrivate) {
       return true;
@@ -1130,7 +1130,7 @@ export class GraphNavigator {
       this.privateNodeOwnerCache.set(nodeRef, null);
       return null;
     }
-    if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+    if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment" || parsed.kind === "episode") {
       const owners = await this.readRepo.getPrivateNodeOwners([nodeRef]);
       const owner = owners[0]?.agentId ?? null;
       this.privateNodeOwnerCache.set(nodeRef, owner);
@@ -1558,7 +1558,7 @@ export class GraphNavigator {
         owner_agent_id: record.ownerAgentId,
       };
     }
-    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment") {
+    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment" || record.kind === "episode") {
       return { agent_id: record.agentId };
     }
     if (record.kind === "fact") {

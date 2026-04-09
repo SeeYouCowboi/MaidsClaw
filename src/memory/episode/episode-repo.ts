@@ -46,10 +46,6 @@ export class EpisodeRepository {
   constructor(private readonly db: Db) {}
 
   append(params: EpisodeAppendParams & Record<string, unknown>): number {
-    if (params.category === "thought") {
-      throw new Error(`episode category "thought" is not allowed`);
-    }
-
     if (!VALID_CATEGORIES.has(params.category)) {
       throw new Error(`invalid episode category: ${JSON.stringify(params.category)}`);
     }

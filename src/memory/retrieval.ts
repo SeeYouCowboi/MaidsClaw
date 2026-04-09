@@ -269,7 +269,7 @@ export class RetrievalService {
 
   private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
     const kind = nodeKind as string;
-    if (kind === "assertion" || kind === "evaluation" || kind === "commitment") {
+    if (kind === "assertion" || kind === "evaluation" || kind === "commitment" || kind === "episode") {
       return "private";
     }
     return "world";

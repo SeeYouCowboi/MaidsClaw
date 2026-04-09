@@ -220,8 +220,9 @@ export class RelationBuilder {
       return null;
     }
 
+    // Normalize legacy private_episode: refs to episode:
     if (trimmed.startsWith("private_episode:")) {
-      return trimmed;
+      return `episode:${trimmed.slice("private_episode:".length)}`;
     }
     try {
       parseGraphNodeRef(trimmed);

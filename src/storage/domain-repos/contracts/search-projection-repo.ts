@@ -1,6 +1,15 @@
 import type { NodeRef } from "../../../memory/types.js";
 
-export type SearchProjectionScope = "private" | "area" | "world" | "cognition";
+export type SearchProjectionScope = "private" | "area" | "world" | "cognition" | "episode";
+
+export type UpsertEpisodeDocParams = {
+  sourceRef: string;
+  agentId: string;
+  category: string;
+  content: string;
+  committedAt: number;
+  createdAt?: number;
+};
 
 export type UpsertCognitionDocParams = {
   sourceRef: NodeRef;

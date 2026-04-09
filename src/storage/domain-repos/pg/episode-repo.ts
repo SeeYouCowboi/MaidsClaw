@@ -36,10 +36,6 @@ export class PgEpisodeRepo implements EpisodeRepo {
   }
 
   async append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number> {
-    if (params.category === "thought") {
-      throw new Error(`episode category "thought" is not allowed`);
-    }
-
     if (!VALID_CATEGORIES.has(params.category)) {
       throw new Error(`invalid episode category: ${JSON.stringify(params.category)}`);
     }

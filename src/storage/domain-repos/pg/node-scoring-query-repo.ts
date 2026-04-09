@@ -15,7 +15,7 @@ type ParsedNodeRef = {
 
 type EmbeddingRow = { embedding: unknown };
 
-const NODE_REF_REGEX = /^(event|entity|fact|assertion|evaluation|commitment):([1-9]\d*)$/;
+const NODE_REF_REGEX = /^(event|entity|fact|assertion|evaluation|commitment|episode):([1-9]\d*)$/;
 
 function parseNodeRef(nodeRef: NodeRef): ParsedNodeRef | null {
   const match = NODE_REF_REGEX.exec(nodeRef);
@@ -84,6 +84,23 @@ export class PgNodeScoringQueryRepo implements NodeScoringQueryRepo {
         nodeRef,
         nodeKind: parsed.kind,
         content: `${rows[0].display_name} ${rows[0].entity_type} ${rows[0].summary ?? ""}`.trim(),
+      };
+    }
+
+    if (parsed.kind === "episode") {
+      const rows = await this.sql<{ summary: string | null; category: string }[]>`
+        SELECT summary, category
+        FROM private_episode_events
+        WHERE id = ${parsed.id}
+        LIMIT 1
+      `;
+      if (rows.length === 0) {
+        return null;
+      }
+      return {
+        nodeRef,
+        nodeKind: parsed.kind,
+        content: `${rows[0].summary ?? ""} ${rows[0].category}`.trim(),
       };
     }
 
@@ -234,6 +251,16 @@ export class PgNodeScoringQueryRepo implements NodeScoringQueryRepo {
       return rows.length > 0 ? Number(rows[0].updated_at) : null;
     }
 
+    if (parsed.kind === "episode") {
+      const rows = await this.sql<{ created_at: number | string }[]>`
+        SELECT created_at
+        FROM private_episode_events
+        WHERE id = ${parsed.id}
+        LIMIT 1
+      `;
+      return rows.length > 0 ? Number(rows[0].created_at) : null;
+    }
+
     if (parsed.kind === "event") {
       const rows = await this.sql<{ created_at: number | string }[]>`
         SELECT created_at
@@ -284,6 +311,11 @@ export class PgNodeScoringQueryRepo implements NodeScoringQueryRepo {
       return null;
     }
 
+    if (parsed.kind === "episode") {
+      // Episodes have no topic_id
+      return null;
+    }
+
     if (parsed.kind === "event") {
       const rows = await this.sql<{ topic_id: number | string | null }[]>`
         SELECT topic_id
@@ -321,6 +353,25 @@ export class PgNodeScoringQueryRepo implements NodeScoringQueryRepo {
     const parsed = parseNodeRef(nodeRef);
     if (!parsed) {
       return null;
+    }
+
+    if (parsed.kind === "episode") {
+      const rows = await this.sql<{ summary: string | null; agent_id: string }[]>`
+        SELECT summary, agent_id
+        FROM private_episode_events
+        WHERE id = ${parsed.id}
+        LIMIT 1
+      `;
+      if (rows.length === 0 || !rows[0].summary) {
+        return null;
+      }
+      return {
+        nodeRef,
+        scope: "private",
+        content: rows[0].summary,
+        agentId: rows[0].agent_id,
+        removeExisting: false,
+      };
     }
 
     if (parsed.kind === "event") {

@@ -114,11 +114,11 @@ describe("time-slice-query", () => {
     const input: EvidencePath[] = [
       {
         path: {
-          seed: "private_episode:1" as NodeRef,
-          nodes: ["private_episode:1" as NodeRef, "event:2" as NodeRef],
+          seed: "episode:1" as NodeRef,
+          nodes: ["episode:1" as NodeRef, "event:2" as NodeRef],
           edges: [
             {
-              from: "private_episode:1" as NodeRef,
+              from: "episode:1" as NodeRef,
               to: "event:2" as NodeRef,
               kind: "same_episode",
               layer: "symbolic",
@@ -149,7 +149,7 @@ describe("time-slice-query", () => {
     const filtered = filterEvidencePathsByTimeSlice(input, { asOfCommittedTime: 300 });
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.redacted_placeholders).toEqual([{ type: "redacted", reason: "private", node_ref: "event:9" }]);
-    expect(filtered[0]?.path.nodes).toEqual(["private_episode:1", "event:2"]);
+    expect(filtered[0]?.path.nodes).toEqual(["episode:1", "event:2"]);
   });
 
   it("filters area/world projection rows by valid_time and committed_time", () => {

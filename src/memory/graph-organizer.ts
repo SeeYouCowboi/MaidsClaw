@@ -103,7 +103,8 @@ export class GraphOrganizer {
       kindRaw !== "fact" &&
       kindRaw !== "assertion" &&
       kindRaw !== "evaluation" &&
-      kindRaw !== "commitment"
+      kindRaw !== "commitment" &&
+      kindRaw !== "episode"
     ) {
       return undefined;
     }
@@ -194,6 +195,8 @@ export class GraphOrganizer {
       "entity:fact",
       "assertion:entity",
       "entity:assertion",
+      "episode:entity",
+      "entity:episode",
     ]);
     return allowed.has(key);
   }

@@ -685,7 +685,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					if (row.source_local_ref) {
 						localRefIndex.set(row.source_local_ref, {
 							kind: "episode",
-							nodeRef: `private_episode:${row.id}`,
+							nodeRef: `episode:${row.id}`,
 						});
 					}
 				}

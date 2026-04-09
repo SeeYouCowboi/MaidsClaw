@@ -82,9 +82,9 @@ export type CommitSettlementResult = {
 	changedNodeRefs: NodeRef[];
 };
 
-/** Map an episode row id to the canonical `event:N` ref accepted by GraphOrganizer. */
+/** Map an episode row id to the canonical `episode:N` ref. */
 function toEpisodeNodeRef(id: number): NodeRef {
-	return makeNodeRef("event", id);
+	return makeNodeRef("episode", id);
 }
 
 /** Build a canonical cognition ref (`assertion:N`, `evaluation:N`, `commitment:N`) from the projection row. */

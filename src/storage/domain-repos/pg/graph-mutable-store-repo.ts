@@ -543,7 +543,7 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     const now = Date.now();
     const settlementId = params.sourceRecordId ?? `legacy:${params.agentId}:${now}`;
 
-    if (params.eventCategory === "thought") {
+    if ((params.eventCategory as string) === "thought") {
       const cognitionKey = `legacy_thought:${params.agentId}:${now}`;
       return this.insertCognitionEvent({
         agentId: params.agentId,

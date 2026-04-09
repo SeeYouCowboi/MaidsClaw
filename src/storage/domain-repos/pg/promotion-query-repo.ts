@@ -16,7 +16,7 @@ import type {
   StableFactPromotionCandidate,
 } from "../contracts/promotion-query-repo.js";
 
-const NODE_REF_REGEX = /^(event|entity|fact|assertion|evaluation|commitment):([1-9]\d*)$/;
+const NODE_REF_REGEX = /^(event|entity|fact|assertion|evaluation|commitment|episode):([1-9]\d*)$/;
 const IDENTITY_HIDDEN_MARKERS = ["unknown", "hidden", "redacted", "anonymous", "masked"] as const;
 const EXISTENCE_PRIVATE_MARKERS = ["private", "secret", "classified", "sensitive", "internal_only"] as const;
 const STABLE_FACT_PATTERNS = [
@@ -343,6 +343,20 @@ export class PgPromotionQueryRepo implements PromotionQueryRepo {
   }
 
   async resolveCandidateTimestamp(sourceRef: NodeRef): Promise<number> {
+    if (sourceRef.startsWith("episode:")) {
+      const parsed = parseNodeRef(sourceRef);
+      if (!parsed) {
+        return Date.now();
+      }
+      const rows = await this.sql<{ created_at: number | string }[]>`
+        SELECT created_at
+        FROM private_episode_events
+        WHERE id = ${parsed.id}
+        LIMIT 1
+      `;
+      return rows.length > 0 ? Number(rows[0].created_at) : Date.now();
+    }
+
     if (sourceRef.startsWith("event:")) {
       const parsed = parseNodeRef(sourceRef);
       if (!parsed) {
@@ -375,9 +389,6 @@ export class PgPromotionQueryRepo implements PromotionQueryRepo {
   }
 
   async toPublicEventCategory(category: PrivateEventCategory): Promise<PublicEventCategory | null> {
-    if (category === "thought") {
-      return null;
-    }
     return category;
   }
 }
