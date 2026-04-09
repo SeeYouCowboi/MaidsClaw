@@ -1,5 +1,6 @@
 import type postgres from "postgres";
 import type { NodeRef } from "../../../memory/types.js";
+import { isCjkQuery, decomposeCjk, type CjkDecomposition } from "./cjk-search-utils.js";
 import type {
   SearchProjectionRepo,
   SearchProjectionScope,
@@ -577,7 +578,14 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     createdAt: number;
     score: number;
   }>> {
-    const pattern = `%${query}%`;
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+
+    if (isCjkQuery(trimmed)) {
+      return this.searchEpisodeCjk(trimmed, agentId, limit);
+    }
+
+    const pattern = `%${trimmed}%`;
     const rows = await this.sql<{
       id: string | number;
       source_ref: string;
@@ -589,10 +597,10 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       score?: string | number;
     }[]>`
       SELECT id, source_ref, agent_id, category, content, committed_at, created_at,
-             similarity(content, ${query}) AS score
+             similarity(content, ${trimmed}) AS score
       FROM search_docs_episode
       WHERE agent_id = ${agentId}
-        AND (content % ${query} OR content ILIKE ${pattern})
+        AND (content % ${trimmed} OR content ILIKE ${pattern})
       ORDER BY score DESC, committed_at DESC
       LIMIT ${limit}
     `;
@@ -607,5 +615,71 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       createdAt: toNumber(row.created_at),
       score: toNumber(row.score),
     }));
+  }
+
+  private async searchEpisodeCjk(
+    query: string,
+    agentId: string,
+    limit: number,
+  ): Promise<Array<{
+    id: number;
+    sourceRef: string;
+    agentId: string;
+    category: string;
+    content: string;
+    committedAt: number;
+    createdAt: number;
+    score: number;
+  }>> {
+    const decomp = decomposeCjk(query);
+    const filterPatterns = [
+      `%${decomp.original}%`,
+      ...decomp.unigrams.slice(0, 3).map((u) => `%${u}%`),
+    ];
+
+    const rows = await this.sql<{
+      id: string | number;
+      source_ref: string;
+      agent_id: string;
+      category: string;
+      content: string;
+      committed_at: string | number;
+      created_at: string | number;
+    }[]>`
+      SELECT id, source_ref, agent_id, category, content,
+             committed_at, created_at
+      FROM search_docs_episode
+      WHERE agent_id = ${agentId}
+        AND lower(content) ILIKE ANY(${filterPatterns})
+      ORDER BY committed_at DESC
+      LIMIT ${limit * 2}
+    `;
+
+    return rows
+      .map((row) => ({
+        id: toNumber(row.id),
+        sourceRef: row.source_ref,
+        agentId: row.agent_id,
+        category: row.category,
+        content: row.content,
+        committedAt: toNumber(row.committed_at),
+        createdAt: toNumber(row.created_at),
+        score: this.computeEpisodeCjkScore(row.content, decomp),
+      }))
+      .sort((a, b) => b.score - a.score || b.committedAt - a.committedAt)
+      .slice(0, limit);
+  }
+
+  private computeEpisodeCjkScore(content: string, decomp: CjkDecomposition): number {
+    const lower = content.toLowerCase();
+    let raw = 0;
+    if (lower.includes(decomp.original.toLowerCase())) raw += 5;
+    for (const bg of decomp.bigrams) {
+      if (lower.includes(bg)) raw += 3;
+    }
+    for (const ug of decomp.unigrams) {
+      if (lower.includes(ug)) raw += 1;
+    }
+    return decomp.maxScore > 0 ? raw / decomp.maxScore : 0;
   }
 }
