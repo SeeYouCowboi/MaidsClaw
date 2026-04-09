@@ -955,6 +955,23 @@ export function bootstrapRuntime(
 		new PgTransactionBatcher(),
 	);
 	const aliasService = new AliasService(pgAliasRepo);
+	// Initialize CJK segmenter + load shared aliases as a user dictionary.
+	// Fire-and-forget: bootstrapRuntime is synchronous, and any queries that
+	// arrive before the sync completes will use the default jieba dictionary,
+	// which already handles common Chinese proper nouns. Shared aliases that
+	// are NOT in the default dict (e.g. fictional names) may fail to segment
+	// as a single token during this cold window — acceptable for v1 since the
+	// tokenizer still produces usable tokens via either jieba's fallback or
+	// the legacy bigram path. Failures log once; the rest of bootstrap
+	// continues with an un-synced segmenter.
+	// TODO(phase4): expose a `segmenterReady: Promise<void>` handle on the
+	// bootstrap result so callers can gate the listener on it if needed.
+	void aliasService.syncSharedAliasesToSegmenter().catch((err) => {
+		console.debug(JSON.stringify({
+			event: "cjk_segmenter_sync_failed",
+			error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+		}));
+	});
 	const narrativeSearchService = new NarrativeSearchService(
 		pgNarrativeSearchRepo,
 	);

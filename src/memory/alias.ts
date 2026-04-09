@@ -1,8 +1,29 @@
 import type { EntityAlias } from "./types.js";
 import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
+import { initCjkSegmenter, loadUserDict } from "./cjk-segmenter.js";
 
 export class AliasService {
   constructor(private readonly repo: AliasRepo) {}
+
+  /**
+   * Load all shared aliases (owner_agent_id IS NULL) into the CJK segmenter's
+   * user dictionary. Call once at bootstrap, after the repo is ready. Private
+   * agent-scoped aliases are intentionally excluded to avoid leaking entity
+   * names across agent boundaries.
+   *
+   * Failures are swallowed: if the segmenter is unavailable or the repo
+   * query fails, the tokenizer falls back to its bigram path without
+   * disturbing the rest of bootstrap.
+   */
+  async syncSharedAliasesToSegmenter(): Promise<void> {
+    initCjkSegmenter();
+    try {
+      const aliases = await this.repo.listSharedAliasStrings();
+      loadUserDict(aliases);
+    } catch {
+      // Segmenter will still work with the default jieba dictionary.
+    }
+  }
 
   /**
    * Exact string match lookup: returns canonical entity_id or null

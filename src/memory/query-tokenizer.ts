@@ -2,12 +2,22 @@
  * Mixed Latin + CJK query token extractor.
  *
  * Latin tokens are split on non-alphanumeric boundaries (preserving @, -, :).
- * CJK runs produce the full run (for alias matching) plus sliding bigrams
- * (for fuzzy matching), filtering stopword-only bigrams.
+ * CJK runs are segmented via @node-rs/jieba when available, producing real
+ * word tokens (e.g. "爱丽丝离开了" → ["爱丽丝", "离开"]). When jieba is
+ * disabled or unavailable, the tokenizer falls back to the legacy bigram
+ * scheme: full run + sliding bigrams with stopword-only pair filtering.
+ *
+ * The jieba path is strictly better for all downstream consumers (entity
+ * resolution, word overlap detection, episode row scoring) so it is
+ * preferred by default. Override via MAIDSCLAW_CJK_SEGMENTER=off.
  */
+
+import { segmentCjk } from "./cjk-segmenter.js";
 
 // CJK Unified Ideographs + Extension A + Compatibility Ideographs
 const CJK_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
+
+const NOISE_TOKEN_RE = /^[\s\p{P}]+$/u;
 
 // Common Chinese function words that provide minimal search value
 const CJK_STOPWORDS = new Set([
@@ -29,28 +39,38 @@ export function tokenizeQuery(text: string): string[] {
       // Latin token — keep as-is if length > 1
       if (trimmed.length > 1) tokens.push(trimmed);
     } else {
-      // Extract contiguous CJK character runs
-      const cjkRuns: string[] = [];
-      let run = "";
-      for (const ch of trimmed) {
-        if (CJK_CHAR_RE.test(ch)) {
-          run += ch;
-        } else if (run) {
-          cjkRuns.push(run);
-          run = "";
+      // CJK branch: try jieba first, fall back to bigrams if unavailable.
+      const jiebaSegments = segmentCjk(trimmed);
+      if (jiebaSegments !== null) {
+        for (const seg of jiebaSegments) {
+          // len >= 2 matches the bigram path's minimum token width; also
+          // strip punctuation/whitespace-only tokens jieba may emit.
+          if (seg.length >= 2 && !NOISE_TOKEN_RE.test(seg)) {
+            tokens.push(seg);
+          }
         }
-      }
-      if (run) cjkRuns.push(run);
+      } else {
+        // Legacy fallback: full run + sliding bigrams.
+        const cjkRuns: string[] = [];
+        let run = "";
+        for (const ch of trimmed) {
+          if (CJK_CHAR_RE.test(ch)) {
+            run += ch;
+          } else if (run) {
+            cjkRuns.push(run);
+            run = "";
+          }
+        }
+        if (run) cjkRuns.push(run);
 
-      for (const cjkStr of cjkRuns) {
-        // Full run (for alias exact matching)
-        if (cjkStr.length >= 2) tokens.push(cjkStr);
-        // Bigram sliding window (for keyword matching and fuzzy scoring)
-        const chars = Array.from(cjkStr);
-        for (let i = 0; i < chars.length - 1; i++) {
-          const bg = chars[i] + chars[i + 1];
-          if (!CJK_STOPWORDS.has(chars[i]) || !CJK_STOPWORDS.has(chars[i + 1])) {
-            tokens.push(bg);
+        for (const cjkStr of cjkRuns) {
+          if (cjkStr.length >= 2) tokens.push(cjkStr);
+          const chars = Array.from(cjkStr);
+          for (let i = 0; i < chars.length - 1; i++) {
+            const bg = chars[i] + chars[i + 1];
+            if (!CJK_STOPWORDS.has(chars[i]) || !CJK_STOPWORDS.has(chars[i + 1])) {
+              tokens.push(bg);
+            }
           }
         }
       }

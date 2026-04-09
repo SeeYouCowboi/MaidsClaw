@@ -126,6 +126,14 @@ class StubAliasRepo implements AliasRepo {
     return { ...entity };
   }
 
+  async listSharedAliasStrings(): Promise<string[]> {
+    const seen = new Set<string>();
+    for (const a of this.aliases) {
+      if (a.owner_agent_id === null) seen.add(a.alias);
+    }
+    return [...seen];
+  }
+
   // Helper methods for test setup
   addEntity(pointerKey: string, memoryScope: string, ownerAgentId?: string): number {
     const id = this.nextEntityId++;

@@ -26,6 +26,7 @@
     "bun": ">=1.0.0"
   },
   "dependencies": {
+    "@node-rs/jieba": "2.0.1",
     "postgres": "3.4.8"
   }
 }

@@ -21,4 +21,13 @@ export interface AliasRepo {
     scope: string,
     ownerAgentId?: string,
   ): Promise<{ id: number; pointer_key: string; memory_scope: string; owner_agent_id: string | null } | null>;
+
+  /**
+   * Return distinct shared alias strings (owner_agent_id IS NULL).
+   *
+   * Used by the CJK segmenter to build its user dictionary at bootstrap.
+   * Private/agent-scoped aliases are intentionally excluded to avoid leaking
+   * entity names across agent boundaries through a global tokenizer dict.
+   */
+  listSharedAliasStrings(): Promise<string[]>;
 }

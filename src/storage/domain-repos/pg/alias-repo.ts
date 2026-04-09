@@ -177,4 +177,18 @@ export class PgAliasRepo implements AliasRepo {
       owner_agent_id: rows[0].owner_agent_id,
     };
   }
+
+  async listSharedAliasStrings(): Promise<string[]> {
+    // Defensive cap. jieba user dictionary performance scales well into the
+    // 10^6 range, but bootstrap-time loading is still bounded. If a deployment
+    // ever exceeds this, we'll need a paged sync strategy.
+    const LIMIT = 100_000;
+    const rows = await this.sql<{ alias: string }[]>`
+      SELECT DISTINCT alias
+      FROM entity_aliases
+      WHERE owner_agent_id IS NULL
+      LIMIT ${LIMIT}
+    `;
+    return rows.map((r) => r.alias);
+  }
 }

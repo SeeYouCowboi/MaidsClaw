@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import { RuleBasedQueryRouter } from "../../src/memory/query-router";
+import { loadUserDict } from "../../src/memory/cjk-segmenter";
 import type { AliasService } from "../../src/memory/alias";
 
 /**
@@ -23,6 +24,13 @@ const ALIAS_MAP: Record<string, number> = {
   鲍勃: 4,
   管家: 5,
 };
+
+// Mirror production bootstrap: seed the jieba user dict with CJK aliases
+// so the router can find them inside long CJK runs without requiring an
+// @-prefix or punctuation separator.
+beforeAll(() => {
+  loadUserDict(Object.keys(ALIAS_MAP));
+});
 
 function makeRouter() {
   return new RuleBasedQueryRouter(makeAlias(ALIAS_MAP));
