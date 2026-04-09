@@ -274,19 +274,21 @@ class StubRetrievalOrchestrator extends RetrievalOrchestrator {
     query: string,
     viewerContext: ViewerContext,
     role: AgentRole,
-    retrievalTemplate?: RetrievalTemplate,
-    dedupContext?: RetrievalDedupContext,
-    queryStrategy: RetrievalQueryStrategy = "default_retrieval",
-    contestedCount?: number,
+    options: {
+      override?: RetrievalTemplate;
+      dedupContext?: RetrievalDedupContext;
+      queryStrategy?: RetrievalQueryStrategy;
+      contestedCount?: number;
+    } = {},
   ): Promise<RetrievalResult> {
     this.calls.push({
       query,
       viewerContext,
       role,
-      retrievalTemplate,
-      dedupContext,
-      queryStrategy,
-      contestedCount,
+      retrievalTemplate: options.override,
+      dedupContext: options.dedupContext,
+      queryStrategy: options.queryStrategy ?? "default_retrieval",
+      contestedCount: options.contestedCount,
     });
     return this.nextResult;
   }

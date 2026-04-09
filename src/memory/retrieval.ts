@@ -11,6 +11,8 @@ import type {
   TypedRetrievalResult,
 } from "./retrieval/retrieval-orchestrator.js";
 import type { EpisodeRow } from "./episode/episode-repo.js";
+import type { QueryPlan, QueryPlanBuilder } from "./query-plan-types.js";
+import type { QueryRouter } from "./query-routing-types.js";
 import type {
   EntityNode,
   EventNode,
@@ -50,6 +52,14 @@ type RetrievalServiceDeps = {
   narrativeSearch?: NarrativeSearchService;
   cognitionSearch?: CognitionSearchService;
   orchestrator?: RetrievalOrchestrator;
+  /**
+   * Phase 3 (plan-driven retrieval): optional router + builder. When both
+   * are provided, `generateTypedRetrieval` builds a QueryPlan per call and
+   * passes it to the orchestrator for signal-weighted budget reallocation.
+   * When either is missing, retrieval runs on the legacy template path.
+   */
+  queryRouter?: QueryRouter;
+  queryPlanBuilder?: QueryPlanBuilder;
 };
 
 export class RetrievalService {
@@ -58,6 +68,8 @@ export class RetrievalService {
   private readonly narrativeSearch: NarrativeSearchService;
   private readonly cognitionSearch: CognitionSearchService;
   private readonly orchestrator: RetrievalOrchestrator;
+  private readonly queryRouter: QueryRouter | null;
+  private readonly queryPlanBuilder: QueryPlanBuilder | null;
 
   constructor(deps: RetrievalServiceDeps) {
     this.retrievalRepo = deps.retrievalRepo;
@@ -65,6 +77,8 @@ export class RetrievalService {
     this.narrativeSearch = deps.narrativeSearch ?? (() => { throw new Error("narrativeSearch is required"); })();
     this.cognitionSearch = deps.cognitionSearch ?? (() => { throw new Error("cognitionSearch is required"); })();
     this.orchestrator = deps.orchestrator ?? (() => { throw new Error("orchestrator is required"); })();
+    this.queryRouter = deps.queryRouter ?? null;
+    this.queryPlanBuilder = deps.queryPlanBuilder ?? null;
   }
 
   async readByEntity(pointerKey: string, viewerContext: ViewerContext): Promise<EntityReadResult> {
@@ -128,14 +142,21 @@ export class RetrievalService {
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
     contestedCount?: number,
   ): Promise<TypedRetrievalResult> {
+    // Phase 3: build a QueryPlan per call when router + builder are wired.
+    // Failures fall back to undefined — orchestrator then runs the legacy
+    // template path without plan-driven budget reallocation.
+    const queryPlan = await this.buildPlanForQuery(query, viewerContext);
     const result = await this.orchestrator.search(
       query,
       viewerContext,
       viewerContext.viewer_role,
-      retrievalTemplate,
-      dedupContext,
-      queryStrategy,
-      contestedCount,
+      {
+        override: retrievalTemplate,
+        dedupContext,
+        queryStrategy,
+        contestedCount,
+        queryPlan,
+      },
     );
     const typed = result.typed;
     const conflictNotesBudget = retrievalTemplate?.conflictNotesBudget ?? 0;
@@ -160,6 +181,39 @@ export class RetrievalService {
     }
 
     return typed;
+  }
+
+  /**
+   * Build a QueryPlan for the current query, routed through the injected
+   * QueryRouter + QueryPlanBuilder. Returns undefined when either dependency
+   * is missing or when either step throws — the orchestrator then runs the
+   * legacy template path (no plan-driven budget reallocation).
+   *
+   * Failures are logged via console.debug (same pattern as Phase 1/2 shadow
+   * logs) so operators and shadow-data analysis can detect repeated fallback
+   * without breaking the legacy path.
+   */
+  private async buildPlanForQuery(
+    query: string,
+    viewerContext: ViewerContext,
+  ): Promise<QueryPlan | undefined> {
+    if (!this.queryRouter || !this.queryPlanBuilder) return undefined;
+    try {
+      const route = await this.queryRouter.route({
+        query,
+        viewerAgentId: viewerContext.viewer_agent_id,
+      });
+      return this.queryPlanBuilder.build({
+        route,
+        role: viewerContext.viewer_role,
+      });
+    } catch (err) {
+      console.debug(JSON.stringify({
+        event: "retrieval_plan_build_failed",
+        error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+      }));
+      return undefined;
+    }
   }
 
   async localizeSeedsHybrid(

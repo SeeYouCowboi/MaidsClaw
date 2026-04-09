@@ -7,7 +7,9 @@ import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
 import { estimateTokens, resolveTemplate } from "../contracts/retrieval-template.js";
 import type { EpisodeRow } from "../episode/episode-repo.js";
 import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-repo.js";
+import type { QueryPlan } from "../query-plan-types.js";
 import { tokenizeQuery } from "../query-tokenizer.js";
+import { allocateBudget } from "./budget-allocator.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
 
@@ -72,10 +74,32 @@ export type RetrievalDedupContext = {
   allSurfacedTexts?: Set<string>;
 };
 
+/**
+ * Options object for RetrievalOrchestrator.search() tail parameters.
+ * Introduced in Phase 3 to avoid positional-argument drift as more plan
+ * consumption fields land in Phase 3.5 / Phase 4.
+ */
+export type RetrievalSearchOptions = {
+  override?: RetrievalTemplate;
+  dedupContext?: RetrievalDedupContext;
+  queryStrategy?: RetrievalQueryStrategy;
+  contestedCount?: number;
+  queryPlan?: QueryPlan;
+};
+
 const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次|记得|昨天|上次|以前|从前|经历)/i;
 const EPISODE_DETECTIVE_TRIGGER = /(detective|investigate|investigation|clue|evidence|timeline|who|why|how did|线索|证据|调查|推理|案发|时间线|谁|为什么|怎么回事|真相|原因)/i;
 const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景|大厅|厨房|花园)/i;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
+
+/**
+ * Phase 3 feature flag: when "off", disables plan-driven budget allocation
+ * and falls back to the legacy template + EPISODE_*_TRIGGER path. Default
+ * is ON — if a QueryPlan is supplied, it will drive the budget.
+ */
+function isPlanDrivenRetrievalEnabled(): boolean {
+  return process.env.MAIDSCLAW_RETRIEVAL_USE_PLAN !== "off";
+}
 
 export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
@@ -96,13 +120,24 @@ export class RetrievalOrchestrator {
     query: string,
     viewerContext: ViewerContext,
     role: AgentRole,
-    override?: RetrievalTemplate,
-    dedupContext?: RetrievalDedupContext,
-    queryStrategy: RetrievalQueryStrategy = "default_retrieval",
-    contestedCount?: number,
+    options: RetrievalSearchOptions = {},
   ): Promise<RetrievalResult> {
+    const {
+      override,
+      dedupContext,
+      queryStrategy = "default_retrieval",
+      contestedCount,
+      queryPlan,
+    } = options;
     const baseTemplate = resolveTemplate(role, override);
-    const template = this.applyQueryStrategy(baseTemplate, queryStrategy);
+    const strategyAdjusted = this.applyQueryStrategy(baseTemplate, queryStrategy);
+    // Phase 3: if a plan is provided and the feature flag is on, let it
+    // reshape the per-surface count budgets via signal-weighted conservation.
+    // Falls back to the strategy-adjusted template when plan or flag absent.
+    const template =
+      queryPlan && isPlanDrivenRetrievalEnabled()
+        ? allocateBudget(strategyAdjusted, queryPlan.route.signals)
+        : strategyAdjusted;
     const effectiveConflictNotesBudget = this.resolveConflictNotesBudget(template, contestedCount);
 
     const seenText = this.seedSeenText(dedupContext);

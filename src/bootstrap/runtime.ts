@@ -990,12 +990,30 @@ export function bootstrapRuntime(
 		episodeSearchFn: async (query, agentId, limit) =>
 			searchProjectionRepo.searchEpisode(query, agentId, limit),
 	});
+	// GAP-4 query understanding stack (Phase 1: router, Phase 2: plan builder,
+	// Phase 3: plan-driven retrieval budget reallocation). Both are shared
+	// between RetrievalService and GraphNavigator so the same instances power
+	// both entry points.
+	//   - MAIDSCLAW_QUERY_ROUTER_SHADOW=0 disables the router entirely.
+	//   - MAIDSCLAW_QUERY_PLAN_SHADOW=0 disables plan construction.
+	//   - MAIDSCLAW_RETRIEVAL_USE_PLAN=off disables plan consumption inside
+	//     the orchestrator (falls back to the legacy template path).
+	const queryRouterEnabled = process.env.MAIDSCLAW_QUERY_ROUTER_SHADOW !== "0";
+	const queryRouter = queryRouterEnabled
+		? new RuleBasedQueryRouter(aliasService)
+		: undefined;
+	const queryPlanBuilderEnabled = process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
+	const queryPlanBuilder = queryPlanBuilderEnabled
+		? new DeterministicQueryPlanBuilder()
+		: undefined;
 	const retrievalService = new RetrievalService({
 		retrievalRepo: pgRetrievalReadRepo,
 		embeddingService,
 		narrativeSearch: narrativeSearchService,
 		cognitionSearch: cognitionSearchService,
 		orchestrator: retrievalOrchestrator,
+		queryRouter,
+		queryPlanBuilder,
 	});
 	const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
 		memoryEmbeddingModelId
@@ -1025,20 +1043,7 @@ export function bootstrapRuntime(
 					}
 				})()
 			: undefined;
-	// Phase 1 shadow QueryRouter — defaults ON, opt out via
-	// MAIDSCLAW_QUERY_ROUTER_SHADOW=0. Shadow only emits trace and never
-	// influences retrieval behavior.
-	const queryRouterShadowEnabled = process.env.MAIDSCLAW_QUERY_ROUTER_SHADOW !== "0";
-	const queryRouter = queryRouterShadowEnabled
-		? new RuleBasedQueryRouter(aliasService)
-		: undefined;
-	// Phase 2 shadow QueryPlanBuilder — defaults ON, opt out via
-	// MAIDSCLAW_QUERY_PLAN_SHADOW=0. Plan is only emitted to trace; never
-	// consumed by retrieval/graph execution in Phase 2.
-	const queryPlanShadowEnabled = process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
-	const queryPlanBuilder = queryPlanShadowEnabled
-		? new DeterministicQueryPlanBuilder()
-		: undefined;
+	// queryRouter + queryPlanBuilder are created above, shared with RetrievalService.
 	const graphNavigator = new GraphNavigator(
 		pgGraphReadQueryRepo,
 		retrievalService,
