@@ -6,6 +6,7 @@ import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } fr
 import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
 import { estimateTokens, resolveTemplate } from "../contracts/retrieval-template.js";
 import type { EpisodeRepository, EpisodeRow } from "../episode/episode-repo.js";
+import { tokenizeQuery } from "../query-tokenizer.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
 
@@ -70,9 +71,9 @@ export type RetrievalDedupContext = {
   allSurfacedTexts?: Set<string>;
 };
 
-const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次)/i;
-const EPISODE_DETECTIVE_TRIGGER = /(detective|investigate|investigation|clue|evidence|timeline|who|why|how did|线索|证据|调查|推理|案发|时间线|谁|为什么)/i;
-const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景)/i;
+const EPISODE_QUERY_TRIGGER = /(remember|before|earlier|previous|last time|once|yesterday|scene|where|location|episode|回忆|之前|先前|场景|地点|那次|记得|昨天|上次|以前|从前|经历)/i;
+const EPISODE_DETECTIVE_TRIGGER = /(detective|investigate|investigation|clue|evidence|timeline|who|why|how did|线索|证据|调查|推理|案发|时间线|谁|为什么|怎么回事|真相|原因)/i;
+const EPISODE_SCENE_TRIGGER = /(here|there|room|hall|kitchen|garden|area|scene|此处|这里|那边|房间|庭院|区域|场景|大厅|厨房|花园)/i;
 const COGNITION_KEY_PREFIX = "cognition_key" + ":";
 
 export class RetrievalOrchestrator {
@@ -535,7 +536,7 @@ export class RetrievalOrchestrator {
     const haystack = `${row.summary} ${row.location_text ?? ""} ${row.category}`.toLowerCase();
 
     if (queryText.length > 0) {
-      const terms = queryText.split(/\s+/).filter((term) => term.length >= 3);
+      const terms = tokenizeQuery(queryText);
       for (const term of terms) {
         if (haystack.includes(term)) {
           score += 1_000_000;

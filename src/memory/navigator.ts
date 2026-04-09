@@ -5,6 +5,7 @@ import type {
 
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
+import { tokenizeQuery } from "./query-tokenizer.js";
 import type { RetrievalService } from "./retrieval.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
 import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
@@ -140,22 +141,31 @@ const QUERY_TYPE_PRIORITY = {
   conflict: ["conflict_or_update", "fact_relation", "fact_support", "causal", "temporal_prev"],
 } satisfies Record<QueryType, NavigatorEdgeKind[]>;
 
-const WHY_KEYWORDS = ["why", "because", "reason", "cause"];
-const TIMELINE_KEYWORDS = ["when", "timeline", "before", "after", "sequence"];
-const RELATIONSHIP_KEYWORDS = ["relationship", "between", "connected", "related"];
-const STATE_KEYWORDS = ["state", "status", "current", "now", "is"];
-const CONFLICT_KEYWORDS = ["conflict", "contradict", "dispute", "contested", "inconsistent"];
+const WHY_KEYWORDS = [
+  "why", "because", "reason", "cause",
+  "为什么", "因为", "原因", "缘由", "为何", "怎么会",
+];
+const TIMELINE_KEYWORDS = [
+  "when", "timeline", "before", "after", "sequence",
+  "什么时候", "时间线", "之前", "之后", "顺序", "先后", "何时",
+];
+const RELATIONSHIP_KEYWORDS = [
+  "relationship", "between", "connected", "related",
+  "关系", "之间", "联系", "相关", "交情",
+];
+const STATE_KEYWORDS = [
+  "state", "status", "current", "now", "is",
+  "状态", "现状", "目前", "当前", "现在",
+];
+const CONFLICT_KEYWORDS = [
+  "conflict", "contradict", "dispute", "contested", "inconsistent",
+  "冲突", "矛盾", "争议", "对立", "不一致", "分歧",
+];
 const TIME_CONSTRAINT_KEYWORDS = [
-  "yesterday",
-  "today",
-  "last week",
-  "last month",
-  "earlier",
-  "recent",
-  "recently",
-  "ago",
-  "before",
-  "after",
+  "yesterday", "today", "last week", "last month",
+  "earlier", "recent", "recently", "ago", "before", "after",
+  "昨天", "今天", "上周", "上个月",
+  "之前", "最近", "近期", "以前", "刚才", "前天",
 ];
 
 const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
@@ -313,10 +323,7 @@ export class GraphNavigator {
 
   private async analyzeQuery(query: string, viewerContext: ViewerContext, mode?: ExploreMode): Promise<QueryAnalysis> {
     const normalized = query.trim().toLowerCase();
-    const tokens = query
-      .split(/[^a-zA-Z0-9_@:-]+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 1);
+    const tokens = tokenizeQuery(query);
 
     const resolvedEntityIds = new Set<number>();
     const entityHints = new Set<string>();

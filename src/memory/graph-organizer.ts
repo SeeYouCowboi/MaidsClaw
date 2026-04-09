@@ -5,6 +5,7 @@ import type { GraphStorageService } from "./storage.js";
 import type { GraphOrganizerJob, MemoryTaskModelProvider } from "./task-agent.js";
 import type { GraphOrganizerResult, NodeRef, NodeRefKind, SemanticEdgeType } from "./types.js";
 import type { NodeScoringQueryRepo } from "../storage/domain-repos/contracts/node-scoring-query-repo.js";
+import { tokenizeQuery } from "./query-tokenizer.js";
 
 export class GraphOrganizer {
   private readonly embeddingLinker: EmbeddingLinker;
@@ -202,8 +203,8 @@ export class GraphOrganizer {
   }
 
   private hasStructuralOverlap(sourceContent: string, targetContent: string): boolean {
-    const sourceTokens = new Set(sourceContent.toLowerCase().split(/\W+/).filter((token) => token.length > 2));
-    const targetTokens = new Set(targetContent.toLowerCase().split(/\W+/).filter((token) => token.length > 2));
+    const sourceTokens = new Set(tokenizeQuery(sourceContent.toLowerCase()));
+    const targetTokens = new Set(tokenizeQuery(targetContent.toLowerCase()));
     let overlap = 0;
     for (const token of sourceTokens) {
       if (targetTokens.has(token)) {

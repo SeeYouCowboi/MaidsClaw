@@ -1,4 +1,5 @@
 import type { CharacterCard } from "./card-schema.js";
+import { tokenizeQuery } from "../memory/query-tokenizer.js";
 
 export type DriftReport = {
   hasDrift: boolean;
@@ -56,8 +57,8 @@ function isSectionChanged(originalSection: string, currentPersonaText: string): 
     return false;
   }
 
-  const originalWords = new Set(normalizedOriginal.split(" ").filter((word) => word.length > 1));
-  const currentWords = new Set(normalizedCurrent.split(" ").filter((word) => word.length > 1));
+  const originalWords = new Set(tokenizeQuery(normalizedOriginal));
+  const currentWords = new Set(tokenizeQuery(normalizedCurrent));
 
   if (originalWords.size === 0) {
     return false;
