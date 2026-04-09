@@ -30,9 +30,29 @@ import type {
   QuerySignals,
   RoutedIntent,
 } from "./query-routing-types.js";
+import type { TimeSliceQuery } from "./time-slice-query.js";
 import type { QueryType } from "./types.js";
 
 const CLASSIFIER_VERSION = "rule-v1";
+
+/**
+ * Phase 2: minimal time keyword → TimeSliceQuery mapping.
+ * Only handles a small fixed set of common windows; complex time expressions
+ * (e.g. "last Wednesday", "two months ago", "the night of the murder") are
+ * deferred to Phase 3+.
+ *
+ * Note: this introduces a Date.now() call which makes route() impure.
+ * Tests must either mock the clock or allow a time tolerance window.
+ */
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const TIME_WINDOW_MAP: Array<{ pattern: RegExp; offsetMs: number }> = [
+  // Order matters: more specific patterns first.
+  { pattern: /(yesterday|昨天)/i, offsetMs: ONE_DAY_MS },
+  { pattern: /(today|今天)/i, offsetMs: 0 },
+  { pattern: /(recent|recently|最近|近期)/i, offsetMs: 7 * ONE_DAY_MS },
+  { pattern: /(last week|上周)/i, offsetMs: 7 * ONE_DAY_MS },
+  { pattern: /(last month|上个月)/i, offsetMs: 30 * ONE_DAY_MS },
+];
 
 /** Legacy classification priority chain — keeps shadow parity with analyzeQuery. */
 const LEGACY_PRIORITY: QueryType[] = [
@@ -242,6 +262,27 @@ export class RuleBasedQueryRouter implements QueryRouter {
     }
     const rationale = rationaleParts.join(" | ");
 
+    // === Phase 2: time constraint derivation (impure — calls Date.now()) ===
+    let timeConstraint: TimeSliceQuery | null = null;
+    for (const { pattern, offsetMs } of TIME_WINDOW_MAP) {
+      if (pattern.test(originalQuery)) {
+        timeConstraint = { asOfCommittedTime: Date.now() - offsetMs };
+        matchedRules.push("time_window_derived");
+        break;
+      }
+    }
+
+    // === Phase 2: relationPairs — naive O(n²) pairwise from resolved entities ===
+    const relationPairs: Array<[number, number]> = [];
+    for (let i = 0; i < resolvedEntityIds.length; i++) {
+      for (let j = i + 1; j < resolvedEntityIds.length; j++) {
+        relationPairs.push([resolvedEntityIds[i], resolvedEntityIds[j]]);
+      }
+    }
+    if (relationPairs.length > 0) {
+      matchedRules.push(`relation_pairs:${relationPairs.length}`);
+    }
+
     return {
       originalQuery,
       normalizedQuery,
@@ -250,8 +291,8 @@ export class RuleBasedQueryRouter implements QueryRouter {
       routeConfidence,
       resolvedEntityIds,
       entityHints,
-      relationPairs: [],
-      timeConstraint: null,
+      relationPairs,
+      timeConstraint,
       timeSignals: timeConstraintHits,
       locationHints: [],
       asksWhy,

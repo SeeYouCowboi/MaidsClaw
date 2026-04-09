@@ -15,6 +15,7 @@ import {
   TIME_CONSTRAINT_KEYWORDS,
 } from "./query-routing-keywords.js";
 import type { QueryRoute, QueryRouter } from "./query-routing-types.js";
+import type { QueryPlan, QueryPlanBuilder } from "./query-plan-types.js";
 import type { RetrievalService } from "./retrieval.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
 import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
@@ -180,6 +181,7 @@ export class GraphNavigator {
     private readonly embedProvider?: EmbedProviderLike,
     private readonly embeddingModelId?: string,
     private readonly queryRouter?: QueryRouter,
+    private readonly queryPlanBuilder?: QueryPlanBuilder,
   ) {
     const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
     this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
@@ -204,7 +206,7 @@ export class GraphNavigator {
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
-    await this.emitQueryRouteShadow(query, viewerContext, input.mode, analysis.query_type);
+    await this.emitQueryRouteAndPlanShadow(query, viewerContext, input.mode, analysis.query_type);
 
     let queryEmbedding: Float32Array | undefined;
     if (this.embedProvider && this.embeddingModelId) {
@@ -354,12 +356,15 @@ export class GraphNavigator {
   }
 
   /**
-   * Phase 1 shadow mode: invokes the optional QueryRouter and emits its
-   * output to a structured log line. Does NOT influence beam search, seed
-   * selection, or any execution path. Failures are swallowed silently —
-   * shadow router must never break legacy execution.
+   * Phase 1+2 shadow mode: invokes the optional QueryRouter and (if present)
+   * the QueryPlanBuilder, then emits two structured log lines:
+   *   - "query_route_shadow" — Phase 1 router output
+   *   - "query_plan_shadow"  — Phase 2 plan output (only if builder set)
+   * Does NOT influence beam search, seed selection, or any execution path.
+   * Failures are swallowed silently — shadow paths must never break legacy
+   * execution.
    */
-  private async emitQueryRouteShadow(
+  private async emitQueryRouteAndPlanShadow(
     query: string,
     viewerContext: ViewerContext,
     explicitMode: ExploreMode | undefined,
@@ -396,6 +401,51 @@ export class GraphNavigator {
         rationale: route.rationale,
       };
       console.debug(JSON.stringify(payload));
+    } catch {
+      // never break execution on serialization errors
+    }
+
+    // Phase 2: emit plan shadow if builder is wired up.
+    if (!this.queryPlanBuilder) return;
+    let plan: QueryPlan | null = null;
+    try {
+      plan = this.queryPlanBuilder.build({
+        route,
+        // ViewerRole and AgentRole share the same string union.
+        role: viewerContext.viewer_role as unknown as Parameters<
+          QueryPlanBuilder["build"]
+        >[0]["role"],
+      });
+    } catch {
+      return;
+    }
+    try {
+      const planPayload = {
+        event: "query_plan_shadow",
+        builder: plan.builderVersion,
+        primary_intent: plan.graphPlan.primaryIntent,
+        secondary_intents: plan.graphPlan.secondaryIntents,
+        surface_weights: {
+          narrative: Number(plan.surfacePlans.narrative.weight.toFixed(3)),
+          cognition: Number(plan.surfacePlans.cognition.weight.toFixed(3)),
+          episode: Number(plan.surfacePlans.episode.weight.toFixed(3)),
+          conflict_notes: Number(plan.surfacePlans.conflictNotes.weight.toFixed(3)),
+        },
+        surface_enabled: {
+          narrative: plan.surfacePlans.narrative.enabledByRole,
+          cognition: plan.surfacePlans.cognition.enabledByRole,
+          episode: plan.surfacePlans.episode.enabledByRole,
+          conflict_notes: plan.surfacePlans.conflictNotes.enabledByRole,
+        },
+        cognition_kind: plan.surfacePlans.cognition.kind ?? null,
+        cognition_stance: plan.surfacePlans.cognition.stance ?? null,
+        seed_bias: plan.graphPlan.seedBias,
+        edge_bias: plan.graphPlan.edgeBias,
+        time_slice: plan.graphPlan.timeSlice,
+        matched_rules: plan.matchedRules,
+        rationale: plan.rationale,
+      };
+      console.debug(JSON.stringify(planPayload));
     } catch {
       // never break execution on serialization errors
     }

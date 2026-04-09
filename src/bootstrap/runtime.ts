@@ -45,6 +45,7 @@ import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
+import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
 import { RuleBasedQueryRouter } from "../memory/query-router.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
@@ -1014,6 +1015,13 @@ export function bootstrapRuntime(
 	const queryRouter = queryRouterShadowEnabled
 		? new RuleBasedQueryRouter(aliasService)
 		: undefined;
+	// Phase 2 shadow QueryPlanBuilder — defaults ON, opt out via
+	// MAIDSCLAW_QUERY_PLAN_SHADOW=0. Plan is only emitted to trace; never
+	// consumed by retrieval/graph execution in Phase 2.
+	const queryPlanShadowEnabled = process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
+	const queryPlanBuilder = queryPlanShadowEnabled
+		? new DeterministicQueryPlanBuilder()
+		: undefined;
 	const graphNavigator = new GraphNavigator(
 		pgGraphReadQueryRepo,
 		retrievalService,
@@ -1027,6 +1035,7 @@ export function bootstrapRuntime(
 		memoryTaskModelProvider,
 		effectiveOrganizerEmbeddingModelId,
 		queryRouter,
+		queryPlanBuilder,
 	);
 	const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService);
 	const promptBuilder = new PromptBuilder({
