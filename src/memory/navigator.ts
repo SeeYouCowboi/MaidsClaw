@@ -6,6 +6,15 @@ import type {
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { tokenizeQuery } from "./query-tokenizer.js";
+import {
+  WHY_KEYWORDS,
+  TIMELINE_KEYWORDS,
+  RELATIONSHIP_KEYWORDS,
+  STATE_KEYWORDS,
+  CONFLICT_KEYWORDS,
+  TIME_CONSTRAINT_KEYWORDS,
+} from "./query-routing-keywords.js";
+import type { QueryRoute, QueryRouter } from "./query-routing-types.js";
 import type { RetrievalService } from "./retrieval.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
 import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
@@ -141,33 +150,6 @@ const QUERY_TYPE_PRIORITY = {
   conflict: ["conflict_or_update", "fact_relation", "fact_support", "causal", "temporal_prev"],
 } satisfies Record<QueryType, NavigatorEdgeKind[]>;
 
-const WHY_KEYWORDS = [
-  "why", "because", "reason", "cause",
-  "为什么", "因为", "原因", "缘由", "为何", "怎么会",
-];
-const TIMELINE_KEYWORDS = [
-  "when", "timeline", "before", "after", "sequence",
-  "什么时候", "时间线", "之前", "之后", "顺序", "先后", "何时",
-];
-const RELATIONSHIP_KEYWORDS = [
-  "relationship", "between", "connected", "related",
-  "关系", "之间", "联系", "相关", "交情",
-];
-const STATE_KEYWORDS = [
-  "state", "status", "current", "now", "is",
-  "状态", "现状", "目前", "当前", "现在",
-];
-const CONFLICT_KEYWORDS = [
-  "conflict", "contradict", "dispute", "contested", "inconsistent",
-  "冲突", "矛盾", "争议", "对立", "不一致", "分歧",
-];
-const TIME_CONSTRAINT_KEYWORDS = [
-  "yesterday", "today", "last week", "last month",
-  "earlier", "recent", "recently", "ago", "before", "after",
-  "昨天", "今天", "上周", "上个月",
-  "之前", "最近", "近期", "以前", "刚才", "前天",
-];
-
 const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "event",
   "entity",
@@ -197,6 +179,7 @@ export class GraphNavigator {
     authorizationPolicy?: AuthorizationPolicy,
     private readonly embedProvider?: EmbedProviderLike,
     private readonly embeddingModelId?: string,
+    private readonly queryRouter?: QueryRouter,
   ) {
     const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
     this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
@@ -221,6 +204,7 @@ export class GraphNavigator {
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
+    await this.emitQueryRouteShadow(query, viewerContext, input.mode, analysis.query_type);
 
     let queryEmbedding: Float32Array | undefined;
     if (this.embedProvider && this.embeddingModelId) {
@@ -367,6 +351,54 @@ export class GraphNavigator {
 
   private includesAny(haystack: string, needles: readonly string[]): boolean {
     return needles.some((needle) => haystack.includes(needle));
+  }
+
+  /**
+   * Phase 1 shadow mode: invokes the optional QueryRouter and emits its
+   * output to a structured log line. Does NOT influence beam search, seed
+   * selection, or any execution path. Failures are swallowed silently —
+   * shadow router must never break legacy execution.
+   */
+  private async emitQueryRouteShadow(
+    query: string,
+    viewerContext: ViewerContext,
+    explicitMode: ExploreMode | undefined,
+    legacyQueryType: QueryType,
+  ): Promise<void> {
+    if (!this.queryRouter) return;
+    let route: QueryRoute;
+    try {
+      route = await this.queryRouter.route({
+        query,
+        viewerAgentId: viewerContext.viewer_agent_id,
+        explicitMode,
+      });
+    } catch {
+      return;
+    }
+    try {
+      const payload = {
+        event: "query_route_shadow",
+        classifier: route.classifierVersion,
+        primary_intent: route.primaryIntent,
+        legacy_query_type: legacyQueryType,
+        agreed_with_legacy: route.primaryIntent === legacyQueryType,
+        intents: route.intents.map((i) => ({
+          type: i.type,
+          confidence: Number(i.confidence.toFixed(3)),
+          evidence_count: i.evidence.length,
+        })),
+        intent_count: route.intents.length,
+        matched_rules: route.matchedRules,
+        resolved_entity_count: route.resolvedEntityIds.length,
+        time_signals: route.timeSignals,
+        signals: route.signals,
+        rationale: route.rationale,
+      };
+      console.debug(JSON.stringify(payload));
+    } catch {
+      // never break execution on serialization errors
+    }
   }
 
   private injectFocusSeed(seeds: SeedCandidate[], focusRef?: NodeRef): SeedCandidate[] {
