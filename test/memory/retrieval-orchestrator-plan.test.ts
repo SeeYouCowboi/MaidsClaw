@@ -215,8 +215,9 @@ describe("RetrievalOrchestrator — plan-driven budget reallocation", () => {
 
     await orchestrator.search("test", makeViewer(), "rp_agent");
 
-    // Legacy path: narrative limit = 3 + 2 + 4 = 9; cognition = 5 + 2 + 4 = 11.
-    expect(narrative.lastLimit.value).toBe(9);
+    // Legacy path: narrative limit = 3 + 3 + 4 = 10; cognition = 5 + 2 + 4 = 11.
+    // (rp_agent episodicBudget bumped from 2 → 3 in GAP-4 §4 prereq.)
+    expect(narrative.lastLimit.value).toBe(10);
     expect(cognition.lastLimit.value).toBe(11);
   });
 
@@ -231,7 +232,7 @@ describe("RetrievalOrchestrator — plan-driven budget reallocation", () => {
     const plan = makePlan({});
     await orchestrator.search("test", makeViewer(), "rp_agent", { queryPlan: plan });
 
-    expect(narrative.lastLimit.value).toBe(9);
+    expect(narrative.lastLimit.value).toBe(10);
     expect(cognition.lastLimit.value).toBe(11);
   });
 
@@ -248,7 +249,7 @@ describe("RetrievalOrchestrator — plan-driven budget reallocation", () => {
     await orchestrator.search("test", makeViewer(), "rp_agent", { queryPlan: plan });
 
     // Legacy limits regardless of plan.
-    expect(narrative.lastLimit.value).toBe(9);
+    expect(narrative.lastLimit.value).toBe(10);
     expect(cognition.lastLimit.value).toBe(11);
   });
 
@@ -314,9 +315,10 @@ describe("RetrievalOrchestrator — strategy + plan composition", () => {
       { queryPlan: plan, queryStrategy: "deep_explain" },
     );
 
-    // Boosted baseline: narrative=5, cognition=7, episode=3, conflict=3.
-    // narrative limit = 5 + 3 + 4 = 12; cognition limit = 7 + 3 + 4 = 14.
-    expect(narrative.lastLimit.value).toBe(12);
+    // Boosted baseline: narrative=5, cognition=7, episode=4, conflict=3.
+    // (rp_agent episodicBudget bumped from 2 → 3, deep_explain adds +1 → 4.)
+    // narrative limit = 5 + 4 + 4 = 13; cognition limit = 7 + 3 + 4 = 14.
+    expect(narrative.lastLimit.value).toBe(13);
     expect(cognition.lastLimit.value).toBe(14);
   });
 

@@ -75,5 +75,11 @@ export interface QueryRouter {
     query: string;
     viewerAgentId: string;
     explicitMode?: QueryType;
+    /**
+     * Caller's current area entity id, when applicable. Enables the
+     * needsEpisode signal to fold in scene-vocabulary hits the same way
+     * resolveEpisodeBudget did with `viewerContext.current_area_id`.
+     */
+    currentAreaId?: number | null;
   }): Promise<QueryRoute>;
 }

@@ -29,6 +29,13 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3);
 }
 
+// GAP-4 §4 prereq: episodicBudget/episodeBudget for rp_agent and maiden
+// were bumped from 2 → 3 to absorb the +1 queryEpisodeBoost that the legacy
+// EPISODE_*_TRIGGER regex path adds in retrieval-orchestrator.ts. The
+// conservation-based plan allocator (budget-allocator.ts) cannot exceed the
+// template baseline, so the baseline itself has to carry the boost. The
+// queryEpisodeBoost / sceneEpisodeBoost fields stay non-zero here for the
+// legacy regex path until the EPISODE_*_TRIGGER deletion follow-up.
 const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
   rp_agent: {
     narrativeEnabled: true,
@@ -38,8 +45,8 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     narrativeBudget: 3,
     cognitionBudget: 5,
     conflictNotesBudget: 2,
-    episodicBudget: 2,
-    episodeBudget: 2,
+    episodicBudget: 3,
+    episodeBudget: 3,
     narrativeTokenBudget: 0,
     cognitionTokenBudget: 0,
     conflictNotesTokenBudget: 0,
@@ -58,8 +65,8 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     narrativeBudget: 3,
     cognitionBudget: 0,
     conflictNotesBudget: 0,
-    episodicBudget: 2,
-    episodeBudget: 2,
+    episodicBudget: 3,
+    episodeBudget: 3,
     narrativeTokenBudget: 0,
     cognitionTokenBudget: 0,
     conflictNotesTokenBudget: 0,

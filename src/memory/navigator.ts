@@ -377,6 +377,7 @@ export class GraphNavigator {
         query,
         viewerAgentId: viewerContext.viewer_agent_id,
         explicitMode,
+        currentAreaId: viewerContext.current_area_id ?? null,
       });
     } catch {
       return;

@@ -23,6 +23,9 @@ import {
   TIME_CONSTRAINT_KEYWORDS,
   CHANGE_KEYWORDS,
   COMPARISON_KEYWORDS,
+  EPISODE_MEMORY_KEYWORDS,
+  EPISODE_DETECTIVE_KEYWORDS,
+  EPISODE_SCENE_KEYWORDS,
 } from "./query-routing-keywords.js";
 import type {
   QueryRoute,
@@ -91,6 +94,21 @@ function confidenceFromEvidence(count: number): number {
   return 0.95;
 }
 
+/**
+ * Feature flag for the GAP-4 §4 prerequisite: when enabled, the router
+ * folds EPISODE_MEMORY/DETECTIVE/SCENE keyword buckets into needsEpisode
+ * (the scene bucket also requires `currentAreaId != null`). When disabled,
+ * needsEpisode falls back to the original 3-term formula and behavior is
+ * byte-identical to pre-Step-3 routing.
+ *
+ * Default is ON. Set MAIDSCLAW_ROUTER_EPISODE_SIGNALS=off to roll back —
+ * single-env-var revert if the expanded buckets cause unexpected drift in
+ * production routing distributions.
+ */
+function isEpisodeSignalExpansionEnabled(): boolean {
+  return process.env.MAIDSCLAW_ROUTER_EPISODE_SIGNALS !== "off";
+}
+
 export class RuleBasedQueryRouter implements QueryRouter {
   static readonly VERSION = CLASSIFIER_VERSION;
 
@@ -137,6 +155,20 @@ export class RuleBasedQueryRouter implements QueryRouter {
     const timeConstraintHits = findHits(normalizedQuery, TIME_CONSTRAINT_KEYWORDS);
     const changeHits = findHits(normalizedQuery, CHANGE_KEYWORDS);
     const comparisonHits = findHits(normalizedQuery, COMPARISON_KEYWORDS);
+    const episodeMemoryHits = findHits(normalizedQuery, EPISODE_MEMORY_KEYWORDS);
+    const episodeDetectiveHits = findHits(normalizedQuery, EPISODE_DETECTIVE_KEYWORDS);
+    const episodeSceneHits = findHits(normalizedQuery, EPISODE_SCENE_KEYWORDS);
+    const episodeSignalsExpanded = isEpisodeSignalExpansionEnabled();
+    const sceneGateOpen = input.currentAreaId != null;
+    if (episodeSignalsExpanded && episodeMemoryHits.length > 0) {
+      matchedRules.push("episode_memory_keywords");
+    }
+    if (episodeSignalsExpanded && episodeDetectiveHits.length > 0) {
+      matchedRules.push("episode_detective_keywords");
+    }
+    if (episodeSignalsExpanded && episodeSceneHits.length > 0 && sceneGateOpen) {
+      matchedRules.push("episode_scene_keywords");
+    }
 
     if (whyHits.length > 0) {
       intents.push({
@@ -221,7 +253,10 @@ export class RuleBasedQueryRouter implements QueryRouter {
       needsEpisode: clamp01(
         (timelineHits.length > 0 ? 0.4 : 0) +
         (hasTimeConstraint ? 0.3 : 0) +
-        (asksChange ? 0.2 : 0),
+        (asksChange ? 0.2 : 0) +
+        (episodeSignalsExpanded && episodeMemoryHits.length > 0 ? 0.3 : 0) +
+        (episodeSignalsExpanded && episodeDetectiveHits.length > 0 ? 0.3 : 0) +
+        (episodeSignalsExpanded && episodeSceneHits.length > 0 && sceneGateOpen ? 0.3 : 0),
       ),
       needsConflict: clamp01(
         (conflictHits.length > 0 ? 0.7 : 0) + (asksChange ? 0.1 : 0),

@@ -202,6 +202,7 @@ export class RetrievalService {
       const route = await this.queryRouter.route({
         query,
         viewerAgentId: viewerContext.viewer_agent_id,
+        currentAreaId: viewerContext.current_area_id ?? null,
       });
       return this.queryPlanBuilder.build({
         route,
