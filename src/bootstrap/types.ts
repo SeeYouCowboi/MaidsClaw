@@ -104,6 +104,17 @@ export type RuntimeBootstrapResult = {
 	thinkerGlobalConcurrencyCap?: number;
 	talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number };
 	shutdown: () => void;
+	/**
+	 * Resolves once the CJK segmenter has finished loading shared aliases into
+	 * its user dictionary. Bootstrap fires the load asynchronously and does
+	 * NOT block on it (queries arriving in the cold window degrade gracefully
+	 * to the default jieba dictionary). Callers that want strict ordering —
+	 * e.g. an HTTP host that must serve correct CJK tokenization on the very
+	 * first request — can `await result.segmenterReady` before opening their
+	 * listener. Always resolves; load failures are logged and the promise
+	 * still resolves so callers don't deadlock.
+	 */
+	segmenterReady: Promise<void>;
 };
 
 export type PublicRuntimeBootstrapResult = Omit<

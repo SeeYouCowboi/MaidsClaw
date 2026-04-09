@@ -964,14 +964,18 @@ export function bootstrapRuntime(
 	// tokenizer still produces usable tokens via either jieba's fallback or
 	// the legacy bigram path. Failures log once; the rest of bootstrap
 	// continues with an un-synced segmenter.
-	// TODO(phase4): expose a `segmenterReady: Promise<void>` handle on the
-	// bootstrap result so callers can gate the listener on it if needed.
-	void aliasService.syncSharedAliasesToSegmenter().catch((err) => {
-		console.debug(JSON.stringify({
-			event: "cjk_segmenter_sync_failed",
-			error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-		}));
-	});
+	//
+	// `segmenterReady` is exposed on RuntimeBootstrapResult so callers that
+	// want strict ordering (e.g. HTTP host before opening its listener) can
+	// `await result.segmenterReady`. Default behavior remains fire-and-forget.
+	const segmenterReady = aliasService
+		.syncSharedAliasesToSegmenter()
+		.catch((err) => {
+			console.debug(JSON.stringify({
+				event: "cjk_segmenter_sync_failed",
+				error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+			}));
+		});
 	const narrativeSearchService = new NarrativeSearchService(
 		pgNarrativeSearchRepo,
 	);
@@ -1260,6 +1264,7 @@ export function bootstrapRuntime(
 		thinkerGlobalConcurrencyCap,
 		talkerThinkerConfig,
 		shutdown,
+		segmenterReady,
 	};
 }
 
