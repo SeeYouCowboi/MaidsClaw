@@ -5,7 +5,8 @@ import type { NarrativeSearchService } from "../narrative/narrative-search.js";
 import type { CognitionSearchService, CognitionHit, CurrentProjectionReader } from "../cognition/cognition-search.js";
 import type { RetrievalTemplate } from "../contracts/retrieval-template.js";
 import { estimateTokens, resolveTemplate } from "../contracts/retrieval-template.js";
-import type { EpisodeRepository, EpisodeRow } from "../episode/episode-repo.js";
+import type { EpisodeRow } from "../episode/episode-repo.js";
+import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-repo.js";
 import { tokenizeQuery } from "../query-tokenizer.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
