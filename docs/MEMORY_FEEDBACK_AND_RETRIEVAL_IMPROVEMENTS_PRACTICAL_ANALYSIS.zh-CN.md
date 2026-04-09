@@ -1,5 +1,9 @@
 # Memory Feedback / Retrieval 改进分析报告（实践版）
 
+> **配套文档**：本文聚焦 GAP-1~GAP-6 的代码级复核，着重于 retrieval / graph 管道改进。  
+> `episode / private_episode / event / event_nodes` 语义收敛的逐文件审计、数据库影响、分阶段路线图见：
+> **[`docs/EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md`](./EPISODE_EVENT_UNIFICATION_AUDIT.zh-CN.md)**
+
 基于 `docs/MEMORY_FEEDBACK_AND_RETRIEVAL_IMPROVEMENTS.md` 的 6 个 gap，对当前仓库实现做了逐项核查。结论是：原文方向大体正确，但其中至少有 3 类问题被混在了一起：
 
 1. 有些结论已经被 2026-04-08 的代码演进部分修正了。
@@ -24,6 +28,7 @@
 - `RetrievalOrchestrator` 支持注入 `episodeRepository`，但 runtime bootstrap 当前没有传。证据：`src/memory/retrieval/retrieval-orchestrator.ts:12-17`，`src/bootstrap/runtime.ts:966-970`。
 - 图读取层对 `private_episode_events` 的 fallback 可见性当前写成了 `world_public`。如果按原文建议直接把 private episode 接入 embedding / graph，而不先修这个语义，会有私有记忆泄漏风险。证据：`src/storage/domain-repos/pg/graph-read-query-repo.ts:754-775`，`src/memory/visibility-policy.ts:15-20, 82-101`。
 - 系统内部现在并存两套 episode ref：graph 侧用 `event:{id}`，relation/intents 侧允许并使用 `private_episode:{id}`。这不是单纯“缺一条 pipeline”，而是类型体系本身不统一。证据：`src/memory/projection/projection-manager.ts:85-87`，`src/memory/contracts/graph-node-ref.ts:9-21`，`src/memory/cognition/relation-intent-resolver.ts:166-172, 333-339`。
+- 当前混乱还跨了三个层级：`episode/event` 是本体语义，`event:* / private_episode:* / episode:*` 是 ref 命名，`event_nodes / private_episode_events` 是物理表。如果不先把这三层拆开，后续“修 retrieval”很容易误伤成“合并对象”或“合并表”。
 
 ## GAP-1：Episode -> Graph Pipeline Disconnection
 
@@ -40,7 +45,7 @@
 3. `search-rebuild-pg` 的 authority source 也明确没有 episode。证据：`src/memory/search-rebuild-pg.ts:1-8`。
 4. `getNodeRecencyTimestamp()`、`getNodeTopicCluster()`、`getEventLogicDegree()` 都默认 `event` 来自 `event_nodes`。所以就算补了 render content，score 语义仍不完整。证据：`src/storage/domain-repos/pg/node-scoring-query-repo.ts:237-244, 287-311`。
 5. 图读取层虽然给 `private_episode_events` 做了 snapshot / visibility fallback，但这只是“读得见一些壳”，不是“完整成为图节点”。证据：`src/storage/domain-repos/pg/graph-read-query-repo.ts:676-690, 701-775`。
-6. 现在的 private episode 既像 `event`，又像 `private_episode`。GraphNavigator、Embedding、NodeRef parser 不认识 `private_episode`；relation intent 却允许并保留 `private_episode:`。这会让 episode 在不同子系统里拥有两种身份。
+6. 现在的 private episode 既被 graph 侧借壳成 `event:{id}`，又被 relation 侧保留为 `private_episode:{id}`。GraphNavigator、Embedding、NodeRef parser 不认识 `private_episode`；relation intent 却允许并保留 `private_episode:`。这会让 episode 在不同子系统里拥有两种身份。
 
 ### 比原文更关键的风险
 
@@ -52,7 +57,7 @@
 
 短期先不要新增 `episode` node kind。更务实的做法是：
 
-1. **先把 graph 侧 canonical ref 稳住**。短期继续使用 `event:{id}` 承载 private episode，避免在 `GraphNavigator`、`EmbeddingRepo`、`NodeRefKind`、`GraphEdgeView`、contracts 一口气扩新 kind。
+1. **先把 graph 侧 canonical carrier ref 稳住**。短期继续使用 `event:{id}` 承载 private episode，避免在 `GraphNavigator`、`EmbeddingRepo`、`NodeRefKind`、`GraphEdgeView`、contracts 一口气扩新 kind。这里说的是 graph 兼容载体，不是把 `episode` 的语义并入 `event`。
 2. **给 `event` 增加 private episode fallback**。至少补齐这些查询：
    - `getNodeRenderingPayload(event:{id})`
    - `getSearchProjectionMaterial(event:{id})`
