@@ -1,4 +1,4 @@
-import type { AgentRole } from "../../agents/profile.js";
+﻿import type { AgentRole } from "../../agents/profile.js";
 import type { ViewerContext } from "../../core/contracts/viewer-context.js";
 import type { MemoryHint } from "../types.js";
 import type { NarrativeSearchService } from "../narrative/narrative-search.js";
@@ -23,7 +23,7 @@ type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
   currentProjectionReader?: CurrentProjectionReader | null;
-  episodeRepository?: EpisodeRepository | null;
+  episodeRepository?: EpisodeRepo | null;
   episodeSearchFn?: EpisodeSearchFn | null;
 };
 
@@ -80,7 +80,7 @@ export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
   private readonly narrativeService: NarrativeSearchService;
   private readonly cognitionService: CognitionSearchService;
-  private readonly episodeRepository: EpisodeRepository | null;
+  private readonly episodeRepository: EpisodeRepo | null;
   private readonly episodeSearchFn: EpisodeSearchFn | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {

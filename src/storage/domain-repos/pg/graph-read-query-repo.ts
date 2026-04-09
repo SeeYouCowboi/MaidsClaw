@@ -767,8 +767,8 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
         `;
         for (const row of privateRows) {
           records.push({
-            nodeRef: `event:${Number(row.id)}` as NodeRef,
-            kind: "event",
+            nodeRef: `episode:${Number(row.id)}` as NodeRef,
+            kind: "episode",
             visibilityScope: "owner_private",
             locationEntityId: Number(row.location_entity_id ?? 0),
             ownerAgentId: row.agent_id,
@@ -791,7 +791,7 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
       for (const row of rows) {
         records.push({
           nodeRef: `episode:${Number(row.id)}` as NodeRef,
-          kind: "episode" as NodeRefKind,
+          kind: "episode",
           visibilityScope: "owner_private",
           locationEntityId: Number(row.location_entity_id ?? 0),
           ownerAgentId: row.agent_id,

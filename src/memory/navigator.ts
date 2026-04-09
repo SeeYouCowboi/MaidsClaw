@@ -546,13 +546,13 @@ export class GraphNavigator {
 
   private nodeTypePrior(queryType: QueryType, nodeKind: NodeRefKind): number {
     const priors = {
-      entity: { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7, evaluation: 0.4, commitment: 0.4 },
-      event: { event: 1, fact: 0.7, entity: 0.55, assertion: 0.45, evaluation: 0.8, commitment: 0.6 },
-      why: { event: 1, fact: 0.85, entity: 0.5, assertion: 0.65, evaluation: 0.85, commitment: 0.75 },
-      relationship: { entity: 1, fact: 0.9, event: 0.45, assertion: 0.7, evaluation: 0.45, commitment: 0.5 },
-      timeline: { event: 1, fact: 0.5, entity: 0.3, assertion: 0.45, evaluation: 0.85, commitment: 0.7 },
-      state: { fact: 1, entity: 0.85, event: 0.5, assertion: 0.8, evaluation: 0.5, commitment: 0.75 },
-      conflict: { assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, entity: 0.6 },
+      entity: { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7, evaluation: 0.4, commitment: 0.4, episode: 0.35 },
+      event: { event: 1, fact: 0.7, entity: 0.55, assertion: 0.45, evaluation: 0.8, commitment: 0.6, episode: 0.85 },
+      why: { event: 1, fact: 0.85, entity: 0.5, assertion: 0.65, evaluation: 0.85, commitment: 0.75, episode: 0.8 },
+      relationship: { entity: 1, fact: 0.9, event: 0.45, assertion: 0.7, evaluation: 0.45, commitment: 0.5, episode: 0.3 },
+      timeline: { event: 1, fact: 0.5, entity: 0.3, assertion: 0.45, evaluation: 0.85, commitment: 0.7, episode: 0.9 },
+      state: { fact: 1, entity: 0.85, event: 0.5, assertion: 0.8, evaluation: 0.5, commitment: 0.75, episode: 0.4 },
+      conflict: { assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, entity: 0.6, episode: 0.65 },
     } satisfies Record<QueryType, Record<NodeRefKind, number>>;
 
     return (priors[queryType] as Record<string, number>)[nodeKind] ?? 0.2;
@@ -1565,8 +1565,11 @@ export class GraphNavigator {
         owner_agent_id: record.ownerAgentId,
       };
     }
-    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment" || record.kind === "episode") {
+    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment") {
       return { agent_id: record.agentId };
+    }
+    if (record.kind === "episode") {
+      return { agent_id: record.ownerAgentId };
     }
     if (record.kind === "fact") {
       return record.active ? { id: 1 } : null;

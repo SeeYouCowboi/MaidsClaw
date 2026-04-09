@@ -87,6 +87,13 @@ export type GraphNodeVisibilityRecord =
     nodeRef: NodeRef;
     kind: "fact";
     active: boolean;
+  }
+  | {
+    nodeRef: NodeRef;
+    kind: "episode";
+    visibilityScope: "owner_private";
+    locationEntityId: number;
+    ownerAgentId: string;
   };
 
 export interface GraphReadQueryRepo {
