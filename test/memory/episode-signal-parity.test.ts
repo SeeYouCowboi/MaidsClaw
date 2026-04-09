@@ -75,6 +75,9 @@ function makeAlias(): AliasService {
     async resolveAlias(): Promise<number | null> {
       return null;
     },
+    async listPrivateAliasStrings(): Promise<string[]> {
+      return [];
+    },
   } as unknown as AliasService;
 }
 

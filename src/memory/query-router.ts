@@ -13,6 +13,7 @@
  */
 
 import type { AliasService } from "./alias.js";
+import { segmentCjkWithSpans, type CjkSpan } from "./cjk-segmenter.js";
 import { tokenizeQuery } from "./query-tokenizer.js";
 import {
   WHY_KEYWORDS,
@@ -109,6 +110,51 @@ function isEpisodeSignalExpansionEnabled(): boolean {
   return process.env.MAIDSCLAW_ROUTER_EPISODE_SIGNALS !== "off";
 }
 
+/**
+ * Feature flag for the GAP-4 §8 fix: when enabled, the router runs a
+ * second-pass private-alias substring scan over the original query to
+ * recover CJK aliases that the global jieba tokenizer cannot recognize
+ * (because private aliases are intentionally NOT loaded into jieba's
+ * global user dictionary — that would leak entity names across agents).
+ *
+ * The second pass is strictly additive: failures fall back silently to
+ * the first-pass token result. Default is ON. Set
+ * MAIDSCLAW_ROUTER_PRIVATE_ALIAS_SCAN=off for single-env-var rollback.
+ */
+function isPrivateAliasScanEnabled(): boolean {
+  return process.env.MAIDSCLAW_ROUTER_PRIVATE_ALIAS_SCAN !== "off";
+}
+
+/**
+ * True iff [aliasStart, aliasEnd) start and end positions both coincide
+ * with some jieba token boundary in `spans`. This is the conservative
+ * disambiguation rule for the private-alias substring scan: it accepts
+ * `小红` when jieba breaks the surrounding run as `小|红` or `小红`, and
+ * rejects it when jieba sees a longer covering word like `小红色`.
+ *
+ * Known limitation: when jieba splits ambiguously (e.g. `小红|色` for
+ * `小红色`), both boundaries align and the alias is accepted as a false
+ * positive. The downstream impact is one extra entry in
+ * resolvedEntityIds — not a security issue (no cross-agent leakage),
+ * just minor over-recall. The rule can be tightened to "alias spans a
+ * contiguous run of complete tokens" if shadow data shows the
+ * false-positive rate matters.
+ */
+function alignsToJiebaBoundaries(
+  aliasStart: number,
+  aliasEnd: number,
+  spans: readonly CjkSpan[],
+): boolean {
+  let startHit = false;
+  let endHit = false;
+  for (const span of spans) {
+    if (span.start === aliasStart) startHit = true;
+    if (span.end === aliasEnd) endHit = true;
+    if (startHit && endHit) return true;
+  }
+  return startHit && endHit;
+}
+
 export class RuleBasedQueryRouter implements QueryRouter {
   static readonly VERSION = CLASSIFIER_VERSION;
 
@@ -137,6 +183,49 @@ export class RuleBasedQueryRouter implements QueryRouter {
         seenEntityIds.add(entityId);
         resolvedEntityIds.push(entityId);
         entityHints.push(aliasToken);
+      }
+    }
+
+    // === Second pass: private-alias substring scan (GAP-4 §8) ===
+    // Recovers CJK private aliases that the global jieba tokenizer cannot
+    // recognize. Strictly additive — failures fall back silently to the
+    // first-pass token result above. Scoped to viewerAgentId, so private
+    // aliases never bleed into other agents' queries.
+    if (isPrivateAliasScanEnabled()) {
+      try {
+        const privateAliases = await this.alias.listPrivateAliasStrings(input.viewerAgentId);
+        if (privateAliases.length > 0) {
+          const cjkSpans = segmentCjkWithSpans(originalQuery);
+          if (cjkSpans !== null) {
+            let scanHit = false;
+            for (const alias of privateAliases) {
+              if (alias.length < 2) continue;
+              let pos = 0;
+              while ((pos = originalQuery.indexOf(alias, pos)) !== -1) {
+                const aliasEnd = pos + alias.length;
+                if (alignsToJiebaBoundaries(pos, aliasEnd, cjkSpans)) {
+                  const entityId = await this.alias.resolveAlias(alias, input.viewerAgentId);
+                  if (entityId !== null && !seenEntityIds.has(entityId)) {
+                    seenEntityIds.add(entityId);
+                    resolvedEntityIds.push(entityId);
+                    entityHints.push(alias);
+                    scanHit = true;
+                  }
+                }
+                pos += 1;
+              }
+            }
+            if (scanHit) {
+              matchedRules.push("private_alias_scan_hit");
+            }
+          }
+        }
+      } catch (err) {
+        console.debug(JSON.stringify({
+          event: "private_alias_scan_failed",
+          error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+        }));
+        // Swallow — first-pass result is preserved.
       }
     }
 

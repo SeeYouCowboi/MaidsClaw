@@ -191,4 +191,19 @@ export class PgAliasRepo implements AliasRepo {
     `;
     return rows.map((r) => r.alias);
   }
+
+  async listPrivateAliasStrings(agentId: string): Promise<string[]> {
+    // Defensive cap on per-agent private alias count. A single agent should
+    // never approach this; if it does, the substring scan in
+    // RuleBasedQueryRouter would also become a hot loop and the scan should
+    // be upgraded to Aho-Corasick (GAP-4 §8 future work).
+    const LIMIT = 10_000;
+    const rows = await this.sql<{ alias: string }[]>`
+      SELECT DISTINCT alias
+      FROM entity_aliases
+      WHERE owner_agent_id = ${agentId}
+      LIMIT ${LIMIT}
+    `;
+    return rows.map((r) => r.alias);
+  }
 }

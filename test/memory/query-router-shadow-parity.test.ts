@@ -36,6 +36,9 @@ function makeAlias(): AliasService {
     async resolveAlias(alias: string): Promise<number | null> {
       return ALIAS_MAP[alias] ?? null;
     },
+    async listPrivateAliasStrings(): Promise<string[]> {
+      return [];
+    },
   } as unknown as AliasService;
 }
 

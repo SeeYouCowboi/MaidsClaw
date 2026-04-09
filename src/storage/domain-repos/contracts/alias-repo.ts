@@ -30,4 +30,14 @@ export interface AliasRepo {
    * entity names across agent boundaries through a global tokenizer dict.
    */
   listSharedAliasStrings(): Promise<string[]>;
+
+  /**
+   * Return distinct private alias strings owned by the given agent
+   * (owner_agent_id = agentId). Used by RuleBasedQueryRouter's private-alias
+   * substring scan (GAP-4 §8) to recover CJK aliases that the global jieba
+   * tokenizer cannot recognize without leaking them across agent boundaries.
+   * The agentId is the only scope key — implementations MUST filter strictly
+   * by owner_agent_id and MUST NOT fall back to shared aliases.
+   */
+  listPrivateAliasStrings(agentId: string): Promise<string[]>;
 }

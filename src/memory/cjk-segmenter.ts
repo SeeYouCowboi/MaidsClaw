@@ -105,6 +105,42 @@ export function segmentCjk(text: string): string[] | null {
   }
 }
 
+/**
+ * A jieba token with its character offset within the original input text.
+ * Used by GAP-4 §8 private-alias substring scan to verify that an alias
+ * candidate aligns to jieba token boundaries before accepting it.
+ */
+export type CjkSpan = { text: string; start: number; end: number };
+
+/**
+ * Like segmentCjk, but returns each token's character offset within the
+ * input. Walks the original text consuming each jieba token in order.
+ *
+ * jieba may emit tokens that aren't byte-contiguous (whitespace
+ * normalization, edge-case characters). This function uses an
+ * indexOf-with-cursor walk that tolerates small gaps but bails (returns
+ * null) if any token cannot be located after the previous one — that way
+ * callers never see misaligned spans, only "spans available" or "spans
+ * unavailable, fall back".
+ *
+ * Returns null when the segmenter is unavailable OR when the walk
+ * detects drift; both cases mean callers should skip span-dependent work.
+ */
+export function segmentCjkWithSpans(text: string): CjkSpan[] | null {
+  const segments = segmentCjk(text);
+  if (segments === null) return null;
+  const spans: CjkSpan[] = [];
+  let cursor = 0;
+  for (const seg of segments) {
+    if (seg.length === 0) continue;
+    const idx = text.indexOf(seg, cursor);
+    if (idx === -1) return null;
+    spans.push({ text: seg, start: idx, end: idx + seg.length });
+    cursor = idx + seg.length;
+  }
+  return spans;
+}
+
 /** Whether the segmenter is currently available (for observability/tests). */
 export function isCjkSegmenterAvailable(): boolean {
   if (!initialized) initCjkSegmenter();

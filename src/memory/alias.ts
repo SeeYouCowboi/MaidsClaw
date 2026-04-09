@@ -44,6 +44,16 @@ export class AliasService {
   }
 
   /**
+   * Return distinct private alias strings owned by `agentId`. Used by
+   * RuleBasedQueryRouter's private-alias substring scan to recover CJK
+   * aliases the global jieba tokenizer cannot recognize. Strictly
+   * agent-scoped — does not include shared aliases.
+   */
+  async listPrivateAliasStrings(agentId: string): Promise<string[]> {
+    return this.repo.listPrivateAliasStrings(agentId);
+  }
+
+  /**
    * Create an alias for a canonical entity.
    * Returns the alias id (existing or newly created).
    */

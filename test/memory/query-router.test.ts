@@ -5,12 +5,21 @@ import type { AliasService } from "../../src/memory/alias";
 
 /**
  * Minimal AliasService stub. Maps a fixed alias dictionary to entity ids.
- * Only resolveAlias is exercised by the router.
+ * Only resolveAlias and listPrivateAliasStrings are exercised by the router.
+ *
+ * The default stub returns an empty private-alias list; tests that want to
+ * exercise the GAP-4 §8 second-pass scan should pass `privateAliases`.
  */
-function makeAlias(map: Record<string, number> = {}): AliasService {
+function makeAlias(
+  map: Record<string, number> = {},
+  privateAliases: string[] = [],
+): AliasService {
   return {
     async resolveAlias(alias: string): Promise<number | null> {
       return map[alias] ?? null;
+    },
+    async listPrivateAliasStrings(): Promise<string[]> {
+      return privateAliases;
     },
   } as unknown as AliasService;
 }
