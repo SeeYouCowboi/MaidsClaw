@@ -1,6 +1,6 @@
 import type { EntityAlias } from "./types.js";
 import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
-import { initCjkSegmenter, loadUserDict } from "./cjk-segmenter.js";
+import { containsCjk, initCjkSegmenter, loadUserDict } from "./cjk-segmenter.js";
 
 export class AliasService {
   constructor(private readonly repo: AliasRepo) {}
@@ -56,6 +56,20 @@ export class AliasService {
   /**
    * Create an alias for a canonical entity.
    * Returns the alias id (existing or newly created).
+   *
+   * GAP-4 §7: when a shared CJK alias is created at runtime (not during
+   * bootstrap), incrementally merge it into jieba's user dictionary so the
+   * tokenizer can recognize it as a single token immediately, without
+   * waiting for the next bootstrap to call `syncSharedAliasesToSegmenter`.
+   * Private aliases are intentionally excluded from the global jieba dict
+   * (scope isolation); they are recovered via the router's second-pass
+   * substring scan (GAP-4 §8). Latin-only and < 2 char aliases are
+   * filtered by `loadUserDict` itself; we still gate on `containsCjk` here
+   * to skip the call entirely for non-CJK shared aliases.
+   *
+   * Failures of `loadUserDict` are swallowed by the segmenter module
+   * (logged but not thrown), so this code path cannot break alias
+   * creation.
    */
   async createAlias(
     canonicalId: number,
@@ -63,7 +77,11 @@ export class AliasService {
     aliasType?: string,
     ownerAgentId?: string,
   ): Promise<number> {
-    return this.repo.createAlias(canonicalId, alias, aliasType, ownerAgentId);
+    const id = await this.repo.createAlias(canonicalId, alias, aliasType, ownerAgentId);
+    if (!ownerAgentId && containsCjk(alias)) {
+      loadUserDict([alias]);
+    }
+    return id;
   }
 
   /**

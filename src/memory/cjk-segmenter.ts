@@ -26,6 +26,16 @@ function hasCjk(text: string): boolean {
   return CJK_CHAR_RE.test(text);
 }
 
+/**
+ * Public CJK detection helper. Exposed so callers (e.g. AliasService when
+ * deciding whether a freshly created shared alias needs to be merged into
+ * jieba's user dictionary) can use the same definition the segmenter uses
+ * internally without re-implementing the regex.
+ */
+export function containsCjk(text: string): boolean {
+  return hasCjk(text);
+}
+
 type JiebaApi = {
   cut(text: string, hmm?: boolean): string[];
   loadDict(buf: Uint8Array): void;
