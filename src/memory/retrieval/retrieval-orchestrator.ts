@@ -104,6 +104,20 @@ function isPlanDrivenRetrievalEnabled(): boolean {
   return process.env.MAIDSCLAW_RETRIEVAL_USE_PLAN !== "off";
 }
 
+/**
+ * GAP-4 §1 feature flag: when enabled, the orchestrator passes the
+ * surface-level facets (`entityFilters`, `timeWindow`, `kind`, `stance`)
+ * from `queryPlan.surfacePlans.*` through to NarrativeSearchService and
+ * CognitionSearchService. When disabled, the services receive `undefined`
+ * filters and behave exactly as in pre-§1 commits.
+ *
+ * Default is ON. Set MAIDSCLAW_RETRIEVAL_USE_FACETS=off for single-env-var
+ * rollback if facet consumption causes unexpected recall changes.
+ */
+function isFacetConsumptionEnabled(): boolean {
+  return process.env.MAIDSCLAW_RETRIEVAL_USE_FACETS !== "off";
+}
+
 export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
   private readonly narrativeService: NarrativeSearchService;
@@ -168,12 +182,33 @@ export class RetrievalOrchestrator {
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(template);
     const episodeHints = await this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
 
+    // GAP-4 §1: extract surface-level facets from the plan if a plan is
+    // present and the facet consumption flag is on. Empty `entityFilters`
+    // arrays are normalized to undefined so the downstream "no filter"
+    // path is taken (avoids accidental "match nothing" semantics).
+    const facetsEnabled = queryPlan != null && isFacetConsumptionEnabled();
+    const narrativeFacets = facetsEnabled
+      ? {
+          entityIds: nonEmptyOrUndefined(queryPlan.surfacePlans.narrative.entityFilters),
+          timeWindow: queryPlan.surfacePlans.narrative.timeWindow ?? undefined,
+        }
+      : undefined;
+    const cognitionFacets = facetsEnabled
+      ? {
+          kind: queryPlan.surfacePlans.cognition.kind,
+          stance: queryPlan.surfacePlans.cognition.stance,
+          entityIds: nonEmptyOrUndefined(queryPlan.surfacePlans.cognition.entityFilters),
+          timeWindow: queryPlan.surfacePlans.cognition.timeWindow ?? undefined,
+        }
+      : undefined;
+
     const narrativeHints: MemoryHint[] =
       template.narrativeEnabled && (template.narrativeBudget > 0 || effectiveEpisodeBudget > 0)
         ? await this.narrativeService.generateMemoryHints(
             query,
             viewerContext,
             Math.max(template.narrativeBudget + effectiveEpisodeBudget + 4, template.narrativeBudget),
+            narrativeFacets,
           )
         : [];
 
@@ -184,6 +219,10 @@ export class RetrievalOrchestrator {
             query,
             activeOnly: true,
             limit: Math.max(template.cognitionBudget + effectiveConflictNotesBudget + 4, template.cognitionBudget),
+            kind: cognitionFacets?.kind,
+            stance: cognitionFacets?.stance,
+            entityIds: cognitionFacets?.entityIds,
+            timeWindow: cognitionFacets?.timeWindow,
           })
         : [];
 
@@ -601,4 +640,16 @@ export class RetrievalOrchestrator {
     const key = text.slice(COGNITION_KEY_PREFIX.length).trim();
     return key.length > 0 ? key : null;
   }
+}
+
+/**
+ * GAP-4 §1: empty entity id arrays from `plan.surfacePlans.*.entityFilters`
+ * must be treated identically to `undefined` (no filter), NEVER as "match
+ * nothing". The contracts and PG repos honor this convention but doing
+ * the normalization once at the orchestrator boundary keeps every
+ * downstream call site simple.
+ */
+function nonEmptyOrUndefined(arr: number[] | undefined | null): number[] | undefined {
+  if (arr == null || arr.length === 0) return undefined;
+  return arr;
 }

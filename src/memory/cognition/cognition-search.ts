@@ -1,5 +1,6 @@
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
 import { parseGraphNodeRef } from "../contracts/graph-node-ref.js";
+import type { TimeSliceQuery } from "../time-slice-query.js";
 import type { NodeRef } from "../types.js";
 import type { CognitionCurrentRow } from "./private-cognition-current.js";
 import type { CognitionSearchRepo } from "../../storage/domain-repos/contracts/cognition-search-repo.js";
@@ -37,6 +38,10 @@ type CognitionSearchParams = {
   basis?: AssertionBasis;
   activeOnly?: boolean;
   limit?: number;
+  /** GAP-4 §1: forwarded from `plan.surfacePlans.cognition.entityFilters`. */
+  entityIds?: number[];
+  /** GAP-4 §1: forwarded from `plan.surfacePlans.cognition.timeWindow`. */
+  timeWindow?: TimeSliceQuery;
 };
 
 type ConflictResolution = {
@@ -101,6 +106,8 @@ export class CognitionSearchService {
       basis: params.basis,
       activeOnly,
       limit,
+      entityIds: params.entityIds,
+      timeWindow: params.timeWindow,
     });
 
     if (activeOnly) {
@@ -127,6 +134,8 @@ export class CognitionSearchService {
         basis: params.basis,
         activeOnly,
         limit,
+        entityIds: params.entityIds,
+        timeWindow: params.timeWindow,
       });
     } else {
       const searches = await Promise.all(
@@ -135,6 +144,8 @@ export class CognitionSearchService {
           basis: params.basis,
           activeOnly,
           limit,
+          entityIds: params.entityIds,
+          timeWindow: params.timeWindow,
         })),
       );
       hits = searches.flat().sort((left, right) => right.updated_at - left.updated_at).slice(0, limit);

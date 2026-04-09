@@ -4,7 +4,18 @@ import type {
 } from "../../storage/domain-repos/contracts/narrative-search-repo.js";
 import type { EmbeddingRepo } from "../../storage/domain-repos/contracts/embedding-repo.js";
 import type { MemoryTaskModelProvider } from "../task-agent.js";
+import type { TimeSliceQuery } from "../time-slice-query.js";
 import type { MemoryHint, NodeRef, ViewerContext } from "../types.js";
+
+/**
+ * GAP-4 §1: optional facet filters threaded from `plan.surfacePlans.narrative`
+ * down to the narrative repo. Both fields are optional; an empty
+ * `entityIds` array is treated identically to `undefined`.
+ */
+export type NarrativeSearchFilters = {
+  entityIds?: number[];
+  timeWindow?: TimeSliceQuery;
+};
 
 type NarrativeSearchResult = {
   source_ref: NodeRef;
@@ -43,8 +54,19 @@ export class NarrativeSearchService {
     this.embeddingFallback = config;
   }
 
-  async searchNarrative(query: string, viewerContext: ViewerContext): Promise<NarrativeSearchResult[]> {
-    const hits = await this.repo.searchNarrative({ text: query }, viewerContext);
+  async searchNarrative(
+    query: string,
+    viewerContext: ViewerContext,
+    filters?: NarrativeSearchFilters,
+  ): Promise<NarrativeSearchResult[]> {
+    const hits = await this.repo.searchNarrative(
+      {
+        text: query,
+        entityIds: filters?.entityIds,
+        timeWindow: filters?.timeWindow,
+      },
+      viewerContext,
+    );
     const textResults = hits.map((hit) => this.mapHit(hit));
 
     if (!this.embeddingFallback) {
@@ -59,12 +81,13 @@ export class NarrativeSearchService {
     userMessage: string,
     viewerContext: ViewerContext,
     limit = 5,
+    filters?: NarrativeSearchFilters,
   ): Promise<MemoryHint[]> {
     if (userMessage.trim().length < 3) {
       return [];
     }
 
-    const results = await this.searchNarrative(userMessage, viewerContext);
+    const results = await this.searchNarrative(userMessage, viewerContext, filters);
     return results.slice(0, limit).map((result) => ({
       source_ref: result.source_ref,
       scope: result.scope,

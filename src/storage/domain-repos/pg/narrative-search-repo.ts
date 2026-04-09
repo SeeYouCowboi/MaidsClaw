@@ -42,11 +42,15 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     const limit = Math.max(1, query.limit ?? DEFAULT_LIMIT);
     const minScore = query.minScore ?? DEFAULT_MIN_SCORE;
 
+    // GAP-4 §1: only honor non-empty entity id lists. Empty == no filter.
+    const entityIds = query.entityIds && query.entityIds.length > 0 ? query.entityIds : undefined;
+    const asOfCommittedTime = query.timeWindow?.asOfCommittedTime;
+
     if (isCjkQuery(trimmed)) {
-      return this.searchCjk(trimmed, viewerContext, includeArea, includeWorld, limit, minScore);
+      return this.searchCjk(trimmed, viewerContext, includeArea, includeWorld, limit, minScore, entityIds, asOfCommittedTime);
     }
 
-    return this.searchLatin(trimmed, viewerContext, includeArea, includeWorld, limit, minScore);
+    return this.searchLatin(trimmed, viewerContext, includeArea, includeWorld, limit, minScore, entityIds, asOfCommittedTime);
   }
 
   private async searchCjk(
@@ -56,6 +60,8 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     includeWorld: boolean,
     limit: number,
     minScore: number,
+    entityIds: number[] | undefined,
+    asOfCommittedTime: number | undefined,
   ): Promise<NarrativeSearchHit[]> {
     const decomp = decomposeCjk(trimmed);
     const results: NarrativeSearchHit[] = [];
@@ -70,21 +76,30 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     const filterPatterns = [exactPattern, ...unigramPatterns.slice(0, 3)];
 
     if (includeArea && viewerContext.current_area_id != null) {
+      // GAP-4 §1: extra entity_ids filter — search_docs_area only stores
+      // location_entity_id, so we narrow by that column. Plan-supplied
+      // entityIds are interpreted as "the location must be one of these".
       const areaRows = await this.sql<PgNarrativeSearchRow[]>`
         SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
         FROM search_docs_area d
         WHERE d.location_entity_id = ${viewerContext.current_area_id}
           AND lower(d.content) ILIKE ANY(${filterPatterns})
+          ${entityIds ? this.sql`AND d.location_entity_id = ANY(${entityIds})` : this.sql``}
+          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
         LIMIT ${limit * 2}
       `;
       results.push(...areaRows.map((row) => this.mapRow(row, "area")));
     }
 
     if (includeWorld) {
+      // GAP-4 §1: search_docs_world has no entity column. entityIds is
+      // wired through the contract but cannot be honored here without a
+      // schema migration; document the gap and proceed without filter.
       const worldRows = await this.sql<PgNarrativeSearchRow[]>`
         SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
         FROM search_docs_world d
         WHERE lower(d.content) ILIKE ANY(${filterPatterns})
+          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
         LIMIT ${limit * 2}
       `;
       results.push(...worldRows.map((row) => this.mapRow(row, "world")));
@@ -118,6 +133,8 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
     includeWorld: boolean,
     limit: number,
     minScore: number,
+    entityIds: number[] | undefined,
+    asOfCommittedTime: number | undefined,
   ): Promise<NarrativeSearchHit[]> {
     const normalizedQuery = trimmed.toLowerCase();
     const pattern = `%${trimmed}%`;
@@ -140,6 +157,8 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
             OR lower(d.content) ILIKE ${pattern}
             OR word_similarity(lower(d.content), ${normalizedQuery}) >= ${minScore}
           )
+          ${entityIds ? this.sql`AND d.location_entity_id = ANY(${entityIds})` : this.sql``}
+          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
         ORDER BY score DESC, d.created_at DESC
         LIMIT ${limit}
       `;
@@ -162,6 +181,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
           OR lower(d.content) ILIKE ${pattern}
           OR word_similarity(lower(d.content), ${normalizedQuery}) >= ${minScore}
         )
+          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
         ORDER BY score DESC, d.created_at DESC
         LIMIT ${limit}
       `;

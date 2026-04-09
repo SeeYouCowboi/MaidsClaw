@@ -1,5 +1,6 @@
 import type { CognitionHit } from "../../../memory/cognition/cognition-search.js";
 import type { CognitionCurrentRow } from "../../../memory/cognition/private-cognition-current.js";
+import type { TimeSliceQuery } from "../../../memory/time-slice-query.js";
 import type { NodeRef } from "../../../memory/types.js";
 import type {
   AssertionBasis,
@@ -14,6 +15,22 @@ export type CognitionSearchQueryOptions = {
   activeOnly?: boolean;
   limit?: number;
   minScore?: number;
+  /**
+   * GAP-4 §1: optional entity-id filter from
+   * `plan.surfacePlans.cognition.entityFilters`. The
+   * `search_docs_cognition` table currently has no entity column, so this
+   * filter is wired through the contract but is a SQL no-op until a
+   * follow-up schema migration adds entity tracking. Empty array == no
+   * filter (same as undefined).
+   */
+  entityIds?: number[];
+  /**
+   * GAP-4 §1: optional time window from
+   * `plan.surfacePlans.cognition.timeWindow`. When `asOfCommittedTime` is
+   * set, filters to rows whose `updated_at` is at or before that
+   * timestamp. `asOfValidTime` is unused at this layer.
+   */
+  timeWindow?: TimeSliceQuery;
 };
 
 export type CognitionByKindOptions = {
@@ -21,6 +38,10 @@ export type CognitionByKindOptions = {
   basis?: AssertionBasis;
   activeOnly?: boolean;
   limit?: number;
+  /** GAP-4 §1: see CognitionSearchQueryOptions.entityIds. */
+  entityIds?: number[];
+  /** GAP-4 §1: see CognitionSearchQueryOptions.timeWindow. */
+  timeWindow?: TimeSliceQuery;
 };
 
 export interface CognitionSearchRepo {

@@ -150,6 +150,20 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
     if (options.activeOnly) {
       conditions.push("(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))");
     }
+    // GAP-4 §1: timeWindow filter via updated_at. asOfValidTime is unused
+    // at the search-doc layer (cognition rows don't carry valid time).
+    if (options.timeWindow?.asOfCommittedTime != null) {
+      conditions.push(`d.updated_at <= $${next}`);
+      params.push(options.timeWindow.asOfCommittedTime);
+      next += 1;
+    }
+    // GAP-4 §1: entityIds is wired through the contract for the future
+    // schema migration that adds an entity column to search_docs_cognition.
+    // The current schema has no entity column, so a non-empty entityIds
+    // list would silently match nothing if we tried to filter on it. We
+    // intentionally do not push a condition here — the orchestrator
+    // unit test verifies the parameter is forwarded; PG-side enforcement
+    // is the follow-up's responsibility.
 
     params.push(minScore, limit);
     const minScoreParam = next++;
@@ -211,6 +225,14 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
       conditions.push("(c.stance IS NULL OR c.stance NOT IN ('rejected', 'abandoned'))");
       conditions.push("(c.kind <> 'commitment' OR c.status = 'active')");
     }
+    // GAP-4 §1: timeWindow filter via updated_at on private_cognition_current.
+    if (options.timeWindow?.asOfCommittedTime != null) {
+      conditions.push(`c.updated_at <= $${next}`);
+      params.push(options.timeWindow.asOfCommittedTime);
+      next += 1;
+    }
+    // GAP-4 §1: entityIds is wired through but not enforced — see the
+    // searchBySimilarity comment for the rationale.
 
     params.push(limit);
     const limitParam = next;
