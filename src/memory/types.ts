@@ -370,6 +370,38 @@ export type NavigatorResult = {
       has_valid_cut: boolean;
       has_committed_cut: boolean;
     }>;
+    /**
+     * GAP-4 §6: optional router shadow trace exposed via the API. Populated
+     * by `GraphNavigator.explore` when a `QueryRouter` is wired up. The
+     * structured `console.log` shadow channel is preserved as a parallel
+     * sink for the §10 parser; this field gives API consumers the same
+     * data without scraping logs. Always optional — older callers and
+     * tests that don't supply a router see `undefined`.
+     */
+    query_route_shadow?: {
+      classifier_version: string;
+      primary_intent: QueryType;
+      legacy_query_type: QueryType;
+      agreed_with_legacy: boolean;
+      intent_count: number;
+      matched_rules: string[];
+      resolved_entity_count: number;
+      rationale: string;
+    };
+    /**
+     * GAP-4 §6: optional plan shadow trace. Same rules as
+     * `query_route_shadow`. Populated when both a router and a plan
+     * builder are wired up.
+     */
+    query_plan_shadow?: {
+      builder_version: string;
+      primary_intent: QueryType;
+      secondary_intents: QueryType[];
+      surface_weights: { narrative: number; cognition: number; episode: number; conflict_notes: number };
+      seed_bias: Record<string, number>;
+      edge_bias: Record<string, number>;
+      rationale: string;
+    };
   };
   evidence_paths: EvidencePath[];
 };

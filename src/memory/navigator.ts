@@ -163,6 +163,44 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "commitment",
 ]);
 
+/**
+ * GAP-4 §2 Stage A feature flag: when enabled, the navigator consumes
+ * `plan.graphPlan.{seedBias, edgeBias, timeSlice}` to influence beam
+ * search. When disabled (the default), the navigator runs exactly as
+ * pre-Phase-4 — plan/route are still computed and emitted to shadow logs
+ * + drilldown for §10/§6, but they don't touch the search path.
+ *
+ * Default is OFF to preserve byte-equality for production until shadow
+ * data validates the new ranking. Set MAIDSCLAW_NAVIGATOR_USE_PLAN=on to
+ * opt in. Stage B (primaryIntent replacement, flag default flip) is a
+ * separate follow-up gated on §10 shadow data.
+ */
+function isNavigatorPlanConsumptionEnabled(): boolean {
+  return process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN === "on";
+}
+
+/**
+ * GAP-4 §2 Stage A: combine the strategy edge weight with the optional
+ * plan-supplied edge bias. Both default to 1.0 when missing. Used by
+ * `compareNeighborEdges`, `preliminaryPathScore`, and `rerankPaths` —
+ * three call sites that previously used `strategy?.edgeWeights[kind] ?? 1.0`
+ * directly. Plan multiplier is sparse (`Partial<Record>`) so missing keys
+ * fall through to the strategy alone, never overriding it.
+ *
+ * Exported (rather than file-private) so unit tests can verify the merge
+ * semantics directly without constructing a full GraphNavigator.
+ */
+export function effectiveEdgeMultiplier(
+  kind: NavigatorEdgeKind | MemoryRelationType,
+  strategy: GraphRetrievalStrategy | undefined,
+  plan: QueryPlan | null,
+): number {
+  const strategyMultiplier = strategy?.edgeWeights[kind as MemoryRelationType] ?? 1.0;
+  if (plan == null || !isNavigatorPlanConsumptionEnabled()) return strategyMultiplier;
+  const planMultiplier = plan.graphPlan.edgeBias?.[kind as string] ?? 1.0;
+  return strategyMultiplier * planMultiplier;
+}
+
 export class GraphNavigator {
   private readonly readRepo: GraphReadQueryRepo;
   private readonly visibilityPolicy: VisibilityPolicy;
@@ -209,7 +247,11 @@ export class GraphNavigator {
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
-    await this.emitQueryRouteAndPlanShadow(query, viewerContext, input.mode, analysis.query_type);
+    const planContext = await this.emitQueryRouteAndPlanShadow(query, viewerContext, input.mode, analysis.query_type);
+    // GAP-4 §2 Stage A: only consume the plan when the flag is on. Stage B
+    // (primaryIntent replacement) is deferred until §10 shadow data lands.
+    const consumePlan = isNavigatorPlanConsumptionEnabled();
+    const activePlan = consumePlan ? planContext.plan : null;
 
     let queryEmbedding: Float32Array | undefined;
     if (this.embedProvider && this.embeddingModelId) {
@@ -234,15 +276,21 @@ export class GraphNavigator {
         query_type: analysis.query_type,
         summary: `No explain evidence found for '${query}'`,
         evidence_paths: [],
+        drilldown: this.buildDrilldown(input, undefined, planContext),
       };
     }
 
-    const seedScores = await this.computeSeedScores(visibleSeeds, analysis);
-    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy);
-    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy);
+    const seedScores = await this.computeSeedScores(visibleSeeds, analysis, activePlan);
+    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy, activePlan);
+    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy, activePlan);
     const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
     const assembled = await this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
-    const sliced = filterEvidencePathsByTimeSlice(assembled, input);
+    // GAP-4 §2 Stage A: prefer plan.graphPlan.timeSlice over the legacy
+    // input.asOf* time slice when present and the flag is on. Falls back
+    // to `input` exactly as before when no plan or flag off.
+    const planTimeSlice = activePlan?.graphPlan.timeSlice;
+    const effectiveTimeSlice = planTimeSlice != null ? planTimeSlice : input;
+    const sliced = filterEvidencePathsByTimeSlice(assembled, effectiveTimeSlice);
     const seedsByRef = new Map(visibleSeeds.map((s) => [s.node_ref, s]));
     const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel, seedsByRef);
     const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
@@ -251,14 +299,7 @@ export class GraphNavigator {
       query,
       query_type: analysis.query_type,
       summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
-      drilldown: {
-        mode: input.mode,
-        focus_ref: input.focusRef,
-        "focus_cognition_key": input.focusCognitionKey,
-        as_of_valid_time: input.asOfValidTime,
-        as_of_committed_time: input.asOfCommittedTime,
-        time_sliced_paths: pathSummaries,
-      },
+      drilldown: this.buildDrilldown(input, pathSummaries, planContext),
       evidence_paths: levelFiltered,
     };
 
@@ -360,20 +401,26 @@ export class GraphNavigator {
 
   /**
    * Phase 1+2 shadow mode: invokes the optional QueryRouter and (if present)
-   * the QueryPlanBuilder, then emits two structured log lines:
+   * the QueryPlanBuilder, emits two structured log lines for the §10
+   * shadow parser:
    *   - "query_route_shadow" — Phase 1 router output
    *   - "query_plan_shadow"  — Phase 2 plan output (only if builder set)
-   * Does NOT influence beam search, seed selection, or any execution path.
-   * Failures are swallowed silently — shadow paths must never break legacy
-   * execution.
+   *
+   * GAP-4 §2 Stage A: this method now ALSO returns the route + plan (via
+   * an envelope object) so `explore()` can feed them into the navigator's
+   * scoring path when `MAIDSCLAW_NAVIGATOR_USE_PLAN` is enabled. Failures
+   * are still swallowed silently — the envelope's fields fall back to
+   * `undefined` and the navigator runs the legacy path. The console.debug
+   * shadow log channel is preserved as a side effect for §10 (the
+   * drilldown-side fields populated in `explore()` are independent).
    */
   private async emitQueryRouteAndPlanShadow(
     query: string,
     viewerContext: ViewerContext,
     explicitMode: ExploreMode | undefined,
     legacyQueryType: QueryType,
-  ): Promise<void> {
-    if (!this.queryRouter) return;
+  ): Promise<{ route: QueryRoute | null; plan: QueryPlan | null }> {
+    if (!this.queryRouter) return { route: null, plan: null };
     let route: QueryRoute;
     try {
       route = await this.queryRouter.route({
@@ -383,7 +430,7 @@ export class GraphNavigator {
         currentAreaId: viewerContext.current_area_id ?? null,
       });
     } catch {
-      return;
+      return { route: null, plan: null };
     }
     try {
       const payload = {
@@ -410,7 +457,7 @@ export class GraphNavigator {
     }
 
     // Phase 2: emit plan shadow if builder is wired up.
-    if (!this.queryPlanBuilder) return;
+    if (!this.queryPlanBuilder) return { route, plan: null };
     let plan: QueryPlan | null = null;
     try {
       plan = this.queryPlanBuilder.build({
@@ -421,7 +468,7 @@ export class GraphNavigator {
         >[0]["role"],
       });
     } catch {
-      return;
+      return { route, plan: null };
     }
     try {
       const planPayload = {
@@ -453,6 +500,63 @@ export class GraphNavigator {
     } catch {
       // never break execution on serialization errors
     }
+
+    return { route, plan };
+  }
+
+  /**
+   * GAP-4 §6: assemble the drilldown payload from the explore inputs and
+   * the (optional) router/plan shadow context. Always returns a
+   * structured object so callers don't need to invent placeholder fields.
+   */
+  private buildDrilldown(
+    input: MemoryExploreInput,
+    pathSummaries: NavigatorResult["drilldown"] extends infer D
+      ? D extends { time_sliced_paths?: infer P }
+        ? P
+        : never
+      : never,
+    planContext: { route: QueryRoute | null; plan: QueryPlan | null },
+  ): NonNullable<NavigatorResult["drilldown"]> {
+    const drilldown: NonNullable<NavigatorResult["drilldown"]> = {
+      mode: input.mode,
+      focus_ref: input.focusRef,
+      focus_cognition_key: input.focusCognitionKey,
+      as_of_valid_time: input.asOfValidTime,
+      as_of_committed_time: input.asOfCommittedTime,
+      time_sliced_paths: pathSummaries,
+    };
+    const route = planContext.route;
+    if (route) {
+      drilldown.query_route_shadow = {
+        classifier_version: route.classifierVersion,
+        primary_intent: route.primaryIntent,
+        legacy_query_type: route.primaryIntent,
+        agreed_with_legacy: true,
+        intent_count: route.intents.length,
+        matched_rules: route.matchedRules,
+        resolved_entity_count: route.resolvedEntityIds.length,
+        rationale: route.rationale,
+      };
+    }
+    const plan = planContext.plan;
+    if (plan) {
+      drilldown.query_plan_shadow = {
+        builder_version: plan.builderVersion,
+        primary_intent: plan.graphPlan.primaryIntent,
+        secondary_intents: plan.graphPlan.secondaryIntents,
+        surface_weights: {
+          narrative: Number(plan.surfacePlans.narrative.weight.toFixed(3)),
+          cognition: Number(plan.surfacePlans.cognition.weight.toFixed(3)),
+          episode: Number(plan.surfacePlans.episode.weight.toFixed(3)),
+          conflict_notes: Number(plan.surfacePlans.conflictNotes.weight.toFixed(3)),
+        },
+        seed_bias: plan.graphPlan.seedBias as unknown as Record<string, number>,
+        edge_bias: (plan.graphPlan.edgeBias ?? {}) as Record<string, number>,
+        rationale: plan.rationale,
+      };
+    }
+    return drilldown;
   }
 
   private injectFocusSeed(seeds: SeedCandidate[], focusRef?: NodeRef): SeedCandidate[] {
@@ -586,14 +690,29 @@ export class GraphNavigator {
     return merged;
   }
 
-  private async computeSeedScores(seeds: SeedCandidate[], analysis: QueryAnalysis): Promise<Map<NodeRef, number>> {
+  private async computeSeedScores(
+    seeds: SeedCandidate[],
+    analysis: QueryAnalysis,
+    plan: QueryPlan | null = null,
+  ): Promise<Map<NodeRef, number>> {
     const salienceByRef = await this.loadSalienceForRefs(seeds.map((seed) => seed.node_ref));
     const scores = new Map<NodeRef, number>();
 
     for (const seed of seeds) {
       const aliasBonus = this.isAliasMatchedSeed(seed, analysis) ? 1 : 0;
       const parsedSeed = this.parseNodeRef(seed.node_ref);
-      const nodeTypePrior = parsedSeed ? this.nodeTypePrior(analysis.query_type, parsedSeed.kind) : 0.2;
+      const baseNodeTypePrior = parsedSeed ? this.nodeTypePrior(analysis.query_type, parsedSeed.kind) : 0.2;
+      // GAP-4 §2 Stage A: when a plan is supplied, multiply (not replace)
+      // the hand-tuned `nodeTypePrior` matrix by `(1 + planBias)` for the
+      // matching kind. Plan bias is sparse: only six kinds are listed
+      // (entity/event/episode/assertion/evaluation/commitment); `fact` and
+      // any other kind fall back to baseNodeTypePrior alone. The multiply
+      // semantics let plan-driven scoring degrade gracefully when the plan
+      // is wrong: a 0 bias falls back to the matrix exactly, a 1 bias
+      // doubles it.
+      const planBiasMap = plan?.graphPlan.seedBias as Record<string, number> | undefined;
+      const planSeedBias = parsedSeed && planBiasMap ? (planBiasMap[parsedSeed.kind] ?? 0) : 0;
+      const nodeTypePrior = baseNodeTypePrior * (1 + planSeedBias);
       const salience = salienceByRef.get(seed.node_ref) ?? 0;
       const seedScore =
         0.35 * seed.lexical_score +
@@ -654,6 +773,7 @@ export class GraphNavigator {
     options: Required<NavigatorOptions>,
     input: TimeSliceQuery,
     strategy: GraphRetrievalStrategy,
+    plan: QueryPlan | null = null,
   ): Promise<InternalBeamPath[]> {
     const effectiveBeamWidth = Math.min(32, Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)));
     const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
@@ -678,7 +798,7 @@ export class GraphNavigator {
       for (const pathItem of currentLayer) {
         const tail = pathItem.path.nodes[pathItem.path.nodes.length - 1];
         const neighbors = [...(neighborMap.get(tail) ?? [])];
-        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy));
+        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy, plan));
 
         for (const edge of neighbors) {
           if (pathItem.path.nodes.includes(edge.to)) {
@@ -703,7 +823,7 @@ export class GraphNavigator {
       }
 
       const unique = this.deduplicatePaths(nextCandidates);
-      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy) - this.preliminaryPathScore(a, seedScores, queryType, strategy));
+      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy, plan) - this.preliminaryPathScore(a, seedScores, queryType, strategy, plan));
       currentLayer = unique.slice(0, effectiveBeamWidth);
       allPaths.push(...currentLayer);
     }
@@ -1235,14 +1355,22 @@ export class GraphNavigator {
     return null;
   }
 
-  private compareNeighborEdges(a: InternalBeamEdge, b: InternalBeamEdge, queryType: QueryType, strategy?: GraphRetrievalStrategy): number {
+  private compareNeighborEdges(
+    a: InternalBeamEdge,
+    b: InternalBeamEdge,
+    queryType: QueryType,
+    strategy?: GraphRetrievalStrategy,
+    plan: QueryPlan | null = null,
+  ): number {
     const scoreA = this.edgePriorityScore(a.kind, queryType);
     const scoreB = this.edgePriorityScore(b.kind, queryType);
     if (scoreA !== scoreB) {
       return scoreB - scoreA;
     }
-    const weightA = a.weight * (strategy?.edgeWeights[a.kind as MemoryRelationType] ?? 1.0);
-    const weightB = b.weight * (strategy?.edgeWeights[b.kind as MemoryRelationType] ?? 1.0);
+    // GAP-4 §2 Stage A: edge multiplier folds plan.graphPlan.edgeBias on
+    // top of strategy.edgeWeights when plan consumption is enabled.
+    const weightA = a.weight * effectiveEdgeMultiplier(a.kind, strategy, plan);
+    const weightB = b.weight * effectiveEdgeMultiplier(b.kind, strategy, plan);
     if (weightA !== weightB) {
       return weightB - weightA;
     }
@@ -1263,13 +1391,19 @@ export class GraphNavigator {
     return 0.1;
   }
 
-  private preliminaryPathScore(path: InternalBeamPath, seedScores: Map<NodeRef, number>, queryType: QueryType, strategy?: GraphRetrievalStrategy): number {
+  private preliminaryPathScore(
+    path: InternalBeamPath,
+    seedScores: Map<NodeRef, number>,
+    queryType: QueryType,
+    strategy?: GraphRetrievalStrategy,
+    plan: QueryPlan | null = null,
+  ): number {
     const seed = seedScores.get(path.path.seed) ?? 0;
     const edgeScore = path.internal_edges.length === 0
       ? 0
       : path.internal_edges.reduce((acc, edge) => {
           const base = this.edgePriorityScore(edge.kind, queryType);
-          const multiplier = strategy?.edgeWeights[edge.kind as MemoryRelationType] ?? 1.0;
+          const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
           return acc + base * multiplier;
         }, 0) / path.internal_edges.length;
     const hopPenalty = path.path.depth / 2;
@@ -1293,6 +1427,7 @@ export class GraphNavigator {
     queryType: QueryType,
     maxDepth: number,
     strategy?: GraphRetrievalStrategy,
+    plan: QueryPlan | null = null,
   ): Promise<Array<{ path: InternalBeamPath; score: PathScore }>> {
     const snapshots = await this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
 
@@ -1300,7 +1435,7 @@ export class GraphNavigator {
       const seedScore = seedScores.get(path.path.seed) ?? 0;
       const edgeTypeScore = this.average(path.internal_edges.map((edge) => {
         const base = this.edgePriorityScore(edge.kind, queryType);
-        const multiplier = strategy?.edgeWeights[edge.kind as MemoryRelationType] ?? 1.0;
+        const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
         return base * multiplier;
       }));
       const temporalConsistency = this.calculateTemporalConsistency(path.internal_edges);
