@@ -167,6 +167,7 @@ export class RuleBasedQueryRouter implements QueryRouter {
     query: string;
     viewerAgentId: string;
     explicitMode?: QueryType;
+    currentAreaId?: number | null;
   }): Promise<QueryRoute> {
     const originalQuery = input.query;
     const normalizedQuery = originalQuery.trim().toLowerCase();

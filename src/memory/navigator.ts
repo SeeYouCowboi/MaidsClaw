@@ -276,7 +276,7 @@ export class GraphNavigator {
         query_type: analysis.query_type,
         summary: `No explain evidence found for '${query}'`,
         evidence_paths: [],
-        drilldown: this.buildDrilldown(input, undefined, planContext),
+        drilldown: this.buildDrilldown(input, undefined, planContext, analysis.query_type),
       };
     }
 
@@ -299,7 +299,7 @@ export class GraphNavigator {
       query,
       query_type: analysis.query_type,
       summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
-      drilldown: this.buildDrilldown(input, pathSummaries, planContext),
+      drilldown: this.buildDrilldown(input, pathSummaries, planContext, analysis.query_type),
       evidence_paths: levelFiltered,
     };
 
@@ -511,12 +511,15 @@ export class GraphNavigator {
    */
   private buildDrilldown(
     input: MemoryExploreInput,
-    pathSummaries: NavigatorResult["drilldown"] extends infer D
-      ? D extends { time_sliced_paths?: infer P }
-        ? P
-        : never
-      : never,
+    pathSummaries:
+      | (NavigatorResult["drilldown"] extends infer D
+          ? D extends { time_sliced_paths?: infer P }
+            ? P
+            : never
+          : never)
+      | undefined,
     planContext: { route: QueryRoute | null; plan: QueryPlan | null },
+    legacyQueryType: QueryType,
   ): NonNullable<NavigatorResult["drilldown"]> {
     const drilldown: NonNullable<NavigatorResult["drilldown"]> = {
       mode: input.mode,
@@ -531,8 +534,8 @@ export class GraphNavigator {
       drilldown.query_route_shadow = {
         classifier_version: route.classifierVersion,
         primary_intent: route.primaryIntent,
-        legacy_query_type: route.primaryIntent,
-        agreed_with_legacy: true,
+        legacy_query_type: legacyQueryType,
+        agreed_with_legacy: route.primaryIntent === legacyQueryType,
         intent_count: route.intents.length,
         matched_rules: route.matchedRules,
         resolved_entity_count: route.resolvedEntityIds.length,
