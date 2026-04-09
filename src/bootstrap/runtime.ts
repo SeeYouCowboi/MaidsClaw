@@ -12,6 +12,7 @@ import { TraceStore } from "../app/diagnostics/trace-store.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import { loadRuntimeConfig } from "../core/config.js";
+import { createLogger } from "../core/logger.js";
 import type { RuntimeConfig } from "../core/config-schema.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
@@ -968,13 +969,14 @@ export function bootstrapRuntime(
 	// `segmenterReady` is exposed on RuntimeBootstrapResult so callers that
 	// want strict ordering (e.g. HTTP host before opening its listener) can
 	// `await result.segmenterReady`. Default behavior remains fire-and-forget.
+	const bootstrapLogger = createLogger({ name: "bootstrap.runtime", level: "debug" });
 	const segmenterReady = aliasService
 		.syncSharedAliasesToSegmenter()
 		.catch((err) => {
-			console.debug(JSON.stringify({
+			bootstrapLogger.debug("cjk_segmenter_sync_failed", {
 				event: "cjk_segmenter_sync_failed",
 				error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-			}));
+			});
 		});
 	const narrativeSearchService = new NarrativeSearchService(
 		pgNarrativeSearchRepo,

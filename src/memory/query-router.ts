@@ -12,9 +12,12 @@
  * by callers — never let a router error break legacy execution.
  */
 
+import { createLogger } from "../core/logger.js";
 import type { AliasService } from "./alias.js";
 import { segmentCjkWithSpans, type CjkSpan } from "./cjk-segmenter.js";
 import { tokenizeQuery } from "./query-tokenizer.js";
+
+const logger = createLogger({ name: "memory.query-router", level: "debug" });
 import {
   WHY_KEYWORDS,
   TIMELINE_KEYWORDS,
@@ -221,10 +224,10 @@ export class RuleBasedQueryRouter implements QueryRouter {
           }
         }
       } catch (err) {
-        console.debug(JSON.stringify({
+        logger.debug("private_alias_scan_failed", {
           event: "private_alias_scan_failed",
           error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-        }));
+        });
         // Swallow — first-pass result is preserved.
       }
     }

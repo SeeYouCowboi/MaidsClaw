@@ -3,9 +3,12 @@ import type {
   GraphReadQueryRepo,
 } from "../storage/domain-repos/contracts/graph-read-query-repo.js";
 
+import { createLogger } from "../core/logger.js";
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { tokenizeQuery } from "./query-tokenizer.js";
+
+const logger = createLogger({ name: "memory.navigator", level: "debug" });
 import {
   WHY_KEYWORDS,
   TIMELINE_KEYWORDS,
@@ -401,7 +404,7 @@ export class GraphNavigator {
         signals: route.signals,
         rationale: route.rationale,
       };
-      console.debug(JSON.stringify(payload));
+      logger.debug("query_route_shadow", payload);
     } catch {
       // never break execution on serialization errors
     }
@@ -446,7 +449,7 @@ export class GraphNavigator {
         matched_rules: plan.matchedRules,
         rationale: plan.rationale,
       };
-      console.debug(JSON.stringify(planPayload));
+      logger.debug("query_plan_shadow", planPayload);
     } catch {
       // never break execution on serialization errors
     }
@@ -526,10 +529,11 @@ export class GraphNavigator {
           });
         }
       } catch (err) {
-        console.debug("[navigator] supplemental narrative search unavailable", {
+        logger.debug("supplemental_narrative_search_unavailable", {
+          event: "supplemental_narrative_search_unavailable",
           error: err instanceof Error ? err.message : String(err),
           query: query.slice(0, 100),
-          agentId: viewerContext.viewer_agent_id,
+          agent_id: viewerContext.viewer_agent_id,
         });
       }
     }
@@ -557,10 +561,11 @@ export class GraphNavigator {
           });
         }
       } catch (err) {
-        console.debug("[navigator] supplemental cognition search unavailable", {
+        logger.debug("supplemental_cognition_search_unavailable", {
+          event: "supplemental_cognition_search_unavailable",
           error: err instanceof Error ? err.message : String(err),
           query: query.slice(0, 100),
-          agentId: viewerContext.viewer_agent_id,
+          agent_id: viewerContext.viewer_agent_id,
         });
       }
     }

@@ -12,6 +12,9 @@
  */
 
 import { createRequire } from "node:module";
+import { createLogger } from "../core/logger.js";
+
+const logger = createLogger({ name: "memory.cjk-segmenter", level: "debug" });
 
 // Inlined CJK detection to break the circular import with query-tokenizer.ts.
 // Keep the regex identical to query-tokenizer.ts's CJK_CHAR_RE so both modules
@@ -56,10 +59,10 @@ export function initCjkSegmenter(): void {
     lastInitError = err instanceof Error ? (err.stack ?? err.message) : String(err);
     // Log once on init failure so operators can tell the fallback is in use
     // because jieba failed, not because the env flag was set.
-    console.debug(JSON.stringify({
+    logger.debug("cjk_segmenter_init_failed", {
       event: "cjk_segmenter_init_failed",
       error: lastInitError,
-    }));
+    });
   }
 }
 
@@ -82,11 +85,11 @@ export function loadUserDict(words: readonly string[]): void {
     loadedUserWords += cjkWords.length;
   } catch (err) {
     // Leave instance in place; default + prior user dict remain usable.
-    console.debug(JSON.stringify({
+    logger.debug("cjk_segmenter_load_dict_failed", {
       event: "cjk_segmenter_load_dict_failed",
       word_count: cjkWords.length,
       error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-    }));
+    });
   }
 }
 

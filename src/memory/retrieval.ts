@@ -1,5 +1,8 @@
+import { createLogger } from "../core/logger.js";
 import type { RetrievalReadRepo } from "../storage/domain-repos/contracts/retrieval-read-repo.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
+
+const logger = createLogger({ name: "memory.retrieval", level: "debug" });
 import type { EmbeddingService } from "./embeddings.js";
 import type { CognitionSearchService } from "./cognition/cognition-search.js";
 import type { RetrievalTemplate } from "./contracts/retrieval-template.js";
@@ -189,9 +192,9 @@ export class RetrievalService {
    * is missing or when either step throws — the orchestrator then runs the
    * legacy template path (no plan-driven budget reallocation).
    *
-   * Failures are logged via console.debug (same pattern as Phase 1/2 shadow
-   * logs) so operators and shadow-data analysis can detect repeated fallback
-   * without breaking the legacy path.
+   * Failures are logged via the structured logger (same pattern as Phase 1/2
+   * shadow logs) so operators and shadow-data analysis can detect repeated
+   * fallback without breaking the legacy path.
    */
   private async buildPlanForQuery(
     query: string,
@@ -209,10 +212,10 @@ export class RetrievalService {
         role: viewerContext.viewer_role,
       });
     } catch (err) {
-      console.debug(JSON.stringify({
+      logger.debug("retrieval_plan_build_failed", {
         event: "retrieval_plan_build_failed",
         error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-      }));
+      });
       return undefined;
     }
   }
