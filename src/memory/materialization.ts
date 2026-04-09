@@ -69,8 +69,7 @@ export class MaterializationService {
       const privateEvent = event as MaterializablePrivateEvent;
       if (
         privateEvent.agent_id !== agentId ||
-        privateEvent.projection_class !== "area_candidate" ||
-        privateEvent.event_category === "thought"
+        privateEvent.projection_class !== "area_candidate"
       ) {
         result.skipped += 1;
         continue;

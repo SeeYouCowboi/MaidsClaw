@@ -9,11 +9,21 @@ import type { EpisodeRepository, EpisodeRow } from "../episode/episode-repo.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
 
+type EpisodeSearchHit = {
+  sourceRef: string;
+  content: string;
+  category: string;
+  score: number;
+};
+
+type EpisodeSearchFn = (query: string, agentId: string, limit: number) => Promise<EpisodeSearchHit[]>;
+
 type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
   currentProjectionReader?: CurrentProjectionReader | null;
   episodeRepository?: EpisodeRepository | null;
+  episodeSearchFn?: EpisodeSearchFn | null;
 };
 
 type TypedRetrievalSegment = {
@@ -70,12 +80,14 @@ export class RetrievalOrchestrator {
   private readonly narrativeService: NarrativeSearchService;
   private readonly cognitionService: CognitionSearchService;
   private readonly episodeRepository: EpisodeRepository | null;
+  private readonly episodeSearchFn: EpisodeSearchFn | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
     this.cognitionService = deps.cognitionService;
     this.currentProjectionReader = deps.currentProjectionReader ?? null;
     this.episodeRepository = deps.episodeRepository ?? null;
+    this.episodeSearchFn = deps.episodeSearchFn ?? null;
   }
 
   async search(
@@ -379,7 +391,34 @@ export class RetrievalOrchestrator {
     viewerContext: ViewerContext,
     effectiveEpisodeBudget: number,
   ): Promise<TypedNarrativeSegment[]> {
-    if (!this.episodeRepository || effectiveEpisodeBudget <= 0) {
+    if (effectiveEpisodeBudget <= 0) {
+      return [];
+    }
+
+    // Prefer FTS when available
+    if (this.episodeSearchFn && query.trim().length > 0) {
+      try {
+        const ftsHits = await this.episodeSearchFn(
+          query,
+          viewerContext.viewer_agent_id,
+          Math.max(effectiveEpisodeBudget * 3, effectiveEpisodeBudget + 4),
+        );
+        if (ftsHits.length > 0) {
+          return ftsHits.map((hit) => ({
+            source_ref: hit.sourceRef,
+            content: hit.content,
+            score: hit.score,
+            doc_type: `episode_${hit.category}`,
+            scope: "private" as const,
+          }));
+        }
+      } catch {
+        // Fall through to readByAgent scan
+      }
+    }
+
+    // Fallback: direct scan via episodeRepository
+    if (!this.episodeRepository) {
       return [];
     }
 

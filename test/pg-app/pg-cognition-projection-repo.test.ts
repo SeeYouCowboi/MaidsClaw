@@ -111,12 +111,12 @@ describe.skipIf(skipPgTests)("PgCognitionProjectionRepo", () => {
       expect(beforeJson.sourceEventRef).toBeUndefined();
 
       const updatedAt = Date.now();
-      await repo.patchRecordJsonSourceEventRef(before!.id, "private_episode:42", updatedAt);
+      await repo.patchRecordJsonSourceEventRef(before!.id, "episode:42", updatedAt);
 
       const after = await repo.getCurrent("agent-d", "ck-patch-1");
       expect(after).not.toBeNull();
       const afterJson = JSON.parse(after!.record_json);
-      expect(afterJson.sourceEventRef).toBe("private_episode:42");
+      expect(afterJson.sourceEventRef).toBe("episode:42");
       expect(afterJson.sourcePointerKey).toBe("bob");
       expect(afterJson.predicate).toBe("knows");
       expect(afterJson.targetPointerKey).toBe("carol");

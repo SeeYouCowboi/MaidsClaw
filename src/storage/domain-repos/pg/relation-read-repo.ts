@@ -99,8 +99,9 @@ export class PgRelationReadRepo implements RelationReadRepo {
       return rows[0]?.agent_id ?? null;
     }
 
-    if (trimmed.startsWith("private_episode:")) {
-      const id = Number(trimmed.slice("private_episode:".length));
+    if (trimmed.startsWith("episode:") || trimmed.startsWith("private_episode:")) {
+      const prefix = trimmed.startsWith("episode:") ? "episode:" : "private_episode:";
+      const id = Number(trimmed.slice(prefix.length));
       if (!Number.isFinite(id)) {
         return null;
       }
@@ -174,8 +175,9 @@ export class PgRelationReadRepo implements RelationReadRepo {
       return null;
     }
 
+    // Normalize legacy private_episode: refs to episode:
     if (trimmed.startsWith("private_episode:")) {
-      return trimmed;
+      return `episode:${trimmed.slice("private_episode:".length)}`;
     }
     try {
       parseGraphNodeRef(trimmed);

@@ -230,7 +230,7 @@ describe.skipIf(skipPgTests)(
 				const localRefIndex = new Map<string, { kind: "episode"; nodeRef: string }>();
 				localRefIndex.set("ep:source", {
 					kind: "episode",
-					nodeRef: "private_episode:9001",
+					nodeRef: "episode:9001",
 				});
 
 				const cognitionByKey = new Map<string, { kind: "assertion"; nodeRef: string }>();
@@ -263,7 +263,7 @@ describe.skipIf(skipPgTests)(
 				const rows = await pool`
 					SELECT source_node_ref, target_node_ref, relation_type, strength
 					FROM memory_relations
-					WHERE source_node_ref = 'private_episode:9001'
+					WHERE source_node_ref = 'episode:9001'
 					  AND target_node_ref = 'private_cognition:9002'
 				`;
 				expect(rows.length).toBe(1);
@@ -369,7 +369,7 @@ describe.skipIf(skipPgTests)(
 					);
 
 					expect(resolved.length).toBe(1);
-					expect(resolved[0].nodeRef).toBe("private_episode:99999");
+					expect(resolved[0].nodeRef).toBe("episode:99999");
 					expect(unresolved.length).toBe(0);
 
 					const relationWriteRepo = new PgRelationWriteRepo(pool);
@@ -789,7 +789,7 @@ describe.skipIf(skipPgTests)(
 				`;
 				expect(relationRows.length).toBe(1);
 				expect(relationRows[0].relation_type).toBe("supports");
-				expect(String(relationRows[0].source_node_ref).startsWith("private_episode:")).toBe(true);
+				expect(String(relationRows[0].source_node_ref).startsWith("episode:")).toBe(true);
 				expect(String(relationRows[0].target_node_ref).startsWith("assertion:")).toBe(true);
 
 				expect(mockJobs.enqueuedJobs.length).toBeGreaterThanOrEqual(1);

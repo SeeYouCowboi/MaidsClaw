@@ -108,7 +108,7 @@ export function normalizeConflictFactorRefs(value: unknown): { refs: string[]; d
       continue;
     }
     const trimmed = item.trim();
-    if (!/^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(trimmed)) {
+    if (!/^(assertion|evaluation|commitment|episode|private_episode|event):\d+$/.test(trimmed)) {
       dropped += 1;
       continue;
     }

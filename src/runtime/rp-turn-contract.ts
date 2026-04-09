@@ -328,10 +328,6 @@ export function validateRpTurnOutcomeV5(payload: unknown): RpTurnOutcomeSubmissi
     }
     for (const ep of obj.privateEpisodes) {
       if (!ep || typeof ep !== "object") throw new Error("privateEpisode must be an object");
-      const e = ep as Record<string, unknown>;
-      if (e.category === "thought") {
-        throw new Error(`privateEpisode category "thought" is not allowed`);
-      }
     }
   }
 
@@ -394,9 +390,6 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
       throw new Error("privateEpisode must be an object");
     }
     const ep = entry as Record<string, unknown>;
-    if (ep.category === "thought") {
-      throw new Error(`privateEpisode category "thought" is not allowed`);
-    }
     if (!VALID_CATEGORIES.has(ep.category as string)) {
       throw new Error(`invalid privateEpisode category: ${JSON.stringify(ep.category)}`);
     }

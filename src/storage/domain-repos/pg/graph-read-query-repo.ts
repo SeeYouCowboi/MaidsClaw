@@ -769,11 +769,33 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
           records.push({
             nodeRef: `event:${Number(row.id)}` as NodeRef,
             kind: "event",
-            visibilityScope: "world_public",
+            visibilityScope: "owner_private",
             locationEntityId: Number(row.location_entity_id ?? 0),
             ownerAgentId: row.agent_id,
           });
         }
+      }
+    }
+
+    const episodeIds = byKind.get("episode") ?? [];
+    if (episodeIds.length > 0) {
+      const rows = await this.sql<{
+        id: number | string;
+        agent_id: string;
+        location_entity_id: number | string | null;
+      }[]>`
+        SELECT id, agent_id, location_entity_id
+        FROM private_episode_events
+        WHERE id IN ${this.sql(episodeIds)}
+      `;
+      for (const row of rows) {
+        records.push({
+          nodeRef: `episode:${Number(row.id)}` as NodeRef,
+          kind: "episode" as NodeRefKind,
+          visibilityScope: "owner_private",
+          locationEntityId: Number(row.location_entity_id ?? 0),
+          ownerAgentId: row.agent_id,
+        });
       }
     }
 
@@ -829,30 +851,58 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
   }
 
   async getPrivateNodeOwners(nodeRefs: readonly NodeRef[]): Promise<Array<{ nodeRef: NodeRef; agentId: string }>> {
-    const privateRefs = nodeRefs
-      .map((nodeRef) => ({ nodeRef, parsed: this.parseNodeRef(nodeRef) }))
-      .filter((entry): entry is { nodeRef: NodeRef; parsed: { kind: NodeRefKind; id: number } } => (
-        entry.parsed != null
-          && (entry.parsed.kind === "assertion" || entry.parsed.kind === "evaluation" || entry.parsed.kind === "commitment")
-      ));
-    if (privateRefs.length === 0) {
+    const cognitionRefs: Array<{ nodeRef: NodeRef; parsed: { kind: NodeRefKind; id: number } }> = [];
+    const episodeRefs: Array<{ nodeRef: NodeRef; parsed: { kind: NodeRefKind; id: number } }> = [];
+
+    for (const nodeRef of nodeRefs) {
+      const parsed = this.parseNodeRef(nodeRef);
+      if (!parsed) continue;
+      if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment") {
+        cognitionRefs.push({ nodeRef, parsed });
+      } else if (parsed.kind === "episode") {
+        episodeRefs.push({ nodeRef, parsed });
+      }
+    }
+
+    if (cognitionRefs.length === 0 && episodeRefs.length === 0) {
       return [];
     }
 
-    const ids = Array.from(new Set(privateRefs.map((entry) => entry.parsed.id)));
-    const rows = await this.sql<{
-      id: number | string;
-      agent_id: string;
-    }[]>`
-      SELECT id, agent_id
-      FROM private_cognition_current
-      WHERE id IN ${this.sql(ids)}
-    `;
-    const ownerById = new Map<number, string>(rows.map((row) => [Number(row.id), row.agent_id]));
+    const ownerById = new Map<string, string>();
+
+    if (cognitionRefs.length > 0) {
+      const ids = Array.from(new Set(cognitionRefs.map((entry) => entry.parsed.id)));
+      const rows = await this.sql<{ id: number | string; agent_id: string }[]>`
+        SELECT id, agent_id
+        FROM private_cognition_current
+        WHERE id IN ${this.sql(ids)}
+      `;
+      for (const row of rows) {
+        ownerById.set(`cognition:${Number(row.id)}`, row.agent_id);
+      }
+    }
+
+    if (episodeRefs.length > 0) {
+      const ids = Array.from(new Set(episodeRefs.map((entry) => entry.parsed.id)));
+      const rows = await this.sql<{ id: number | string; agent_id: string }[]>`
+        SELECT id, agent_id
+        FROM private_episode_events
+        WHERE id IN ${this.sql(ids)}
+      `;
+      for (const row of rows) {
+        ownerById.set(`episode:${Number(row.id)}`, row.agent_id);
+      }
+    }
 
     const owners: Array<{ nodeRef: NodeRef; agentId: string }> = [];
-    for (const entry of privateRefs) {
-      const owner = ownerById.get(entry.parsed.id);
+    for (const entry of cognitionRefs) {
+      const owner = ownerById.get(`cognition:${entry.parsed.id}`);
+      if (owner) {
+        owners.push({ nodeRef: entry.nodeRef, agentId: owner });
+      }
+    }
+    for (const entry of episodeRefs) {
+      const owner = ownerById.get(`episode:${entry.parsed.id}`);
       if (owner) {
         owners.push({ nodeRef: entry.nodeRef, agentId: owner });
       }

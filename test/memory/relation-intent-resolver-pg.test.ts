@@ -114,7 +114,7 @@ describe("materializeRelationIntents (PG-native, async)", () => {
     const relationWriteRepo = new MockRelationWriteRepo();
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
       cognitionByKey: new Map([
         ["cognition-key-1", { kind: "assertion", nodeRef: "assertion:1" }],
@@ -135,7 +135,7 @@ describe("materializeRelationIntents (PG-native, async)", () => {
     expect(relationWriteRepo.upsertCalls).toHaveLength(1);
 
     const call = relationWriteRepo.upsertCalls[0];
-    expect(call.sourceNodeRef).toBe("private_episode:1");
+    expect(call.sourceNodeRef).toBe("episode:1");
     expect(call.targetNodeRef).toBe("assertion:1");
     expect(call.relationType).toBe("supports");
     expect(call.sourceKind).toBe("turn");
@@ -175,8 +175,8 @@ describe("materializeRelationIntents (PG-native, async)", () => {
     const relationWriteRepo = new MockRelationWriteRepo();
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
-        ["episode-2", { kind: "episode", nodeRef: "private_episode:2" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
+        ["episode-2", { kind: "episode", nodeRef: "episode:2" }],
       ]),
       cognitionByKey: new Map([
         ["cognition-key-1", { kind: "assertion", nodeRef: "assertion:1" }],
@@ -221,7 +221,7 @@ describe("materializeRelationIntents (PG-native, async)", () => {
     const resolvedRefs = createResolvedLocalRefs({
       settlementId: "custom-settlement-xyz",
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
       cognitionByKey: new Map([
         ["cognition-key-1", { kind: "assertion", nodeRef: "assertion:1" }],
@@ -247,7 +247,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
     const cognitionProjectionRepo = new MockCognitionProjectionRepo();
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["factor-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["factor-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
     });
 
@@ -263,7 +263,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
     expect(result.resolved[0]).toEqual({
       kind: "evidence",
       ref: "factor-1",
-      nodeRef: "private_episode:1",
+      nodeRef: "episode:1",
     });
     expect(result.unresolved).toHaveLength(0);
   });
@@ -288,7 +288,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
     expect(result.resolved[0].nodeRef).toBe("assertion:1");
   });
 
-  it("should resolve private_episode: refs directly", async () => {
+  it("should resolve private_episode: refs and normalize to episode:", async () => {
     const cognitionProjectionRepo = new MockCognitionProjectionRepo();
     const resolvedRefs = createResolvedLocalRefs();
 
@@ -301,7 +301,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
     });
 
     expect(result.resolved).toHaveLength(1);
-    expect(result.resolved[0].nodeRef).toBe("private_episode:123");
+    expect(result.resolved[0].nodeRef).toBe("episode:123");
   });
 
   it("should resolve valid graph node refs directly", async () => {
@@ -532,7 +532,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
     const cognitionProjectionRepo = new MockCognitionProjectionRepo();
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["factor-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["factor-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
     });
 
@@ -563,7 +563,7 @@ describe("resolveConflictFactors (PG-native, async)", () => {
 
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["local-factor", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["local-factor", { kind: "episode", nodeRef: "episode:1" }],
       ]),
     });
 
@@ -589,7 +589,7 @@ describe("resolveLocalRefs", () => {
   it("should return resolved refs from settled artifacts", () => {
     const settledArtifacts = createSettledArtifacts({
       localRefIndex: new Map([
-        ["ref-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["ref-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
       cognitionByKey: new Map([
         ["key-1", { kind: "assertion", nodeRef: "assertion:1" }],
@@ -607,7 +607,7 @@ describe("resolveLocalRefs", () => {
 
     expect(result.settlementId).toBe("settlement-1");
     expect(result.agentId).toBe("agent-1");
-    expect(result.localRefIndex.get("ref-1")).toEqual({ kind: "episode", nodeRef: "private_episode:1" });
+    expect(result.localRefIndex.get("ref-1")).toEqual({ kind: "episode", nodeRef: "episode:1" });
     expect(result.cognitionByKey.get("key-1")).toEqual({ kind: "assertion", nodeRef: "assertion:1" });
   });
 });
@@ -616,7 +616,7 @@ describe("validateRelationIntents", () => {
   it("should validate supports intent targeting assertion", () => {
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
       cognitionByKey: new Map([
         ["cognition-1", { kind: "assertion", nodeRef: "assertion:1" }],
@@ -635,14 +635,14 @@ describe("validateRelationIntents", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].intent).toBe("supports");
-    expect(result[0].source.nodeRef).toBe("private_episode:1");
+    expect(result[0].source.nodeRef).toBe("episode:1");
     expect(result[0].target.nodeRef).toBe("assertion:1");
   });
 
   it("should validate triggered intent targeting evaluation", () => {
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
       cognitionByKey: new Map([
         ["cognition-1", { kind: "evaluation", nodeRef: "evaluation:1" }],
@@ -666,7 +666,7 @@ describe("validateRelationIntents", () => {
   it("should throw for unsupported intent", () => {
     const resolvedRefs = createResolvedLocalRefs({
       localRefIndex: new Map([
-        ["episode-1", { kind: "episode", nodeRef: "private_episode:1" }],
+        ["episode-1", { kind: "episode", nodeRef: "episode:1" }],
       ]),
     });
 

@@ -15,7 +15,7 @@ import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projec
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
 
-export type PgSearchRebuildScope = "private" | "area" | "world" | "cognition" | "all";
+export type PgSearchRebuildScope = "private" | "area" | "world" | "cognition" | "episode" | "all";
 
 export type PgSearchRebuildPayload = {
   agentId: string;
@@ -37,6 +37,7 @@ export class PgSearchRebuilder {
       await this.rebuildArea();
       await this.rebuildWorld();
       await this.rebuildCognition(agentId);
+      await this.rebuildEpisode(agentId);
       return;
     }
 
@@ -52,6 +53,9 @@ export class PgSearchRebuilder {
         break;
       case "cognition":
         await this.rebuildCognition(agentId);
+        break;
+      case "episode":
+        await this.rebuildEpisode(agentId);
         break;
     }
   }
@@ -140,7 +144,78 @@ export class PgSearchRebuilder {
     }
   }
 
+  async rebuildEpisode(agentId: string): Promise<void> {
+    if (agentId === ALL_AGENTS_SENTINEL) {
+      const agentIds = await this.listEpisodeSearchAuthorityAgentIds();
+      for (const id of agentIds) {
+        await this.rebuildEpisodeForAgent(id);
+      }
+      return;
+    }
+    await this.rebuildEpisodeForAgent(agentId);
+  }
+
+  private async rebuildEpisodeForAgent(agentId: string): Promise<void> {
+    await this.repo.rebuildForScope("episode", agentId);
+
+    const now = Date.now();
+    const rows = await this.buildEpisodeSearchAuthorityRows(agentId);
+
+    for (const row of rows) {
+      await this.sql`
+        INSERT INTO search_docs_episode
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at)
+        VALUES
+          ('episode', ${row.sourceRef}, ${row.agentId}, ${row.category},
+           ${row.content}, ${row.committedAt}, ${now})
+      `;
+    }
+  }
+
   // ── Authority source queries (PG equivalents of search-authority.ts) ──
+
+  private async listEpisodeSearchAuthorityAgentIds(): Promise<string[]> {
+    const rows = await this.sql<{ agent_id: string }[]>`
+      SELECT DISTINCT agent_id
+      FROM private_episode_events
+      ORDER BY agent_id ASC
+    `;
+    return rows.map((r) => r.agent_id);
+  }
+
+  private async buildEpisodeSearchAuthorityRows(
+    agentId: string,
+  ): Promise<
+    Array<{
+      sourceRef: string;
+      agentId: string;
+      category: string;
+      content: string;
+      committedAt: number;
+    }>
+  > {
+    const rows = await this.sql<
+      {
+        id: string | number;
+        category: string;
+        summary: string;
+        committed_time: string | number;
+      }[]
+    >`
+      SELECT id, category, summary, committed_time
+      FROM private_episode_events
+      WHERE agent_id = ${agentId}
+      ORDER BY id ASC
+    `;
+
+    return rows.map((row) => ({
+      sourceRef: `episode:${Number(row.id)}`,
+      agentId,
+      category: row.category,
+      content: row.summary,
+      committedAt: Number(row.committed_time),
+    }));
+  }
 
   private async listPrivateSearchAuthorityAgentIds(): Promise<string[]> {
     const rows = await this.sql<{ agent_id: string }[]>`

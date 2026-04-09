@@ -247,6 +247,51 @@ export function buildCognitionSearchAuthorityRows(
   }));
 }
 
+export type EpisodeSearchAuthorityRow = {
+  docType: string;
+  sourceRef: string;
+  agentId: string;
+  category: string;
+  content: string;
+  committedAt: number;
+};
+
+export function listEpisodeSearchAuthorityAgentIds(db: Db): string[] {
+  const rows = db.query<{ agent_id: string }>(
+    `SELECT DISTINCT agent_id
+     FROM private_episode_events
+     ORDER BY agent_id ASC`,
+  );
+  return rows.map((row) => row.agent_id);
+}
+
+export function buildEpisodeSearchAuthorityRows(
+  db: Db,
+  agentId: string,
+): EpisodeSearchAuthorityRow[] {
+  const rows = db.query<{
+    id: number;
+    category: string;
+    summary: string;
+    committed_time: number;
+  }>(
+    `SELECT id, category, summary, committed_time
+     FROM private_episode_events
+     WHERE agent_id = ?
+     ORDER BY id ASC`,
+    [agentId],
+  );
+
+  return rows.map((row) => ({
+    docType: "episode",
+    sourceRef: `episode:${row.id}`,
+    agentId,
+    category: row.category,
+    content: row.summary,
+    committedAt: row.committed_time,
+  }));
+}
+
 function safeParseJson(value: string | null): Record<string, unknown> {
   if (!value) {
     return {};

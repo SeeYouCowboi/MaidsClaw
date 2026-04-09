@@ -12,7 +12,7 @@ import type {
 export type { AssertionStance, AssertionBasis };
 export type { PrivateEventCategory, LogicEdgeType, VisibilityScope, MemoryScope };
 
-export type EpisodeCategory = Exclude<PrivateEventCategory, "thought">;
+export type EpisodeCategory = PrivateEventCategory;
 
 // Character in a story
 export type StoryCharacter = {

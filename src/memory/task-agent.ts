@@ -1250,14 +1250,14 @@ export class MemoryTaskAgent {
     if (typeof value !== "string") {
       return undefined;
     }
-    if (!/^(event|entity|fact|assertion|evaluation|commitment):[1-9]\d*$/.test(value)) {
+    if (!/^(event|entity|fact|assertion|evaluation|commitment|episode):[1-9]\d*$/.test(value)) {
       return undefined;
     }
     return value as NodeRef;
   }
 
-  private asPrivateEventCategory(value: unknown): "speech" | "action" | "thought" | "observation" | "state_change" {
-    if (value === "speech" || value === "action" || value === "thought" || value === "observation" || value === "state_change") {
+  private asPrivateEventCategory(value: unknown): "speech" | "action" | "observation" | "state_change" {
+    if (value === "speech" || value === "action" || value === "observation" || value === "state_change") {
       return value;
     }
     return "observation";

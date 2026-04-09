@@ -32,7 +32,7 @@ export interface RelationReadRepo {
 
   /**
    * Resolve the agent ID for a given source node ref.
-   * Supports: assertion:{id}, private_episode:{id}, evaluation:{id}, commitment:{id}
+   * Supports: assertion:{id}, episode:{id}, evaluation:{id}, commitment:{id}
    */
   resolveSourceAgentId(sourceNodeRef: string): Promise<string | null>;
 

@@ -967,6 +967,9 @@ export function bootstrapRuntime(
 		narrativeService: narrativeSearchService,
 		cognitionService: cognitionSearchService,
 		currentProjectionReader,
+		episodeRepository: episodeRepo,
+		episodeSearchFn: async (query, agentId, limit) =>
+			searchProjectionRepo.searchEpisode(query, agentId, limit),
 	});
 	const retrievalService = new RetrievalService({
 		retrievalRepo: pgRetrievalReadRepo,

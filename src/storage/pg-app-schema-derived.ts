@@ -188,13 +188,41 @@ export async function bootstrapDerivedSchema(
       ON search_docs_cognition USING GIN (content gin_trgm_ops)
   `);
 
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS search_docs_episode (
+      id            BIGSERIAL PRIMARY KEY,
+      doc_type      TEXT NOT NULL DEFAULT 'episode',
+      source_ref    TEXT NOT NULL,
+      agent_id      TEXT NOT NULL,
+      category      TEXT NOT NULL,
+      content       TEXT NOT NULL,
+      committed_at  BIGINT NOT NULL,
+      created_at    BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_search_docs_episode_ref_agent
+      ON search_docs_episode(source_ref, agent_id)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_episode_agent
+      ON search_docs_episode(agent_id)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_episode_trgm
+      ON search_docs_episode USING GIN (content gin_trgm_ops)
+  `);
+
   if (!opts.skipVector) {
     await sql.unsafe(`
       CREATE TABLE IF NOT EXISTS node_embeddings (
         id         BIGSERIAL PRIMARY KEY,
         node_ref   TEXT NOT NULL,
         node_kind  TEXT NOT NULL
-                   CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment')),
+                   CHECK (node_kind IN ('event', 'entity', 'fact', 'assertion', 'evaluation', 'commitment', 'episode')),
         view_type  TEXT NOT NULL
                    CHECK (view_type IN ('primary', 'keywords', 'context')),
         model_id   TEXT NOT NULL,

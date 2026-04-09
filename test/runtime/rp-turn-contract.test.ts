@@ -296,7 +296,7 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
     ).toThrow("pinnedSummaryProposal must be a single object, not an array");
   });
 
-  it("rejects privateEpisodes with category 'thought'", () => {
+  it("rejects privateEpisodes with category 'thought' via VALID_CATEGORIES guard", () => {
     expect(() =>
       normalizeRpTurnOutcome({
         schemaVersion: "rp_turn_outcome_v5",
@@ -306,7 +306,7 @@ describe("V5 contract: normalizeRpTurnOutcome", () => {
           summary: "thinking deeply",
         }],
       }),
-    ).toThrow(`privateEpisode category "thought" is not allowed`);
+    ).toThrow('invalid privateEpisode category: "thought"');
   });
 
   it("preserves latentScratchpad as durable cognitive sketch in settlement", () => {

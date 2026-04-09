@@ -331,8 +331,9 @@ async function resolveFactorNodeRef(
   }
 
   const raw = ref.trim();
+  // Normalize legacy private_episode: refs to episode:
   if (raw.startsWith("private_episode:")) {
-    return raw;
+    return `episode:${raw.slice("private_episode:".length)}`;
   }
   try {
     parseGraphNodeRef(raw);

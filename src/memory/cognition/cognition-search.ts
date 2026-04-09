@@ -332,7 +332,7 @@ export class CognitionSearchService {
       return parsed
         .filter((item): item is string => typeof item === "string")
         .map((item) => item.trim())
-        .filter((item) => /^(assertion|evaluation|commitment|private_episode|event):\d+$/.test(item)) as NodeRef[];
+        .filter((item) => /^(assertion|evaluation|commitment|episode|private_episode|event):\d+$/.test(item)) as NodeRef[];
     } catch {
       return [];
     }
