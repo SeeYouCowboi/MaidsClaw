@@ -76,6 +76,22 @@ describe("validateFixtureFreshness", () => {
       );
     });
 
+    it("throws when generatedAt is undefined", () => {
+      const fixture = makeFixture();
+      (fixture as any).generatedAt = undefined;
+      expect(() => validateFixtureFreshness(fixture, defaultOpts())).toThrow(
+        /missing required metadata/i,
+      );
+    });
+
+    it("throws when generatedAt is null", () => {
+      const fixture = makeFixture();
+      (fixture as any).generatedAt = null;
+      expect(() => validateFixtureFreshness(fixture, defaultOpts())).toThrow(
+        /missing required metadata/i,
+      );
+    });
+
     it("error message includes regeneration instruction", () => {
       const fixture = makeFixture({ modelVersion: "" });
       expect(() => validateFixtureFreshness(fixture, defaultOpts())).toThrow(

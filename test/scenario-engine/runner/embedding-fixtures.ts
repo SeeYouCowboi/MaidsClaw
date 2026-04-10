@@ -45,9 +45,15 @@ export function validateFixtureFreshness(
   opts: FixtureFreshnessOptions,
 ): void {
   // 1. Metadata presence (guard against runtime JSON missing fields)
-  if (!fixture.modelVersion || fixture.schemaVersion === undefined || fixture.schemaVersion === null) {
+  if (
+    !fixture.modelVersion ||
+    fixture.schemaVersion === undefined ||
+    fixture.schemaVersion === null ||
+    fixture.generatedAt === undefined ||
+    fixture.generatedAt === null
+  ) {
     throw new Error(
-      `Fixture for story "${fixture.storyId}" is missing required metadata (modelVersion or schemaVersion). ` +
+      `Fixture for story "${fixture.storyId}" is missing required metadata (modelVersion, schemaVersion, or generatedAt). ` +
         `Regenerate with: bun run test/scenario-engine/scripts/generate-embedding-fixtures.ts ${fixture.storyId}`,
     );
   }
