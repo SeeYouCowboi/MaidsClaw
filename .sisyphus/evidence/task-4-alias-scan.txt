@@ -1,0 +1,65 @@
+bun test v1.3.10 (30e609e0)
+
+test\scenario-engine\scenarios\query-router.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"scenario_query-router_settlement\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "526",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42701",
+  message: "鍏崇郴 \"recent_cognition_slots\" 鐨勫垪 \"talker_turn_counter\" 宸茬粡瀛樺湪锛岃烦杩?,
+  file: "tablecmds.c",
+  line: "7343",
+  routine: "check_for_column_name_collision",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42701",
+  message: "鍏崇郴 \"recent_cognition_slots\" 鐨勫垪 \"thinker_committed_version\" 宸茬粡瀛樺湪锛岃烦杩?,
+  file: "tablecmds.c",
+  line: "7343",
+  routine: "check_for_column_name_collision",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42710",
+  message: "鎵╁睍 \"pg_trgm\" 宸茬粡瀛樺湪,璺宠繃",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42710",
+  message: "鎵╁睍 \"vector\" 宸茬粡瀛樺湪,璺宠繃",
+  file: "extension.c",
+  line: "1928",
+  routine: "CreateExtension",
+}
+[settlement] enriched 8 cognition search docs with display names
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎46涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?settlement_processing_ledger\n閫掑綊鍒犻櫎 琛?event_nodes\n閫掑綊鍒犻櫎 琛?logic_edges\n閫掑綊鍒犻櫎 琛?topics\n閫掑綊鍒犻櫎 琛?fact_edges\n閫掑綊鍒犻櫎 琛?entity_nodes\n閫掑綊鍒犻櫎 琛?entity_aliases\n閫掑綊鍒犻櫎 琛?pointer_redirects\n閫掑綊鍒犻櫎 琛?core_memory_blocks\n閫掑綊鍒犻櫎 琛?memory_relations\n閫掑綊鍒犻櫎 琛?private_episode_events\n閫掑綊鍒犻櫎 琛?private_cognition_events\n閫掑綊鍒犻櫎 琛?area_state_events\n閫掑綊鍒犻櫎 琛?world_state_events\n閫掑綊鍒犻櫎 琛?shared_blocks\n閫掑綊鍒犻櫎 琛?shared_block_sections\n閫掑綊鍒犻櫎 琛?shared_block_admins\n閫掑綊鍒犻櫎 琛?shared_block_attachments\n閫掑綊鍒犻櫎 琛?shared_block_patch_log\n閫掑綊鍒犻櫎 琛?shared_block_snapshots\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_update_private_episode_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_delete_private_episode_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_update_private_cognition_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_delete_private_cognition_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_update_area_state_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_delete_area_state_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_update_world_state_events()\n閫掑綊鍒犻櫎 鍑芥暟 fn_deny_delete_world_state_events()\n閫掑綊鍒犻櫎 琛?sessions\n閫掑綊鍒犻櫎 琛?interaction_records\n閫掑綊鍒犻櫎 琛?recent_cognition_slots\n閫掑綊鍒犻櫎 琛?pending_settlement_recovery\n閫掑綊鍒犻櫎 琛?private_cognition_current\n閫掑綊鍒犻櫎 琛?area_state_current\n閫掑綊鍒犻櫎 琛?area_narrative_current\n閫掑綊鍒犻櫎 琛?world_state_current\n閫掑綊鍒犻櫎 琛?world_narrative_current\n閫掑綊鍒犻櫎 琛?search_docs_private\n閫掑綊鍒犻櫎 琛?search_docs_area\n閫掑綊鍒犻櫎 琛?search_docs_world\n閫掑綊鍒犻櫎 琛?search_docs_cognition\n閫掑綊鍒犻櫎 琛?search_docs_episode\n閫掑綊鍒犻櫎 琛?node_embeddings\n閫掑綊鍒犻櫎 琛?semantic_edges\n閫掑綊鍒犻櫎 琛?graph_nodes\n閫掑綊鍒犻櫎 琛?node_scores",
+  file: "dependency.c",
+  line: "1227",
+  routine: "reportDependentObjects",
+}
+
+ 1 pass
+ 2 filtered out
+ 0 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [982.00ms]
