@@ -2,6 +2,8 @@ import { describe, it, expect } from "bun:test";
 import {
   validateFixtureFreshness,
   injectEmbeddingFixtures,
+  buildFixtureDocument,
+  loadEmbeddingFixtures,
   CURRENT_FIXTURE_SCHEMA_VERSION,
   type EmbeddingFixtureFile,
   type FixtureFreshnessOptions,
@@ -339,5 +341,84 @@ describe("pre-versioned fixture detection", () => {
 describe("CURRENT_FIXTURE_SCHEMA_VERSION", () => {
   it("is exported and equals 1", () => {
     expect(CURRENT_FIXTURE_SCHEMA_VERSION).toBe(1);
+  });
+});
+
+/* ---------- buildFixtureDocument (generator shape) ---------- */
+
+describe("buildFixtureDocument", () => {
+  it("serialized fixture document contains model, modelVersion, schemaVersion, generatedAt, vectors", () => {
+    const vectors = [
+      { nodeRef: "person:rin", kind: "person", vector: [0.1, 0.2, 0.3] },
+    ];
+    const doc = buildFixtureDocument(
+      "shape-test",
+      "openai/text-embedding-3-small",
+      "openai/text-embedding-3-small",
+      CURRENT_FIXTURE_SCHEMA_VERSION,
+      vectors,
+    );
+
+    expect(doc).toHaveProperty("storyId", "shape-test");
+    expect(doc).toHaveProperty("model", "openai/text-embedding-3-small");
+    expect(doc).toHaveProperty("modelVersion", "openai/text-embedding-3-small");
+    expect(doc).toHaveProperty("schemaVersion", CURRENT_FIXTURE_SCHEMA_VERSION);
+    expect(doc).toHaveProperty("generatedAt");
+    expect(typeof doc.generatedAt).toBe("number");
+    expect(doc.generatedAt).toBeGreaterThan(0);
+    expect(doc).toHaveProperty("vectors");
+    expect(doc.vectors).toHaveLength(1);
+    expect(doc).toHaveProperty("dimension", 3);
+  });
+
+  it("computes dimension from first vector length", () => {
+    const vectors = [
+      { nodeRef: "entity:a", kind: "entity", vector: [1, 2, 3, 4, 5] },
+      { nodeRef: "entity:b", kind: "entity", vector: [6, 7, 8, 9, 10] },
+    ];
+    const doc = buildFixtureDocument("dim-test", "m", "m", 1, vectors);
+    expect(doc.dimension).toBe(5);
+  });
+
+  it("dimension defaults to 0 when vectors array is empty", () => {
+    const doc = buildFixtureDocument("empty", "m", "m", 1, []);
+    expect(doc.dimension).toBe(0);
+    expect(doc.vectors).toHaveLength(0);
+  });
+
+  it("passes through modelVersion independently of model", () => {
+    const doc = buildFixtureDocument("mv-test", "model-alias", "specific-snapshot-v2", 1, []);
+    expect(doc.model).toBe("model-alias");
+    expect(doc.modelVersion).toBe("specific-snapshot-v2");
+  });
+});
+
+/* ---------- loadEmbeddingFixtures — legacy fixture rejection ---------- */
+
+describe("loadEmbeddingFixtures — pre-versioned rejection", () => {
+  it("throws 'regenerate' error for legacy fixture JSON missing modelVersion and schemaVersion", () => {
+    const { writeFileSync, mkdirSync, unlinkSync, existsSync: exists } = require("node:fs");
+    const { resolve: res, dirname: dir } = require("node:path");
+
+    const fixturesDir = res(dir(import.meta.path), "..", "fixtures");
+    mkdirSync(fixturesDir, { recursive: true });
+
+    const legacyPath = res(fixturesDir, "legacy-test-story-embeddings.json");
+    const legacyFixture = {
+      storyId: "legacy-test-story",
+      model: "text-embedding-ada-002",
+      dimension: 1536,
+      generatedAt: Date.now(),
+      vectors: [{ nodeRef: "person:old", kind: "person", vector: [0.1] }],
+    };
+    writeFileSync(legacyPath, JSON.stringify(legacyFixture, null, 2));
+
+    try {
+      expect(() => loadEmbeddingFixtures("legacy-test-story")).toThrow(
+        /outdated.*pre-versioned.*Regenerate/i,
+      );
+    } finally {
+      if (exists(legacyPath)) unlinkSync(legacyPath);
+    }
   });
 });

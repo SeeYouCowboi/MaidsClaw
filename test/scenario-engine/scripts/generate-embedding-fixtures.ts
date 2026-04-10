@@ -22,7 +22,7 @@ import { PgNodeScoringQueryRepo } from "../../../src/storage/domain-repos/pg/nod
 import type { NodeRef, NodeRefKind } from "../../../src/memory/types.js";
 import { miniSample } from "../stories/mini-sample.js";
 import { runScenario } from "../runner/orchestrator.js";
-import type { EmbeddingFixtureFile } from "../runner/embedding-fixtures.js";
+import { CURRENT_FIXTURE_SCHEMA_VERSION, type EmbeddingFixtureFile } from "../runner/embedding-fixtures.js";
 import type { ScenarioInfra } from "../runner/infra.js";
 
 const EMBED_BATCH = 10;
@@ -143,6 +143,8 @@ async function main() {
   const fixture: EmbeddingFixtureFile = {
     storyId,
     model: embeddingModelId,
+    modelVersion: embeddingModelId,
+    schemaVersion: CURRENT_FIXTURE_SCHEMA_VERSION,
     dimension: vectors[0]?.vector.length ?? 0,
     generatedAt: Date.now(),
     vectors,
