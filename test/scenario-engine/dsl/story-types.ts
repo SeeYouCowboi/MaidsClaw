@@ -8,6 +8,7 @@ import type {
   VisibilityScope,
   MemoryScope,
 } from "../../src/memory/types.js";
+import type { QueryType } from "../../../src/memory/types.js";
 
 export type { AssertionStance, AssertionBasis };
 export type { PrivateEventCategory, LogicEdgeType, VisibilityScope, MemoryScope };
@@ -187,6 +188,53 @@ export type ReasoningChainProbe = {
   }[];
 };
 
+/**
+ * GAP-4: asserts on the plan surface emitted by navigator.explore()'s
+ * `drilldown.query_plan_shadow`. The shadow is populated whenever the
+ * scenario runner wires in a QueryRouter + QueryPlanBuilder (it does —
+ * see `runner/infra.ts:buildServices`), regardless of active flags like
+ * `MAIDSCLAW_NAVIGATOR_USE_PLAN`.
+ *
+ * All `expected.*` fields are optional — every populated field is checked
+ * against the shadow; validation requires at least one expectation.
+ */
+export type StoryPlanSurfaceProbe = {
+  id: string;
+  description: string;
+  /** Query fed to navigator.explore(). Same style as StoryProbe.query. */
+  query: string;
+  /** pointer_key of the viewer character. */
+  viewerPerspective: string;
+  expected: {
+    /** e.g. "deterministic-v1" — stable string per plan builder version. */
+    builderVersion?: string;
+    /** Primary intent classification from the plan builder. */
+    primaryIntent?: QueryType;
+    /** Order-sensitive secondary intents (sorted by descending confidence). */
+    secondaryIntents?: QueryType[];
+    /**
+     * Per-surface minimum weights. Assertion is `actual >= min`. Surfaces
+     * not listed are ignored. Use this to express "this query should
+     * emphasize the cognition surface" without pinning exact values.
+     */
+    minSurfaceWeights?: Partial<{
+      narrative: number;
+      cognition: number;
+      episode: number;
+      conflict_notes: number;
+    }>;
+    /**
+     * Per-node-kind seed_bias floor. Keys match GraphPlan.seedBias
+     * ("entity" | "event" | "episode" | "assertion" | "evaluation" | "commitment").
+     */
+    minSeedBias?: Partial<Record<string, number>>;
+    /** Assert specific edge_bias keys are present (value may be any number). */
+    edgeBiasPresent?: string[];
+    /** Assert the plan's primary_intent matches the legacy query classifier. */
+    expectRouteAgreedWithLegacy?: boolean;
+  };
+};
+
 // The full story definition
 export type Story = {
   id: string; // used for cache file naming
@@ -199,5 +247,7 @@ export type Story = {
   beats: StoryBeat[];
   probes: StoryProbe[];
   reasoningChainProbes?: ReasoningChainProbe[];
+  /** GAP-4: plan surface / drilldown shadow probes. See StoryPlanSurfaceProbe. */
+  planSurfaceProbes?: StoryPlanSurfaceProbe[];
   eventRelations?: EventRelation[];
 };

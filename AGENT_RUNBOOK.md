@@ -321,6 +321,15 @@ bun test:acceptance:app-host
 # PostgreSQL data-plane tests
 PG_TEST_URL=postgres://user:pass@host/db bun test:pg:data-plane
 
+# Scenario engine — settlement + scripted paths (no LLM)
+PG_TEST_URL=postgres://... bun test test/scenario-engine/
+
+# Scenario engine — live path (real LLM, ~30–60 min, real API spend)
+# Requires SCENARIO_LIVE_TESTS=1 AND at least one LLM API key.
+# NEVER run in regular PR CI. See README "Scenario Engine Tests" for details.
+SCENARIO_LIVE_TESTS=1 ANTHROPIC_API_KEY=... PG_TEST_URL=postgres://... \
+  bun test test/scenario-engine/scenarios/live-mini-sample.test.ts
+
 # Full closeout suite (PG + memory + real model)
 bun test:acceptance:closeout
 

@@ -32,6 +32,8 @@ import { RetrievalService } from "../../../src/memory/retrieval.js";
 import { AliasService } from "../../../src/memory/alias.js";
 import type { EmbeddingService } from "../../../src/memory/embeddings.js";
 import { RetrievalOrchestrator } from "../../../src/memory/retrieval/retrieval-orchestrator.js";
+import { RuleBasedQueryRouter } from "../../../src/memory/query-router.js";
+import { DeterministicQueryPlanBuilder } from "../../../src/memory/query-plan-builder.js";
 
 const DEFAULT_APP_TEST_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app_test";
 
@@ -64,6 +66,10 @@ export type ScenarioInfra = {
     cognitionSearch: CognitionSearchService;
     navigator: GraphNavigator;
     retrieval: RetrievalService;
+    /** GAP-4: rule-based router — shared between RetrievalService and GraphNavigator. */
+    queryRouter: RuleBasedQueryRouter;
+    /** GAP-4: deterministic plan builder — powers drilldown.query_plan_shadow. */
+    queryPlanBuilder: DeterministicQueryPlanBuilder;
   };
   _testDb: PgTestDb;
 };
@@ -138,24 +144,39 @@ function buildServices(sql: postgres.Sql) {
     cognitionService: cognitionSearch,
   });
 
+  // GAP-4: share a single AliasService between router and navigator so alias
+  // lookups go through the same cache. Mirrors src/bootstrap/runtime.ts wiring.
+  const aliasService = new AliasService(new PgAliasRepo(sql));
+  const queryRouter = new RuleBasedQueryRouter(aliasService);
+  const queryPlanBuilder = new DeterministicQueryPlanBuilder();
+
   const retrieval = new RetrievalService({
     retrievalRepo: new PgRetrievalReadRepo(sql),
     embeddingService: {} as EmbeddingService,
     narrativeSearch,
     cognitionSearch,
     orchestrator,
+    queryRouter,
+    queryPlanBuilder,
   });
 
   const navigator = new GraphNavigator(
     new PgGraphReadQueryRepo(sql),
     retrieval,
-    new AliasService(new PgAliasRepo(sql)),
-    undefined,
+    aliasService,
+    undefined, // modelProvider
     narrativeSearch,
     cognitionSearch,
+    undefined, // visibilityPolicy
+    undefined, // redactionPolicy
+    undefined, // authorizationPolicy
+    undefined, // embedProvider
+    undefined, // embeddingModelId
+    queryRouter, // GAP-4: positional arg 12
+    queryPlanBuilder, // GAP-4: positional arg 13 — powers drilldown.query_plan_shadow
   );
 
-  return { narrativeSearch, cognitionSearch, navigator, retrieval };
+  return { narrativeSearch, cognitionSearch, navigator, retrieval, queryRouter, queryPlanBuilder };
 }
 
 export async function bootstrapScenarioSchema(

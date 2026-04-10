@@ -21,6 +21,7 @@ export function validateStory(story: Story): ValidationResult {
   errors.push(...validateToolCallPatterns(story));
   errors.push(...validateReasoningChainProbes(story));
   errors.push(...validateConflictFields(story));
+  errors.push(...validatePlanSurfaceProbes(story));
 
   if (story.beats) {
     errors.push(...validateStanceTransitions(story.beats));
@@ -411,6 +412,82 @@ export function validateConflictFields(story: Story): ValidationError[] {
           field: "expectedConflictFields.expectedFactorRefs",
           message: `Probe '${probe.id}' expectedConflictFields.expectedFactorRefs contains an empty factor ref`,
         });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validatePlanSurfaceProbes(story: Story): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const characterIds = new Set(story.characters?.map((c) => c.id) ?? []);
+
+  for (const probe of story.planSurfaceProbes ?? []) {
+    if (!probe.id || probe.id.trim().length === 0) {
+      errors.push({
+        field: "planSurfaceProbes.id",
+        message: "planSurfaceProbe is missing id",
+      });
+      continue;
+    }
+    if (typeof probe.query !== "string" || probe.query.trim().length === 0) {
+      errors.push({
+        field: "planSurfaceProbes.query",
+        message: `planSurfaceProbe '${probe.id}' has empty query`,
+      });
+    }
+    if (!characterIds.has(probe.viewerPerspective)) {
+      errors.push({
+        field: "planSurfaceProbes.viewerPerspective",
+        message: `planSurfaceProbe '${probe.id}' viewerPerspective '${probe.viewerPerspective}' does not match any character.id`,
+      });
+    }
+
+    const exp = probe.expected;
+    if (!exp) {
+      errors.push({
+        field: "planSurfaceProbes.expected",
+        message: `planSurfaceProbe '${probe.id}' is missing an 'expected' block`,
+      });
+      continue;
+    }
+
+    const hasAnyAssertion =
+      Boolean(exp.builderVersion) ||
+      Boolean(exp.primaryIntent) ||
+      (Array.isArray(exp.secondaryIntents) && exp.secondaryIntents.length > 0) ||
+      (exp.minSurfaceWeights !== undefined && Object.keys(exp.minSurfaceWeights).length > 0) ||
+      (exp.minSeedBias !== undefined && Object.keys(exp.minSeedBias).length > 0) ||
+      (Array.isArray(exp.edgeBiasPresent) && exp.edgeBiasPresent.length > 0) ||
+      exp.expectRouteAgreedWithLegacy !== undefined;
+
+    if (!hasAnyAssertion) {
+      errors.push({
+        field: "planSurfaceProbes.expected",
+        message: `planSurfaceProbe '${probe.id}' expected block must define at least one assertion`,
+      });
+    }
+
+    if (exp.minSurfaceWeights) {
+      for (const [surface, min] of Object.entries(exp.minSurfaceWeights)) {
+        if (typeof min !== "number" || min < 0 || min > 1) {
+          errors.push({
+            field: "planSurfaceProbes.expected.minSurfaceWeights",
+            message: `planSurfaceProbe '${probe.id}' minSurfaceWeights.${surface}=${min} must be a number in [0,1]`,
+          });
+        }
+      }
+    }
+
+    if (exp.minSeedBias) {
+      for (const [kind, min] of Object.entries(exp.minSeedBias)) {
+        if (typeof min !== "number" || min < 0) {
+          errors.push({
+            field: "planSurfaceProbes.expected.minSeedBias",
+            message: `planSurfaceProbe '${probe.id}' minSeedBias.${kind}=${min} must be a non-negative number`,
+          });
+        }
       }
     }
   }

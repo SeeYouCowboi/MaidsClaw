@@ -7,7 +7,7 @@ import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
 import { miniSample } from "../stories/mini-sample.js";
-import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
+import { SCENARIO_DEFAULT_AGENT_ID, scenarioLiveTestsEnabled } from "../constants.js";
 import type { ProbeResult } from "../probes/probe-types.js";
 
 const hasLlmKey =
@@ -17,7 +17,7 @@ const hasLlmKey =
   Boolean(process.env.KIMI_CODING_API_KEY?.trim()) ||
   Boolean(process.env.OPENAI_API_KEY?.trim());
 
-describe.skipIf(skipPgTests || !hasLlmKey)("Live Path — mini-sample", () => {
+describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Live Path — mini-sample", () => {
   let handle!: ScenarioHandleExtended;
   let probeResults!: ProbeResult[];
 

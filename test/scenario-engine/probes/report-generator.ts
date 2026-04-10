@@ -8,6 +8,7 @@ import type {
   ReasoningChainResult,
   ToolCallAssertionResult,
 } from "./scenario-assertion-types.js";
+import type { PlanSurfaceProbeResult } from "./plan-surface-probe.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
 
 export type AlignedComparison = {
@@ -41,6 +42,7 @@ export function generateReport(
   chainResults?: ReasoningChainResult[],
   toolCallAssertionResults?: ToolCallAssertionResult[],
   diagnosisResults?: Map<string, DiagnosisResult[]>,
+  planSurfaceResults?: PlanSurfaceProbeResult[],
 ): string {
   const title = storyTitle ?? "Untitled Scenario";
   const totalProbes = probeResults.length;
@@ -158,6 +160,31 @@ export function generateReport(
           .join("<br>")
         : "—";
       lines.push(`| ${result.beatId} | ${passedIcon} | ${violations} |`);
+    }
+  }
+
+  if (planSurfaceResults && planSurfaceResults.length > 0) {
+    const psTotal = planSurfaceResults.length;
+    const psPassed = planSurfaceResults.filter((r) => r.passed).length;
+    lines.push("");
+    lines.push("## Plan Surface Probes");
+    lines.push("");
+    lines.push(`${psPassed}/${psTotal} passed`);
+    lines.push("");
+    lines.push("| Probe | Passed | Primary Intent | Surface Weights | Violations |");
+    lines.push("|-------|--------|---------------|-----------------|------------|");
+
+    for (const r of planSurfaceResults) {
+      const icon = r.passed ? "✅" : "❌";
+      const intent = r.actual.primaryIntent ?? "—";
+      const sw = r.actual.surfaceWeights;
+      const weights = sw
+        ? `N:${sw.narrative.toFixed(2)} C:${sw.cognition.toFixed(2)} E:${sw.episode.toFixed(2)} CF:${sw.conflict_notes.toFixed(2)}`
+        : "—";
+      const viols = r.violations.length > 0
+        ? r.violations.join("<br>")
+        : "—";
+      lines.push(`| ${r.probe.id} | ${icon} | ${intent} | ${weights} | ${viols} |`);
     }
   }
 

@@ -3,6 +3,7 @@ import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import type { ProbeResult } from "../probes/probe-types.js";
+import { executePlanSurfaceProbes, type PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
 import { generateReport, saveReport } from "../probes/report-generator.js";
 import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
@@ -21,6 +22,7 @@ const hasEmbeddingKey =
 describe.skipIf(skipPgTests)("Invisible Man — Settlement Path", () => {
   let handle: ScenarioHandleExtended;
   let probeResults: ProbeResult[];
+  let planSurfaceResults: PlanSurfaceProbeResult[];
   let embeddingsGenerated = 0;
 
   beforeAll(async () => {
@@ -41,11 +43,17 @@ describe.skipIf(skipPgTests)("Invisible Man — Settlement Path", () => {
     }
 
     probeResults = await executeProbes(invisibleMan, handle);
+    planSurfaceResults = await executePlanSurfaceProbes(invisibleMan, handle);
+    handle.planSurfaceResults = planSurfaceResults;
 
     const report = generateReport(
       probeResults,
       handle.runResult,
       invisibleMan.title,
+      undefined, // chainResults
+      undefined, // toolCallAssertionResults
+      undefined, // diagnosisResults
+      planSurfaceResults,
     );
     saveReport(report, invisibleMan.id, "settlement");
   }, 10 * 60 * 1000);
@@ -148,5 +156,22 @@ describe.skipIf(skipPgTests)("Invisible Man — Settlement Path", () => {
 
   it.skipIf(!hasEmbeddingKey)("embeddings generated when API key available", () => {
     expect(embeddingsGenerated).toBeGreaterThan(0);
+  });
+
+  it("plan surface probes executed (shadow wired)", () => {
+    expect(planSurfaceResults.length).toBeGreaterThan(0);
+    expect(planSurfaceResults.every((r) => !r.shadowMissing)).toBe(true);
+  });
+
+  it("plan surface probes all pass", () => {
+    const failed = planSurfaceResults.filter((r) => !r.passed);
+    if (failed.length > 0) {
+      for (const r of failed) {
+        console.error(
+          `[plan-surface] ${r.probe.id}: ${r.violations.join("; ")}`,
+        );
+      }
+    }
+    expect(failed).toHaveLength(0);
   });
 });

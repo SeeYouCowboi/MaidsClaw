@@ -2025,4 +2025,42 @@ export const invisibleMan: Story = {
       expectEdges: false,
     },
   ],
+
+  planSurfaceProbes: [
+    {
+      id: "ps_investigation_query",
+      description: "调查类查询应偏向 narrative 表面与 event seed bias",
+      query: "隐身人 恐吓信 调查 守卫",
+      viewerPerspective: "angus",
+      expected: {
+        builderVersion: "deterministic-v1",
+        // Investigation queries should weight narrative surface non-trivially.
+        // Thresholds intentionally loose — calibrate after first run.
+        minSurfaceWeights: { narrative: 0.1 },
+        minSeedBias: { event: 0.1 },
+      },
+    },
+    {
+      id: "ps_belief_query",
+      description: "信念/立场类查询应偏向 cognition 表面",
+      query: "谁相信 welkin 是凶手 为什么怀疑",
+      viewerPerspective: "angus",
+      expected: {
+        builderVersion: "deterministic-v1",
+        // Belief queries should emphasize the cognition surface.
+        minSurfaceWeights: { cognition: 0.1 },
+      },
+    },
+    {
+      id: "ps_conflict_query",
+      description: "冲突证词查询应触发 conflict_notes 权重",
+      query: "laura 证词 矛盾 冲突",
+      viewerPerspective: "angus",
+      expected: {
+        builderVersion: "deterministic-v1",
+        // Conflict queries should give the conflict_notes surface non-zero weight.
+        minSurfaceWeights: { conflict_notes: 0.05 },
+      },
+    },
+  ],
 };

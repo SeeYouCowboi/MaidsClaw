@@ -358,6 +358,45 @@ bun run check:native
 
 ---
 
+## Scenario Engine Tests
+
+The `test/scenario-engine/` suite runs narrative stories through three write paths:
+
+| Path | What it does | Runtime | API cost |
+|------|-------------|---------|----------|
+| `settlement` | Direct projection writes, no LLM | ~1 s per story | none |
+| `scripted` | Replays cached LLM tool calls | ~few seconds | none |
+| `live` | Real LLM reasoning end-to-end | **~30–60 min per story** | **real spend** |
+
+Default `bun test` only runs the settlement + scripted paths. **Live tests are gated behind an explicit opt-in flag** to keep PR CI cheap and fast.
+
+### Run default (settlement + scripted)
+
+```bash
+PG_TEST_URL=postgres://... bun test test/scenario-engine/
+```
+
+### Run live path (manual / nightly only)
+
+```bash
+# 1. At least one LLM API key must be set. Any of these works:
+export ANTHROPIC_API_KEY=...    # or MINIMAX_API_KEY / MOONSHOT_API_KEY /
+                                 #    KIMI_CODING_API_KEY / OPENAI_API_KEY
+
+# 2. Explicitly opt in:
+export SCENARIO_LIVE_TESTS=1    # or CI_NIGHTLY=1 (for scheduled jobs)
+
+# 3. Run:
+PG_TEST_URL=postgres://... bun test test/scenario-engine/scenarios/invisible-man-live.test.ts
+PG_TEST_URL=postgres://... bun test test/scenario-engine/scenarios/live-mini-sample.test.ts
+```
+
+Without `SCENARIO_LIVE_TESTS=1`, both live test files report `(skip)` and no LLM calls happen. **Never** set this flag in regular PR CI — a single live run can take 60 minutes and burn real API tokens.
+
+Recommended trigger points: manual pre-release verification, nightly scheduled jobs, post-merge canaries on `main`.
+
+---
+
 ## Example Character Direction
 
 The sample persona already points toward the intended maid style:

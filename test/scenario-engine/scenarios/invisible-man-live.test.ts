@@ -3,12 +3,13 @@ import { existsSync } from "node:fs";
 import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import { assertAllProbesPass } from "../probes/probe-assertions.js";
+import { executePlanSurfaceProbes, type PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
 import { generateReport, saveReport } from "../probes/report-generator.js";
 import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
 import { invisibleMan } from "../stories/invisible-man.js";
-import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
+import { SCENARIO_DEFAULT_AGENT_ID, scenarioLiveTestsEnabled } from "../constants.js";
 import type { ProbeResult } from "../probes/probe-types.js";
 
 const hasLlmKey =
@@ -26,9 +27,10 @@ const hasEmbeddingKey =
   Boolean(process.env.MOONSHOT_API_KEY?.trim()) ||
   Boolean(process.env.KIMI_CODING_API_KEY?.trim());
 
-describe.skipIf(skipPgTests || !hasLlmKey)("Invisible Man — Live Path", () => {
+describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Invisible Man — Live Path", () => {
   let handle!: ScenarioHandleExtended;
   let probeResults!: ProbeResult[];
+  let planSurfaceResults!: PlanSurfaceProbeResult[];
   let embeddingsGenerated = 0;
 
   beforeAll(async () => {
@@ -49,11 +51,17 @@ describe.skipIf(skipPgTests || !hasLlmKey)("Invisible Man — Live Path", () => 
     }
 
     probeResults = await executeProbes(invisibleMan, handle);
+    planSurfaceResults = await executePlanSurfaceProbes(invisibleMan, handle);
+    handle.planSurfaceResults = planSurfaceResults;
 
     const report = generateReport(
       probeResults,
       handle.runResult,
       invisibleMan.title,
+      undefined, // chainResults
+      undefined, // toolCallAssertionResults
+      undefined, // diagnosisResults
+      planSurfaceResults,
     );
     saveReport(report, invisibleMan.id, "live");
   }, 60 * 60 * 1000); // 60 min — reasoning models (Kimi K2.5) need extra headroom
@@ -128,5 +136,22 @@ describe.skipIf(skipPgTests || !hasLlmKey)("Invisible Man — Live Path", () => 
   it("live report generated", () => {
     const reportPath = "test/scenario-engine/reports/invisible-man-live-report.md";
     expect(existsSync(reportPath)).toBe(true);
+  });
+
+  it("plan surface probes executed (shadow wired)", () => {
+    expect(planSurfaceResults.length).toBeGreaterThan(0);
+    expect(planSurfaceResults.every((r) => !r.shadowMissing)).toBe(true);
+  });
+
+  it("plan surface probes mostly pass (live tolerance)", () => {
+    const failed = planSurfaceResults.filter((r) => !r.passed);
+    if (failed.length > 0) {
+      for (const r of failed) {
+        console.warn(`[plan-surface-live] ${r.probe.id}: ${r.violations.join("; ")}`);
+      }
+    }
+    // Allow up to 1 failure in live mode due to LLM non-determinism
+    // affecting graph state that feeds into plan routing.
+    expect(failed.length).toBeLessThanOrEqual(1);
   });
 });

@@ -35,6 +35,7 @@ import type {
   ReasoningChainResult,
   ToolCallAssertionResult,
 } from "../probes/scenario-assertion-types.js";
+import type { PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
 
 export type ScenarioHandleExtended = ScenarioHandle & {
   settlementInfra?: ScenarioInfra;
@@ -42,6 +43,8 @@ export type ScenarioHandleExtended = ScenarioHandle & {
   toolCallAssertionResults?: ToolCallAssertionResult[];
   chainResults?: ReasoningChainResult[];
   diagnosisResults?: Map<string, DiagnosisResult[]>;
+  /** GAP-4: plan surface / drilldown shadow probe results. */
+  planSurfaceResults?: PlanSurfaceProbeResult[];
 };
 
 export async function runProbeFailureDiagnosis(
