@@ -1,0 +1,20 @@
+Evidence: T5 embedding-fixtures happy path tests
+Date: 2026-04-10
+File: test/scenario-engine/runner/embedding-fixtures.test.ts
+
+bun test v1.3.10 (30e609e0)
+ 25 pass
+ 0 fail
+ 29 expect() calls
+Ran 25 tests across 1 file.
+
+Happy path tests verified:
+- validateFixtureFreshness: matching model/schema, no age violation → no throw
+- validateFixtureFreshness: age within limit (nowMs testability) → no throw
+- model match via modelVersion (model differs but modelVersion matches) → no throw
+- model match via model field (modelVersion differs but model matches) → no throw
+- age not checked when maxAgeMs omitted → no throw
+- Date.now() fallback when nowMs not provided → no throw
+- injectEmbeddingFixtures: upserts 2 vectors via sql proxy → count=2, calls>0
+- injectEmbeddingFixtures: skips empty vector arrays → count=1
+- CURRENT_FIXTURE_SCHEMA_VERSION exported and equals 1

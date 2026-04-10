@@ -1,0 +1,27 @@
+Evidence: T5 embedding-fixtures error/rejection tests
+Date: 2026-04-10
+File: test/scenario-engine/runner/embedding-fixtures.test.ts
+
+bun test v1.3.10 (30e609e0)
+ 25 pass
+ 0 fail
+ 29 expect() calls
+Ran 25 tests across 1 file.
+
+Error tests verified:
+- Missing metadata: modelVersion="" → throws /missing required metadata/
+- Missing metadata: schemaVersion=undefined → throws /missing required metadata/
+- Missing metadata: schemaVersion=null → throws /missing required metadata/
+- Missing metadata: error includes "Regenerate with: bun run" instruction
+- Model mismatch: both model and modelVersion differ → throws /model mismatch/
+- Model mismatch: error includes both expected and actual model names
+- Schema mismatch: schemaVersion=99 vs expected=1 → throws /schema version mismatch/
+- Schema mismatch: error includes both expected (1) and actual (42) versions
+- Age expiry: age 10000ms > maxAgeMs 5000ms → throws /stale/
+- Age expiry: error includes actual age (60000) and limit (30000)
+- injectEmbeddingFixtures: missing modelVersion → throws before DB (null infra)
+- injectEmbeddingFixtures: missing schemaVersion → throws before DB (null infra)
+- injectEmbeddingFixtures: model mismatch via opts → throws before DB (null infra)
+- Pre-versioned fixture: no modelVersion field → throws /missing required metadata.*modelVersion/
+- Pre-versioned fixture: no schemaVersion field → throws /missing required metadata/
+- Pre-versioned fixture: injectEmbeddingFixtures rejects before DB access
