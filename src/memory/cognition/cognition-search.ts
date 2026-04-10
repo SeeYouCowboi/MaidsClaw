@@ -42,6 +42,13 @@ type CognitionSearchParams = {
   entityIds?: number[];
   /** GAP-4 §1: forwarded from `plan.surfacePlans.cognition.timeWindow`. */
   timeWindow?: TimeSliceQuery;
+  /**
+   * Optional allowlist of `source_ref` prefixes. When provided and non-empty,
+   * hits whose `source_ref` does not begin with one of these prefixes are
+   * excluded from the result. Intended as a tenant/provenance isolation gate
+   * for adversarial / polluted-retrieval scenarios.
+   */
+  allowedSourceRefPrefixes?: readonly string[];
 };
 
 type ConflictResolution = {
@@ -90,6 +97,11 @@ export class CognitionSearchService {
     // RRF merge with embedding results when configured
     if (this.embeddingConfig && params.query && params.query.trim().length >= 2) {
       hits = await this.rrfMergeCognition(params.query, params.agentId, hits);
+    }
+
+    if (params.allowedSourceRefPrefixes && params.allowedSourceRefPrefixes.length > 0) {
+      const prefixes = params.allowedSourceRefPrefixes;
+      hits = hits.filter((hit) => prefixes.some((prefix) => hit.source_ref.startsWith(prefix)));
     }
 
     return this.enrichContestedHits(params.agentId, hits);

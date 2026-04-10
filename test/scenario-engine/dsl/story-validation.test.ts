@@ -6,6 +6,8 @@ import {
   validateEpisodeCategories,
   validateContestedAssertions,
   validateLogicEdgeTargets,
+  validateLogicEdgeCycles,
+  validateStanceValueKnown,
   validatePointerKeyRefs,
   validateProbes,
   validateToolCallPatterns,
@@ -116,6 +118,209 @@ describe("validateStanceTransitions", () => {
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].message).toContain("rejected → accepted");
   });
+
+  it("contested → confirmed is illegal", () => {
+    const beats: StoryBeat[] = [
+      {
+        id: "beat-1",
+        phase: "A",
+        round: 1,
+        timestamp: 1000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "A",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-cc", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "contested", preContestedStance: "accepted", basis: "belief" },
+          ],
+        },
+      },
+      {
+        id: "beat-2",
+        phase: "A",
+        round: 2,
+        timestamp: 2000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "B",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-cc", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "confirmed", basis: "belief" },
+          ],
+        },
+      },
+    ];
+    const errors = validateStanceTransitions(beats);
+    expect(errors.some((e) => e.message.includes("contested → confirmed"))).toBe(true);
+  });
+
+  it("hypothetical is terminal — hypothetical → tentative is illegal", () => {
+    const beats: StoryBeat[] = [
+      {
+        id: "beat-1",
+        phase: "A",
+        round: 1,
+        timestamp: 1000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "A",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-ht", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "hypothetical", basis: "belief" },
+          ],
+        },
+      },
+      {
+        id: "beat-2",
+        phase: "A",
+        round: 2,
+        timestamp: 2000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "B",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-ht", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "tentative", basis: "belief" },
+          ],
+        },
+      },
+    ];
+    const errors = validateStanceTransitions(beats);
+    expect(errors.some((e) => e.message.includes("hypothetical → tentative"))).toBe(true);
+  });
+});
+
+describe("validateStanceValueKnown", () => {
+  it("unknown stance value 'denied' is caught", () => {
+    const beats: StoryBeat[] = [
+      {
+        id: "beat-unk",
+        phase: "A",
+        round: 1,
+        timestamp: 1000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "U",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-u", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "denied" as any, basis: "belief" },
+          ],
+        },
+      },
+    ];
+    const errors = validateStanceValueKnown(beats);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message).toContain("Unknown stance");
+    expect(errors[0].message).toContain("denied");
+  });
+
+  it("valid stance 'confirmed' passes", () => {
+    const beats: StoryBeat[] = [
+      {
+        id: "beat-ok",
+        phase: "A",
+        round: 1,
+        timestamp: 1000,
+        locationId: "loc_kitchen",
+        participantIds: ["char_a"],
+        dialogueGuidance: "K",
+        memoryEffects: {
+          assertions: [
+            { cognitionKey: "key-ok", holderId: "char_a", entityIds: ["char_b"], claim: "is", stance: "confirmed", basis: "belief" },
+          ],
+        },
+      },
+    ];
+    const errors = validateStanceValueKnown(beats);
+    expect(errors.length).toBe(0);
+  });
+});
+
+describe("validateLogicEdgeCycles", () => {
+  const mkBeat = (id: string, episodes: string[], edges: Array<{ from: string; to: string }>): StoryBeat => ({
+    id,
+    phase: "A",
+    round: 1,
+    timestamp: 1000,
+    locationId: "loc_kitchen",
+    participantIds: ["char_a"],
+    dialogueGuidance: id,
+    memoryEffects: {
+      episodes: episodes.map((epId) => ({
+        id: epId,
+        category: "speech",
+        summary: epId,
+        observerIds: ["char_a"],
+        timestamp: 1000,
+        locationId: "loc_kitchen",
+      })),
+      logicEdges: edges.map((e) => ({
+        fromEpisodeId: e.from,
+        toEpisodeId: e.to,
+        edgeType: "causal",
+      })),
+    },
+  });
+
+  it("self-loop A→A is caught", () => {
+    const beats = [mkBeat("b-self", ["ep-1"], [{ from: "ep-1", to: "ep-1" }])];
+    const errors = validateLogicEdgeCycles(beats);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message.toLowerCase()).toContain("self-loop");
+    expect(errors[0].message).toContain("ep-1");
+  });
+
+  it("2-cycle A→B→A is caught", () => {
+    const beats = [
+      mkBeat("b-2cyc", ["ep-a", "ep-b"], [
+        { from: "ep-a", to: "ep-b" },
+        { from: "ep-b", to: "ep-a" },
+      ]),
+    ];
+    const errors = validateLogicEdgeCycles(beats);
+    expect(errors.some((e) => e.message.toLowerCase().includes("cycle"))).toBe(true);
+    const cycleMessage = errors.find((e) => e.message.toLowerCase().includes("cycle"))!.message;
+    expect(cycleMessage).toContain("ep-a");
+    expect(cycleMessage).toContain("ep-b");
+  });
+
+  it("3-cycle A→B→C→A across beats is caught", () => {
+    const beats = [
+      mkBeat("b-1", ["ep-a"], [{ from: "ep-a", to: "ep-b" }]),
+      mkBeat("b-2", ["ep-b"], [{ from: "ep-b", to: "ep-c" }]),
+      mkBeat("b-3", ["ep-c"], [{ from: "ep-c", to: "ep-a" }]),
+    ];
+    const errors = validateLogicEdgeCycles(beats);
+    expect(errors.some((e) => e.message.toLowerCase().includes("cycle"))).toBe(true);
+    const cycleMessage = errors.find((e) => e.message.toLowerCase().includes("cycle"))!.message;
+    expect(cycleMessage).toContain("ep-a");
+    expect(cycleMessage).toContain("ep-b");
+    expect(cycleMessage).toContain("ep-c");
+  });
+
+  it("DAG (A→B→C) passes", () => {
+    const beats = [
+      mkBeat("b-dag", ["ep-a", "ep-b", "ep-c"], [
+        { from: "ep-a", to: "ep-b" },
+        { from: "ep-b", to: "ep-c" },
+      ]),
+    ];
+    const errors = validateLogicEdgeCycles(beats);
+    expect(errors.length).toBe(0);
+  });
+
+  it("diamond (A→B, A→C, B→D, C→D) passes without false cycle", () => {
+    const beats = [
+      mkBeat("b-diamond", ["ep-a", "ep-b", "ep-c", "ep-d"], [
+        { from: "ep-a", to: "ep-b" },
+        { from: "ep-a", to: "ep-c" },
+        { from: "ep-b", to: "ep-d" },
+        { from: "ep-c", to: "ep-d" },
+      ]),
+    ];
+    const errors = validateLogicEdgeCycles(beats);
+    expect(errors.length).toBe(0);
+  });
 });
 
 describe("validateContestedAssertions", () => {
@@ -162,6 +367,30 @@ describe("validateLogicEdgeTargets", () => {
     const errors = validateLogicEdgeTargets([beat]);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].message).toContain("ep-missing");
+  });
+
+  it("edge with both endpoints missing yields two errors", () => {
+    const beat: StoryBeat = {
+      id: "beat-le-both",
+      phase: "A",
+      round: 1,
+      timestamp: 1000,
+      locationId: "loc_kitchen",
+      participantIds: ["char_a"],
+      dialogueGuidance: "LE-both",
+      memoryEffects: {
+        episodes: [
+          { id: "ep-real", category: "speech", summary: "S", observerIds: ["char_a"], timestamp: 1000, locationId: "loc_kitchen" },
+        ],
+        logicEdges: [
+          { fromEpisodeId: "ghost-from", toEpisodeId: "ghost-to", edgeType: "causal" },
+        ],
+      },
+    };
+    const errors = validateLogicEdgeTargets([beat]);
+    expect(errors.length).toBe(2);
+    expect(errors.some((e) => e.message.includes("ghost-from"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("ghost-to"))).toBe(true);
   });
 });
 
@@ -217,6 +446,38 @@ describe("validateBeat", () => {
     };
     const errors = validateBeat(beat, story);
     expect(errors.some((e) => e.message.includes("ghost"))).toBe(true);
+  });
+
+  it("empty participantIds is caught", () => {
+    const story = makeValidStory();
+    const beat: StoryBeat = {
+      id: "beat-empty-pids",
+      phase: "A",
+      round: 1,
+      timestamp: 1000,
+      locationId: "loc_kitchen",
+      participantIds: [],
+      dialogueGuidance: "Solo monologue",
+      memoryEffects: {},
+    };
+    const errors = validateBeat(beat, story);
+    expect(errors.some((e) => e.field === "participantIds" && e.message.toLowerCase().includes("empty"))).toBe(true);
+  });
+
+  it("whitespace-only dialogueGuidance is caught", () => {
+    const story = makeValidStory();
+    const beat: StoryBeat = {
+      id: "beat-empty-dg",
+      phase: "A",
+      round: 1,
+      timestamp: 1000,
+      locationId: "loc_kitchen",
+      participantIds: ["char_a"],
+      dialogueGuidance: "   ",
+      memoryEffects: {},
+    };
+    const errors = validateBeat(beat, story);
+    expect(errors.some((e) => e.field === "dialogueGuidance" && e.message.toLowerCase().includes("empty"))).toBe(true);
   });
 });
 

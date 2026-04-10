@@ -49,6 +49,7 @@ import {
   createScriptedProviderFromCache,
   type BeatCallLog,
   type CachedToolCallLog,
+  type ScriptedBeatProvider,
 } from "../generators/scripted-provider.js";
 import {
   generateSettlements,
@@ -427,22 +428,30 @@ export async function executeSettlementPath(
   };
 }
 
+export type ScriptedPathOptions = WritePathDebugOptions & {
+  beatProviderOverride?: ScriptedBeatProvider;
+};
+
 export async function executeScriptedPath(
   infra: ScenarioInfra,
   story: Story,
   dialogue: GeneratedDialogue[],
-  options?: WritePathDebugOptions,
+  options?: ScriptedPathOptions,
 ): Promise<WritePathResult> {
-  const cached = loadCachedToolCalls(story.id);
-  if (!cached) {
-    throw new Error(
-      `No cached tool calls for story '${story.id}' — run with writePath:'live' first`,
+  let scriptedBeatProvider: ScriptedBeatProvider;
+  if (options?.beatProviderOverride) {
+    scriptedBeatProvider = options.beatProviderOverride;
+  } else {
+    const cached = loadCachedToolCalls(story.id);
+    if (!cached) {
+      throw new Error(
+        `No cached tool calls for story '${story.id}' — run with writePath:'live' first`,
+      );
+    }
+    scriptedBeatProvider = createScriptedProviderFromCache(
+      toScriptedCacheLog(story.id, cached),
     );
   }
-
-  const scriptedBeatProvider = createScriptedProviderFromCache(
-    toScriptedCacheLog(story.id, cached),
-  );
 
   const runtime = await createMemoryTaskRuntime(infra);
   const errors: Array<{ beatId: string; error: Error }> = [];

@@ -3,8 +3,8 @@ import type { Story, StoryBeat, AssertionStance } from "./story-types.js";
 export type ValidationError = { field: string; message: string; beatId?: string };
 export type ValidationResult = { valid: boolean; errors: ValidationError[] };
 
-const LEGAL_STANCE_TRANSITIONS: Record<AssertionStance, AssertionStance[] | undefined> = {
-  hypothetical: undefined,
+const LEGAL_STANCE_TRANSITIONS: Record<AssertionStance, AssertionStance[]> = {
+  hypothetical: [],
   tentative: ["accepted", "contested", "rejected", "abandoned"],
   accepted: ["confirmed", "contested", "rejected", "abandoned"],
   confirmed: ["accepted", "contested", "rejected", "abandoned"],
@@ -12,6 +12,10 @@ const LEGAL_STANCE_TRANSITIONS: Record<AssertionStance, AssertionStance[] | unde
   rejected: [],
   abandoned: [],
 };
+
+const KNOWN_STANCES: ReadonlySet<AssertionStance> = new Set(
+  Object.keys(LEGAL_STANCE_TRANSITIONS) as AssertionStance[],
+);
 
 export function validateStory(story: Story): ValidationResult {
   const errors: ValidationError[] = [];
@@ -24,10 +28,12 @@ export function validateStory(story: Story): ValidationResult {
   errors.push(...validatePlanSurfaceProbes(story));
 
   if (story.beats) {
+    errors.push(...validateStanceValueKnown(story.beats));
     errors.push(...validateStanceTransitions(story.beats));
     errors.push(...validateEpisodeCategories(story.beats));
     errors.push(...validateContestedAssertions(story.beats));
     errors.push(...validateLogicEdgeTargets(story.beats));
+    errors.push(...validateLogicEdgeCycles(story.beats));
 
     for (const beat of story.beats) {
       errors.push(...validateBeat(beat, story));
@@ -61,6 +67,13 @@ export function validateBeat(beat: StoryBeat, story: Story): ValidationError[] {
   }
 
   if (Array.isArray(beat.participantIds)) {
+    if (beat.participantIds.length === 0) {
+      errors.push({
+        field: "participantIds",
+        message: `Beat '${beat.id}' participantIds cannot be empty`,
+        beatId: beat.id,
+      });
+    }
     for (const pid of beat.participantIds) {
       if (!characterIds.has(pid)) {
         errors.push({
@@ -70,6 +83,14 @@ export function validateBeat(beat: StoryBeat, story: Story): ValidationError[] {
         });
       }
     }
+  }
+
+  if (typeof beat.dialogueGuidance === "string" && beat.dialogueGuidance.trim().length === 0) {
+    errors.push({
+      field: "dialogueGuidance",
+      message: `Beat '${beat.id}' dialogueGuidance cannot be empty`,
+      beatId: beat.id,
+    });
   }
 
   return errors;
@@ -98,8 +119,9 @@ export function validateStanceTransitions(beats: StoryBeat[]): ValidationError[]
     for (let i = 1; i < entries.length; i++) {
       const prev = entries[i - 1].stance;
       const next = entries[i].stance;
+      if (!KNOWN_STANCES.has(prev) || !KNOWN_STANCES.has(next)) continue;
       const allowed = LEGAL_STANCE_TRANSITIONS[prev];
-      if (allowed !== undefined && !allowed.includes(next)) {
+      if (!allowed.includes(next)) {
         errors.push({
           field: "stanceTransition",
           message: `Illegal stance transition for key '${key}': ${prev} → ${next}`,
@@ -176,6 +198,106 @@ export function validateLogicEdgeTargets(beats: StoryBeat[]): ValidationError[] 
         errors.push({
           field: "logicEdge",
           message: `LogicEdge in beat '${beat.id}' references unknown episode ID '${edge.toEpisodeId}' in fromEpisodeId/toEpisodeId`,
+          beatId: beat.id,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateLogicEdgeCycles(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const adjacency = new Map<string, Set<string>>();
+  const edgeBeatId = new Map<string, string>();
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.logicEdges) continue;
+    for (const edge of beat.memoryEffects.logicEdges) {
+      if (edge.fromEpisodeId === edge.toEpisodeId) {
+        errors.push({
+          field: "logicEdge",
+          message: `Logic edge self-loop detected in beat '${beat.id}': '${edge.fromEpisodeId}' → '${edge.fromEpisodeId}'`,
+          beatId: beat.id,
+        });
+        continue;
+      }
+      if (!adjacency.has(edge.fromEpisodeId)) {
+        adjacency.set(edge.fromEpisodeId, new Set());
+      }
+      adjacency.get(edge.fromEpisodeId)!.add(edge.toEpisodeId);
+      const edgeKey = `${edge.fromEpisodeId}→${edge.toEpisodeId}`;
+      if (!edgeBeatId.has(edgeKey)) {
+        edgeBeatId.set(edgeKey, beat.id);
+      }
+    }
+  }
+
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<string, number>();
+  const parent = new Map<string, string>();
+  const reportedCycles = new Set<string>();
+
+  for (const node of adjacency.keys()) {
+    if (color.get(node) !== undefined) continue;
+
+    const stack: Array<{ node: string; iter: Iterator<string> }> = [];
+    color.set(node, GRAY);
+    stack.push({ node, iter: (adjacency.get(node) ?? new Set()).values() });
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const step = frame.iter.next();
+      if (step.done) {
+        color.set(frame.node, BLACK);
+        stack.pop();
+        continue;
+      }
+      const next = step.value;
+      const nextColor = color.get(next) ?? WHITE;
+      if (nextColor === GRAY) {
+        const cyclePath: string[] = [next];
+        let cursor: string | undefined = frame.node;
+        while (cursor !== undefined && cursor !== next) {
+          cyclePath.push(cursor);
+          cursor = parent.get(cursor);
+        }
+        cyclePath.push(next);
+        cyclePath.reverse();
+        const cycleKey = [...cyclePath].sort().join("|");
+        if (!reportedCycles.has(cycleKey)) {
+          reportedCycles.add(cycleKey);
+          const edgeKey = `${frame.node}→${next}`;
+          errors.push({
+            field: "logicEdge",
+            message: `Cycle detected in logic edges: ${cyclePath.join(" → ")}`,
+            beatId: edgeBeatId.get(edgeKey),
+          });
+        }
+      } else if (nextColor === WHITE) {
+        color.set(next, GRAY);
+        parent.set(next, frame.node);
+        stack.push({ node: next, iter: (adjacency.get(next) ?? new Set()).values() });
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateStanceValueKnown(beats: StoryBeat[]): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const beat of beats) {
+    if (!beat.memoryEffects?.assertions) continue;
+    for (const assertion of beat.memoryEffects.assertions) {
+      if (!KNOWN_STANCES.has(assertion.stance)) {
+        errors.push({
+          field: "stance",
+          message: `Unknown stance value '${assertion.stance}' for cognitionKey '${assertion.cognitionKey}' in beat '${beat.id}'`,
           beatId: beat.id,
         });
       }
