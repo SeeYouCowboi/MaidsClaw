@@ -58,6 +58,7 @@ import {
 } from "../generators/settlement-generator.js";
 import type { ScenarioInfra } from "./infra.js";
 import type { ScenarioDebuggerCollector } from "./debugger.js";
+import { LOGIC_EDGE_TYPES, type LogicEdgeType } from "../../../src/memory/types.js";
 
 export type BeatStats = {
   beatId: string;
@@ -246,7 +247,13 @@ export async function executeSettlementPath(
   // Cumulative map across all beats — supports both backward and forward refs.
   const cumulativeEpisodeIdByLocalRef = new Map<string, number>();
   // Deferred logic edges: created after all episodes exist to handle forward refs.
-  const deferredEdges: Array<{ beatId: string; fromLocalRef: string; toLocalRef: string; edgeType: string }> = [];
+  const deferredEdges: Array<{
+    beatId: string;
+    fromLocalRef: string;
+    toLocalRef: string;
+    edgeType: string;
+    weight?: number;
+  }> = [];
 
   let beatsProcessed = 0;
 
@@ -357,6 +364,7 @@ export async function executeSettlementPath(
           fromLocalRef: edge.fromLocalRef,
           toLocalRef: edge.toLocalRef,
           edgeType: edge.edgeType,
+          weight: edge.weight,
         });
       }
     } catch (error) {
@@ -387,6 +395,7 @@ export async function executeSettlementPath(
         sourceId,
         targetId,
         asLogicEdgeType(edge.edgeType),
+        edge.weight ?? null,
       );
     } catch (error) {
       errors.push({ beatId: edge.beatId, error: toError(error) });
@@ -959,16 +968,10 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function asLogicEdgeType(
-  value: string,
-): "causal" | "temporal_prev" | "temporal_next" | "same_episode" {
-  if (
-    value === "causal" ||
-    value === "temporal_prev" ||
-    value === "temporal_next" ||
-    value === "same_episode"
-  ) {
-    return value;
+function asLogicEdgeType(value: string): LogicEdgeType {
+  const allowed = LOGIC_EDGE_TYPES as readonly string[];
+  if (allowed.includes(value)) {
+    return value as LogicEdgeType;
   }
   throw new Error(`Unsupported logic edge type: ${value}`);
 }

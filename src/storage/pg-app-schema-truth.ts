@@ -117,7 +117,8 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       source_event_id   INTEGER NOT NULL,
       target_event_id   INTEGER NOT NULL,
       relation_type     TEXT NOT NULL
-                        CHECK (relation_type IN ('causal', 'temporal_prev', 'temporal_next', 'same_episode')),
+                        CHECK (relation_type IN ('causal', 'contradict', 'reinforce', 'temporal_prev', 'temporal_next', 'same_episode')),
+      weight            REAL,
       created_at        BIGINT NOT NULL
     )
   `);

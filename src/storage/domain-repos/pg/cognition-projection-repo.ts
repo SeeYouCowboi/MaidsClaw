@@ -249,15 +249,15 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         basis = CASE WHEN excluded.basis IS NOT NULL THEN excluded.basis
                      ELSE private_cognition_current.basis END,
         status = 'active',
-        -- Auto-track pre_contested_stance: when transitioning away from contested,
-        -- preserve the contested stance. If the new record provides an explicit value, use it.
-        -- Otherwise, if current row is contested, save it before overwriting.
+        -- Auto-track pre_contested_stance: preserve the stance that held
+        -- BEFORE the contested transition. If the new record supplies an
+        -- explicit value, use it; otherwise keep whatever was previously
+        -- recorded in pre_contested_stance (never overwrite it with the
+        -- literal 'contested' sentinel — that would discard the pre-contested
+        -- history and break belief-revision rollback checks).
         pre_contested_stance = COALESCE(
           excluded.pre_contested_stance,
-          CASE WHEN private_cognition_current.stance = 'contested'
-                    AND excluded.stance IS DISTINCT FROM 'contested'
-               THEN private_cognition_current.stance
-               ELSE private_cognition_current.pre_contested_stance END
+          private_cognition_current.pre_contested_stance
         ),
         -- Preserve conflict metadata when resolving a contested assertion
         conflict_summary = COALESCE(

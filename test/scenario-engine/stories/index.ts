@@ -6,4 +6,5 @@ export {
   adversarialContestedRefuted,
   adversarialPollutedRetrieval,
   adversarialTimeoutRecovery,
+  adversarialRetractionCascade,
 } from "./adversarial.js";

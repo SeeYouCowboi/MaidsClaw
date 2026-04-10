@@ -20,7 +20,14 @@ export type PublicEventCategory = (typeof PUBLIC_EVENT_CATEGORIES)[number];
 export const PRIVATE_EVENT_CATEGORIES = ["speech", "action", "observation", "state_change"] as const;
 export type PrivateEventCategory = (typeof PRIVATE_EVENT_CATEGORIES)[number];
 
-export const LOGIC_EDGE_TYPES = ["causal", "temporal_prev", "temporal_next", "same_episode"] as const;
+export const LOGIC_EDGE_TYPES = [
+  "causal",
+  "contradict",
+  "reinforce",
+  "temporal_prev",
+  "temporal_next",
+  "same_episode",
+] as const;
 export type LogicEdgeType = (typeof LOGIC_EDGE_TYPES)[number];
 
 export const SEMANTIC_EDGE_TYPES = ["semantic_similar", "conflict_or_update", "entity_bridge"] as const;

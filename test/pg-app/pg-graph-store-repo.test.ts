@@ -148,13 +148,25 @@ describe.skipIf(skipPgTests)(
         expect(edgeId).toBeGreaterThan(0);
 
         const rows = await sql`
-          SELECT source_event_id, target_event_id, relation_type
+          SELECT source_event_id, target_event_id, relation_type, weight
           FROM logic_edges
           WHERE id = ${edgeId}
         `;
         expect(Number(rows[0].source_event_id)).toBe(e1);
         expect(Number(rows[0].target_event_id)).toBe(e2);
         expect(rows[0].relation_type).toBe("causal");
+        // Weight is optional; unspecified → stored as NULL.
+        expect(rows[0].weight).toBeNull();
+
+        // Explicit weight round-trips through INSERT/SELECT.
+        const weightedEdgeId = await repo.createLogicEdge(e1, e2, "contradict", 0.85);
+        const weightedRows = await sql`
+          SELECT relation_type, weight
+          FROM logic_edges
+          WHERE id = ${weightedEdgeId}
+        `;
+        expect(weightedRows[0].relation_type).toBe("contradict");
+        expect(Number(weightedRows[0].weight)).toBeCloseTo(0.85, 5);
       });
     });
 

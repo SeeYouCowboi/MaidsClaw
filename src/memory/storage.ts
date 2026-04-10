@@ -165,8 +165,15 @@ export class GraphStorageService {
     return this.resolveNow(this.delegates.graphStoreRepo.createPromotedEvent(params));
   }
 
-  createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType): number {
-    return this.resolveNow(this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType));
+  createLogicEdge(
+    sourceEventId: number,
+    targetEventId: number,
+    relationType: LogicEdgeType,
+    weight?: number | null,
+  ): number {
+    return this.resolveNow(
+      this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType, weight),
+    );
   }
 
   createTopic(name: string, description?: string): number {
@@ -321,8 +328,13 @@ export class GraphStorageAsyncApi {
     return this.delegates.graphStoreRepo.createPromotedEvent(params);
   }
 
-  createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType): Promise<number> {
-    return this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType);
+  createLogicEdge(
+    sourceEventId: number,
+    targetEventId: number,
+    relationType: LogicEdgeType,
+    weight?: number | null,
+  ): Promise<number> {
+    return this.delegates.graphStoreRepo.createLogicEdge(sourceEventId, targetEventId, relationType, weight);
   }
 
   createTopic(name: string, description?: string): Promise<number> {

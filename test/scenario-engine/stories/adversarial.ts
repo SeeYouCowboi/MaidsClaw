@@ -222,7 +222,7 @@ export const adversarialContestedRefuted: Story = {
           {
             fromEpisodeId: "b1_ep",
             toEpisodeId: "b3_ep",
-            edgeType: "causal",
+            edgeType: "contradict",
             weight: 0.9,
           },
         ],
@@ -312,7 +312,7 @@ export const adversarialContestedRefuted: Story = {
           {
             fromEpisodeId: "b2_ep",
             toEpisodeId: "b5_ep",
-            edgeType: "causal",
+            edgeType: "reinforce",
             weight: 0.7,
           },
         ],
@@ -787,6 +787,177 @@ export const adversarialTimeoutRecovery: Story = {
             stance: "accepted",
             basis: "first_hand",
             sourceEpisodeId: "t_b5_ep",
+          },
+        ],
+      },
+    },
+  ],
+  probes: [],
+};
+
+/**
+ * 对抗 · 撤回级联
+ *
+ * 覆盖 assertion + commitment 两类认知的显式 retract 路径：
+ *  - b1：目击者陈述 → upsert assertion `butler_had_key` + 侦探发出公开承诺
+ *        `lin_will_question_butler`（`commitment`）。
+ *  - b2：物证显示钥匙整晚未动 → retract 第 1 条 assertion。projection 层
+ *        会把 status 置为 'retracted' 并强制 stance='rejected'。
+ *  - b3：目击者被证伪后侦探取消追问计划 → retract 第 1 条 commitment。
+ *        projection 层仅改 status，承诺 JSON 本身仍然可见（历史审计）。
+ *
+ * 配套断言：
+ *  - cognition_search 默认 activeOnly 语义下不再返回被 retract 的记录；
+ *  - 直接查询 private_cognition_current 仍能看到 status='retracted' 行，
+ *    即撤回是 soft-delete 不是 hard-delete；
+ *  - assertion 的 stance 一定会被强制写成 rejected。
+ */
+const CHARS_RETRACTION = {
+  detective: CHARS.detective,
+  witness: {
+    id: "witness_zhao",
+    displayName: "目击者赵婶",
+    entityType: "person" as const,
+    surfaceMotives: "向侦探描述昨夜所见",
+    hiddenCommitments: [],
+    initialEvaluations: [],
+    aliases: ["赵婶"],
+  },
+  butler: CHARS.butler,
+};
+
+export const adversarialRetractionCascade: Story = {
+  id: "adversarial-retraction-cascade",
+  title: "对抗：撤回级联",
+  language: "Chinese/中文",
+  description:
+    "赵婶声称昨夜史管家带了一把钥匙离开正厅，林漱雪随即立下公开承诺要追问管家。然而现场勘查显示钥匙柜整晚未动，目击陈述被撤回；随后侦探主动撤回追问承诺。用于验证引擎对 assertion + commitment 两类 retract 的级联处理。",
+  characters: [CHARS_RETRACTION.detective, CHARS_RETRACTION.witness, CHARS_RETRACTION.butler],
+  locations: [
+    { id: "main_hall", displayName: "正厅", entityType: "location", visibilityScope: "area_visible" },
+    { id: "key_cabinet", displayName: "钥匙柜", entityType: "location", visibilityScope: "area_visible" },
+  ],
+  clues: [
+    {
+      id: "brass_key",
+      displayName: "黄铜钥匙",
+      entityType: "item",
+      initialLocationId: "key_cabinet",
+      description: "钥匙柜内的黄铜钥匙，是本轮撤回测试的焦点物证。",
+    },
+  ],
+  beats: [
+    {
+      id: "b1",
+      phase: "A",
+      round: 1,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 10_000,
+      locationId: "main_hall",
+      participantIds: ["detective_lin", "witness_zhao"],
+      dialogueGuidance:
+        "赵婶向林漱雪报告：昨夜她看到史管家拿着一把黄铜钥匙离开正厅",
+      memoryEffects: {
+        episodes: [
+          {
+            id: "r_b1_ep",
+            category: "speech",
+            summary: "赵婶告诉林漱雪：昨夜她看见史管家拿着一把黄铜钥匙离开正厅",
+            observerIds: ["detective_lin", "witness_zhao"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 10_000,
+            locationId: "main_hall",
+          },
+        ],
+        assertions: [
+          {
+            cognitionKey: "butler_had_key",
+            holderId: "__self__",
+            claim: "昨夜史管家从正厅取走一把黄铜钥匙",
+            entityIds: ["butler_shi", "brass_key", "main_hall"],
+            stance: "accepted",
+            basis: "hearsay",
+            sourceEpisodeId: "r_b1_ep",
+          },
+        ],
+        commitments: [
+          {
+            cognitionKey: "lin_will_question_butler",
+            subjectId: "detective_lin",
+            mode: "plan",
+            content: "林漱雪计划今日傍晚单独盘问史管家关于黄铜钥匙的去向",
+            isPrivate: false,
+            sourceEpisodeId: "r_b1_ep",
+          },
+        ],
+      },
+    },
+    {
+      id: "b2",
+      phase: "B",
+      round: 2,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 20_000,
+      locationId: "key_cabinet",
+      participantIds: ["detective_lin"],
+      dialogueGuidance:
+        "林漱雪亲自勘查钥匙柜，发现黄铜钥匙整晚原位未动，赵婶的陈述被物证否定",
+      memoryEffects: {
+        episodes: [
+          {
+            id: "r_b2_ep",
+            category: "observation",
+            summary: "林漱雪勘查钥匙柜，确认黄铜钥匙整晚未被移动——赵婶的陈述与物证不符",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 20_000,
+            locationId: "key_cabinet",
+          },
+        ],
+        retractions: [
+          {
+            cognitionKey: "butler_had_key",
+            kind: "assertion",
+          },
+        ],
+        logicEdges: [
+          {
+            fromEpisodeId: "r_b1_ep",
+            toEpisodeId: "r_b2_ep",
+            edgeType: "contradict",
+            weight: 0.95,
+          },
+        ],
+      },
+    },
+    {
+      id: "b3",
+      phase: "C",
+      round: 3,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 30_000,
+      locationId: "main_hall",
+      participantIds: ["detective_lin"],
+      dialogueGuidance:
+        "林漱雪基于新证据取消原本的追问计划，主动撤回公开承诺",
+      memoryEffects: {
+        episodes: [
+          {
+            id: "r_b3_ep",
+            category: "state_change",
+            summary: "林漱雪基于钥匙柜勘查结果撤销原本盘问史管家的计划",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 30_000,
+            locationId: "main_hall",
+          },
+        ],
+        retractions: [
+          {
+            cognitionKey: "lin_will_question_butler",
+            kind: "commitment",
+          },
+        ],
+        logicEdges: [
+          {
+            fromEpisodeId: "r_b2_ep",
+            toEpisodeId: "r_b3_ep",
+            edgeType: "causal",
+            weight: 0.8,
           },
         ],
       },

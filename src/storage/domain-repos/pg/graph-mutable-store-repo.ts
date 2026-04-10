@@ -111,10 +111,11 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     sourceEventId: number,
     targetEventId: number,
     relationType: Parameters<GraphMutableStoreRepo["createLogicEdge"]>[2],
+    weight?: number | null,
   ): Promise<number> {
     const rows = await this.sql`
-      INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, created_at)
-      VALUES (${sourceEventId}, ${targetEventId}, ${relationType}, ${Date.now()})
+      INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at)
+      VALUES (${sourceEventId}, ${targetEventId}, ${relationType}, ${weight ?? null}, ${Date.now()})
       RETURNING id
     `;
     return Number(rows[0].id);

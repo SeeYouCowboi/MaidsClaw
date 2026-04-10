@@ -18,6 +18,13 @@ export type RelationContract = {
 
 export const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
   causal:            { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
+  // Narrative-layer matched pair: contradict/reinforce are explicit, author-
+  // or DSL-declared relationships. They sit next to `causal` because both
+  // endpoints are event nodes and the claim is truth-bearing (as opposed to
+  // `semantic_similar` / `conflict_or_update` which are heuristic and
+  // embedding-derived — see SEMANTIC_EDGE_TYPES).
+  contradict:        { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
+  reinforce:         { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
   temporal_prev:     { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
   temporal_next:     { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
   same_episode:      { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },

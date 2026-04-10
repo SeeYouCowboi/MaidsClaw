@@ -41,7 +41,12 @@ export interface GraphMutableStoreRepo {
     primaryActorEntityId?: number;
     sourceEventId?: number;
   }): Promise<number>;
-  createLogicEdge(sourceEventId: number, targetEventId: number, relationType: LogicEdgeType): Promise<number>;
+  createLogicEdge(
+    sourceEventId: number,
+    targetEventId: number,
+    relationType: LogicEdgeType,
+    weight?: number | null,
+  ): Promise<number>;
   createTopic(name: string, description?: string): Promise<number>;
   upsertEntity(params: {
     pointerKey: string;

@@ -165,9 +165,10 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
       source_event_id: number | string;
       target_event_id: number | string;
       relation_type: string;
+      weight: number | string | null;
       created_at: number | string;
     }[]>`
-      SELECT source_event_id, target_event_id, relation_type, created_at
+      SELECT source_event_id, target_event_id, relation_type, weight, created_at
       FROM logic_edges
       WHERE source_event_id IN ${this.sql(ids)}
          OR target_event_id IN ${this.sql(ids)}
@@ -178,12 +179,13 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
       const sourceId = Number(row.source_event_id);
       const targetId = Number(row.target_event_id);
       const createdAt = Number(row.created_at);
+      const weight = row.weight == null ? 1 : Number(row.weight);
       const sourceRef = `event:${sourceId}` as NodeRef;
       const targetRef = `event:${targetId}` as NodeRef;
 
       if (frontier.has(sourceRef)) {
         candidates.push(this.toGraphEdge("logic_edges", "symbolic", row.relation_type, sourceRef, targetRef, {
-          weight: 1,
+          weight,
           timestamp: createdAt,
           validTime: createdAt,
           committedTime: createdAt,
@@ -192,7 +194,7 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
       if (frontier.has(targetRef)) {
         candidates.push(
           this.toGraphEdge("logic_edges", "symbolic", this.reverseTemporalRelation(row.relation_type), targetRef, sourceRef, {
-            weight: 1,
+            weight,
             timestamp: createdAt,
             validTime: createdAt,
             committedTime: createdAt,

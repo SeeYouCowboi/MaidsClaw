@@ -83,6 +83,70 @@ describe.skipIf(skipPgTests)("PgCognitionProjectionRepo", () => {
     });
   });
 
+  it("contested→rejected without explicit preContestedStance preserves the prior pre_contested_stance", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+      const repo = new PgCognitionProjectionRepo(sql);
+      const agentId = "agent-pre-contested";
+      const cognitionKey = "ck-pre-contested";
+      const base = {
+        sourcePointerKey: "alice",
+        predicate: "was_present_at",
+        targetPointerKey: "cellar",
+      };
+
+      // 1. accepted baseline
+      await repo.upsertFromEvent(
+        makeEvent({
+          id: 400,
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          committed_time: 1_000,
+          record_json: JSON.stringify({ ...base, stance: "accepted", basis: "first_hand" }),
+        }),
+      );
+
+      // 2. contested with explicit preContestedStance = accepted
+      await repo.upsertFromEvent(
+        makeEvent({
+          id: 401,
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          committed_time: 2_000,
+          record_json: JSON.stringify({
+            ...base,
+            stance: "contested",
+            basis: "inference",
+            preContestedStance: "accepted",
+          }),
+        }),
+      );
+
+      const afterContested = await repo.getCurrent(agentId, cognitionKey);
+      expect(afterContested?.stance).toBe("contested");
+      expect(afterContested?.pre_contested_stance).toBe("accepted");
+
+      // 3. rejected WITHOUT explicit preContestedStance — must not clobber accepted
+      await repo.upsertFromEvent(
+        makeEvent({
+          id: 402,
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          committed_time: 3_000,
+          record_json: JSON.stringify({ ...base, stance: "rejected", basis: "inference" }),
+        }),
+      );
+
+      const afterRejected = await repo.getCurrent(agentId, cognitionKey);
+      expect(afterRejected?.stance).toBe("rejected");
+      // Regression guard: prior to the fix, this was literally "contested"
+      // because the ON CONFLICT branch wrote `current.stance` into
+      // pre_contested_stance instead of preserving `current.pre_contested_stance`.
+      expect(afterRejected?.pre_contested_stance).toBe("accepted");
+    });
+  });
+
   it("patchRecordJsonSourceEventRef merges into record_json without overwriting", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);

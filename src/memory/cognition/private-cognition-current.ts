@@ -212,9 +212,23 @@ export class PrivateCognitionProjectionRepo {
             stance = excluded.stance,
             basis = CASE WHEN excluded.basis IS NOT NULL THEN excluded.basis ELSE private_cognition_current.basis END,
             status = 'active',
-            pre_contested_stance = excluded.pre_contested_stance,
-            conflict_summary = excluded.conflict_summary,
-            conflict_factor_refs_json = excluded.conflict_factor_refs_json,
+            -- Preserve pre_contested_stance across transitions: only overwrite
+            -- when the new record explicitly supplies a value. The prior code
+            -- used a simple excluded.pre_contested_stance override which wiped
+            -- the field to NULL on any contested to non-contested transition
+            -- whose op did not repeat the preContestedStance (e.g. rejected
+            -- rollbacks). COALESCE preserves the earlier value instead.
+            --
+            -- The conflict_* COALESCEs mirror the PG path: applyAssertionUpsert
+            -- only populates the insert values when the new record is itself
+            -- contested, so the COALESCE effectively means "preserve existing
+            -- conflict metadata unless this op is writing fresh contested
+            -- metadata". Non-contested transitions therefore will NOT clear
+            -- stale conflict rows -- readers that care must consult status
+            -- (retracted) or stance (rejected) to disambiguate.
+            pre_contested_stance = COALESCE(excluded.pre_contested_stance, private_cognition_current.pre_contested_stance),
+            conflict_summary = COALESCE(excluded.conflict_summary, private_cognition_current.conflict_summary),
+            conflict_factor_refs_json = COALESCE(excluded.conflict_factor_refs_json, private_cognition_current.conflict_factor_refs_json),
             summary_text = excluded.summary_text,
             record_json = excluded.record_json,
             source_event_id = excluded.source_event_id,
