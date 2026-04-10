@@ -56,6 +56,7 @@ import {
   type GeneratedSettlement,
 } from "../generators/settlement-generator.js";
 import type { ScenarioInfra } from "./infra.js";
+import type { ScenarioDebuggerCollector } from "./debugger.js";
 
 export type BeatStats = {
   beatId: string;
@@ -108,6 +109,100 @@ export type WritePathResult = {
   capturedToolCallLog?: CachedToolCallLog;
 };
 
+type WritePathDebugOptions = {
+  debugger?: ScenarioDebuggerCollector;
+};
+
+async function captureGraphSnapshotForBeat(
+  infra: ScenarioInfra,
+  beatId: string,
+  debuggerCollector?: ScenarioDebuggerCollector,
+): Promise<void> {
+  if (!debuggerCollector) return;
+
+  const entities = await infra.sql<Array<{ id: number; pointer_key: string; entity_type: string }>>`
+    SELECT id, pointer_key, entity_type
+    FROM entity_nodes
+    ORDER BY id ASC
+  `;
+
+  const edges = await infra.sql<Array<{ source_event_id: number; target_event_id: number; relation_type: string }>>`
+    SELECT source_event_id, target_event_id, relation_type
+    FROM logic_edges
+    ORDER BY id ASC
+  `;
+
+  debuggerCollector.captureGraphSnapshot(beatId, {
+    entities: entities.map((entity) => ({
+      id: `entity:${entity.id}`,
+      type: entity.entity_type,
+      pointerKey: entity.pointer_key,
+    })),
+    edges: edges.map((edge) => ({
+      from: `event:${edge.source_event_id}`,
+      to: `event:${edge.target_event_id}`,
+      type: edge.relation_type,
+    })),
+  });
+}
+
+async function captureIndexSnapshotForBeat(
+  infra: ScenarioInfra,
+  beatId: string,
+  debuggerCollector?: ScenarioDebuggerCollector,
+): Promise<void> {
+  if (!debuggerCollector) return;
+
+  const worldDocs = await infra.sql<Array<{ source_ref: string; content: string }>>`
+    SELECT source_ref, content
+    FROM search_docs_world
+    ORDER BY id ASC
+  `;
+
+  const cognitionDocs = await infra.sql<Array<{ source_ref: string; content: string }>>`
+    SELECT source_ref, content
+    FROM search_docs_cognition
+    WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+    ORDER BY id ASC
+  `;
+
+  const embeddingRows = await infra.sql<Array<{ node_ref: string; node_kind: string; model_id: string }>>`
+    SELECT node_ref, node_kind, model_id
+    FROM node_embeddings
+    ORDER BY updated_at DESC
+  `;
+
+  debuggerCollector.captureIndexSnapshot(beatId, {
+    documents: [
+      ...worldDocs.map((doc) => ({
+        nodeRef: doc.source_ref,
+        kind: "search_world",
+        content: doc.content,
+      })),
+      ...cognitionDocs.map((doc) => ({
+        nodeRef: doc.source_ref,
+        kind: "search_cognition",
+        content: doc.content,
+      })),
+      ...embeddingRows.map((row) => ({
+        nodeRef: row.node_ref,
+        kind: `embedding:${row.node_kind}`,
+        modelId: row.model_id,
+      })),
+    ],
+  });
+}
+
+async function captureBeatSnapshots(
+  infra: ScenarioInfra,
+  beatId: string,
+  options?: WritePathDebugOptions,
+): Promise<void> {
+  if (!options?.debugger) return;
+  await captureGraphSnapshotForBeat(infra, beatId, options.debugger);
+  await captureIndexSnapshotForBeat(infra, beatId, options.debugger);
+}
+
 type MemoryTaskRuntime = {
   graphStorage: GraphStorageService;
   coreMemory: CoreMemoryService;
@@ -139,6 +234,7 @@ const NOOP_JOB_PERSISTENCE: JobPersistence = {
 export async function executeSettlementPath(
   infra: ScenarioInfra,
   story: Story,
+  options?: WritePathDebugOptions,
 ): Promise<WritePathResult> {
   const settlements = generateSettlements(story);
   const errors: Array<{ beatId: string; error: Error }> = [];
@@ -266,6 +362,9 @@ export async function executeSettlementPath(
       beatStat.errors += 1;
       errors.push({ beatId: settlement.beatId, error: toError(error) });
     }
+
+    await captureBeatSnapshots(infra, settlement.beatId, options);
+
     perBeatStats.push(beatStat);
   }
 
@@ -332,6 +431,7 @@ export async function executeScriptedPath(
   infra: ScenarioInfra,
   story: Story,
   dialogue: GeneratedDialogue[],
+  options?: WritePathDebugOptions,
 ): Promise<WritePathResult> {
   const cached = loadCachedToolCalls(story.id);
   if (!cached) {
@@ -367,6 +467,8 @@ export async function executeScriptedPath(
     const after = await snapshotDbCounts(infra);
     const delta = diffSnapshots(before, after);
 
+    await captureBeatSnapshots(infra, beat.id, options);
+
     perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
   }
 
@@ -386,6 +488,7 @@ export async function executeLivePath(
   infra: ScenarioInfra,
   story: Story,
   dialogue: GeneratedDialogue[],
+  options?: WritePathDebugOptions,
 ): Promise<WritePathResult> {
   const runtime = await createMemoryTaskRuntime(infra);
   const realProvider = createEnvironmentMemoryTaskModelProvider();
@@ -453,6 +556,9 @@ export async function executeLivePath(
     }
     const after = await snapshotDbCounts(infra);
     const delta = diffSnapshots(before, after);
+
+    await captureBeatSnapshots(infra, beat.id, options);
+
     perBeatStats.push({ beatId: beat.id, ...delta, errors: beatErrors });
     console.log(`[live] (${beatIndex + 1}/${totalBeats}) beat "${beat.id}" — done (episodes=${delta.episodesCreated} assertions=${delta.assertionsCreated} errors=${beatErrors})`);
   }

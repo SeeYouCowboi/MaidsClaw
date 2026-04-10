@@ -39,6 +39,7 @@ import type { PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
 import {
   createScenarioDebugger,
   type ScenarioDebugger,
+  type ScenarioDebuggerCollector,
 } from "./debugger.js";
 
 export type ScenarioHandleExtended = ScenarioHandle & {
@@ -78,7 +79,11 @@ export async function executeProbesWithDiagnosis(
   story: Story,
   handle: ScenarioHandleExtended,
 ): Promise<ProbeResult[]> {
-  const probeResults = await executeProbes(story, handle);
+  const probeResults = await executeProbes(story, handle, {
+    debugger: isScenarioDebuggerCollector(handle.debugger)
+      ? handle.debugger
+      : undefined,
+  });
   handle.diagnosisResults = await runProbeFailureDiagnosis(
     probeResults,
     handle.infra,
@@ -153,6 +158,7 @@ export async function runScenario(
     infra,
     story,
     dialogue,
+    { debugger: debuggerCollector },
   );
 
   const toolCallAssertionResults = assertToolCallPatterns(
@@ -228,17 +234,29 @@ async function dispatchWritePath(
   infra: ScenarioInfra,
   story: Story,
   dialogue: GeneratedDialogue[],
+  options?: { debugger?: ScenarioDebuggerCollector },
 ): Promise<WritePathResult> {
   switch (writePath) {
     case "settlement":
-      return executeSettlementPath(infra, story);
+      return executeSettlementPath(infra, story, options);
     case "scripted":
-      return executeScriptedPath(infra, story, dialogue);
+      return executeScriptedPath(infra, story, dialogue, options);
     case "live":
-      return executeLivePath(infra, story, dialogue);
+      return executeLivePath(infra, story, dialogue, options);
     default: {
       const _exhaustive: never = writePath;
       throw new Error(`Unknown write path: ${_exhaustive}`);
     }
   }
+}
+
+function isScenarioDebuggerCollector(
+  value: ScenarioDebugger | undefined,
+): value is ScenarioDebuggerCollector {
+  return Boolean(
+    value &&
+      typeof (value as ScenarioDebuggerCollector).captureGraphSnapshot === "function" &&
+      typeof (value as ScenarioDebuggerCollector).captureIndexSnapshot === "function" &&
+      typeof (value as ScenarioDebuggerCollector).captureProbeHits === "function",
+  );
 }

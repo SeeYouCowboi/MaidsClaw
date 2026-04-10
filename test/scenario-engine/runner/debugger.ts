@@ -35,6 +35,12 @@ export interface ScenarioDebugger {
   getProbeHits(probeId: string): ProbeHitsSnapshot;
 }
 
+export type ScenarioDebuggerCollector = ScenarioDebugger & {
+  captureGraphSnapshot(beatId: string, data: GraphSnapshotInput): GraphSnapshot;
+  captureIndexSnapshot(beatId: string, data: IndexSnapshotInput): IndexSnapshot;
+  captureProbeHits(probeId: string, data: ProbeHitsSnapshotInput): ProbeHitsSnapshot;
+};
+
 type GraphSnapshotInput = {
   entities: GraphSnapshot["entities"];
   edges: GraphSnapshot["edges"];
@@ -79,11 +85,7 @@ export function createScenarioDebugger() {
   const indexSnapshots = new Map<string, IndexSnapshot>();
   const probeHitsSnapshots = new Map<string, ProbeHitsSnapshot>();
 
-  const api: ScenarioDebugger & {
-    captureGraphSnapshot(beatId: string, data: GraphSnapshotInput): GraphSnapshot;
-    captureIndexSnapshot(beatId: string, data: IndexSnapshotInput): IndexSnapshot;
-    captureProbeHits(probeId: string, data: ProbeHitsSnapshotInput): ProbeHitsSnapshot;
-  } = {
+  const api: ScenarioDebuggerCollector = {
     getGraphState(beatId: string): GraphSnapshot {
       const snapshot = graphSnapshots.get(beatId);
       if (!snapshot) {

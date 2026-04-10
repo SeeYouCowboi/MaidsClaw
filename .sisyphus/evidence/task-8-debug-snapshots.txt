@@ -1,0 +1,11 @@
+Command: bun test test/scenario-engine/runner/debugger.test.ts
+
+Observed output excerpts:
+- [settlement] enriched 12 cognition search docs with display names
+- [debug-perf] settlement mini-sample elapsed debugOff=930.2ms debugOn=862.9ms delta=-67.2ms
+
+Result summary:
+11 pass
+0 fail
+23 expect() calls
+Ran 11 tests across 1 file. [5.63s]

@@ -1,0 +1,14 @@
+Cleanup survival evidence from debugger suite:
+
+- Test: "snapshots survive run completion with keepSchema=false cleanup"
+- Validation behavior:
+  1) runScenario(miniSample, { writePath: "settlement", keepSchema: false, debug: true })
+  2) executeProbes(miniSample, handle)
+  3) await handle.infra._testDb.cleanup()
+  4) debugger snapshot reads still succeed for beat/probe IDs
+
+Command run:
+bun test test/scenario-engine/runner/debugger.test.ts
+
+Result:
+11 pass, 0 fail (includes cleanup survival assertion)

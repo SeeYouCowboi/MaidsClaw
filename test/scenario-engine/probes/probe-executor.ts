@@ -6,10 +6,35 @@ import {
 import type { Story, StoryProbe } from "../dsl/story-types.js";
 import type { ScenarioHandle } from "../runner/infra.js";
 import type { ScenarioHandleExtended } from "../runner/orchestrator.js";
+import type { ScenarioDebuggerCollector } from "../runner/debugger.js";
 import { matchProbeResults } from "./probe-matcher.js";
 import type { ProbeResult, RetrievalHit } from "./probe-types.js";
 
 type AnyHandle = ScenarioHandle | ScenarioHandleExtended;
+
+type ExecuteProbesOptions = {
+  debugger?: ScenarioDebuggerCollector;
+};
+
+function hasDebuggerCollector(value: unknown): value is ScenarioDebuggerCollector {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as ScenarioDebuggerCollector).captureGraphSnapshot === "function" &&
+      typeof (value as ScenarioDebuggerCollector).captureIndexSnapshot === "function" &&
+      typeof (value as ScenarioDebuggerCollector).captureProbeHits === "function",
+  );
+}
+
+function resolveDebuggerCollector(
+  handle: AnyHandle,
+  options?: ExecuteProbesOptions,
+): ScenarioDebuggerCollector | undefined {
+  if (options?.debugger) return options.debugger;
+
+  const maybeDebugger = (handle as ScenarioHandleExtended).debugger;
+  return hasDebuggerCollector(maybeDebugger) ? maybeDebugger : undefined;
+}
 
 function buildViewerContext(
   probe: StoryProbe,
@@ -315,8 +340,10 @@ function resolveMatchMode(handle: AnyHandle): "deterministic" | "live" {
 export async function executeProbes(
   story: Story,
   handle: AnyHandle,
+  options?: ExecuteProbesOptions,
 ): Promise<ProbeResult[]> {
   const mode = resolveMatchMode(handle);
+  const debuggerCollector = resolveDebuggerCollector(handle, options);
   const results: ProbeResult[] = [];
 
   for (const probe of story.probes) {
@@ -325,6 +352,18 @@ export async function executeProbes(
     const latencyMs = performance.now() - start;
     const result = matchProbeResults(probe, hits, { mode });
     result.latencyMs = latencyMs;
+
+    debuggerCollector?.captureProbeHits(probe.id, {
+      hits: hits.map((hit) => ({
+        nodeRef: hit.source_ref,
+        score: hit.score,
+        content: hit.content,
+        scope: hit.scope,
+      })),
+      matched: [...result.matched],
+      missed: [...result.missed],
+    });
+
     results.push(result);
   }
 
