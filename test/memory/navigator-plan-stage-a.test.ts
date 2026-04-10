@@ -12,16 +12,20 @@ import type { QueryPlan } from "../../src/memory/query-plan-types";
  *
  * Stage A is intentionally narrow:
  *   - Mechanical changes only (4 functions take an extra `plan` argument)
- *   - Default `MAIDSCLAW_NAVIGATOR_USE_PLAN=off` so flag-off behavior is
- *     byte-equal to pre-Phase-4
- *   - Stage B (primaryIntent replacement, flag default flip, 20+ fixture
- *     parity tests) is deferred until §10 shadow data lands
+ *   - Covers the merge semantics of `effectiveEdgeMultiplier` — the
+ *     helper that replaces three identical `strategy?.edgeWeights[kind]
+ *     ?? 1.0` sites in the navigator
  *
- * These tests cover the merge semantics of `effectiveEdgeMultiplier` —
- * the helper that replaces three identical `strategy?.edgeWeights[kind]
- * ?? 1.0` sites in the navigator. They run without a real GraphReadRepo
- * because the helper is module-level and depends only on the strategy
- * object + plan.graphPlan.edgeBias.
+ * Post-rollout state: `MAIDSCLAW_NAVIGATOR_USE_PLAN` now defaults to ON
+ * in production. The `beforeEach` below explicitly sets it to `"off"`
+ * so any "flag explicitly OFF" test in this file still measures the
+ * legacy path; individual tests that want flag-on must set `"on"` in
+ * their own setup. The saved/restored pattern guarantees flag state
+ * never leaks between tests (bun runs tests within a file sequentially).
+ *
+ * These tests run without a real GraphReadRepo because
+ * `effectiveEdgeMultiplier` is module-level and depends only on the
+ * strategy object + plan.graphPlan.edgeBias.
  */
 
 function makePlan(edgeBias: Record<string, number>): QueryPlan {
@@ -76,7 +80,10 @@ let savedFlag: string | undefined;
 
 beforeEach(() => {
   savedFlag = process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN;
-  delete process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN;
+  // Post-rollout default is ON — explicitly set "off" so each test
+  // starts from a known legacy baseline. Tests that want flag-on must
+  // override in their own beforeEach or `it` body.
+  process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN = "off";
 });
 
 afterEach(() => {
@@ -85,7 +92,7 @@ afterEach(() => {
 });
 
 describe("effectiveEdgeMultiplier (GAP-4 §2 Stage A)", () => {
-  describe("with flag default OFF", () => {
+  describe("with flag explicitly OFF", () => {
     it("returns strategy multiplier alone when plan is present", () => {
       process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN = "off";
       const strategy: GraphRetrievalStrategy = GRAPH_RETRIEVAL_STRATEGIES.deep_explain;

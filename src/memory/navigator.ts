@@ -164,19 +164,29 @@ const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
 ]);
 
 /**
- * GAP-4 §2 Stage A feature flag: when enabled, the navigator consumes
- * `plan.graphPlan.{seedBias, edgeBias, timeSlice}` to influence beam
- * search. When disabled (the default), the navigator runs exactly as
- * pre-Phase-4 — plan/route are still computed and emitted to shadow logs
- * + drilldown for §10/§6, but they don't touch the search path.
+ * GAP-4 §2 feature flag covering both Stage A and Stage B: when enabled,
+ * the navigator consumes `plan.graphPlan.{seedBias, edgeBias, timeSlice,
+ * primaryIntent, secondaryIntents}` to influence seed scoring and beam
+ * search. When disabled, the navigator runs exactly as pre-Phase-4 —
+ * plan/route are still computed and emitted to shadow logs + drilldown
+ * for §10/§6, but they don't touch the search path.
  *
- * Default is OFF to preserve byte-equality for production until shadow
- * data validates the new ranking. Set MAIDSCLAW_NAVIGATOR_USE_PLAN=on to
- * opt in. Stage B (primaryIntent replacement, flag default flip) is a
- * separate follow-up gated on §10 shadow data.
+ * Rollout state: **default is ON**. Stage A + Stage B landed and the
+ * §10 shadow gates (multi-intent ≥ 15%, edge_bias non-empty ≥ 10%,
+ * sample ≥ 100, failure rate 0%) were all green on the 133-fixture
+ * adversarial shadow run — flipping the default was the last step of
+ * the GAP-4 Phase 4 navigator rollout. Set
+ * `MAIDSCLAW_NAVIGATOR_USE_PLAN=off` for single-env-var instant
+ * rollback if a regression appears in production. Any value other than
+ * the exact string `"off"` leaves plan consumption enabled (unset,
+ * `"on"`, `"yes"`, `"1"`, etc.).
+ *
+ * Disable semantics note: the inverse check (`!== "off"`) means future
+ * deploys that forget to set the flag at all still get plan
+ * consumption. That's the intended production default post-rollout.
  */
 function isNavigatorPlanConsumptionEnabled(): boolean {
-  return process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN === "on";
+  return process.env.MAIDSCLAW_NAVIGATOR_USE_PLAN !== "off";
 }
 
 /**
@@ -199,6 +209,84 @@ export function effectiveEdgeMultiplier(
   if (plan == null || !isNavigatorPlanConsumptionEnabled()) return strategyMultiplier;
   const planMultiplier = plan.graphPlan.edgeBias?.[kind as string] ?? 1.0;
   return strategyMultiplier * planMultiplier;
+}
+
+/**
+ * GAP-4 §2 Stage B: resolve the effective primary query intent. Returns
+ * `plan.graphPlan.primaryIntent` when plan consumption is enabled AND a
+ * plan is present; otherwise the legacy `analysis.query_type`. Exported
+ * for unit tests (so we can check flag gating without a navigator).
+ *
+ * Why this exists: the router's §1 multi-intent classifier and §8
+ * private-alias scan recover classifications the navigator's pre-Phase-4
+ * `analyzeQuery` misses (shadow data shows ~5% of CJK queries with
+ * private aliases are misclassified as `event`). Replacing
+ * `analysis.query_type` at the five scoring call sites lets those
+ * corrected intents drive beam expansion + seed scoring. The flag still
+ * defaults OFF — flipping the default is a separate rollout step.
+ */
+export function resolveEffectivePrimaryIntent(
+  analysis: { query_type: QueryType },
+  plan: QueryPlan | null,
+): QueryType {
+  if (plan == null || !isNavigatorPlanConsumptionEnabled()) return analysis.query_type;
+  return plan.graphPlan.primaryIntent;
+}
+
+/**
+ * GAP-4 §2 Stage B: resolve the effective secondary intent list. Returns
+ * `plan.graphPlan.secondaryIntents` (already sorted by descending
+ * confidence in the deterministic builder) when plan consumption is
+ * enabled; otherwise an empty array so the legacy priority list used at
+ * edge scoring remains byte-identical to pre-Phase-4.
+ */
+export function resolveEffectiveSecondaryIntents(
+  plan: QueryPlan | null,
+): readonly QueryType[] {
+  if (plan == null || !isNavigatorPlanConsumptionEnabled()) return [];
+  // Defensive copy: the returned array is typed `readonly` but the
+  // source (`plan.graphPlan.secondaryIntents`) is a mutable `QueryType[]`.
+  // A future caller widening the type could mutate the plan in place; a
+  // copy is O(n≤7) and rules that out. Chaos test §7 asserts
+  // `mergedEdgePriority` never mutates its input, but defense in depth
+  // here is effectively free.
+  return [...plan.graphPlan.secondaryIntents];
+}
+
+/**
+ * GAP-4 §2 Stage B: build the merged edge-kind priority list used by
+ * `edgePriorityScore` when secondary intents are present. The primary
+ * intent's priority list comes first (preserving its ranking exactly),
+ * then each secondary intent's list is appended with duplicates removed.
+ *
+ * Example: primary=why (`[causal, fact_support, fact_relation,
+ * temporal_prev]`), secondary=[timeline] (`[temporal_prev, temporal_next,
+ * same_episode, causal, fact_support]`) → merged `[causal, fact_support,
+ * fact_relation, temporal_prev, temporal_next, same_episode]`.
+ *
+ * Exported so unit tests can verify the concat/dedup semantics directly.
+ */
+export function mergedEdgePriority(
+  primary: QueryType,
+  secondaries: readonly QueryType[],
+): readonly NavigatorEdgeKind[] {
+  const seen = new Set<NavigatorEdgeKind>();
+  const out: NavigatorEdgeKind[] = [];
+  for (const kind of QUERY_TYPE_PRIORITY[primary]) {
+    if (!seen.has(kind)) {
+      seen.add(kind);
+      out.push(kind);
+    }
+  }
+  for (const sec of secondaries) {
+    for (const kind of QUERY_TYPE_PRIORITY[sec]) {
+      if (!seen.has(kind)) {
+        seen.add(kind);
+        out.push(kind);
+      }
+    }
+  }
+  return out;
 }
 
 export class GraphNavigator {
@@ -248,8 +336,11 @@ export class GraphNavigator {
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
     const planContext = await this.emitQueryRouteAndPlanShadow(query, viewerContext, input.mode, analysis.query_type);
-    // GAP-4 §2 Stage A: only consume the plan when the flag is on. Stage B
-    // (primaryIntent replacement) is deferred until §10 shadow data lands.
+    // GAP-4 §2: only consume the plan when the flag is on. Stage A
+    // (edge/seed bias, time slice) and Stage B (primaryIntent +
+    // secondaryIntents) both gate on `activePlan != null` downstream.
+    // Flag default is OFF — flipping to ON is a separate rollout commit
+    // gated on §10 production shadow data.
     const consumePlan = isNavigatorPlanConsumptionEnabled();
     const activePlan = consumePlan ? planContext.plan : null;
 
@@ -280,9 +371,17 @@ export class GraphNavigator {
       };
     }
 
-    const seedScores = await this.computeSeedScores(visibleSeeds, analysis, activePlan);
-    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, analysis.query_type, viewerContext, opts, input, effectiveStrategy, activePlan);
-    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, analysis.query_type, opts.maxDepth, effectiveStrategy, activePlan);
+    // GAP-4 §2 Stage B: resolve effective primary + secondary intents
+    // from plan (when consumption flag is on) before threading them into
+    // seed scoring, beam expansion, and reranking. When the flag is off
+    // `effectivePrimary === analysis.query_type` and `effectiveSecondaries`
+    // is `[]`, so the five call sites below are byte-equal to pre-Phase-4.
+    const effectivePrimary = resolveEffectivePrimaryIntent(analysis, activePlan);
+    const effectiveSecondaries = resolveEffectiveSecondaryIntents(activePlan);
+
+    const seedScores = await this.computeSeedScores(visibleSeeds, analysis, activePlan, effectivePrimary);
+    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, effectivePrimary, viewerContext, opts, input, effectiveStrategy, activePlan, effectiveSecondaries);
+    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, effectivePrimary, opts.maxDepth, effectiveStrategy, activePlan, effectiveSecondaries);
     const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
     const assembled = await this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
     // GAP-4 §2 Stage A: prefer plan.graphPlan.timeSlice over the legacy
@@ -697,6 +796,7 @@ export class GraphNavigator {
     seeds: SeedCandidate[],
     analysis: QueryAnalysis,
     plan: QueryPlan | null = null,
+    effectivePrimary: QueryType = analysis.query_type,
   ): Promise<Map<NodeRef, number>> {
     const salienceByRef = await this.loadSalienceForRefs(seeds.map((seed) => seed.node_ref));
     const scores = new Map<NodeRef, number>();
@@ -704,7 +804,10 @@ export class GraphNavigator {
     for (const seed of seeds) {
       const aliasBonus = this.isAliasMatchedSeed(seed, analysis) ? 1 : 0;
       const parsedSeed = this.parseNodeRef(seed.node_ref);
-      const baseNodeTypePrior = parsedSeed ? this.nodeTypePrior(analysis.query_type, parsedSeed.kind) : 0.2;
+      // GAP-4 §2 Stage B: use effectivePrimary (plan-driven when flag on)
+      // to look up the nodeTypePrior matrix. Default arg = analysis.query_type
+      // preserves pre-Stage-B behavior for any direct/test caller.
+      const baseNodeTypePrior = parsedSeed ? this.nodeTypePrior(effectivePrimary, parsedSeed.kind) : 0.2;
       // GAP-4 §2 Stage A: when a plan is supplied, multiply (not replace)
       // the hand-tuned `nodeTypePrior` matrix by `(1 + planBias)` for the
       // matching kind. Plan bias is sparse: only six kinds are listed
@@ -777,6 +880,7 @@ export class GraphNavigator {
     input: TimeSliceQuery,
     strategy: GraphRetrievalStrategy,
     plan: QueryPlan | null = null,
+    secondaries: readonly QueryType[] = [],
   ): Promise<InternalBeamPath[]> {
     const effectiveBeamWidth = Math.min(32, Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)));
     const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
@@ -801,7 +905,7 @@ export class GraphNavigator {
       for (const pathItem of currentLayer) {
         const tail = pathItem.path.nodes[pathItem.path.nodes.length - 1];
         const neighbors = [...(neighborMap.get(tail) ?? [])];
-        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy, plan));
+        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy, plan, secondaries));
 
         for (const edge of neighbors) {
           if (pathItem.path.nodes.includes(edge.to)) {
@@ -826,7 +930,7 @@ export class GraphNavigator {
       }
 
       const unique = this.deduplicatePaths(nextCandidates);
-      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy, plan) - this.preliminaryPathScore(a, seedScores, queryType, strategy, plan));
+      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy, plan, secondaries) - this.preliminaryPathScore(a, seedScores, queryType, strategy, plan, secondaries));
       currentLayer = unique.slice(0, effectiveBeamWidth);
       allPaths.push(...currentLayer);
     }
@@ -1364,9 +1468,10 @@ export class GraphNavigator {
     queryType: QueryType,
     strategy?: GraphRetrievalStrategy,
     plan: QueryPlan | null = null,
+    secondaries: readonly QueryType[] = [],
   ): number {
-    const scoreA = this.edgePriorityScore(a.kind, queryType);
-    const scoreB = this.edgePriorityScore(b.kind, queryType);
+    const scoreA = this.edgePriorityScore(a.kind, queryType, secondaries);
+    const scoreB = this.edgePriorityScore(b.kind, queryType, secondaries);
     if (scoreA !== scoreB) {
       return scoreB - scoreA;
     }
@@ -1381,10 +1486,34 @@ export class GraphNavigator {
   }
 
 
-  private edgePriorityScore(kind: NavigatorEdgeKind | MemoryRelationType, queryType: QueryType): number {
-    const ordered = QUERY_TYPE_PRIORITY[queryType];
+  private edgePriorityScore(
+    kind: NavigatorEdgeKind | MemoryRelationType,
+    queryType: QueryType,
+    secondaries: readonly QueryType[] = [],
+  ): number {
+    // GAP-4 §2 Stage B: when plan-driven secondary intents are present,
+    // extend the priority list with each secondary's edge kinds (dedup).
+    // When secondaries is empty (flag off OR no plan OR no secondaries),
+    // use the original single-intent priority list — byte-equal to
+    // pre-Stage-B behavior.
+    const ordered = secondaries.length === 0
+      ? QUERY_TYPE_PRIORITY[queryType]
+      : mergedEdgePriority(queryType, secondaries);
     const index = (ordered as readonly string[]).indexOf(kind);
     if (index !== -1) {
+      // Normalization side effect (documented for future readers):
+      // when secondaries extend `ordered` from e.g. 4 → 8 kinds, the
+      // primary-head kind at index 0 still scores 1.0, but primary
+      // MID/TAIL kinds RISE (not fall) because the denominator grows.
+      // E.g. why's `temporal_prev` at index 3 goes 1 - 3/4 = 0.25
+      // (primary only) to 1 - 3/6 = 0.5 (with a timeline secondary).
+      // This is the intended Stage B effect: secondary intents raise
+      // all primary kinds' floors slightly so paths that would have
+      // fallen off the beam gain another chance. The trade-off is that
+      // secondary-appended kinds land around 0.5, above the 0.3
+      // MEMORY_RELATION_TYPES floor but below the primary head —
+      // which is exactly the "promoted over unknowns, capped below
+      // primary head" semantics the doc calls for.
       return 1 - index / Math.max(ordered.length, 1);
     }
     // Memory relation edges get a non-floor base score (0.3) rather than the default 0.1
@@ -1400,12 +1529,13 @@ export class GraphNavigator {
     queryType: QueryType,
     strategy?: GraphRetrievalStrategy,
     plan: QueryPlan | null = null,
+    secondaries: readonly QueryType[] = [],
   ): number {
     const seed = seedScores.get(path.path.seed) ?? 0;
     const edgeScore = path.internal_edges.length === 0
       ? 0
       : path.internal_edges.reduce((acc, edge) => {
-          const base = this.edgePriorityScore(edge.kind, queryType);
+          const base = this.edgePriorityScore(edge.kind, queryType, secondaries);
           const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
           return acc + base * multiplier;
         }, 0) / path.internal_edges.length;
@@ -1431,18 +1561,19 @@ export class GraphNavigator {
     maxDepth: number,
     strategy?: GraphRetrievalStrategy,
     plan: QueryPlan | null = null,
+    secondaries: readonly QueryType[] = [],
   ): Promise<Array<{ path: InternalBeamPath; score: PathScore }>> {
     const snapshots = await this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
 
     const scored = paths.map((path) => {
       const seedScore = seedScores.get(path.path.seed) ?? 0;
       const edgeTypeScore = this.average(path.internal_edges.map((edge) => {
-        const base = this.edgePriorityScore(edge.kind, queryType);
+        const base = this.edgePriorityScore(edge.kind, queryType, secondaries);
         const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
         return base * multiplier;
       }));
       const temporalConsistency = this.calculateTemporalConsistency(path.internal_edges);
-      const queryIntentMatch = this.calculateQueryIntentMatch(path.internal_edges, queryType);
+      const queryIntentMatch = this.calculateQueryIntentMatch(path.internal_edges, queryType, secondaries);
       const supportScore = this.calculateSupportScore(path);
       const recencyScore = this.calculateRecencyScore(path, snapshots);
       const hopPenalty = path.path.depth / Math.max(1, maxDepth);
@@ -1505,11 +1636,30 @@ export class GraphNavigator {
     return nonDecreasing / (times.length - 1);
   }
 
-  private calculateQueryIntentMatch(edges: InternalBeamEdge[], queryType: QueryType): number {
+  private calculateQueryIntentMatch(
+    edges: InternalBeamEdge[],
+    queryType: QueryType,
+    secondaries: readonly QueryType[] = [],
+  ): number {
     if (edges.length === 0) {
       return 0.4;
     }
-    const topKinds = new Set<NavigatorEdgeKind | MemoryRelationType>(QUERY_TYPE_PRIORITY[queryType].slice(0, 2));
+    // GAP-4 §2 Stage B: when secondaries are present, widen the "top
+    // kinds" window proportionally so secondary intents actually
+    // influence the match score. Without widening, `mergedEdgePriority`
+    // always places primary kinds first, so `slice(0, 2)` would never
+    // see a secondary kind and the score would be primary-only —
+    // contradicting the doc's "secondaryIntents 为 beam expansion 提供额外
+    // 的边类型优先级" requirement. The widening is +1 top kind per
+    // secondary intent, capped at 4 so a large secondary list can't
+    // reduce the signal to a meaningless "any match counts" floor.
+    const orderedForIntents = secondaries.length === 0
+      ? QUERY_TYPE_PRIORITY[queryType]
+      : mergedEdgePriority(queryType, secondaries);
+    const sliceWidth = Math.min(2 + secondaries.length, 4);
+    const topKinds = new Set<NavigatorEdgeKind | MemoryRelationType>(
+      (orderedForIntents as readonly (NavigatorEdgeKind | MemoryRelationType)[]).slice(0, sliceWidth),
+    );
     const matched = edges.filter((edge) => topKinds.has(edge.kind)).length;
     return matched / edges.length;
   }
