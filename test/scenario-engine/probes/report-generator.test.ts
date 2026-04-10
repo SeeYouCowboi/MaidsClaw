@@ -5,7 +5,11 @@ import type { Story } from "../dsl/story-types.js";
 import {
   generateComparisonReport,
   alignCognitionState,
+  generateJsonReport,
+  compareReports,
+  type JsonScenarioReport,
 } from "./report-generator.js";
+import type { ScenarioRunResult } from "../runner/infra.js";
 
 type MockCognitionCurrentRow = {
   cognition_key: string;
@@ -245,5 +249,156 @@ describe("report-generator per-assertion alignment drift", () => {
     expect(report).toContain("accepted");
     expect(report).toContain("tentative");
     expect(report).toContain("⚠️ drift");
+  });
+});
+
+function makeRunResult(overrides: Partial<ScenarioRunResult> = {}): ScenarioRunResult {
+  return {
+    writePath: "settlement",
+    settlementCount: 2,
+    elapsedMs: 1234,
+    errors: [],
+    perBeatStats: [
+      { beatId: "b1", entitiesCreated: 3, episodesCreated: 2, assertionsCreated: 1, evaluationsCreated: 0, errors: 0 },
+      { beatId: "b2", entitiesCreated: 1, episodesCreated: 1, assertionsCreated: 0, evaluationsCreated: 0, errors: 0 },
+    ],
+    ...overrides,
+  } as ScenarioRunResult;
+}
+
+describe("generateJsonReport", () => {
+  it("returns stable JSON with meta, summary, perBeatStats, and probes", () => {
+    const probes = [makeProbeResult("p1", 0.9, true), makeProbeResult("p2", 0.3, false)];
+    const runResult = makeRunResult();
+    const report = generateJsonReport(probes, runResult, "My Story");
+
+    expect(report.meta.storyTitle).toBe("My Story");
+    expect(report.meta.writePath).toBe("settlement");
+    expect(typeof report.meta.generatedAt).toBe("number");
+    expect(report.meta.gitSha).toBeUndefined();
+
+    expect(report.summary.totalProbes).toBe(2);
+    expect(report.summary.passed).toBe(1);
+    expect(report.summary.failed).toBe(1);
+    expect(report.summary.elapsedMs).toBe(1234);
+
+    expect(report.perBeatStats).toHaveLength(2);
+    expect(report.perBeatStats[0]!.beatId).toBe("b1");
+    expect(report.perBeatStats[0]!.entitiesCreated).toBe(3);
+
+    expect(report.probes).toHaveLength(2);
+    expect(report.probes[0]!.probe.id).toBe("p1");
+    expect(report.probes[0]!.score).toBe(0.9);
+    expect(report.probes[0]!.passed).toBe(true);
+    expect(report.probes[1]!.passed).toBe(false);
+  });
+
+  it("includes optional latencyMs when probe result has it", () => {
+    const probe = makeProbeResult("p1", 0.9, true);
+    probe.latencyMs = 42.5;
+    const report = generateJsonReport([probe], makeRunResult());
+    expect(report.probes[0]!.latencyMs).toBe(42.5);
+  });
+
+  it("omits latencyMs when probe result does not have it", () => {
+    const probe = makeProbeResult("p1", 0.9, true);
+    const report = generateJsonReport([probe], makeRunResult());
+    expect(report.probes[0]!.latencyMs).toBeUndefined();
+    expect("latencyMs" in report.probes[0]!).toBe(false);
+  });
+});
+
+describe("compareReports", () => {
+  function makeJsonReport(
+    probes: Array<{ id: string; score: number; passed: boolean; latencyMs?: number }>,
+  ): JsonScenarioReport {
+    return {
+      meta: { storyTitle: "Test", writePath: "settlement", generatedAt: Date.now() },
+      summary: {
+        totalProbes: probes.length,
+        passed: probes.filter((p) => p.passed).length,
+        failed: probes.filter((p) => !p.passed).length,
+        elapsedMs: 100,
+      },
+      perBeatStats: [],
+      probes: probes.map((p) => {
+        const entry: { probe: { id: string; query: string; retrievalMethod: string }; score: number; passed: boolean; matched: string[]; missed: string[]; latencyMs?: number } = {
+          probe: { id: p.id, query: `q-${p.id}`, retrievalMethod: "narrative_search" },
+          score: p.score,
+          passed: p.passed,
+          matched: p.passed ? ["frag"] : [],
+          missed: p.passed ? [] : ["frag"],
+        };
+        if (p.latencyMs !== undefined) entry.latencyMs = p.latencyMs;
+        return entry;
+      }),
+    };
+  }
+
+  it("classifies pass->fail status change correctly", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.9, passed: true }]);
+    const current = makeJsonReport([{ id: "p1", score: 0.3, passed: false }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.probes).toHaveLength(1);
+    expect(diff.probes[0]!.statusChange).toBe("pass->fail");
+  });
+
+  it("classifies fail->pass status change correctly", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.3, passed: false }]);
+    const current = makeJsonReport([{ id: "p1", score: 0.9, passed: true }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.probes[0]!.statusChange).toBe("fail->pass");
+  });
+
+  it("records added probe IDs", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.9, passed: true }]);
+    const current = makeJsonReport([
+      { id: "p1", score: 0.9, passed: true },
+      { id: "p2", score: 0.8, passed: true },
+    ]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.addedProbeIds).toEqual(["p2"]);
+    const addedProbe = diff.probes.find((p) => p.probeId === "p2");
+    expect(addedProbe!.statusChange).toBe("added");
+  });
+
+  it("records removed probe IDs", () => {
+    const baseline = makeJsonReport([
+      { id: "p1", score: 0.9, passed: true },
+      { id: "p2", score: 0.8, passed: true },
+    ]);
+    const current = makeJsonReport([{ id: "p1", score: 0.9, passed: true }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.removedProbeIds).toEqual(["p2"]);
+    const removedProbe = diff.probes.find((p) => p.probeId === "p2");
+    expect(removedProbe!.statusChange).toBe("removed");
+  });
+
+  it("computes scoreDelta correctly", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.5, passed: true }]);
+    const current = makeJsonReport([{ id: "p1", score: 0.8, passed: true }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.probes[0]!.scoreDelta).toBeCloseTo(0.3);
+  });
+
+  it("computes latencyDeltaMs when both reports have latency", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.9, passed: true, latencyMs: 100 }]);
+    const current = makeJsonReport([{ id: "p1", score: 0.9, passed: true, latencyMs: 150 }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.probes[0]!.latencyDeltaMs).toBe(50);
+  });
+
+  it("omits latencyDeltaMs when either report lacks latency", () => {
+    const baseline = makeJsonReport([{ id: "p1", score: 0.9, passed: true, latencyMs: 100 }]);
+    const current = makeJsonReport([{ id: "p1", score: 0.9, passed: true }]);
+    const diff = compareReports(baseline, current);
+
+    expect(diff.probes[0]!.latencyDeltaMs).toBeUndefined();
   });
 });

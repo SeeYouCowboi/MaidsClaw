@@ -535,3 +535,151 @@ export async function alignCognitionState(
 
   return alignments;
 }
+
+// --- JSON Report Contract ---
+
+export type JsonProbeResult = {
+  probe: { id: string; query: string; retrievalMethod: string };
+  score: number;
+  passed: boolean;
+  latencyMs?: number;
+  matched: string[];
+  missed: string[];
+};
+
+export type JsonScenarioReport = {
+  meta: {
+    storyTitle: string;
+    writePath: string;
+    generatedAt: number;
+    gitSha?: string;
+  };
+  summary: {
+    totalProbes: number;
+    passed: number;
+    failed: number;
+    elapsedMs: number;
+  };
+  perBeatStats: Array<{ beatId: string; entitiesCreated: number; episodesCreated: number; errors: number }>;
+  probes: JsonProbeResult[];
+};
+
+export function generateJsonReport(
+  probeResults: ProbeResult[],
+  runResult: ScenarioRunResult,
+  storyTitle?: string,
+): JsonScenarioReport {
+  const passed = probeResults.filter((r) => r.passed).length;
+  const failed = probeResults.length - passed;
+
+  const probes: JsonProbeResult[] = probeResults.map((r) => {
+    const entry: JsonProbeResult = {
+      probe: {
+        id: r.probe.id,
+        query: r.probe.query,
+        retrievalMethod: r.probe.retrievalMethod,
+      },
+      score: r.score,
+      passed: r.passed,
+      matched: r.matched,
+      missed: r.missed,
+    };
+    if (r.latencyMs !== undefined) {
+      entry.latencyMs = r.latencyMs;
+    }
+    return entry;
+  });
+
+  return {
+    meta: {
+      storyTitle: storyTitle ?? "Untitled Scenario",
+      writePath: runResult.writePath,
+      generatedAt: Date.now(),
+    },
+    summary: {
+      totalProbes: probeResults.length,
+      passed,
+      failed,
+      elapsedMs: runResult.elapsedMs,
+    },
+    perBeatStats: runResult.perBeatStats.map((b) => ({
+      beatId: b.beatId,
+      entitiesCreated: b.entitiesCreated,
+      episodesCreated: b.episodesCreated,
+      errors: b.errors,
+    })),
+    probes,
+  };
+}
+
+// --- Report Diff Contract ---
+
+export type ProbeDiff = {
+  probeId: string;
+  statusChange: "pass->fail" | "fail->pass" | "unchanged-pass" | "unchanged-fail" | "added" | "removed";
+  scoreDelta: number;
+  latencyDeltaMs?: number;
+};
+
+export type ReportDiff = {
+  probes: ProbeDiff[];
+  addedProbeIds: string[];
+  removedProbeIds: string[];
+};
+
+export function compareReports(
+  baseline: JsonScenarioReport,
+  current: JsonScenarioReport,
+): ReportDiff {
+  const baselineMap = new Map<string, JsonProbeResult>();
+  for (const p of baseline.probes) baselineMap.set(p.probe.id, p);
+
+  const currentMap = new Map<string, JsonProbeResult>();
+  for (const p of current.probes) currentMap.set(p.probe.id, p);
+
+  const allIds = new Set([...baselineMap.keys(), ...currentMap.keys()]);
+  const probes: ProbeDiff[] = [];
+  const addedProbeIds: string[] = [];
+  const removedProbeIds: string[] = [];
+
+  for (const id of allIds) {
+    const base = baselineMap.get(id);
+    const curr = currentMap.get(id);
+
+    if (base && curr) {
+      let statusChange: ProbeDiff["statusChange"];
+      if (base.passed && !curr.passed) statusChange = "pass->fail";
+      else if (!base.passed && curr.passed) statusChange = "fail->pass";
+      else if (curr.passed) statusChange = "unchanged-pass";
+      else statusChange = "unchanged-fail";
+
+      const diff: ProbeDiff = {
+        probeId: id,
+        statusChange,
+        scoreDelta: curr.score - base.score,
+      };
+
+      if (base.latencyMs !== undefined && curr.latencyMs !== undefined) {
+        diff.latencyDeltaMs = curr.latencyMs - base.latencyMs;
+      }
+
+      probes.push(diff);
+    } else if (curr && !base) {
+      addedProbeIds.push(id);
+      probes.push({
+        probeId: id,
+        statusChange: "added",
+        scoreDelta: curr.score,
+      });
+    } else if (base && !curr) {
+      removedProbeIds.push(id);
+      probes.push({
+        probeId: id,
+        statusChange: "removed",
+        scoreDelta: -base.score,
+      });
+    }
+  }
+
+  return { probes, addedProbeIds, removedProbeIds };
+}

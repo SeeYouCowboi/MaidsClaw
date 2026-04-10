@@ -320,8 +320,11 @@ export async function executeProbes(
   const results: ProbeResult[] = [];
 
   for (const probe of story.probes) {
+    const start = performance.now();
     const hits = await executeSingleProbe(probe, handle);
+    const latencyMs = performance.now() - start;
     const result = matchProbeResults(probe, hits, { mode });
+    result.latencyMs = latencyMs;
     results.push(result);
   }
 

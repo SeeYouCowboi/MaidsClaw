@@ -22,6 +22,7 @@ export type ProbeResult = {
   score: number;
   passed: boolean;
   conflictFieldResults?: { field: string; expected: boolean; actual: boolean }[];
+  latencyMs?: number; // populated by probe-executor when timing is available
 };
 
 export type ScenarioProbeReport = {
