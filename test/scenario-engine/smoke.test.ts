@@ -5,7 +5,7 @@ import { runScenario } from "./runner/orchestrator.js";
 import { executeProbes } from "./probes/probe-executor.js";
 import { assertAllProbesPass } from "./probes/probe-assertions.js";
 import { matchProbeResults } from "./probes/probe-matcher.js";
-import { generateJsonReport, saveJsonReport } from "./probes/report-generator.js";
+import { generateJsonReport, generateReport, saveJsonReport, saveReport } from "./probes/report-generator.js";
 import { loadCachedToolCalls } from "./generators/scenario-cache.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "./constants.js";
 import type { ScenarioHandleExtended } from "./runner/orchestrator.js";
@@ -114,6 +114,8 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
   });
 
   it("json report sibling saved alongside markdown", () => {
+    const report = generateReport(probeResults, handle.runResult, miniSample.title);
+    saveReport(report, miniSample.id, "settlement");
     const jsonReport = generateJsonReport(probeResults, handle.runResult, miniSample.title);
     saveJsonReport(JSON.stringify(jsonReport, null, 2), miniSample.id, "settlement");
   });

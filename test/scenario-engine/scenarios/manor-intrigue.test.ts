@@ -5,6 +5,7 @@ import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import type { ProbeResult } from "../probes/probe-types.js";
 import {
+  compareReports,
   generateComparisonReport,
   generateJsonReport,
   generateReport,
@@ -60,6 +61,15 @@ describe.skipIf(skipPgTests || !hasManorIntrigueCache)("Manor Intrigue Full Scen
         { scripted: handle.infra, settlement: handle.settlementInfra },
       );
       saveReport(comparison, manorIntrigue.id, "comparison");
+
+      const scriptedJson = generateJsonReport(probeResults, handle.runResult, manorIntrigue.title);
+      const settlementJson = generateJsonReport(
+        settlementProbeResults,
+        { ...handle.runResult, writePath: "settlement" },
+        manorIntrigue.title,
+      );
+      const diff = compareReports(settlementJson, scriptedJson);
+      saveJsonReport(JSON.stringify(diff, null, 2), manorIntrigue.id, "comparison");
     }
   }, 30 * 60 * 1000);
 
