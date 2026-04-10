@@ -46,6 +46,7 @@ export type RunOptions = {
   phase?: "full" | "resume" | "probe_only";
   compareWithSettlement?: boolean;
   keepSchema?: boolean;
+  debug?: boolean;
 };
 
 export type ScenarioInfra = {

@@ -14,6 +14,14 @@ export {
 } from "./orchestrator.js";
 
 export {
+  type ScenarioDebugger,
+  type GraphSnapshot,
+  type IndexSnapshot,
+  type ProbeHitsSnapshot,
+  createScenarioDebugger,
+} from "./debugger.js";
+
+export {
   type GraphOrganizerStepResult,
   runGraphOrganizer,
 } from "./graph-organizer-step.js";

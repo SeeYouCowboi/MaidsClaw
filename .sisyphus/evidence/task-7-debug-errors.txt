@@ -1,0 +1,8 @@
+$ bun test "test/scenario-engine/runner/debugger.test.ts" --test-name-pattern "throws containing Unknown"
+bun test v1.3.10 (30e609e0)
+
+  3 pass
+  3 filtered out
+  0 fail
+  3 expect() calls
+Ran 3 tests across 1 file. [70.00ms]

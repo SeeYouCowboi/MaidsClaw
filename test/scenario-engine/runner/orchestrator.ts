@@ -36,6 +36,10 @@ import type {
   ToolCallAssertionResult,
 } from "../probes/scenario-assertion-types.js";
 import type { PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
+import {
+  createScenarioDebugger,
+  type ScenarioDebugger,
+} from "./debugger.js";
 
 export type ScenarioHandleExtended = ScenarioHandle & {
   settlementInfra?: ScenarioInfra;
@@ -43,6 +47,7 @@ export type ScenarioHandleExtended = ScenarioHandle & {
   toolCallAssertionResults?: ToolCallAssertionResult[];
   chainResults?: ReasoningChainResult[];
   diagnosisResults?: Map<string, DiagnosisResult[]>;
+  debugger?: ScenarioDebugger;
   /** GAP-4: plan surface / drilldown shadow probe results. */
   planSurfaceResults?: PlanSurfaceProbeResult[];
 };
@@ -86,12 +91,17 @@ export async function runScenario(
   story: Story,
   options?: RunOptions,
 ): Promise<ScenarioHandleExtended> {
+  const debugEnabled = options?.debug ?? (process.env.SCENARIO_DEBUG === "1");
+
   const resolvedOptions: RunOptions = {
     writePath: options?.writePath ?? "settlement",
     phase: options?.phase ?? "full",
     compareWithSettlement: options?.compareWithSettlement ?? false,
     keepSchema: options?.keepSchema ?? true,
+    debug: debugEnabled,
   };
+
+  const debuggerCollector = debugEnabled ? createScenarioDebugger() : undefined;
 
   const startMs = performance.now();
 
@@ -120,6 +130,7 @@ export async function runScenario(
       toolCallAssertionResults: [],
       chainResults,
       diagnosisResults: new Map<string, DiagnosisResult[]>(),
+      ...(debuggerCollector ? { debugger: debuggerCollector } : {}),
     };
   }
 
@@ -186,6 +197,7 @@ export async function runScenario(
     toolCallAssertionResults,
     chainResults,
     diagnosisResults: new Map<string, DiagnosisResult[]>(),
+    ...(debuggerCollector ? { debugger: debuggerCollector } : {}),
   };
 }
 
