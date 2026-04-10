@@ -6,7 +6,9 @@ import { executeProbes } from "../probes/probe-executor.js";
 import type { ProbeResult } from "../probes/probe-types.js";
 import {
   generateComparisonReport,
+  generateJsonReport,
   generateReport,
+  saveJsonReport,
   saveReport,
 } from "../probes/report-generator.js";
 import { loadCachedToolCalls } from "../generators/scenario-cache.js";
@@ -36,6 +38,9 @@ describe.skipIf(skipPgTests || !hasManorIntrigueCache)("Manor Intrigue Full Scen
       manorIntrigue.title,
     );
     saveReport(report, manorIntrigue.id, "scripted");
+
+    const jsonReport = generateJsonReport(probeResults, handle.runResult, manorIntrigue.title);
+    saveJsonReport(JSON.stringify(jsonReport, null, 2), manorIntrigue.id, "scripted");
 
     if (handle.settlementInfra) {
       const settlementProbeResults = await executeProbes(manorIntrigue, {

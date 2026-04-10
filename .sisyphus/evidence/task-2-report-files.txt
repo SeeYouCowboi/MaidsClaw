@@ -1,0 +1,40 @@
+Task 2 Evidence: JSON Report Siblings
+
+=== Test Run: report-generator.test.ts ===
+bun test v1.3.10 — 19 pass, 0 fail, 57 expect() calls
+
+=== saveJsonReport() added to report-generator.ts ===
+Location: line 213 (mirrors saveReport() at line 197)
+Signature: saveJsonReport(content: string, storyId: string, suffix: string): void
+File pattern: ${storyId}-${suffix}-report.json
+
+=== Persistence test in report-generator.test.ts ===
+describe("saveJsonReport persistence")
+  - "writes JSON file to reports/ directory"
+    → calls saveJsonReport(), asserts existsSync() returns true
+  - "written file contains valid JSON matching input"
+    → generates JSON report, saves, reads back, asserts meta.storyTitle and probes.length
+
+=== Test files updated to save JSON siblings ===
+1. test/scenario-engine/smoke.test.ts
+   - Settlement describe: added generateJsonReport + saveJsonReport after probeResults
+   - Scripted describe: added generateJsonReport + saveJsonReport after probeResults
+
+2. test/scenario-engine/scenarios/invisible-man.test.ts
+   - Added saveJsonReport(JSON.stringify(jsonReport, null, 2), invisibleMan.id, "settlement")
+
+3. test/scenario-engine/scenarios/island-suspicion.test.ts
+   - Added saveJsonReport(JSON.stringify(jsonReport, null, 2), islandSuspicion.id, "settlement")
+
+4. test/scenario-engine/scenarios/manor-intrigue.test.ts
+   - Added saveJsonReport(JSON.stringify(jsonReport, null, 2), manorIntrigue.id, "scripted")
+
+5. test/scenario-engine/scenarios/invisible-man-live.test.ts
+   - Added saveJsonReport(JSON.stringify(jsonReport, null, 2), invisibleMan.id, "live")
+
+6. test/scenario-engine/scenarios/live-mini-sample.test.ts
+   - Added saveJsonReport(JSON.stringify(jsonReport, null, 2), miniSample.id, "live")
+
+=== Full suite run (6 files) ===
+bun test — 41 pass, 37 skip, 0 fail, 135 expect() calls
+Ran 78 tests across 6 files. [26.96s]

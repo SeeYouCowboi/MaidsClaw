@@ -209,6 +209,23 @@ export function saveReport(
 }
 
 /**
+ * Save a JSON report string to disk under test/scenario-engine/reports/.
+ */
+export function saveJsonReport(
+  content: string,
+  storyId: string,
+  suffix: string,
+): void {
+  const reportsDir = join(
+    dirname(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"))),
+    "reports",
+  );
+  mkdirSync(reportsDir, { recursive: true });
+  const filePath = join(reportsDir, `${storyId}-${suffix}-report.json`);
+  writeFileSync(filePath, content, "utf-8");
+}
+
+/**
  * Generate a comparison report between scripted (thinker actual) and settlement (DSL expected) probe results.
  * When infra references are provided, includes Cognition Alignment and Extraction Gaps/Surprises sections.
  */

@@ -5,6 +5,7 @@ import { runScenario } from "./runner/orchestrator.js";
 import { executeProbes } from "./probes/probe-executor.js";
 import { assertAllProbesPass } from "./probes/probe-assertions.js";
 import { matchProbeResults } from "./probes/probe-matcher.js";
+import { generateJsonReport, saveJsonReport } from "./probes/report-generator.js";
 import { loadCachedToolCalls } from "./generators/scenario-cache.js";
 import { SCENARIO_DEFAULT_AGENT_ID } from "./constants.js";
 import type { ScenarioHandleExtended } from "./runner/orchestrator.js";
@@ -111,6 +112,11 @@ describe.skipIf(skipPgTests)("Smoke Test - settlement writePath", () => {
     expect(trivialResult.passed).toBe(true);
     expect(trivialResult.score).toBe(1.0);
   });
+
+  it("json report sibling saved alongside markdown", () => {
+    const jsonReport = generateJsonReport(probeResults, handle.runResult, miniSample.title);
+    saveJsonReport(JSON.stringify(jsonReport, null, 2), miniSample.id, "settlement");
+  });
 });
 
 // Scripted path requires cached tool calls from a prior live run.
@@ -150,6 +156,11 @@ describe.skipIf(skipPgTests || !hasMiniSampleCache)(
 
     it("all probes pass", () => {
       assertAllProbesPass(probeResults);
+    });
+
+    it("json report sibling saved for scripted path", () => {
+      const jsonReport = generateJsonReport(probeResults, handle.runResult, miniSample.title);
+      saveJsonReport(JSON.stringify(jsonReport, null, 2), miniSample.id, "scripted");
     });
   },
 );

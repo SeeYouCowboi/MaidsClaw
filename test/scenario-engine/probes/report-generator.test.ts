@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, afterAll } from "bun:test";
+import { existsSync, unlinkSync } from "node:fs";
 import type { ScenarioInfra } from "../runner/infra.js";
 import type { ProbeResult } from "./probe-types.js";
 import type { Story } from "../dsl/story-types.js";
@@ -7,6 +8,7 @@ import {
   alignCognitionState,
   generateJsonReport,
   compareReports,
+  saveJsonReport,
   type JsonScenarioReport,
 } from "./report-generator.js";
 import type { ScenarioRunResult } from "../runner/infra.js";
@@ -400,5 +402,79 @@ describe("compareReports", () => {
     const diff = compareReports(baseline, current);
 
     expect(diff.probes[0]!.latencyDeltaMs).toBeUndefined();
+  });
+});
+
+describe("saveJsonReport persistence", () => {
+  const testStoryId = "__test-persistence__";
+  const testSuffix = "unit";
+  const expectedPath = `test/scenario-engine/reports/${testStoryId}-${testSuffix}-report.json`;
+
+  afterAll(() => {
+    if (existsSync(expectedPath)) unlinkSync(expectedPath);
+  });
+
+  it("writes JSON file to reports/ directory", () => {
+    const content = JSON.stringify({ test: true }, null, 2);
+    saveJsonReport(content, testStoryId, testSuffix);
+    expect(existsSync(expectedPath)).toBe(true);
+  });
+
+  it("written file contains valid JSON matching input", () => {
+    const probes = [makeProbeResult("p1", 0.9, true)];
+    const runResult = makeRunResult();
+    const report = generateJsonReport(probes, runResult, "Persistence Test");
+    const serialized = JSON.stringify(report, null, 2);
+    saveJsonReport(serialized, testStoryId, testSuffix);
+
+    const { readFileSync } = require("node:fs");
+    const onDisk = JSON.parse(readFileSync(expectedPath, "utf-8"));
+    expect(onDisk.meta.storyTitle).toBe("Persistence Test");
+    expect(onDisk.probes).toHaveLength(1);
+  });
+});
+
+describe("compareReports explicit baseline comparison", () => {
+  it("detects regression and improvement across probes in a single diff", () => {
+    const baseline: JsonScenarioReport = {
+      meta: { storyTitle: "Baseline", writePath: "settlement", generatedAt: 1000 },
+      summary: { totalProbes: 3, passed: 2, failed: 1, elapsedMs: 500 },
+      perBeatStats: [{ beatId: "b1", entitiesCreated: 2, episodesCreated: 1, errors: 0 }],
+      probes: [
+        { probe: { id: "recall-clue", query: "q1", retrievalMethod: "narrative_search" }, score: 0.9, passed: true, matched: ["a"], missed: [] },
+        { probe: { id: "cognition-stance", query: "q2", retrievalMethod: "cognition_search" }, score: 0.4, passed: false, matched: [], missed: ["b"] },
+        { probe: { id: "removed-probe", query: "q3", retrievalMethod: "narrative_search" }, score: 0.7, passed: true, matched: ["c"], missed: [] },
+      ],
+    };
+
+    const current: JsonScenarioReport = {
+      meta: { storyTitle: "Current", writePath: "settlement", generatedAt: 2000 },
+      summary: { totalProbes: 3, passed: 2, failed: 1, elapsedMs: 480 },
+      perBeatStats: [{ beatId: "b1", entitiesCreated: 2, episodesCreated: 1, errors: 0 }],
+      probes: [
+        { probe: { id: "recall-clue", query: "q1", retrievalMethod: "narrative_search" }, score: 0.5, passed: false, matched: [], missed: ["a"] },
+        { probe: { id: "cognition-stance", query: "q2", retrievalMethod: "cognition_search" }, score: 0.85, passed: true, matched: ["b"], missed: [] },
+        { probe: { id: "new-probe", query: "q4", retrievalMethod: "narrative_search" }, score: 0.95, passed: true, matched: ["d"], missed: [] },
+      ],
+    };
+
+    const diff = compareReports(baseline, current);
+
+    const recallDiff = diff.probes.find((p) => p.probeId === "recall-clue");
+    expect(recallDiff!.statusChange).toBe("pass->fail");
+    expect(recallDiff!.scoreDelta).toBeCloseTo(-0.4);
+
+    const cognitionDiff = diff.probes.find((p) => p.probeId === "cognition-stance");
+    expect(cognitionDiff!.statusChange).toBe("fail->pass");
+    expect(cognitionDiff!.scoreDelta).toBeCloseTo(0.45);
+
+    expect(diff.addedProbeIds).toEqual(["new-probe"]);
+    expect(diff.removedProbeIds).toEqual(["removed-probe"]);
+
+    const addedDiff = diff.probes.find((p) => p.probeId === "new-probe");
+    expect(addedDiff!.statusChange).toBe("added");
+
+    const removedDiff = diff.probes.find((p) => p.probeId === "removed-probe");
+    expect(removedDiff!.statusChange).toBe("removed");
   });
 });

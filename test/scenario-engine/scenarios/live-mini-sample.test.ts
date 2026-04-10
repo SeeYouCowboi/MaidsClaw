@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { executeProbes } from "../probes/probe-executor.js";
-import { generateReport, saveReport } from "../probes/report-generator.js";
+import { generateJsonReport, generateReport, saveJsonReport, saveReport } from "../probes/report-generator.js";
 import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
@@ -40,6 +40,9 @@ describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Live Pa
       miniSample.title,
     );
     saveReport(report, miniSample.id, "live");
+
+    const jsonReport = generateJsonReport(probeResults, handle.runResult, miniSample.title);
+    saveJsonReport(JSON.stringify(jsonReport, null, 2), miniSample.id, "live");
   }, 30 * 60 * 1000); // 30 min — real LLM calls
 
   it("all beats processed without errors", () => {

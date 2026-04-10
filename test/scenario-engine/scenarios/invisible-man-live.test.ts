@@ -4,7 +4,7 @@ import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executePlanSurfaceProbes, type PlanSurfaceProbeResult } from "../probes/plan-surface-probe.js";
-import { generateReport, saveReport } from "../probes/report-generator.js";
+import { generateJsonReport, generateReport, saveJsonReport, saveReport } from "../probes/report-generator.js";
 import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
@@ -64,6 +64,9 @@ describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Invisib
       planSurfaceResults,
     );
     saveReport(report, invisibleMan.id, "live");
+
+    const jsonReport = generateJsonReport(probeResults, handle.runResult, invisibleMan.title);
+    saveJsonReport(JSON.stringify(jsonReport, null, 2), invisibleMan.id, "live");
   }, 60 * 60 * 1000); // 60 min — reasoning models (Kimi K2.5) need extra headroom
 
   it("all 26 beats processed without errors", () => {

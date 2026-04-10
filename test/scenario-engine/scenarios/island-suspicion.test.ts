@@ -3,7 +3,7 @@ import { skipPgTests } from "../../helpers/pg-test-utils.js";
 import { assertAllProbesPass } from "../probes/probe-assertions.js";
 import { executeProbes } from "../probes/probe-executor.js";
 import type { ProbeResult } from "../probes/probe-types.js";
-import { generateReport, saveReport } from "../probes/report-generator.js";
+import { generateJsonReport, generateReport, saveJsonReport, saveReport } from "../probes/report-generator.js";
 import { generateEmbeddings } from "../runner/embedding-step.js";
 import { configureEmbeddingSearch } from "../runner/infra.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
@@ -49,6 +49,9 @@ describe.skipIf(skipPgTests)("Island Suspicion — Settlement Path", () => {
       islandSuspicion.title,
     );
     saveReport(report, islandSuspicion.id, "settlement");
+
+    const jsonReport = generateJsonReport(probeResults, handle.runResult, islandSuspicion.title);
+    saveJsonReport(JSON.stringify(jsonReport, null, 2), islandSuspicion.id, "settlement");
   }, 10 * 60 * 1000);
 
   it("all 35 beats processed without errors", () => {

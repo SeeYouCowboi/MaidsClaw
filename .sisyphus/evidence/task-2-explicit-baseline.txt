@@ -1,0 +1,23 @@
+Task 2 Evidence: Explicit Baseline Comparison
+
+=== Test: compareReports explicit baseline comparison ===
+describe("compareReports explicit baseline comparison")
+  it("detects regression and improvement across probes in a single diff")
+
+Two in-memory JsonScenarioReport objects constructed:
+  baseline: 3 probes [recall-clue(pass), cognition-stance(fail), removed-probe(pass)]
+  current:  3 probes [recall-clue(fail), cognition-stance(pass), new-probe(pass)]
+
+Assertions verified:
+  - recall-clue:      statusChange = "pass->fail", scoreDelta ≈ -0.4
+  - cognition-stance:  statusChange = "fail->pass", scoreDelta ≈ 0.45
+  - addedProbeIds     = ["new-probe"]
+  - removedProbeIds   = ["removed-probe"]
+  - new-probe:        statusChange = "added"
+  - removed-probe:    statusChange = "removed"
+
+Result: PASS (part of 19 passing tests in report-generator.test.ts)
+
+=== No disk-based baseline auto-discovery ===
+Both report objects are constructed entirely in memory.
+compareReports() is called with explicit parameters — no file I/O.
