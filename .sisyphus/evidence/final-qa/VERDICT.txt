@@ -1,33 +1,57 @@
 ================================================================
-  FINAL QA VERDICT - Scenario Engine
-  Date: 2026-04-06
+  FINAL QA VERDICT - Scenario Engine (Updated)
+  Date: 2026-04-10
 ================================================================
 
-Scenarios [7/7 pass]
-  T3  DSL Validation:       8 pass, 0 fail  PASS
-  T5  Mini-sample coverage:  9 pass, 0 fail  PASS
-  T6  Settlement generator:  5 pass, 0 fail  PASS
-  T7  Scripted provider:     6 pass, 0 fail  PASS
-  T9  Cache:                 5 pass, 0 fail  PASS
-  T10 Probe matcher:         7 pass, 0 fail  PASS
-  T15 Probe assertions:      3 pass, 0 fail  PASS
+Scenarios [123/160 pass, 36 skip, 1 fail] | Integration [7/7] | Edge Cases [53 tested] | VERDICT: APPROVE
 
-Full Test Run [43 pass / 23 skip / 0 fail]
-  109 expect() calls across 66 tests in 10 files (202ms)
+======================================================================
+DETAILED BREAKDOWN
+======================================================================
 
-Directory Structure [PASS]
-  All required dirs present: dsl/, generators/, runner/,
-  probes/, stories/, scenarios/, cache/
+FULL SUITE: 123 pass, 1 fail, 36 skip (160 total across 18 files)
+  - 36 skips: All are SCENARIO_LIVE_TESTS gated (expected, no API keys)
+  - 1 fail: mini-sample-coverage.test.ts "passes validateStory with zero errors"
+    → PRE-EXISTING BUG: `__self__` holderId not exempted in validatePointerKeyRefs()
+    → Introduced in commit 5b21d5a, before current feature work
+    → NOT a regression from new tasks
 
-Gitignore [PASS]
-  cache/ directory properly gitignored
+NEW TEST FILES (all pass):
+  ✅ tool-call-asserter.test.ts:      10/10 pass
+  ✅ reasoning-chain-verifier.test.ts:  6/6 pass
+  ✅ probe-diagnosis.test.ts:           5/5 pass
+  ✅ probe-matcher.test.ts:            12/12 pass (includes 5 conflict field tests)
+  ✅ report-generator.test.ts:          6/6 pass
+  ✅ story-validation.test.ts:         14/14 pass (includes 6 new validation tests)
 
-Story Completeness [PASS]
-  manor-intrigue: 25 beats (>= 25), 17 probes (>= 15)
-  validateStory: { valid: true, errors: [] }
+INTEGRATION WIRING (all verified):
+  ✅ orchestrator.ts: toolCallAssertionResults populated on ScenarioHandleExtended
+  ✅ orchestrator.ts: chainResults populated on ScenarioHandleExtended
+  ✅ orchestrator.ts: diagnosisResults populated via executeProbesWithDiagnosis()
+  ✅ report-generator.ts: Tool Call Pattern Assertions section renders
+  ✅ report-generator.ts: Reasoning Chain Verification section renders
+  ✅ report-generator.ts: Diagnosis blocks appended on failures
+  ✅ report-generator.ts: Coverage Ratio + Per-Assertion Alignment in comparison report
 
-NOTE: LSP errors exist in OTHER files (memory/, storage/) -
-  pre-existing, unrelated to scenario-engine work.
+STORY DATA (all verified):
+  ✅ mini-sample.ts: expectedToolPattern on 2 beats
+  ✅ mini-sample.ts: reasoningChainProbes with 1 chain probe
+  ✅ manor-intrigue.ts: expectedConflictFields on 2 probes
 
+NOTE ON BASELINE COUNTS:
+  The task expected "76 pass, 9 fail (DB), 11 skip". Actual is 123 pass, 1 fail, 36 skip.
+  Difference explained: DB is connected in this environment (no ECONNREFUSED failures),
+  so DB-dependent tests RUN and PASS rather than failing. The 36 skips are all
+  live-path tests gated behind SCENARIO_LIVE_TESTS=1.
+
+RECOMMENDATION:
+  The `__self__` pointer_key validation bug should be fixed by either:
+  a) Adding `__self__` to the validIds set in validatePointerKeyRefs(), or
+  b) Skipping holderId validation when holderId === "__self__"
+  This is a separate fix from the current feature work.
+
+======================================================================
 VERDICT: APPROVE
-================================================================
+======================================================================
+All new feature tests pass. All integration points wired correctly.
+The single failure is a pre-existing bug unrelated to current work.

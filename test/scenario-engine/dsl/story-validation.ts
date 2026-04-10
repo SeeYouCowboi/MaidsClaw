@@ -188,6 +188,7 @@ export function validateLogicEdgeTargets(beats: StoryBeat[]): ValidationError[] 
 export function validatePointerKeyRefs(story: Story): ValidationError[] {
   const errors: ValidationError[] = [];
   const validIds = new Set<string>([
+    "__self__",
     ...(story.characters?.map((c) => c.id) ?? []),
     ...(story.locations?.map((l) => l.id) ?? []),
     ...(story.clues?.map((c) => c.id) ?? []),

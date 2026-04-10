@@ -1,0 +1,6 @@
+warning: in the working copy of 'test/scenario-engine/probes/report-generator.test.ts', LF will be replaced by CRLF the next time Git touches it
+ test/scenario-engine/probes/probe-executor.ts      |   3 +
+ test/scenario-engine/probes/probe-types.ts         |   1 +
+ .../probes/report-generator.test.ts                | 155 +++++++++++++++++++++
+ test/scenario-engine/probes/report-generator.ts    | 148 ++++++++++++++++++++
+ 4 files changed, 307 insertions(+)

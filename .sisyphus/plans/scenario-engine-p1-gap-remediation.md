@@ -21,6 +21,7 @@ Provide an executable plan for the scenario-engine gaps listed as P1-4 through P
 - Existing router/unit coverage in `test/memory/query-router.test.ts`, `test/memory/query-plan-builder.test.ts`, and `test/memory/retrieval-orchestrator-plan.test.ts` is reference material, not work to duplicate.
 - Default test strategy is `tests-after` using `bun test`; every task still requires agent-executed happy/error QA.
 - No `.github/workflows/`, artifact upload implementation, dashboards, or unrelated P0/P2 work are in scope.
+- P0-1 is already merged into the working baseline; for `orchestrator.ts`, `report-generator.ts`, `infra.ts`, and `story-types.ts`, treat symbol names as canonical if line offsets drift again.
 
 ### Metis Review (gaps addressed)
 - Preserve the current markdown save path from `test/scenario-engine/probes/report-generator.ts:197` and add JSON siblings instead of renaming reports.
@@ -107,7 +108,7 @@ Wave 2: wiring/integration tasks
 > Implementation + test = one task.
 > Every task includes exact file targets, acceptance criteria, and QA scenarios.
 
-- [ ] 1. Add JSON report contract and diff semantics
+- [x] 1. Add JSON report contract and diff semantics
 
   **What to do**: Extend `test/scenario-engine/probes/probe-types.ts` so `ProbeResult` carries additive `latencyMs?: number`, then time each probe execution in `test/scenario-engine/probes/probe-executor.ts`. In `test/scenario-engine/probes/report-generator.ts`, add a JSON report type plus `generateJsonReport()` and `compareReports(baseline, current)`. JSON comparison must key by `probe.id`, ignore volatile `meta.generatedAt`/`meta.gitSha` fields, compute `scoreDelta` and `latencyDeltaMs`, and classify `statusChange` as `pass->fail`, `fail->pass`, `added`, or `removed`.
   **Must NOT do**: Do not rename `saveReport()` or change existing markdown text/filenames. Do not auto-read a baseline from disk. Do not make latency mandatory when a retrieval method cannot supply it.
@@ -151,7 +152,7 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `feat(scenario-engine): add json report contracts and probe drift diffing` | Files: `test/scenario-engine/probes/probe-types.ts`, `test/scenario-engine/probes/probe-executor.ts`, `test/scenario-engine/probes/report-generator.ts`, `test/scenario-engine/probes/report-generator.test.ts`
 
-- [ ] 2. Persist JSON report siblings and wire explicit comparisons
+- [x] 2. Persist JSON report siblings and wire explicit comparisons
 
   **What to do**: In `test/scenario-engine/probes/report-generator.ts`, add a `saveJsonReport()` helper that writes `test/scenario-engine/reports/<storyId>-<suffix>-report.json` beside the existing markdown file. Update the exact report-producing tests that already save markdown reports to save JSON siblings too: `test/scenario-engine/smoke.test.ts`, `test/scenario-engine/scenarios/invisible-man.test.ts`, `test/scenario-engine/scenarios/island-suspicion.test.ts`, `test/scenario-engine/scenarios/manor-intrigue.test.ts`, `test/scenario-engine/scenarios/invisible-man-live.test.ts`, and `test/scenario-engine/scenarios/live-mini-sample.test.ts`. Add one explicit comparison path in tests: generate settlement/scripted or settlement/live JSON reports in the same test, feed them to `compareReports()`, and assert the diff object rather than scanning files implicitly.
   **Must NOT do**: Do not add a workflow, artifact upload, or automatic “baseline path” resolver. Do not stop writing markdown files.
@@ -164,7 +165,8 @@ Wave 2: wiring/integration tasks
   **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: F1-F4 | Blocked By: T1
 
   **References**:
-  - Pattern: `test/scenario-engine/probes/report-generator.ts:197` - report save helper and filename stem.
+  - Pattern: `test/scenario-engine/probes/report-generator.ts:197` - `saveReport()` remains the markdown save helper and filename stem source.
+  - Pattern: `test/scenario-engine/probes/report-generator.ts:38` - `generateReport()` already ends with optional `planSurfaceResults?`; JSON persistence must not disturb that trailing argument pattern.
   - Pattern: `test/scenario-engine/scenarios/manor-intrigue.test.ts` - existing report-writing test pattern to preserve.
   - Pattern: `test/scenario-engine/smoke.test.ts` - existing scenario smoke flow suitable for explicit comparison assertions.
   - Test: `test/scenario-engine/probes/report-generator.test.ts` - persistence assertions.
@@ -194,7 +196,7 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `test(scenario-engine): persist json report siblings for scenario outputs` | Files: `test/scenario-engine/probes/report-generator.ts`, `test/scenario-engine/smoke.test.ts`, `test/scenario-engine/scenarios/invisible-man.test.ts`, `test/scenario-engine/scenarios/island-suspicion.test.ts`, `test/scenario-engine/scenarios/manor-intrigue.test.ts`, `test/scenario-engine/scenarios/invisible-man-live.test.ts`, `test/scenario-engine/scenarios/live-mini-sample.test.ts`
 
-- [ ] 3. Create QueryRouter scenario story and case definitions
+- [x] 3. Create QueryRouter scenario story and case definitions
 
   **What to do**: Add `test/scenario-engine/stories/query-router.ts` and export it from `test/scenario-engine/stories/index.ts`. The file should export both `queryRouterStory` and a small `queryRouterCases` descriptor array used by tests. Seed the story with enough entities, aliases, episodes, and assertions to support three fixed queries: (1) CJK alias substring resolution with one character having 3+ aliases, (2) a multi-intent query that should produce a stable `primaryIntent` plus ordered `secondaryIntents`, and (3) a budget-reallocation query whose router/plan output is deterministic across repeated execution. Keep all query texts time-neutral so they do not trigger `Date.now()`-derived time windows.
   **Must NOT do**: Do not copy router math/assertions from `test/memory/*.test.ts`. Do not add unrelated probe types or P0 plan-surface work. Do not use ambiguous “recently/today/last night” query wording.
@@ -209,7 +211,8 @@ Wave 2: wiring/integration tasks
   **References**:
   - Pattern: `test/scenario-engine/stories/mini-sample.ts` - minimal story shape for a compact scenario fixture.
   - Pattern: `test/scenario-engine/stories/index.ts` - story export registration.
-  - API/Type: `test/scenario-engine/dsl/story-types.ts:238` - `Story` contract; set `probes: []` explicitly because router assertions live in the scenario test, not in story probes.
+  - API/Type: `test/scenario-engine/dsl/story-types.ts:239` - `Story` contract; set `probes: []` explicitly because router assertions live in the scenario test, not in story probes.
+  - API/Type: `test/scenario-engine/dsl/story-types.ts:250` - `planSurfaceProbes?` already exists from P0-1; reuse it only if one or two zero-cost probes come naturally from the same story fixture.
   - API/Type: `src/memory/query-router.ts` - production router behavior to seed for.
   - Test: `test/memory/query-router.test.ts` - reference expectations for alias scan and multi-intent ordering.
   - Test: `test/memory/query-plan-builder.test.ts` - reference expectations for deterministic plan shape.
@@ -218,6 +221,7 @@ Wave 2: wiring/integration tasks
   - [ ] `queryRouterStory` seeds aliases/entities/assertions sufficient for the three named query cases.
   - [ ] `queryRouterCases` declares expected `primaryIntent`, ordered `secondaryIntents`, expected entity IDs, and the normalized fields to compare for determinism.
   - [ ] Story export registration allows importing the story from scenario tests.
+  - [ ] Optional: if the story naturally exposes stable drilldown shadow expectations, attach 1-2 `planSurfaceProbes` without expanding scope or blocking completion.
   - [ ] `bun test test/scenario-engine/dsl/story-validation.test.ts` still passes.
 
   **QA Scenarios**:
@@ -237,7 +241,7 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `test(scenario-engine): add query-router scenario story fixtures` | Files: `test/scenario-engine/stories/query-router.ts`, `test/scenario-engine/stories/index.ts`
 
-- [ ] 4. Add QueryRouter scenario integration and determinism tests
+- [x] 4. Add QueryRouter scenario integration and determinism tests
 
   **What to do**: Create `test/scenario-engine/scenarios/query-router.test.ts`. Seed data with `runScenario(queryRouterStory, { writePath: "settlement", phase: "full" })`, then exercise the same router/planner stack the scenario engine uses. Assert case 1 resolves the expected entity IDs via alias substring scan; assert case 2 returns the expected `primaryIntent`, ordered `secondaryIntents`, matched rules, and signals; assert case 3 produces byte-stable normalized plan data and budget allocations across two identical invocations. Include one negative alias case that proves an unrelated substring does not resolve a false-positive entity.
   **Must NOT do**: Do not duplicate allocator unit tests or verify every surface-weight float exactly. Do not compare raw objects that contain volatile/non-deterministic fields.
@@ -281,9 +285,9 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `test(scenario-engine): cover query-router integration and plan determinism` | Files: `test/scenario-engine/scenarios/query-router.test.ts`, `test/scenario-engine/stories/query-router.ts`
 
-- [ ] 5. Add fixture metadata contract and validation helper
+- [x] 5. Add fixture metadata contract and validation helper
 
-  **What to do**: Extend `test/scenario-engine/runner/embedding-fixtures.ts` so `EmbeddingFixtureFile` requires `modelVersion: string`, `schemaVersion: number`, and the existing `generatedAt: number`. Add exported constants for the current fixture schema version and a `validateFixtureFreshness(fixture, opts)` helper with `expectedModel`, `expectedSchemaVersion`, optional `maxAgeMs`, and optional `nowMs` for tests. Validation must fail before any DB writes when metadata is missing, model/schema mismatch occurs, or age exceeds `maxAgeMs`.
+  **What to do**: Extend `test/scenario-engine/runner/embedding-fixtures.ts` so `EmbeddingFixtureFile` requires `modelVersion: string`, `schemaVersion: number`, and the existing `generatedAt: number`. Add exported constants for the current fixture schema version and a `validateFixtureFreshness(fixture, opts)` helper with `expectedModel`, `expectedSchemaVersion`, optional `maxAgeMs`, and optional `nowMs` for tests. Validation must fail before any DB writes when metadata is missing, model/schema mismatch occurs, or age exceeds `maxAgeMs`. When touching runner wiring, account for the P0-1 `ScenarioInfra.services` expansion in `test/scenario-engine/runner/infra.ts:64` so additive option changes do not trample the existing `queryRouter` / `queryPlanBuilder` service handles.
   **Must NOT do**: Do not hard-code a wall-clock expiry into default loads. Do not silently accept pre-versioned fixtures missing metadata.
 
   **Recommended Agent Profile**:
@@ -304,6 +308,7 @@ Wave 2: wiring/integration tasks
   - [ ] `EmbeddingFixtureFile` requires `modelVersion`, `schemaVersion`, and `generatedAt`.
   - [ ] `validateFixtureFreshness()` throws descriptive errors for missing metadata, model mismatch, schema mismatch, and stale age.
   - [ ] `injectEmbeddingFixtures()` calls validation before creating/upserting vectors.
+  - [ ] Any fixture JSON present locally or committed during implementation is regenerated or patched with the new metadata before full-suite execution.
   - [ ] `bun test test/scenario-engine/runner/embedding-fixtures.test.ts` passes.
 
   **QA Scenarios**:
@@ -323,7 +328,7 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `feat(scenario-engine): validate embedding fixture metadata before injection` | Files: `test/scenario-engine/runner/embedding-fixtures.ts`, `test/scenario-engine/runner/embedding-fixtures.test.ts`
 
-- [ ] 6. Update fixture generator and load path for versioned fixtures
+- [x] 6. Update fixture generator and load path for versioned fixtures
 
   **What to do**: Update `test/scenario-engine/scripts/generate-embedding-fixtures.ts` so generated files always emit the new metadata contract. Keep `model` as the embedding model identifier used for repo upserts, and set `modelVersion` to the same resolved model id unless the provider exposes a more specific version string. Update `loadEmbeddingFixtures()` to surface a clear regeneration error for pre-versioned files. Add a pure helper for building fixture documents so tests can verify the serialized shape without requiring live API keys or committing new fixture files.
   **Must NOT do**: Do not require a real fixture generation run in default QA. Do not assume `test/scenario-engine/fixtures/` already contains committed fixtures.
@@ -364,7 +369,7 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `test(scenario-engine): version embedding fixture generation output` | Files: `test/scenario-engine/scripts/generate-embedding-fixtures.ts`, `test/scenario-engine/runner/embedding-fixtures.ts`, `test/scenario-engine/runner/embedding-fixtures.test.ts`
 
-- [ ] 7. Add ScenarioDebugger types and default-off handle gating
+- [x] 7. Add ScenarioDebugger types and default-off handle gating
 
   **What to do**: Create `test/scenario-engine/runner/debugger.ts` with `ScenarioDebugger`, `GraphSnapshot`, `IndexSnapshot`, and `ProbeHitsSnapshot` types plus a collector factory that stores immutable snapshots in memory. Extend `test/scenario-engine/runner/infra.ts` so `RunOptions` gains additive `debug?: boolean`. In `test/scenario-engine/runner/orchestrator.ts`, resolve `debugEnabled` as `options?.debug ?? (process.env.SCENARIO_DEBUG === "1")`, add optional `debugger?: ScenarioDebugger` to `ScenarioHandleExtended`, and instantiate the collector only when `debugEnabled` is true. Export the debugger types from `test/scenario-engine/runner/index.ts`.
   **Must NOT do**: Do not expose debugger objects on normal runs. Do not make debugger methods lazy DB queries. Do not return `undefined` for bad lookups; throw descriptive `Unknown beatId` / `Unknown probeId` errors.
@@ -380,7 +385,8 @@ Wave 2: wiring/integration tasks
   - API/Type: `test/scenario-engine/runner/orchestrator.ts:40` - `ScenarioHandleExtended` attachment point.
   - Pattern: `test/scenario-engine/runner/orchestrator.ts:85` - central `runScenario()` option resolution.
   - Pattern: `test/scenario-engine/runner/index.ts` - runner export surface.
-  - API/Type: `test/scenario-engine/runner/infra.ts` - additive run option location if explicit debug override is needed.
+  - API/Type: `test/scenario-engine/runner/infra.ts:44` - additive `RunOptions` location if explicit debug override is needed.
+  - API/Type: `test/scenario-engine/runner/infra.ts:64` - existing `ScenarioInfra.services.queryRouter/queryPlanBuilder` handles that must remain intact.
   - External: `test/scenario-engine/docs/scenario-engine-gaps.md:203` - P1-7 target API.
 
   **Acceptance Criteria**:
@@ -406,9 +412,9 @@ Wave 2: wiring/integration tasks
 
   **Commit**: YES | Message: `feat(scenario-engine): add opt-in scenario debugger handle surface` | Files: `test/scenario-engine/runner/debugger.ts`, `test/scenario-engine/runner/infra.ts`, `test/scenario-engine/runner/orchestrator.ts`, `test/scenario-engine/runner/index.ts`, `test/scenario-engine/runner/debugger.test.ts`
 
-- [ ] 8. Capture graph/index/probe snapshots for ScenarioDebugger
+- [x] 8. Capture graph/index/probe snapshots for ScenarioDebugger
 
-  **What to do**: Wire the debugger collector into the scenario pipeline so it captures: (a) per-beat graph snapshots after each beat is persisted/organized, (b) per-beat indexed-content snapshots showing what search/index rows exist after the beat, and (c) per-probe hit snapshots from `executeProbes()` containing hit order, score, source refs, and matched/missed fragments. Use immutable JSON-friendly payloads so the debugger remains usable even if `keepSchema` is false and cleanup has already run. Add dedicated tests for debug-on capture using a compact story such as `mini-sample`.
+  **What to do**: Wire the debugger collector into the scenario pipeline so it captures: (a) per-beat graph snapshots after each beat is persisted/organized, (b) per-beat indexed-content snapshots showing what search/index rows exist after the beat, and (c) per-probe hit snapshots from `executeProbes()` containing hit order, score, source refs, and matched/missed fragments. Use immutable JSON-friendly payloads so the debugger remains usable even if `keepSchema` is false and cleanup has already run. Add dedicated tests for debug-on capture using a compact story such as `mini-sample`. Measure one debug-off vs debug-on elapsed comparison during QA and record the delta; do not introduce a hard performance gate in this P1 plan.
   **Must NOT do**: Do not store raw SQL clients or lazy closures in snapshots. Do not change normal run results when debug is off.
 
   **Recommended Agent Profile**:
@@ -420,7 +426,7 @@ Wave 2: wiring/integration tasks
 
   **References**:
   - Pattern: `test/scenario-engine/runner/orchestrator.ts:140` - write-path dispatch sequence.
-  - Pattern: `test/scenario-engine/probes/probe-executor.ts` - probe hit collection point.
+  - Pattern: `test/scenario-engine/probes/probe-executor.ts` - retrieval-probe hit collection point; note that P0-1 `executePlanSurfaceProbes` is a separate path and may legitimately omit `latencyMs`.
   - Pattern: `test/scenario-engine/runner/write-paths.ts` - per-path persistence/projection points for beat snapshots.
   - Pattern: `test/scenario-engine/runner/graph-organizer-step.ts` - graph-organizer output source.
   - Pattern: `test/scenario-engine/runner/embedding-step.ts` - indexed content/embedding-related state source.
@@ -431,6 +437,7 @@ Wave 2: wiring/integration tasks
   - [ ] With debug enabled, `getIndexedContent(beatId)` returns the captured indexed-content snapshot for that beat.
   - [ ] With debug enabled, `getProbeHits(probeId)` returns ordered hit data plus matched/missed fragments.
   - [ ] Snapshots remain readable after run completion without requiring a live schema.
+  - [ ] QA records one debug-off vs debug-on elapsed comparison so any snapshot overhead is visible before broad rollout.
   - [ ] `bun test test/scenario-engine/runner/debugger.test.ts` passes.
 
   **QA Scenarios**:
@@ -453,13 +460,13 @@ Wave 2: wiring/integration tasks
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
 > 4 review agents run in parallel. All must approve. Present consolidated results to the user and wait for explicit okay before marking work complete.
 
-- [ ] F1. Plan Compliance Audit — oracle
+- [x] F1. Plan Compliance Audit — oracle
   Validate every T1-T8 acceptance criterion against the final diff and command output. Confirm markdown filenames are unchanged, JSON siblings exist, baseline comparison stays explicit, and no P0/P2 files were pulled in. Output: `Tasks [N/N] | Guardrails [N/N] | VERDICT`.
-- [ ] F2. Code Quality Review — unspecified-high
+- [x] F2. Code Quality Review — unspecified-high
   Run `bun run build` plus the targeted test commands from Definition of Done. Review changed files for accidental scope creep, duplicate router math, lazy DB-backed debugger lookups, and default-on age gating. Output: `Build [PASS/FAIL] | Tests [PASS/FAIL] | Code Review [PASS/FAIL] | VERDICT`.
-- [ ] F3. Real Manual QA — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high
   Execute the new router scenario tests, fixture validation tests, debugger tests, and one report-producing smoke test. Verify actual report files under `test/scenario-engine/reports/` include both `.md` and `.json` siblings. Output: `Reports [PASS/FAIL] | Router [PASS/FAIL] | Fixtures [PASS/FAIL] | Debugger [PASS/FAIL] | VERDICT`.
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F4. Scope Fidelity Check — deep
   Compare the final diff to `test/scenario-engine/docs/scenario-engine-gaps.md` P1-4 through P1-7 and this plan. Confirm no `.github/workflows/`, dashboards, or unrelated probe subsystems were added. Output: `In Scope [PASS/FAIL] | Out of Scope [PASS/FAIL] | VERDICT`.
 
 ## Commit Strategy
