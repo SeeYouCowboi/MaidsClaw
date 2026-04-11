@@ -21,9 +21,10 @@ describe("Route resolution", () => {
 		["GET", "/v1/logs"],
 		["GET", "/v1/jobs"],
 		["GET", "/v1/jobs/job-42"],
+		["GET", "/v1/agents"],
 	];
 
-	it("resolves all 17 known routes", () => {
+	it("resolves all 18 known routes", () => {
 		for (const [method, path] of ALL_PATTERNS) {
 			const route = resolveRoute(method, path);
 			expect(route).toBeDefined();
@@ -41,8 +42,8 @@ describe("Route resolution", () => {
 		expect(resolveRoute("POST", "/v1/jobs")).toBeUndefined();
 	});
 
-	it("ROUTES array has exactly 17 entries", () => {
-		expect(ROUTES.length).toBe(17);
+	it("ROUTES array has exactly 18 entries", () => {
+		expect(ROUTES.length).toBe(18);
 	});
 });
 

@@ -847,3 +847,122 @@ export async function handleGetJob(
 		throw error;
 	}
 }
+
+// ── Agent response projection ────────────────────────────────────────────────
+
+type AgentResponseItem = {
+	id: string;
+	display_name: string;
+	role: string;
+	lifecycle: string;
+	user_facing: boolean;
+	output_mode: string;
+	model_id: string;
+	persona_id?: string;
+	max_output_tokens?: number;
+	tool_permissions: Array<{ tool_name: string; allowed: boolean }>;
+	context_budget?: { max_tokens: number; reserved_for_coordination?: number };
+	lorebook_enabled: boolean;
+	narrative_context_enabled: boolean;
+};
+
+type AgentProfileLike = {
+	id: string;
+	role: string;
+	lifecycle: string;
+	userFacing: boolean;
+	outputMode: string;
+	modelId: string;
+	personaId?: string;
+	maxOutputTokens?: number;
+	toolPermissions: Array<{ toolName: string; allowed: boolean }>;
+	contextBudget?: { maxTokens: number; reservedForCoordination?: number };
+	lorebookEnabled: boolean;
+	narrativeContextEnabled: boolean;
+};
+
+async function resolveDisplayName(
+	agent: AgentProfileLike,
+	personaAdmin: ControllerContext["personaAdmin"],
+): Promise<string> {
+	if (!agent.personaId || !personaAdmin) {
+		return agent.id;
+	}
+
+	try {
+		const persona = (await personaAdmin.getPersona(agent.personaId)) as
+			| { name?: string }
+			| null
+			| undefined;
+		if (persona && typeof persona.name === "string" && persona.name.length > 0) {
+			return persona.name;
+		}
+	} catch {
+		// Persona lookup is non-fatal — fallback to agent id
+	}
+
+	return agent.id;
+}
+
+function projectAgent(
+	agent: AgentProfileLike,
+	displayName: string,
+): AgentResponseItem {
+	const item: AgentResponseItem = {
+		id: agent.id,
+		display_name: displayName,
+		role: agent.role,
+		lifecycle: agent.lifecycle,
+		user_facing: agent.userFacing,
+		output_mode: agent.outputMode,
+		model_id: agent.modelId,
+		tool_permissions: agent.toolPermissions.map((tp) => ({
+			tool_name: tp.toolName,
+			allowed: tp.allowed,
+		})),
+		lorebook_enabled: agent.lorebookEnabled,
+		narrative_context_enabled: agent.narrativeContextEnabled,
+	};
+
+	if (agent.personaId !== undefined) {
+		item.persona_id = agent.personaId;
+	}
+	if (agent.maxOutputTokens !== undefined) {
+		item.max_output_tokens = agent.maxOutputTokens;
+	}
+	if (agent.contextBudget !== undefined) {
+		item.context_budget = {
+			max_tokens: agent.contextBudget.maxTokens,
+			...(agent.contextBudget.reservedForCoordination !== undefined
+				? { reserved_for_coordination: agent.contextBudget.reservedForCoordination }
+				: {}),
+		};
+	}
+
+	return item;
+}
+
+/** GET /v1/agents — list runtime agents with persona display_name join */
+export async function handleListAgents(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const listFn = requireService(ctx.listRuntimeAgents, "listRuntimeAgents");
+		const rawAgents = await listFn();
+		const agents = rawAgents as AgentProfileLike[];
+
+		const items: AgentResponseItem[] = [];
+		for (const agent of agents) {
+			const displayName = await resolveDisplayName(agent, ctx.personaAdmin);
+			items.push(projectAgent(agent, displayName));
+		}
+
+		return jsonResponse({ agents: items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
