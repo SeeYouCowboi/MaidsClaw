@@ -1,0 +1,19 @@
+Task 15 Persona guard evidence
+
+Command:
+bun test test/gateway/personas-route.test.ts test/gateway/personas-guards.test.ts
+
+Result:
+bun test v1.3.10 (30e609e0)
+
+ 6 pass
+ 0 fail
+ 40 expect() calls
+Ran 6 tests across 2 files.
+
+Guard assertions covered:
+- 501 UNSUPPORTED_RUNTIME_MODE when personaAdmin missing
+- 409 CONFLICT on duplicate persona create
+- 400 BAD_REQUEST on update id mismatch
+- 404 for missing persona get/delete
+- 409 PERSONA_IN_USE delete guard for referenced persona_id in agents config

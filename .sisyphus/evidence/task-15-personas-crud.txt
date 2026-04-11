@@ -1,0 +1,20 @@
+Task 15 Persona CRUD evidence
+
+Command:
+bun test test/gateway/personas-route.test.ts test/gateway/personas-guards.test.ts
+
+Result:
+bun test v1.3.10 (30e609e0)
+
+ 6 pass
+ 0 fail
+ 40 expect() calls
+Ran 6 tests across 2 files.
+
+CRUD assertions covered:
+- GET /v1/personas
+- GET /v1/personas/{id}
+- POST /v1/personas
+- PUT /v1/personas/{id}
+- DELETE /v1/personas/{id}
+- POST /v1/personas:reload

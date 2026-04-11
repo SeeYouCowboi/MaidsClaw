@@ -6,6 +6,7 @@ import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin } from "../app/host/types.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { JobQueryService } from "../jobs/job-query-service.js";
+import type { PersonaAdminService } from "../persona/admin-service.js";
 import type { GatewayTokenSnapshot } from "./auth.js";
 
 export type SubsystemStatus = "ok" | "degraded" | "unavailable";
@@ -56,20 +57,12 @@ export interface ProviderCatalogService {
 	listProviders(): Promise<ProviderCatalogListResponse>;
 }
 
-export interface PersonaAdminService {
-	listPersonas(): Promise<unknown>;
-	getPersona(personaId: string): Promise<unknown>;
-	createPersona(input: unknown): Promise<unknown>;
-	updatePersona(personaId: string, input: unknown): Promise<unknown>;
-	deletePersona(personaId: string): Promise<unknown>;
-}
-
 export interface LoreAdminService {
-	listLore(): Promise<unknown>;
+	listLore(filters?: { scope?: string; keyword?: string }): Promise<unknown>;
 	getLore(loreId: string): Promise<unknown>;
 	createLore(input: unknown): Promise<unknown>;
 	updateLore(loreId: string, input: unknown): Promise<unknown>;
-	deleteLore(loreId: string): Promise<unknown>;
+	deleteLore(loreId: string): Promise<void>;
 }
 
 export interface BlackboardService {

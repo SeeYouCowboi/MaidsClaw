@@ -1,14 +1,14 @@
 import type { RouteEntry } from "../route-definition.js";
-import { HEALTH_ROUTES } from "./health.js";
-import { SESSION_ROUTES } from "./sessions.js";
-import { REQUEST_ROUTES } from "./requests.js";
-import { JOB_ROUTES } from "./jobs.js";
 import { AGENT_ROUTES } from "./agents.js";
-import { RUNTIME_ROUTES } from "./runtime.js";
-import { PROVIDER_ROUTES } from "./providers.js";
-import { PERSONA_ROUTES } from "./personas.js";
+import { HEALTH_ROUTES } from "./health.js";
+import { JOB_ROUTES } from "./jobs.js";
 import { LORE_ROUTES } from "./lore.js";
 import { MEMORY_ROUTES } from "./memory.js";
+import { PERSONA_ROUTES } from "./personas.js";
+import { PROVIDER_ROUTES } from "./providers.js";
+import { REQUEST_ROUTES } from "./requests.js";
+import { RUNTIME_ROUTES } from "./runtime.js";
+import { SESSION_ROUTES } from "./sessions.js";
 import { STATE_ROUTES } from "./state.js";
 
 export type { RouteEntry, RouteHandler } from "../route-definition.js";
@@ -22,6 +22,7 @@ export const ROUTES: RouteEntry[] = [
 	...AGENT_ROUTES,
 	...RUNTIME_ROUTES,
 	...PROVIDER_ROUTES,
+	// Persona CRUD + reload endpoints
 	...PERSONA_ROUTES,
 	...LORE_ROUTES,
 	...MEMORY_ROUTES,

@@ -82,7 +82,7 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
   },
   {
     method: "PUT",
-    route_pattern: "/v1/personas/{persona_id}",
+    route_pattern: "/v1/personas/{id}",
     scope: "write",
     audit: true,
     cors: true,
@@ -91,7 +91,7 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
   },
   {
     method: "DELETE",
-    route_pattern: "/v1/personas/{persona_id}",
+    route_pattern: "/v1/personas/{id}",
     scope: "write",
     audit: true,
     cors: true,
@@ -237,6 +237,7 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
     pg_required: false,
     error_transport: "json",
   },
+  // Provider discovery endpoint (redacted effective catalog)
   {
     method: "GET",
     route_pattern: "/v1/providers",
@@ -284,7 +285,7 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
   },
   {
     method: "GET",
-    route_pattern: "/v1/personas/{persona_id}",
+    route_pattern: "/v1/personas/{id}",
     scope: "read",
     audit: false,
     cors: true,

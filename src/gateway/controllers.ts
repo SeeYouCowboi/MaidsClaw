@@ -895,6 +895,295 @@ export async function handleGetJobDetail(
 	}
 }
 
+type PersonaMessageExampleDto = {
+	role: string;
+	content: string;
+};
+
+type PersonaDto = {
+	id: string;
+	name: string;
+	description: string;
+	persona: string;
+	world?: string;
+	message_examples?: PersonaMessageExampleDto[];
+	system_prompt?: string;
+	tags?: string[];
+	created_at?: number;
+	hidden_tasks?: string[];
+	private_persona?: string;
+};
+
+function toPersonaDto(input: unknown): PersonaDto {
+	const record = input as Record<string, unknown>;
+	const dto: PersonaDto = {
+		id: String(record.id ?? ""),
+		name: String(record.name ?? ""),
+		description: String(record.description ?? ""),
+		persona: String(record.persona ?? ""),
+	};
+
+	if (typeof record.world === "string") {
+		dto.world = record.world;
+	}
+
+	if (Array.isArray(record.messageExamples)) {
+		dto.message_examples = record.messageExamples as PersonaMessageExampleDto[];
+	} else if (Array.isArray(record.message_examples)) {
+		dto.message_examples = record.message_examples as PersonaMessageExampleDto[];
+	}
+
+	if (typeof record.systemPrompt === "string") {
+		dto.system_prompt = record.systemPrompt;
+	} else if (typeof record.system_prompt === "string") {
+		dto.system_prompt = record.system_prompt;
+	}
+
+	if (Array.isArray(record.tags)) {
+		dto.tags = record.tags.filter((tag): tag is string => typeof tag === "string");
+	}
+
+	if (typeof record.createdAt === "number") {
+		dto.created_at = record.createdAt;
+	} else if (typeof record.created_at === "number") {
+		dto.created_at = record.created_at;
+	}
+
+	if (Array.isArray(record.hiddenTasks)) {
+		dto.hidden_tasks = record.hiddenTasks.filter((task): task is string => typeof task === "string");
+	} else if (Array.isArray(record.hidden_tasks)) {
+		dto.hidden_tasks = record.hidden_tasks.filter((task): task is string => typeof task === "string");
+	}
+
+	if (typeof record.privatePersona === "string") {
+		dto.private_persona = record.privatePersona;
+	} else if (typeof record.private_persona === "string") {
+		dto.private_persona = record.private_persona;
+	}
+
+	return dto;
+}
+
+function fromPersonaDto(input: unknown): unknown {
+	if (!input || typeof input !== "object") {
+		return input;
+	}
+
+	const source = input as Record<string, unknown>;
+	const normalized: Record<string, unknown> = {
+		id: source.id,
+		name: source.name,
+		description: source.description,
+		persona: source.persona,
+	};
+
+	if (typeof source.world === "string") {
+		normalized.world = source.world;
+	}
+
+	if (Array.isArray(source.message_examples)) {
+		normalized.messageExamples = source.message_examples;
+	} else if (Array.isArray(source.messageExamples)) {
+		normalized.messageExamples = source.messageExamples;
+	}
+
+	if (typeof source.system_prompt === "string") {
+		normalized.systemPrompt = source.system_prompt;
+	} else if (typeof source.systemPrompt === "string") {
+		normalized.systemPrompt = source.systemPrompt;
+	}
+
+	if (Array.isArray(source.tags)) {
+		normalized.tags = source.tags;
+	}
+
+	if (typeof source.created_at === "number") {
+		normalized.createdAt = source.created_at;
+	} else if (typeof source.createdAt === "number") {
+		normalized.createdAt = source.createdAt;
+	}
+
+	if (Array.isArray(source.hidden_tasks)) {
+		normalized.hiddenTasks = source.hidden_tasks;
+	} else if (Array.isArray(source.hiddenTasks)) {
+		normalized.hiddenTasks = source.hiddenTasks;
+	}
+
+	if (typeof source.private_persona === "string") {
+		normalized.privatePersona = source.private_persona;
+	} else if (typeof source.privatePersona === "string") {
+		normalized.privatePersona = source.privatePersona;
+	}
+
+	return normalized;
+}
+
+function mapPersonaAdminError(error: unknown): Response {
+	if (isMaidsClawError(error)) {
+		if (
+			error.code === "BAD_REQUEST" &&
+			typeof error.details === "object" &&
+			error.details !== null &&
+			"status" in error.details &&
+			(error.details as { status?: unknown }).status === 404
+		) {
+			return errorResponse(error, 404);
+		}
+
+		if (error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		if (error.code === "CONFLICT" || error.code === "PERSONA_IN_USE") {
+			return errorResponse(error, 409);
+		}
+		if (error.code === "PERSONA_CARD_INVALID" || error.code === "BAD_REQUEST") {
+			return errorResponse(error, 400);
+		}
+		return errorResponse(error, 500);
+	}
+
+	return errorResponse(
+		new MaidsClawError({
+			code: "INTERNAL_ERROR",
+			message: "Unexpected persona admin error",
+			retriable: false,
+		}),
+		500,
+	);
+}
+
+/** GET /v1/personas — list personas */
+export async function handleListPersonas(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const personas = await service.listPersonas();
+		const items = Array.isArray(personas)
+			? personas.map((persona) => toPersonaDto(persona))
+			: [];
+		return jsonResponse({ items });
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
+/** GET /v1/personas/{id} — get persona detail */
+export async function handleGetPersona(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const url = new URL(req.url);
+		const personaId = extractParam(url, "/v1/personas/{id}", "id");
+		if (!personaId) {
+			return badRequest("Missing id in path");
+		}
+
+		const persona = await service.getPersona(personaId);
+		if (!persona) {
+			return errorResponse(
+				new MaidsClawError({
+					code: "BAD_REQUEST",
+					message: `Persona not found: ${personaId}`,
+					retriable: false,
+				}),
+				404,
+			);
+		}
+
+		return jsonResponse(toPersonaDto(persona));
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
+/** POST /v1/personas — create persona */
+export async function handleCreatePersona(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	const parsed = await validateBody(req, z.unknown());
+	if (parsed instanceof Response) {
+		return parsed;
+	}
+
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const created = await service.createPersona(fromPersonaDto(parsed));
+		return jsonResponse(toPersonaDto(created), 201);
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
+/** PUT /v1/personas/{id} — update persona */
+export async function handleUpdatePersona(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	const parsed = await validateBody(req, z.unknown());
+	if (parsed instanceof Response) {
+		return parsed;
+	}
+
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const url = new URL(req.url);
+		const personaId = extractParam(url, "/v1/personas/{id}", "id");
+		if (!personaId) {
+			return badRequest("Missing id in path");
+		}
+
+		const updated = await service.updatePersona(personaId, fromPersonaDto(parsed));
+		return jsonResponse(toPersonaDto(updated));
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
+/** DELETE /v1/personas/{id} — delete persona */
+export async function handleDeletePersona(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const url = new URL(req.url);
+		const personaId = extractParam(url, "/v1/personas/{id}", "id");
+		if (!personaId) {
+			return badRequest("Missing id in path");
+		}
+
+		return jsonResponse(await service.deletePersona(personaId));
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
+/** POST /v1/personas:reload — explicit persona reload */
+export async function handleReloadPersonas(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.personaAdmin, "personaAdmin");
+		const reload = service.reloadPersonas;
+		if (!reload) {
+			throw new MaidsClawError({
+				code: "UNSUPPORTED_RUNTIME_MODE",
+				message: "Gateway service 'personaAdmin.reloadPersonas' is unavailable in this runtime mode",
+				retriable: false,
+			});
+		}
+		return jsonResponse(await reload());
+	} catch (error) {
+		return mapPersonaAdminError(error);
+	}
+}
+
 // ── Agent response projection ────────────────────────────────────────────────
 
 type AgentResponseItem = {
@@ -912,6 +1201,179 @@ type AgentResponseItem = {
 	lorebook_enabled: boolean;
 	narrative_context_enabled: boolean;
 };
+
+type ProviderResponseSelectionPolicy = {
+	enabled_by_default: boolean;
+	eligible_for_auto_fallback: boolean;
+	is_auto_default: boolean;
+};
+
+type ProviderResponseModel = {
+	id: string;
+	display_name: string;
+	context_window: number;
+	max_output_tokens: number;
+	supports_tools: boolean;
+	supports_vision: boolean;
+	supports_embedding: boolean;
+};
+
+type ProviderResponseItem = {
+	id: string;
+	display_name: string;
+	transport_family: string;
+	api_kind: string;
+	risk_tier: string;
+	base_url: string;
+	auth_modes: string[];
+	configured: boolean;
+	selection_policy: ProviderResponseSelectionPolicy;
+	default_chat_model_id?: string;
+	default_embedding_model_id?: string;
+	models: ProviderResponseModel[];
+};
+
+const NESTED_SENSITIVE_KEY_PATTERN = /token|secret|password|authorization/i;
+const EXPLICIT_SENSITIVE_KEYS = new Set(["apiKey", "accessToken", "token"]);
+const SENSITIVE_KEY_ALLOWLIST = new Set(["max_output_tokens"]);
+
+function asRecord(value: unknown): Record<string, unknown> {
+	if (value && typeof value === "object" && !Array.isArray(value)) {
+		return value as Record<string, unknown>;
+	}
+	return {};
+}
+
+function asStringArray(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const result: string[] = [];
+	for (const item of value) {
+		if (typeof item === "string") {
+			result.push(item);
+		}
+	}
+	return result;
+}
+
+function shouldStripNestedKey(key: string, path: readonly string[]): boolean {
+	if (EXPLICIT_SENSITIVE_KEYS.has(key)) {
+		return true;
+	}
+
+	if (
+		path.length > 0 &&
+		path[path.length - 1] === "extraHeaders" &&
+		key === "Authorization"
+	) {
+		return true;
+	}
+
+	if (SENSITIVE_KEY_ALLOWLIST.has(key)) {
+		return false;
+	}
+
+	return NESTED_SENSITIVE_KEY_PATTERN.test(key);
+}
+
+function redactNestedSensitiveKeys(
+	value: unknown,
+	path: readonly string[] = [],
+): unknown {
+	if (Array.isArray(value)) {
+		return value.map((item) => redactNestedSensitiveKeys(item, path));
+	}
+
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+
+	const source = value as Record<string, unknown>;
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, child] of Object.entries(source)) {
+		if (shouldStripNestedKey(key, path)) {
+			continue;
+		}
+		sanitized[key] = redactNestedSensitiveKeys(child, [...path, key]);
+	}
+
+	return sanitized;
+}
+
+function projectProviderSelectionPolicy(value: unknown): ProviderResponseSelectionPolicy {
+	const record = asRecord(value);
+	return {
+		enabled_by_default:
+			typeof record.enabled_by_default === "boolean"
+				? record.enabled_by_default
+				: false,
+		eligible_for_auto_fallback:
+			typeof record.eligible_for_auto_fallback === "boolean"
+				? record.eligible_for_auto_fallback
+				: false,
+		is_auto_default:
+			typeof record.is_auto_default === "boolean"
+				? record.is_auto_default
+				: false,
+	};
+}
+
+function projectProviderModel(value: unknown): ProviderResponseModel {
+	const record = asRecord(value);
+	return {
+		id: typeof record.id === "string" ? record.id : "",
+		display_name:
+			typeof record.display_name === "string" ? record.display_name : "",
+		context_window:
+			typeof record.context_window === "number" ? record.context_window : 0,
+		max_output_tokens:
+			typeof record.max_output_tokens === "number"
+				? record.max_output_tokens
+				: 0,
+		supports_tools:
+			typeof record.supports_tools === "boolean" ? record.supports_tools : false,
+		supports_vision:
+			typeof record.supports_vision === "boolean"
+				? record.supports_vision
+				: false,
+		supports_embedding:
+			typeof record.supports_embedding === "boolean"
+				? record.supports_embedding
+				: false,
+	};
+}
+
+function projectProviderEntry(value: unknown): ProviderResponseItem {
+	const record = asRecord(value);
+
+	const projected: ProviderResponseItem = {
+		id: typeof record.id === "string" ? record.id : "",
+		display_name:
+			typeof record.display_name === "string" ? record.display_name : "",
+		transport_family:
+			typeof record.transport_family === "string" ? record.transport_family : "",
+		api_kind: typeof record.api_kind === "string" ? record.api_kind : "",
+		risk_tier: typeof record.risk_tier === "string" ? record.risk_tier : "",
+		base_url: typeof record.base_url === "string" ? record.base_url : "",
+		auth_modes: asStringArray(record.auth_modes),
+		configured: typeof record.configured === "boolean" ? record.configured : false,
+		selection_policy: projectProviderSelectionPolicy(record.selection_policy),
+		models: Array.isArray(record.models)
+			? record.models.map((model) => projectProviderModel(model))
+			: [],
+	};
+
+	if (typeof record.default_chat_model_id === "string") {
+		projected.default_chat_model_id = record.default_chat_model_id;
+	}
+
+	if (typeof record.default_embedding_model_id === "string") {
+		projected.default_embedding_model_id = record.default_embedding_model_id;
+	}
+
+	return redactNestedSensitiveKeys(projected) as ProviderResponseItem;
+}
 
 type AgentProfileLike = {
 	id: string;
@@ -1041,6 +1503,164 @@ export async function handleGetRuntime(
 	}
 }
 
+// ── Lore CRUD ────────────────────────────────────────────────────────────────
+
+/** GET /v1/lore */
+export async function handleListLore(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.loreAdmin, "loreAdmin");
+		const url = new URL(req.url);
+		const scope = extractOptionalQueryParam(url, "scope") as
+			| "world"
+			| "area"
+			| undefined;
+		const keyword = extractOptionalQueryParam(url, "keyword");
+
+		const items = await service.listLore({ scope, keyword });
+		return jsonResponse({ items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** GET /v1/lore/{lore_id} */
+export async function handleGetLore(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.loreAdmin, "loreAdmin");
+		const url = new URL(req.url);
+		const loreId = extractParam(url, "/v1/lore/{lore_id}", "lore_id");
+		if (!loreId) {
+			return badRequest("Missing lore_id in path");
+		}
+
+		const entry = await service.getLore(loreId);
+		if (!entry) {
+			return errorResponse(
+				new MaidsClawError({
+					code: "BAD_REQUEST",
+					message: `Lore entry not found: ${loreId}`,
+					retriable: false,
+				}),
+				404,
+			);
+		}
+
+		return jsonResponse(entry);
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** POST /v1/lore */
+export async function handleCreateLore(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.loreAdmin, "loreAdmin");
+
+		let body: unknown;
+		try {
+			body = await req.json();
+		} catch {
+			return badRequestResponse("Invalid JSON body");
+		}
+
+		const created = await service.createLore(body);
+		return jsonResponse(created, 201);
+	} catch (error) {
+		if (isMaidsClawError(error)) {
+			if (error.code === "UNSUPPORTED_RUNTIME_MODE") {
+				return errorResponse(error, 501);
+			}
+			if (error.code === "BAD_REQUEST") {
+				return errorResponse(error, 400);
+			}
+			if (error.code === "CONFLICT") {
+				return errorResponse(error, 409);
+			}
+		}
+		throw error;
+	}
+}
+
+/** PUT /v1/lore/{lore_id} */
+export async function handleUpdateLore(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.loreAdmin, "loreAdmin");
+		const url = new URL(req.url);
+		const loreId = extractParam(url, "/v1/lore/{lore_id}", "lore_id");
+		if (!loreId) {
+			return badRequest("Missing lore_id in path");
+		}
+
+		let body: unknown;
+		try {
+			body = await req.json();
+		} catch {
+			return badRequestResponse("Invalid JSON body");
+		}
+
+		const updated = await service.updateLore(loreId, body);
+		return jsonResponse(updated);
+	} catch (error) {
+		if (isMaidsClawError(error)) {
+			if (error.code === "UNSUPPORTED_RUNTIME_MODE") {
+				return errorResponse(error, 501);
+			}
+			if (error.code === "BAD_REQUEST") {
+				return errorResponse(error, 400);
+			}
+		}
+		throw error;
+	}
+}
+
+/** DELETE /v1/lore/{lore_id} */
+export async function handleDeleteLore(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.loreAdmin, "loreAdmin");
+		const url = new URL(req.url);
+		const loreId = extractParam(url, "/v1/lore/{lore_id}", "lore_id");
+		if (!loreId) {
+			return badRequest("Missing lore_id in path");
+		}
+
+		await service.deleteLore(loreId);
+		return jsonResponse({ deleted: true });
+	} catch (error) {
+		if (isMaidsClawError(error)) {
+			if (error.code === "UNSUPPORTED_RUNTIME_MODE") {
+				return errorResponse(error, 501);
+			}
+			if (error.code === "BAD_REQUEST") {
+				return errorResponse(error, 404);
+			}
+		}
+		throw error;
+	}
+}
+
+// ── Agent response projection ────────────────────────────────────────────────
+
 /** GET /v1/agents — list runtime agents with persona display_name join */
 export async function handleListAgents(
 	_req: Request,
@@ -1058,6 +1678,28 @@ export async function handleListAgents(
 		}
 
 		return jsonResponse({ agents: items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** GET /v1/providers — redacted effective provider discovery */
+export async function handleListProviders(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.providerCatalog, "providerCatalog");
+		const catalog = await service.listProviders();
+
+		const items = Array.isArray(catalog.providers)
+			? catalog.providers.map((entry) => projectProviderEntry(entry))
+			: [];
+
+		return jsonResponse({ providers: items });
 	} catch (error) {
 		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
 			return errorResponse(error, 501);
