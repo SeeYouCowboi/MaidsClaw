@@ -1,30 +1,15 @@
-import type { HealthClient } from "../app/clients/health-client.js";
-import type { InspectClient } from "../app/clients/inspect-client.js";
-import type { SessionClient } from "../app/clients/session-client.js";
-import type { TurnClient } from "../app/clients/turn-client.js";
 import type { ObservationEvent } from "../app/contracts/execution.js";
-import type { TraceStore } from "../app/diagnostics/trace-store.js";
-import type { AppHostAdmin } from "../app/host/types.js";
 import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
+import { requireService, type GatewayContext } from "./context.js";
 import { createSseStream } from "./sse.js";
 
-export type SubsystemStatus = "ok" | "degraded" | "unavailable";
-
-export type HealthCheckFn = () => SubsystemStatus;
+export type SubsystemStatus = import("./context.js").SubsystemStatus;
+export type HealthCheckFn = import("./context.js").HealthCheckFn;
 
 /** Shared context injected into every controller */
-export type ControllerContext = {
-	sessionClient?: SessionClient;
-	turnClient?: TurnClient;
-	inspectClient?: InspectClient;
-	healthClient?: HealthClient;
-	traceStore?: TraceStore;
-	healthChecks?: Record<string, HealthCheckFn>;
-	listRuntimeAgents?: AppHostAdmin["listRuntimeAgents"];
-	hasAgent?: (agentId: string) => boolean;
-};
+export type ControllerContext = GatewayContext;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -150,9 +135,11 @@ export function chunkToObservationEvent(chunk: Chunk): ObservationEvent | null {
 	}
 }
 
-function sessionClient(ctx: ControllerContext): SessionClient | Response {
-	if (ctx.sessionClient) {
-		return ctx.sessionClient;
+function sessionClient(
+	ctx: ControllerContext,
+): NonNullable<ControllerContext["session"]> | Response {
+	if (ctx.session) {
+		return ctx.session;
 	}
 
 	const err = new MaidsClawError({
@@ -163,9 +150,11 @@ function sessionClient(ctx: ControllerContext): SessionClient | Response {
 	return errorResponse(err, 503);
 }
 
-function inspectClient(ctx: ControllerContext): InspectClient | Response {
-	if (ctx.inspectClient) {
-		return ctx.inspectClient;
+function inspectClient(
+	ctx: ControllerContext,
+): NonNullable<ControllerContext["inspect"]> | Response {
+	if (ctx.inspect) {
+		return ctx.inspect;
 	}
 
 	const err = new MaidsClawError({
@@ -176,9 +165,11 @@ function inspectClient(ctx: ControllerContext): InspectClient | Response {
 	return errorResponse(err, 503);
 }
 
-function turnClient(ctx: ControllerContext): TurnClient | Response {
-	if (ctx.turnClient) {
-		return ctx.turnClient;
+function turnClient(
+	ctx: ControllerContext,
+): NonNullable<ControllerContext["turn"]> | Response {
+	if (ctx.turn) {
+		return ctx.turn;
 	}
 
 	const err = new MaidsClawError({
@@ -210,6 +201,14 @@ function extractSessionId(url: URL): string | undefined {
 function extractRequestId(url: URL): string | undefined {
 	const parts = url.pathname.split("/");
 	if (parts.length >= 4 && parts[1] === "v1" && parts[2] === "requests") {
+		return parts[3];
+	}
+	return undefined;
+}
+
+function extractJobId(url: URL): string | undefined {
+	const parts = url.pathname.split("/");
+	if (parts.length >= 4 && parts[1] === "v1" && parts[2] === "jobs") {
 		return parts[3];
 	}
 	return undefined;
@@ -281,8 +280,8 @@ export async function handleReadyz(
 	_req: Request,
 	ctx: ControllerContext,
 ): Promise<Response> {
-	if (ctx.healthClient) {
-		const health = await ctx.healthClient.checkHealth();
+	if (ctx.health) {
+		const health = await ctx.health.checkHealth();
 		const httpStatus = health.readyz.status === "ok" ? 200 : 503;
 		return jsonResponse(health.readyz, httpStatus);
 	}
@@ -805,4 +804,39 @@ export async function handleLogs(
 			agentId: extractOptionalQueryParam(url, "agent_id"),
 		}),
 	);
+}
+
+export async function handleListJobs(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.jobQuery, "jobQuery");
+		return jsonResponse(await service.listJobs());
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+export async function handleGetJob(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	const jobId = extractJobId(new URL(req.url));
+	if (!jobId) {
+		return badRequest("Missing job_id in path");
+	}
+
+	try {
+		const service = requireService(ctx.jobQuery, "jobQuery");
+		return jsonResponse(await service.getJob(jobId));
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
 }

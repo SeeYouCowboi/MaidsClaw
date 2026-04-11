@@ -14,6 +14,8 @@ import {
   handleSessionTranscript,
   handleSessionMemory,
   handleLogs,
+  handleListJobs,
+  handleGetJob,
 } from "./controllers.js";
 
 export type RouteHandler = (req: Request, ctx: ControllerContext) => Response | Promise<Response>;
@@ -60,6 +62,8 @@ export const ROUTES: RouteEntry[] = [
   { method: "GET", pattern: "/v1/sessions/{session_id}/transcript", handler: handleSessionTranscript },
   { method: "GET", pattern: "/v1/sessions/{session_id}/memory", handler: handleSessionMemory },
   { method: "GET", pattern: "/v1/logs", handler: handleLogs },
+  { method: "GET", pattern: "/v1/jobs", handler: handleListJobs },
+  { method: "GET", pattern: "/v1/jobs/{job_id}", handler: handleGetJob },
 ];
 
 /**

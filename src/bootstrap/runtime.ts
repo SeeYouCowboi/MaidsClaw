@@ -99,6 +99,7 @@ import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.
 import { resolveStoragePaths } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
+import type { GatewayContext } from "../gateway/context.js";
 import type {
 	MemoryPipelineStatus,
 	RuntimeBootstrapOptions,
@@ -1267,6 +1268,47 @@ export function bootstrapRuntime(
 		talkerThinkerConfig,
 		shutdown,
 		segmenterReady,
+	};
+}
+
+/**
+ * Single seam for wiring optional gateway domain services from runtime.
+ *
+ * Keep all Phase A-D services optional so lightweight/local tests stay minimal,
+ * and attach concrete implementations here as each service lands.
+ */
+export function buildGatewayRuntimeContextExtensions(
+	runtime: RuntimeBootstrapResult,
+): Pick<
+	GatewayContext,
+	| "providerCatalog"
+	| "personaAdmin"
+	| "loreAdmin"
+	| "jobQuery"
+	| "blackboard"
+	| "coreMemory"
+	| "episodeRepo"
+	| "settlementRepo"
+	| "areaWorldProjection"
+	| "decisionLog"
+	| "getAuthSnapshot"
+	| "getRuntimeSnapshot"
+> {
+	void runtime;
+
+	return {
+		providerCatalog: undefined,
+		personaAdmin: undefined,
+		loreAdmin: undefined,
+		jobQuery: undefined,
+		blackboard: undefined,
+		coreMemory: undefined,
+		episodeRepo: undefined,
+		settlementRepo: undefined,
+		areaWorldProjection: undefined,
+		decisionLog: undefined,
+		getAuthSnapshot: undefined,
+		getRuntimeSnapshot: undefined,
 	};
 }
 

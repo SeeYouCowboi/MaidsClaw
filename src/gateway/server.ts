@@ -1,21 +1,23 @@
 import type { Server } from "bun";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin, AppUserFacade } from "../app/host/types.js";
-import {
-	type ControllerContext,
-	type HealthCheckFn,
-} from "./controllers.js";
+import type { ControllerContext } from "./controllers.js";
+import type { GatewayContext, HealthCheckFn } from "./context.js";
 import { resolveRoute } from "./routes.js";
 
-export type GatewayServerOptions = {
-	port: number;
-	host: string;
+type LegacyGatewayServerOptions = {
 	userFacade?: AppUserFacade;
 	traceStore?: TraceStore;
 	healthChecks?: Record<string, HealthCheckFn>;
 	listRuntimeAgents?: AppHostAdmin["listRuntimeAgents"];
 	hasAgent?: (agentId: string) => boolean;
 };
+
+export type GatewayServerOptions = {
+	port: number;
+	host: string;
+	context?: GatewayContext;
+} & LegacyGatewayServerOptions;
 
 /**
  * Gateway HTTP server wrapping Bun.serve().
@@ -30,15 +32,20 @@ export class GatewayServer {
 	}
 
 	start(): void {
-		const ctx: ControllerContext = {
-			sessionClient: this.options.userFacade?.session,
-			turnClient: this.options.userFacade?.turn,
-			inspectClient: this.options.userFacade?.inspect,
-			healthClient: this.options.userFacade?.health,
+		const legacyContext: GatewayContext = {
+			session: this.options.userFacade?.session,
+			turn: this.options.userFacade?.turn,
+			inspect: this.options.userFacade?.inspect,
+			health: this.options.userFacade?.health,
 			traceStore: this.options.traceStore,
 			healthChecks: this.options.healthChecks,
 			listRuntimeAgents: this.options.listRuntimeAgents,
 			hasAgent: this.options.hasAgent,
+		};
+
+		const ctx: ControllerContext = {
+			...legacyContext,
+			...(this.options.context ?? {}),
 		};
 
 		// "localhost" on Windows binds to IPv6 ::1 only, causing IPv4 fetch() to get ConnectionRefused.

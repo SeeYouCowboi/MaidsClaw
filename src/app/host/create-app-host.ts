@@ -2,10 +2,12 @@ import { isAbsolute, join, resolve } from "node:path";
 import type postgres from "postgres";
 import {
 	bootstrapRuntime,
+	buildGatewayRuntimeContextExtensions,
 	initializePgBackendForRuntime,
 } from "../../bootstrap/runtime.js";
 import type { RuntimeBootstrapResult } from "../../bootstrap/types.js";
 import { loadConfig } from "../../core/config.js";
+import type { GatewayContext } from "../../gateway/context.js";
 import { GatewayServer } from "../../gateway/server.js";
 import type { DurableJobStore } from "../../jobs/durable-store.js";
 import { LeaseReclaimSweeper } from "../../jobs/lease-reclaim-sweeper.js";
@@ -265,15 +267,57 @@ export async function createAppHost(
 				}
 			: undefined;
 
+	const isOrchestrated =
+		options.role === "worker" ||
+		(options.role === "server" && options.enableDurableOrchestration === true);
+
+	const getHostStatus: AppHostAdmin["getHostStatus"] = async () => {
+		return {
+			backendType: runtime.backendType,
+			memoryPipelineStatus: runtime.memoryPipelineStatus,
+			migrationStatus: { succeeded: runtime.migrationStatus.succeeded },
+			orchestration: {
+				enabled: isOrchestrated,
+				role: options.role,
+				durableMode: options.enableDurableOrchestration ?? false,
+				leaseReclaimActive: isOrchestrated && runtime.backendType === "pg",
+			},
+		};
+	};
+
+	const getPipelineStatus: AppHostAdmin["getPipelineStatus"] = async () => {
+		return {
+			memoryPipelineStatus: runtime.memoryPipelineStatus,
+			memoryPipelineReady: runtime.memoryPipelineReady,
+			effectiveOrganizerEmbeddingModelId:
+				runtime.effectiveOrganizerEmbeddingModelId,
+		};
+	};
+
+	const listRuntimeAgents: AppHostAdmin["listRuntimeAgents"] = async () => {
+		return runtime.agentRegistry.getAll();
+	};
+
+	const gatewayContext: GatewayContext = {
+		session: user?.session,
+		turn: user?.turn,
+		inspect: user?.inspect,
+		health: user?.health,
+		traceStore: runtime.traceStore,
+		healthChecks,
+		hasAgent: (agentId: string) => runtime.agentRegistry.has(agentId),
+		getHostStatus,
+		getPipelineStatus,
+		listRuntimeAgents,
+		...buildGatewayRuntimeContextExtensions(runtime),
+	};
+
 	const server =
 		options.role === "server"
 			? new GatewayServer({
 					port,
 					host,
-					userFacade: user,
-					healthChecks,
-					listRuntimeAgents: async () => runtime.agentRegistry.getAll(),
-					traceStore: runtime.traceStore,
+					context: gatewayContext,
 				})
 			: undefined;
 
@@ -292,35 +336,10 @@ export async function createAppHost(
 				)
 			: undefined;
 
-	const isOrchestrated =
-		options.role === "worker" ||
-		(options.role === "server" && options.enableDurableOrchestration === true);
-
 	const admin: AppHostAdmin = {
-		async getHostStatus() {
-			return {
-				backendType: runtime.backendType,
-				memoryPipelineStatus: runtime.memoryPipelineStatus,
-				migrationStatus: { succeeded: runtime.migrationStatus.succeeded },
-				orchestration: {
-					enabled: isOrchestrated,
-					role: options.role,
-					durableMode: options.enableDurableOrchestration ?? false,
-					leaseReclaimActive: isOrchestrated && runtime.backendType === "pg",
-				},
-			};
-		},
-		async getPipelineStatus() {
-			return {
-				memoryPipelineStatus: runtime.memoryPipelineStatus,
-				memoryPipelineReady: runtime.memoryPipelineReady,
-				effectiveOrganizerEmbeddingModelId:
-					runtime.effectiveOrganizerEmbeddingModelId,
-			};
-		},
-		async listRuntimeAgents() {
-			return runtime.agentRegistry.getAll();
-		},
+		getHostStatus,
+		getPipelineStatus,
+		listRuntimeAgents,
 		async getCapabilities() {
 			return {
 				orchestration: {

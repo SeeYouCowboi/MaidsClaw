@@ -1,5 +1,6 @@
 import { GatewayServer } from "../src/gateway/server.js";
 import { SessionService } from "../src/session/service.js";
+import { LocalSessionClient } from "../src/app/clients/local/local-session-client.js";
 
 async function runDemo(): Promise<void> {
   console.log("MaidsClaw V1 Demo");
@@ -7,7 +8,11 @@ async function runDemo(): Promise<void> {
   const server = new GatewayServer({
     port: 0,
     host: "localhost",
-    sessionService: new SessionService(),
+    context: {
+      session: new LocalSessionClient({
+        sessionService: new SessionService(),
+      }),
+    },
   });
 
   server.start();
