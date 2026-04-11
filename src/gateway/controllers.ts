@@ -1,15 +1,22 @@
+import { z } from "zod";
 import type { ObservationEvent } from "../app/contracts/execution.js";
+import { SessionCreateRequestSchema } from "../contracts/cockpit/index.js";
 import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
-import { z } from "zod";
-import {
-	SessionCreateRequestSchema,
-} from "../contracts/cockpit/index.js";
-import { requireService, type GatewayContext } from "./context.js";
+import { type GatewayContext, requireService } from "./context.js";
 import { badRequestResponse, errorJsonResponse } from "./error-response.js";
 import { createSseStream } from "./sse.js";
-import { validateBody } from "./validate.js";
+import { validateBody, validateCursor, validateQuery } from "./validate.js";
+
+const SessionListQuerySchema = z
+	.object({
+		agent_id: z.string().min(1).optional(),
+		status: z.enum(["open", "closed", "recovery_required"]).optional(),
+		limit: z.coerce.number().int().min(1).max(200).optional(),
+		cursor: z.string().min(1).optional(),
+	})
+	.strict();
 
 export type SubsystemStatus = import("./context.js").SubsystemStatus;
 export type HealthCheckFn = import("./context.js").HealthCheckFn;
@@ -335,6 +342,47 @@ export async function handleCreateSession(
 		{ session_id: session.session_id, created_at: session.created_at },
 		201,
 	);
+}
+
+/** GET /v1/sessions — list sessions */
+export async function handleListSessions(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.session, "session");
+		const url = new URL(req.url);
+
+		const parsedQuery = validateQuery(url, SessionListQuerySchema);
+		if (parsedQuery instanceof Response) {
+			return parsedQuery;
+		}
+
+		const validatedCursor = validateCursor(parsedQuery.cursor ?? null);
+		if (validatedCursor instanceof Response) {
+			return validatedCursor;
+		}
+
+		const result = await service.listSessions({
+			agent_id: parsedQuery.agent_id,
+			status: parsedQuery.status,
+			limit: parsedQuery.limit,
+			cursor: parsedQuery.cursor,
+		});
+
+		return jsonResponse({
+			items: result.items,
+			next_cursor: result.next_cursor,
+		});
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		if (isMaidsClawError(error) && error.code === "BAD_REQUEST") {
+			return errorResponse(error, 400);
+		}
+		throw error;
+	}
 }
 
 /** POST /v1/sessions/{session_id}/turns:stream — submit user turn, receive SSE */

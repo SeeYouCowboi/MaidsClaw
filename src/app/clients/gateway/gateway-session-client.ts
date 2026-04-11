@@ -1,6 +1,8 @@
 import type {
 	SessionCloseResult,
 	SessionCreateResult,
+	SessionListQuery,
+	SessionListResult,
 	SessionRecoverResult,
 } from "../../contracts/session.js";
 import type { SessionClient, SessionInfo } from "../session-client.js";
@@ -51,6 +53,17 @@ export class GatewaySessionClient implements SessionClient {
 						| undefined) ?? "not_applicable",
 			},
 		};
+	}
+
+	async listSessions(query: SessionListQuery): Promise<SessionListResult> {
+		const params = new URLSearchParams();
+		if (query.agent_id) params.set("agent_id", query.agent_id);
+		if (query.status) params.set("status", query.status);
+		if (query.limit !== undefined) params.set("limit", String(query.limit));
+		if (query.cursor) params.set("cursor", query.cursor);
+
+		const suffix = params.size > 0 ? `?${params.toString()}` : "";
+		return requestJson(this.baseUrl, `/v1/sessions${suffix}`);
 	}
 
 	async getSession(sessionId: string): Promise<SessionInfo | undefined> {

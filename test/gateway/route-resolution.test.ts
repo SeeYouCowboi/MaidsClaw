@@ -1,11 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { resolveRoute, ROUTES } from "../../src/gateway/routes/index.js";
 import { extractParam } from "../../src/gateway/route-definition.js";
+import { ROUTES, resolveRoute } from "../../src/gateway/routes/index.js";
 
 describe("Route resolution", () => {
 	const ALL_PATTERNS: [string, string][] = [
 		["GET", "/healthz"],
 		["GET", "/readyz"],
+		["GET", "/v1/sessions"],
 		["POST", "/v1/sessions"],
 		["POST", "/v1/sessions/abc-123/turns:stream"],
 		["POST", "/v1/sessions/abc-123/close"],
@@ -22,37 +23,47 @@ describe("Route resolution", () => {
 		["GET", "/v1/jobs/job-42"],
 	];
 
-	it("resolves all 16 known routes", () => {
+	it("resolves all 17 known routes", () => {
 		for (const [method, path] of ALL_PATTERNS) {
 			const route = resolveRoute(method, path);
 			expect(route).toBeDefined();
-			expect(route!.method).toBe(method);
+			if (!route) {
+				throw new Error(`Expected route to resolve for ${method} ${path}`);
+			}
+			expect(route.method).toBe(method);
 		}
 	});
 
 	it("returns undefined for unknown paths (404)", () => {
 		expect(resolveRoute("GET", "/v1/unknown")).toBeUndefined();
-		expect(resolveRoute("GET", "/v1/sessions")).toBeUndefined();
 		expect(resolveRoute("DELETE", "/healthz")).toBeUndefined();
 		expect(resolveRoute("GET", "/")).toBeUndefined();
 		expect(resolveRoute("POST", "/v1/jobs")).toBeUndefined();
 	});
 
-	it("ROUTES array has exactly 16 entries", () => {
-		expect(ROUTES.length).toBe(16);
+	it("ROUTES array has exactly 17 entries", () => {
+		expect(ROUTES.length).toBe(17);
 	});
 });
 
 describe("extractParam", () => {
 	it("extracts session_id from session route", () => {
 		const url = new URL("http://localhost/v1/sessions/abc-123/close");
-		const value = extractParam(url, "/v1/sessions/{session_id}/close", "session_id");
+		const value = extractParam(
+			url,
+			"/v1/sessions/{session_id}/close",
+			"session_id",
+		);
 		expect(value).toBe("abc-123");
 	});
 
 	it("extracts request_id from request route", () => {
 		const url = new URL("http://localhost/v1/requests/req-001/summary");
-		const value = extractParam(url, "/v1/requests/{request_id}/summary", "request_id");
+		const value = extractParam(
+			url,
+			"/v1/requests/{request_id}/summary",
+			"request_id",
+		);
 		expect(value).toBe("req-001");
 	});
 
@@ -64,7 +75,11 @@ describe("extractParam", () => {
 
 	it("returns undefined for non-matching param name", () => {
 		const url = new URL("http://localhost/v1/sessions/abc-123/close");
-		const value = extractParam(url, "/v1/sessions/{session_id}/close", "request_id");
+		const value = extractParam(
+			url,
+			"/v1/sessions/{session_id}/close",
+			"request_id",
+		);
 		expect(value).toBeUndefined();
 	});
 

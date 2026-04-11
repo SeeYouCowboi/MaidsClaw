@@ -1,0 +1,14 @@
+$ bun test "test/storage/pg-sessions-indexes.test.ts"
+bun test v1.3.10 (30e609e0)
+
+ 1 pass
+ 0 fail
+ 4 expect() calls
+Ran 1 test across 1 file. [93.00ms]
+
+$ bun run build
+$ tsc -p tsconfig.build.json --noEmit
+src/jobs/pg-store.ts(446,26): error TS2769: No overload matches this call.
+src/jobs/pg-store.ts(606,17): error TS2769: No overload matches this call.
+src/memory/storage.ts(418,5): error TS2322: Type 'MaybePromise<void>' is not assignable to type 'Promise<void>'.
+src/storage/domain-repos/pg/interaction-repo.ts(38,18): error TS2769: No overload matches this call.

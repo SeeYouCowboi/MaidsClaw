@@ -1,0 +1,15 @@
+$ bun test "test/gateway/session-list.test.ts"
+bun test v1.3.10 (30e609e0)
+
+ 3 pass
+ 0 fail
+ 14 expect() calls
+Ran 3 tests across 1 file. [208.00ms]
+
+$ bun test "test/gateway/route-resolution.test.ts"
+bun test v1.3.10 (30e609e0)
+
+ 8 pass
+ 0 fail
+ 44 expect() calls
+Ran 8 tests across 1 file. [293.00ms]

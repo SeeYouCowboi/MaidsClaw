@@ -40,6 +40,16 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
       ON sessions(recovery_required)
   `);
 
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_created_at_session_id_desc
+      ON sessions(created_at DESC, session_id DESC)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent_id_created_at_session_id_desc
+      ON sessions(agent_id, created_at DESC, session_id DESC)
+  `);
+
   // ── interaction_records ─────────────────────────────────────────────
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS interaction_records (

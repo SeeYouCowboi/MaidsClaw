@@ -19,3 +19,25 @@ export type SessionRecoverResult = {
   action: "discard_partial_turn";
   note_code: "partial_output_not_canonized";
 };
+
+export type SessionListStatus = "open" | "closed" | "recovery_required";
+
+export type SessionListItem = {
+  session_id: string;
+  agent_id: string;
+  created_at: number;
+  closed_at?: number;
+  status: SessionListStatus;
+};
+
+export type SessionListQuery = {
+  agent_id?: string;
+  status?: SessionListStatus;
+  limit?: number;
+  cursor?: string;
+};
+
+export type SessionListResult = {
+  items: SessionListItem[];
+  next_cursor: string | null;
+};

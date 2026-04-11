@@ -5,6 +5,8 @@ import type { SessionService } from "../../../session/service.js";
 import type {
 	SessionCloseResult,
 	SessionCreateResult,
+	SessionListQuery,
+	SessionListResult,
 	SessionRecoverResult,
 } from "../../contracts/session.js";
 import type { SessionClient, SessionInfo } from "../session-client.js";
@@ -54,6 +56,20 @@ export class LocalSessionClient implements SessionClient {
 			host_steps: {
 				flush_on_session_close: flushResult,
 			},
+		};
+	}
+
+	async listSessions(query: SessionListQuery): Promise<SessionListResult> {
+		const listed = await this.deps.sessionService.listSessions({
+			agentId: query.agent_id,
+			status: query.status,
+			limit: query.limit,
+			cursor: query.cursor,
+		});
+
+		return {
+			items: listed.items,
+			next_cursor: listed.nextCursor,
 		};
 	}
 

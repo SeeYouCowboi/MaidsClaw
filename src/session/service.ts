@@ -1,3 +1,4 @@
+import { decodeCursor, encodeCursor } from "../contracts/cockpit/cursor.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { Db } from "../storage/db-types.js";
 import type { SessionRepo } from "../storage/domain-repos/contracts/session-repo.js";
@@ -8,6 +9,112 @@ export type SessionRecord = {
   closedAt?: number;
   agentId: string;
 };
+
+export type SessionListStatus = "open" | "closed" | "recovery_required";
+
+export type SessionListParams = {
+  agentId?: string;
+  status?: SessionListStatus;
+  limit?: number;
+  cursor?: string;
+};
+
+export type SessionListItem = {
+  session_id: string;
+  agent_id: string;
+  created_at: number;
+  closed_at?: number;
+  status: SessionListStatus;
+};
+
+export type SessionListResult = {
+  items: SessionListItem[];
+  nextCursor: string | null;
+};
+
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 200;
+
+type CursorBoundary = {
+  createdAt: number;
+  sessionId: string;
+};
+
+function clampListLimit(limit?: number): number {
+  const value = Number.isFinite(limit) ? Math.floor(limit as number) : DEFAULT_LIST_LIMIT;
+  return Math.max(1, Math.min(MAX_LIST_LIMIT, value || DEFAULT_LIST_LIMIT));
+}
+
+function deriveStatus(closedAt: number | undefined, recoveryRequired: boolean): SessionListStatus {
+  if (recoveryRequired) {
+    return "recovery_required";
+  }
+  if (closedAt !== undefined) {
+    return "closed";
+  }
+  return "open";
+}
+
+function compareByCreatedAtDescThenSessionIdDesc(a: SessionListItem, b: SessionListItem): number {
+  if (a.created_at !== b.created_at) {
+    return b.created_at - a.created_at;
+  }
+  return b.session_id.localeCompare(a.session_id);
+}
+
+function decodeCursorBoundary(cursor?: string): CursorBoundary | undefined {
+  if (!cursor) {
+    return undefined;
+  }
+  const payload = decodeCursor(cursor);
+  if (typeof payload.sort_key !== "string") {
+    throw new MaidsClawError({
+      code: "BAD_REQUEST",
+      message: "Cursor sort_key must be an ISO date string",
+      retriable: false,
+    });
+  }
+  const createdAt = Date.parse(payload.sort_key);
+  if (!Number.isFinite(createdAt)) {
+    throw new MaidsClawError({
+      code: "BAD_REQUEST",
+      message: "Cursor sort_key must be a valid ISO date string",
+      retriable: false,
+    });
+  }
+  return {
+    createdAt,
+    sessionId: payload.tie_breaker,
+  };
+}
+
+function isBeforeCursor(item: SessionListItem, boundary?: CursorBoundary): boolean {
+  if (!boundary) {
+    return true;
+  }
+  if (item.created_at < boundary.createdAt) {
+    return true;
+  }
+  if (item.created_at > boundary.createdAt) {
+    return false;
+  }
+  return item.session_id < boundary.sessionId;
+}
+
+function buildPagedResult(items: SessionListItem[], limit: number): SessionListResult {
+  const hasNext = items.length > limit;
+  const pageItems = hasNext ? items.slice(0, limit) : items;
+  let nextCursor: string | null = null;
+  if (hasNext && pageItems.length > 0) {
+    const last = pageItems[pageItems.length - 1];
+    nextCursor = encodeCursor({
+      v: 1,
+      sort_key: new Date(last.created_at).toISOString(),
+      tie_breaker: last.session_id,
+    });
+  }
+  return { items: pageItems, nextCursor };
+}
 
 export class SessionService {
   private readonly pgRepo?: SessionRepo;
@@ -33,9 +140,20 @@ export class SessionService {
     }
   }
 
+  private pgRepoOrThrow(): SessionRepo {
+    if (!this.pgRepo) {
+      throw new MaidsClawError({
+        code: "INTERNAL_ERROR",
+        message: "PG session repo is unavailable",
+        retriable: false,
+      });
+    }
+    return this.pgRepo;
+  }
+
   async createSession(agentId: string): Promise<SessionRecord> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.createSession(agentId);
+      return this.pgRepoOrThrow().createSession(agentId);
     }
 
     const sessionId = crypto.randomUUID();
@@ -62,9 +180,72 @@ export class SessionService {
     return record;
   }
 
+  async listSessions(params: SessionListParams = {}): Promise<SessionListResult> {
+    const limit = clampListLimit(params.limit);
+
+    if (this.pgAvailable()) {
+      return this.pgRepoOrThrow().listSessions({
+        agentId: params.agentId,
+        status: params.status,
+        limit,
+        cursor: params.cursor,
+      });
+    }
+
+    const cursorBoundary = decodeCursorBoundary(params.cursor);
+
+    if (this.db) {
+      const rows = this.db.query<{
+        session_id: string;
+        agent_id: string;
+        created_at: number;
+        closed_at: number | null;
+        recovery_required: number;
+      }>(
+        "SELECT session_id, agent_id, created_at, closed_at, recovery_required FROM sessions",
+      );
+
+      const items = rows
+        .map<SessionListItem>((row) => {
+          const closedAt = row.closed_at ?? undefined;
+          return {
+            session_id: row.session_id,
+            agent_id: row.agent_id,
+            created_at: Number(row.created_at),
+            ...(closedAt !== undefined ? { closed_at: Number(closedAt) } : {}),
+            status: deriveStatus(closedAt, row.recovery_required === 1),
+          };
+        })
+        .filter((item) => (params.agentId ? item.agent_id === params.agentId : true))
+        .filter((item) => (params.status ? item.status === params.status : true))
+        .sort(compareByCreatedAtDescThenSessionIdDesc)
+        .filter((item) => isBeforeCursor(item, cursorBoundary));
+
+      return buildPagedResult(items, limit);
+    }
+
+    const items = Array.from(this.sessions.values())
+      .map<SessionListItem>((record) => {
+        const recoveryRequired = this.recoveryRequired.has(record.sessionId);
+        return {
+          session_id: record.sessionId,
+          agent_id: record.agentId,
+          created_at: record.createdAt,
+          ...(record.closedAt !== undefined ? { closed_at: record.closedAt } : {}),
+          status: deriveStatus(record.closedAt, recoveryRequired),
+        };
+      })
+      .filter((item) => (params.agentId ? item.agent_id === params.agentId : true))
+      .filter((item) => (params.status ? item.status === params.status : true))
+      .sort(compareByCreatedAtDescThenSessionIdDesc)
+      .filter((item) => isBeforeCursor(item, cursorBoundary));
+
+    return buildPagedResult(items, limit);
+  }
+
   async getSession(sessionId: string): Promise<SessionRecord | undefined> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.getSession(sessionId);
+      return this.pgRepoOrThrow().getSession(sessionId);
     }
 
     if (this.db) {
@@ -93,7 +274,7 @@ export class SessionService {
 
   async closeSession(sessionId: string): Promise<SessionRecord> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.closeSession(sessionId);
+      return this.pgRepoOrThrow().closeSession(sessionId);
     }
 
     const record = await this.getSession(sessionId);
@@ -124,7 +305,7 @@ export class SessionService {
 
   async isOpen(sessionId: string): Promise<boolean> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.isOpen(sessionId);
+      return this.pgRepoOrThrow().isOpen(sessionId);
     }
 
     const record = await this.getSession(sessionId);
@@ -134,7 +315,7 @@ export class SessionService {
 
   async markRecoveryRequired(sessionId: string): Promise<void> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.markRecoveryRequired(sessionId);
+      return this.pgRepoOrThrow().markRecoveryRequired(sessionId);
     }
 
     const session = await this.getSession(sessionId);
@@ -162,7 +343,7 @@ export class SessionService {
 
   async clearRecoveryRequired(sessionId: string): Promise<void> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.clearRecoveryRequired(sessionId);
+      return this.pgRepoOrThrow().clearRecoveryRequired(sessionId);
     }
 
     if (this.db) {
@@ -175,7 +356,7 @@ export class SessionService {
 
   async requiresRecovery(sessionId: string): Promise<boolean> {
     if (this.pgAvailable()) {
-      return this.pgRepo!.requiresRecovery(sessionId);
+      return this.pgRepoOrThrow().requiresRecovery(sessionId);
     }
 
     if (this.db) {
