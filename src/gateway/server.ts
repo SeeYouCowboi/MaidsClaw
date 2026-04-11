@@ -271,7 +271,7 @@ export class GatewayServer {
 				}
 
 				if (routePolicy && authLoader) {
-					const authResult = authLoader.requireAuth(
+					const authResult = await authLoader.requireAuth(
 						req,
 						toRequiredScope(routePolicy.scope),
 					);

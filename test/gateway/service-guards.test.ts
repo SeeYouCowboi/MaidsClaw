@@ -30,7 +30,7 @@ describe("gateway service guards", () => {
 
 		expect(body.error.code).toBe("UNSUPPORTED_RUNTIME_MODE");
 		expect(body.error.retriable).toBe(false);
-		expect(body.error.message.includes("jobQuery")).toBe(true);
+		expect(body.error.message.includes("jobQueryService")).toBe(true);
 		expect(body.request_id).toBe("");
 	});
 });

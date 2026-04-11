@@ -1442,7 +1442,7 @@ export function buildGatewayRuntimeContextExtensions(
 	| "providerCatalog"
 	| "personaAdmin"
 	| "loreAdmin"
-	| "jobQuery"
+	| "jobQueryService"
 	| "blackboard"
 	| "coreMemory"
 	| "episodeRepo"
@@ -1456,7 +1456,7 @@ export function buildGatewayRuntimeContextExtensions(
 		providerCatalog: runtime.providerCatalogService,
 		personaAdmin: undefined,
 		loreAdmin: undefined,
-		jobQuery: undefined,
+		jobQueryService: undefined,
 		blackboard: undefined,
 		coreMemory: undefined,
 		episodeRepo: undefined,

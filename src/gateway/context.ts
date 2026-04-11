@@ -5,6 +5,7 @@ import type { TurnClient } from "../app/clients/turn-client.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin } from "../app/host/types.js";
 import { MaidsClawError } from "../core/errors.js";
+import type { JobQueryService } from "../jobs/job-query-service.js";
 import type { GatewayTokenSnapshot } from "./auth.js";
 
 export type SubsystemStatus = "ok" | "degraded" | "unavailable";
@@ -71,11 +72,6 @@ export interface LoreAdminService {
 	deleteLore(loreId: string): Promise<unknown>;
 }
 
-export interface JobQueryService {
-	listJobs(): Promise<unknown>;
-	getJob(jobId: string): Promise<unknown>;
-}
-
 export interface BlackboardService {
 	toSnapshot(options?: { sessionId?: string }): unknown;
 }
@@ -118,7 +114,7 @@ export interface GatewayContext {
 	providerCatalog?: ProviderCatalogService;
 	personaAdmin?: PersonaAdminService;
 	loreAdmin?: LoreAdminService;
-	jobQuery?: JobQueryService;
+	jobQueryService?: JobQueryService;
 	blackboard?: BlackboardService;
 	coreMemory?: import("../memory/core-memory.js").CoreMemoryService;
 	episodeRepo?: EpisodeRepoService;

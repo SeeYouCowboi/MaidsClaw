@@ -6,6 +6,7 @@ import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
 import { type GatewayContext, requireService } from "./context.js";
 import { badRequestResponse, errorJsonResponse } from "./error-response.js";
+import { extractParam } from "./route-definition.js";
 import { createSseStream } from "./sse.js";
 import { validateBody, validateCursor, validateQuery } from "./validate.js";
 
@@ -213,14 +214,6 @@ function extractSessionId(url: URL): string | undefined {
 function extractRequestId(url: URL): string | undefined {
 	const parts = url.pathname.split("/");
 	if (parts.length >= 4 && parts[1] === "v1" && parts[2] === "requests") {
-		return parts[3];
-	}
-	return undefined;
-}
-
-function extractJobId(url: URL): string | undefined {
-	const parts = url.pathname.split("/");
-	if (parts.length >= 4 && parts[1] === "v1" && parts[2] === "jobs") {
 		return parts[3];
 	}
 	return undefined;
@@ -813,13 +806,53 @@ export async function handleLogs(
 	);
 }
 
+const VALID_JOB_STATUSES = ["pending", "running", "succeeded", "failed_terminal", "cancelled"] as const;
+
+/** GET /v1/jobs — list jobs with optional filters and pagination */
 export async function handleListJobs(
-	_req: Request,
+	req: Request,
 	ctx: ControllerContext,
 ): Promise<Response> {
 	try {
-		const service = requireService(ctx.jobQuery, "jobQuery");
-		return jsonResponse(await service.listJobs());
+		const service = requireService(ctx.jobQueryService, "jobQueryService");
+		const url = new URL(req.url);
+
+		const statusParam = extractOptionalQueryParam(url, "status");
+		if (statusParam !== undefined && !(VALID_JOB_STATUSES as readonly string[]).includes(statusParam)) {
+			return badRequestResponse(
+				`Invalid status filter: '${statusParam}'. Must be one of: ${VALID_JOB_STATUSES.join(", ")}`,
+			);
+		}
+
+		const typeParam = extractOptionalQueryParam(url, "type");
+
+		const limitRaw = url.searchParams.get("limit");
+		let limit = 50;
+		if (limitRaw !== null) {
+			const parsed = Number(limitRaw);
+			if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+				return badRequestResponse("Invalid limit: must be an integer");
+			}
+			limit = Math.max(1, Math.min(200, parsed));
+		}
+
+		const cursorParam = extractOptionalQueryParam(url, "cursor");
+		const validatedCursor = validateCursor(cursorParam ?? null);
+		if (validatedCursor instanceof Response) {
+			return validatedCursor;
+		}
+
+		const result = await service.listJobs({
+			status: statusParam,
+			type: typeParam,
+			limit,
+			cursor: cursorParam,
+		});
+
+		return jsonResponse({
+			items: result.items,
+			next_cursor: result.next_cursor,
+		});
 	} catch (error) {
 		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
 			return errorResponse(error, 501);
@@ -828,18 +861,32 @@ export async function handleListJobs(
 	}
 }
 
-export async function handleGetJob(
+/** GET /v1/jobs/{job_id} — get job detail with attempt history */
+export async function handleGetJobDetail(
 	req: Request,
 	ctx: ControllerContext,
 ): Promise<Response> {
-	const jobId = extractJobId(new URL(req.url));
-	if (!jobId) {
-		return badRequest("Missing job_id in path");
-	}
-
 	try {
-		const service = requireService(ctx.jobQuery, "jobQuery");
-		return jsonResponse(await service.getJob(jobId));
+		const service = requireService(ctx.jobQueryService, "jobQueryService");
+		const url = new URL(req.url);
+		const jobId = extractParam(url, "/v1/jobs/{job_id}", "job_id");
+		if (!jobId) {
+			return badRequest("Missing job_id in path");
+		}
+
+		const job = await service.getJob(jobId);
+		if (!job) {
+			const err = new MaidsClawError({
+				code: "JOB_NOT_FOUND",
+				message: `Job not found: ${jobId}`,
+				retriable: false,
+			});
+			return errorResponse(err, 404);
+		}
+
+		const history = await service.getJobHistory(jobId);
+
+		return jsonResponse({ ...job, history });
 	} catch (error) {
 		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
 			return errorResponse(error, 501);
