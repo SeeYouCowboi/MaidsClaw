@@ -2,8 +2,14 @@ import type { ObservationEvent } from "../app/contracts/execution.js";
 import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
+import { z } from "zod";
+import {
+	SessionCreateRequestSchema,
+} from "../contracts/cockpit/index.js";
 import { requireService, type GatewayContext } from "./context.js";
+import { badRequestResponse, errorJsonResponse } from "./error-response.js";
 import { createSseStream } from "./sse.js";
+import { validateBody } from "./validate.js";
 
 export type SubsystemStatus = import("./context.js").SubsystemStatus;
 export type HealthCheckFn = import("./context.js").HealthCheckFn;
@@ -25,8 +31,7 @@ function errorResponse(
 	status: number,
 	requestId?: string,
 ): Response {
-	const shape = err.toGatewayShape();
-	return jsonResponse({ ...shape, request_id: requestId ?? "" }, status);
+	return errorJsonResponse(err, status, requestId);
 }
 
 function makeEvent(
@@ -258,14 +263,7 @@ async function agentExists(
 }
 
 function badRequest(message: string): Response {
-	return errorResponse(
-		new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message,
-			retriable: false,
-		}),
-		400,
-	);
+	return badRequestResponse(message);
 }
 
 // ── Controllers ──────────────────────────────────────────────────────────────
@@ -313,31 +311,15 @@ export async function handleCreateSession(
 	req: Request,
 	ctx: ControllerContext,
 ): Promise<Response> {
-	let body: { agent_id?: string };
-	try {
-		body = (await req.json()) as { agent_id?: string };
-	} catch {
-		const err = new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message: "Invalid JSON body",
-			retriable: false,
-		});
-		return errorResponse(err, 400);
+	const parsed = await validateBody(req, SessionCreateRequestSchema);
+	if (parsed instanceof Response) {
+		return parsed;
 	}
 
-	if (!body.agent_id || typeof body.agent_id !== "string") {
-		const err = new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message: "Missing required field: agent_id",
-			retriable: false,
-		});
-		return errorResponse(err, 400);
-	}
-
-	if (!(await agentExists(ctx, body.agent_id))) {
+	if (!(await agentExists(ctx, parsed.agent_id))) {
 		const err = new MaidsClawError({
 			code: "AGENT_NOT_FOUND",
-			message: `Unknown agent: ${body.agent_id}`,
+			message: `Unknown agent: ${parsed.agent_id}`,
 			retriable: false,
 		});
 		return errorResponse(err, 400);
@@ -348,7 +330,7 @@ export async function handleCreateSession(
 		return client;
 	}
 
-	const session = await client.createSession(body.agent_id);
+	const session = await client.createSession(parsed.agent_id);
 	return jsonResponse(
 		{ session_id: session.session_id, created_at: session.created_at },
 		201,
@@ -364,37 +346,31 @@ export async function handleTurnStream(
 	const sessionId = extractSessionId(url);
 
 	if (!sessionId) {
-		const err = new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message: "Missing session_id in path",
-			retriable: false,
-		});
-		return errorResponse(err, 400);
+		return badRequestResponse("Missing session_id in path");
 	}
 
 	const resolvedSessionId = sessionId;
 
-	let body: {
-		agent_id?: string;
-		request_id?: string;
-		user_message?: { id?: string; text?: string };
-		client_context?: unknown;
-		metadata?: unknown;
-	};
-	try {
-		body = (await req.json()) as typeof body;
-	} catch {
-		const err = new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message: "Invalid JSON body",
-			retriable: false,
-		});
-		return errorResponse(err, 400);
+	const TurnBodySchema = z.object({
+		agent_id: z.string().min(1).optional(),
+		request_id: z.string().min(1).optional(),
+		user_message: z
+			.object({
+				id: z.string().optional(),
+				text: z.string().optional(),
+			})
+			.optional(),
+		client_context: z.unknown().optional(),
+		metadata: z.unknown().optional(),
+	});
+
+	const parsed = await validateBody(req, TurnBodySchema);
+	if (parsed instanceof Response) {
+		return parsed;
 	}
 
-	const requestId = body.request_id ?? crypto.randomUUID();
-
-	const userText = body.user_message?.text ?? "";
+	const requestId = parsed.request_id ?? crypto.randomUUID();
+	const userText = parsed.user_message?.text ?? "";
 
 	const client = turnClient(ctx);
 	if (client instanceof Response) {
@@ -405,7 +381,7 @@ export async function handleTurnStream(
 	try {
 		observationStream = client.streamTurn({
 			sessionId,
-			agentId: body.agent_id,
+			agentId: parsed.agent_id,
 			text: userText,
 			requestId,
 		});
@@ -550,12 +526,7 @@ export async function handleCloseSession(
 	const sessionId = extractSessionId(url);
 
 	if (!sessionId) {
-		const err = new MaidsClawError({
-			code: "INTERNAL_ERROR",
-			message: "Missing session_id in path",
-			retriable: false,
-		});
-		return errorResponse(err, 400);
+		return badRequestResponse("Missing session_id in path");
 	}
 
 	try {
@@ -592,31 +563,19 @@ export async function handleRecoverSession(
 	const sessionId = extractSessionId(url);
 
 	if (!sessionId) {
-		return errorResponse(
-			new MaidsClawError({
-				code: "INTERNAL_ERROR",
-				message: "Missing session_id",
-				retriable: false,
-			}),
-			400,
-		);
+		return badRequestResponse("Missing session_id");
 	}
 
-	let body: { action?: string };
-	try {
-		body = (await req.json()) as { action?: string };
-	} catch {
-		return errorResponse(
-			new MaidsClawError({
-				code: "INTERNAL_ERROR",
-				message: "Invalid JSON body",
-				retriable: false,
-			}),
-			400,
-		);
+	const RecoverBodySchema = z.object({
+		action: z.string().min(1),
+	});
+
+	const parsed = await validateBody(req, RecoverBodySchema);
+	if (parsed instanceof Response) {
+		return parsed;
 	}
 
-	if (body.action !== "discard_partial_turn") {
+	if (parsed.action !== "discard_partial_turn") {
 		return errorResponse(
 			new MaidsClawError({
 				code: "INVALID_ACTION",

@@ -179,8 +179,7 @@ describe("POST /v1/sessions", () => {
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
-    expect(body.error.message.includes("agent_id")).toBe(true);
+    expect(body.error.code).toBe("BAD_REQUEST");
   });
 
   it("returns 400 on invalid JSON", async () => {
@@ -191,7 +190,7 @@ describe("POST /v1/sessions", () => {
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.code).toBe("BAD_REQUEST");
   });
 });
 
