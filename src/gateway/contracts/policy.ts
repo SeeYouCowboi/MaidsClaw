@@ -394,6 +394,21 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
   },
 ] as const;
 
+export function normalizeRoutePattern(pattern: string): string {
+  return pattern.replace(/\{[^}]+\}/g, "{}");
+}
+
+export function routePolicyKey(method: string, routePattern: string): string {
+  return `${method.toUpperCase()} ${normalizeRoutePattern(routePattern)}`;
+}
+
+export const ROUTE_POLICY = new Map<string, RoutePolicy>(
+  GATEWAY_ROUTE_POLICY_MATRIX.map((policy) => [
+    routePolicyKey(policy.method, policy.route_pattern),
+    policy,
+  ]),
+);
+
 export function acceptsScope(required: RoutePolicyScope, granted: "read" | "write"): boolean {
   if (required === "public") {
     return true;

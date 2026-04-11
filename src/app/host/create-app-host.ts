@@ -318,6 +318,8 @@ export async function createAppHost(
 					port,
 					host,
 					context: gatewayContext,
+					authConfigPath: join(resolveConfigDir(options) ?? "config", "auth.json"),
+					dataDir,
 				})
 			: undefined;
 

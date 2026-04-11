@@ -5,6 +5,7 @@ import type { TurnClient } from "../app/clients/turn-client.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin } from "../app/host/types.js";
 import { MaidsClawError } from "../core/errors.js";
+import type { GatewayTokenSnapshot } from "./auth.js";
 
 export type SubsystemStatus = "ok" | "degraded" | "unavailable";
 
@@ -85,7 +86,7 @@ export interface GatewayContext {
 	areaWorldProjection?: AreaWorldProjectionService;
 	decisionLog?: MaidenDecisionLogService;
 
-	getAuthSnapshot?: () => unknown;
+	getAuthSnapshot?: () => GatewayTokenSnapshot;
 	getRuntimeSnapshot?: () => unknown;
 }
 
