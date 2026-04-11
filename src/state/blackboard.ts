@@ -22,6 +22,10 @@ import {
 export class Blackboard {
   /** The underlying in-memory store. V1: no persistence. */
   private readonly store = new Map<string, unknown>();
+  /** Session side-index: sessionId -> keys explicitly written with that session. */
+  private readonly sessionKeyIndex = new Map<string, Set<string>>();
+  /** Reverse index for efficient reassignment/cleanup: key -> sessionId. */
+  private readonly keySessionIndex = new Map<string, string>();
 
   // -----------------------------------------------------------------------
   // Write
@@ -39,10 +43,14 @@ export class Blackboard {
    * @throws MaidsClawError BLACKBOARD_NAMESPACE_RESERVED — key belongs to a reserved namespace.
    * @throws MaidsClawError BLACKBOARD_OWNERSHIP_VIOLATION — caller does not match singleWriter.
    */
-  set(key: string, value: unknown, caller?: string): void {
+  set(key: string, value: unknown, caller?: string, sessionId?: string): void {
     const ns = this.validateKey(key);
     this.validateOwnership(ns, caller);
     this.store.set(key, value);
+
+    if (sessionId !== undefined) {
+      this.assignKeyToSession(key, sessionId);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -75,7 +83,50 @@ export class Blackboard {
   delete(key: string, caller?: string): boolean {
     const ns = this.validateKey(key);
     this.validateOwnership(ns, caller);
-    return this.store.delete(key);
+    const didDelete = this.store.delete(key);
+    if (didDelete) {
+      this.removeKeyFromSessionIndex(key);
+    }
+    return didDelete;
+  }
+
+  /**
+   * Return a sorted key/value snapshot.
+   * - without options/sessionId: all non-reserved entries
+   * - with sessionId: only entries explicitly indexed to that sessionId
+   */
+  toSnapshot(options?: { sessionId?: string }): Array<{ key: string; value: unknown }> {
+    const sessionId = options?.sessionId;
+    const entries: Array<{ key: string; value: unknown }> = [];
+
+    if (sessionId !== undefined) {
+      const keys = this.sessionKeyIndex.get(sessionId);
+      if (!keys) {
+        return [];
+      }
+
+      for (const key of keys) {
+        if (this.isReservedKey(key)) {
+          continue;
+        }
+        if (this.store.has(key)) {
+          entries.push({ key, value: this.store.get(key) });
+        }
+      }
+
+      entries.sort((a, b) => a.key.localeCompare(b.key));
+      return entries;
+    }
+
+    for (const [key, value] of this.store) {
+      if (this.isReservedKey(key)) {
+        continue;
+      }
+      entries.push({ key, value });
+    }
+
+    entries.sort((a, b) => a.key.localeCompare(b.key));
+    return entries;
   }
 
   // -----------------------------------------------------------------------
@@ -110,6 +161,8 @@ export class Blackboard {
   /** Remove all entries. Intended for testing / session reset. */
   clear(): void {
     this.store.clear();
+    this.sessionKeyIndex.clear();
+    this.keySessionIndex.clear();
   }
 
   /** Return all keys (snapshot). */
@@ -165,5 +218,43 @@ export class Blackboard {
         },
       });
     }
+  }
+
+  private assignKeyToSession(key: string, sessionId: string): void {
+    const existingSessionId = this.keySessionIndex.get(key);
+    if (existingSessionId !== undefined && existingSessionId !== sessionId) {
+      const existingSet = this.sessionKeyIndex.get(existingSessionId);
+      existingSet?.delete(key);
+      if (existingSet && existingSet.size === 0) {
+        this.sessionKeyIndex.delete(existingSessionId);
+      }
+    }
+
+    let keySet = this.sessionKeyIndex.get(sessionId);
+    if (!keySet) {
+      keySet = new Set<string>();
+      this.sessionKeyIndex.set(sessionId, keySet);
+    }
+    keySet.add(key);
+    this.keySessionIndex.set(key, sessionId);
+  }
+
+  private removeKeyFromSessionIndex(key: string): void {
+    const sessionId = this.keySessionIndex.get(key);
+    if (sessionId === undefined) {
+      return;
+    }
+
+    this.keySessionIndex.delete(key);
+    const keySet = this.sessionKeyIndex.get(sessionId);
+    keySet?.delete(key);
+    if (keySet && keySet.size === 0) {
+      this.sessionKeyIndex.delete(sessionId);
+    }
+  }
+
+  private isReservedKey(key: string): boolean {
+    const ns = resolveNamespace(key);
+    return ns?.reserved === true;
   }
 }

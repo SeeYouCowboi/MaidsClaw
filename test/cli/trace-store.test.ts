@@ -103,6 +103,35 @@ describe("TraceStore", () => {
 		}
 	});
 
+	it("persists retrieval trace capture when setRetrieval is used", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-trace-"));
+		const store = new TraceStore(tempDir);
+
+		try {
+			store.initTrace("req-retrieval-1", "sess-retrieval-1", "rp:alice");
+			store.setRetrieval("req-retrieval-1", {
+				query_string: "where did she go",
+				strategy: "default_retrieval",
+				narrative_facets_used: ["entity_filters"],
+				cognition_facets_used: ["kind", "stance"],
+				segment_count: 2,
+			});
+			store.finalizeTrace("req-retrieval-1");
+
+			const bundle = store.getTrace("req-retrieval-1");
+			expect(bundle).not.toBeNull();
+			expect(bundle?.retrieval).toEqual({
+				query_string: "where did she go",
+				strategy: "default_retrieval",
+				narrative_facets_used: ["entity_filters"],
+				cognition_facets_used: ["kind", "stance"],
+				segment_count: 2,
+			});
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("listTraces returns trace summaries for a session", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "maidsclaw-trace-"));
 		const store = new TraceStore(tempDir);

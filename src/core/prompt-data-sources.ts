@@ -1,4 +1,9 @@
 import type { ViewerContext } from "./contracts/viewer-context.js";
+import type { RetrievalTraceCapture } from "../app/contracts/trace.js";
+
+export type TypedRetrievalSurfaceOptions = {
+  onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void;
+};
 
 export type PersonaDataSource = {
   getSystemPrompt(personaId: string): string | undefined;
@@ -17,7 +22,11 @@ export type MemoryDataSource = {
   getSharedBlocks?(agentId: string): string | Promise<string>;
   getRecentCognition(viewerContext: ViewerContext): string | Promise<string>;
   getAttachedSharedBlocks?(agentId: string): string | Promise<string>;
-  getTypedRetrievalSurface?(userMessage: string, viewerContext: ViewerContext): string | Promise<string>;
+  getTypedRetrievalSurface?(
+    userMessage: string,
+    viewerContext: ViewerContext,
+    options?: TypedRetrievalSurfaceOptions,
+  ): string | Promise<string>;
 };
 
 export type OperationalDataSource = {

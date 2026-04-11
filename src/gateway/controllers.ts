@@ -741,6 +741,42 @@ export async function handleRequestTrace(
 	return jsonResponse(await client.getTrace(requestId, { unsafeRaw: false }));
 }
 
+export async function handleRequestRetrievalTrace(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	const url = new URL(req.url);
+	const requestId = extractRequestId(url);
+	if (!requestId) {
+		return badRequest("Missing request_id in path");
+	}
+
+	try {
+		const traceStore = requireService(ctx.traceStore, "traceStore");
+		const trace = traceStore.getTrace(requestId);
+		if (!trace) {
+			return errorResponse(
+				new MaidsClawError({
+					code: "BAD_REQUEST",
+					message: `Unknown request_id: ${requestId}`,
+					retriable: false,
+				}),
+				404,
+			);
+		}
+
+		return jsonResponse({
+			request_id: requestId,
+			retrieval: trace.retrieval ?? null,
+		});
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
 export async function handleSessionTranscript(
 	req: Request,
 	ctx: ControllerContext,
@@ -786,6 +822,421 @@ export async function handleSessionMemory(
 		),
 	);
 }
+
+function parseBoundedLimit(
+	url: URL,
+	key: string,
+	defaults: { defaultValue: number; min: number; max: number },
+): number | Response {
+	const raw = url.searchParams.get(key);
+	if (raw === null) {
+		return defaults.defaultValue;
+	}
+
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+		return badRequestResponse(`Invalid ${key}: must be an integer`);
+	}
+
+	return Math.max(defaults.min, Math.min(defaults.max, parsed));
+}
+
+function parseSinceEpochMs(url: URL): number | undefined | Response {
+	const raw = url.searchParams.get("since");
+	if (raw === null || raw.trim().length === 0) {
+		return undefined;
+	}
+
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+		return badRequestResponse(
+			"Invalid since: must be a non-negative epoch millisecond integer",
+		);
+	}
+
+	return parsed;
+}
+
+function asUnknownRecord(value: unknown): Record<string, unknown> {
+	if (value && typeof value === "object" && !Array.isArray(value)) {
+		return value as Record<string, unknown>;
+	}
+	return {};
+}
+
+function numberField(record: Record<string, unknown>, ...keys: string[]): number | undefined {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "string" && value.trim().length > 0) {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
+		}
+	}
+	return undefined;
+}
+
+function stringField(record: Record<string, unknown>, ...keys: string[]): string | undefined {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string") {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function compareDescNumberThenString(a: unknown, b: unknown): number {
+	if (typeof a === "number" && typeof b === "number") {
+		return b - a;
+	}
+	return String(b).localeCompare(String(a));
+}
+
+export async function handleAgentMemoryEpisodes(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.episodeRepo, "episodeRepo");
+		const url = new URL(req.url);
+		const agentId = extractParam(
+			url,
+			"/v1/agents/{agent_id}/memory/episodes",
+			"agent_id",
+		);
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const since = parseSinceEpochMs(url);
+		if (since instanceof Response) {
+			return since;
+		}
+		const limit = parseBoundedLimit(url, "limit", {
+			defaultValue: 50,
+			min: 1,
+			max: 200,
+		});
+		if (limit instanceof Response) {
+			return limit;
+		}
+
+		const source = await service.listByAgent(agentId, { since, limit });
+		const rows = Array.isArray(source) ? source : [];
+
+		const items = rows
+			.map((row) => {
+				const record = asUnknownRecord(row);
+				const createdAt = numberField(record, "created_at", "createdAt");
+				const episodeId = record.episode_id ?? record.id;
+				const settlementId = stringField(
+					record,
+					"settlement_id",
+					"settlementId",
+				);
+				const category = stringField(record, "category");
+				const summary = stringField(record, "summary");
+				const committedTime = numberField(
+					record,
+					"committed_time",
+					"committedTime",
+				);
+
+				if (
+					episodeId === undefined ||
+					settlementId === undefined ||
+					category === undefined ||
+					summary === undefined ||
+					createdAt === undefined ||
+					committedTime === undefined
+				) {
+					return null;
+				}
+
+				if (since !== undefined && createdAt < since) {
+					return null;
+				}
+
+				const item: Record<string, unknown> = {
+					episode_id: episodeId,
+					settlement_id: settlementId,
+					category,
+					summary,
+					committed_time: committedTime,
+					created_at: createdAt,
+				};
+
+				const privateNotes = stringField(
+					record,
+					"private_notes",
+					"privateNotes",
+				);
+				if (privateNotes !== undefined) {
+					item.private_notes = privateNotes;
+				}
+
+				const locationText = stringField(
+					record,
+					"location_text",
+					"locationText",
+				);
+				if (locationText !== undefined) {
+					item.location_text = locationText;
+				}
+
+				return item;
+			})
+			.filter((item): item is Record<string, unknown> => item !== null)
+			.sort((a, b) => {
+				const created =
+					compareDescNumberThenString(a.created_at, b.created_at);
+				if (created !== 0) {
+					return created;
+				}
+				return compareDescNumberThenString(a.episode_id, b.episode_id);
+			})
+			.slice(0, limit);
+
+		return jsonResponse({ agent_id: agentId, items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+export async function handleAgentMemoryNarratives(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.areaWorldProjection, "areaWorldProjection");
+		const url = new URL(req.url);
+		const agentId = extractParam(
+			url,
+			"/v1/agents/{agent_id}/memory/narratives",
+			"agent_id",
+		);
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const source = await service.listByAgent(agentId);
+		const rows = Array.isArray(source) ? source : [];
+
+		const items = rows
+			.map((row) => {
+				const record = asUnknownRecord(row);
+				const rawScope = stringField(record, "scope");
+				if (rawScope !== "world" && rawScope !== "area") {
+					return null;
+				}
+				const scope = rawScope;
+
+				const summaryText = stringField(
+					record,
+					"summary_text",
+					"summaryText",
+				);
+				const updatedAt = numberField(record, "updated_at", "updatedAt");
+				const areaId = numberField(record, "area_id", "areaId");
+				const scopeId =
+					scope === "world"
+						? "world"
+						: areaId !== undefined
+							? `area:${areaId}`
+							: undefined;
+
+				if (summaryText === undefined || updatedAt === undefined || !scopeId) {
+					return null;
+				}
+
+				const scopeRank = scope === "world" ? 0 : 1;
+				return {
+					scope,
+					scope_id: scopeId,
+					summary_text: summaryText,
+					updated_at: updatedAt,
+					scope_rank: scopeRank,
+				};
+			})
+			.filter(
+				(item): item is {
+					scope: "world" | "area";
+					scope_id: string;
+					summary_text: string;
+					updated_at: number;
+					scope_rank: number;
+				} => item !== null,
+			)
+			.sort((a, b) => {
+				if (a.scope_rank !== b.scope_rank) {
+					return a.scope_rank - b.scope_rank;
+				}
+				if (a.updated_at !== b.updated_at) {
+					return b.updated_at - a.updated_at;
+				}
+				return a.scope_id.localeCompare(b.scope_id);
+			})
+			.map(({ scope_rank: _scopeRank, ...item }) => item);
+
+		return jsonResponse({ agent_id: agentId, items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+export async function handleAgentMemorySettlements(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.settlementRepo, "settlementRepo");
+		const url = new URL(req.url);
+		const agentId = extractParam(
+			url,
+			"/v1/agents/{agent_id}/memory/settlements",
+			"agent_id",
+		);
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const limit = parseBoundedLimit(url, "limit", {
+			defaultValue: 50,
+			min: 1,
+			max: 200,
+		});
+		if (limit instanceof Response) {
+			return limit;
+		}
+
+		const source = await service.listByAgent(agentId, { limit });
+		const rows = Array.isArray(source) ? source : [];
+
+		const items = rows
+			.map((row) => {
+				const record = asUnknownRecord(row);
+				const settlementId = stringField(
+					record,
+					"settlement_id",
+					"settlementId",
+				);
+				const status = stringField(record, "status");
+				const attemptCount = numberField(
+					record,
+					"attempt_count",
+					"attemptCount",
+				);
+				const createdAt = numberField(record, "created_at", "createdAt");
+				const updatedAt = numberField(record, "updated_at", "updatedAt");
+
+				if (
+					settlementId === undefined ||
+					status === undefined ||
+					attemptCount === undefined ||
+					createdAt === undefined ||
+					updatedAt === undefined
+				) {
+					return null;
+				}
+
+				const item: Record<string, unknown> = {
+					settlement_id: settlementId,
+					status,
+					attempt_count: attemptCount,
+					created_at: createdAt,
+					updated_at: updatedAt,
+				};
+
+				const payloadHash = stringField(record, "payload_hash", "payloadHash");
+				if (payloadHash !== undefined) {
+					item.payload_hash = payloadHash;
+				}
+
+				const claimedBy = stringField(record, "claimed_by", "claimedBy");
+				if (claimedBy !== undefined) {
+					item.claimed_by = claimedBy;
+				}
+
+				const claimedAt = numberField(record, "claimed_at", "claimedAt");
+				if (claimedAt !== undefined) {
+					item.claimed_at = claimedAt;
+				}
+
+				const appliedAt = numberField(record, "applied_at", "appliedAt");
+				if (appliedAt !== undefined) {
+					item.applied_at = appliedAt;
+				}
+
+				const errorMessage = stringField(
+					record,
+					"error_message",
+					"errorMessage",
+				);
+				if (errorMessage !== undefined) {
+					item.error_message = errorMessage;
+				}
+
+				return item;
+			})
+			.filter((item): item is Record<string, unknown> => item !== null)
+			.sort((a, b) => {
+				const updated =
+					compareDescNumberThenString(a.updated_at, b.updated_at);
+				if (updated !== 0) {
+					return updated;
+				}
+				return compareDescNumberThenString(a.settlement_id, b.settlement_id);
+			})
+			.slice(0, limit);
+
+		return jsonResponse({ agent_id: agentId, items });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** GET /v1/state/snapshot?session_id=... */
+export async function handleStateSnapshot(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.blackboard, "blackboard");
+		const url = new URL(req.url);
+		const sessionId = extractOptionalQueryParam(url, "session_id");
+
+		const entries = service.toSnapshot(
+			sessionId !== undefined ? { sessionId } : undefined,
+		) as Array<{ key: string; value: unknown }>;
+
+		const filters: { session_id?: string } = {};
+		if (sessionId !== undefined) {
+			filters.session_id = sessionId;
+		}
+
+		return jsonResponse({ filters, entries });
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
 
 export async function handleLogs(
 	req: Request,
@@ -1703,6 +2154,233 @@ export async function handleListProviders(
 	} catch (error) {
 		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
 			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+const CORE_MEMORY_LABELS = [
+	"user",
+	"index",
+	"pinned_summary",
+	"pinned_index",
+	"persona",
+] as const;
+
+function isCoreMemoryLabel(label: string): label is (typeof CORE_MEMORY_LABELS)[number] {
+	return (CORE_MEMORY_LABELS as readonly string[]).includes(label);
+}
+
+function toCoreMemoryBlockDto(
+	block: {
+		label: string;
+		value: string;
+		chars_current: number;
+		char_limit: number;
+		read_only: number;
+		updated_at: number;
+	},
+): {
+	label: string;
+	content: string;
+	chars_current: number;
+	chars_limit: number;
+	read_only: boolean;
+	updated_at: number;
+} {
+	return {
+		label: block.label,
+		content: block.value,
+		chars_current: block.chars_current,
+		chars_limit: block.char_limit,
+		read_only: block.read_only !== 0,
+		updated_at: block.updated_at,
+	};
+}
+
+function toPinnedSummaryDto(
+	block: {
+		label: string;
+		value: string;
+		chars_current: number;
+		updated_at: number;
+	},
+): {
+	label: string;
+	content: string;
+	chars_current: number;
+	updated_at: number;
+} {
+	return {
+		label: block.label,
+		content: block.value,
+		chars_current: block.chars_current,
+		updated_at: block.updated_at,
+	};
+}
+
+/** GET /v1/agents/{agent_id}/memory/core-blocks */
+export async function handleListCoreMemoryBlocks(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.coreMemory, "coreMemory");
+		const url = new URL(req.url);
+		const agentId = extractParam(url, "/v1/agents/{agent_id}/memory/core-blocks", "agent_id");
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const blocks = await service.getAllBlocks(agentId);
+		return jsonResponse({
+			blocks: blocks.map((block) => toCoreMemoryBlockDto(block)),
+		});
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** GET /v1/agents/{agent_id}/memory/core-blocks/{label} */
+export async function handleGetCoreMemoryBlock(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.coreMemory, "coreMemory");
+		const url = new URL(req.url);
+		const agentId = extractParam(url, "/v1/agents/{agent_id}/memory/core-blocks", "agent_id");
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const label = extractParam(url, "/v1/agents/{agent_id}/memory/core-blocks/{label}", "label");
+		if (!label) {
+			return badRequest("Missing label in path");
+		}
+
+		if (!isCoreMemoryLabel(label)) {
+			return errorResponse(
+				new MaidsClawError({
+					code: "BAD_REQUEST",
+					message: `Unknown core memory label: ${label}`,
+					retriable: false,
+				}),
+				400,
+			);
+		}
+
+		try {
+			const block = await service.getBlock(agentId, label);
+			return jsonResponse(toCoreMemoryBlockDto(block));
+		} catch (innerError) {
+			if (
+				innerError instanceof Error &&
+				innerError.message.includes("Block not found")
+			) {
+				return jsonResponse(
+					{
+						error: {
+							code: "NOT_FOUND",
+							message: `Core memory block not found: ${agentId}/${label}`,
+							retriable: false,
+						},
+						request_id: "",
+					},
+					404,
+				);
+			}
+			throw innerError;
+		}
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+/** GET /v1/agents/{agent_id}/memory/pinned-summaries */
+export async function handleListPinnedSummaries(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.coreMemory, "coreMemory");
+		const url = new URL(req.url);
+		const agentId = extractParam(url, "/v1/agents/{agent_id}/memory/pinned-summaries", "agent_id");
+		if (!agentId) {
+			return badRequest("Missing agent_id in path");
+		}
+
+		const blocks = await service.getAllBlocks(agentId);
+		const summaries = blocks
+			.filter((block) => block.label === "pinned_summary" || block.label === "persona")
+			.map((block) => toPinnedSummaryDto(block));
+
+		return jsonResponse({
+			agent_id: agentId,
+			summaries,
+		});
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
+const MaidenDecisionsQuerySchema = z
+	.object({
+		session_id: z.string().min(1).optional(),
+		limit: z.coerce.number().int().min(1).max(200).optional(),
+		cursor: z.string().min(1).optional(),
+	})
+	.strict();
+
+/** GET /v1/state/maiden-decisions */
+export async function handleListMaidenDecisions(
+	req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const service = requireService(ctx.decisionLog, "decisionLog");
+		const url = new URL(req.url);
+
+		const parsedQuery = validateQuery(url, MaidenDecisionsQuerySchema);
+		if (parsedQuery instanceof Response) {
+			return parsedQuery;
+		}
+
+		const validatedCursor = validateCursor(parsedQuery.cursor ?? null);
+		if (validatedCursor instanceof Response) {
+			return validatedCursor;
+		}
+
+		const result = await service.list({
+			sessionId: parsedQuery.session_id,
+			limit: parsedQuery.limit,
+			cursor: parsedQuery.cursor,
+		});
+
+		return jsonResponse({
+			items: result.items,
+			next_cursor: result.next_cursor,
+			filters: {
+				...(parsedQuery.session_id !== undefined
+					? { session_id: parsedQuery.session_id }
+					: {}),
+			},
+		});
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		if (isMaidsClawError(error) && error.code === "BAD_REQUEST") {
+			return errorResponse(error, 400);
 		}
 		throw error;
 	}

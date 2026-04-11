@@ -1,0 +1,40 @@
+Task 22 evidence — decision callsite/wiring analysis
+Date: 2026-04-12
+
+Plan requirement: investigate whether src/agents/maiden/decision-policy.ts is actively wired.
+
+Findings:
+1) src/agents/maiden/decision-policy.ts exists but is not the active runtime decision path for gateway turn execution.
+   - Referenced in tests and helper flow, but runtime turn dispatch in current architecture does not depend on this file to choose response path per request.
+
+2) DelegationCoordinator path is present in codebase but not on the primary runtime turn path used by TurnService.run() for regular request handling.
+
+3) Active decision seam used for instrumentation:
+   - File: src/runtime/turn-service.ts
+   - Method: TurnService.run()
+   - Decision source: resolveAssistantActorType(ownerAgent)
+   - Instrumentation hook: recordMaidenDecision(request, assistantActorType)
+
+Action mapping implemented at active seam:
+- assistantActorType === "rp_agent" => action: "delegate"
+- otherwise => action: "direct_reply"
+
+Captured fields populated in log entry:
+- decision_id
+- request_id
+- session_id
+- delegation_depth (currently 0 at this seam)
+- action (direct_reply | delegate)
+- target_agent_id (set for delegate path)
+- chosen_from_agent_ids (candidate list; includes target when known)
+- created_at
+
+Storage and API notes:
+- In-memory MaidenDecisionLog class (no PG requirement)
+- Opaque cursor pagination via encodeCursor/decodeCursor from src/contracts/cockpit/cursor.ts
+- Route: GET /v1/state/maiden-decisions
+- 501 guard: requireService(ctx.decisionLog, "decisionLog")
+- Empty result behavior: 200 with items: []
+
+Route policy alignment:
+- src/gateway/contracts/policy.ts updated for GET /v1/state/maiden-decisions with pg_required: false

@@ -1,0 +1,15 @@
+$ tsc -p tsconfig.build.json --noEmit
+src/jobs/pg-store.ts(561,26): error TS2769: No overload matches this call.
+  Argument of type '[string, "memory.migrate" | "memory.organize" | "task.run" | "search.rebuild" | "maintenance.replay_projection" | "maintenance.rebuild_derived" | "maintenance.full" | "cognition.thinker", ... 12 more ..., number]' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(template: TemplateStringsArray, ...parameters: readonly ParameterOrFragment<never>[]): PendingQuery<Row[]>', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'ParameterOrFragment<never>'.
+src/jobs/pg-store.ts(721,17): error TS2769: No overload matches this call.
+  Argument of type '[string, JobKind, string | null, ExecutionClass, string, number, number, string, string, number, unknown, Record<string, unknown>, number, number, number]' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(template: TemplateStringsArray, ...parameters: readonly ParameterOrFragment<never>[]): PendingQuery<Row[]>', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'ParameterOrFragment<never>'.
+src/memory/storage.ts(418,5): error TS2322: Type 'MaybePromise<void>' is not assignable to type 'Promise<void>'.
+  Type 'void' is not assignable to type 'Promise<void>'.
+src/storage/domain-repos/pg/interaction-repo.ts(38,18): error TS2769: No overload matches this call.
+  Argument of type '[string, string, number, ActorType, RecordType, unknown, string | null, number]' is not assignable to parameter of type 'never'.
+  Overload 2 of 2, '(template: TemplateStringsArray, ...parameters: readonly ParameterOrFragment<never>[]): PendingQuery<Row[]>', gave the following error.
+    Argument of type 'unknown' is not assignable to parameter of type 'ParameterOrFragment<never>'.

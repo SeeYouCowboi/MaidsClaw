@@ -4,6 +4,10 @@ import type { SessionClient } from "../app/clients/session-client.js";
 import type { TurnClient } from "../app/clients/turn-client.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AppHostAdmin } from "../app/host/types.js";
+import type {
+	MaidenDecisionEntry,
+	MaidenDecisionListResult,
+} from "../agents/maiden/decision-log.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { JobQueryService } from "../jobs/job-query-service.js";
 import type { PersonaAdminService } from "../persona/admin-service.js";
@@ -70,11 +74,14 @@ export interface BlackboardService {
 }
 
 export interface EpisodeRepoService {
-	listByAgent(agentId: string): Promise<unknown>;
+	listByAgent(
+		agentId: string,
+		options?: { since?: number; limit?: number },
+	): Promise<unknown>;
 }
 
 export interface SettlementRepoService {
-	listByAgent(agentId: string): Promise<unknown>;
+	listByAgent(agentId: string, options?: { limit?: number }): Promise<unknown>;
 }
 
 export interface AreaWorldProjectionService {
@@ -82,7 +89,11 @@ export interface AreaWorldProjectionService {
 }
 
 export interface MaidenDecisionLogService {
-	listByAgent(agentId: string): Promise<unknown>;
+	list(options?: {
+		sessionId?: string;
+		limit?: number;
+		cursor?: string;
+	}): Promise<MaidenDecisionListResult>;
 }
 
 /**

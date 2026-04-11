@@ -762,12 +762,9 @@ export class AgentLoop {
 		try {
 			const pendingCalls = new Map<string, PendingToolCall>();
 			const completed: PendingToolCall[] = [];
-			let retryText = "";
 
 			for await (const chunk of this.modelProvider.chatCompletion(retryRequest)) {
-				if (chunk.type === "text_delta") {
-					retryText += chunk.text;
-				} else if (chunk.type === "tool_use_start") {
+				if (chunk.type === "tool_use_start") {
 					pendingCalls.set(chunk.id, { id: chunk.id, name: chunk.name, argumentsJson: "" });
 				} else if (chunk.type === "tool_use_delta") {
 					const p = pendingCalls.get(chunk.id);
@@ -856,6 +853,22 @@ export class AgentLoop {
 				DEFAULT_PROMPT_MAX_CONTEXT_TOKENS,
 			),
 			isTalkerMode: request.isTalkerMode,
+			onRetrievalTraceCapture: (capture) => {
+				const traceRequestId = request.requestId ?? "";
+				try {
+					request.traceStore?.setRetrieval(traceRequestId, capture);
+				} catch (error) {
+					const wrapped = wrapError(error, {
+						code: "INTERNAL_ERROR",
+						retriable: false,
+					});
+					request.traceStore?.addLogEntry(traceRequestId, {
+						level: "warn",
+						message: `retrieval trace capture failed: ${wrapped.code} — ${wrapped.message}`,
+						timestamp: Date.now(),
+					});
+				}
+			},
 		});
 
 		const rendered = this.promptRenderer.render({

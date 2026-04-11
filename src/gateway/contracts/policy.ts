@@ -325,7 +325,7 @@ export const GATEWAY_ROUTE_POLICY_MATRIX: readonly RoutePolicy[] = [
     scope: "read",
     audit: false,
     cors: true,
-    pg_required: true,
+    pg_required: false,
     error_transport: "json",
   },
   {

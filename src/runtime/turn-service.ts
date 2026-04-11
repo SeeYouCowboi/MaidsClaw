@@ -1,4 +1,5 @@
 import type { AgentProfile } from "../agents/profile.js";
+import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { ObservationEvent } from "../app/contracts/execution.js";
 import type { RedactedSettlement } from "../app/contracts/inspect.js";
 import type { LogEntry } from "../app/contracts/trace.js";
@@ -91,6 +92,7 @@ export class TurnService {
 		private readonly memoryPipelineReady = true,
 		private readonly talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number } = { enabled: false, stalenessThreshold: 2, softBlockTimeoutMs: 3000, softBlockPollIntervalMs: 500 },
 		private readonly jobPersistence: JobPersistence | null = null,
+		private readonly maidenDecisionLog: MaidenDecisionLog | null = null,
 	) {}
 
 	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
@@ -213,6 +215,8 @@ export class TurnService {
 		const assistantActorType = await this.resolveAssistantActorType(
 			effectiveRequest.sessionId,
 		);
+
+		await this.recordMaidenDecision(effectiveRequest, assistantActorType);
 
 		if (assistantActorType === "rp_agent") {
 			if (this.talkerThinkerConfig.enabled) {
@@ -606,7 +610,7 @@ export class TurnService {
 			settlementPayloadAfterCommit = settlementPayload;
 
 			try {
-				await this.settlementUnitOfWork!.run(async (repos) => {
+				await this.settlementUnitOfWork.run(async (repos) => {
 					await repos.settlementLedger.markTalkerCommitted(settlementId, ownerAgentId);
 				});
 			} catch (ledgerErr) {
@@ -1446,6 +1450,37 @@ export class TurnService {
 			return "task_agent";
 		}
 		return "rp_agent";
+	}
+
+	private async recordMaidenDecision(
+		request: AgentRunRequest,
+		assistantActorType: "rp_agent" | "maiden" | "task_agent",
+	): Promise<void> {
+		if (!this.maidenDecisionLog) {
+			return;
+		}
+
+		const targetAgentId = await this.resolveQueueOwnerAgentId(request.sessionId);
+		const action =
+			assistantActorType === "rp_agent" ? "delegate" : "direct_reply";
+		const chosenFromAgentIds = targetAgentId ? [targetAgentId] : [];
+
+		try {
+			await this.maidenDecisionLog.append({
+				decision_id: `dec:${crypto.randomUUID()}`,
+				request_id: request.requestId ?? `req:${Date.now()}`,
+				session_id: request.sessionId,
+				delegation_depth: request.delegationDepth ?? 0,
+				action,
+				...(action === "delegate" && targetAgentId
+					? { target_agent_id: targetAgentId }
+					: {}),
+				chosen_from_agent_ids: chosenFromAgentIds,
+				created_at: Date.now(),
+			});
+		} catch {
+			// Decision logging is observability-only and must never fail turns.
+		}
 	}
 
 	private traceChunk(requestId: string, chunk: Chunk): void {

@@ -4,6 +4,7 @@ import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/
 import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { RetrievalService } from "./retrieval";
 import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
+import type { TypedRetrievalSurfaceOptions } from "../core/prompt-data-sources.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
@@ -277,6 +278,7 @@ export async function getTypedRetrievalSurfaceAsync(
   viewerContext: ViewerContext,
   repos: PromptDataRepos,
   retrievalService: RetrievalService,
+  options?: TypedRetrievalSurfaceOptions,
 ): Promise<string> {
   if (userMessage.trim().length < 3) {
     return "";
@@ -314,7 +316,7 @@ export async function getTypedRetrievalSurfaceAsync(
     recentCognitionKeys,
     recentCognitionTexts,
     conversationTexts,
-  });
+  }, undefined, "default_retrieval", undefined, options?.onRetrievalTraceCapture);
 
   return renderTypedRetrieval(typed);
 }

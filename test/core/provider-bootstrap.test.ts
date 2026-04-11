@@ -135,6 +135,7 @@ describe("provider bootstrap catalog service", () => {
 
 		const extensions = buildGatewayRuntimeContextExtensions(runtimeLike);
 		expect(extensions.providerCatalog).toBe(providerCatalogService);
+		expect(extensions.blackboard).toBeUndefined();
 
 		const providers = await extensions.providerCatalog?.listProviders();
 		expect(Array.isArray(providers?.providers)).toBe(true);

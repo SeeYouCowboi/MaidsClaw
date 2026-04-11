@@ -70,7 +70,12 @@ export class DelegationCoordinator {
       delegationContext.taskInput = taskInput;
     }
 
-    this.deps.blackboard.set(`delegation.${delegationId}`, delegationContext, "maiden");
+    this.deps.blackboard.set(
+      `delegation.${delegationId}`,
+      delegationContext,
+      "maiden",
+      delegationContext.sessionId,
+    );
 
     if (this.deps.commitService) {
       const payload: DelegationPayload = {

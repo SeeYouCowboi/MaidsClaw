@@ -4,6 +4,7 @@ import type {
   RetrievalQueryStrategy,
   TypedRetrievalResult,
 } from "../retrieval/retrieval-orchestrator.js";
+import type { RetrievalTraceCaptureHook } from "../retrieval.js";
 import type {
   EntityNode,
   EventNode,
@@ -54,6 +55,7 @@ export interface RetrievalServiceLike {
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy?: RetrievalQueryStrategy,
     contestedCount?: number,
+    onTraceCapture?: RetrievalTraceCaptureHook,
   ): Promise<TypedRetrievalResult>;
   localizeSeedsHybrid(
     query: string,

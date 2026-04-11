@@ -1,0 +1,31 @@
+Task 22 evidence — maiden decisions route + decision log
+Date: 2026-04-12
+
+Command: bun test test/gateway/maiden-decisions-route.test.ts
+Result:
+bun test v1.3.10 (30e609e0)
+
+ 3 pass
+ 0 fail
+ 16 expect() calls
+Ran 3 tests across 1 file. [135.00ms]
+
+Command: bun test test/agents/maiden-decision-log.test.ts
+Result:
+bun test v1.3.10 (30e609e0)
+
+ 2 pass
+ 0 fail
+ 5 expect() calls
+Ran 2 tests across 1 file. [124.00ms]
+
+Command: bun run build
+Result:
+$ tsc -p tsconfig.build.json --noEmit
+Expected baseline pre-existing TypeScript errors observed (4 total):
+1) src/jobs/pg-store.ts(561,26): TS2769
+2) src/jobs/pg-store.ts(721,17): TS2769
+3) src/memory/storage.ts(418,5): TS2322
+4) src/storage/domain-repos/pg/interaction-repo.ts(38,18): TS2769
+
+No additional Task-22-specific build errors introduced by maiden decision log and route changes.

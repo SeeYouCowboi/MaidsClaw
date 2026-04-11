@@ -1,0 +1,101 @@
+Task 20 — Retrieval trace capture + retrieval-trace route evidence
+
+Pre-change gap analysis (captured before implementation)
+1) TraceBundle has no retrieval field:
+   - File: src/app/contracts/trace.ts
+   - Existing TraceBundle fields: request_id, session_id, agent_id, captured_at, prompt?, public_chunks, settlement?, flush?, log_entries
+   - No `retrieval` key is defined.
+
+2) TraceStore has no retrieval write path:
+   - File: src/app/diagnostics/trace-store.ts
+   - Available write methods: initTrace, addPromptCapture, addChunk, addSettlement, addFlushResult, addLogEntry, finalizeTrace
+   - No `setRetrieval`/`addRetrieval` method exists.
+
+3) Retrieval orchestration path has no trace capture hook:
+   - File: src/memory/retrieval/retrieval-orchestrator.ts
+   - search() computes typed retrieval + hints/hits but does not write trace data.
+   - File: src/memory/retrieval.ts
+   - generateTypedRetrieval() calls orchestrator.search() and returns typed result; no trace capture output or sink.
+   - File: src/memory/prompt-data.ts (getTypedRetrievalSurfaceAsync)
+   - Calls retrieval.generateTypedRetrieval(...) and renders result; no traceStore/requestId capture path.
+
+4) Gateway route gap:
+   - File: src/gateway/routes/requests.ts
+   - Has /summary, /prompt, /chunks, /diagnose, /trace, /logs
+   - No /v1/requests/{request_id}/retrieval-trace route wired.
+
+5) Existing trace endpoint is present and must remain unchanged:
+   - File: src/gateway/controllers.ts (handleRequestTrace)
+   - Uses inspect client and unsafe_raw rejection guard.
+
+---
+Post-change test/build evidence
+
+Implemented changes
+1) Trace bundle contract extension:
+   - File: src/app/contracts/trace.ts
+   - Added type `RetrievalTraceCapture` with fields:
+     - query_string
+     - strategy
+     - narrative_facets_used
+     - cognition_facets_used
+     - segment_count
+   - Extended `TraceBundle` with optional `retrieval?: RetrievalTraceCapture` (backward compatible).
+
+2) Trace store retrieval write path:
+   - File: src/app/diagnostics/trace-store.ts
+   - Added `setRetrieval(requestId, retrieval)` that stores copied retrieval capture payload into active bundle.
+
+3) Retrieval boundary capture (injected, non-fatal):
+   - File: src/memory/retrieval.ts
+   - Extended `generateTypedRetrieval(...)` with optional trace hook callback.
+   - Hook payload includes query string, strategy, facet usage, and total segment count.
+   - Callback invocation wrapped in try/catch so capture failure is non-fatal.
+   - File: src/memory/prompt-data.ts
+   - Passed trace hook via retrieval call path (no global singleton).
+   - File: src/core/prompt-data-sources.ts, src/core/prompt-data-adapters/memory-adapter.ts, src/core/prompt-builder.ts
+   - Added/propagated optional retrieval-trace capture callback.
+   - File: src/core/agent-loop.ts
+   - Injected callback to call `traceStore.setRetrieval(...)`; callback failure logs warn and does not break turn/retrieval.
+
+4) New retrieval trace route:
+   - File: src/gateway/controllers.ts
+   - Added `handleRequestRetrievalTrace` with:
+     - `requireService(ctx.traceStore, "traceStore")` (501 guard)
+     - 404 when request is unknown (`traceStore.getTrace(requestId) === null`)
+     - 200 `{ request_id, retrieval: null }` when trace exists but no retrieval section
+     - 200 `{ request_id, retrieval: RetrievalTraceCapture }` when present
+   - File: src/gateway/routes/requests.ts
+   - Added `GET /v1/requests/{request_id}/retrieval-trace`.
+   - File: src/gateway/contracts/policy.ts
+   - Confirmed route policy already includes GET retrieval-trace as read scope.
+
+5) Existing trace route backward compatibility:
+   - Existing `/v1/requests/{request_id}/trace` handler left unchanged.
+
+Tests executed (all passing)
+- bun test test/memory/retrieval-trace-capture.test.ts
+  - 2 pass, 0 fail
+- bun test test/gateway/retrieval-trace-route.test.ts
+  - 4 pass, 0 fail
+- bun test test/gateway/trace-route-regression.test.ts
+  - 2 pass, 0 fail
+- bun test test/memory/prompt-data-pg.test.ts
+  - 4 pass, 0 fail
+- bun test test/core/memory-adapter-pg.test.ts
+  - 7 pass, 0 fail
+- bun test test/cli/trace-store.test.ts
+  - 8 pass, 0 fail
+- bun test test/gateway/route-resolution.test.ts
+  - 8 pass, 0 fail
+
+Build check
+- bun run build
+  - Failed with the same 4 pre-existing TypeScript errors only:
+    1) src/jobs/pg-store.ts(561,26)
+    2) src/jobs/pg-store.ts(721,17)
+    3) src/memory/storage.ts(418,5)
+    4) src/storage/domain-repos/pg/interaction-repo.ts(38,18)
+
+Diagnostics
+- lsp_diagnostics (error severity) on all changed src/test files: no diagnostics found.

@@ -8,6 +8,7 @@ import type { PromptBuilder } from "../core/prompt-builder.js";
 import type { PromptRenderer } from "../core/prompt-renderer.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
+import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { ProviderCatalogService } from "../gateway/context.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
@@ -104,6 +105,7 @@ export type RuntimeBootstrapResult = {
 	jobPersistence: JobPersistence;
 	thinkerGlobalConcurrencyCap?: number;
 	talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number };
+	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;
 	/**
 	 * Resolves once the CJK segmenter has finished loading shared aliases into

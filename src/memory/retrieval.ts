@@ -65,6 +65,14 @@ type RetrievalServiceDeps = {
   queryPlanBuilder?: QueryPlanBuilder;
 };
 
+export type RetrievalTraceCaptureHook = (capture: {
+  query_string: string;
+  strategy: RetrievalQueryStrategy;
+  narrative_facets_used: string[];
+  cognition_facets_used: string[];
+  segment_count: number;
+}) => void;
+
 export class RetrievalService {
   private readonly retrievalRepo: RetrievalReadRepo;
   private readonly embeddingService: EmbeddingService;
@@ -144,6 +152,7 @@ export class RetrievalService {
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
     contestedCount?: number,
+    onTraceCapture?: RetrievalTraceCaptureHook,
   ): Promise<TypedRetrievalResult> {
     // Phase 3: build a QueryPlan per call when router + builder are wired.
     // Failures fall back to undefined — orchestrator then runs the legacy
@@ -180,6 +189,45 @@ export class RetrievalService {
           content,
           score: hit.updated_at,
         });
+      }
+    }
+
+    if (onTraceCapture) {
+      try {
+        const narrativeFacetsUsed: string[] = [];
+        const cognitionFacetsUsed: string[] = [];
+        if ((queryPlan?.surfacePlans.narrative.entityFilters.length ?? 0) > 0) {
+          narrativeFacetsUsed.push("entity_filters");
+        }
+        if (queryPlan?.surfacePlans.narrative.timeWindow) {
+          narrativeFacetsUsed.push("time_window");
+        }
+        if ((queryPlan?.surfacePlans.cognition.entityFilters.length ?? 0) > 0) {
+          cognitionFacetsUsed.push("entity_filters");
+        }
+        if (queryPlan?.surfacePlans.cognition.timeWindow) {
+          cognitionFacetsUsed.push("time_window");
+        }
+        if (queryPlan?.surfacePlans.cognition.kind) {
+          cognitionFacetsUsed.push("kind");
+        }
+        if (queryPlan?.surfacePlans.cognition.stance) {
+          cognitionFacetsUsed.push("stance");
+        }
+
+        onTraceCapture({
+          query_string: query,
+          strategy: queryStrategy,
+          narrative_facets_used: narrativeFacetsUsed,
+          cognition_facets_used: cognitionFacetsUsed,
+          segment_count:
+            typed.narrative.length
+            + typed.cognition.length
+            + typed.conflict_notes.length
+            + typed.episode.length,
+        });
+      } catch {
+        // Non-fatal diagnostics path: retrieval output must still return.
       }
     }
 

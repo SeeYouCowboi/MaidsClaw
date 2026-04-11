@@ -24,12 +24,21 @@ export type LogEntry = {
   timestamp: number;
 };
 
+export type RetrievalTraceCapture = {
+  query_string: string;
+  strategy: string;
+  narrative_facets_used: string[];
+  cognition_facets_used: string[];
+  segment_count: number;
+};
+
 export type TraceBundle = {
   request_id: string;
   session_id: string;
   agent_id: string;
   captured_at: number;
   prompt?: PromptCapture;
+  retrieval?: RetrievalTraceCapture;
   public_chunks: ObservationEvent[];
   settlement?: RedactedSettlement;
   flush?: FlushCapture;

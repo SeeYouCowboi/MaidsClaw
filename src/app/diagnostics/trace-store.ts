@@ -6,6 +6,7 @@ import type {
   FlushCapture,
   LogEntry,
   PromptCapture,
+  RetrievalTraceCapture,
   TraceBundle,
   TraceSummary,
 } from "../contracts/trace.js";
@@ -76,6 +77,17 @@ export class TraceStore {
   addLogEntry(requestId: string, entry: LogEntry): void {
     const bundle = this.ensureBundle(requestId);
     bundle.log_entries.push({ ...entry });
+  }
+
+  setRetrieval(requestId: string, retrieval: RetrievalTraceCapture): void {
+    const bundle = this.ensureBundle(requestId);
+    bundle.retrieval = {
+      query_string: retrieval.query_string,
+      strategy: retrieval.strategy,
+      narrative_facets_used: [...retrieval.narrative_facets_used],
+      cognition_facets_used: [...retrieval.cognition_facets_used],
+      segment_count: retrieval.segment_count,
+    };
   }
 
   finalizeTrace(requestId: string): void {

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import {
 	MAIDEN_PROFILE,
 	PRESET_PROFILES,
@@ -1324,6 +1325,8 @@ export function bootstrapRuntime(
 		: memoryPipelineStatusPreliminary;
 	healthChecks.memory_pipeline = memoryPipelineReady ? "ok" : "degraded";
 
+	const maidenDecisionLog = new MaidenDecisionLog();
+
 	const turnService = new TurnService(
 		turnServiceAgentLoop,
 		commitService,
@@ -1340,6 +1343,7 @@ export function bootstrapRuntime(
 		memoryPipelineReady,
 		talkerThinkerConfig,
 		resolvedJobPersistence,
+		maidenDecisionLog,
 	);
 
 	const pendingFlushRepo = createLazyPgRepo(
@@ -1423,6 +1427,7 @@ export function bootstrapRuntime(
 		jobPersistence: resolvedJobPersistence,
 		thinkerGlobalConcurrencyCap,
 		talkerThinkerConfig,
+		maidenDecisionLog,
 		shutdown,
 		segmenterReady,
 		providerCatalogService,
@@ -1457,12 +1462,12 @@ export function buildGatewayRuntimeContextExtensions(
 		personaAdmin: undefined,
 		loreAdmin: undefined,
 		jobQueryService: undefined,
-		blackboard: undefined,
+		blackboard: runtime.blackboard,
 		coreMemory: undefined,
 		episodeRepo: undefined,
 		settlementRepo: undefined,
 		areaWorldProjection: undefined,
-		decisionLog: undefined,
+		decisionLog: runtime.maidenDecisionLog,
 		getAuthSnapshot: undefined,
 		getRuntimeSnapshot: undefined,
 	};

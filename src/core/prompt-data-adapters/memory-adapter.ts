@@ -7,7 +7,11 @@ import {
   getTypedRetrievalSurfaceAsync,
   type PromptDataRepos,
 } from "../../memory/prompt-data.js";
-import type { MemoryDataSource, ViewerContext } from "../prompt-data-sources.js";
+import type {
+  MemoryDataSource,
+  TypedRetrievalSurfaceOptions,
+  ViewerContext,
+} from "../prompt-data-sources.js";
 
 export class MemoryAdapter implements MemoryDataSource {
   constructor(
@@ -31,10 +35,20 @@ export class MemoryAdapter implements MemoryDataSource {
     return getAttachedSharedBlocksAsync(agentId, this.repos);
   }
 
-  async getTypedRetrievalSurface(userMessage: string, viewerContext: ViewerContext): Promise<string> {
+  async getTypedRetrievalSurface(
+    userMessage: string,
+    viewerContext: ViewerContext,
+    options?: TypedRetrievalSurfaceOptions,
+  ): Promise<string> {
     if (!this.retrievalService) {
       return "";
     }
-    return getTypedRetrievalSurfaceAsync(userMessage, viewerContext, this.repos, this.retrievalService);
+    return getTypedRetrievalSurfaceAsync(
+      userMessage,
+      viewerContext,
+      this.repos,
+      this.retrievalService,
+      options,
+    );
   }
 }

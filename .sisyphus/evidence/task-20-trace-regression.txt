@@ -1,0 +1,19 @@
+Task 20 — Trace route backward-compat regression evidence
+
+Objective
+- Verify existing GET /v1/requests/{request_id}/trace behavior remains unchanged while adding retrieval-trace endpoint.
+
+Regression tests executed
+1) bun test test/gateway/trace-route-regression.test.ts
+   - Result: 2 pass, 0 fail
+   - Covers:
+     - Existing trace endpoint returns expected trace payload shape
+     - Existing unsafe_raw query guard still returns BAD_REQUEST with INSPECT_UNSAFE_RAW_LOCAL_ONLY
+
+2) bun test test/gateway/route-resolution.test.ts
+   - Result: 8 pass, 0 fail
+   - Confirms route table now resolves retrieval-trace path in addition to existing trace route.
+
+Conclusion
+- `/v1/requests/{request_id}/trace` remains backward compatible.
+- New `/v1/requests/{request_id}/retrieval-trace` added without behavior changes to existing trace route.

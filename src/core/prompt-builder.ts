@@ -15,6 +15,7 @@ import {
 	SECTION_SLOT_ORDER,
 } from "./prompt-template.js";
 import type { TokenBudget } from "./token-budget.js";
+import type { RetrievalTraceCapture } from "../app/contracts/trace.js";
 
 const MAIDEN_OPERATIONAL_KEYS = [
 	"session.*",
@@ -179,6 +180,7 @@ export type BuildPromptInput = {
 	budget: TokenBudget;
 	contextText?: string;
 	isTalkerMode?: boolean;
+	onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void;
 };
 
 export type BuildPromptOutput = {
@@ -238,7 +240,11 @@ export class PromptBuilder {
 			);
 			slotContent.set(
 				PromptSectionSlot.TYPED_RETRIEVAL,
-				await this.getTypedRetrievalSurface(input.userMessage, input.viewerContext),
+				await this.getTypedRetrievalSurface(
+					input.userMessage,
+					input.viewerContext,
+					input.onRetrievalTraceCapture,
+				),
 			);
 			slotContent.set(
 				PromptSectionSlot.LORE_ENTRIES,
@@ -398,6 +404,7 @@ export class PromptBuilder {
 	private async getTypedRetrievalSurface(
 		userMessage: string,
 		viewerContext: ViewerContext,
+		onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void,
 	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
 		if (!memDs.getTypedRetrievalSurface) {
@@ -406,7 +413,10 @@ export class PromptBuilder {
 
 		const result = this.readDataSource(
 			"memory.getTypedRetrievalSurface",
-			() => memDs.getTypedRetrievalSurface!(userMessage, viewerContext),
+			() =>
+				memDs.getTypedRetrievalSurface!(userMessage, viewerContext, {
+					onRetrievalTraceCapture,
+				}),
 		);
 
 		if (result instanceof Promise) {
