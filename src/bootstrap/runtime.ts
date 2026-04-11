@@ -11,10 +11,20 @@ import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { TraceStore } from "../app/diagnostics/trace-store.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
-import { loadRuntimeConfig } from "../core/config.js";
+import {
+	loadAuthConfig,
+	loadRuntimeConfig,
+	resolveProviderCredential,
+} from "../core/config.js";
+import type { AuthConfig, RuntimeConfig } from "../core/config-schema.js";
 import { createLogger } from "../core/logger.js";
-import type { RuntimeConfig } from "../core/config-schema.js";
 import { bootstrapRegistry } from "../core/models/bootstrap.js";
+import {
+	BUILT_IN_PROVIDERS,
+	mergeProviderOverrides,
+} from "../core/models/provider-catalog.js";
+import { loadProviderOverrides } from "../core/models/provider-overrides-loader.js";
+import type { ProviderCatalogEntry } from "../core/models/provider-types.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import {
 	BlackboardOperationalDataSource,
@@ -24,6 +34,11 @@ import {
 import { MemoryAdapter } from "../core/prompt-data-adapters/memory-adapter.js";
 import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
+import type {
+	GatewayContext,
+	ProviderCatalogListResponse,
+	ProviderCatalogService,
+} from "../gateway/context.js";
 import { CommitService } from "../interaction/commit-service.js";
 import type {
 	InteractionRecord,
@@ -34,8 +49,8 @@ import type { InteractionStore } from "../interaction/store.js";
 import type { DurableJobStore } from "../jobs/durable-store.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
-import { PgJobStore } from "../jobs/pg-store.js";
 import { bootstrapPgJobsSchema } from "../jobs/pg-schema.js";
+import { PgJobStore } from "../jobs/pg-store.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
 import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
@@ -46,13 +61,13 @@ import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
-import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
-import { RuleBasedQueryRouter } from "../memory/query-router.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { PromptDataRepos } from "../memory/prompt-data.js";
 import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
+import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
+import { RuleBasedQueryRouter } from "../memory/query-router.js";
 import { RetrievalOrchestrator } from "../memory/retrieval/retrieval-orchestrator.js";
 import { RetrievalService } from "../memory/retrieval.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
@@ -99,7 +114,6 @@ import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.
 import { resolveStoragePaths } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
-import type { GatewayContext } from "../gateway/context.js";
 import type {
 	MemoryPipelineStatus,
 	RuntimeBootstrapOptions,
@@ -170,6 +184,125 @@ function buildHealthChecks(
 	}
 
 	return healthChecks;
+}
+
+function formatConfigErrors(
+	errors: Array<{ field: string; message: string }>,
+): string {
+	return errors.map((error) => `${error.field}: ${error.message}`).join("; ");
+}
+
+function isSensitiveHeaderName(headerName: string): boolean {
+	const normalized = headerName.replace(/[\s_-]/g, "").toLowerCase();
+	return (
+		normalized === "authorization" ||
+		normalized === "apikey" ||
+		normalized === "accesstoken" ||
+		normalized === "token"
+	);
+}
+
+function sanitizeExtraHeaders(
+	extraHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+	if (!extraHeaders) {
+		return undefined;
+	}
+
+	const sanitizedEntries = Object.entries(extraHeaders).map(([key, value]) => {
+		if (isSensitiveHeaderName(key)) {
+			return [key, "[REDACTED]"] as const;
+		}
+		return [key, value] as const;
+	});
+
+	if (sanitizedEntries.length === 0) {
+		return undefined;
+	}
+
+	return Object.fromEntries(sanitizedEntries);
+}
+
+function toProviderCatalogEntryView(
+	entry: ProviderCatalogEntry,
+	auth: AuthConfig,
+): ProviderCatalogListResponse["providers"][number] {
+	const configured = resolveProviderCredential(entry.id, auth) !== null;
+	const extraHeaders = sanitizeExtraHeaders(entry.extraHeaders);
+
+	return {
+		id: entry.id,
+		display_name: entry.displayName,
+		transport_family: entry.transportFamily,
+		api_kind: entry.apiKind,
+		risk_tier: entry.riskTier,
+		base_url: entry.baseUrl,
+		auth_modes: [...entry.authModes],
+		selection_policy: {
+			enabled_by_default: entry.selectionPolicy.enabledByDefault,
+			eligible_for_auto_fallback: entry.selectionPolicy.eligibleForAutoFallback,
+			is_auto_default: entry.selectionPolicy.isAutoDefault,
+		},
+		...(entry.defaultChatModelId
+			? { default_chat_model_id: entry.defaultChatModelId }
+			: {}),
+		...(entry.defaultEmbeddingModelId
+			? { default_embedding_model_id: entry.defaultEmbeddingModelId }
+			: {}),
+		models: entry.models.map((model) => ({
+			id: model.id,
+			display_name: model.displayName,
+			context_window: model.contextWindow,
+			max_output_tokens: model.maxOutputTokens,
+			supports_tools: model.supportsTools,
+			supports_vision: model.supportsVision,
+			supports_embedding: model.supportsEmbedding,
+		})),
+		...(entry.warningMessage ? { warning_message: entry.warningMessage } : {}),
+		...(entry.supportsStreamingUsage !== undefined
+			? { supports_streaming_usage: entry.supportsStreamingUsage }
+			: {}),
+		...(entry.disableToolChoiceRequired !== undefined
+			? { disable_tool_choice_required: entry.disableToolChoiceRequired }
+			: {}),
+		...(entry.embeddingDimensions !== undefined
+			? { embedding_dimensions: entry.embeddingDimensions }
+			: {}),
+		...(extraHeaders ? { extra_headers: extraHeaders } : {}),
+		configured,
+	};
+}
+
+class RuntimeProviderCatalogService implements ProviderCatalogService {
+	private readonly providers: ReadonlyArray<ProviderCatalogEntry>;
+	private readonly auth: AuthConfig;
+
+	constructor(
+		providers: ReadonlyArray<ProviderCatalogEntry>,
+		auth: AuthConfig,
+	) {
+		this.providers = providers;
+		this.auth = auth;
+	}
+
+	async listProviders(): Promise<ProviderCatalogListResponse> {
+		return {
+			providers: this.providers.map((entry) =>
+				toProviderCatalogEntryView(entry, this.auth),
+			),
+		};
+	}
+}
+
+export function createProviderCatalogService(options: {
+	auth: AuthConfig;
+	providerOverrides: ProviderCatalogEntry[];
+}): ProviderCatalogService {
+	const providers = mergeProviderOverrides(
+		BUILT_IN_PROVIDERS,
+		options.providerOverrides,
+	);
+	return new RuntimeProviderCatalogService(providers, options.auth);
 }
 
 function buildAgentRegistry(
@@ -625,6 +758,14 @@ export function bootstrapRuntime(
 	const runtimeConfig: RuntimeConfig = runtimeConfigResult.ok
 		? runtimeConfigResult.runtime
 		: {};
+	const authConfigResult = loadAuthConfig({ cwd: runtimeCwd });
+	if (!authConfigResult.ok) {
+		throw new Error(
+			`Failed to load auth config: ${formatConfigErrors(authConfigResult.errors)}`,
+		);
+	}
+	const authConfig = authConfigResult.auth;
+	const providerOverrides = loadProviderOverrides({ cwd: runtimeCwd });
 	const thinkerGlobalConcurrencyCap =
 		runtimeConfig.talkerThinker?.globalConcurrencyCap;
 
@@ -661,7 +802,12 @@ export function bootstrapRuntime(
 		options.sessionService ?? new SessionService({ pgRepo: pgSessionRepo });
 	const blackboard = options.blackboard ?? new Blackboard();
 	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
-	const modelRegistry = options.modelRegistry ?? bootstrapRegistry();
+	const modelRegistry =
+		options.modelRegistry ??
+		bootstrapRegistry({
+			auth: authConfig,
+			providerOverrides,
+		});
 	const toolExecutor = options.toolExecutor ?? new ToolExecutor();
 
 	const interactionStore = createPgInteractionStoreShim();
@@ -970,7 +1116,10 @@ export function bootstrapRuntime(
 	// `segmenterReady` is exposed on RuntimeBootstrapResult so callers that
 	// want strict ordering (e.g. HTTP host before opening its listener) can
 	// `await result.segmenterReady`. Default behavior remains fire-and-forget.
-	const bootstrapLogger = createLogger({ name: "bootstrap.runtime", level: "debug" });
+	const bootstrapLogger = createLogger({
+		name: "bootstrap.runtime",
+		level: "debug",
+	});
 	const segmenterReady = aliasService
 		.syncSharedAliasesToSegmenter()
 		.catch((err) => {
@@ -1009,7 +1158,8 @@ export function bootstrapRuntime(
 	const queryRouter = queryRouterEnabled
 		? new RuleBasedQueryRouter(aliasService)
 		: undefined;
-	const queryPlanBuilderEnabled = process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
+	const queryPlanBuilderEnabled =
+		process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
 	const queryPlanBuilder = queryPlanBuilderEnabled
 		? new DeterministicQueryPlanBuilder()
 		: undefined;
@@ -1207,7 +1357,9 @@ export function bootstrapRuntime(
 					},
 					talkerThinkerConfig.enabled
 						? {
-								get sql() { return resolvePgPool(); },
+								get sql() {
+									return resolvePgPool();
+								},
 								jobPersistence: resolvedJobPersistence,
 								settlementLedger,
 							}
@@ -1229,6 +1381,11 @@ export function bootstrapRuntime(
 			.close()
 			.catch((err) => console.error("PG pool close error:", err));
 	};
+
+	const providerCatalogService = createProviderCatalogService({
+		auth: authConfig,
+		providerOverrides,
+	});
 
 	return {
 		sessionService,
@@ -1268,6 +1425,7 @@ export function bootstrapRuntime(
 		talkerThinkerConfig,
 		shutdown,
 		segmenterReady,
+		providerCatalogService,
 	};
 }
 
@@ -1294,10 +1452,8 @@ export function buildGatewayRuntimeContextExtensions(
 	| "getAuthSnapshot"
 	| "getRuntimeSnapshot"
 > {
-	void runtime;
-
 	return {
-		providerCatalog: undefined,
+		providerCatalog: runtime.providerCatalogService,
 		personaAdmin: undefined,
 		loreAdmin: undefined,
 		jobQuery: undefined,
@@ -1338,8 +1494,8 @@ export async function initializePgBackendForRuntime(
 				pool,
 				typeof result.thinkerGlobalConcurrencyCap === "number"
 					? {
-						thinkerGlobalConcurrencyCap: result.thinkerGlobalConcurrencyCap,
-					}
+							thinkerGlobalConcurrencyCap: result.thinkerGlobalConcurrencyCap,
+						}
 					: undefined,
 			);
 		}

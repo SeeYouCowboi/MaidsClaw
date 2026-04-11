@@ -303,6 +303,7 @@ export async function createAppHost(
 		turn: user?.turn,
 		inspect: user?.inspect,
 		health: user?.health,
+		providerCatalog: runtime.providerCatalogService,
 		traceStore: runtime.traceStore,
 		healthChecks,
 		hasAgent: (agentId: string) => runtime.agentRegistry.has(agentId),

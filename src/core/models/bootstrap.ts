@@ -91,7 +91,7 @@ export function bootstrapRegistry(options?: BootstrapOptions): DefaultModelServi
 }
 
 function resolveBootstrapCredential(providerId: string, auth: AuthConfig | undefined): AuthCredential | null {
-  if (auth && auth.credentials.length > 0) {
+  if (auth) {
     return resolveProviderCredential(providerId, auth);
   }
 

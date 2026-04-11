@@ -1,0 +1,15 @@
+$ bun test "test/core/provider-bootstrap.test.ts"
+bun test v1.3.10 (30e609e0)
+
+ 2 pass
+ 0 fail
+ 8 expect() calls
+Ran 2 tests across 1 file. [171.00ms]
+
+$ bun test "test/core/models/bootstrap.test.ts"
+bun test v1.3.10 (30e609e0)
+
+ 10 pass
+ 0 fail
+ 24 expect() calls
+Ran 10 tests across 1 file. [100.00ms]
