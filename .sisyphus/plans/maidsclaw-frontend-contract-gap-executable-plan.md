@@ -974,7 +974,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 15. Add file-backed persona admin service plus full persona CRUD, explicit reload, and delete guards
+- [x] 15. Add file-backed persona admin service plus full persona CRUD, explicit reload, and delete guards
 
   **What to do**:
   - Add `src/persona/admin-service.ts` implementing a dedicated `PersonaAdminService` separate from the prompt-facing `PersonaService`; it must support:
@@ -1044,7 +1044,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 16. Add file-backed lore admin service plus full lore CRUD
+- [x] 16. Add file-backed lore admin service plus full lore CRUD
 
   **What to do**:
   - Add `src/lore/admin-service.ts` implementing a dedicated `LoreAdminService` mirroring the persona admin pattern for:
@@ -1108,7 +1108,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 17. Add `GET /v1/providers` as a redacted effective provider discovery route
+- [x] 17. Add `GET /v1/providers` as a redacted effective provider discovery route
 
   **What to do**:
   - Add `src/gateway/routes/providers.ts` exposing `GET /v1/providers`.
