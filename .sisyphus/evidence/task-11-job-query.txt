@@ -1,0 +1,18 @@
+Task 11 evidence — job query service
+
+Command:
+  bun test test/jobs/job-query-service.test.ts
+
+Output:
+  bun test v1.3.10 (30e609e0)
+
+   6 pass
+   0 fail
+   8 expect() calls
+  Ran 6 tests across 1 file. [196.00ms]
+
+Build snapshot (expected baseline only):
+  bun run build
+  - src/jobs/pg-store.ts (2 pre-existing TS2769)
+  - src/memory/storage.ts (1 pre-existing TS2322)
+  - src/storage/domain-repos/pg/interaction-repo.ts (1 pre-existing TS2769)

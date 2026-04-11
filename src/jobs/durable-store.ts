@@ -252,6 +252,45 @@ export type CancelResult =
 
 export type PgStatusCount = Record<PgJobStatus, number>;
 
+export type CockpitJobItem = {
+  job_id: string;
+  job_type: JobKind;
+  execution_class: ExecutionClass;
+  status: PgJobStatus;
+  session_id?: string;
+  agent_id?: string;
+  created_at: string;
+  updated_at: string;
+  started_at?: string;
+  finished_at?: string;
+  attempt_count: number;
+  max_attempts: number;
+  last_error_code?: string;
+  last_error_message?: string;
+};
+
+export type CockpitJobAttempt = {
+  attempt_no: number;
+  worker_id: string;
+  outcome: string;
+  started_at: string;
+  finished_at?: string;
+  error_code?: string;
+  error_message?: string;
+};
+
+export type JobListPageParams = {
+  status?: PgJobStatus;
+  type?: JobKind;
+  limit: number;
+  cursor?: string;
+};
+
+export type JobListPageResult = {
+  items: CockpitJobItem[];
+  nextCursor: string | null;
+};
+
 export interface DurableJobStore {
   enqueue<K extends JobKind>(input: EnqueueJobInput<K>): Promise<EnqueueResult>;
   claimNext(input: ClaimNextInput): Promise<ClaimNextResult>;
@@ -273,6 +312,7 @@ export interface DurableJobStore {
   listExpiredLeases(nowMs: number): Promise<PgJobCurrentRow[]>;
   countByStatus(): Promise<PgStatusCount>;
   getHistory(job_key: string): Promise<PgJobAttemptHistoryRow[]>;
+  listPage(params: JobListPageParams): Promise<JobListPageResult>;
 }
 
 export function isDurableSearchRebuildPayload(value: unknown): value is DurableSearchRebuildPayload {

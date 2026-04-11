@@ -1,0 +1,17 @@
+Task 11 evidence — durable status vocabulary
+
+Command:
+  bun test test/jobs/job-query-statuses.test.ts
+
+Output:
+  bun test v1.3.10 (30e609e0)
+
+   3 pass
+   0 fail
+   18 expect() calls
+  Ran 3 tests across 1 file. [145.00ms]
+
+Status checks covered:
+  - response excludes legacy statuses: processing, retryable, reconciled
+  - all 5 durable statuses accepted: pending, running, succeeded, failed_terminal, cancelled
+  - response status values match PgJobStatus exactly

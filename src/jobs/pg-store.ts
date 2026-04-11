@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
+import { decodeCursor, encodeCursor } from "../contracts/cockpit/cursor.js";
+import { MaidsClawError } from "../core/errors.js";
 import type {
   CancelResult,
   ClaimNextInput,
   ClaimNextResult,
+  CockpitJobItem,
+  CognitionThinkerJobPayload,
   CompleteResult,
   DurableJobStore,
   DurableSearchRebuildPayload,
@@ -11,9 +15,12 @@ import type {
   EnqueueResult,
   FailResult,
   HeartbeatResult,
+  JobListPageParams,
+  JobListPageResult,
   PgJobAttemptHistoryRow,
   PgJobCurrentRow,
   PgJobFailInput,
+  PgJobStatus,
   PgStatusCount,
 } from "./durable-store.js";
 import { CONCURRENCY_CAPS, type JobKind } from "./types.js";
@@ -158,6 +165,8 @@ type FenceLookupRow = Pick<PgJobCurrentRow, "status" | "claim_version">;
 type FenceMissOutcome = "not_found" | "stale_claim" | "not_running";
 
 const DEFAULT_HEARTBEAT_LEASE_EXTENSION_MS = 30_000;
+const DEFAULT_LIST_PAGE_LIMIT = 50;
+const MAX_LIST_PAGE_LIMIT = 200;
 
 type PgJobStoreOptions = {
   thinkerGlobalConcurrencyCap?: number;
@@ -173,6 +182,112 @@ function normalizeJsonValue<T>(value: T): T | unknown {
   } catch {
     return value;
   }
+}
+
+type CursorBoundary = {
+  updatedAt: number;
+  jobKey: string;
+};
+
+function clampListPageLimit(limit?: number): number {
+  const value = Number.isFinite(limit) ? Math.floor(limit as number) : DEFAULT_LIST_PAGE_LIMIT;
+  return Math.max(1, Math.min(MAX_LIST_PAGE_LIMIT, value || DEFAULT_LIST_PAGE_LIMIT));
+}
+
+function decodeCursorBoundary(cursor?: string): CursorBoundary | undefined {
+  if (!cursor) {
+    return undefined;
+  }
+
+  const payload = decodeCursor(cursor);
+  if (typeof payload.sort_key !== "string") {
+    throw new MaidsClawError({
+      code: "BAD_REQUEST",
+      message: "Cursor sort_key must be an ISO date string",
+      retriable: false,
+    });
+  }
+
+  const updatedAt = Date.parse(payload.sort_key);
+  if (!Number.isFinite(updatedAt)) {
+    throw new MaidsClawError({
+      code: "BAD_REQUEST",
+      message: "Cursor sort_key must be a valid ISO date string",
+      retriable: false,
+    });
+  }
+
+  return {
+    updatedAt,
+    jobKey: payload.tie_breaker,
+  };
+}
+
+function toIsoTimestamp(timestamp?: number): string | undefined {
+  if (timestamp === undefined) {
+    return undefined;
+  }
+  return new Date(Number(timestamp)).toISOString();
+}
+
+function isTerminalStatus(status: PgJobStatus): boolean {
+  return status === "succeeded" || status === "failed_terminal" || status === "cancelled";
+}
+
+function asThinkerPayload(value: unknown): CognitionThinkerJobPayload | undefined {
+  const normalized = normalizeJsonValue(value);
+  if (typeof normalized !== "object" || normalized === null) {
+    return undefined;
+  }
+
+  const candidate = normalized as Record<string, unknown>;
+  if (
+    typeof candidate.sessionId !== "string"
+    || typeof candidate.agentId !== "string"
+    || typeof candidate.settlementId !== "string"
+    || typeof candidate.talkerTurnVersion !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    sessionId: candidate.sessionId,
+    agentId: candidate.agentId,
+    settlementId: candidate.settlementId,
+    talkerTurnVersion: candidate.talkerTurnVersion,
+  };
+}
+
+function mapPgRowToCockpitItem(row: PgJobCurrentRow): CockpitJobItem {
+  const normalized = normalizePgJobCurrentRow(row);
+  const createdAt = toIsoTimestamp(normalized.created_at) ?? new Date(0).toISOString();
+  const updatedAt = toIsoTimestamp(normalized.updated_at) ?? createdAt;
+  const startedAt = toIsoTimestamp(normalized.claimed_at);
+  const finishedAt = isTerminalStatus(normalized.status)
+    ? toIsoTimestamp(normalized.terminal_at)
+    : undefined;
+
+  const thinkerPayload =
+    normalized.job_type === "cognition.thinker"
+      ? asThinkerPayload(normalized.payload_json)
+      : undefined;
+
+  return {
+    job_id: normalized.job_key,
+    job_type: normalized.job_type,
+    execution_class: normalized.execution_class,
+    status: normalized.status,
+    ...(thinkerPayload?.sessionId ? { session_id: thinkerPayload.sessionId } : {}),
+    ...(thinkerPayload?.agentId ? { agent_id: thinkerPayload.agentId } : {}),
+    created_at: createdAt,
+    updated_at: updatedAt,
+    ...(startedAt ? { started_at: startedAt } : {}),
+    ...(finishedAt ? { finished_at: finishedAt } : {}),
+    attempt_count: normalized.attempt_count,
+    max_attempts: normalized.max_attempts,
+    ...(normalized.last_error_code ? { last_error_code: normalized.last_error_code } : {}),
+    ...(normalized.last_error_message ? { last_error_message: normalized.last_error_message } : {}),
+  };
 }
 
 function buildSearchRebuildSuccessorJobKey(jobFamilyKey: string): string {
@@ -1096,6 +1211,68 @@ export class PgJobStore implements DurableJobStore {
     `) as PgJobAttemptHistoryRow[];
 
     return rows;
+  }
+
+  async listPage(params: JobListPageParams): Promise<JobListPageResult> {
+    const limit = clampListPageLimit(params.limit);
+    const cursorBoundary = decodeCursorBoundary(params.cursor);
+    const queryLimit = limit + 1;
+
+    if (cursorBoundary) {
+      const cursorRows = await this.sql`
+        SELECT job_key
+        FROM jobs_current
+        WHERE job_key = ${cursorBoundary.jobKey}
+          AND updated_at = ${cursorBoundary.updatedAt}
+          AND ${params.status ? this.sql`status = ${params.status}` : this.sql`TRUE`}
+          AND ${params.type ? this.sql`job_type = ${params.type}` : this.sql`TRUE`}
+        LIMIT 1
+      `;
+
+      if (cursorRows.length === 0) {
+        return { items: [], nextCursor: null };
+      }
+    }
+
+    const rows = (await this.sql`
+      SELECT *
+      FROM jobs_current
+      WHERE ${params.status ? this.sql`status = ${params.status}` : this.sql`TRUE`}
+        AND ${params.type ? this.sql`job_type = ${params.type}` : this.sql`TRUE`}
+        AND ${cursorBoundary
+    ? this.sql`
+              (
+                updated_at < ${cursorBoundary.updatedAt}
+                OR (updated_at = ${cursorBoundary.updatedAt} AND job_key < ${cursorBoundary.jobKey})
+              )
+            `
+    : this.sql`TRUE`}
+      ORDER BY updated_at DESC, job_key DESC
+      LIMIT ${queryLimit}
+    `) as PgJobCurrentRow[];
+
+    if (rows.length === 0) {
+      return { items: [], nextCursor: null };
+    }
+
+    const hasNext = rows.length > limit;
+    const pageRows = hasNext ? rows.slice(0, limit) : rows;
+    const items = pageRows.map(mapPgRowToCockpitItem);
+
+    let nextCursor: string | null = null;
+    if (hasNext && items.length > 0) {
+      const last = items[items.length - 1];
+      nextCursor = encodeCursor({
+        v: 1,
+        sort_key: last.updated_at,
+        tie_breaker: last.job_id,
+      });
+    }
+
+    return {
+      items,
+      nextCursor,
+    };
   }
 
   async cleanupTerminal(
