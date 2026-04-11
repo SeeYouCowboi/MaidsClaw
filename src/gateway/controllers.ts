@@ -942,6 +942,58 @@ function projectAgent(
 	return item;
 }
 
+/** GET /v1/runtime — effective runtime/admin snapshot */
+export async function handleGetRuntime(
+	_req: Request,
+	ctx: ControllerContext,
+): Promise<Response> {
+	try {
+		const getHostStatus = requireService(ctx.getHostStatus, "getHostStatus");
+		const hostStatus = await getHostStatus();
+
+		const pipelineStatus = ctx.getPipelineStatus
+			? await ctx.getPipelineStatus()
+			: undefined;
+
+		const orchestration = hostStatus.orchestration;
+
+		const corsOrigins = ctx.corsAllowedOrigins ?? ["http://localhost:5173"];
+
+		const body: Record<string, unknown> = {
+			backend_type: hostStatus.backendType,
+			memory_pipeline_status: pipelineStatus?.memoryPipelineStatus ?? hostStatus.memoryPipelineStatus,
+			memory_pipeline_ready: pipelineStatus?.memoryPipelineReady ?? false,
+			talker_thinker: {
+				enabled: orchestration?.enabled ?? false,
+			},
+			orchestration: {
+				enabled: orchestration !== undefined,
+				role: orchestration?.role ?? hostStatus.backendType ?? "local",
+				durable_mode: orchestration?.durableMode ?? false,
+				lease_reclaim_active: orchestration?.leaseReclaimActive ?? false,
+			},
+			gateway: {
+				cors_allowed_origins: corsOrigins,
+			},
+		};
+
+		if (
+			pipelineStatus?.effectiveOrganizerEmbeddingModelId !== undefined &&
+			pipelineStatus?.effectiveOrganizerEmbeddingModelId !== null
+		) {
+			body.effective_organizer_embedding_model_id =
+				pipelineStatus.effectiveOrganizerEmbeddingModelId;
+		}
+
+		return jsonResponse(body);
+	} catch (error) {
+		if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+			return errorResponse(error, 501);
+		}
+		throw error;
+	}
+}
+
 /** GET /v1/agents — list runtime agents with persona display_name join */
 export async function handleListAgents(
 	_req: Request,

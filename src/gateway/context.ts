@@ -126,6 +126,8 @@ export interface GatewayContext {
 	areaWorldProjection?: AreaWorldProjectionService;
 	decisionLog?: MaidenDecisionLogService;
 
+	corsAllowedOrigins?: string[];
+
 	getAuthSnapshot?: () => GatewayTokenSnapshot;
 	getRuntimeSnapshot?: () => unknown;
 }
