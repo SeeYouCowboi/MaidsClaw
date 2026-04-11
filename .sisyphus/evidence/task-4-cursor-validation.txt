@@ -1,0 +1,20 @@
+Task 4: Cursor Validation Evidence
+====================================
+
+## Pagination/Cursor Validation Tests
+bun test test/gateway/pagination-validation.test.ts
+Result: 7 pass / 0 fail / 19 expect() calls
+
+Tests:
+- null input → null (no cursor) ✅
+- empty string → null (no cursor) ✅
+- valid base64url cursor → decoded CursorPayload ✅
+- non-base64url characters → 400 BAD_REQUEST Response ✅
+- valid base64url but garbage payload → 400 BAD_REQUEST Response ✅
+- valid base64url JSON but wrong schema (missing v) → 400 BAD_REQUEST ✅
+- valid base64url JSON but wrong version (v:2) → 400 BAD_REQUEST ✅
+
+## Implementation
+validateCursor() in src/gateway/validate.ts wraps decodeCursor() from
+src/contracts/cockpit/cursor.ts, catching MaidsClawError with code BAD_REQUEST
+and converting it to a 400 Response with the standard error envelope.

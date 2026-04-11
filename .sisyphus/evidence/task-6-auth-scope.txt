@@ -1,0 +1,38 @@
+Task 6 Auth Scope Evidence
+Date: 2026-04-12
+
+Implemented:
+- src/gateway/auth.ts
+  - Exported GatewayPrincipal, GatewayTokenSnapshot, AuthLoader, createAuthLoader(configPath)
+  - Bearer auth parsing and token validation against gateway.tokens[]
+  - Scope enforcement:
+    - write satisfies read
+    - read does not satisfy write
+  - Public routes return synthetic principal { token_id: "public", scopes: [] }
+  - Hot reload behavior:
+    - mtime checked on every requireAuth()
+    - snapshot swapped only when parse succeeds
+    - reload failure retains last-known-good snapshot
+
+- src/gateway/server.ts
+  - Added GatewayServerOptions.authConfigPath?: string and dataDir?: string
+  - Auth check wired before route handler:
+    - policy-derived required scope for all routes
+    - when authConfigPath is absent, auth is skipped (test-mode compatible)
+  - Policy matrix integration via ROUTE_POLICY lookup and fallback behavior:
+    - uses matched route pattern
+    - unknown /v1/** fallback => write scope
+    - GET /v1/** matrix fallback respected
+
+Test Results:
+- bun test test/gateway/auth-scope.test.ts
+  - PASS (4 pass, 0 fail)
+  - Covers:
+    - public routes (/healthz, /readyz) no auth
+    - protected route requires valid token
+    - read token on write route => 403 FORBIDDEN
+    - missing token => 401 UNAUTHORIZED
+
+- bun test test/gateway/gateway.test.ts
+  - 29 pass / 5 fail
+  - 5 failures remain; count matches pre-existing expected-failure count for this suite.

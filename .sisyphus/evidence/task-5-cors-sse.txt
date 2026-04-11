@@ -1,0 +1,37 @@
+Task 5: CORS SSE Compat — Evidence
+====================================
+
+## Test Results: test/gateway/cors-sse-compat.test.ts
+
+```
+bun test v1.3.10 (30e609e0)
+
+ 9 pass
+ 0 fail
+ 20 expect() calls
+Ran 9 tests across 1 file. [58.00ms]
+```
+
+## Tests Covered
+
+### SSE + CORS compat
+1. No-Origin SSE request passes through without CORS headers ✓
+2. Allowed-origin SSE request includes CORS headers ✓
+3. Disallowed-origin SSE request omits CORS headers ✓
+4. Preserves original SSE headers after CORS merge ✓
+5. SSE response body remains readable after CORS wrapping ✓
+
+### getCorsHeaders unit
+6. Returns headers for allowed origin ✓
+7. Returns null for disallowed origin ✓
+
+### handlePreflight unit
+8. Returns null for non-OPTIONS (GET) ✓
+9. Returns null for POST ✓
+
+## Design Notes
+
+CORS headers are applied at the server.ts level via `applyCors()` wrapping the
+final response. This means SSE responses from `createSseStream()` automatically
+get CORS headers without modifying sse.ts. The `new Response(res.body, ...)`
+clone pattern preserves the ReadableStream body for SSE while merging headers.

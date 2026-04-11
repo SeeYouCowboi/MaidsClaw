@@ -1,0 +1,31 @@
+Task 5: CORS Preflight — Evidence
+===================================
+
+## Test Results: test/gateway/cors.test.ts
+
+```
+bun test v1.3.10 (30e609e0)
+
+ 10 pass
+ 0 fail
+ 25 expect() calls
+Ran 10 tests across 1 file. [126.00ms]
+```
+
+## Tests Covered
+
+1. OPTIONS + allowed origin → 204 + CORS headers ✓
+2. OPTIONS + disallowed origin → 403 FORBIDDEN ✓
+3. OPTIONS + missing Origin → 400 BAD_REQUEST ✓
+4. GET + allowed origin → 200 + CORS headers ✓
+5. GET + disallowed origin → 200, no CORS headers ✓
+6. GET + no Origin (curl) → 200, no CORS headers ✓
+7. 404 response + allowed origin → 404 + CORS headers ✓
+8. Multiple allowed origins: first allowed ✓
+9. Multiple allowed origins: second allowed ✓
+10. Multiple allowed origins: unlisted rejected ✓
+
+## Regression
+
+gateway.test.ts: 29 pass / 5 fail (same 5 pre-existing LLM-key-gated failures)
+Build: 4 pre-existing TS errors (pg-store, storage, interaction-repo), no new errors.

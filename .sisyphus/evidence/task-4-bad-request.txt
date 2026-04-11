@@ -1,0 +1,23 @@
+Task 4: BAD_REQUEST Validation Evidence
+========================================
+
+## Request Validation Tests
+bun test test/gateway/request-validation.test.ts
+Result: 8 pass / 0 fail / 23 expect() calls
+
+Tests:
+- POST /v1/sessions: invalid JSON body → 400 BAD_REQUEST ✅
+- POST /v1/sessions: empty object (missing agent_id) → 400 BAD_REQUEST with details ✅
+- POST /v1/sessions: agent_id is empty string → 400 BAD_REQUEST ✅
+- POST /v1/sessions: agent_id is numeric (wrong type) → 400 BAD_REQUEST ✅
+- POST /v1/sessions: extra unknown fields → 400 BAD_REQUEST ✅
+- POST turns:stream: invalid JSON body → 400 BAD_REQUEST ✅
+- POST recover: invalid JSON body → 400 BAD_REQUEST ✅
+- POST recover: missing action field → 400 BAD_REQUEST ✅
+
+## Regression
+bun test test/gateway/gateway.test.ts
+Result: 29 pass / 5 fail (same 5 LLM-key-gated tests as baseline)
+
+## Build
+bun run build → only pre-existing TS errors (pg-store, storage, interaction-repo)

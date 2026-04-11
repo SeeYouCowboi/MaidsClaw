@@ -1,0 +1,35 @@
+Task 6 Audit + Redaction Evidence
+Date: 2026-04-12
+
+Implemented:
+- src/gateway/audit.ts
+  - Exported AuditRecord, initAudit(dataDir), appendAuditRecord(filePath, record)
+  - initAudit creates {dataDir}/audit and throws MaidsClawError(AUDIT_WRITE_FAILED) on mkdir failure
+  - appendAuditRecord writes JSONL append-only lines and does not throw on append failure (console.error only)
+
+- src/gateway/server.ts
+  - Audit initialized once at server startup when dataDir provided
+  - Audit append executed after request completion
+  - Audit schema fields populated:
+    - ts, request_id, method, path, route_pattern, status, duration_ms,
+      origin?, principal_id?, scopes?, result, body_keys?, query_keys?
+  - Audit redaction behavior:
+    - never logs Authorization header values
+    - strips sensitive keys from body_keys/query_keys: apiKey, accessToken, token, authorization
+    - no token values are persisted
+
+Test Results:
+- bun test test/gateway/audit-and-auth-reload.test.ts
+  - PASS (2 pass, 0 fail)
+  - Verifies:
+    - audit JSONL is written with expected fields
+    - secret-bearing keys excluded from logged key lists
+    - no bearer token or credential values present in audit line content
+    - auth hot-reload picks up newly written token file after mtime change
+
+Additional Validation:
+- lsp_diagnostics clean for changed files
+- bun run build shows only pre-existing unrelated TS errors in:
+  - src/jobs/pg-store.ts
+  - src/memory/storage.ts
+  - src/storage/domain-repos/pg/interaction-repo.ts

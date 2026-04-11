@@ -1,0 +1,84 @@
+bun test v1.3.10 (30e609e0)
+
+test\gateway\gateway.test.ts:
+1037 | 
+1038 |       expect(res.status).toBe(200);
+1039 |       const events = parseSseEvents(await res.text());
+1040 |       const types = events.map((e) => e.type);
+1041 | 
+1042 |       expect(types).toContain("status");
+                           ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "status"
+Received: [ "error" ]
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1042:21)
+(fail) Real TurnService-backed gateway path > real-path turn completes with done event [110.00ms]
+1103 |         }),
+1104 |       });
+1105 | 
+1106 |       expect(res.status).toBe(200);
+1107 |       const events = parseSseEvents(await res.text());
+1108 |       expect(events.map((event) => event.type)).toEqual(["status", "delta", "done"]);
+                                                       ^
+error: expect(received).toEqual(expected)
+
+  [
+-   "status",
+-   "delta",
+-   "done",
++   "error",
+  ]
+
+- Expected  - 3
++ Received  + 1
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1108:49)
+(fail) Real TurnService-backed gateway path > real-path RP session emits status, full delta, then done
+1173 |       });
+1174 |       const events2 = parseSseEvents(await res2.text());
+1175 |       expect(events2.length).toBe(1);
+1176 |       expect(events2[0].type).toBe("error");
+1177 |       const errData = events2[0].data as { code: string; retriable: boolean };
+1178 |       expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
+                                  ^
+error: expect(received).toBe(expected)
+
+Expected: "SESSION_RECOVERY_REQUIRED"
+Received: "INTERNAL_ERROR"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1178:28)
+(fail) Real TurnService-backed gateway path > real-path failed turn sets recovery_required and blocks next turn
+1225 |           user_message: { id: "msg-re", text: "Hello" },
+1226 |         }),
+1227 |       }).then((r) => r.text()); // consume body
+1228 | 
+1229 |       // Verify session is now recovery_required
+1230 |       expect(await runtime.sessionService.isRecoveryRequired(session_id)).toBe(true);
+                                                                                 ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1230:75)
+(fail) Real TurnService-backed gateway path > real-path recovery clears blocked state [15.00ms]
+1323 | 
+1324 |       const events = parseSseEvents(await res.text());
+1325 |       const types = events.map((e) => e.type);
+1326 | 
+1327 |       const toolResult = events.find((e) => e.type === "tool_result");
+1328 |       expect(toolResult).toBeDefined();
+                                ^
+error: expect(received).toBeDefined()
+
+Received: undefined
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1328:26)
+(fail) Real TurnService-backed gateway path > real-path tool execution failure emits tool_result.failed then error
+
+ 29 pass
+ 5 fail
+ 138 expect() calls
+Ran 34 tests across 1 file. [382.00ms]
