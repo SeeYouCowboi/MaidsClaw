@@ -1941,11 +1941,11 @@ export async function handleGetRuntime(
 					typeof runtimeTalkerThinker?.enabled === "boolean"
 						? runtimeTalkerThinker.enabled
 						: orchestration?.enabled ?? false,
-				staleness_threshold_ms:
+				staleness_threshold:
 					numberField(
 						runtimeTalkerThinker ?? {},
 						"stalenessThreshold",
-						"staleness_threshold_ms",
+						"staleness_threshold",
 					) ?? 2,
 				soft_block_timeout_ms:
 					numberField(
@@ -1959,7 +1959,10 @@ export async function handleGetRuntime(
 						"softBlockPollIntervalMs",
 						"soft_block_poll_interval_ms",
 					) ?? 500,
-			},
+				...(typeof runtimeTalkerThinker?.globalConcurrencyCap === "number"
+					? { global_concurrency_cap: runtimeTalkerThinker.globalConcurrencyCap }
+					: {}),
+		},
 			orchestration: {
 				enabled: orchestration !== undefined,
 				role: orchestration?.role ?? hostStatus.backendType ?? "local",

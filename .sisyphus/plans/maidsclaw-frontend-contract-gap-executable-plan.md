@@ -1170,7 +1170,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 18. Add Study room memory routes for core blocks and pinned summaries
+- [x] 18. Add Study room memory routes for core blocks and pinned summaries
 
   **What to do**:
   - Extend core memory repo/service projections so route responses can include **content**, not just size summaries.
@@ -1225,7 +1225,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 19. Add episodes, narratives, and settlements memory routes with deterministic agent-scoped queries
+- [x] 19. Add episodes, narratives, and settlements memory routes with deterministic agent-scoped queries
 
   **What to do**:
   - Add routes:
@@ -1286,7 +1286,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 20. Add retrieval-trace capture and `GET /v1/requests/{id}/retrieval-trace`
+- [x] 20. Add retrieval-trace capture and `GET /v1/requests/{id}/retrieval-trace`
 
   **What to do**:
   - Begin with a short evidence pass confirming that current `TraceBundle` / `TraceStore` capture has **no retrieval field and no retrieval write path**, then implement the missing retrieval instrumentation rather than assuming the data already exists.
@@ -1345,7 +1345,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 21. Add blackboard session-aware snapshot filtering and `GET /v1/state/snapshot?session_id=` without breaking existing key shapes
+- [x] 21. Add blackboard session-aware snapshot filtering and `GET /v1/state/snapshot?session_id=` without breaking existing key shapes
 
   **What to do**:
   - Preserve the existing namespace prefixes and current writer key shapes (for example `delegation.{delegationId}`) so current runtime consumers that read by namespace prefix remain stable.
@@ -1409,7 +1409,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 22. Add maiden decision logging and `GET /v1/state/maiden-decisions`
+- [x] 22. Add maiden decision logging and `GET /v1/state/maiden-decisions`
 
   **What to do**:
   - Add a dedicated `MaidenDecisionLog` contract + PG repo under the storage domain layer.
