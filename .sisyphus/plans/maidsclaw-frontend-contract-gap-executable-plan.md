@@ -519,7 +519,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 7. Load provider overrides and wire effective provider/catalog services into runtime bootstrap
+- [x] 7. Load provider overrides and wire effective provider/catalog services into runtime bootstrap
 
   **What to do**:
   - Add `src/core/models/provider-overrides-loader.ts` to load and validate `config/providers.json` into `ProviderCatalogEntry[]`.
@@ -576,7 +576,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 8. Add deterministic `GET /v1/sessions` listing across PG, legacy Db, and in-memory session backends
+- [x] 8. Add deterministic `GET /v1/sessions` listing across PG, legacy Db, and in-memory session backends
 
   **What to do**:
   - Extend `src/storage/domain-repos/contracts/session-repo.ts` with `listSessions(params)` supporting `{ agentId?, status?, limit, cursor? }`.
@@ -642,7 +642,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 9. Add `GET /v1/agents` as the canonical runtime-agent projection with persona join
+- [x] 9. Add `GET /v1/agents` as the canonical runtime-agent projection with persona join
 
   **What to do**:
   - Add a small projection service used by the route layer that converts runtime `AgentProfile` entries into cockpit wire items.
@@ -697,7 +697,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 10. Add `GET /v1/runtime` as an effective runtime/admin snapshot, not a raw file dump
+- [x] 10. Add `GET /v1/runtime` as an effective runtime/admin snapshot, not a raw file dump
 
   **What to do**:
   - Implement a runtime snapshot route that combines:
@@ -749,7 +749,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 11. Add PG-backed `JobQueryService` on top of the durable job store vocabulary
+- [x] 11. Add PG-backed `JobQueryService` on top of the durable job store vocabulary
 
   **What to do**:
   - Create `src/jobs/job-query-service.ts` backed by `DurableJobStore`, not `JobPersistence`’s legacy status vocabulary.
@@ -802,7 +802,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 12. Add `GET /v1/jobs` and `GET /v1/jobs/{id}` on top of `JobQueryService`
+- [x] 12. Add `GET /v1/jobs` and `GET /v1/jobs/{id}` on top of `JobQueryService`
 
   **What to do**:
   - Add `src/gateway/routes/jobs.ts` exposing:
@@ -856,7 +856,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 13. Add atomic config writer with backup, fsync, and rollback-safe replace semantics
+- [x] 13. Add atomic config writer with backup, fsync, and rollback-safe replace semantics
 
   **What to do**:
   - Add `src/config/atomic-writer.ts` implementing a single reusable file-write path for `config/personas.json`, `config/lore.json`, and later `config/auth.json`/`config/runtime.json` if reused.
@@ -911,7 +911,7 @@ Wave 4 — Study / War Room / state surfaces
 
   **Commit**: NO | Message: `n/a` | Files: []
 
-- [ ] 14. Add reload coordinator and immutable snapshot-swap semantics for persona, lore, auth, and provider/runtime views
+- [x] 14. Add reload coordinator and immutable snapshot-swap semantics for persona, lore, auth, and provider/runtime views
 
   **What to do**:
   - Add `src/config/reloadable.ts` defining a small reload coordinator abstraction used by file-backed config surfaces.
