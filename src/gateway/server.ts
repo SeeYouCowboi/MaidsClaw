@@ -165,6 +165,10 @@ export class GatewayServer {
 	}
 
 	start(): void {
+		const effectiveCorsAllowedOrigins = this.options.corsAllowedOrigins ?? [
+			"http://localhost:5173",
+		];
+
 		const legacyContext: GatewayContext = {
 			session: this.options.userFacade?.session,
 			turn: this.options.userFacade?.turn,
@@ -179,6 +183,8 @@ export class GatewayServer {
 		const ctx: ControllerContext = {
 			...legacyContext,
 			...(this.options.context ?? {}),
+			corsAllowedOrigins:
+				this.options.context?.corsAllowedOrigins ?? effectiveCorsAllowedOrigins,
 		};
 
 		const authConfigPath =
@@ -203,9 +209,7 @@ export class GatewayServer {
 			this.options.host === "localhost" ? "0.0.0.0" : this.options.host;
 
 		const corsOpts: CorsOptions = {
-			allowedOrigins: this.options.corsAllowedOrigins ?? [
-				"http://localhost:5173",
-			],
+			allowedOrigins: effectiveCorsAllowedOrigins,
 		};
 
 		this.server = Bun.serve({

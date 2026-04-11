@@ -1,0 +1,28 @@
+F1 service wiring verification evidence
+Date: 2026-04-12
+
+Commands run:
+1) bun test test/gateway/ 2>&1 | Select-Object -Last 20
+2) bun test test/runtime/ 2>&1 | Select-Object -Last 10
+3) bun run build
+
+Gateway test tail summary:
+- Result: 174 pass / 5 fail / 845 expect() calls
+- Matches expected baseline fail-count for gateway suite.
+
+Runtime test tail summary:
+- Result: 48 pass / 2 fail / 183 expect() calls
+- Failures are PG integration environment failures:
+  - ECONNREFUSED 127.0.0.1:55433
+  - testDb.cleanup undefined after failed PG setup
+
+Build summary (`bun run build` / tsc --noEmit):
+- Only pre-existing TypeScript errors reported:
+  - src/jobs/pg-store.ts TS2769 x2
+  - src/memory/storage.ts TS2322 x1
+  - src/storage/domain-repos/pg/interaction-repo.ts TS2769 x1
+
+Additional targeted checks:
+- bun test test/core/provider-bootstrap.test.ts => 2 pass / 0 fail
+- bun test test/gateway/runtime-route.test.ts => 6 pass / 0 fail
+- bun test test/gateway/runtime-cors-consistency.test.ts => 2 pass / 0 fail

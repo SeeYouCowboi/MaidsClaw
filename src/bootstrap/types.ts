@@ -2,7 +2,7 @@ import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import type { AgentLoop } from "../core/agent-loop.js";
-import type { RuntimeConfig } from "../core/config-schema.js";
+import type { AuthConfig, RuntimeConfig } from "../core/config-schema.js";
 import type { DefaultModelServiceRegistry } from "../core/models/registry.js";
 import type { PromptBuilder } from "../core/prompt-builder.js";
 import type { PromptRenderer } from "../core/prompt-renderer.js";
@@ -12,10 +12,14 @@ import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { ProviderCatalogService } from "../gateway/context.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
+import type { CoreMemoryService } from "../memory/core-memory.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
+import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
+import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
 import type {
 	BackendType,
 	PgBackendFactory,
@@ -119,6 +123,13 @@ export type RuntimeBootstrapResult = {
 	 */
 	segmenterReady: Promise<void>;
 	providerCatalogService: ProviderCatalogService;
+	runtimeCwd: string;
+	runtimeConfigSnapshot: RuntimeConfig;
+	authConfigSnapshot: AuthConfig;
+	coreMemoryService: CoreMemoryService;
+	episodeRepo: EpisodeRepo;
+	settlementLedgerRepo: SettlementLedgerRepo;
+	areaWorldProjectionRepo: AreaWorldProjectionRepo;
 };
 
 export type PublicRuntimeBootstrapResult = Omit<

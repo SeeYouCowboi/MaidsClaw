@@ -32,6 +32,7 @@ import {
 	LoreAdapter,
 	PersonaAdapter,
 } from "../core/prompt-data-adapters/index.js";
+import type { GatewayTokenSnapshot } from "../gateway/auth.js";
 import { MemoryAdapter } from "../core/prompt-data-adapters/memory-adapter.js";
 import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
@@ -48,10 +49,15 @@ import type {
 import { FlushSelector } from "../interaction/flush-selector.js";
 import type { InteractionStore } from "../interaction/store.js";
 import type { DurableJobStore } from "../jobs/durable-store.js";
+import {
+	createJobQueryService,
+	type JobQueryService,
+} from "../jobs/job-query-service.js";
 import { createJobPersistence } from "../jobs/job-persistence-factory.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { bootstrapPgJobsSchema } from "../jobs/pg-schema.js";
 import { PgJobStore } from "../jobs/pg-store.js";
+import { createLoreAdminService } from "../lore/admin-service.js";
 import { createLoreService } from "../lore/service.js";
 import { AliasService } from "../memory/alias.js";
 import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
@@ -78,6 +84,7 @@ import {
 	type MemoryTaskModelProvider,
 } from "../memory/task-agent.js";
 import { registerMemoryTools } from "../memory/tools.js";
+import { createPersonaAdminService } from "../persona/admin-service.js";
 import { PersonaLoader } from "../persona/loader.js";
 import { PersonaService } from "../persona/service.js";
 import type { RpBufferedExecutionResult } from "../runtime/rp-turn-contract.js";
@@ -783,6 +790,18 @@ export function bootstrapRuntime(
 		softBlockTimeoutMs: 3000,
 		softBlockPollIntervalMs: 500,
 	};
+	const runtimeConfigSnapshot: RuntimeConfig = {
+		...runtimeConfig,
+		talkerThinker: {
+			enabled: talkerThinkerConfig.enabled,
+			stalenessThreshold: talkerThinkerConfig.stalenessThreshold,
+			softBlockTimeoutMs: talkerThinkerConfig.softBlockTimeoutMs,
+			softBlockPollIntervalMs: talkerThinkerConfig.softBlockPollIntervalMs,
+			...(typeof thinkerGlobalConcurrencyCap === "number"
+				? { globalConcurrencyCap: thinkerGlobalConcurrencyCap }
+				: {}),
+		},
+	};
 
 	const migrationStatus: RuntimeMigrationStatus = {
 		interaction: {
@@ -1431,6 +1450,135 @@ export function bootstrapRuntime(
 		shutdown,
 		segmenterReady,
 		providerCatalogService,
+		runtimeCwd,
+		runtimeConfigSnapshot,
+		authConfigSnapshot: authConfig,
+		coreMemoryService,
+		episodeRepo,
+		settlementLedgerRepo,
+		areaWorldProjectionRepo,
+	};
+}
+
+function toGatewayTokenSnapshot(auth: AuthConfig): GatewayTokenSnapshot {
+	return {
+		tokens: (auth.gateway?.tokens ?? []).map((token) => ({
+			id: token.id,
+			token: token.token,
+			scopes: [...token.scopes],
+			...(typeof token.disabled === "boolean"
+				? { disabled: token.disabled }
+				: {}),
+		})),
+	};
+}
+
+function getDurableStore(
+	runtime: RuntimeBootstrapResult,
+): DurableJobStore | undefined {
+	const store = (
+		runtime.pgFactory as (PgBackendFactory & { store?: DurableJobStore }) | null
+	)?.store;
+	return store;
+}
+
+function buildSettlementRepoService(
+	runtime: RuntimeBootstrapResult,
+): GatewayContext["settlementRepo"] {
+	if (!runtime.pgFactory) {
+		return undefined;
+	}
+
+	return {
+		async listByAgent(agentId: string, options?: { limit?: number }) {
+			const sql = runtime.pgFactory?.getPool();
+			if (!sql) {
+				return [];
+			}
+			const limit = Math.max(1, Math.min(200, options?.limit ?? 50));
+			const rows = await sql`
+				SELECT settlement_id, status, attempt_count, payload_hash,
+				       claimed_by, claimed_at, applied_at, error_message,
+				       created_at, updated_at
+				FROM settlement_processing_ledger
+				WHERE agent_id = ${agentId}
+				ORDER BY updated_at DESC, settlement_id DESC
+				LIMIT ${limit}
+			`;
+			return rows.map((row) => ({
+				settlement_id: String(row.settlement_id),
+				status: String(row.status),
+				attempt_count: Number(row.attempt_count),
+				payload_hash:
+					typeof row.payload_hash === "string" ? row.payload_hash : undefined,
+				claimed_by:
+					typeof row.claimed_by === "string" ? row.claimed_by : undefined,
+				claimed_at:
+					typeof row.claimed_at === "number"
+						? row.claimed_at
+						: row.claimed_at === null || row.claimed_at === undefined
+							? undefined
+							: Number(row.claimed_at),
+				applied_at:
+					typeof row.applied_at === "number"
+						? row.applied_at
+						: row.applied_at === null || row.applied_at === undefined
+							? undefined
+							: Number(row.applied_at),
+				error_message:
+					typeof row.error_message === "string" ? row.error_message : undefined,
+				created_at: Number(row.created_at),
+				updated_at: Number(row.updated_at),
+			}));
+		},
+	};
+}
+
+function buildAreaWorldProjectionService(
+	runtime: RuntimeBootstrapResult,
+): GatewayContext["areaWorldProjection"] {
+	if (!runtime.pgFactory) {
+		return undefined;
+	}
+
+	return {
+		async listByAgent(agentId: string) {
+			const sql = runtime.pgFactory?.getPool();
+			if (!sql) {
+				return [];
+			}
+
+			const areaRows = await sql`
+				SELECT area_id, summary_text, updated_at
+				FROM area_narrative_current
+				WHERE agent_id = ${agentId}
+			`;
+
+			const worldRows = await sql`
+				SELECT summary_text, updated_at
+				FROM world_narrative_current
+				WHERE id = 1
+			`;
+
+			const items: Array<Record<string, unknown>> = [];
+			for (const row of worldRows) {
+				items.push({
+					scope: "world",
+					summary_text: String(row.summary_text),
+					updated_at: Number(row.updated_at),
+				});
+			}
+			for (const row of areaRows) {
+				items.push({
+					scope: "area",
+					area_id: Number(row.area_id),
+					summary_text: String(row.summary_text),
+					updated_at: Number(row.updated_at),
+				});
+			}
+
+			return items;
+		},
 	};
 }
 
@@ -1457,19 +1605,89 @@ export function buildGatewayRuntimeContextExtensions(
 	| "getAuthSnapshot"
 	| "getRuntimeSnapshot"
 > {
+	const runtimeCwd =
+		typeof runtime.runtimeCwd === "string" ? runtime.runtimeCwd : undefined;
+
+	const personaAdmin = runtimeCwd
+		? createPersonaAdminService({
+				configPath: join(runtimeCwd, "config", "personas.json"),
+				agentConfigPath: join(runtimeCwd, "config", "agents.json"),
+			})
+		: undefined;
+
+	const loreAdmin = runtimeCwd
+		? createLoreAdminService({
+				configPath: join(runtimeCwd, "config", "lore.json"),
+			})
+		: undefined;
+
+	const durableStore = getDurableStore(runtime);
+	const jobQueryService: JobQueryService | undefined = durableStore
+		? createJobQueryService(durableStore)
+		: undefined;
+
+	const episodeRepo: GatewayContext["episodeRepo"] = runtime.episodeRepo
+		? {
+				async listByAgent(
+					agentId: string,
+					options?: { since?: number; limit?: number },
+				) {
+					const rows = await runtime.episodeRepo.readByAgent(
+						agentId,
+						options?.limit,
+					);
+					const since = options?.since;
+					if (typeof since === "number") {
+						return rows.filter((row) => row.created_at >= since);
+					}
+					return rows;
+				},
+			}
+		: undefined;
+
+	const settlementRepo = buildSettlementRepoService(runtime);
+	const areaWorldProjection = buildAreaWorldProjectionService(runtime);
+
+	const getAuthSnapshot =
+		typeof runtime.authConfigSnapshot === "object" && runtime.authConfigSnapshot
+			? () => {
+					if (runtimeCwd) {
+						const reloaded = loadAuthConfig({ cwd: runtimeCwd });
+						if (reloaded.ok) {
+							return toGatewayTokenSnapshot(reloaded.auth);
+						}
+					}
+					return toGatewayTokenSnapshot(runtime.authConfigSnapshot);
+				}
+			: undefined;
+
+	const getRuntimeSnapshot =
+		typeof runtime.runtimeConfigSnapshot === "object" &&
+		runtime.runtimeConfigSnapshot
+			? () => {
+					if (runtimeCwd) {
+						const reloaded = loadRuntimeConfig({ cwd: runtimeCwd });
+						if (reloaded.ok) {
+							return reloaded.runtime;
+						}
+					}
+					return runtime.runtimeConfigSnapshot;
+				}
+			: undefined;
+
 	return {
 		providerCatalog: runtime.providerCatalogService,
-		personaAdmin: undefined,
-		loreAdmin: undefined,
-		jobQueryService: undefined,
+		personaAdmin,
+		loreAdmin,
+		jobQueryService,
 		blackboard: runtime.blackboard,
-		coreMemory: undefined,
-		episodeRepo: undefined,
-		settlementRepo: undefined,
-		areaWorldProjection: undefined,
+		coreMemory: runtime.coreMemoryService,
+		episodeRepo,
+		settlementRepo,
+		areaWorldProjection,
 		decisionLog: runtime.maidenDecisionLog,
-		getAuthSnapshot: undefined,
-		getRuntimeSnapshot: undefined,
+		getAuthSnapshot,
+		getRuntimeSnapshot,
 	};
 }
 

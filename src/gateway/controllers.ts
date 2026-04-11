@@ -1914,17 +1914,51 @@ export async function handleGetRuntime(
 		const pipelineStatus = ctx.getPipelineStatus
 			? await ctx.getPipelineStatus()
 			: undefined;
+		const runtimeSnapshot = ctx.getRuntimeSnapshot?.();
+		const runtimeRecord =
+			runtimeSnapshot &&
+			typeof runtimeSnapshot === "object" &&
+			!Array.isArray(runtimeSnapshot)
+				? (runtimeSnapshot as Record<string, unknown>)
+				: undefined;
+		const runtimeTalkerThinker =
+			runtimeRecord?.talkerThinker &&
+			typeof runtimeRecord.talkerThinker === "object" &&
+			!Array.isArray(runtimeRecord.talkerThinker)
+				? (runtimeRecord.talkerThinker as Record<string, unknown>)
+				: undefined;
 
 		const orchestration = hostStatus.orchestration;
 
-		const corsOrigins = ctx.corsAllowedOrigins ?? ["http://localhost:5173"];
+		const corsOrigins = ctx.corsAllowedOrigins ?? [];
 
 		const body: Record<string, unknown> = {
 			backend_type: hostStatus.backendType,
 			memory_pipeline_status: pipelineStatus?.memoryPipelineStatus ?? hostStatus.memoryPipelineStatus,
 			memory_pipeline_ready: pipelineStatus?.memoryPipelineReady ?? false,
 			talker_thinker: {
-				enabled: orchestration?.enabled ?? false,
+				enabled:
+					typeof runtimeTalkerThinker?.enabled === "boolean"
+						? runtimeTalkerThinker.enabled
+						: orchestration?.enabled ?? false,
+				staleness_threshold_ms:
+					numberField(
+						runtimeTalkerThinker ?? {},
+						"stalenessThreshold",
+						"staleness_threshold_ms",
+					) ?? 2,
+				soft_block_timeout_ms:
+					numberField(
+						runtimeTalkerThinker ?? {},
+						"softBlockTimeoutMs",
+						"soft_block_timeout_ms",
+					) ?? 3000,
+				soft_block_poll_interval_ms:
+					numberField(
+						runtimeTalkerThinker ?? {},
+						"softBlockPollIntervalMs",
+						"soft_block_poll_interval_ms",
+					) ?? 500,
 			},
 			orchestration: {
 				enabled: orchestration !== undefined,

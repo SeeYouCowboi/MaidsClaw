@@ -294,6 +294,9 @@ export async function createAppHost(
 		};
 	};
 
+	const runtimeCorsAllowedOrigins =
+		runtime.runtimeConfigSnapshot?.runtime?.gateway?.corsAllowedOrigins;
+
 	const listRuntimeAgents: AppHostAdmin["listRuntimeAgents"] = async () => {
 		return runtime.agentRegistry.getAll();
 	};
@@ -304,6 +307,7 @@ export async function createAppHost(
 		inspect: user?.inspect,
 		health: user?.health,
 		providerCatalog: runtime.providerCatalogService,
+		corsAllowedOrigins: runtimeCorsAllowedOrigins,
 		traceStore: runtime.traceStore,
 		healthChecks,
 		hasAgent: (agentId: string) => runtime.agentRegistry.has(agentId),
@@ -319,6 +323,7 @@ export async function createAppHost(
 					port,
 					host,
 					context: gatewayContext,
+					corsAllowedOrigins: runtimeCorsAllowedOrigins,
 					authConfigPath: join(resolveConfigDir(options) ?? "config", "auth.json"),
 					dataDir,
 				})
