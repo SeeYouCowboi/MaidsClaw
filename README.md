@@ -146,29 +146,34 @@ TypeScript fallbacks exist, so the system can still run without a compiled Rust 
 ```text
 MaidsClaw/
 ├─ src/
-│  ├─ app/               Application layer: clients, config, contracts, diagnostics, inspect, turn
+│  ├─ app/               Application layer: AppHost + user/admin facades
 │  │  ├─ clients/        Transport-neutral client interfaces + local/gateway implementations
+│  │  ├─ config/         Config loading/validation used by the app layer
 │  │  ├─ contracts/      Shared execution/trace/inspect/session type contracts
 │  │  ├─ diagnostics/    Trace store and trace reader
+│  │  ├─ host/           createAppHost() and AppHost type (primary entry point)
 │  │  ├─ inspect/        InspectQueryService and inspect view-models
-│  │  └─ turn/           UserTurnService and TurnService.runUserTurn
-│  ├─ terminal-cli/      Terminal-only CLI: commands, shell, inspect renderers, output
-│  ├─ cli/               Thin compatibility shims (intentional facades, not active logic)
+│  │  └─ turn/           executeUserTurn() — app-layer turn entry point
+│  ├─ bootstrap/         bootstrapRuntime() — wires storage, agents, memory, providers
+│  ├─ runtime/           TurnService, RP turn contract (v5), thinker worker, viewer context
 │  ├─ agents/            Agent profiles, registry, lifecycle, maiden/RP/task agents
-│  ├─ core/              Loop, prompt assembly, model access, tools, config, events
+│  ├─ core/              Agent loop, prompt assembly, model access, tools, config, events
 │  │  └─ contracts/      Viewer context types shared across boundaries
 │  ├─ memory/            Core memory, retrieval, embeddings, materialization, promotion
 │  ├─ persona/           Character cards and anti-drift constraints
 │  ├─ lore/              World knowledge and lore matching
 │  ├─ state/             Blackboard shared state
 │  ├─ interaction/       Interaction log and context flushing
-│  ├─ gateway/           HTTP / SSE gateway
-│  ├─ storage/           PostgreSQL, file storage, migrations
 │  ├─ session/           Session services
+│  ├─ gateway/           HTTP / SSE gateway (routes under /v1/)
+│  ├─ storage/           PostgreSQL repos, schema, file storage
+│  ├─ jobs/              Durable job runner (PgJobRunner), dispatcher, scheduler
+│  ├─ migration/         Data import / projection rebuild utilities
+│  ├─ terminal-cli/      Terminal-only CLI: commands, shell, inspect renderers, output
 │  └─ native-fallbacks/  TypeScript fallbacks for native modules
 ├─ native/               Rust NAPI-RS crate
-├─ config/               Example provider, agent, persona, and lore configs
-├─ scripts/              Demo and system-check scripts
+├─ config/               Example provider, agent, persona, lore, auth, runtime configs
+├─ scripts/              Demo, CLI entry, and system-check scripts
 ├─ test/                 Tests
 ├─ docs/                 Localized and supplemental documentation
 ├─ .env.example
@@ -225,10 +230,12 @@ cd ..
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI API key |
-| `MAIDSCLAW_PORT` | Gateway port |
-| `MAIDSCLAW_HOST` | Gateway bind host |
-| `MAIDSCLAW_DATA_DIR` | Data directory |
+| `MAIDSCLAW_PORT` | Gateway port (default `3000`) |
+| `MAIDSCLAW_HOST` | Gateway bind host (default `localhost`) |
+| `MAIDSCLAW_DATA_DIR` | Data directory (default `./data`) |
 | `MAIDSCLAW_NATIVE_MODULES` | Whether to attempt loading Rust native modules |
+| `PG_APP_URL` | PostgreSQL URL for the application database |
+| `JOBS_PG_URL` | PostgreSQL URL for the durable job queue database |
 
 ### Provider Tiers
 
@@ -279,6 +286,10 @@ Defines who a maid is, how she speaks, how she serves, and what kind of opening 
 
 Defines world rules, etiquette constraints, and background knowledge. A maid should know how the household works, not just how to reply.
 
+### `config/runtime.json`
+
+Runtime tuning for subsystems that don't belong in agent/persona/lore configs — notably the memory pipeline model IDs (`memory.migrationChatModelId`, `memory.embeddingModelId`, `memory.organizerEmbeddingModelId`) and the talker/thinker split (`talkerThinker.*`). Copy `config/runtime.example.json` to `config/runtime.json` to customize.
+
 ## Adding a New Provider
 
 Any OpenAI-compatible API can be added without writing a new transport class.
@@ -320,7 +331,8 @@ bun run cli debug summary --request <request_id> --json
 ### Commands
 
 - `config init/validate/doctor/show/write-runtime` — project configuration
-- `server start` / `health` — gateway server
+- `server start` — start the HTTP/SSE gateway
+- `health` — check runtime health status
 - `agent list/show/create-rp/create-task/enable/disable/remove/validate` — agent management
 - `session create/close/recover` — session lifecycle
 - `turn send` — send a non-interactive turn

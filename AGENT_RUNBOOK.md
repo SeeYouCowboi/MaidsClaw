@@ -61,7 +61,7 @@ test/                # Unit + integration + acceptance tests
 | `src/core/agent-loop.ts` | Main execution loop — Think/Act/Observe/Repeat |
 | `src/runtime/turn-service.ts` | Orchestrates a full user turn end-to-end |
 | `src/app/host/create-app-host.ts` | Creates the AppHost (entry point for tests) |
-| `src/app/turn/user-turn-service.ts` | Validates + dispatches user turns |
+| `src/app/turn/user-turn-service.ts` | `executeUserTurn()` — validates + dispatches user turns (function, not a class) |
 | `src/agents/presets.ts` | MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE |
 | `src/agents/profile.ts` | `AgentProfile` type definition |
 | `src/agents/registry.ts` | Central agent registry |
@@ -127,10 +127,10 @@ Direct text output from an RP agent is discarded.
 
 ## Model Providers
 
-**Default models:**
-- Maiden: `claude-3-5-sonnet-20241022`
-- RP Agent: `claude-3-5-sonnet-20241022`
-- Task Agent: `claude-3-5-haiku-20241022`
+**Default models** (see `src/agents/presets.ts`):
+- Maiden: `anthropic/claude-3-5-sonnet-20241022`
+- RP Agent: `anthropic/claude-3-5-sonnet-20241022`
+- Task Agent: `anthropic/claude-3-5-haiku-20241022`
 
 **Built-in providers:** Anthropic, OpenAI
 **Optional (config/auth.json):** Moonshot/Kimi, MiniMax, Bailian, any OpenAI-compatible endpoint
@@ -265,15 +265,17 @@ import { createAppHost } from "./src/app/host/create-app-host";
 
 const host = await createAppHost({ role: "local" });
 
-// Create session
-const session = await host.user.createSession({ agentId: "rp:alice" });
+// host.user is the user-facing facade: { session, turn, inspect, health }
+const session = await host.user!.session.createSession("rp:alice");
 
-// Send turn (returns AsyncIterable<Chunk>)
-for await (const chunk of host.user.executeUserTurn({
+// streamTurn yields ObservationEvent objects
+const requestId = crypto.randomUUID();
+for await (const evt of host.user!.turn.streamTurn({
   sessionId: session.sessionId,
-  text: "Hello Alice!"
+  text: "Hello Alice!",
+  requestId,
 })) {
-  if (chunk.type === "text_delta") process.stdout.write(chunk.text);
+  if (evt.type === "text_delta") process.stdout.write(evt.text);
 }
 
 await host.shutdown();
@@ -296,16 +298,20 @@ bun run cli debug summary --request <requestId>
 ### Via HTTP (server mode)
 
 ```bash
-bun run start   # starts on port 3000
+bun run start   # starts on port 3000 by default (MAIDSCLAW_PORT)
 
-curl -X POST http://localhost:3000/sessions \
+# Create a session
+curl -X POST http://localhost:3000/v1/sessions \
   -H "Content-Type: application/json" \
-  -d '{"agentId":"rp:alice"}'
+  -d '{"agent_id":"rp:alice"}'
 
-curl -X POST http://localhost:3000/sessions/<id>/turns \
+# Stream a turn (SSE)
+curl -X POST "http://localhost:3000/v1/sessions/<session_id>/turns:stream" \
   -H "Content-Type: application/json" \
-  -d '{"text":"Hello!"}' -N   # SSE stream
+  -d '{"user_message":{"text":"Hello!"}}' -N
 ```
+
+Gateway routes are registered under `/v1/` in `src/gateway/routes.ts`.
 
 ---
 
