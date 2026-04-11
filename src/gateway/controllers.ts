@@ -1963,16 +1963,16 @@ export async function handleGetRuntime(
 					? { global_concurrency_cap: runtimeTalkerThinker.globalConcurrencyCap }
 					: {}),
 		},
-			orchestration: {
-				enabled: orchestration !== undefined,
-				role: orchestration?.role ?? hostStatus.backendType ?? "local",
-				durable_mode: orchestration?.durableMode ?? false,
-				lease_reclaim_active: orchestration?.leaseReclaimActive ?? false,
-			},
-			gateway: {
-				cors_allowed_origins: corsOrigins,
-			},
-		};
+		orchestration: {
+			enabled: orchestration?.enabled ?? false,
+			role: orchestration?.role ?? hostStatus.backendType ?? "local",
+			durable_mode: orchestration?.durableMode ?? false,
+			lease_reclaim_active: orchestration?.leaseReclaimActive ?? false,
+		},
+		gateway: {
+			cors_allowed_origins: corsOrigins,
+		},
+	};
 
 		if (
 			pipelineStatus?.effectiveOrganizerEmbeddingModelId !== undefined &&
