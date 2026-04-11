@@ -79,8 +79,22 @@ export type SetupTokenCredential = {
 
 export type AuthCredential = ApiKeyCredential | OAuthTokenCredential | SetupTokenCredential;
 
+export type GatewayTokenScope = "read" | "write";
+
+export type GatewayToken = {
+  id: string;
+  token: string;
+  scopes: GatewayTokenScope[];
+  disabled?: boolean;
+};
+
+export type GatewayAuthConfig = {
+  tokens: GatewayToken[];
+};
+
 export type AuthConfig = {
   credentials: AuthCredential[];
+  gateway?: GatewayAuthConfig;
 };
 
 export type AuthConfigResult =
@@ -97,6 +111,11 @@ export type RuntimeConfig = {
     softBlockTimeoutMs: number;
     softBlockPollIntervalMs: number;
     globalConcurrencyCap?: number;
+  };
+  runtime?: {
+    gateway?: {
+      corsAllowedOrigins?: string[];
+    };
   };
 };
 

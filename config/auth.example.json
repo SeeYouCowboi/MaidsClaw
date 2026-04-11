@@ -33,5 +33,21 @@
       "token": "stp-PLACEHOLDER",
       "expiresAt": 9999999999000
     }
-  ]
+  ],
+  "gateway": {
+    "_comment": "Gateway bearer tokens for cockpit routes. Keep separate from provider credentials[].",
+    "tokens": [
+      {
+        "id": "dashboard-local-read",
+        "token": "mcw-local-read-token-PLACEHOLDER",
+        "scopes": ["read"]
+      },
+      {
+        "id": "dashboard-local-write",
+        "token": "mcw-local-write-token-PLACEHOLDER",
+        "scopes": ["write"],
+        "disabled": false
+      }
+    ]
+  }
 }

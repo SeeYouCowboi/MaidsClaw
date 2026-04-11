@@ -9,5 +9,13 @@
     "stalenessThreshold": 2,
     "softBlockTimeoutMs": 3000,
     "softBlockPollIntervalMs": 500
+  },
+  "runtime": {
+    "gateway": {
+      "corsAllowedOrigins": [
+        "http://localhost:5173",
+        "https://your-dashboard.example.com"
+      ]
+    }
   }
 }

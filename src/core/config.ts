@@ -7,6 +7,9 @@ import type {
   AuthCredential,
   ConfigError,
   ConfigResult,
+  GatewayAuthConfig,
+  GatewayToken,
+  GatewayTokenScope,
   MaidsClawConfig,
   MemoryConfig,
   OpenAIProviderConfig,
@@ -210,6 +213,71 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
       : {}),
   };
 
+  if (obj.runtime !== undefined) {
+    if (typeof obj.runtime !== "object" || obj.runtime === null || Array.isArray(obj.runtime)) {
+      return {
+        ok: false,
+        errors: [{
+          type: "CONFIG_ERROR",
+          field: "runtime",
+          message: "'runtime' must be an object",
+        }],
+      };
+    }
+
+    const runtimeObj = obj.runtime as Record<string, unknown>;
+    if (runtimeObj.gateway !== undefined) {
+      if (
+        typeof runtimeObj.gateway !== "object" ||
+        runtimeObj.gateway === null ||
+        Array.isArray(runtimeObj.gateway)
+      ) {
+        return {
+          ok: false,
+          errors: [{
+            type: "CONFIG_ERROR",
+            field: "runtime.gateway",
+            message: "'runtime.gateway' must be an object",
+          }],
+        };
+      }
+
+      const gatewayObj = runtimeObj.gateway as Record<string, unknown>;
+      if (gatewayObj.corsAllowedOrigins !== undefined) {
+        if (!Array.isArray(gatewayObj.corsAllowedOrigins)) {
+          return {
+            ok: false,
+            errors: [{
+              type: "CONFIG_ERROR",
+              field: "runtime.gateway.corsAllowedOrigins",
+              message: "'runtime.gateway.corsAllowedOrigins' must be an array of non-empty strings",
+            }],
+          };
+        }
+
+        const invalidIndex = gatewayObj.corsAllowedOrigins.findIndex(
+          (origin) => typeof origin !== "string" || origin.trim() === "",
+        );
+        if (invalidIndex >= 0) {
+          return {
+            ok: false,
+            errors: [{
+              type: "CONFIG_ERROR",
+              field: `runtime.gateway.corsAllowedOrigins[${invalidIndex}]`,
+              message: "Each CORS allowed origin must be a non-empty string",
+            }],
+          };
+        }
+
+        runtime.runtime = {
+          gateway: {
+            corsAllowedOrigins: (gatewayObj.corsAllowedOrigins as string[]).map((origin) => origin.trim()),
+          },
+        };
+      }
+    }
+  }
+
   return { ok: true, runtime };
 }
 
@@ -304,6 +372,7 @@ export function loadAuthConfig(options?: { authFilePath?: string; cwd?: string }
   // Validate each credential entry
   const errors: ConfigError[] = [];
   const credentials: AuthCredential[] = [];
+  let gateway: GatewayAuthConfig | undefined;
 
   for (let i = 0; i < obj.credentials.length; i++) {
     const entry = obj.credentials[i] as Record<string, unknown>;
@@ -357,11 +426,82 @@ export function loadAuthConfig(options?: { authFilePath?: string; cwd?: string }
     }
   }
 
+  if (obj.gateway !== undefined) {
+    if (typeof obj.gateway !== "object" || obj.gateway === null || Array.isArray(obj.gateway)) {
+      errors.push({ type: "CONFIG_ERROR", field: "gateway", message: "'gateway' must be an object" });
+    } else {
+      const gatewayObj = obj.gateway as Record<string, unknown>;
+      if (!Array.isArray(gatewayObj.tokens)) {
+        errors.push({ type: "CONFIG_ERROR", field: "gateway.tokens", message: "'gateway.tokens' must be an array" });
+      } else {
+        const tokens: GatewayToken[] = [];
+
+        for (let i = 0; i < gatewayObj.tokens.length; i++) {
+          const tokenEntry = gatewayObj.tokens[i];
+          const idx = `gateway.tokens[${i}]`;
+
+          if (typeof tokenEntry !== "object" || tokenEntry === null || Array.isArray(tokenEntry)) {
+            errors.push({ type: "CONFIG_ERROR", field: idx, message: `${idx} must be an object` });
+            continue;
+          }
+
+          const tokenObj = tokenEntry as Record<string, unknown>;
+          if (typeof tokenObj.id !== "string" || tokenObj.id.trim() === "") {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.id`, message: `${idx}.id must be a non-empty string` });
+            continue;
+          }
+
+          if (typeof tokenObj.token !== "string" || tokenObj.token.trim() === "") {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.token`, message: `${idx}.token must be a non-empty string` });
+            continue;
+          }
+
+          if (!Array.isArray(tokenObj.scopes)) {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.scopes`, message: `${idx}.scopes must be an array with 'read' and/or 'write'` });
+            continue;
+          }
+
+          const hasInvalidScope = tokenObj.scopes.some((scope) => scope !== "read" && scope !== "write");
+          if (hasInvalidScope) {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.scopes`, message: `${idx}.scopes contains invalid scope; allowed: 'read', 'write'` });
+            continue;
+          }
+
+          const scopes = tokenObj.scopes as GatewayTokenScope[];
+          if (scopes.length === 0) {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.scopes`, message: `${idx}.scopes must not be empty` });
+            continue;
+          }
+
+          if (tokenObj.disabled !== undefined && typeof tokenObj.disabled !== "boolean") {
+            errors.push({ type: "CONFIG_ERROR", field: `${idx}.disabled`, message: `${idx}.disabled must be boolean when provided` });
+            continue;
+          }
+
+          tokens.push({
+            id: tokenObj.id,
+            token: tokenObj.token,
+            scopes,
+            ...(typeof tokenObj.disabled === "boolean" ? { disabled: tokenObj.disabled } : {}),
+          });
+        }
+
+        gateway = { tokens };
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
 
-  return { ok: true, auth: { credentials } };
+  return {
+    ok: true,
+    auth: {
+      credentials,
+      ...(gateway ? { gateway } : {}),
+    },
+  };
 }
 
 // Resolve credential for a provider, with env var taking precedence over file-based auth

@@ -1,5 +1,20 @@
+export const GATEWAY_ERROR_CODES = [
+  "BAD_REQUEST",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "CONFLICT",
+  "UNSUPPORTED_RUNTIME_MODE",
+  "AUDIT_WRITE_FAILED",
+  "PERSONA_IN_USE",
+  "JOB_NOT_FOUND",
+] as const;
+
+export type GatewayErrorCode = (typeof GATEWAY_ERROR_CODES)[number];
+
 // All V1 error codes — exhaustive list
 export type ErrorCode =
+  // Gateway errors
+  | GatewayErrorCode
   // Model/LLM errors
   | "MODEL_TIMEOUT"
   | "MODEL_RATE_LIMIT"
