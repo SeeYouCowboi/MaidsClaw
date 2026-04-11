@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
+import { createReloadable } from "../config/reloadable.js";
 import { MaidsClawError } from "../core/errors.js";
 import { errorJsonResponse } from "./error-response.js";
 
@@ -17,7 +18,7 @@ export type AuthLoader = {
 	requireAuth(
 		req: Request,
 		requiredScope: "read" | "write" | "public",
-	): GatewayPrincipal | Response;
+	): Promise<GatewayPrincipal | Response>;
 };
 
 const PUBLIC_PRINCIPAL: GatewayPrincipal = { token_id: "public", scopes: [] };
@@ -142,18 +143,30 @@ function hasRequiredScope(required: "read" | "write", grantedScopes: string[]): 
 }
 
 export function createAuthLoader(configPath: string): AuthLoader {
-	let snapshot: GatewayTokenSnapshot = { tokens: [] };
+	let initialSnapshot: GatewayTokenSnapshot = { tokens: [] };
 	let lastMtimeMs: number | undefined;
 
 	try {
-		snapshot = parseAuthSnapshot(configPath);
+		initialSnapshot = parseAuthSnapshot(configPath);
 		lastMtimeMs = statSync(configPath).mtimeMs;
 	} catch {
-		snapshot = { tokens: [] };
+		initialSnapshot = { tokens: [] };
 		lastMtimeMs = undefined;
 	}
 
-	function maybeReloadSnapshot(): void {
+	function createAuthSnapshotReloadable(initial: GatewayTokenSnapshot) {
+		return createReloadable<GatewayTokenSnapshot>({
+			initial,
+			load: async () => parseAuthSnapshot(configPath),
+			onReloadError: () => {
+				// Keep last-known-good snapshot silently on reload failure.
+			},
+		});
+	}
+
+	const snapshot = createAuthSnapshotReloadable(initialSnapshot);
+
+	async function maybeReloadSnapshot(): Promise<void> {
 		let mtimeMs: number | undefined;
 		try {
 			mtimeMs = statSync(configPath).mtimeMs;
@@ -165,21 +178,19 @@ export function createAuthLoader(configPath: string): AuthLoader {
 			return;
 		}
 
-		try {
-			const nextSnapshot = parseAuthSnapshot(configPath);
-			snapshot = nextSnapshot;
+		const result = await snapshot.reload();
+		if (result.ok) {
 			lastMtimeMs = mtimeMs;
-		} catch {
-			// Keep last-known-good snapshot on parse/reload failure.
 		}
 	}
 
 	return {
-		requireAuth(
+		async requireAuth(
 			req: Request,
 			requiredScope: "read" | "write" | "public",
-		): GatewayPrincipal | Response {
-			maybeReloadSnapshot();
+		): Promise<GatewayPrincipal | Response> {
+			await maybeReloadSnapshot();
+			const currentSnapshot = snapshot.get();
 
 			if (requiredScope === "public") {
 				return PUBLIC_PRINCIPAL;
@@ -190,7 +201,7 @@ export function createAuthLoader(configPath: string): AuthLoader {
 				return unauthorizedResponse();
 			}
 
-			const token = snapshot.tokens.find(
+			const token = currentSnapshot.tokens.find(
 				(entry) => !entry.disabled && entry.token === bearerToken,
 			);
 			if (!token) {

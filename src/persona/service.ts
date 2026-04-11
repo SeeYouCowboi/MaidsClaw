@@ -1,42 +1,75 @@
+import {
+	createReloadable,
+	type ReloadableSnapshot,
+	type ReloadResult,
+} from "../config/reloadable.js";
 import { DriftDetector, type DriftReport } from "./anti-drift.js";
 import type { CharacterCard } from "./card-schema.js";
 import { PersonaLoader } from "./loader.js";
 
+type PersonaRegistrySnapshot = ReadonlyMap<string, CharacterCard>;
+
 export class PersonaService {
-  private readonly registry: Map<string, CharacterCard> = new Map();
-  private readonly driftDetector: DriftDetector;
-  private readonly loader: PersonaLoader;
+	private readonly driftDetector: DriftDetector;
+	private readonly loader: PersonaLoader;
+	private registrySnapshot: ReloadableSnapshot<PersonaRegistrySnapshot>;
 
-  constructor(options?: { loader?: PersonaLoader; driftDetector?: DriftDetector }) {
-    this.loader = options?.loader ?? new PersonaLoader();
-    this.driftDetector = options?.driftDetector ?? new DriftDetector();
-  }
+	constructor(options?: {
+		loader?: PersonaLoader;
+		driftDetector?: DriftDetector;
+	}) {
+		this.loader = options?.loader ?? new PersonaLoader();
+		this.driftDetector = options?.driftDetector ?? new DriftDetector();
+		this.registrySnapshot = this.createRegistryReloadable(new Map());
+	}
 
-  loadAll(): CharacterCard[] {
-    this.registry.clear();
+	private createRegistryReloadable(
+		initial: PersonaRegistrySnapshot,
+	): ReloadableSnapshot<PersonaRegistrySnapshot> {
+		return createReloadable<PersonaRegistrySnapshot>({
+			initial,
+			load: async () => this.buildRegistrySnapshot(),
+		});
+	}
 
-    const cards = this.loader.loadCards();
-    for (const card of cards) {
-      this.registry.set(card.id, card);
-    }
+	private buildRegistrySnapshot(): PersonaRegistrySnapshot {
+		const cards = this.loader.loadCards();
+		const next = new Map<string, CharacterCard>();
+		for (const card of cards) {
+			next.set(card.id, card);
+		}
+		return next;
+	}
 
-    return cards;
-  }
+	loadAll(): CharacterCard[] {
+		const nextSnapshot = this.buildRegistrySnapshot();
+		this.registrySnapshot = this.createRegistryReloadable(nextSnapshot);
+		return [...nextSnapshot.values()];
+	}
 
-  getCard(cardId: string): CharacterCard | undefined {
-    return this.registry.get(cardId);
-  }
+	reload(): Promise<ReloadResult<PersonaRegistrySnapshot>> {
+		return this.registrySnapshot.reload();
+	}
 
-  registerCard(card: CharacterCard): void {
-    this.registry.set(card.id, card);
-  }
+	getCard(cardId: string): CharacterCard | undefined {
+		return this.registrySnapshot.get().get(cardId);
+	}
 
-  detectDrift(cardId: string, currentPersonaText: string): DriftReport | undefined {
-    const card = this.getCard(cardId);
-    if (!card) {
-      return undefined;
-    }
+	registerCard(card: CharacterCard): void {
+		const nextSnapshot = new Map(this.registrySnapshot.get());
+		nextSnapshot.set(card.id, card);
+		this.registrySnapshot = this.createRegistryReloadable(nextSnapshot);
+	}
 
-    return this.driftDetector.detectDrift(card, currentPersonaText);
-  }
+	detectDrift(
+		cardId: string,
+		currentPersonaText: string,
+	): DriftReport | undefined {
+		const card = this.getCard(cardId);
+		if (!card) {
+			return undefined;
+		}
+
+		return this.driftDetector.detectDrift(card, currentPersonaText);
+	}
 }
