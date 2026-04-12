@@ -180,3 +180,51 @@ export type {
   OpaqueCursor,
 } from "./cursor.js";
 export type { GatewayErrorCode } from "./errors.js";
+
+export type {
+  AgentToolPermissionDto,
+  AgentContextBudgetDto,
+  AgentItemDto,
+  AgentListResponseDto,
+} from "./agents.js";
+
+export type {
+  ProviderSelectionPolicyDto,
+  ProviderModelDto,
+  ProviderItemDto,
+  ProviderListResponseDto,
+} from "./providers.js";
+
+export type {
+  PersonaMessageExampleDto,
+  PersonaItemDto,
+  PersonaListResponseDto,
+} from "./personas.js";
+
+export type {
+  RuntimeTalkerThinkerDto,
+  RuntimeOrchestrationDto,
+  RuntimeGatewayDto,
+  RuntimeSnapshotDto,
+} from "./runtime.js";
+
+export type {
+  BlackboardSnapshotEntryDto,
+  StateSnapshotResponseDto,
+  MaidenDecisionItemDto,
+  MaidenDecisionListResponseDto,
+} from "./state.js";
+
+export type {
+  CoreMemoryBlockDto,
+  CoreMemoryBlockListResponseDto,
+  PinnedSummaryDto,
+  PinnedSummaryListResponseDto,
+  EpisodeItemDto,
+  EpisodeListResponseDto,
+  NarrativeItemDto,
+  NarrativeListResponseDto,
+  SettlementItemDto,
+  SettlementListResponseDto,
+  RetrievalTraceResponseDto,
+} from "./memory.js";

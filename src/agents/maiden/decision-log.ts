@@ -1,3 +1,5 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { decodeCursor, encodeCursor } from "../../contracts/cockpit/cursor.js";
 import { MaidsClawError } from "../../core/errors.js";
 
@@ -76,14 +78,74 @@ function parseCursor(cursor?: string): { createdAt: number; decisionId: string }
 	};
 }
 
+function parseJsonlEntry(line: string): MaidenDecisionEntry | null {
+	try {
+		const parsed = JSON.parse(line) as Record<string, unknown>;
+		if (
+			typeof parsed.decision_id !== "string" ||
+			typeof parsed.request_id !== "string" ||
+			typeof parsed.session_id !== "string" ||
+			typeof parsed.delegation_depth !== "number" ||
+			typeof parsed.action !== "string" ||
+			typeof parsed.created_at !== "number"
+		) {
+			return null;
+		}
+		return {
+			decision_id: parsed.decision_id,
+			request_id: parsed.request_id,
+			session_id: parsed.session_id,
+			delegation_depth: parsed.delegation_depth,
+			action: parsed.action as "direct_reply" | "delegate",
+			target_agent_id: typeof parsed.target_agent_id === "string" ? parsed.target_agent_id : undefined,
+			chosen_from_agent_ids: Array.isArray(parsed.chosen_from_agent_ids)
+				? parsed.chosen_from_agent_ids.filter((id): id is string => typeof id === "string")
+				: [],
+			created_at: parsed.created_at,
+		};
+	} catch {
+		return null;
+	}
+}
+
 export class MaidenDecisionLog {
 	private readonly entries: MaidenDecisionEntry[] = [];
+	private readonly filePath: string | undefined;
+
+	constructor(filePath?: string) {
+		this.filePath = filePath;
+		if (filePath && existsSync(filePath)) {
+			try {
+				const content = readFileSync(filePath, "utf8");
+				for (const line of content.split("\n")) {
+					const trimmed = line.trim();
+					if (trimmed.length === 0) continue;
+					const entry = parseJsonlEntry(trimmed);
+					if (entry) {
+						this.entries.push(entry);
+					}
+				}
+			} catch {
+				// File unreadable — start fresh
+			}
+		}
+	}
 
 	async append(entry: MaidenDecisionEntry): Promise<void> {
-		this.entries.push({
+		const stored = {
 			...entry,
 			chosen_from_agent_ids: [...entry.chosen_from_agent_ids],
-		});
+		};
+		this.entries.push(stored);
+
+		if (this.filePath) {
+			try {
+				mkdirSync(dirname(this.filePath), { recursive: true });
+				appendFileSync(this.filePath, `${JSON.stringify(stored)}\n`, "utf8");
+			} catch {
+				// Append failure is non-fatal — entry is still in memory
+			}
+		}
 	}
 
 	async list(options: MaidenDecisionListOptions = {}): Promise<MaidenDecisionListResult> {

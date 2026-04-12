@@ -1027,15 +1027,7 @@ export function bootstrapRuntime(
 		},
 	} as unknown as AgentLoop;
 
-	const settlementUnitOfWork: SettlementUnitOfWork | null = {
-		run<T>(
-			fn: (
-				repos: import("../storage/unit-of-work.js").SettlementRepos,
-			) => Promise<T>,
-		): Promise<T> {
-			return new PgSettlementUnitOfWork(pgFactory.getPool()).run(fn);
-		},
-	};
+	const settlementUnitOfWork: SettlementUnitOfWork | null = null;
 
 	const episodeRepo = createLazyPgRepo(
 		() => new PgEpisodeRepo(resolvePgPool()),
@@ -1344,7 +1336,9 @@ export function bootstrapRuntime(
 		: memoryPipelineStatusPreliminary;
 	healthChecks.memory_pipeline = memoryPipelineReady ? "ok" : "degraded";
 
-	const maidenDecisionLog = new MaidenDecisionLog();
+	const maidenDecisionLog = new MaidenDecisionLog(
+		join(dataDir, "maiden-decisions.jsonl"),
+	);
 
 	const turnService = new TurnService(
 		turnServiceAgentLoop,
@@ -1632,15 +1626,19 @@ export function buildGatewayRuntimeContextExtensions(
 					agentId: string,
 					options?: { since?: number; limit?: number },
 				) {
+					const since = options?.since;
+					const limit = options?.limit;
+					const fetchLimit = typeof since === "number" ? undefined : limit;
 					const rows = await runtime.episodeRepo.readByAgent(
 						agentId,
-						options?.limit,
+						fetchLimit,
 					);
-					const since = options?.since;
-					if (typeof since === "number") {
-						return rows.filter((row) => row.created_at >= since);
-					}
-					return rows;
+					const filtered = typeof since === "number"
+						? rows.filter((row) => row.created_at >= since)
+						: rows;
+					return typeof limit === "number"
+						? filtered.slice(0, limit)
+						: filtered;
 				},
 			}
 		: undefined;
@@ -1699,6 +1697,18 @@ export async function initializePgBackendForRuntime(
 		type: "pg",
 		pg: { url: process.env.PG_APP_URL ?? "" },
 	});
+
+	if (result.turnService && result.pgFactory.isInitialized()) {
+		result.turnService.setSettlementUnitOfWork({
+			run<T>(
+				fn: (
+					repos: import("../storage/unit-of-work.js").SettlementRepos,
+				) => Promise<T>,
+			): Promise<T> {
+				return new PgSettlementUnitOfWork(result.pgFactory!.getPool()).run(fn);
+			},
+		});
+	}
 
 	const pgFactoryWithStore = result.pgFactory as PgBackendFactory & {
 		store?: DurableJobStore;

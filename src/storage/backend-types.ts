@@ -66,6 +66,10 @@ export class PgBackendFactory implements BackendFactory {
 		}
 	}
 
+	isInitialized(): boolean {
+		return this.pool !== null;
+	}
+
 	getPool(): postgres.Sql {
 		if (!this.pool) throw new Error("PgBackendFactory not initialized");
 		return this.pool;

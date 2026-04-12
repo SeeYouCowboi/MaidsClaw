@@ -1,6 +1,14 @@
 import { z } from "zod";
 import type { ObservationEvent } from "../app/contracts/execution.js";
 import { SessionCreateRequestSchema } from "../contracts/cockpit/index.js";
+import type {
+	AgentItemDto,
+	ProviderItemDto,
+	ProviderSelectionPolicyDto,
+	ProviderModelDto,
+	PersonaItemDto,
+	PersonaMessageExampleDto as PersonaMessageExampleWire,
+} from "../contracts/cockpit/index.js";
 import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
@@ -1346,24 +1354,8 @@ export async function handleGetJobDetail(
 	}
 }
 
-type PersonaMessageExampleDto = {
-	role: string;
-	content: string;
-};
-
-type PersonaDto = {
-	id: string;
-	name: string;
-	description: string;
-	persona: string;
-	world?: string;
-	message_examples?: PersonaMessageExampleDto[];
-	system_prompt?: string;
-	tags?: string[];
-	created_at?: number;
-	hidden_tasks?: string[];
-	private_persona?: string;
-};
+type PersonaMessageExampleDto = PersonaMessageExampleWire;
+type PersonaDto = PersonaItemDto;
 
 function toPersonaDto(input: unknown): PersonaDto {
 	if (!input || typeof input !== "object") {
@@ -1640,52 +1632,10 @@ export async function handleReloadPersonas(
 
 // ── Agent response projection ────────────────────────────────────────────────
 
-type AgentResponseItem = {
-	id: string;
-	display_name: string;
-	role: string;
-	lifecycle: string;
-	user_facing: boolean;
-	output_mode: string;
-	model_id: string;
-	persona_id?: string;
-	max_output_tokens?: number;
-	tool_permissions: Array<{ tool_name: string; allowed: boolean }>;
-	context_budget?: { max_tokens: number; reserved_for_coordination?: number };
-	lorebook_enabled: boolean;
-	narrative_context_enabled: boolean;
-};
-
-type ProviderResponseSelectionPolicy = {
-	enabled_by_default: boolean;
-	eligible_for_auto_fallback: boolean;
-	is_auto_default: boolean;
-};
-
-type ProviderResponseModel = {
-	id: string;
-	display_name: string;
-	context_window: number;
-	max_output_tokens: number;
-	supports_tools: boolean;
-	supports_vision: boolean;
-	supports_embedding: boolean;
-};
-
-type ProviderResponseItem = {
-	id: string;
-	display_name: string;
-	transport_family: string;
-	api_kind: string;
-	risk_tier: string;
-	base_url: string;
-	auth_modes: string[];
-	configured: boolean;
-	selection_policy: ProviderResponseSelectionPolicy;
-	default_chat_model_id?: string;
-	default_embedding_model_id?: string;
-	models: ProviderResponseModel[];
-};
+type AgentResponseItem = AgentItemDto;
+type ProviderResponseSelectionPolicy = ProviderSelectionPolicyDto;
+type ProviderResponseModel = ProviderModelDto;
+type ProviderResponseItem = ProviderItemDto;
 
 const NESTED_SENSITIVE_KEY_PATTERN = /token|secret|password|authorization/i;
 const EXPLICIT_SENSITIVE_KEYS = new Set(["apiKey", "accessToken", "token"]);

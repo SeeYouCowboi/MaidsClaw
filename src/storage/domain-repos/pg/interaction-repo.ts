@@ -42,7 +42,7 @@ export class PgInteractionRepo implements InteractionRepo {
         ) VALUES (
           ${record.sessionId}, ${record.recordId}, ${record.recordIndex},
           ${record.actorType}, ${record.recordType},
-          ${record.payload}::jsonb,
+          ${JSON.stringify(record.payload)}::jsonb,
           ${record.correlatedTurnId ?? null}, ${record.committedAt}, 0
         )
       `;

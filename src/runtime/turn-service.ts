@@ -88,12 +88,16 @@ export class TurnService {
 		private readonly graphStorage?: GraphStorageService,
 		private readonly traceStore?: TraceStore,
 		private readonly projectionManager?: ProjectionManager,
-		private readonly settlementUnitOfWork: SettlementUnitOfWork | null = null,
+		private settlementUnitOfWork: SettlementUnitOfWork | null = null,
 		private readonly memoryPipelineReady = true,
 		private readonly talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number } = { enabled: false, stalenessThreshold: 2, softBlockTimeoutMs: 3000, softBlockPollIntervalMs: 500 },
 		private readonly jobPersistence: JobPersistence | null = null,
 		private readonly maidenDecisionLog: MaidenDecisionLog | null = null,
 	) {}
+
+	setSettlementUnitOfWork(uow: SettlementUnitOfWork): void {
+		this.settlementUnitOfWork = uow;
+	}
 
 	async *runUserTurn(params: RunUserTurnParams): AsyncGenerator<Chunk> {
 		const messages: ChatMessage[] = [];
@@ -515,25 +519,22 @@ export class TurnService {
 		}
 
 		if (!this.settlementUnitOfWork) {
-			const errorChunk = {
-				code: "SETTLEMENT_UOW_REQUIRED",
-				message:
-					"PG settlement unit-of-work is required for turn settlement commit. SQLite fallback has been removed.",
-			};
-			this.traceLog(requestId, "error", errorChunk.message);
-			yield {
-				type: "error" as const,
-				code: errorChunk.code,
-				message: errorChunk.message,
-				retriable: false,
-			};
-			await this.handleFailedTurn({
-				request: effectiveRequest,
-				turnRangeStart,
-				errorChunk,
-				assistantText: canonicalOutcome.publicReply,
-				hasAssistantVisibleActivity,
+			this.traceLog(requestId, "warn", "No PG settlement UoW — emitting RP turn without durable settlement");
+			if (canonicalOutcome.publicReply.length > 0) {
+				const replyChunk: Chunk = { type: "text_delta", text: canonicalOutcome.publicReply };
+				this.traceChunk(requestId, replyChunk);
+				yield replyChunk;
+			}
+			this.commitService.commit({
+				sessionId: effectiveRequest.sessionId,
+				actorType: "rp_agent",
+				recordType: "message",
+				payload: { role: "assistant", content: canonicalOutcome.publicReply },
+				correlatedTurnId: requestId,
 			});
+			const endChunk: Chunk = { type: "message_end", stopReason: "end_turn" };
+			this.traceChunk(requestId, endChunk);
+			yield endChunk;
 			rpTraceStore?.finalizeTrace(requestId);
 			return;
 		}

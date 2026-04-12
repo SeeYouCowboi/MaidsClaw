@@ -415,7 +415,7 @@ export class GraphStorageAsyncApi {
     modelId: string,
     embedding: Float32Array,
   ): Promise<void> {
-    return this.delegates.embeddingRepo.upsert(nodeRef, nodeKind, viewType, modelId, embedding);
+    return Promise.resolve(this.delegates.embeddingRepo.upsert(nodeRef, nodeKind, viewType, modelId, embedding));
   }
 
   upsertSemanticEdge(
