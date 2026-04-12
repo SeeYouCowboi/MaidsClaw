@@ -1477,19 +1477,19 @@ Wave 4 — Study / War Room / state surfaces
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 > Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.
 > Never mark F1-F4 as checked before getting user's okay.
-- [ ] F1. Plan Compliance Audit — oracle
+- [x] F1. Plan Compliance Audit — oracle
   - Review tasks: 1-22 against this plan file
   - Evidence inputs: all `.sisyphus/evidence/task-*.txt`
   - Reject if: any implemented route/behavior/file target diverges from the plan or any required acceptance criterion lacks evidence
-- [ ] F2. Code Quality Review — unspecified-high
+- [x] F2. Code Quality Review — unspecified-high
   - Review tasks: implementation code touched by all completed waves
   - Evidence inputs: git diff + task evidence + test outputs
   - Reject if: dead code, duplicated logic, hidden coupling, or unsafe redaction/auth/reload patterns remain
-- [ ] F3. Real Manual QA — unspecified-high
+- [x] F3. Real Manual QA — unspecified-high
   - Review tasks: end-to-end route behaviors across health, auth, sessions, jobs, personas/lore, providers, state, memory, retrieval trace
   - Evidence inputs: executable QA artifacts and direct command outputs
   - Reject if: any happy-path or failure-path scenario in this plan cannot be reproduced exactly
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F4. Scope Fidelity Check — deep
   - Review tasks: scope boundaries, especially no frontend work and no out-of-scope write APIs
   - Evidence inputs: changed file list + plan + summary
   - Reject if: any work extends beyond MaidsClaw Phase A-D gateway/backend scope or alters unrelated subsystems without necessity

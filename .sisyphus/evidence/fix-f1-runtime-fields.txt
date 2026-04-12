@@ -1,0 +1,10 @@
+## fix-f1-runtime-fields
+2026-04-12T00:00:00.000Z
+
+Changes:
+1. staleness_threshold_ms -> staleness_threshold in handleGetRuntime (src/gateway/controllers.ts line 1944)
+2. global_concurrency_cap added conditionally from runtimeTalkerThinker?.globalConcurrencyCap (src/gateway/controllers.ts lines 1962-1964)
+3. No test updates required - no assertions for staleness_threshold_ms existed in test/gateway/runtime-route.test.ts
+
+Build: fail (pre-existing errors in unrelated files: src/jobs/pg-store.ts, src/memory/storage.ts, src/storage/domain-repos/pg/interaction-repo.ts). src/gateway/controllers.ts has 0 diagnostics.
+Test: pass (6 pass, 0 fail, 30 expect() calls in test/gateway/runtime-route.test.ts)
