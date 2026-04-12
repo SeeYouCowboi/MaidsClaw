@@ -1,3 +1,4 @@
+import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { AgentProfile } from "../agents/profile.js";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
@@ -8,25 +9,26 @@ import type { PromptBuilder } from "../core/prompt-builder.js";
 import type { PromptRenderer } from "../core/prompt-renderer.js";
 import type { RuntimeProjectionSink } from "../core/runtime-projection.js";
 import type { ToolExecutor } from "../core/tools/tool-executor.js";
-import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { ProviderCatalogService } from "../gateway/context.js";
 import type { JobPersistence } from "../jobs/persistence.js";
-import type { ProjectionManager } from "../memory/projection/projection-manager.js";
+import type { LoreService } from "../lore/service.js";
 import type { CoreMemoryService } from "../memory/core-memory.js";
+import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
+import type { PersonaService } from "../persona/service.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
 import type { Blackboard } from "../state/blackboard.js";
-import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
-import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
-import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
 import type {
 	BackendType,
 	PgBackendFactory,
 } from "../storage/backend-types.js";
+import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
+import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
+import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
 import type { SharedBlockRepo } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 
@@ -108,7 +110,12 @@ export type RuntimeBootstrapResult = {
 	sharedBlockRepo: SharedBlockRepo;
 	jobPersistence: JobPersistence;
 	thinkerGlobalConcurrencyCap?: number;
-	talkerThinkerConfig: { enabled: boolean; stalenessThreshold: number; softBlockTimeoutMs: number; softBlockPollIntervalMs: number };
+	talkerThinkerConfig: {
+		enabled: boolean;
+		stalenessThreshold: number;
+		softBlockTimeoutMs: number;
+		softBlockPollIntervalMs: number;
+	};
 	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;
 	/**
@@ -130,6 +137,9 @@ export type RuntimeBootstrapResult = {
 	episodeRepo: EpisodeRepo;
 	settlementLedgerRepo: SettlementLedgerRepo;
 	areaWorldProjectionRepo: AreaWorldProjectionRepo;
+	personaService: PersonaService;
+	loreService: LoreService;
+	reloadPromptData: () => Promise<void>;
 };
 
 export type PublicRuntimeBootstrapResult = Omit<
