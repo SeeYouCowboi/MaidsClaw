@@ -7,14 +7,13 @@ import { appendAuditRecord, initAudit } from "./audit.js";
 import type { GatewayPrincipal } from "./auth.js";
 import { createAuthLoader } from "./auth.js";
 import type { GatewayContext, HealthCheckFn } from "./context.js";
-import {
-	ROUTE_POLICY,
-	type RoutePolicy,
-	type RoutePolicyScope,
-	routePolicyKey,
-} from "./contracts/policy.js";
 import type { ControllerContext } from "./controllers.js";
 import { applyCors, type CorsOptions, handlePreflight } from "./cors.js";
+import type {
+	RouteEntry,
+	RouteErrorTransport,
+	RouteScope,
+} from "./route-definition.js";
 import { resolveRoute } from "./routes.js";
 
 type LegacyGatewayServerOptions = {
@@ -36,68 +35,58 @@ export type GatewayServerOptions = {
 
 const DEFAULT_AUTH_CONFIG_PATH = "config/auth.json";
 
-function normalizePattern(pattern: string): string {
-	return pattern.replace(/\{[^}]+\}/g, "{}");
-}
+type EffectiveRoutePolicy = {
+	method: string;
+	routePattern?: string;
+	scope: RouteScope;
+	audit: boolean;
+	cors: boolean;
+	pgRequired: boolean;
+	errorTransport: RouteErrorTransport;
+	requestSchemaName?: string;
+	responseSchemaName?: string;
+};
 
-function matchesFallbackPattern(pathname: string, pattern: string): boolean {
-	if (!pattern.endsWith("/**")) {
-		return false;
-	}
-	const prefix = pattern.slice(0, -3);
-	return pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
+function resolveRouteWithPolicy(
+	req: Request,
+	url: URL,
+): {
+	route?: RouteEntry;
+	policy: EffectiveRoutePolicy;
+} {
+	const corsMethod = req.headers.get("Access-Control-Request-Method");
+	const matchedMethod =
+		req.method === "OPTIONS" && corsMethod
+			? corsMethod.toUpperCase()
+			: req.method;
+	const route = resolveRoute(matchedMethod, url.pathname);
 
-function resolveRoutePolicy(
-	method: string,
-	routePatternOrPath: string,
-): RoutePolicy {
-	const exact = ROUTE_POLICY.get(routePolicyKey(method, routePatternOrPath));
-	if (exact) {
-		return exact;
-	}
-
-	const normalizedPattern = normalizePattern(routePatternOrPath);
-	for (const policy of ROUTE_POLICY.values()) {
-		if (policy.method !== method) {
-			continue;
-		}
-		if (normalizePattern(policy.route_pattern) === normalizedPattern) {
-			return policy;
-		}
-	}
-
-	if (method === "GET" && routePatternOrPath.startsWith("/v1/")) {
-		for (const policy of ROUTE_POLICY.values()) {
-			if (
-				policy.method === "GET" &&
-				matchesFallbackPattern(routePatternOrPath, policy.route_pattern)
-			) {
-				return policy;
-			}
-		}
-	}
-
-	if (routePatternOrPath.startsWith("/v1/")) {
+	if (!route) {
 		return {
-			method: method as RoutePolicy["method"],
-			route_pattern: routePatternOrPath,
-			scope: "write",
-			audit: true,
-			cors: true,
-			pg_required: false,
-			error_transport: "json",
+			policy: {
+				method: matchedMethod,
+				scope: "public",
+				audit: false,
+				cors: true,
+				pgRequired: false,
+				errorTransport: "json",
+			},
 		};
 	}
 
 	return {
-		method: method as RoutePolicy["method"],
-		route_pattern: routePatternOrPath,
-		scope: "public",
-		audit: false,
-		cors: true,
-		pg_required: false,
-		error_transport: "json",
+		route,
+		policy: {
+			method: route.method,
+			routePattern: route.pattern,
+			scope: route.scope,
+			audit: route.audit,
+			cors: route.cors,
+			pgRequired: route.pgRequired,
+			errorTransport: route.errorTransport,
+			requestSchemaName: route.requestSchema?.description,
+			responseSchemaName: route.responseSchema?.description,
+		},
 	};
 }
 
@@ -116,10 +105,42 @@ function filterAuditKeys(keys: string[]): string[] | undefined {
 	return safe.length > 0 ? safe : undefined;
 }
 
-function toRequiredScope(
-	policyScope: RoutePolicyScope,
-): "public" | "read" | "write" {
+function toRequiredScope(policyScope: RouteScope): "public" | "read" | "write" {
 	return policyScope;
+}
+
+async function toSseErrorResponse(jsonResponse: Response): Promise<Response> {
+	let payload = "";
+	try {
+		payload = await jsonResponse.text();
+	} catch {
+		payload = JSON.stringify({
+			error: {
+				code: "INTERNAL_ERROR",
+				message: "Unexpected server error",
+				retriable: false,
+			},
+		});
+	}
+
+	return new Response(`data: ${payload}\n\n`, {
+		status: jsonResponse.status,
+		headers: {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+		},
+	});
+}
+
+async function applyErrorTransport(
+	res: Response,
+	errorTransport: RouteErrorTransport,
+): Promise<Response> {
+	if (errorTransport !== "sse" || res.status < 400) {
+		return res;
+	}
+	return toSseErrorResponse(res);
 }
 
 function parseQueryKeys(url: URL): string[] | undefined {
@@ -224,24 +245,28 @@ export class GatewayServer {
 				} catch {
 					auditReq = undefined;
 				}
-				const route = resolveRoute(req.method, url.pathname);
-				const routePattern = route?.pattern;
-				const routePolicy = resolveRoutePolicy(
-					req.method,
-					routePattern ?? url.pathname,
-				);
+				const { route, policy: routePolicy } = resolveRouteWithPolicy(req, url);
+				const routePattern = routePolicy.routePattern;
 				let principal: GatewayPrincipal | undefined;
 				let requestId: string = crypto.randomUUID();
 
 				const finalize = async (res: Response): Promise<Response> => {
-					if (!auditFilePath || !routePolicy?.audit) {
-						return applyCors(req, res, corsOpts);
+					const transported = await applyErrorTransport(
+						res,
+						routePolicy.errorTransport,
+					);
+					if (!auditFilePath || !routePolicy.audit) {
+						return routePolicy.cors
+							? applyCors(req, transported, corsOpts)
+							: transported;
 					}
 
 					if (auditInitPromise) {
 						const auditReady = await auditInitPromise;
 						if (!auditReady) {
-							return applyCors(req, res, corsOpts);
+							return routePolicy.cors
+								? applyCors(req, transported, corsOpts)
+								: transported;
 						}
 					}
 
@@ -254,27 +279,31 @@ export class GatewayServer {
 						method: req.method,
 						path: url.pathname,
 						...(routePattern ? { route_pattern: routePattern } : {}),
-						status: res.status,
+						status: transported.status,
 						duration_ms: Date.now() - requestStartedAt,
 						...(originHeader ? { origin: originHeader } : {}),
 						...(principal
 							? { principal_id: principal.token_id, scopes: principal.scopes }
 							: {}),
-						result: res.status >= 400 ? "error" : "ok",
+						result: transported.status >= 400 ? "error" : "ok",
 						...(bodyKeys ? { body_keys: bodyKeys } : {}),
 						...(queryKeys ? { query_keys: queryKeys } : {}),
 					};
 
 					await appendAuditRecord(auditFilePath, auditRecord);
-					return applyCors(req, res, corsOpts);
+					return routePolicy.cors
+						? applyCors(req, transported, corsOpts)
+						: transported;
 				};
 
-				const preflightRes = handlePreflight(req, corsOpts);
+				const preflightRes = routePolicy.cors
+					? handlePreflight(req, corsOpts)
+					: null;
 				if (preflightRes) {
 					return preflightRes;
 				}
 
-				if (routePolicy && authLoader) {
+				if (authLoader) {
 					const authResult = await authLoader.requireAuth(
 						req,
 						toRequiredScope(routePolicy.scope),
