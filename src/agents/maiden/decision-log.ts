@@ -30,7 +30,7 @@ function clampLimit(limit?: number): number {
 	if (!Number.isFinite(limit)) {
 		return DEFAULT_LIMIT;
 	}
-	const normalized = Math.floor(limit ?? DEFAULT_LIMIT);
+	const normalized = Math.floor(limit!);
 	return Math.max(1, Math.min(MAX_LIMIT, normalized));
 }
 

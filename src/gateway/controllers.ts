@@ -757,7 +757,7 @@ export async function handleRequestRetrievalTrace(
 		if (!trace) {
 			return errorResponse(
 				new MaidsClawError({
-					code: "BAD_REQUEST",
+					code: "REQUEST_NOT_FOUND",
 					message: `Unknown request_id: ${requestId}`,
 					retriable: false,
 				}),
@@ -1366,6 +1366,9 @@ type PersonaDto = {
 };
 
 function toPersonaDto(input: unknown): PersonaDto {
+	if (!input || typeof input !== "object") {
+		return { id: "", name: "", description: "", persona: "" };
+	}
 	const record = input as Record<string, unknown>;
 	const dto: PersonaDto = {
 		id: String(record.id ?? ""),
@@ -1962,17 +1965,17 @@ export async function handleGetRuntime(
 				...(typeof runtimeTalkerThinker?.globalConcurrencyCap === "number"
 					? { global_concurrency_cap: runtimeTalkerThinker.globalConcurrencyCap }
 					: {}),
-		},
-		orchestration: {
-			enabled: orchestration?.enabled ?? false,
-			role: orchestration?.role ?? hostStatus.backendType ?? "local",
-			durable_mode: orchestration?.durableMode ?? false,
-			lease_reclaim_active: orchestration?.leaseReclaimActive ?? false,
-		},
-		gateway: {
-			cors_allowed_origins: corsOrigins,
-		},
-	};
+			},
+			orchestration: {
+				enabled: orchestration?.enabled ?? false,
+				role: orchestration?.role ?? hostStatus.backendType ?? "local",
+				durable_mode: orchestration?.durableMode ?? false,
+				lease_reclaim_active: orchestration?.leaseReclaimActive ?? false,
+			},
+			gateway: {
+				cors_allowed_origins: corsOrigins,
+			},
+		};
 
 		if (
 			pipelineStatus?.effectiveOrganizerEmbeddingModelId !== undefined &&

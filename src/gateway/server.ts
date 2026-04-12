@@ -310,7 +310,8 @@ export class GatewayServer {
 					}
 					const res = await route.handler(req, ctx);
 					return finalize(res);
-				} catch {
+				} catch (unhandledErr) {
+					console.error("[gateway] unhandled handler error:", unhandledErr);
 					return finalize(
 						new Response(
 							JSON.stringify({

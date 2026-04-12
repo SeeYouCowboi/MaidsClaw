@@ -7,6 +7,7 @@ export const GATEWAY_ERROR_CODES = [
   "AUDIT_WRITE_FAILED",
   "PERSONA_IN_USE",
   "JOB_NOT_FOUND",
+  "REQUEST_NOT_FOUND",
 ] as const;
 
 export type GatewayErrorCode = (typeof GATEWAY_ERROR_CODES)[number];

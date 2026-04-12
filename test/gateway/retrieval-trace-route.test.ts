@@ -98,7 +98,7 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
     const res = await fetch(`${baseUrl}/v1/requests/unknown/retrieval-trace`);
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("BAD_REQUEST");
+    expect(body.error.code).toBe("REQUEST_NOT_FOUND");
     expect(body.error.message.includes("Unknown request_id")).toBe(true);
   });
 
