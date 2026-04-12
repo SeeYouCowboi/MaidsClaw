@@ -1,4 +1,20 @@
-export {
-  GATEWAY_ERROR_CODES,
-  type GatewayErrorCode,
-} from "../../core/errors.js";
+export const GATEWAY_ERROR_CODES = [
+  "BAD_REQUEST",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "CONFLICT",
+  "UNSUPPORTED_RUNTIME_MODE",
+  "AUDIT_WRITE_FAILED",
+  "PERSONA_IN_USE",
+  "PERSONA_NOT_FOUND",
+  "LORE_NOT_FOUND",
+  "LORE_CONFLICT",
+  "JOB_NOT_FOUND",
+  "REQUEST_NOT_FOUND",
+  "SESSION_NOT_FOUND",
+  "SESSION_CLOSED",
+  "SESSION_RECOVERY_REQUIRED",
+] as const;
+
+export type GatewayErrorCode = (typeof GATEWAY_ERROR_CODES)[number];
+export type GatewayErrorCodeUnion = GatewayErrorCode;

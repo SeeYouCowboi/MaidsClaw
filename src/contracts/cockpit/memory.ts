@@ -1,81 +1,139 @@
-export type CoreMemoryBlockDto = {
-  label: string;
-  content: string;
-  chars_current: number;
-  chars_limit: number;
-  read_only: boolean;
-  updated_at: number;
-};
+import { z } from "zod";
 
-export type CoreMemoryBlockListResponseDto = {
-  blocks: CoreMemoryBlockDto[];
-};
+export const CoreMemoryBlockSchema = z
+  .object({
+    label: z.string(),
+    content: z.string(),
+    chars_current: z.number(),
+    chars_limit: z.number(),
+    read_only: z.boolean(),
+    updated_at: z.number(),
+  })
+  .strict();
+export type CoreMemoryBlock = z.infer<typeof CoreMemoryBlockSchema>;
+export type CoreMemoryBlockDto = CoreMemoryBlock;
 
-export type PinnedSummaryDto = {
-  label: string;
-  content: string;
-  chars_current: number;
-  updated_at: number;
-};
+export const CoreMemoryBlockListResponseSchema = z
+  .object({
+    blocks: z.array(CoreMemoryBlockSchema),
+  })
+  .strict();
+export type CoreMemoryBlockListResponse = z.infer<
+  typeof CoreMemoryBlockListResponseSchema
+>;
+export type CoreMemoryBlockListResponseDto = CoreMemoryBlockListResponse;
 
-export type PinnedSummaryListResponseDto = {
-  agent_id: string;
-  summaries: PinnedSummaryDto[];
-};
+export const PinnedSummarySchema = z
+  .object({
+    label: z.string(),
+    content: z.string(),
+    chars_current: z.number(),
+    updated_at: z.number(),
+  })
+  .strict();
+export type PinnedSummary = z.infer<typeof PinnedSummarySchema>;
+export type PinnedSummaryDto = PinnedSummary;
 
-export type EpisodeItemDto = {
-  episode_id: string | number;
-  settlement_id: string;
-  category: string;
-  summary: string;
-  committed_time: number;
-  created_at: number;
-  private_notes?: string;
-  location_text?: string;
-};
+export const PinnedSummaryListResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    summaries: z.array(PinnedSummarySchema),
+  })
+  .strict();
+export type PinnedSummaryListResponse = z.infer<
+  typeof PinnedSummaryListResponseSchema
+>;
+export type PinnedSummaryListResponseDto = PinnedSummaryListResponse;
 
-export type EpisodeListResponseDto = {
-  agent_id: string;
-  items: EpisodeItemDto[];
-};
+export const EpisodeItemSchema = z
+  .object({
+    episode_id: z.union([z.string(), z.number()]),
+    settlement_id: z.string(),
+    category: z.string(),
+    summary: z.string(),
+    committed_time: z.number(),
+    created_at: z.number(),
+    private_notes: z.string().optional(),
+    location_text: z.string().optional(),
+  })
+  .strict();
+export type EpisodeItem = z.infer<typeof EpisodeItemSchema>;
+export type EpisodeItemDto = EpisodeItem;
 
-export type NarrativeItemDto = {
-  scope: "world" | "area";
-  scope_id: string;
-  summary_text: string;
-  updated_at: number;
-};
+export const EpisodeListResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    items: z.array(EpisodeItemSchema),
+  })
+  .strict();
+export type EpisodeListResponse = z.infer<typeof EpisodeListResponseSchema>;
+export type EpisodeListResponseDto = EpisodeListResponse;
 
-export type NarrativeListResponseDto = {
-  agent_id: string;
-  items: NarrativeItemDto[];
-};
+export const NarrativeItemSchema = z
+  .object({
+    scope: z.enum(["world", "area"]),
+    scope_id: z.string(),
+    summary_text: z.string(),
+    updated_at: z.number(),
+  })
+  .strict();
+export type NarrativeItem = z.infer<typeof NarrativeItemSchema>;
+export type NarrativeItemDto = NarrativeItem;
 
-export type SettlementItemDto = {
-  settlement_id: string;
-  status: string;
-  attempt_count: number;
-  created_at: number;
-  updated_at: number;
-  payload_hash?: string;
-  claimed_by?: string;
-  claimed_at?: number;
-  applied_at?: number;
-  error_message?: string;
-};
+export const NarrativeListResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    items: z.array(NarrativeItemSchema),
+  })
+  .strict();
+export type NarrativeListResponse = z.infer<typeof NarrativeListResponseSchema>;
+export type NarrativeListResponseDto = NarrativeListResponse;
 
-export type SettlementListResponseDto = {
-  agent_id: string;
-  items: SettlementItemDto[];
-};
+export const SettlementItemSchema = z
+  .object({
+    settlement_id: z.string(),
+    status: z.string(),
+    attempt_count: z.number(),
+    created_at: z.number(),
+    updated_at: z.number(),
+    payload_hash: z.string().optional(),
+    claimed_by: z.string().optional(),
+    claimed_at: z.number().optional(),
+    applied_at: z.number().optional(),
+    error_message: z.string().optional(),
+  })
+  .strict();
+export type SettlementItem = z.infer<typeof SettlementItemSchema>;
+export type SettlementItemDto = SettlementItem;
 
-export type RetrievalTraceResponseDto = {
-  request_id: string;
-  retrieval: {
-    query_string: string;
-    strategy: string;
-    narrative_facets_used: string[];
-    cognition_facets_used: string[];
-    segment_count: number;
-  } | null;
-};
+export const SettlementListResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    items: z.array(SettlementItemSchema),
+  })
+  .strict();
+export type SettlementListResponse = z.infer<
+  typeof SettlementListResponseSchema
+>;
+export type SettlementListResponseDto = SettlementListResponse;
+
+const RetrievalTraceDataSchema = z
+  .object({
+    query_string: z.string(),
+    strategy: z.string(),
+    narrative_facets_used: z.array(z.string()),
+    cognition_facets_used: z.array(z.string()),
+    segment_count: z.number(),
+  })
+  .strict();
+
+export const RetrievalTraceResponseSchema = z
+  .object({
+    request_id: z.string(),
+    retrieval: RetrievalTraceDataSchema.nullable(),
+  })
+  .strict();
+export type RetrievalTraceResponse = z.infer<
+  typeof RetrievalTraceResponseSchema
+>;
+export type RetrievalTraceResponseDto = RetrievalTraceResponse;
