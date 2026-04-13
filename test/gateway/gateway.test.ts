@@ -1113,6 +1113,98 @@ describe("Real TurnService-backed gateway path", () => {
     }
   });
 
+  // SR-D-1: RP turns must bootstrap the persona core-block from config on first turn.
+  // Guards turn-service.ts:249 (bootstrapRpCoreMemory call) against accidental removal.
+  it("real-path RP turn bootstraps persona core block from persona config", async () => {
+    const chunkRef: { value: Chunk[] } = {
+      value: [
+        { type: "tool_use_start", id: "call_1", name: "submit_rp_turn" },
+        {
+          type: "tool_use_delta",
+          id: "call_1",
+          partialJson: '{"schemaVersion":"rp_turn_outcome_v5","publicReply":"Yes, master."}',
+        },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+    };
+    const modelRegistry = new DefaultModelServiceRegistry({
+      chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
+    });
+    const rpAliceProfile = { ...RP_AGENT_PROFILE, id: "rp:alice" };
+    const runtime = bootstrapRuntime({
+      modelRegistry,
+      agentProfiles: [MAIDEN_PROFILE, rpAliceProfile, TASK_AGENT_PROFILE],
+    });
+
+    // Spy: capture every bootstrap call without touching PG (lazy PG repo would throw).
+    const captured: Array<{ agentId: string; content: string; snapshotSource: string; snapshotSourceId: string }> = [];
+    runtime.coreMemoryService.initializeFromPersonaSnapshot = async (
+      agentId: string,
+      init: {
+        content: string;
+        snapshot_source: string;
+        snapshot_source_id: string;
+        snapshot_captured_at: number;
+      },
+    ) => {
+      captured.push({
+        agentId,
+        content: init.content,
+        snapshotSource: init.snapshot_source,
+        snapshotSourceId: init.snapshot_source_id,
+      });
+      return true;
+    };
+
+    const srv = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      userFacade: buildTestUserFacade({
+        sessionService: runtime.sessionService,
+        turnService: runtime.turnService,
+      }),
+      hasAgent: (id: string) => runtime.agentRegistry.has(id),
+    });
+    srv.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${srv.getPort()}`;
+
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "rp:alice" }),
+      });
+      expect(createRes.status).toBe(201);
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: "rp:alice",
+          request_id: "req-bootstrap-1",
+          user_message: { id: "msg-b1", text: "Hello" },
+        }),
+      });
+      expect(res.status).toBe(200);
+      await res.text(); // drain stream
+
+      // Bootstrap should have fired at least once during the RP turn.
+      expect(captured.length).toBeGreaterThan(0);
+      const first = captured[0]!;
+      expect(first.agentId).toBe("rp:alice");
+      expect(first.snapshotSource).toBe("persona_config");
+      expect(first.snapshotSourceId).toBe("alice");
+      // Alice's persona card content should be non-empty (loaded from config/personas.json).
+      expect(first.content.length).toBeGreaterThan(0);
+    } finally {
+      srv.stop();
+      runtime.shutdown();
+    }
+  });
+
   it("real-path failed turn sets recovery_required and blocks next turn", async () => {
     const chunkRef: { value: Chunk[] } = {
       value: [
