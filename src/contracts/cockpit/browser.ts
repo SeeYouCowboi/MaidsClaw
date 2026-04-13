@@ -162,12 +162,15 @@ export const SessionListResponseSchema = z
 export type SessionListResponse = z.infer<typeof SessionListResponseSchema>;
 
 export * from "./agents.js";
+export * from "./cognition.js";
+export * from "./graph.js";
 export * from "./lore.js";
 export type {
   CoreMemoryBlockListResponse as CoreMemoryBlockList,
   EpisodeListResponse as EpisodeList,
   NarrativeListResponse as NarrativeList,
   PinnedSummaryListResponse as PinnedSummaryList,
+  RecentRequestListResponse as RecentRequestList,
   RetrievalTraceResponse as RetrievalTrace,
   SettlementListResponse as SettlementList,
 } from "./memory.js";
@@ -181,6 +184,8 @@ export {
   NarrativeListResponseSchema as NarrativeListSchema,
   PinnedSummaryListResponseSchema as PinnedSummaryListSchema,
   PinnedSummarySchema,
+  RecentRequestItemSchema,
+  RecentRequestListResponseSchema as RecentRequestListSchema,
   RetrievalTraceResponseSchema as RetrievalTraceSchema,
   SettlementItemSchema,
   SettlementListResponseSchema as SettlementListSchema,

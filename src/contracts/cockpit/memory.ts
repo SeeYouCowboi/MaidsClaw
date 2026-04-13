@@ -8,6 +8,9 @@ export const CoreMemoryBlockSchema = z
     chars_limit: z.number(),
     read_only: z.boolean(),
     updated_at: z.number(),
+    snapshot_source: z.string().optional(),
+    snapshot_source_id: z.string().optional(),
+    snapshot_captured_at: z.number().optional(),
   })
   .strict();
 export type CoreMemoryBlock = z.infer<typeof CoreMemoryBlockSchema>;
@@ -55,6 +58,7 @@ export const EpisodeItemSchema = z
     created_at: z.number(),
     private_notes: z.string().optional(),
     location_text: z.string().optional(),
+    request_id: z.string().optional().nullable(),
   })
   .strict();
 export type EpisodeItem = z.infer<typeof EpisodeItemSchema>;
@@ -124,6 +128,36 @@ const RetrievalTraceDataSchema = z
     narrative_facets_used: z.array(z.string()),
     cognition_facets_used: z.array(z.string()),
     segment_count: z.number(),
+    segments: z
+      .array(
+        z
+          .object({
+            source: z.string(),
+            content: z.string(),
+            score: z.number().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    navigator: z
+      .object({
+        seeds: z.array(z.string()),
+        steps: z.array(
+          z
+            .object({
+              depth: z.number(),
+              visited_ref: z.string(),
+              via_ref: z.string().optional(),
+              via_relation: z.string().optional(),
+              score: z.number().optional(),
+              pruned: z.string().nullable().optional(),
+            })
+            .strict(),
+        ),
+        final_selection: z.array(z.string()),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -137,3 +171,27 @@ export type RetrievalTraceResponse = z.infer<
   typeof RetrievalTraceResponseSchema
 >;
 export type RetrievalTraceResponseDto = RetrievalTraceResponse;
+
+export const RecentRequestItemSchema = z
+  .object({
+    request_id: z.string(),
+    session_id: z.string(),
+    agent_id: z.string(),
+    captured_at: z.number(),
+    has_retrieval: z.boolean(),
+    has_settlement: z.boolean(),
+    has_prompt: z.boolean(),
+  })
+  .strict();
+export type RecentRequestItem = z.infer<typeof RecentRequestItemSchema>;
+export type RecentRequestItemDto = RecentRequestItem;
+
+export const RecentRequestListResponseSchema = z
+  .object({
+    items: z.array(RecentRequestItemSchema),
+  })
+  .strict();
+export type RecentRequestListResponse = z.infer<
+  typeof RecentRequestListResponseSchema
+>;
+export type RecentRequestListResponseDto = RecentRequestListResponse;
