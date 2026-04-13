@@ -1678,6 +1678,154 @@ function buildAreaWorldProjectionService(
   };
 }
 
+function buildCognitionRepoService(
+  runtime: RuntimeBootstrapResult,
+): GatewayContext["cognitionRepo"] {
+  if (!runtime.pgFactory) {
+    return undefined;
+  }
+
+  return {
+    async getAssertions(
+      agentId: string,
+      options?: { activeOnly?: boolean; stance?: string; basis?: string },
+    ) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) return [];
+      const rows = await sql`
+				SELECT id, agent_id, cognition_key, kind, stance, basis, status,
+				       summary_text, record_json, source_event_id, updated_at
+				FROM cognition_current
+				WHERE agent_id = ${agentId} AND kind = 'assertion'
+				ORDER BY updated_at DESC, id DESC
+				LIMIT 500
+			`;
+      let result = rows.map((row) => ({
+        id: Number(row.id),
+        agent_id: String(row.agent_id),
+        cognition_key: String(row.cognition_key),
+        stance: row.stance ? String(row.stance) : null,
+        status: String(row.status),
+        summary_text: row.summary_text ? String(row.summary_text) : null,
+        record_json: row.record_json ? String(row.record_json) : null,
+        updated_at: Number(row.updated_at),
+      }));
+      if (options?.activeOnly) {
+        result = result.filter(
+          (r) => r.stance !== "rejected" && r.stance !== "abandoned",
+        );
+      }
+      if (options?.stance) {
+        result = result.filter((r) => r.stance === options.stance);
+      }
+      return result;
+    },
+    async getEvaluations(agentId: string, options?: { activeOnly?: boolean }) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) return [];
+      const rows = await sql`
+				SELECT id, agent_id, cognition_key, kind, status,
+				       summary_text, record_json, source_event_id, updated_at
+				FROM cognition_current
+				WHERE agent_id = ${agentId} AND kind = 'evaluation'
+				ORDER BY updated_at DESC, id DESC
+				LIMIT 500
+			`;
+      let result = rows.map((row) => ({
+        id: Number(row.id),
+        agent_id: String(row.agent_id),
+        cognition_key: String(row.cognition_key),
+        status: String(row.status),
+        summary_text: row.summary_text ? String(row.summary_text) : null,
+        record_json: row.record_json ? String(row.record_json) : null,
+        updated_at: Number(row.updated_at),
+      }));
+      if (options?.activeOnly) {
+        result = result.filter((r) => r.status === "active");
+      }
+      return result;
+    },
+    async getCommitments(
+      agentId: string,
+      options?: { activeOnly?: boolean; mode?: string },
+    ) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) return [];
+      const rows = await sql`
+				SELECT id, agent_id, cognition_key, kind, status,
+				       summary_text, record_json, source_event_id, updated_at
+				FROM cognition_current
+				WHERE agent_id = ${agentId} AND kind = 'commitment'
+				ORDER BY updated_at DESC, id DESC
+				LIMIT 500
+			`;
+      let result = rows.map((row) => ({
+        id: Number(row.id),
+        agent_id: String(row.agent_id),
+        cognition_key: String(row.cognition_key),
+        status: String(row.status),
+        summary_text: row.summary_text ? String(row.summary_text) : null,
+        record_json: row.record_json ? String(row.record_json) : null,
+        updated_at: Number(row.updated_at),
+      }));
+      if (options?.activeOnly) {
+        result = result.filter((r) => r.status === "active");
+      }
+      if (options?.mode) {
+        result = result.filter((r) => {
+          try {
+            const parsed = JSON.parse(r.record_json ?? "{}") as Record<
+              string,
+              unknown
+            >;
+            return parsed.mode === options.mode;
+          } catch {
+            return false;
+          }
+        });
+      }
+      return result;
+    },
+  };
+}
+
+function buildCognitionEventRepoService(
+  runtime: RuntimeBootstrapResult,
+): GatewayContext["cognitionEventRepo"] {
+  if (!runtime.pgFactory) {
+    return undefined;
+  }
+
+  return {
+    async readByAgent(agentId: string, limit?: number) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) return [];
+      const effectiveLimit = Math.max(1, Math.min(200, limit ?? 50));
+      const rows = await sql`
+				SELECT id, agent_id, cognition_key, kind, op, record_json,
+				       settlement_id, committed_time, request_id, created_at
+				FROM cognition_events
+				WHERE agent_id = ${agentId}
+				ORDER BY committed_time DESC, id DESC
+				LIMIT ${effectiveLimit}
+			`;
+      return rows;
+    },
+    async readByCognitionKey(agentId: string, cognitionKey: string) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) return [];
+      const rows = await sql`
+				SELECT id, agent_id, cognition_key, kind, op, record_json,
+				       settlement_id, committed_time, request_id, created_at
+				FROM cognition_events
+				WHERE agent_id = ${agentId} AND cognition_key = ${cognitionKey}
+				ORDER BY committed_time ASC, id ASC
+			`;
+      return rows;
+    },
+  };
+}
+
 /**
  * Single seam for wiring optional gateway domain services from runtime.
  *
@@ -1698,6 +1846,8 @@ export function buildGatewayRuntimeContextExtensions(
   | "settlementRepo"
   | "areaWorldProjection"
   | "decisionLog"
+  | "cognitionRepo"
+  | "cognitionEventRepo"
   | "getAuthSnapshot"
   | "getRuntimeSnapshot"
 > {
@@ -1789,6 +1939,8 @@ export function buildGatewayRuntimeContextExtensions(
     settlementRepo,
     areaWorldProjection,
     decisionLog: runtime.maidenDecisionLog,
+    cognitionRepo: buildCognitionRepoService(runtime),
+    cognitionEventRepo: buildCognitionEventRepoService(runtime),
     getAuthSnapshot,
     getRuntimeSnapshot,
   };

@@ -2537,3 +2537,481 @@ export async function handleListRecentRequests(
 
   return jsonResponse({ items });
 }
+
+// ── Cognition Controllers ────────────────────────────────────────────────────
+
+/** GET /v1/agents/{agent_id}/cognition/assertions */
+export async function handleListCognitionAssertions(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const agentId = extractParam(
+    url,
+    "/v1/agents/{agent_id}/cognition/assertions",
+    "agent_id",
+  );
+  if (!agentId) {
+    return badRequest("Missing agent_id in path");
+  }
+
+  if (!ctx.cognitionRepo) {
+    return jsonResponse({ items: [] });
+  }
+
+  const limit = parseBoundedLimit(url, "limit", {
+    defaultValue: 50,
+    min: 1,
+    max: 200,
+  });
+  if (limit instanceof Response) {
+    return limit;
+  }
+
+  const since = parseSinceEpochMs(url);
+  if (since instanceof Response) {
+    return since;
+  }
+
+  const stanceFilter = extractOptionalQueryParam(url, "stance");
+  const requestIdFilter = extractOptionalQueryParam(url, "request_id");
+  const settlementIdFilter = extractOptionalQueryParam(url, "settlement_id");
+
+  try {
+    const source = await ctx.cognitionRepo.getAssertions(agentId, {
+      stance: stanceFilter,
+    });
+    const rows = Array.isArray(source) ? source : [];
+
+    const items = rows
+      .map((row) => {
+        const record = asUnknownRecord(row);
+        const id = numberField(record, "id");
+        const cognitionKey = stringField(record, "cognition_key");
+        const stance = stringField(record, "stance");
+        const updatedAt = numberField(record, "updated_at");
+        const summaryText = stringField(record, "summary_text");
+        const recordJson = stringField(record, "record_json");
+        const requestId = stringField(record, "request_id");
+        const settlementId = stringField(record, "settlement_id");
+
+        if (id === undefined || cognitionKey === undefined) {
+          return null;
+        }
+
+        const committedTime = updatedAt ?? 0;
+        if (since !== undefined && committedTime < since) {
+          return null;
+        }
+
+        if (requestIdFilter && requestId !== requestIdFilter) {
+          return null;
+        }
+        if (settlementIdFilter && settlementId !== settlementIdFilter) {
+          return null;
+        }
+
+        // Extract settlement_id and request_id from record_json if not on row
+        let effectiveSettlementId = settlementId;
+        let effectiveRequestId = requestId;
+        if (recordJson && (!effectiveSettlementId || !effectiveRequestId)) {
+          try {
+            const parsed = JSON.parse(recordJson) as Record<string, unknown>;
+            if (
+              !effectiveSettlementId &&
+              typeof parsed.settlementId === "string"
+            ) {
+              effectiveSettlementId = parsed.settlementId;
+            }
+            if (!effectiveRequestId && typeof parsed.requestId === "string") {
+              effectiveRequestId = parsed.requestId;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        const content = summaryText ?? cognitionKey;
+
+        return {
+          id: String(id),
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          stance: stance ?? "unknown",
+          content,
+          committed_time: committedTime,
+          ...(effectiveRequestId !== undefined
+            ? { request_id: effectiveRequestId }
+            : {}),
+          ...(effectiveSettlementId !== undefined
+            ? { settlement_id: effectiveSettlementId }
+            : {}),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => {
+        const timeCompare = b.committed_time - a.committed_time;
+        if (timeCompare !== 0) return timeCompare;
+        return Number(b.id) - Number(a.id);
+      })
+      .slice(0, limit);
+
+    return jsonResponse({ items });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return jsonResponse({ items: [] });
+    }
+    throw error;
+  }
+}
+
+/** GET /v1/agents/{agent_id}/cognition/evaluations */
+export async function handleListCognitionEvaluations(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const agentId = extractParam(
+    url,
+    "/v1/agents/{agent_id}/cognition/evaluations",
+    "agent_id",
+  );
+  if (!agentId) {
+    return badRequest("Missing agent_id in path");
+  }
+
+  if (!ctx.cognitionRepo) {
+    return jsonResponse({ items: [] });
+  }
+
+  const limit = parseBoundedLimit(url, "limit", {
+    defaultValue: 50,
+    min: 1,
+    max: 200,
+  });
+  if (limit instanceof Response) {
+    return limit;
+  }
+
+  const since = parseSinceEpochMs(url);
+  if (since instanceof Response) {
+    return since;
+  }
+
+  const requestIdFilter = extractOptionalQueryParam(url, "request_id");
+  const settlementIdFilter = extractOptionalQueryParam(url, "settlement_id");
+
+  try {
+    const source = await ctx.cognitionRepo.getEvaluations(agentId);
+    const rows = Array.isArray(source) ? source : [];
+
+    const items = rows
+      .map((row) => {
+        const record = asUnknownRecord(row);
+        const id = numberField(record, "id");
+        const cognitionKey = stringField(record, "cognition_key");
+        const status = stringField(record, "status");
+        const updatedAt = numberField(record, "updated_at");
+        const summaryText = stringField(record, "summary_text");
+        const recordJson = stringField(record, "record_json");
+
+        if (id === undefined || cognitionKey === undefined) {
+          return null;
+        }
+
+        const committedTime = updatedAt ?? 0;
+        if (since !== undefined && committedTime < since) {
+          return null;
+        }
+
+        // Extract salience, settlement_id, request_id from record_json
+        let salience: number | undefined;
+        let settlementId: string | undefined;
+        let requestId: string | undefined;
+        if (recordJson) {
+          try {
+            const parsed = JSON.parse(recordJson) as Record<string, unknown>;
+            if (typeof parsed.salience === "number") {
+              salience = parsed.salience;
+            }
+            if (typeof parsed.settlementId === "string") {
+              settlementId = parsed.settlementId;
+            }
+            if (typeof parsed.requestId === "string") {
+              requestId = parsed.requestId;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (requestIdFilter && requestId !== requestIdFilter) {
+          return null;
+        }
+        if (settlementIdFilter && settlementId !== settlementIdFilter) {
+          return null;
+        }
+
+        const content = summaryText ?? cognitionKey;
+
+        return {
+          id: String(id),
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          content,
+          status: status ?? "active",
+          committed_time: committedTime,
+          ...(salience !== undefined ? { salience } : {}),
+          ...(requestId !== undefined ? { request_id: requestId } : {}),
+          ...(settlementId !== undefined
+            ? { settlement_id: settlementId }
+            : {}),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => {
+        const timeCompare = b.committed_time - a.committed_time;
+        if (timeCompare !== 0) return timeCompare;
+        return Number(b.id) - Number(a.id);
+      })
+      .slice(0, limit);
+
+    return jsonResponse({ items });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return jsonResponse({ items: [] });
+    }
+    throw error;
+  }
+}
+
+/** GET /v1/agents/{agent_id}/cognition/commitments */
+export async function handleListCognitionCommitments(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const agentId = extractParam(
+    url,
+    "/v1/agents/{agent_id}/cognition/commitments",
+    "agent_id",
+  );
+  if (!agentId) {
+    return badRequest("Missing agent_id in path");
+  }
+
+  if (!ctx.cognitionRepo) {
+    return jsonResponse({ items: [] });
+  }
+
+  const limit = parseBoundedLimit(url, "limit", {
+    defaultValue: 50,
+    min: 1,
+    max: 200,
+  });
+  if (limit instanceof Response) {
+    return limit;
+  }
+
+  const since = parseSinceEpochMs(url);
+  if (since instanceof Response) {
+    return since;
+  }
+
+  const statusFilter = extractOptionalQueryParam(url, "status");
+  const requestIdFilter = extractOptionalQueryParam(url, "request_id");
+  const settlementIdFilter = extractOptionalQueryParam(url, "settlement_id");
+
+  try {
+    const source = await ctx.cognitionRepo.getCommitments(agentId, {
+      activeOnly: statusFilter === "active",
+    });
+    const rows = Array.isArray(source) ? source : [];
+
+    const items = rows
+      .map((row) => {
+        const record = asUnknownRecord(row);
+        const id = numberField(record, "id");
+        const cognitionKey = stringField(record, "cognition_key");
+        const rowStatus = stringField(record, "status");
+        const updatedAt = numberField(record, "updated_at");
+        const summaryText = stringField(record, "summary_text");
+        const recordJson = stringField(record, "record_json");
+
+        if (id === undefined || cognitionKey === undefined) {
+          return null;
+        }
+
+        const committedTime = updatedAt ?? 0;
+        if (since !== undefined && committedTime < since) {
+          return null;
+        }
+
+        // Extract fields from record_json
+        let salience: number | undefined;
+        let settlementId: string | undefined;
+        let requestId: string | undefined;
+        let commitmentStatus: string | undefined;
+        if (recordJson) {
+          try {
+            const parsed = JSON.parse(recordJson) as Record<string, unknown>;
+            if (typeof parsed.salience === "number") {
+              salience = parsed.salience;
+            }
+            if (typeof parsed.settlementId === "string") {
+              settlementId = parsed.settlementId;
+            }
+            if (typeof parsed.requestId === "string") {
+              requestId = parsed.requestId;
+            }
+            if (typeof parsed.status === "string") {
+              commitmentStatus = parsed.status;
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // Apply status filter (from commitment record, not projection status)
+        if (
+          statusFilter &&
+          statusFilter !== "active" &&
+          commitmentStatus !== statusFilter
+        ) {
+          return null;
+        }
+
+        if (requestIdFilter && requestId !== requestIdFilter) {
+          return null;
+        }
+        if (settlementIdFilter && settlementId !== settlementIdFilter) {
+          return null;
+        }
+
+        const effectiveStatus = commitmentStatus ?? rowStatus ?? "active";
+        const content = summaryText ?? cognitionKey;
+
+        return {
+          id: String(id),
+          agent_id: agentId,
+          cognition_key: cognitionKey,
+          content,
+          status: effectiveStatus,
+          committed_time: committedTime,
+          ...(salience !== undefined ? { salience } : {}),
+          ...(requestId !== undefined ? { request_id: requestId } : {}),
+          ...(settlementId !== undefined
+            ? { settlement_id: settlementId }
+            : {}),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => {
+        const timeCompare = b.committed_time - a.committed_time;
+        if (timeCompare !== 0) return timeCompare;
+        return Number(b.id) - Number(a.id);
+      })
+      .slice(0, limit);
+
+    return jsonResponse({ items });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return jsonResponse({ items: [] });
+    }
+    throw error;
+  }
+}
+
+/** GET /v1/agents/{agent_id}/cognition/{cognition_key}/history */
+export async function handleCognitionKeyHistory(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const agentId = extractParam(
+    url,
+    "/v1/agents/{agent_id}/cognition/{cognition_key}/history",
+    "agent_id",
+  );
+  if (!agentId) {
+    return badRequest("Missing agent_id in path");
+  }
+
+  const cognitionKey = extractParam(
+    url,
+    "/v1/agents/{agent_id}/cognition/{cognition_key}/history",
+    "cognition_key",
+  );
+  if (!cognitionKey) {
+    return badRequest("Missing cognition_key in path");
+  }
+
+  const decodedKey = decodeURIComponent(cognitionKey);
+
+  if (!ctx.cognitionEventRepo) {
+    return jsonResponse({ items: [] });
+  }
+
+  try {
+    const source = await ctx.cognitionEventRepo.readByCognitionKey(
+      agentId,
+      decodedKey,
+    );
+    const rows = Array.isArray(source) ? source : [];
+
+    const items = rows.map((row) => {
+      const record = asUnknownRecord(row);
+      const id = numberField(record, "id");
+      const eventKind = stringField(record, "kind");
+      const committedTime = numberField(
+        record,
+        "committed_time",
+        "committedTime",
+      );
+      const recordJson = stringField(record, "record_json");
+      const settlementId = stringField(record, "settlement_id", "settlementId");
+      const requestId = stringField(record, "request_id", "requestId");
+
+      // Extract stance/status/salience from record_json
+      let stance: string | undefined;
+      let status: string | undefined;
+      let salience: number | undefined;
+      let content = "";
+      if (recordJson) {
+        try {
+          const parsed = JSON.parse(recordJson) as Record<string, unknown>;
+          if (typeof parsed.stance === "string") stance = parsed.stance;
+          if (typeof parsed.status === "string") status = parsed.status;
+          if (typeof parsed.salience === "number") salience = parsed.salience;
+          if (typeof parsed.claim === "string") content = parsed.claim;
+          else if (typeof parsed.notes === "string") content = parsed.notes;
+          else if (typeof parsed.target === "string") content = parsed.target;
+          else if (parsed.target !== undefined)
+            content = JSON.stringify(parsed.target);
+        } catch {
+          // ignore
+        }
+      }
+
+      return {
+        id: String(id ?? 0),
+        agent_id: agentId,
+        cognition_key: decodedKey,
+        content,
+        committed_time: committedTime ?? 0,
+        ...(stance !== undefined ? { stance } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(salience !== undefined ? { salience } : {}),
+        ...(requestId !== undefined ? { request_id: requestId } : {}),
+        ...(settlementId !== undefined ? { settlement_id: settlementId } : {}),
+      };
+    });
+
+    return jsonResponse({ items });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return jsonResponse({ items: [] });
+    }
+    throw error;
+  }
+}

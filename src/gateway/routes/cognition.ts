@@ -1,0 +1,65 @@
+import {
+  AssertionListResponseSchema,
+  CognitionHistoryResponseSchema,
+  CommitmentListResponseSchema,
+  EvaluationListResponseSchema,
+  GatewayNoBodyRequestSchema,
+} from "../../contracts/cockpit/browser.js";
+import {
+  handleCognitionKeyHistory,
+  handleListCognitionAssertions,
+  handleListCognitionCommitments,
+  handleListCognitionEvaluations,
+} from "../controllers.js";
+import type { RouteEntry } from "../route-definition.js";
+
+export const COGNITION_ROUTES: RouteEntry[] = [
+  {
+    method: "GET",
+    pattern: "/v1/agents/{agent_id}/cognition/assertions",
+    handler: handleListCognitionAssertions,
+    scope: "read",
+    audit: false,
+    cors: true,
+    pgRequired: true,
+    errorTransport: "json",
+    requestSchema: GatewayNoBodyRequestSchema,
+    responseSchema: AssertionListResponseSchema,
+  },
+  {
+    method: "GET",
+    pattern: "/v1/agents/{agent_id}/cognition/evaluations",
+    handler: handleListCognitionEvaluations,
+    scope: "read",
+    audit: false,
+    cors: true,
+    pgRequired: true,
+    errorTransport: "json",
+    requestSchema: GatewayNoBodyRequestSchema,
+    responseSchema: EvaluationListResponseSchema,
+  },
+  {
+    method: "GET",
+    pattern: "/v1/agents/{agent_id}/cognition/commitments",
+    handler: handleListCognitionCommitments,
+    scope: "read",
+    audit: false,
+    cors: true,
+    pgRequired: true,
+    errorTransport: "json",
+    requestSchema: GatewayNoBodyRequestSchema,
+    responseSchema: CommitmentListResponseSchema,
+  },
+  {
+    method: "GET",
+    pattern: "/v1/agents/{agent_id}/cognition/{cognition_key}/history",
+    handler: handleCognitionKeyHistory,
+    scope: "read",
+    audit: false,
+    cors: true,
+    pgRequired: true,
+    errorTransport: "json",
+    requestSchema: GatewayNoBodyRequestSchema,
+    responseSchema: CognitionHistoryResponseSchema,
+  },
+];
