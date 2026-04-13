@@ -142,8 +142,13 @@ export type GraphEdgeItem = {
   from_ref: string;
   to_ref: string;
   relation_type: string;
+  layer: "logic" | "semantic" | "memory";
   weight?: number;
   direction?: string;
+  context?: {
+    request_id?: string;
+    settlement_id?: string;
+  };
 };
 
 export interface GraphReadRepoService {

@@ -2296,8 +2296,10 @@ function buildGraphReadRepoService(
         from_ref: string;
         to_ref: string;
         relation_type: string;
+        layer: "logic" | "semantic" | "memory";
         weight?: number;
         direction?: string;
+        context?: { request_id?: string; settlement_id?: string };
       }> = [];
 
       const includeOut =
@@ -2323,6 +2325,7 @@ function buildGraphReadRepoService(
               from_ref: params.nodeRef,
               to_ref: `event:${Number(row.target_event_id)}`,
               relation_type: row.relation_type,
+              layer: "logic",
               ...(row.weight !== null ? { weight: Number(row.weight) } : {}),
               direction: "out",
             });
@@ -2346,6 +2349,7 @@ function buildGraphReadRepoService(
               from_ref: `event:${Number(row.source_event_id)}`,
               to_ref: params.nodeRef,
               relation_type: row.relation_type,
+              layer: "logic",
               ...(row.weight !== null ? { weight: Number(row.weight) } : {}),
               direction: "in",
             });
@@ -2360,9 +2364,11 @@ function buildGraphReadRepoService(
               target_node_ref: string;
               relation_type: string;
               strength: number | string;
+              source_kind: string;
+              source_ref: string;
             }[]
           >`
-            SELECT target_node_ref, relation_type, strength
+            SELECT target_node_ref, relation_type, strength, source_kind, source_ref
             FROM memory_relations
             WHERE source_node_ref = ${params.nodeRef}
           `;
@@ -2371,8 +2377,12 @@ function buildGraphReadRepoService(
               from_ref: params.nodeRef,
               to_ref: row.target_node_ref,
               relation_type: row.relation_type,
+              layer: "memory",
               weight: Number(row.strength),
               direction: "out",
+              ...(row.source_kind === "turn"
+                ? { context: { request_id: row.source_ref } }
+                : {}),
             });
           }
         }
@@ -2383,9 +2393,11 @@ function buildGraphReadRepoService(
               source_node_ref: string;
               relation_type: string;
               strength: number | string;
+              source_kind: string;
+              source_ref: string;
             }[]
           >`
-            SELECT source_node_ref, relation_type, strength
+            SELECT source_node_ref, relation_type, strength, source_kind, source_ref
             FROM memory_relations
             WHERE target_node_ref = ${params.nodeRef}
           `;
@@ -2394,8 +2406,12 @@ function buildGraphReadRepoService(
               from_ref: row.source_node_ref,
               to_ref: params.nodeRef,
               relation_type: row.relation_type,
+              layer: "memory",
               weight: Number(row.strength),
               direction: "in",
+              ...(row.source_kind === "turn"
+                ? { context: { request_id: row.source_ref } }
+                : {}),
             });
           }
         }
@@ -2419,6 +2435,7 @@ function buildGraphReadRepoService(
               from_ref: params.nodeRef,
               to_ref: row.target,
               relation_type: row.relation_type,
+              layer: "semantic",
               weight: Number(row.weight),
               direction: "out",
             });
@@ -2442,6 +2459,7 @@ function buildGraphReadRepoService(
               from_ref: row.source,
               to_ref: params.nodeRef,
               relation_type: row.relation_type,
+              layer: "semantic",
               weight: Number(row.weight),
               direction: "in",
             });

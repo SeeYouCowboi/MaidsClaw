@@ -29,8 +29,16 @@ export const GraphEdgeItemSchema = z
     from_ref: z.string(),
     to_ref: z.string(),
     relation_type: z.string(),
+    layer: z.enum(["logic", "semantic", "memory"]),
     weight: z.number().optional(),
     direction: z.string().optional(),
+    context: z
+      .object({
+        request_id: z.string().optional(),
+        settlement_id: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type GraphEdgeItem = z.infer<typeof GraphEdgeItemSchema>;

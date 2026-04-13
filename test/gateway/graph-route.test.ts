@@ -237,8 +237,18 @@ describe("graph routes", () => {
               from_ref: "event:42",
               to_ref: "event:43",
               relation_type: "causal",
+              layer: "logic",
               weight: 0.8,
               direction: "out",
+            },
+            {
+              from_ref: "event:42",
+              to_ref: "assertion:cog:alice:claim_1",
+              relation_type: "supports",
+              layer: "memory",
+              weight: 0.7,
+              direction: "out",
+              context: { request_id: "req-123" },
             },
           ];
         },
@@ -252,14 +262,23 @@ describe("graph routes", () => {
     const body = (await res.json()) as {
       items: Array<Record<string, unknown>>;
     };
-    expect(body.items).toHaveLength(1);
+    expect(body.items).toHaveLength(2);
     expect(body.items[0]).toMatchObject({
       from_ref: "event:42",
       to_ref: "event:43",
       relation_type: "causal",
+      layer: "logic",
       weight: 0.8,
       direction: "out",
     });
+    expect(body.items[1]).toMatchObject({
+      layer: "memory",
+      relation_type: "supports",
+      context: { request_id: "req-123" },
+    });
+    for (const edge of body.items) {
+      expect(["logic", "semantic", "memory"]).toContain(edge.layer);
+    }
     expect(capturedTypes).toEqual(["logic", "memory"]);
     expect(capturedDirection).toBe("in");
   });
