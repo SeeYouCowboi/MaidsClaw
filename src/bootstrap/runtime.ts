@@ -41,6 +41,7 @@ import { PromptRenderer } from "../core/prompt-renderer.js";
 import { ToolExecutor } from "../core/tools/tool-executor.js";
 import type { GatewayTokenSnapshot } from "../gateway/auth.js";
 import type {
+  GraphReadRepoService,
   GatewayContext,
   ProviderCatalogListResponse,
   ProviderCatalogService,
@@ -69,6 +70,7 @@ import { CognitionRepository } from "../memory/cognition/cognition-repo.js";
 import { CognitionSearchService } from "../memory/cognition/cognition-search.js";
 import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
+import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
@@ -82,6 +84,8 @@ import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
 import { RuleBasedQueryRouter } from "../memory/query-router.js";
 import { RetrievalOrchestrator } from "../memory/retrieval/retrieval-orchestrator.js";
 import { RetrievalService } from "../memory/retrieval.js";
+import type { NodeRef, ViewerContext } from "../memory/types.js";
+import { VisibilityPolicy } from "../memory/visibility-policy.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
 import { GraphStorageService } from "../memory/storage.js";
 import {
@@ -99,6 +103,7 @@ import { SessionService } from "../session/service.js";
 import { Blackboard } from "../state/blackboard.js";
 import { PgBackendFactory } from "../storage/backend-types.js";
 import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
+import type { GraphNodeVisibilityRecord } from "../storage/domain-repos/contracts/graph-read-query-repo.js";
 import { PgAliasRepo } from "../storage/domain-repos/pg/alias-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
@@ -1826,6 +1831,665 @@ function buildCognitionEventRepoService(
   };
 }
 
+function parseGraphNodeRefStrict(nodeRef: string): {
+  kind: ReturnType<typeof parseGraphNodeRef>["kind"];
+  id: number;
+} | null {
+  try {
+    const parsed = parseGraphNodeRef(nodeRef);
+    const id = Number(parsed.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return null;
+    }
+    return { kind: parsed.kind, id };
+  } catch {
+    return null;
+  }
+}
+
+function graphVisibilityNodeData(
+  record: GraphNodeVisibilityRecord,
+): Record<string, unknown> | null {
+  if (record.kind === "entity") {
+    return {
+      memory_scope: record.memoryScope,
+      owner_agent_id: record.ownerAgentId,
+    };
+  }
+  if (record.kind === "event") {
+    return {
+      visibility_scope: record.visibilityScope,
+      location_entity_id: record.locationEntityId,
+      owner_agent_id: record.ownerAgentId,
+    };
+  }
+  if (
+    record.kind === "assertion" ||
+    record.kind === "evaluation" ||
+    record.kind === "commitment"
+  ) {
+    return { agent_id: record.agentId };
+  }
+  if (record.kind === "episode") {
+    return { agent_id: record.ownerAgentId };
+  }
+  if (record.kind === "fact") {
+    return record.active ? { id: 1 } : null;
+  }
+  return null;
+}
+
+function graphVisibilityScope(record: GraphNodeVisibilityRecord): string {
+  if (record.kind === "event") {
+    return record.visibilityScope;
+  }
+  if (record.kind === "entity") {
+    return record.memoryScope;
+  }
+  if (record.kind === "fact") {
+    return "world_public";
+  }
+  return "owner_private";
+}
+
+function isVisibleInDegradedGraphMode(
+  record: GraphNodeVisibilityRecord,
+): boolean {
+  if (record.kind === "event") {
+    return record.visibilityScope === "world_public";
+  }
+  if (record.kind === "entity") {
+    return record.memoryScope === "shared_public";
+  }
+  if (record.kind === "fact") {
+    return record.active;
+  }
+  return false;
+}
+
+function isGraphNodeVisible(params: {
+  record: GraphNodeVisibilityRecord;
+  viewerContext: ViewerContext;
+  viewerContextDegraded: boolean;
+  visibilityPolicy: VisibilityPolicy;
+  nodeRef: string;
+}): boolean {
+  if (params.viewerContextDegraded) {
+    return isVisibleInDegradedGraphMode(params.record);
+  }
+
+  const nodeData = graphVisibilityNodeData(params.record);
+  if (!nodeData) {
+    return false;
+  }
+
+  return (
+    params.visibilityPolicy.getNodeDisposition(
+      params.viewerContext,
+      params.nodeRef,
+      nodeData,
+    ) === "visible"
+  );
+}
+
+function parseEventParticipants(
+  participants: string | null,
+  primaryActorEntityId?: number | null,
+): string[] | undefined {
+  const refs = new Set<string>();
+  if (participants) {
+    try {
+      const parsed = JSON.parse(participants) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string" && item.trim().length > 0) {
+            refs.add(item.trim());
+          } else if (
+            typeof item === "number" &&
+            Number.isInteger(item) &&
+            item > 0
+          ) {
+            refs.add(`entity:${item}`);
+          }
+        }
+      }
+    } catch {
+      // best-effort parse
+    }
+  }
+  if (
+    typeof primaryActorEntityId === "number" &&
+    Number.isInteger(primaryActorEntityId) &&
+    primaryActorEntityId > 0
+  ) {
+    refs.add(`entity:${primaryActorEntityId}`);
+  }
+  if (refs.size === 0) {
+    return undefined;
+  }
+  return [...refs];
+}
+
+function buildGraphReadRepoService(
+  runtime: RuntimeBootstrapResult,
+): GraphReadRepoService | undefined {
+  if (!runtime.pgFactory) {
+    return undefined;
+  }
+
+  const visibilityPolicy = new VisibilityPolicy();
+
+  return {
+    async listNodes(params) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) {
+        return [];
+      }
+
+      const readRepo = new PgGraphReadQueryRepo(sql);
+      const fetchLimit = Math.max(params.limit * 4, 120);
+
+      const eventRows = await sql<
+        {
+          id: number | string;
+          event_category: string;
+          summary: string | null;
+          timestamp: number | string;
+          visibility_scope: string;
+          participants: string | null;
+          primary_actor_entity_id: number | string | null;
+        }[]
+      >`
+        SELECT e.id, e.event_category, e.summary, e.timestamp, e.visibility_scope,
+               e.participants, e.primary_actor_entity_id
+        FROM event_nodes e
+        JOIN sessions s ON s.session_id = e.session_id
+        WHERE s.agent_id = ${params.agentId}
+        ORDER BY e.timestamp DESC, e.id DESC
+        LIMIT ${fetchLimit}
+      `;
+
+      const episodeRows = await sql<
+        {
+          id: number | string;
+          category: string;
+          summary: string | null;
+          committed_time: number | string;
+          created_at: number | string;
+        }[]
+      >`
+        SELECT id, category, summary, committed_time, created_at
+        FROM private_episode_events
+        WHERE agent_id = ${params.agentId}
+        ORDER BY committed_time DESC, id DESC
+        LIMIT ${fetchLimit}
+      `;
+
+      const candidates = [
+        ...eventRows.map((row) => ({
+          node_ref: `event:${Number(row.id)}`,
+          category: row.event_category,
+          summary: row.summary ?? undefined,
+          timestamp: Number(row.timestamp),
+          visibility_scope: row.visibility_scope,
+          participants: parseEventParticipants(
+            row.participants,
+            row.primary_actor_entity_id == null
+              ? undefined
+              : Number(row.primary_actor_entity_id),
+          ),
+        })),
+        ...episodeRows.map((row) => ({
+          node_ref: `episode:${Number(row.id)}`,
+          category: row.category,
+          summary: row.summary ?? undefined,
+          timestamp: Number(row.committed_time ?? row.created_at),
+          visibility_scope: "owner_private",
+          participants: undefined as string[] | undefined,
+        })),
+      ];
+
+      if (candidates.length === 0) {
+        return [];
+      }
+
+      const nodeRefs = candidates.map((item) => item.node_ref as NodeRef);
+      const visibilityRows = await readRepo.getNodeVisibility(nodeRefs);
+      const visibilityByRef = new Map(
+        visibilityRows.map((row) => [row.nodeRef, row] as const),
+      );
+
+      const scoredRows = await sql<
+        {
+          node_ref: string;
+          salience: number | string;
+          centrality: number | string;
+          bridge_score: number | string;
+        }[]
+      >`
+        SELECT node_ref, salience, centrality, bridge_score
+        FROM node_scores
+        WHERE node_ref IN ${sql(nodeRefs)}
+      `;
+      const scoreByRef = new Map(
+        scoredRows.map((row) => [
+          row.node_ref,
+          {
+            salience: Number(row.salience),
+            centrality: Number(row.centrality),
+            bridge_score: Number(row.bridge_score),
+          },
+        ]),
+      );
+
+      const rows = candidates
+        .filter((item) => {
+          if (params.since !== undefined && item.timestamp < params.since) {
+            return false;
+          }
+          if (params.category && item.category !== params.category) {
+            return false;
+          }
+          if (
+            params.visibility &&
+            item.visibility_scope !== params.visibility
+          ) {
+            return false;
+          }
+          const visibility = visibilityByRef.get(item.node_ref as NodeRef);
+          if (!visibility) {
+            return false;
+          }
+          return isGraphNodeVisible({
+            record: visibility,
+            viewerContext: params.viewerContext,
+            viewerContextDegraded: params.viewerContextDegraded,
+            visibilityPolicy,
+            nodeRef: item.node_ref,
+          });
+        })
+        .sort((a, b) => {
+          if (a.timestamp !== b.timestamp) {
+            return b.timestamp - a.timestamp;
+          }
+          return b.node_ref.localeCompare(a.node_ref);
+        })
+        .slice(0, params.limit)
+        .map((item) => {
+          const scores = scoreByRef.get(item.node_ref);
+          return {
+            node_ref: item.node_ref,
+            agent_id: params.agentId,
+            category: item.category,
+            ...(item.summary !== undefined ? { summary: item.summary } : {}),
+            timestamp: item.timestamp,
+            visibility_scope: item.visibility_scope,
+            ...(item.participants ? { participants: item.participants } : {}),
+            ...(scores ? scores : {}),
+          };
+        });
+
+      return rows;
+    },
+
+    async getNodeDetail(params) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) {
+        return null;
+      }
+
+      const parsed = parseGraphNodeRefStrict(params.nodeRef);
+      if (!parsed) {
+        return null;
+      }
+
+      const readRepo = new PgGraphReadQueryRepo(sql);
+      const visibilityRows = await readRepo.getNodeVisibility([
+        params.nodeRef as NodeRef,
+      ]);
+      const visibility = visibilityRows[0];
+      if (!visibility) {
+        return null;
+      }
+      if (
+        !isGraphNodeVisible({
+          record: visibility,
+          viewerContext: params.viewerContext,
+          viewerContextDegraded: params.viewerContextDegraded,
+          visibilityPolicy,
+          nodeRef: params.nodeRef,
+        })
+      ) {
+        return null;
+      }
+
+      const [snapshot] = await readRepo.getNodeSnapshots([
+        params.nodeRef as NodeRef,
+      ]);
+      const [score] = await sql<
+        {
+          salience: number | string;
+          centrality: number | string;
+          bridge_score: number | string;
+        }[]
+      >`
+        SELECT salience, centrality, bridge_score
+        FROM node_scores
+        WHERE node_ref = ${params.nodeRef}
+        LIMIT 1
+      `;
+
+      let category: string = parsed.kind;
+      let summary = snapshot?.summary ?? undefined;
+      let timestamp = snapshot?.timestamp ?? 0;
+      let participants: string[] | undefined;
+      let rawText: string | undefined;
+      let entityRefs: string[] | undefined;
+
+      if (parsed.kind === "event") {
+        const rows = await sql<
+          {
+            event_category: string;
+            summary: string | null;
+            timestamp: number | string;
+            raw_text: string | null;
+            participants: string | null;
+            primary_actor_entity_id: number | string | null;
+          }[]
+        >`
+          SELECT event_category, summary, timestamp, raw_text, participants, primary_actor_entity_id
+          FROM event_nodes
+          WHERE id = ${parsed.id}
+          LIMIT 1
+        `;
+        if (rows.length === 0) {
+          return null;
+        }
+        const row = rows[0];
+        category = row.event_category;
+        summary = row.summary ?? summary;
+        timestamp = Number(row.timestamp);
+        rawText = row.raw_text ?? undefined;
+        participants = parseEventParticipants(
+          row.participants,
+          row.primary_actor_entity_id == null
+            ? undefined
+            : Number(row.primary_actor_entity_id),
+        );
+        entityRefs = participants;
+      } else if (parsed.kind === "episode") {
+        const rows = await sql<
+          {
+            category: string;
+            summary: string;
+            private_notes: string | null;
+            committed_time: number | string;
+          }[]
+        >`
+          SELECT category, summary, private_notes, committed_time
+          FROM private_episode_events
+          WHERE id = ${parsed.id}
+          LIMIT 1
+        `;
+        if (rows.length === 0) {
+          return null;
+        }
+        const row = rows[0];
+        category = row.category;
+        summary = row.summary ?? summary;
+        timestamp = Number(row.committed_time);
+        rawText = row.private_notes ?? undefined;
+      }
+
+      return {
+        node_ref: params.nodeRef,
+        agent_id: params.agentId,
+        category,
+        ...(summary !== undefined ? { summary } : {}),
+        timestamp,
+        visibility_scope: graphVisibilityScope(visibility),
+        ...(participants ? { participants } : {}),
+        ...(score
+          ? {
+              salience: Number(score.salience),
+              centrality: Number(score.centrality),
+              bridge_score: Number(score.bridge_score),
+            }
+          : {}),
+        ...(rawText !== undefined ? { raw_text: rawText } : {}),
+        ...(entityRefs ? { entity_refs: entityRefs } : {}),
+      };
+    },
+
+    async listNodeEdges(params) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql) {
+        return null;
+      }
+
+      const parsed = parseGraphNodeRefStrict(params.nodeRef);
+      if (!parsed) {
+        return null;
+      }
+
+      const readRepo = new PgGraphReadQueryRepo(sql);
+      const visibilityRows = await readRepo.getNodeVisibility([
+        params.nodeRef as NodeRef,
+      ]);
+      const rootVisibility = visibilityRows[0];
+      if (!rootVisibility) {
+        return null;
+      }
+      if (
+        !isGraphNodeVisible({
+          record: rootVisibility,
+          viewerContext: params.viewerContext,
+          viewerContextDegraded: params.viewerContextDegraded,
+          visibilityPolicy,
+          nodeRef: params.nodeRef,
+        })
+      ) {
+        return null;
+      }
+
+      const items: Array<{
+        from_ref: string;
+        to_ref: string;
+        relation_type: string;
+        weight?: number;
+        direction?: string;
+      }> = [];
+
+      const includeOut =
+        params.direction === "out" || params.direction === "both";
+      const includeIn =
+        params.direction === "in" || params.direction === "both";
+
+      if (params.types.includes("logic") && parsed.kind === "event") {
+        if (includeOut) {
+          const rows = await sql<
+            {
+              target_event_id: number | string;
+              relation_type: string;
+              weight: number | string | null;
+            }[]
+          >`
+            SELECT target_event_id, relation_type, weight
+            FROM logic_edges
+            WHERE source_event_id = ${parsed.id}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: params.nodeRef,
+              to_ref: `event:${Number(row.target_event_id)}`,
+              relation_type: row.relation_type,
+              ...(row.weight !== null ? { weight: Number(row.weight) } : {}),
+              direction: "out",
+            });
+          }
+        }
+
+        if (includeIn) {
+          const rows = await sql<
+            {
+              source_event_id: number | string;
+              relation_type: string;
+              weight: number | string | null;
+            }[]
+          >`
+            SELECT source_event_id, relation_type, weight
+            FROM logic_edges
+            WHERE target_event_id = ${parsed.id}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: `event:${Number(row.source_event_id)}`,
+              to_ref: params.nodeRef,
+              relation_type: row.relation_type,
+              ...(row.weight !== null ? { weight: Number(row.weight) } : {}),
+              direction: "in",
+            });
+          }
+        }
+      }
+
+      if (params.types.includes("memory")) {
+        if (includeOut) {
+          const rows = await sql<
+            {
+              target_node_ref: string;
+              relation_type: string;
+              strength: number | string;
+            }[]
+          >`
+            SELECT target_node_ref, relation_type, strength
+            FROM memory_relations
+            WHERE source_node_ref = ${params.nodeRef}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: params.nodeRef,
+              to_ref: row.target_node_ref,
+              relation_type: row.relation_type,
+              weight: Number(row.strength),
+              direction: "out",
+            });
+          }
+        }
+
+        if (includeIn) {
+          const rows = await sql<
+            {
+              source_node_ref: string;
+              relation_type: string;
+              strength: number | string;
+            }[]
+          >`
+            SELECT source_node_ref, relation_type, strength
+            FROM memory_relations
+            WHERE target_node_ref = ${params.nodeRef}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: row.source_node_ref,
+              to_ref: params.nodeRef,
+              relation_type: row.relation_type,
+              weight: Number(row.strength),
+              direction: "in",
+            });
+          }
+        }
+      }
+
+      if (params.types.includes("semantic")) {
+        if (includeOut) {
+          const rows = await sql<
+            {
+              target: string;
+              relation_type: string;
+              weight: number | string;
+            }[]
+          >`
+            SELECT target, relation_type, weight
+            FROM semantic_edges
+            WHERE source = ${params.nodeRef}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: params.nodeRef,
+              to_ref: row.target,
+              relation_type: row.relation_type,
+              weight: Number(row.weight),
+              direction: "out",
+            });
+          }
+        }
+
+        if (includeIn) {
+          const rows = await sql<
+            {
+              source: string;
+              relation_type: string;
+              weight: number | string;
+            }[]
+          >`
+            SELECT source, relation_type, weight
+            FROM semantic_edges
+            WHERE target = ${params.nodeRef}
+          `;
+          for (const row of rows) {
+            items.push({
+              from_ref: row.source,
+              to_ref: params.nodeRef,
+              relation_type: row.relation_type,
+              weight: Number(row.weight),
+              direction: "in",
+            });
+          }
+        }
+      }
+
+      if (items.length === 0) {
+        return [];
+      }
+
+      const involvedRefs = Array.from(
+        new Set(
+          items.flatMap((item) => [item.from_ref, item.to_ref]) as NodeRef[],
+        ),
+      );
+      const allVisibilityRows = await readRepo.getNodeVisibility(involvedRefs);
+      const visibilityByRef = new Map(
+        allVisibilityRows.map((row) => [row.nodeRef, row] as const),
+      );
+
+      return items.filter((item) => {
+        const fromVisibility = visibilityByRef.get(item.from_ref as NodeRef);
+        const toVisibility = visibilityByRef.get(item.to_ref as NodeRef);
+        if (!fromVisibility || !toVisibility) {
+          return false;
+        }
+        return (
+          isGraphNodeVisible({
+            record: fromVisibility,
+            viewerContext: params.viewerContext,
+            viewerContextDegraded: params.viewerContextDegraded,
+            visibilityPolicy,
+            nodeRef: item.from_ref,
+          }) &&
+          isGraphNodeVisible({
+            record: toVisibility,
+            viewerContext: params.viewerContext,
+            viewerContextDegraded: params.viewerContextDegraded,
+            visibilityPolicy,
+            nodeRef: item.to_ref,
+          })
+        );
+      });
+    },
+  };
+}
+
 /**
  * Single seam for wiring optional gateway domain services from runtime.
  *
@@ -1848,6 +2512,7 @@ export function buildGatewayRuntimeContextExtensions(
   | "decisionLog"
   | "cognitionRepo"
   | "cognitionEventRepo"
+  | "graphReadRepo"
   | "getAuthSnapshot"
   | "getRuntimeSnapshot"
 > {
@@ -1941,6 +2606,7 @@ export function buildGatewayRuntimeContextExtensions(
     decisionLog: runtime.maidenDecisionLog,
     cognitionRepo: buildCognitionRepoService(runtime),
     cognitionEventRepo: buildCognitionEventRepoService(runtime),
+    graphReadRepo: buildGraphReadRepoService(runtime),
     getAuthSnapshot,
     getRuntimeSnapshot,
   };

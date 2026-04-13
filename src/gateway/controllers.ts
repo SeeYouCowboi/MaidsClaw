@@ -12,7 +12,18 @@ import type {
 import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
-import { type GatewayContext, requireService } from "./context.js";
+import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
+import {
+  VIEWER_ROLES,
+  type ViewerContext,
+  type ViewerRole,
+} from "../memory/types.js";
+import {
+  type GatewayContext,
+  requireService,
+  type GraphEdgeDirectionFilter,
+  type GraphEdgeFamilyFilter,
+} from "./context.js";
 import { badRequestResponse, errorJsonResponse } from "./error-response.js";
 import { extractParam } from "./route-definition.js";
 import { createSseStream } from "./sse.js";
@@ -908,6 +919,158 @@ function parseSinceEpochMs(url: URL): number | undefined | Response {
   }
 
   return parsed;
+}
+
+const GRAPH_EDGE_TYPE_VALUES = ["logic", "semantic", "memory"] as const;
+const GRAPH_EDGE_DIRECTION_VALUES = ["out", "in", "both"] as const;
+const VIEWER_ROLE_SET = new Set<string>(VIEWER_ROLES as readonly string[]);
+
+function normalizeViewerRole(value: unknown): ViewerRole {
+  if (typeof value === "string" && VIEWER_ROLE_SET.has(value)) {
+    return value as ViewerRole;
+  }
+  return "maiden";
+}
+
+function extractAreaIdFromBlackboardSnapshot(
+  snapshot: unknown,
+  agentId: string,
+): number | undefined {
+  const expectedKey = `agent_runtime.location.${agentId}`;
+
+  if (!Array.isArray(snapshot)) {
+    return undefined;
+  }
+
+  for (const entry of snapshot) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (record.key !== expectedKey) {
+      continue;
+    }
+    const value = record.value;
+    if (typeof value === "number" && Number.isInteger(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveGraphViewerContext(
+  url: URL,
+  ctx: ControllerContext,
+  agentId: string,
+): Promise<{ viewerContext: ViewerContext; viewerContextDegraded: boolean }> {
+  const requestedSessionId = extractOptionalQueryParam(url, "session_id");
+
+  let viewerRole: ViewerRole = "maiden";
+  if (ctx.listRuntimeAgents) {
+    const agents = await ctx.listRuntimeAgents();
+    if (Array.isArray(agents)) {
+      const match = agents.find((agent) => includesAgentId(agent, agentId));
+      if (match && typeof match === "object") {
+        viewerRole = normalizeViewerRole(
+          (match as Record<string, unknown>).role,
+        );
+      }
+    }
+  }
+
+  let currentAreaId: number | undefined;
+  if (ctx.blackboard) {
+    if (requestedSessionId) {
+      currentAreaId = extractAreaIdFromBlackboardSnapshot(
+        ctx.blackboard.toSnapshot({ sessionId: requestedSessionId }),
+        agentId,
+      );
+    } else {
+      currentAreaId = extractAreaIdFromBlackboardSnapshot(
+        ctx.blackboard.toSnapshot(),
+        agentId,
+      );
+    }
+  }
+
+  const viewerContextDegraded = currentAreaId === undefined;
+  const viewerContext: ViewerContext = {
+    viewer_agent_id: agentId,
+    viewer_role: viewerRole,
+    can_read_admin_only: viewerRole === "maiden",
+    session_id: requestedSessionId ?? `live:${agentId}`,
+    ...(currentAreaId !== undefined ? { current_area_id: currentAreaId } : {}),
+  };
+
+  return { viewerContext, viewerContextDegraded };
+}
+
+function parseGraphNodeRefStrict(raw: string): string | undefined {
+  try {
+    const parsed = parseGraphNodeRef(raw);
+    const id = Number(parsed.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return undefined;
+    }
+    return `${parsed.kind}:${id}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseGraphEdgeTypes(url: URL): GraphEdgeFamilyFilter[] | Response {
+  const raw = extractOptionalQueryParam(url, "types");
+  if (!raw) {
+    return [...GRAPH_EDGE_TYPE_VALUES];
+  }
+
+  const tokens = raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  if (tokens.length === 0) {
+    return badRequestResponse(
+      "Invalid types: must be comma-separated values of logic,semantic,memory",
+    );
+  }
+
+  const parsed: GraphEdgeFamilyFilter[] = [];
+  for (const token of tokens) {
+    if (!(GRAPH_EDGE_TYPE_VALUES as readonly string[]).includes(token)) {
+      return badRequestResponse(
+        "Invalid types: must be comma-separated values of logic,semantic,memory",
+      );
+    }
+    parsed.push(token as GraphEdgeFamilyFilter);
+  }
+
+  return Array.from(new Set(parsed));
+}
+
+function parseGraphEdgeDirection(
+  url: URL,
+): GraphEdgeDirectionFilter | Response {
+  const raw = extractOptionalQueryParam(url, "direction");
+  if (!raw) {
+    return "both";
+  }
+  if ((GRAPH_EDGE_DIRECTION_VALUES as readonly string[]).includes(raw)) {
+    return raw as GraphEdgeDirectionFilter;
+  }
+  return badRequestResponse("Invalid direction: must be out, in, or both");
+}
+
+function graphNodeNotFound(nodeRef: string): Response {
+  return errorResponse(
+    new MaidsClawError({
+      code: "REQUEST_NOT_FOUND",
+      message: `Graph node not found or not visible: ${nodeRef}`,
+      retriable: false,
+    }),
+    404,
+  );
 }
 
 function asUnknownRecord(value: unknown): Record<string, unknown> {
@@ -3011,6 +3174,189 @@ export async function handleCognitionKeyHistory(
   } catch (error) {
     if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
       return jsonResponse({ items: [] });
+    }
+    throw error;
+  }
+}
+
+// ── Graph Controllers ────────────────────────────────────────────────────────
+
+/** GET /v1/agents/{agent_id}/graph/nodes */
+export async function handleListGraphNodes(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.graphReadRepo, "graphReadRepo");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/nodes",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const limit = parseBoundedLimit(url, "limit", {
+      defaultValue: 20,
+      min: 1,
+      max: 100,
+    });
+    if (limit instanceof Response) {
+      return limit;
+    }
+
+    const since = parseSinceEpochMs(url);
+    if (since instanceof Response) {
+      return since;
+    }
+
+    const category = extractOptionalQueryParam(url, "category");
+    const visibility = extractOptionalQueryParam(url, "visibility");
+
+    const { viewerContext, viewerContextDegraded } =
+      await resolveGraphViewerContext(url, ctx, agentId);
+
+    const items = await service.listNodes({
+      agentId,
+      viewerContext,
+      viewerContextDegraded,
+      since,
+      limit,
+      category,
+      visibility,
+    });
+
+    return jsonResponse({
+      viewer_context_degraded: viewerContextDegraded,
+      items,
+    });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return errorResponse(error, 501);
+    }
+    throw error;
+  }
+}
+
+/** GET /v1/agents/{agent_id}/graph/nodes/{node_ref} */
+export async function handleGetGraphNodeDetail(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.graphReadRepo, "graphReadRepo");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/nodes/{node_ref}",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const rawNodeRef = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/nodes/{node_ref}",
+      "node_ref",
+    );
+    if (!rawNodeRef) {
+      return badRequest("Missing node_ref in path");
+    }
+    const decodedNodeRef = decodeURIComponent(rawNodeRef);
+    const nodeRef = parseGraphNodeRefStrict(decodedNodeRef);
+    if (!nodeRef) {
+      return badRequestResponse(
+        "Invalid node_ref: must be kind:id with positive integer id",
+      );
+    }
+
+    const { viewerContext, viewerContextDegraded } =
+      await resolveGraphViewerContext(url, ctx, agentId);
+
+    const node = await service.getNodeDetail({
+      agentId,
+      nodeRef,
+      viewerContext,
+      viewerContextDegraded,
+    });
+    if (!node) {
+      return graphNodeNotFound(nodeRef);
+    }
+
+    return jsonResponse({ node });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return errorResponse(error, 501);
+    }
+    throw error;
+  }
+}
+
+/** GET /v1/agents/{agent_id}/graph/nodes/{node_ref}/edges */
+export async function handleListGraphNodeEdges(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.graphReadRepo, "graphReadRepo");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/nodes/{node_ref}/edges",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const rawNodeRef = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/nodes/{node_ref}/edges",
+      "node_ref",
+    );
+    if (!rawNodeRef) {
+      return badRequest("Missing node_ref in path");
+    }
+    const decodedNodeRef = decodeURIComponent(rawNodeRef);
+    const nodeRef = parseGraphNodeRefStrict(decodedNodeRef);
+    if (!nodeRef) {
+      return badRequestResponse(
+        "Invalid node_ref: must be kind:id with positive integer id",
+      );
+    }
+
+    const types = parseGraphEdgeTypes(url);
+    if (types instanceof Response) {
+      return types;
+    }
+
+    const direction = parseGraphEdgeDirection(url);
+    if (direction instanceof Response) {
+      return direction;
+    }
+
+    const { viewerContext, viewerContextDegraded } =
+      await resolveGraphViewerContext(url, ctx, agentId);
+
+    const items = await service.listNodeEdges({
+      agentId,
+      nodeRef,
+      viewerContext,
+      viewerContextDegraded,
+      types,
+      direction,
+    });
+    if (items === null) {
+      return graphNodeNotFound(nodeRef);
+    }
+
+    return jsonResponse({ items });
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return errorResponse(error, 501);
     }
     throw error;
   }

@@ -10,6 +10,7 @@ import type {
 } from "../agents/maiden/decision-log.js";
 import { MaidsClawError } from "../core/errors.js";
 import type { JobQueryService } from "../jobs/job-query-service.js";
+import type { ViewerContext } from "../memory/types.js";
 import type { PersonaAdminService } from "../persona/admin-service.js";
 import type { GatewayTokenSnapshot } from "./auth.js";
 
@@ -116,6 +117,63 @@ export interface CognitionEventRepoService {
   readByCognitionKey(agentId: string, cognitionKey: string): Promise<unknown[]>;
 }
 
+export type GraphEdgeFamilyFilter = "logic" | "semantic" | "memory";
+export type GraphEdgeDirectionFilter = "out" | "in" | "both";
+
+export type GraphNodeListItem = {
+  node_ref: string;
+  agent_id: string;
+  category: string;
+  summary?: string;
+  timestamp: number;
+  visibility_scope: string;
+  participants?: string[];
+  salience?: number;
+  centrality?: number;
+  bridge_score?: number;
+};
+
+export type GraphNodeDetailItem = GraphNodeListItem & {
+  raw_text?: string;
+  entity_refs?: string[];
+};
+
+export type GraphEdgeItem = {
+  from_ref: string;
+  to_ref: string;
+  relation_type: string;
+  weight?: number;
+  direction?: string;
+};
+
+export interface GraphReadRepoService {
+  listNodes(params: {
+    agentId: string;
+    viewerContext: ViewerContext;
+    viewerContextDegraded: boolean;
+    since?: number;
+    limit: number;
+    category?: string;
+    visibility?: string;
+  }): Promise<GraphNodeListItem[]>;
+
+  getNodeDetail(params: {
+    agentId: string;
+    nodeRef: string;
+    viewerContext: ViewerContext;
+    viewerContextDegraded: boolean;
+  }): Promise<GraphNodeDetailItem | null>;
+
+  listNodeEdges(params: {
+    agentId: string;
+    nodeRef: string;
+    viewerContext: ViewerContext;
+    viewerContextDegraded: boolean;
+    types: GraphEdgeFamilyFilter[];
+    direction: GraphEdgeDirectionFilter;
+  }): Promise<GraphEdgeItem[] | null>;
+}
+
 /**
  * Single service container for gateway handlers.
  *
@@ -147,6 +205,7 @@ export interface GatewayContext {
   decisionLog?: MaidenDecisionLogService;
   cognitionRepo?: CognitionRepoService;
   cognitionEventRepo?: CognitionEventRepoService;
+  graphReadRepo?: GraphReadRepoService;
 
   corsAllowedOrigins?: string[];
 

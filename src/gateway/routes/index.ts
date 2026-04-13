@@ -1,6 +1,7 @@
 import type { RouteEntry } from "../route-definition.js";
 import { AGENT_ROUTES } from "./agents.js";
 import { COGNITION_ROUTES } from "./cognition.js";
+import { GRAPH_ROUTES } from "./graph.js";
 import { HEALTH_ROUTES } from "./health.js";
 import { JOB_ROUTES } from "./jobs.js";
 import { LORE_ROUTES } from "./lore.js";
@@ -28,6 +29,7 @@ export const ROUTES: RouteEntry[] = [
   ...LORE_ROUTES,
   ...MEMORY_ROUTES,
   ...COGNITION_ROUTES,
+  ...GRAPH_ROUTES,
   ...STATE_ROUTES,
 ];
 
