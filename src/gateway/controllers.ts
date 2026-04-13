@@ -2774,10 +2774,11 @@ export async function handleListCognitionAssertions(
           return null;
         }
 
-        // Extract settlement_id and request_id from record_json if not on row
+        // Extract settlement_id, request_id, entity_refs from record_json if not on row
         let effectiveSettlementId = settlementId;
         let effectiveRequestId = requestId;
-        if (recordJson && (!effectiveSettlementId || !effectiveRequestId)) {
+        let entityRefs: string[] | undefined;
+        if (recordJson) {
           try {
             const parsed = JSON.parse(recordJson) as Record<string, unknown>;
             if (
@@ -2788,6 +2789,12 @@ export async function handleListCognitionAssertions(
             }
             if (!effectiveRequestId && typeof parsed.requestId === "string") {
               effectiveRequestId = parsed.requestId;
+            }
+            if (Array.isArray(parsed.entityPointerKeys)) {
+              const refs = parsed.entityPointerKeys.filter(
+                (v): v is string => typeof v === "string" && v.length > 0,
+              );
+              if (refs.length > 0) entityRefs = refs;
             }
           } catch {
             // ignore
@@ -2809,6 +2816,7 @@ export async function handleListCognitionAssertions(
           ...(effectiveSettlementId !== undefined
             ? { settlement_id: effectiveSettlementId }
             : {}),
+          ...(entityRefs !== undefined ? { entity_refs: entityRefs } : {}),
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null)

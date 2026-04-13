@@ -11,6 +11,7 @@ export const AssertionItemSchema = z
     committed_time: z.number(),
     request_id: z.string().optional().nullable(),
     settlement_id: z.string().optional().nullable(),
+    entity_refs: z.array(z.string()).optional(),
   })
   .strict();
 export type AssertionItem = z.infer<typeof AssertionItemSchema>;
@@ -35,6 +36,7 @@ export const EvaluationItemSchema = z
     committed_time: z.number(),
     request_id: z.string().optional().nullable(),
     settlement_id: z.string().optional().nullable(),
+    entity_refs: z.array(z.string()).optional(),
   })
   .strict();
 export type EvaluationItem = z.infer<typeof EvaluationItemSchema>;
@@ -61,6 +63,7 @@ export const CommitmentItemSchema = z
     committed_time: z.number(),
     request_id: z.string().optional().nullable(),
     settlement_id: z.string().optional().nullable(),
+    entity_refs: z.array(z.string()).optional(),
   })
   .strict();
 export type CommitmentItem = z.infer<typeof CommitmentItemSchema>;

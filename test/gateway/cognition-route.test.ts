@@ -35,6 +35,7 @@ describe("cognition routes", () => {
             record_json: JSON.stringify({
               requestId: "req-1",
               settlementId: "set-1",
+              entityPointerKeys: ["entity:sky", "entity:alice"],
             }),
           },
           {
@@ -68,6 +69,7 @@ describe("cognition routes", () => {
       committed_time: 1700000200000,
       request_id: "req-1",
       settlement_id: "set-1",
+      entity_refs: ["entity:sky", "entity:alice"],
     });
     expect(body.items[1]).toMatchObject({
       id: "9",
