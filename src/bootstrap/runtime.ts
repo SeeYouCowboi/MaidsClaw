@@ -1700,7 +1700,7 @@ function buildCognitionRepoService(
       const rows = await sql`
 				SELECT id, agent_id, cognition_key, kind, stance, basis, status,
 				       summary_text, record_json, source_event_id, updated_at
-				FROM cognition_current
+				FROM private_cognition_current
 				WHERE agent_id = ${agentId} AND kind = 'assertion'
 				ORDER BY updated_at DESC, id DESC
 				LIMIT 500
@@ -1731,7 +1731,7 @@ function buildCognitionRepoService(
       const rows = await sql`
 				SELECT id, agent_id, cognition_key, kind, status,
 				       summary_text, record_json, source_event_id, updated_at
-				FROM cognition_current
+				FROM private_cognition_current
 				WHERE agent_id = ${agentId} AND kind = 'evaluation'
 				ORDER BY updated_at DESC, id DESC
 				LIMIT 500
@@ -1759,7 +1759,7 @@ function buildCognitionRepoService(
       const rows = await sql`
 				SELECT id, agent_id, cognition_key, kind, status,
 				       summary_text, record_json, source_event_id, updated_at
-				FROM cognition_current
+				FROM private_cognition_current
 				WHERE agent_id = ${agentId} AND kind = 'commitment'
 				ORDER BY updated_at DESC, id DESC
 				LIMIT 500
