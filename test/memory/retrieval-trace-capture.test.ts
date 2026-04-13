@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { RetrievalService } from "../../src/memory/retrieval.js";
-import type { QueryPlan, QueryPlanBuilder } from "../../src/memory/query-plan-types.js";
-import type { QueryRoute, QueryRouter } from "../../src/memory/query-routing-types.js";
+import type {
+  QueryPlan,
+  QueryPlanBuilder,
+} from "../../src/memory/query-plan-types.js";
+import type {
+  QueryRoute,
+  QueryRouter,
+} from "../../src/memory/query-routing-types.js";
 import type { ViewerContext } from "../../src/memory/types.js";
 
 const viewerContext: ViewerContext = {
@@ -116,10 +122,44 @@ describe("retrieval trace capture", () => {
       orchestrator: {
         search: async () => ({
           typed: {
-            narrative: [{ source_ref: "event:1", content: "n1", score: 1, doc_type: "event", scope: "area" }],
-            cognition: [{ source_ref: "assertion:1", content: "c1", score: 1, kind: "assertion", basis: null, stance: "contested", cognitionKey: "k1" }],
-            conflict_notes: [{ source_ref: "conflict_note:1", from_source_ref: "assertion:1", cognitionKey: "k1", content: "x", score: 1 }],
-            episode: [{ source_ref: "episode:1", content: "e1", score: 1, doc_type: "episode_event", scope: "private" }],
+            narrative: [
+              {
+                source_ref: "event:1",
+                content: "n1",
+                score: 1,
+                doc_type: "event",
+                scope: "area",
+              },
+            ],
+            cognition: [
+              {
+                source_ref: "assertion:1",
+                content: "c1",
+                score: 1,
+                kind: "assertion",
+                basis: null,
+                stance: "contested",
+                cognitionKey: "k1",
+              },
+            ],
+            conflict_notes: [
+              {
+                source_ref: "conflict_note:1",
+                from_source_ref: "assertion:1",
+                cognitionKey: "k1",
+                content: "x",
+                score: 1,
+              },
+            ],
+            episode: [
+              {
+                source_ref: "episode:1",
+                content: "e1",
+                score: 1,
+                doc_type: "episode_event",
+                scope: "private",
+              },
+            ],
           },
           narrativeHints: [],
           cognitionHits: [],
@@ -146,8 +186,19 @@ describe("retrieval trace capture", () => {
       query_string: "what happened",
       strategy: "deep_explain",
       narrative_facets_used: ["entity_filters", "time_window"],
-      cognition_facets_used: ["entity_filters", "time_window", "kind", "stance"],
+      cognition_facets_used: [
+        "entity_filters",
+        "time_window",
+        "kind",
+        "stance",
+      ],
       segment_count: 4,
+      segments: [
+        { source: "event:1", content: "n1", score: 1 },
+        { source: "assertion:1", content: "c1", score: 1 },
+        { source: "conflict_note:1", content: "x", score: 1 },
+        { source: "episode:1", content: "e1", score: 1 },
+      ],
     });
   });
 
@@ -160,7 +211,15 @@ describe("retrieval trace capture", () => {
       orchestrator: {
         search: async () => ({
           typed: {
-            narrative: [{ source_ref: "event:1", content: "n1", score: 1, doc_type: "event", scope: "area" }],
+            narrative: [
+              {
+                source_ref: "event:1",
+                content: "n1",
+                score: 1,
+                doc_type: "event",
+                scope: "area",
+              },
+            ],
             cognition: [],
             conflict_notes: [],
             episode: [],

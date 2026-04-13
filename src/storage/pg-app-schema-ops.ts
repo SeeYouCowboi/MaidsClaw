@@ -125,6 +125,18 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
     ON private_cognition_events (settlement_id, agent_id, cognition_key, op)
   `);
 
+  // ── request_id correlation columns ──────────────────────────────────
+  // Nullable VARCHAR for request-correlation tracing. Added post-V3 launch;
+  // existing rows retain NULL and remain readable without backfill.
+  await sql.unsafe(`
+    ALTER TABLE private_episode_events
+      ADD COLUMN IF NOT EXISTS request_id VARCHAR
+  `);
+  await sql.unsafe(`
+    ALTER TABLE private_cognition_events
+      ADD COLUMN IF NOT EXISTS request_id VARCHAR
+  `);
+
   // ── pending_settlement_recovery ─────────────────────────────────────
   // NEW table per consensus §3.80 — replaces _memory_maintenance_jobs
   // usage for flush recovery.

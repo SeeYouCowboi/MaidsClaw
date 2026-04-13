@@ -54,8 +54,12 @@ export class TraceStore {
     const bundle = this.ensureBundle(requestId);
     bundle.settlement = {
       type: settlement.type,
-      ...(settlement.op_count !== undefined ? { op_count: settlement.op_count } : {}),
-      ...(settlement.kinds !== undefined ? { kinds: [...settlement.kinds] } : {}),
+      ...(settlement.op_count !== undefined
+        ? { op_count: settlement.op_count }
+        : {}),
+      ...(settlement.kinds !== undefined
+        ? { kinds: [...settlement.kinds] }
+        : {}),
     };
   }
 
@@ -63,7 +67,9 @@ export class TraceStore {
     const bundle = this.ensureBundle(requestId);
     bundle.flush = {
       requested: flushResult.requested,
-      ...(flushResult.result !== undefined ? { result: flushResult.result } : {}),
+      ...(flushResult.result !== undefined
+        ? { result: flushResult.result }
+        : {}),
       ...(flushResult.pending_job !== undefined
         ? {
             pending_job: {
@@ -87,6 +93,35 @@ export class TraceStore {
       narrative_facets_used: [...retrieval.narrative_facets_used],
       cognition_facets_used: [...retrieval.cognition_facets_used],
       segment_count: retrieval.segment_count,
+      ...(retrieval.segments !== undefined
+        ? {
+            segments: retrieval.segments.map((segment) => ({
+              source: segment.source,
+              content: segment.content,
+              ...(segment.score !== undefined ? { score: segment.score } : {}),
+            })),
+          }
+        : {}),
+      ...(retrieval.navigator !== undefined
+        ? {
+            navigator: {
+              seeds: [...retrieval.navigator.seeds],
+              steps: retrieval.navigator.steps.map((step) => ({
+                depth: step.depth,
+                visited_ref: step.visited_ref,
+                ...(step.via_ref !== undefined
+                  ? { via_ref: step.via_ref }
+                  : {}),
+                ...(step.via_relation !== undefined
+                  ? { via_relation: step.via_relation }
+                  : {}),
+                ...(step.score !== undefined ? { score: step.score } : {}),
+                ...(step.pruned !== undefined ? { pruned: step.pruned } : {}),
+              })),
+              final_selection: [...retrieval.navigator.final_selection],
+            },
+          }
+        : {}),
     };
   }
 
@@ -97,7 +132,11 @@ export class TraceStore {
     }
 
     mkdirSync(this.traceDir, { recursive: true });
-    writeFileSync(this.getTracePath(requestId), `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+    writeFileSync(
+      this.getTracePath(requestId),
+      `${JSON.stringify(bundle, null, 2)}\n`,
+      "utf8",
+    );
     this.activeBundles.delete(requestId);
   }
 
@@ -140,6 +179,7 @@ export class TraceStore {
         chunk_count: bundle.public_chunks.length,
         has_prompt: bundle.prompt !== undefined,
         has_settlement: bundle.settlement !== undefined,
+        has_retrieval: bundle.retrieval !== undefined,
       });
     }
 

@@ -1,23 +1,46 @@
-import { VIEWER_ROLES, type ViewerContext, type ViewerRole } from "../core/contracts/viewer-context.js";
+import {
+  VIEWER_ROLES,
+  type ViewerContext,
+  type ViewerRole,
+} from "../core/contracts/viewer-context.js";
 
 export { VIEWER_ROLES };
 export type { ViewerContext, ViewerRole };
 
 export const MAX_INTEGER = Number.MAX_SAFE_INTEGER;
 
-export const VISIBILITY_SCOPES = ["system_only", "owner_private", "area_visible", "world_public"] as const;
+export const VISIBILITY_SCOPES = [
+  "system_only",
+  "owner_private",
+  "area_visible",
+  "world_public",
+] as const;
 export type VisibilityScope = (typeof VISIBILITY_SCOPES)[number];
 
 export const MEMORY_SCOPES = ["shared_public", "private_overlay"] as const;
 export type MemoryScope = (typeof MEMORY_SCOPES)[number];
 
-export const EVENT_ORIGINS = ["runtime_projection", "delayed_materialization", "promotion"] as const;
+export const EVENT_ORIGINS = [
+  "runtime_projection",
+  "delayed_materialization",
+  "promotion",
+] as const;
 export type EventOrigin = (typeof EVENT_ORIGINS)[number];
 
-export const PUBLIC_EVENT_CATEGORIES = ["speech", "action", "observation", "state_change"] as const;
+export const PUBLIC_EVENT_CATEGORIES = [
+  "speech",
+  "action",
+  "observation",
+  "state_change",
+] as const;
 export type PublicEventCategory = (typeof PUBLIC_EVENT_CATEGORIES)[number];
 
-export const PRIVATE_EVENT_CATEGORIES = ["speech", "action", "observation", "state_change"] as const;
+export const PRIVATE_EVENT_CATEGORIES = [
+  "speech",
+  "action",
+  "observation",
+  "state_change",
+] as const;
 export type PrivateEventCategory = (typeof PRIVATE_EVENT_CATEGORIES)[number];
 
 export const LOGIC_EDGE_TYPES = [
@@ -30,19 +53,37 @@ export const LOGIC_EDGE_TYPES = [
 ] as const;
 export type LogicEdgeType = (typeof LOGIC_EDGE_TYPES)[number];
 
-export const SEMANTIC_EDGE_TYPES = ["semantic_similar", "conflict_or_update", "entity_bridge"] as const;
+export const SEMANTIC_EDGE_TYPES = [
+  "semantic_similar",
+  "conflict_or_update",
+  "entity_bridge",
+] as const;
 export type SemanticEdgeType = (typeof SEMANTIC_EDGE_TYPES)[number];
 
 export const EMBEDDING_VIEW_TYPES = ["primary", "keywords", "context"] as const;
 export type EmbeddingViewType = (typeof EMBEDDING_VIEW_TYPES)[number];
 
-export const QUERY_TYPES = ["entity", "event", "why", "relationship", "timeline", "state", "conflict"] as const;
+export const QUERY_TYPES = [
+  "entity",
+  "event",
+  "why",
+  "relationship",
+  "timeline",
+  "state",
+  "conflict",
+] as const;
 export type QueryType = (typeof QUERY_TYPES)[number];
 
 export const EDGE_LAYERS = ["state", "symbolic", "heuristic"] as const;
 export type EdgeLayer = (typeof EDGE_LAYERS)[number];
 
-export const EXPLORE_MODES = ["why", "timeline", "relationship", "state", "conflict"] as const;
+export const EXPLORE_MODES = [
+  "why",
+  "timeline",
+  "relationship",
+  "state",
+  "conflict",
+] as const;
 export type ExploreMode = (typeof EXPLORE_MODES)[number];
 
 export const EXPLAIN_DETAIL_LEVELS = ["concise", "standard", "audit"] as const;
@@ -71,7 +112,12 @@ export const NAVIGATOR_EDGE_KINDS = [
 ] as const;
 export type NavigatorEdgeKind = (typeof NAVIGATOR_EDGE_KINDS)[number];
 
-export const PROMOTION_ACTIONS = ["reuse", "promote_full", "promote_placeholder", "block"] as const;
+export const PROMOTION_ACTIONS = [
+  "reuse",
+  "promote_full",
+  "promote_placeholder",
+  "block",
+] as const;
 export type PromotionAction = (typeof PROMOTION_ACTIONS)[number];
 
 export const PROJECTION_CLASSES = ["none", "area_candidate"] as const;
@@ -93,14 +139,31 @@ export type PromotionClass = (typeof PROMOTION_CLASSES)[number];
  * @deprecated Legacy — retained for DB compat, no longer prompt-surfaced:
  * - `user`: read-only, superseded by persona + pinned_summary
  */
-export const CORE_MEMORY_LABELS = ["user", "index", "pinned_summary", "pinned_index", "persona"] as const;
+export const CORE_MEMORY_LABELS = [
+  "user",
+  "index",
+  "pinned_summary",
+  "pinned_index",
+  "persona",
+] as const;
 export type CoreMemoryLabel = (typeof CORE_MEMORY_LABELS)[number];
 
 /** Canonical labels introduced by T7 — the preferred write targets. */
-export const CANONICAL_PINNED_LABELS = ["pinned_summary", "pinned_index"] as const;
+export const CANONICAL_PINNED_LABELS = [
+  "pinned_summary",
+  "pinned_index",
+] as const;
 export type CanonicalPinnedLabel = (typeof CANONICAL_PINNED_LABELS)[number];
 
-export const CANONICAL_NODE_KINDS = ["event", "entity", "fact", "assertion", "evaluation", "commitment", "episode"] as const;
+export const CANONICAL_NODE_KINDS = [
+  "event",
+  "entity",
+  "fact",
+  "assertion",
+  "evaluation",
+  "commitment",
+  "episode",
+] as const;
 export type CanonicalNodeRefKind = (typeof CANONICAL_NODE_KINDS)[number];
 
 export const NODE_REF_KINDS = [...CANONICAL_NODE_KINDS] as const;
@@ -190,13 +253,32 @@ export type PointerRedirect = {
 };
 
 // Memory relation types - extracted from schema.ts CHECK constraints
-export const MEMORY_RELATION_TYPES = ["supports", "triggered", "conflicts_with", "derived_from", "supersedes", "surfaced_as", "published_as", "resolved_by", "downgraded_by"] as const;
+export const MEMORY_RELATION_TYPES = [
+  "supports",
+  "triggered",
+  "conflicts_with",
+  "derived_from",
+  "supersedes",
+  "surfaced_as",
+  "published_as",
+  "resolved_by",
+  "downgraded_by",
+] as const;
 export type MemoryRelationType = (typeof MEMORY_RELATION_TYPES)[number];
 
-export const RELATION_DIRECTNESS_VALUES = ["direct", "inferred", "indirect"] as const;
+export const RELATION_DIRECTNESS_VALUES = [
+  "direct",
+  "inferred",
+  "indirect",
+] as const;
 export type RelationDirectness = (typeof RELATION_DIRECTNESS_VALUES)[number];
 
-export const RELATION_SOURCE_KINDS = ["turn", "job", "agent_op", "system"] as const;
+export const RELATION_SOURCE_KINDS = [
+  "turn",
+  "job",
+  "agent_op",
+  "system",
+] as const;
 export type RelationSourceKind = (typeof RELATION_SOURCE_KINDS)[number];
 
 export type MemoryRelationRecord = {
@@ -221,6 +303,9 @@ export type CoreMemoryBlock = {
   char_limit: number;
   read_only: number;
   updated_at: number;
+  snapshot_source?: string | null;
+  snapshot_source_id?: string | null;
+  snapshot_captured_at?: number | null;
 };
 
 export type AppendResult =
@@ -404,7 +489,12 @@ export type NavigatorResult = {
       builder_version: string;
       primary_intent: QueryType;
       secondary_intents: QueryType[];
-      surface_weights: { narrative: number; cognition: number; episode: number; conflict_notes: number };
+      surface_weights: {
+        narrative: number;
+        cognition: number;
+        episode: number;
+        conflict_notes: number;
+      };
       seed_bias: Record<string, number>;
       edge_bias: Record<string, number>;
       rationale: string;
@@ -519,12 +609,22 @@ export interface IMemoryStorage {
 }
 
 export interface IMemoryRetrieval {
-  searchVisibleNarrative(query: string, viewerContext: ViewerContext): MemoryHint[];
-  generateMemoryHints(userMessage: string, viewerContext: ViewerContext, limit?: number): MemoryHint[];
+  searchVisibleNarrative(
+    query: string,
+    viewerContext: ViewerContext,
+  ): MemoryHint[];
+  generateMemoryHints(
+    userMessage: string,
+    viewerContext: ViewerContext,
+    limit?: number,
+  ): MemoryHint[];
 }
 
 export interface ICoreMemory {
-  getBlock(agentId: string, label: CoreMemoryLabel): CoreMemoryBlock | undefined;
+  getBlock(
+    agentId: string,
+    label: CoreMemoryLabel,
+  ): CoreMemoryBlock | undefined;
   getAllBlocks(agentId: string): CoreMemoryBlock[];
 }
 
@@ -538,7 +638,10 @@ export interface IMaterializationService {
 
 export interface IPromotionService {
   resolveReferences(candidate: PromotionCandidate): ReferenceResolution[];
-  executeProjectedWrite(candidate: PromotionCandidate, resolutions: ReferenceResolution[]): ProjectedWrite | undefined;
+  executeProjectedWrite(
+    candidate: PromotionCandidate,
+    resolutions: ReferenceResolution[],
+  ): ProjectedWrite | undefined;
 }
 
 export interface IVisibilityPolicy {
@@ -549,5 +652,9 @@ export interface IVisibilityPolicy {
 }
 
 export interface IAuthorizationResolver {
-  canAccess(viewerAgentId: string, targetAgentId: string, scope: "owner_private"): boolean;
+  canAccess(
+    viewerAgentId: string,
+    targetAgentId: string,
+    scope: "owner_private",
+  ): boolean;
 }

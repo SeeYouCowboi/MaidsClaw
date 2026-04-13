@@ -8,16 +8,18 @@ export type CognitionEventAppendParams = {
   recordJson: string | null;
   settlementId: string;
   committedTime: number;
+  requestId?: string;
 };
 
 export type CognitionEventRow = {
   id: number;
   agent_id: string;
-  "cognition_key": string;
+  cognition_key: string;
   kind: string;
   op: string;
   record_json: string | null;
   settlement_id: string;
   committed_time: number;
+  request_id: string | null;
   created_at: number;
 };

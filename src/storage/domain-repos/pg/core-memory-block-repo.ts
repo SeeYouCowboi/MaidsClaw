@@ -1,6 +1,7 @@
 import type postgres from "postgres";
 import type {
   CoreMemoryBlockRepo,
+  PersonaSnapshotInit,
 } from "../contracts/core-memory-block-repo.js";
 import type {
   AppendResult,
@@ -10,7 +11,11 @@ import type {
 } from "../../../memory/types.js";
 
 /** Labels that are read-only for RP agents (index, pinned_index, user). */
-const RP_READ_ONLY: ReadonlySet<CoreMemoryLabel> = new Set(["index", "pinned_index", "user"]);
+const RP_READ_ONLY: ReadonlySet<CoreMemoryLabel> = new Set([
+  "index",
+  "pinned_index",
+  "user",
+]);
 
 const BLOCK_DEFAULTS: ReadonlyArray<{
   label: CoreMemoryLabel;
@@ -18,11 +23,36 @@ const BLOCK_DEFAULTS: ReadonlyArray<{
   char_limit: number;
   read_only: number;
 }> = [
-  { label: "user", description: "Information about the user (legacy, read-only)", char_limit: 3000, read_only: 1 },
-  { label: "index", description: "Memory index with pointer addresses", char_limit: 1500, read_only: 1 },
-  { label: "pinned_summary", description: "Pinned character summary (canonical)", char_limit: 4000, read_only: 0 },
-  { label: "pinned_index", description: "Pinned memory index (canonical, no RP direct-write)", char_limit: 1500, read_only: 1 },
-  { label: "persona", description: "Agent persona, identity, and behavioral traits", char_limit: 4000, read_only: 0 },
+  {
+    label: "user",
+    description: "Information about the user (legacy, read-only)",
+    char_limit: 3000,
+    read_only: 1,
+  },
+  {
+    label: "index",
+    description: "Memory index with pointer addresses",
+    char_limit: 1500,
+    read_only: 1,
+  },
+  {
+    label: "pinned_summary",
+    description: "Pinned character summary (canonical)",
+    char_limit: 4000,
+    read_only: 0,
+  },
+  {
+    label: "pinned_index",
+    description: "Pinned memory index (canonical, no RP direct-write)",
+    char_limit: 1500,
+    read_only: 1,
+  },
+  {
+    label: "persona",
+    description: "Agent persona, identity, and behavioral traits",
+    char_limit: 4000,
+    read_only: 0,
+  },
 ];
 
 type CoreMemoryRow = {
@@ -34,6 +64,9 @@ type CoreMemoryRow = {
   char_limit: string | number;
   read_only: string | number;
   updated_at: string;
+  snapshot_source?: string | null;
+  snapshot_source_id?: string | null;
+  snapshot_captured_at?: string | number | null;
 };
 
 function normalizeRow(row: CoreMemoryRow): CoreMemoryBlock {
@@ -46,6 +79,12 @@ function normalizeRow(row: CoreMemoryRow): CoreMemoryBlock {
     char_limit: Number(row.char_limit),
     read_only: Number(row.read_only),
     updated_at: Number(row.updated_at),
+    snapshot_source: row.snapshot_source ?? null,
+    snapshot_source_id: row.snapshot_source_id ?? null,
+    snapshot_captured_at:
+      row.snapshot_captured_at != null
+        ? Number(row.snapshot_captured_at)
+        : null,
   };
 }
 
@@ -74,7 +113,8 @@ export class PgCoreMemoryBlockRepo implements CoreMemoryBlockRepo {
     label: CoreMemoryLabel,
   ): Promise<CoreMemoryBlock & { chars_current: number; chars_limit: number }> {
     const rows = await this.sql<CoreMemoryRow[]>`
-      SELECT id, agent_id, label, description, value, char_limit, read_only, updated_at
+      SELECT id, agent_id, label, description, value, char_limit, read_only, updated_at,
+             snapshot_source, snapshot_source_id, snapshot_captured_at
       FROM core_memory_blocks
       WHERE agent_id = ${agentId} AND label = ${label}
       LIMIT 1
@@ -92,9 +132,12 @@ export class PgCoreMemoryBlockRepo implements CoreMemoryBlockRepo {
     };
   }
 
-  async getAllBlocks(agentId: string): Promise<Array<CoreMemoryBlock & { chars_current: number }>> {
+  async getAllBlocks(
+    agentId: string,
+  ): Promise<Array<CoreMemoryBlock & { chars_current: number }>> {
     const rows = await this.sql<CoreMemoryRow[]>`
-      SELECT id, agent_id, label, description, value, char_limit, read_only, updated_at
+      SELECT id, agent_id, label, description, value, char_limit, read_only, updated_at,
+             snapshot_source, snapshot_source_id, snapshot_captured_at
       FROM core_memory_blocks
       WHERE agent_id = ${agentId}
       ORDER BY label
@@ -160,7 +203,10 @@ export class PgCoreMemoryBlockRepo implements CoreMemoryBlockRepo {
     const block = await this.getBlock(agentId, label);
 
     if (isReadOnlyForRp(label) && callerRole !== "task-agent") {
-      return { success: false, reason: `${label} block is read-only for RP Agent` };
+      return {
+        success: false,
+        reason: `${label} block is read-only for RP Agent`,
+      };
     }
 
     if (!block.value.includes(oldText)) {
@@ -184,5 +230,38 @@ export class PgCoreMemoryBlockRepo implements CoreMemoryBlockRepo {
       success: true,
       chars_current: newValue.length,
     };
+  }
+
+  async writePersonaSnapshot(
+    agentId: string,
+    init: PersonaSnapshotInit,
+  ): Promise<boolean> {
+    const rows = await this.sql<CoreMemoryRow[]>`
+      SELECT id, value
+      FROM core_memory_blocks
+      WHERE agent_id = ${agentId} AND label = 'persona'
+      LIMIT 1
+    `;
+
+    if (rows.length === 0) {
+      return false;
+    }
+
+    if (rows[0].value.length > 0) {
+      return false;
+    }
+
+    const truncated = init.content.slice(0, 4000);
+    await this.sql`
+      UPDATE core_memory_blocks
+      SET value = ${truncated},
+          snapshot_source = ${init.snapshot_source},
+          snapshot_source_id = ${init.snapshot_source_id},
+          snapshot_captured_at = ${init.snapshot_captured_at},
+          updated_at = ${Date.now()}
+      WHERE agent_id = ${agentId} AND label = 'persona' AND value = ''
+    `;
+
+    return true;
   }
 }

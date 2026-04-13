@@ -274,6 +274,17 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       ON core_memory_blocks(agent_id, label)
   `);
 
+  // Snapshot provenance columns (idempotent migration)
+  await sql.unsafe(
+    `ALTER TABLE core_memory_blocks ADD COLUMN IF NOT EXISTS snapshot_source TEXT`,
+  );
+  await sql.unsafe(
+    `ALTER TABLE core_memory_blocks ADD COLUMN IF NOT EXISTS snapshot_source_id TEXT`,
+  );
+  await sql.unsafe(
+    `ALTER TABLE core_memory_blocks ADD COLUMN IF NOT EXISTS snapshot_captured_at BIGINT`,
+  );
+
   // ══════════════════════════════════════════════════════════════════
   // Graph nodes: memory_relations
   // ══════════════════════════════════════════════════════════════════
@@ -336,6 +347,7 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       valid_time          BIGINT,
       committed_time      BIGINT NOT NULL,
       source_local_ref    TEXT,
+      request_id          VARCHAR,
       created_at          BIGINT NOT NULL
     )
   `);
@@ -372,6 +384,7 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       record_json     JSONB,
       settlement_id   TEXT NOT NULL,
       committed_time  BIGINT NOT NULL,
+      request_id      VARCHAR,
       created_at      BIGINT NOT NULL
     )
   `);

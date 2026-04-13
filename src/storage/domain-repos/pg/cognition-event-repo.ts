@@ -14,11 +14,12 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
     const rows = await this.sql`
       INSERT INTO private_cognition_events
         (agent_id, cognition_key, kind, op, record_json,
-         settlement_id, committed_time, created_at)
+         settlement_id, committed_time, request_id, created_at)
       VALUES
         (${params.agentId}, ${params.cognitionKey}, ${params.kind},
          ${params.op}, ${params.recordJson ?? null},
-         ${params.settlementId}, ${params.committedTime}, ${now})
+         ${params.settlementId}, ${params.committedTime},
+         ${params.requestId ?? null}, ${now})
       ON CONFLICT (settlement_id, agent_id, cognition_key, op) DO NOTHING
       RETURNING id
     `;
@@ -27,11 +28,14 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
     return Number(rows[0].id);
   }
 
-  async readByAgent(agentId: string, limit?: number): Promise<CognitionEventRow[]> {
+  async readByAgent(
+    agentId: string,
+    limit?: number,
+  ): Promise<CognitionEventRow[]> {
     const effectiveLimit = limit ?? 500;
     const rows = await this.sql`
       SELECT id, agent_id, cognition_key, kind, op, record_json,
-             settlement_id, committed_time, created_at
+             settlement_id, committed_time, request_id, created_at
       FROM private_cognition_events
       WHERE agent_id = ${agentId}
       ORDER BY committed_time ASC, id ASC
@@ -40,10 +44,13 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
     return rows.map(normalizeCognitionRow);
   }
 
-  async readByCognitionKey(agentId: string, cognitionKey: string): Promise<CognitionEventRow[]> {
+  async readByCognitionKey(
+    agentId: string,
+    cognitionKey: string,
+  ): Promise<CognitionEventRow[]> {
     const rows = await this.sql`
       SELECT id, agent_id, cognition_key, kind, op, record_json,
-             settlement_id, committed_time, created_at
+             settlement_id, committed_time, request_id, created_at
       FROM private_cognition_events
       WHERE agent_id = ${agentId}
         AND cognition_key = ${cognitionKey}
@@ -52,11 +59,14 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
     return rows.map(normalizeCognitionRow);
   }
 
-  async replay(agentId: string, afterTime?: number): Promise<CognitionEventRow[]> {
+  async replay(
+    agentId: string,
+    afterTime?: number,
+  ): Promise<CognitionEventRow[]> {
     if (afterTime !== undefined) {
       const rows = await this.sql`
         SELECT id, agent_id, cognition_key, kind, op, record_json,
-               settlement_id, committed_time, created_at
+               settlement_id, committed_time, request_id, created_at
         FROM private_cognition_events
         WHERE agent_id = ${agentId}
           AND committed_time > ${afterTime}
@@ -67,7 +77,7 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
 
     const rows = await this.sql`
       SELECT id, agent_id, cognition_key, kind, op, record_json,
-             settlement_id, committed_time, created_at
+             settlement_id, committed_time, request_id, created_at
       FROM private_cognition_events
       WHERE agent_id = ${agentId}
       ORDER BY committed_time ASC, id ASC
@@ -83,9 +93,15 @@ function normalizeCognitionRow(row: postgres.Row): CognitionEventRow {
     cognition_key: row.cognition_key as string,
     kind: row.kind as string,
     op: row.op as string,
-    record_json: row.record_json != null ? (typeof row.record_json === "string" ? row.record_json : JSON.stringify(row.record_json)) : null,
+    record_json:
+      row.record_json != null
+        ? typeof row.record_json === "string"
+          ? row.record_json
+          : JSON.stringify(row.record_json)
+        : null,
     settlement_id: row.settlement_id as string,
     committed_time: Number(row.committed_time),
+    request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
   };
 }

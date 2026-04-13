@@ -71,6 +71,23 @@ export type RetrievalTraceCaptureHook = (capture: {
   narrative_facets_used: string[];
   cognition_facets_used: string[];
   segment_count: number;
+  segments?: Array<{
+    source: string;
+    content: string;
+    score?: number;
+  }>;
+  navigator?: {
+    seeds: string[];
+    steps: Array<{
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }>;
+    final_selection: string[];
+  };
 }) => void;
 
 export class RetrievalService {
@@ -84,32 +101,66 @@ export class RetrievalService {
 
   constructor(deps: RetrievalServiceDeps) {
     this.retrievalRepo = deps.retrievalRepo;
-    this.embeddingService = deps.embeddingService ?? (() => { throw new Error("embeddingService is required"); })();
-    this.narrativeSearch = deps.narrativeSearch ?? (() => { throw new Error("narrativeSearch is required"); })();
-    this.cognitionSearch = deps.cognitionSearch ?? (() => { throw new Error("cognitionSearch is required"); })();
-    this.orchestrator = deps.orchestrator ?? (() => { throw new Error("orchestrator is required"); })();
+    this.embeddingService =
+      deps.embeddingService ??
+      (() => {
+        throw new Error("embeddingService is required");
+      })();
+    this.narrativeSearch =
+      deps.narrativeSearch ??
+      (() => {
+        throw new Error("narrativeSearch is required");
+      })();
+    this.cognitionSearch =
+      deps.cognitionSearch ??
+      (() => {
+        throw new Error("cognitionSearch is required");
+      })();
+    this.orchestrator =
+      deps.orchestrator ??
+      (() => {
+        throw new Error("orchestrator is required");
+      })();
     this.queryRouter = deps.queryRouter ?? null;
     this.queryPlanBuilder = deps.queryPlanBuilder ?? null;
   }
 
-  async readByEntity(pointerKey: string, viewerContext: ViewerContext): Promise<EntityReadResult> {
+  async readByEntity(
+    pointerKey: string,
+    viewerContext: ViewerContext,
+  ): Promise<EntityReadResult> {
     return this.retrievalRepo.readByEntity(pointerKey, viewerContext);
   }
 
-  async readByTopic(name: string, viewerContext: ViewerContext): Promise<TopicReadResult> {
+  async readByTopic(
+    name: string,
+    viewerContext: ViewerContext,
+  ): Promise<TopicReadResult> {
     return this.retrievalRepo.readByTopic(name, viewerContext);
   }
 
-  async readByEventIds(ids: number[], viewerContext: ViewerContext): Promise<EventNode[]> {
+  async readByEventIds(
+    ids: number[],
+    viewerContext: ViewerContext,
+  ): Promise<EventNode[]> {
     return this.retrievalRepo.readByEventIds(ids, viewerContext);
   }
 
-  async readByFactIds(ids: number[], viewerContext: ViewerContext): Promise<FactEdge[]> {
+  async readByFactIds(
+    ids: number[],
+    viewerContext: ViewerContext,
+  ): Promise<FactEdge[]> {
     return this.retrievalRepo.readByFactIds(ids, viewerContext);
   }
 
-  async searchVisibleNarrative(query: string, viewerContext: ViewerContext): Promise<SearchResult[]> {
-    const narrativeResults = await this.narrativeSearch.searchNarrative(query, viewerContext);
+  async searchVisibleNarrative(
+    query: string,
+    viewerContext: ViewerContext,
+  ): Promise<SearchResult[]> {
+    const narrativeResults = await this.narrativeSearch.searchNarrative(
+      query,
+      viewerContext,
+    );
     return narrativeResults.map((r) => ({
       source_ref: r.source_ref,
       doc_type: r.doc_type,
@@ -221,10 +272,40 @@ export class RetrievalService {
           narrative_facets_used: narrativeFacetsUsed,
           cognition_facets_used: cognitionFacetsUsed,
           segment_count:
-            typed.narrative.length
-            + typed.cognition.length
-            + typed.conflict_notes.length
-            + typed.episode.length,
+            typed.narrative.length +
+            typed.cognition.length +
+            typed.conflict_notes.length +
+            typed.episode.length,
+          segments: [
+            ...typed.narrative.map((segment) => ({
+              source: String(segment.source_ref),
+              content: segment.content,
+              ...(typeof segment.score === "number"
+                ? { score: segment.score }
+                : {}),
+            })),
+            ...typed.cognition.map((segment) => ({
+              source: String(segment.source_ref),
+              content: segment.content,
+              ...(typeof segment.score === "number"
+                ? { score: segment.score }
+                : {}),
+            })),
+            ...typed.conflict_notes.map((segment) => ({
+              source: String(segment.source_ref),
+              content: segment.content,
+              ...(typeof segment.score === "number"
+                ? { score: segment.score }
+                : {}),
+            })),
+            ...typed.episode.map((segment) => ({
+              source: String(segment.source_ref),
+              content: segment.content,
+              ...(typeof segment.score === "number"
+                ? { score: segment.score }
+                : {}),
+            })),
+          ],
         });
       } catch {
         // Non-fatal diagnostics path: retrieval output must still return.
@@ -275,23 +356,35 @@ export class RetrievalService {
     queryEmbedding?: Float32Array,
     modelId?: string,
   ): Promise<SeedCandidate[]> {
-    const lexicalResults = await this.searchVisibleNarrative(query, viewerContext);
+    const lexicalResults = await this.searchVisibleNarrative(
+      query,
+      viewerContext,
+    );
 
     const lexicalRankByRef = new Map<string, number>();
     for (let i = 0; i < lexicalResults.length; i += 1) {
       lexicalRankByRef.set(lexicalResults[i].source_ref, i + 1);
     }
 
-    const semanticRankByRef = new Map<string, { rank: number; nodeKind: string }>();
+    const semanticRankByRef = new Map<
+      string,
+      { rank: number; nodeKind: string }
+    >();
     const embeddingCount = await this.retrievalRepo.countNodeEmbeddings();
     if (embeddingCount > 0 && queryEmbedding) {
-      const neighbors = await this.embeddingService.queryNearestNeighbors(queryEmbedding, {
-        agentId: viewerContext.viewer_agent_id,
-        limit: Math.max(limit * 4, 20),
-        modelId,
-      });
+      const neighbors = await this.embeddingService.queryNearestNeighbors(
+        queryEmbedding,
+        {
+          agentId: viewerContext.viewer_agent_id,
+          limit: Math.max(limit * 4, 20),
+          modelId,
+        },
+      );
       for (let i = 0; i < neighbors.length; i += 1) {
-        semanticRankByRef.set(neighbors[i].nodeRef, { rank: i + 1, nodeKind: neighbors[i].nodeKind });
+        semanticRankByRef.set(neighbors[i].nodeRef, {
+          rank: i + 1,
+          nodeKind: neighbors[i].nodeKind,
+        });
       }
     }
 
@@ -306,7 +399,10 @@ export class RetrievalService {
       const lexicalRrf = this.rrf(i + 1);
       const semanticMatch = semanticRankByRef.get(row.source_ref);
       const semanticRrf = semanticMatch ? this.rrf(semanticMatch.rank) : 0;
-      const fusedScore = semanticRankByRef.size > 0 ? 0.5 * lexicalRrf + 0.5 * semanticRrf : lexicalRrf;
+      const fusedScore =
+        semanticRankByRef.size > 0
+          ? 0.5 * lexicalRrf + 0.5 * semanticRrf
+          : lexicalRrf;
 
       fused.set(row.source_ref, {
         node_ref: row.source_ref,
@@ -339,7 +435,9 @@ export class RetrievalService {
 
     const selected: SeedCandidate[] = [];
     const seen = new Set<string>();
-    for (const candidate of Array.from(fused.values()).sort((a, b) => b.fused_score - a.fused_score)) {
+    for (const candidate of Array.from(fused.values()).sort(
+      (a, b) => b.fused_score - a.fused_score,
+    )) {
       if (seen.has(candidate.node_ref)) {
         continue;
       }
@@ -357,7 +455,10 @@ export class RetrievalService {
     return this.retrievalRepo.resolveRedirect(name, ownerAgentId);
   }
 
-  async resolveEntityByPointer(pointerKey: string, viewerAgentId: string): Promise<EntityNode | null> {
+  async resolveEntityByPointer(
+    pointerKey: string,
+    viewerAgentId: string,
+  ): Promise<EntityNode | null> {
     return this.retrievalRepo.resolveEntityByPointer(pointerKey, viewerAgentId);
   }
 
@@ -373,9 +474,16 @@ export class RetrievalService {
     }
   }
 
-  private scopeFromNodeKind(nodeKind: NodeRefKind): "private" | "area" | "world" {
+  private scopeFromNodeKind(
+    nodeKind: NodeRefKind,
+  ): "private" | "area" | "world" {
     const kind = nodeKind as string;
-    if (kind === "assertion" || kind === "evaluation" || kind === "commitment" || kind === "episode") {
+    if (
+      kind === "assertion" ||
+      kind === "evaluation" ||
+      kind === "commitment" ||
+      kind === "episode"
+    ) {
       return "private";
     }
     return "world";

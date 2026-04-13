@@ -1,5 +1,9 @@
 import { MaidsClawError } from "../../core/errors.js";
-import type { AssertionBasis, AssertionStance, CognitionKind } from "../../runtime/rp-turn-contract.js";
+import type {
+  AssertionBasis,
+  AssertionStance,
+  CognitionKind,
+} from "../../runtime/rp-turn-contract.js";
 import type { NodeRef } from "../types.js";
 import {
   TERMINAL_STANCES,
@@ -28,6 +32,7 @@ type UpsertAssertionParams = {
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
   provenance?: string;
+  requestId?: string;
 };
 
 type UpsertEvaluationParams = {
@@ -40,6 +45,7 @@ type UpsertEvaluationParams = {
   dimensions: Array<{ name: string; value: number }>;
   emotionTags?: string[];
   notes?: string;
+  requestId?: string;
 };
 
 type UpsertCommitmentParams = {
@@ -54,6 +60,7 @@ type UpsertCommitmentParams = {
   status: "active" | "paused" | "fulfilled" | "abandoned";
   priority?: number;
   horizon?: "immediate" | "near" | "long";
+  requestId?: string;
 };
 
 type CanonicalAssertionRow = {
@@ -122,15 +129,16 @@ type CognitionRepositoryDeps = {
   cognitionProjectionRepo: CognitionProjectionRepo;
   cognitionEventRepo: CognitionEventRepo;
   searchProjectionRepo: SearchProjectionRepo;
-  entityResolver: (pointerKey: string, agentId: string) => Promise<number | null>;
+  entityResolver: (
+    pointerKey: string,
+    agentId: string,
+  ) => Promise<number | null>;
 };
 
 export class CognitionRepository {
   private readonly deps: CognitionRepositoryDeps;
 
-  constructor(
-    deps: CognitionRepositoryDeps | unknown,
-  ) {
+  constructor(deps: CognitionRepositoryDeps | unknown) {
     this.deps = isCognitionRepositoryDeps(deps)
       ? deps
       : createUnsupportedDeps();
@@ -140,8 +148,13 @@ export class CognitionRepository {
     return this.deps.cognitionEventRepo;
   }
 
-  async upsertAssertion(params: UpsertAssertionParams): Promise<{ id: number }> {
-    const holderEntityId = await this.resolveEntityByPointerKey(params.holderPointerKey, params.agentId);
+  async upsertAssertion(
+    params: UpsertAssertionParams,
+  ): Promise<{ id: number }> {
+    const holderEntityId = await this.resolveEntityByPointerKey(
+      params.holderPointerKey,
+      params.agentId,
+    );
     if (holderEntityId === null) {
       throw new MaidsClawError({
         code: "COGNITION_UNRESOLVED_REFS",
@@ -195,12 +208,16 @@ export class CognitionRepository {
     });
 
     if (cognitionKey) {
-      const existing = await this.getExistingAssertionState(params.agentId, cognitionKey);
+      const existing = await this.getExistingAssertionState(
+        params.agentId,
+        cognitionKey,
+      );
 
       if (existing?.stance && TERMINAL_STANCES.has(existing.stance)) {
         throw new MaidsClawError({
           code: "COGNITION_TERMINAL_KEY_REUSE",
-          message: "terminal assertion keys cannot be reused; create a new cognition key",
+          message:
+            "terminal assertion keys cannot be reused; create a new cognition key",
           retriable: false,
           details: {
             cognitionKey,
@@ -226,6 +243,7 @@ export class CognitionRepository {
         recordJson,
         settlementId: params.settlementId,
         committedTime: now,
+        requestId: params.requestId,
       });
 
       await this.syncCognitionSearchDoc({
@@ -251,6 +269,7 @@ export class CognitionRepository {
       recordJson,
       settlementId: params.settlementId,
       committedTime: now,
+      requestId: params.requestId,
     });
 
     await this.syncCognitionSearchDoc({
@@ -267,7 +286,9 @@ export class CognitionRepository {
     return { id: projectionId };
   }
 
-  async upsertEvaluation(params: UpsertEvaluationParams): Promise<{ id: number }> {
+  async upsertEvaluation(
+    params: UpsertEvaluationParams,
+  ): Promise<{ id: number }> {
     const now = Date.now();
     const cognitionKey = params.cognitionKey?.normalize("NFC");
     const eventRecordPayload = {
@@ -281,11 +302,20 @@ export class CognitionRepository {
     };
 
     if (cognitionKey) {
-      const existing = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, cognitionKey);
+      const existing = await this.deps.cognitionProjectionRepo.getCurrent(
+        params.agentId,
+        cognitionKey,
+      );
       if (existing?.kind === "evaluation") {
         const existingRecord = safeParseJson(existing.record_json);
-        const createdAt = typeof existingRecord.createdAt === "number" ? existingRecord.createdAt : now;
-        const eventRecordJson = JSON.stringify({ ...eventRecordPayload, createdAt });
+        const createdAt =
+          typeof existingRecord.createdAt === "number"
+            ? existingRecord.createdAt
+            : now;
+        const eventRecordJson = JSON.stringify({
+          ...eventRecordPayload,
+          createdAt,
+        });
         const projectionId = await this.appendAndProject({
           agentId: params.agentId,
           cognitionKey,
@@ -294,6 +324,7 @@ export class CognitionRepository {
           recordJson: eventRecordJson,
           settlementId: params.settlementId,
           committedTime: now,
+          requestId: params.requestId,
         });
         const summaryText = `evaluation: ${params.notes ?? ""}`;
 
@@ -311,8 +342,13 @@ export class CognitionRepository {
       }
     }
 
-    const effectiveKey = cognitionKey ?? `__anon_evaluation__${params.settlementId}:${params.opIndex}:${now}`;
-    const eventRecordJson = JSON.stringify({ ...eventRecordPayload, createdAt: now });
+    const effectiveKey =
+      cognitionKey ??
+      `__anon_evaluation__${params.settlementId}:${params.opIndex}:${now}`;
+    const eventRecordJson = JSON.stringify({
+      ...eventRecordPayload,
+      createdAt: now,
+    });
     const projectionId = await this.appendAndProject({
       agentId: params.agentId,
       cognitionKey: effectiveKey,
@@ -321,6 +357,7 @@ export class CognitionRepository {
       recordJson: eventRecordJson,
       settlementId: params.settlementId,
       committedTime: now,
+      requestId: params.requestId,
     });
     const summaryText = `evaluation: ${params.notes ?? ""}`;
 
@@ -337,7 +374,9 @@ export class CognitionRepository {
     return { id: projectionId };
   }
 
-  async upsertCommitment(params: UpsertCommitmentParams): Promise<{ id: number }> {
+  async upsertCommitment(
+    params: UpsertCommitmentParams,
+  ): Promise<{ id: number }> {
     const now = Date.now();
     const cognitionKey = params.cognitionKey?.normalize("NFC");
     const eventRecordPayload = {
@@ -353,11 +392,20 @@ export class CognitionRepository {
     };
 
     if (cognitionKey) {
-      const existing = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, cognitionKey);
+      const existing = await this.deps.cognitionProjectionRepo.getCurrent(
+        params.agentId,
+        cognitionKey,
+      );
       if (existing?.kind === "commitment") {
         const existingRecord = safeParseJson(existing.record_json);
-        const createdAt = typeof existingRecord.createdAt === "number" ? existingRecord.createdAt : now;
-        const eventRecordJson = JSON.stringify({ ...eventRecordPayload, createdAt });
+        const createdAt =
+          typeof existingRecord.createdAt === "number"
+            ? existingRecord.createdAt
+            : now;
+        const eventRecordJson = JSON.stringify({
+          ...eventRecordPayload,
+          createdAt,
+        });
         const projectionId = await this.appendAndProject({
           agentId: params.agentId,
           cognitionKey,
@@ -366,6 +414,7 @@ export class CognitionRepository {
           recordJson: eventRecordJson,
           settlementId: params.settlementId,
           committedTime: now,
+          requestId: params.requestId,
         });
         const summaryText = `${params.mode}: ${JSON.stringify(params.target)}`;
 
@@ -383,8 +432,13 @@ export class CognitionRepository {
       }
     }
 
-    const effectiveKey = cognitionKey ?? `__anon_commitment__${params.settlementId}:${params.opIndex}:${now}`;
-    const eventRecordJson = JSON.stringify({ ...eventRecordPayload, createdAt: now });
+    const effectiveKey =
+      cognitionKey ??
+      `__anon_commitment__${params.settlementId}:${params.opIndex}:${now}`;
+    const eventRecordJson = JSON.stringify({
+      ...eventRecordPayload,
+      createdAt: now,
+    });
     const projectionId = await this.appendAndProject({
       agentId: params.agentId,
       cognitionKey: effectiveKey,
@@ -393,6 +447,7 @@ export class CognitionRepository {
       recordJson: eventRecordJson,
       settlementId: params.settlementId,
       committedTime: now,
+      requestId: params.requestId,
     });
     const summaryText = `${params.mode}: ${JSON.stringify(params.target)}`;
 
@@ -414,6 +469,7 @@ export class CognitionRepository {
     cognitionKey: string,
     kind?: "assertion" | "evaluation" | "commitment",
     settlementId?: string,
+    requestId?: string,
   ): Promise<void> {
     const normalizedKey = cognitionKey.normalize("NFC");
     const now = Date.now();
@@ -428,8 +484,15 @@ export class CognitionRepository {
         recordJson: null,
         settlementId: effectiveSettlementId,
         committedTime: now,
+        requestId,
       });
-      await this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
+      await this.updateCognitionSearchDocStance(
+        agentId,
+        "assertion",
+        normalizedKey,
+        "rejected",
+        now,
+      );
       return;
     }
 
@@ -442,8 +505,15 @@ export class CognitionRepository {
         recordJson: null,
         settlementId: effectiveSettlementId,
         committedTime: now,
+        requestId,
       });
-      await this.updateCognitionSearchDocStance(agentId, kind, normalizedKey, "abandoned", now);
+      await this.updateCognitionSearchDocStance(
+        agentId,
+        kind,
+        normalizedKey,
+        "abandoned",
+        now,
+      );
       return;
     }
 
@@ -455,27 +525,56 @@ export class CognitionRepository {
       recordJson: null,
       settlementId: effectiveSettlementId,
       committedTime: now,
+      requestId,
     });
-    await this.updateCognitionSearchDocStance(agentId, "assertion", normalizedKey, "rejected", now);
-    await this.updateCognitionSearchDocStance(agentId, "evaluation", normalizedKey, "abandoned", now);
-    await this.updateCognitionSearchDocStance(agentId, "commitment", normalizedKey, "abandoned", now);
+    await this.updateCognitionSearchDocStance(
+      agentId,
+      "assertion",
+      normalizedKey,
+      "rejected",
+      now,
+    );
+    await this.updateCognitionSearchDocStance(
+      agentId,
+      "evaluation",
+      normalizedKey,
+      "abandoned",
+      now,
+    );
+    await this.updateCognitionSearchDocStance(
+      agentId,
+      "commitment",
+      normalizedKey,
+      "abandoned",
+      now,
+    );
   }
 
   async getAssertions(
     agentId: string,
-    options?: { activeOnly?: boolean; stance?: AssertionStance; basis?: AssertionBasis },
+    options?: {
+      activeOnly?: boolean;
+      stance?: AssertionStance;
+      basis?: AssertionBasis;
+    },
   ): Promise<CanonicalAssertionRow[]> {
-    const keyedRows = (await this.deps.cognitionProjectionRepo.getAllCurrent(agentId))
+    const keyedRows = (
+      await this.deps.cognitionProjectionRepo.getAllCurrent(agentId)
+    )
       .filter((row) => row.kind === "assertion")
       .sort((a, b) => b.updated_at - a.updated_at)
       .slice(0, 500);
 
-    let mapped = (await Promise.all(
-      keyedRows.map((row) => this.toCanonicalAssertionFromProjection(row)),
-    )).filter((row): row is CanonicalAssertionRow => row !== null);
+    let mapped = (
+      await Promise.all(
+        keyedRows.map((row) => this.toCanonicalAssertionFromProjection(row)),
+      )
+    ).filter((row): row is CanonicalAssertionRow => row !== null);
 
     if (options?.activeOnly) {
-      mapped = mapped.filter((row) => row.stance !== "rejected" && row.stance !== "abandoned");
+      mapped = mapped.filter(
+        (row) => row.stance !== "rejected" && row.stance !== "abandoned",
+      );
     }
     if (options?.stance) {
       mapped = mapped.filter((row) => row.stance === options.stance);
@@ -486,8 +585,13 @@ export class CognitionRepository {
     return mapped;
   }
 
-  async getEvaluations(agentId: string, options?: { activeOnly?: boolean }): Promise<CanonicalEvaluationRow[]> {
-    const rows = (await this.deps.cognitionProjectionRepo.getAllCurrent(agentId))
+  async getEvaluations(
+    agentId: string,
+    options?: { activeOnly?: boolean },
+  ): Promise<CanonicalEvaluationRow[]> {
+    const rows = (
+      await this.deps.cognitionProjectionRepo.getAllCurrent(agentId)
+    )
       .filter((row) => row.kind === "evaluation")
       .sort((a, b) => b.updated_at - a.updated_at)
       .slice(0, 500);
@@ -503,7 +607,9 @@ export class CognitionRepository {
     agentId: string,
     options?: { activeOnly?: boolean; mode?: string },
   ): Promise<CanonicalCommitmentRow[]> {
-    const rows = (await this.deps.cognitionProjectionRepo.getAllCurrent(agentId))
+    const rows = (
+      await this.deps.cognitionProjectionRepo.getAllCurrent(agentId)
+    )
       .filter((row) => row.kind === "commitment")
       .sort((a, b) => b.updated_at - a.updated_at)
       .slice(0, 500);
@@ -518,26 +624,50 @@ export class CognitionRepository {
     return mapped;
   }
 
-  async getAssertionByKey(agentId: string, cognitionKey: string): Promise<CanonicalAssertionRow | null> {
-    const keyed = await this.deps.cognitionProjectionRepo.getCurrent(agentId, cognitionKey.normalize("NFC"));
+  async getAssertionByKey(
+    agentId: string,
+    cognitionKey: string,
+  ): Promise<CanonicalAssertionRow | null> {
+    const keyed = await this.deps.cognitionProjectionRepo.getCurrent(
+      agentId,
+      cognitionKey.normalize("NFC"),
+    );
     if (!keyed || keyed.kind !== "assertion") return null;
     return this.toCanonicalAssertionFromProjection(keyed);
   }
 
-  async getEvaluationByKey(agentId: string, cognitionKey: string): Promise<CanonicalEvaluationRow | null> {
-    const row = await this.deps.cognitionProjectionRepo.getCurrent(agentId, cognitionKey.normalize("NFC"));
+  async getEvaluationByKey(
+    agentId: string,
+    cognitionKey: string,
+  ): Promise<CanonicalEvaluationRow | null> {
+    const row = await this.deps.cognitionProjectionRepo.getCurrent(
+      agentId,
+      cognitionKey.normalize("NFC"),
+    );
     if (!row || row.kind !== "evaluation") return null;
     return this.toCanonicalEvaluation(row);
   }
 
-  async getCommitmentByKey(agentId: string, cognitionKey: string): Promise<CanonicalCommitmentRow | null> {
-    const row = await this.deps.cognitionProjectionRepo.getCurrent(agentId, cognitionKey.normalize("NFC"));
+  async getCommitmentByKey(
+    agentId: string,
+    cognitionKey: string,
+  ): Promise<CanonicalCommitmentRow | null> {
+    const row = await this.deps.cognitionProjectionRepo.getCurrent(
+      agentId,
+      cognitionKey.normalize("NFC"),
+    );
     if (!row || row.kind !== "commitment") return null;
     return this.toCanonicalCommitment(row);
   }
 
-  private async getExistingAssertionState(agentId: string, cognitionKey: string): Promise<ExistingAssertionState | null> {
-    const current = await this.deps.cognitionProjectionRepo.getCurrent(agentId, cognitionKey);
+  private async getExistingAssertionState(
+    agentId: string,
+    cognitionKey: string,
+  ): Promise<ExistingAssertionState | null> {
+    const current = await this.deps.cognitionProjectionRepo.getCurrent(
+      agentId,
+      cognitionKey,
+    );
     if (!current || current.kind !== "assertion") {
       return null;
     }
@@ -545,33 +675,51 @@ export class CognitionRepository {
       id: current.id,
       stance: (current.stance as AssertionStance | null) ?? null,
       basis: (current.basis as AssertionBasis | null) ?? null,
-      preContestedStance: (current.pre_contested_stance as AssertionStance | null) ?? null,
+      preContestedStance:
+        (current.pre_contested_stance as AssertionStance | null) ?? null,
     };
   }
 
-  private async resolveEntityByPointerKey(pointerKey: string, agentId: string): Promise<number | null> {
+  private async resolveEntityByPointerKey(
+    pointerKey: string,
+    agentId: string,
+  ): Promise<number | null> {
     return this.deps.entityResolver(pointerKey.normalize("NFC"), agentId);
   }
 
-  private async appendAndProject(params: CognitionEventAppendParams): Promise<number> {
+  private async appendAndProject(
+    params: CognitionEventAppendParams,
+  ): Promise<number> {
     const event = await this.appendEvent(params);
     if (event === null) {
       // Conflict hit — event already exists. Get existing projection id.
-      const projection = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, params.cognitionKey);
+      const projection = await this.deps.cognitionProjectionRepo.getCurrent(
+        params.agentId,
+        params.cognitionKey,
+      );
       if (!projection) {
-        throw new Error(`Failed to sync projection id for ${params.agentId}/${params.cognitionKey}`);
+        throw new Error(
+          `Failed to sync projection id for ${params.agentId}/${params.cognitionKey}`,
+        );
       }
       return projection.id;
     }
     await this.deps.cognitionProjectionRepo.upsertFromEvent(event);
-    const projection = await this.deps.cognitionProjectionRepo.getCurrent(params.agentId, params.cognitionKey);
+    const projection = await this.deps.cognitionProjectionRepo.getCurrent(
+      params.agentId,
+      params.cognitionKey,
+    );
     if (!projection) {
-      throw new Error(`Failed to sync projection id for ${params.agentId}/${params.cognitionKey}`);
+      throw new Error(
+        `Failed to sync projection id for ${params.agentId}/${params.cognitionKey}`,
+      );
     }
     return projection.id;
   }
 
-  private async appendEvent(params: CognitionEventAppendParams): Promise<CognitionEventRow | null> {
+  private async appendEvent(
+    params: CognitionEventAppendParams,
+  ): Promise<CognitionEventRow | null> {
     const eventId = await this.deps.cognitionEventRepo.append(params);
     if (eventId === null) return null;
     return {
@@ -583,26 +731,40 @@ export class CognitionRepository {
       record_json: params.recordJson,
       settlement_id: params.settlementId,
       committed_time: params.committedTime,
+      request_id: params.requestId ?? null,
       created_at: params.committedTime,
     };
   }
 
-  private async toCanonicalAssertionFromProjection(row: CognitionCurrentRow): Promise<CanonicalAssertionRow | null> {
+  private async toCanonicalAssertionFromProjection(
+    row: CognitionCurrentRow,
+  ): Promise<CanonicalAssertionRow | null> {
     if (!row.stance) {
       return null;
     }
     const parsed = safeParseJson(row.record_json) as AssertionProjectionRecord;
-    const holderEntityId = typeof parsed.holderPointerKey === "string"
-      ? await this.resolveEntityByPointerKey(parsed.holderPointerKey, row.agent_id)
-      : null;
+    const holderEntityId =
+      typeof parsed.holderPointerKey === "string"
+        ? await this.resolveEntityByPointerKey(
+            parsed.holderPointerKey,
+            row.agent_id,
+          )
+        : null;
     // Use first entityPointerKey as targetEntityId for backward compat with CanonicalAssertionRow shape
-    const firstEntityKey = Array.isArray(parsed.entityPointerKeys) && parsed.entityPointerKeys.length > 0
-      ? parsed.entityPointerKeys[0]
-      : undefined;
-    const targetEntityId = typeof firstEntityKey === "string"
-      ? await this.resolveEntityByPointerKey(firstEntityKey, row.agent_id)
-      : null;
-    if (holderEntityId == null || targetEntityId == null || typeof parsed.claim !== "string") {
+    const firstEntityKey =
+      Array.isArray(parsed.entityPointerKeys) &&
+      parsed.entityPointerKeys.length > 0
+        ? parsed.entityPointerKeys[0]
+        : undefined;
+    const targetEntityId =
+      typeof firstEntityKey === "string"
+        ? await this.resolveEntityByPointerKey(firstEntityKey, row.agent_id)
+        : null;
+    if (
+      holderEntityId == null ||
+      targetEntityId == null ||
+      typeof parsed.claim !== "string"
+    ) {
       return null;
     }
 
@@ -614,54 +776,84 @@ export class CognitionRepository {
       targetEntityId,
       predicate: parsed.claim,
       cognitionKey: row.cognition_key,
-      settlementId: typeof projectionRecord.settlementId === "string" ? projectionRecord.settlementId : null,
-      opIndex: typeof projectionRecord.opIndex === "number" ? projectionRecord.opIndex : null,
-      provenance: typeof parsed.provenance === "string" ? parsed.provenance : null,
+      settlementId:
+        typeof projectionRecord.settlementId === "string"
+          ? projectionRecord.settlementId
+          : null,
+      opIndex:
+        typeof projectionRecord.opIndex === "number"
+          ? projectionRecord.opIndex
+          : null,
+      provenance:
+        typeof parsed.provenance === "string" ? parsed.provenance : null,
       sourceEventRef: null,
       stance: row.stance as AssertionStance,
       basis: (row.basis as AssertionBasis | null) ?? null,
-      preContestedStance: (row.pre_contested_stance as AssertionStance | null) ?? null,
+      preContestedStance:
+        (row.pre_contested_stance as AssertionStance | null) ?? null,
       createdAt: row.updated_at,
       updatedAt: row.updated_at,
     };
   }
 
-  private toCanonicalEvaluation(row: CognitionCurrentRow): CanonicalEvaluationRow {
+  private toCanonicalEvaluation(
+    row: CognitionCurrentRow,
+  ): CanonicalEvaluationRow {
     const parsed = safeParseJson(row.record_json);
     return {
       id: row.id,
       agentId: row.agent_id,
       cognitionKey: row.cognition_key,
-      settlementId: typeof parsed.settlementId === "string" ? parsed.settlementId : null,
+      settlementId:
+        typeof parsed.settlementId === "string" ? parsed.settlementId : null,
       opIndex: typeof parsed.opIndex === "number" ? parsed.opIndex : null,
       salience: typeof parsed.salience === "number" ? parsed.salience : null,
-      targetEntityId: typeof parsed.targetEntityId === "number" ? parsed.targetEntityId : null,
-      dimensions: Array.isArray(parsed.dimensions) ? parsed.dimensions as Array<{ name: string; value: number }> : [],
-      emotionTags: Array.isArray(parsed.emotionTags) ? parsed.emotionTags as string[] : [],
+      targetEntityId:
+        typeof parsed.targetEntityId === "number"
+          ? parsed.targetEntityId
+          : null,
+      dimensions: Array.isArray(parsed.dimensions)
+        ? (parsed.dimensions as Array<{ name: string; value: number }>)
+        : [],
+      emotionTags: Array.isArray(parsed.emotionTags)
+        ? (parsed.emotionTags as string[])
+        : [],
       notes: typeof parsed.notes === "string" ? parsed.notes : null,
       status: row.status as "active" | "retracted",
-      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : row.updated_at,
+      createdAt:
+        typeof parsed.createdAt === "number"
+          ? parsed.createdAt
+          : row.updated_at,
       updatedAt: row.updated_at,
     };
   }
 
-  private toCanonicalCommitment(row: CognitionCurrentRow): CanonicalCommitmentRow {
+  private toCanonicalCommitment(
+    row: CognitionCurrentRow,
+  ): CanonicalCommitmentRow {
     const parsed = safeParseJson(row.record_json);
     return {
       id: row.id,
       agentId: row.agent_id,
       cognitionKey: row.cognition_key,
-      settlementId: typeof parsed.settlementId === "string" ? parsed.settlementId : null,
+      settlementId:
+        typeof parsed.settlementId === "string" ? parsed.settlementId : null,
       opIndex: typeof parsed.opIndex === "number" ? parsed.opIndex : null,
       salience: typeof parsed.salience === "number" ? parsed.salience : null,
-      targetEntityId: typeof parsed.targetEntityId === "number" ? parsed.targetEntityId : null,
+      targetEntityId:
+        typeof parsed.targetEntityId === "number"
+          ? parsed.targetEntityId
+          : null,
       mode: asCommitmentMode(parsed.mode),
       target: parsed.target,
       commitmentStatus: asCommitmentStatus(parsed.status),
       priority: typeof parsed.priority === "number" ? parsed.priority : null,
       horizon: asCommitmentHorizon(parsed.horizon),
       status: row.status as "active" | "retracted",
-      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : row.updated_at,
+      createdAt:
+        typeof parsed.createdAt === "number"
+          ? parsed.createdAt
+          : row.updated_at,
       updatedAt: row.updated_at,
     };
   }
@@ -673,8 +865,11 @@ export class CognitionRepository {
     newStance: AssertionStance,
     now: number,
   ): Promise<void> {
-    const rows = (await this.deps.cognitionProjectionRepo.getAllCurrent(agentId))
-      .filter((row) => row.cognition_key === cognitionKey && row.kind === refKind);
+    const rows = (
+      await this.deps.cognitionProjectionRepo.getAllCurrent(agentId)
+    ).filter(
+      (row) => row.cognition_key === cognitionKey && row.kind === refKind,
+    );
 
     for (const row of rows) {
       await this.deps.searchProjectionRepo.updateCognitionSearchDocStanceBySourceRef(
@@ -717,46 +912,67 @@ function safeParseJson(value: string | null): Record<string, unknown> {
   }
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
 }
 
-function asCommitmentMode(value: unknown): "goal" | "intent" | "plan" | "constraint" | "avoidance" {
-  if (value === "goal" || value === "intent" || value === "plan" || value === "constraint" || value === "avoidance") {
+function asCommitmentMode(
+  value: unknown,
+): "goal" | "intent" | "plan" | "constraint" | "avoidance" {
+  if (
+    value === "goal" ||
+    value === "intent" ||
+    value === "plan" ||
+    value === "constraint" ||
+    value === "avoidance"
+  ) {
     return value;
   }
   return "goal";
 }
 
-function asCommitmentStatus(value: unknown): "active" | "paused" | "fulfilled" | "abandoned" {
-  if (value === "active" || value === "paused" || value === "fulfilled" || value === "abandoned") {
+function asCommitmentStatus(
+  value: unknown,
+): "active" | "paused" | "fulfilled" | "abandoned" {
+  if (
+    value === "active" ||
+    value === "paused" ||
+    value === "fulfilled" ||
+    value === "abandoned"
+  ) {
     return value;
   }
   return "active";
 }
 
-function asCommitmentHorizon(value: unknown): "immediate" | "near" | "long" | null {
+function asCommitmentHorizon(
+  value: unknown,
+): "immediate" | "near" | "long" | null {
   if (value === "immediate" || value === "near" || value === "long") {
     return value;
   }
   return null;
 }
 
-function isCognitionRepositoryDeps(value: unknown): value is CognitionRepositoryDeps {
+function isCognitionRepositoryDeps(
+  value: unknown,
+): value is CognitionRepositoryDeps {
   if (!value || typeof value !== "object") {
     return false;
   }
   const candidate = value as Partial<CognitionRepositoryDeps>;
   return (
-    typeof candidate.cognitionProjectionRepo === "object"
-    && candidate.cognitionProjectionRepo !== null
-    && typeof candidate.cognitionEventRepo === "object"
-    && candidate.cognitionEventRepo !== null
-    && typeof candidate.searchProjectionRepo === "object"
-    && candidate.searchProjectionRepo !== null
-    && typeof candidate.entityResolver === "function"
+    typeof candidate.cognitionProjectionRepo === "object" &&
+    candidate.cognitionProjectionRepo !== null &&
+    typeof candidate.cognitionEventRepo === "object" &&
+    candidate.cognitionEventRepo !== null &&
+    typeof candidate.searchProjectionRepo === "object" &&
+    candidate.searchProjectionRepo !== null &&
+    typeof candidate.entityResolver === "function"
   );
 }
 

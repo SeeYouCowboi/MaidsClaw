@@ -46,7 +46,7 @@ export class PgProjectionRebuilder {
 
         const rows = await txSql`
           SELECT id, agent_id, cognition_key, kind, op, record_json,
-                 settlement_id, committed_time, created_at
+                 settlement_id, committed_time, request_id, created_at
           FROM private_cognition_events
           ORDER BY committed_time ASC, id ASC
         `;
@@ -61,6 +61,7 @@ export class PgProjectionRebuilder {
             record_json: stringifyJsonbNullable(row.record_json),
             settlement_id: row.settlement_id as string,
             committed_time: Number(row.committed_time),
+            request_id: (row.request_id as string) ?? null,
             created_at: Number(row.created_at),
           };
           await repo.upsertFromEvent(eventRow);
@@ -79,7 +80,10 @@ export class PgProjectionRebuilder {
    * @param agentId — optional agent filter
    * @param areaId  — optional area filter (requires agentId)
    */
-  async rebuildAreaStateCurrent(agentId?: string, areaId?: number): Promise<void> {
+  async rebuildAreaStateCurrent(
+    agentId?: string,
+    areaId?: number,
+  ): Promise<void> {
     await this.sql.begin(async (tx) => {
       const txSql = tx as unknown as postgres.Sql;
 

@@ -30,9 +30,18 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
 
   constructor(private readonly sql: postgres.Sql) {}
 
-  async readByEntity(pointerKey: string, viewerContext: ViewerContext): Promise<EntityReadResult> {
-    const resolvedPointer = await this.resolveRedirect(pointerKey, viewerContext.viewer_agent_id);
-    const entity = await this.resolveEntityByPointer(resolvedPointer, viewerContext.viewer_agent_id);
+  async readByEntity(
+    pointerKey: string,
+    viewerContext: ViewerContext,
+  ): Promise<EntityReadResult> {
+    const resolvedPointer = await this.resolveRedirect(
+      pointerKey,
+      viewerContext.viewer_agent_id,
+    );
+    const entity = await this.resolveEntityByPointer(
+      resolvedPointer,
+      viewerContext.viewer_agent_id,
+    );
     if (!entity) {
       return { entity: null, facts: [], events: [], episodes: [] };
     }
@@ -44,7 +53,8 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
         AND t_invalid = ${PG_MAX_BIGINT}
     `;
 
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const eventVisibilityPredicate =
+      this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
     const eventRows = await this.sql.unsafe<postgres.Row[]>(
       `SELECT *
        FROM event_nodes
@@ -69,8 +79,14 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     };
   }
 
-  async readByTopic(name: string, viewerContext: ViewerContext): Promise<TopicReadResult> {
-    const resolvedName = await this.resolveRedirect(name, viewerContext.viewer_agent_id);
+  async readByTopic(
+    name: string,
+    viewerContext: ViewerContext,
+  ): Promise<TopicReadResult> {
+    const resolvedName = await this.resolveRedirect(
+      name,
+      viewerContext.viewer_agent_id,
+    );
     const topicRows = await this.sql<postgres.Row[]>`
       SELECT *
       FROM topics
@@ -82,7 +98,8 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
       return { topic: null, events: [], episodes: [] };
     }
 
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const eventVisibilityPredicate =
+      this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
     const eventRows = await this.sql.unsafe<postgres.Row[]>(
       `SELECT *
        FROM event_nodes
@@ -98,13 +115,17 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     };
   }
 
-  async readByEventIds(ids: number[], viewerContext: ViewerContext): Promise<EventNode[]> {
+  async readByEventIds(
+    ids: number[],
+    viewerContext: ViewerContext,
+  ): Promise<EventNode[]> {
     const uniqueIds = Array.from(new Set(ids));
     if (uniqueIds.length === 0) {
       return [];
     }
 
-    const eventVisibilityPredicate = this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
+    const eventVisibilityPredicate =
+      this.visibilityPolicy.eventVisibilityPredicate(viewerContext);
     const rows = await this.sql.unsafe<postgres.Row[]>(
       `SELECT *
        FROM event_nodes
@@ -116,7 +137,10 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     return rows.map(normalizeEventRow);
   }
 
-  async readByFactIds(ids: number[], _viewerContext: ViewerContext): Promise<FactEdge[]> {
+  async readByFactIds(
+    ids: number[],
+    _viewerContext: ViewerContext,
+  ): Promise<FactEdge[]> {
     const uniqueIds = Array.from(new Set(ids));
     if (uniqueIds.length === 0) {
       return [];
@@ -157,7 +181,10 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     return globalRows[0]?.new_name ?? name;
   }
 
-  async resolveEntityByPointer(pointerKey: string, viewerAgentId: string): Promise<EntityNode | null> {
+  async resolveEntityByPointer(
+    pointerKey: string,
+    viewerAgentId: string,
+  ): Promise<EntityNode | null> {
     const privateRows = await this.sql<postgres.Row[]>`
       SELECT *
       FROM entity_nodes
@@ -245,7 +272,8 @@ function normalizeEntityRow(row: postgres.Row): EntityNode {
     entity_type: row.entity_type as string,
     memory_scope: row.memory_scope as EntityNode["memory_scope"],
     owner_agent_id: (row.owner_agent_id as string) ?? null,
-    canonical_entity_id: row.canonical_entity_id != null ? Number(row.canonical_entity_id) : null,
+    canonical_entity_id:
+      row.canonical_entity_id != null ? Number(row.canonical_entity_id) : null,
     summary: (row.summary as string) ?? null,
     created_at: Number(row.created_at),
     updated_at: Number(row.updated_at),
@@ -266,7 +294,10 @@ function normalizeEventRow(row: postgres.Row): EventNode {
     visibility_scope: row.visibility_scope as EventNode["visibility_scope"],
     location_entity_id: Number(row.location_entity_id),
     event_category: row.event_category as EventNode["event_category"],
-    primary_actor_entity_id: row.primary_actor_entity_id != null ? Number(row.primary_actor_entity_id) : null,
+    primary_actor_entity_id:
+      row.primary_actor_entity_id != null
+        ? Number(row.primary_actor_entity_id)
+        : null,
     promotion_class: row.promotion_class as EventNode["promotion_class"],
     source_record_id: (row.source_record_id as string) ?? null,
     event_origin: row.event_origin as EventNode["event_origin"],
@@ -283,7 +314,8 @@ function normalizeFactRow(row: postgres.Row): FactEdge {
     t_invalid: Number(row.t_invalid ?? MAX_INTEGER),
     t_created: Number(row.t_created),
     t_expired: Number(row.t_expired),
-    source_event_id: row.source_event_id != null ? Number(row.source_event_id) : null,
+    source_event_id:
+      row.source_event_id != null ? Number(row.source_event_id) : null,
   };
 }
 
@@ -296,11 +328,13 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
     category: row.category as string,
     summary: row.summary as string,
     private_notes: (row.private_notes as string) ?? null,
-    location_entity_id: row.location_entity_id != null ? Number(row.location_entity_id) : null,
+    location_entity_id:
+      row.location_entity_id != null ? Number(row.location_entity_id) : null,
     location_text: (row.location_text as string) ?? null,
     valid_time: row.valid_time != null ? Number(row.valid_time) : null,
     committed_time: Number(row.committed_time),
     source_local_ref: (row.source_local_ref as string) ?? null,
+    request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
   };
 }

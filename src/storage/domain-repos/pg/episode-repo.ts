@@ -5,7 +5,12 @@ import type {
 } from "../../../memory/episode/episode-repo.js";
 import type { EpisodeRepo } from "../contracts/episode-repo.js";
 
-const VALID_CATEGORIES = new Set(["speech", "action", "observation", "state_change"]);
+const VALID_CATEGORIES = new Set([
+  "speech",
+  "action",
+  "observation",
+  "state_change",
+]);
 
 const REJECTED_FIELDS = new Set([
   "emotion",
@@ -24,7 +29,7 @@ export class PgEpisodeRepo implements EpisodeRepo {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at
       FROM private_episode_events
       WHERE id = ${id}
       LIMIT 1
@@ -35,9 +40,13 @@ export class PgEpisodeRepo implements EpisodeRepo {
     return normalizeEpisodeRow(rows[0]);
   }
 
-  async append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number> {
+  async append(
+    params: EpisodeAppendParams & Record<string, unknown>,
+  ): Promise<number> {
     if (!VALID_CATEGORIES.has(params.category)) {
-      throw new Error(`invalid episode category: ${JSON.stringify(params.category)}`);
+      throw new Error(
+        `invalid episode category: ${JSON.stringify(params.category)}`,
+      );
     }
 
     if (params.committedTime === undefined || params.committedTime === null) {
@@ -56,13 +65,14 @@ export class PgEpisodeRepo implements EpisodeRepo {
       INSERT INTO private_episode_events
         (agent_id, session_id, settlement_id, category, summary,
          private_notes, location_entity_id, location_text,
-         valid_time, committed_time, source_local_ref, created_at)
+         valid_time, committed_time, source_local_ref, request_id, created_at)
       VALUES
         (${params.agentId}, ${params.sessionId}, ${params.settlementId},
          ${params.category}, ${params.summary},
          ${params.privateNotes ?? null}, ${params.locationEntityId ?? null},
          ${params.locationText ?? null}, ${params.validTime ?? null},
-         ${params.committedTime}, ${params.sourceLocalRef ?? null}, ${now})
+         ${params.committedTime}, ${params.sourceLocalRef ?? null},
+         ${params.requestId ?? null}, ${now})
       ON CONFLICT (settlement_id, source_local_ref)
         WHERE source_local_ref IS NOT NULL
         DO NOTHING
@@ -75,11 +85,14 @@ export class PgEpisodeRepo implements EpisodeRepo {
     return Number(rows[0].id);
   }
 
-  async readBySettlement(settlementId: string, agentId: string): Promise<EpisodeRow[]> {
+  async readBySettlement(
+    settlementId: string,
+    agentId: string,
+  ): Promise<EpisodeRow[]> {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at
       FROM private_episode_events
       WHERE settlement_id = ${settlementId}
         AND agent_id = ${agentId}
@@ -110,7 +123,7 @@ export class PgEpisodeRepo implements EpisodeRepo {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at
       FROM private_episode_events
       WHERE agent_id = ${agentId}
       ORDER BY created_at DESC, id DESC
@@ -129,11 +142,13 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
     category: row.category as string,
     summary: row.summary as string,
     private_notes: (row.private_notes as string) ?? null,
-    location_entity_id: row.location_entity_id != null ? Number(row.location_entity_id) : null,
+    location_entity_id:
+      row.location_entity_id != null ? Number(row.location_entity_id) : null,
     location_text: (row.location_text as string) ?? null,
     valid_time: row.valid_time != null ? Number(row.valid_time) : null,
     committed_time: Number(row.committed_time),
     source_local_ref: (row.source_local_ref as string) ?? null,
+    request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
   };
 }

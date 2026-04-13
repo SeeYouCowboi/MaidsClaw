@@ -1454,6 +1454,8 @@ export function bootstrapRuntime(
     talkerThinkerConfig,
     resolvedJobPersistence,
     maidenDecisionLog,
+    coreMemoryService,
+    personaService,
   );
 
   const pendingFlushRepo = createLazyPgRepo(

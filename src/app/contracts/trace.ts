@@ -30,6 +30,23 @@ export type RetrievalTraceCapture = {
   narrative_facets_used: string[];
   cognition_facets_used: string[];
   segment_count: number;
+  segments?: Array<{
+    source: string;
+    content: string;
+    score?: number;
+  }>;
+  navigator?: {
+    seeds: string[];
+    steps: Array<{
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }>;
+    final_selection: string[];
+  };
 };
 
 export type TraceBundle = {
@@ -54,4 +71,5 @@ export type TraceSummary = {
   chunk_count: number;
   has_prompt: boolean;
   has_settlement: boolean;
+  has_retrieval: boolean;
 };

@@ -1,6 +1,11 @@
 import type { Db } from "../../storage/db-types.js";
 
-const VALID_CATEGORIES = new Set(["speech", "action", "observation", "state_change"]);
+const VALID_CATEGORIES = new Set([
+  "speech",
+  "action",
+  "observation",
+  "state_change",
+]);
 
 const REJECTED_FIELDS = new Set([
   "emotion",
@@ -24,6 +29,7 @@ export type EpisodeAppendParams = {
   validTime?: number;
   committedTime: number;
   sourceLocalRef?: string;
+  requestId?: string;
 };
 
 export type EpisodeRow = {
@@ -39,6 +45,7 @@ export type EpisodeRow = {
   valid_time: number | null;
   committed_time: number;
   source_local_ref: string | null;
+  request_id: string | null;
   created_at: number;
 };
 
@@ -47,7 +54,9 @@ export class EpisodeRepository {
 
   append(params: EpisodeAppendParams & Record<string, unknown>): number {
     if (!VALID_CATEGORIES.has(params.category)) {
-      throw new Error(`invalid episode category: ${JSON.stringify(params.category)}`);
+      throw new Error(
+        `invalid episode category: ${JSON.stringify(params.category)}`,
+      );
     }
 
     if (params.committedTime === undefined || params.committedTime === null) {
@@ -62,7 +71,7 @@ export class EpisodeRepository {
 
     const now = Date.now();
     const result = this.db.run(
-      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.agentId,
         params.sessionId,
@@ -75,6 +84,7 @@ export class EpisodeRepository {
         params.validTime ?? null,
         params.committedTime,
         params.sourceLocalRef ?? null,
+        params.requestId ?? null,
         now,
       ],
     );
@@ -84,7 +94,7 @@ export class EpisodeRepository {
 
   readBySettlement(settlementId: string, agentId: string): EpisodeRow[] {
     return this.db.query<EpisodeRow>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
       [settlementId, agentId],
     );
   }
@@ -92,7 +102,7 @@ export class EpisodeRepository {
   readByAgent(agentId: string, limit?: number): EpisodeRow[] {
     const effectiveLimit = limit ?? 100;
     return this.db.query<EpisodeRow>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
       [agentId, effectiveLimit],
     );
   }

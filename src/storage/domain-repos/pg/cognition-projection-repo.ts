@@ -27,7 +27,9 @@ function safeParseJson(value: string | null): Record<string, unknown> {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -50,15 +52,24 @@ function stringifyJsonbNullable(value: unknown): string | null {
  * but ParsedAssertionRecord expects holderPointerKey (string) and entityPointerKeys (string[]).
  * Also handles backward compat from old SPO model (sourcePointerKey/predicate/targetPointerKey).
  */
-function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRecord {
+function extractAssertionRecord(
+  raw: Record<string, unknown>,
+): ParsedAssertionRecord {
   const record = raw as Record<string, unknown>;
 
   // Extract holderPointerKey from holderId (new model) or sourcePointerKey (old model)
   let holderPointerKey: string | undefined;
-  const holderId = record.holderId as Record<string, unknown> | string | undefined;
+  const holderId = record.holderId as
+    | Record<string, unknown>
+    | string
+    | undefined;
   if (typeof holderId === "string") {
     holderPointerKey = holderId;
-  } else if (holderId && typeof holderId === "object" && typeof holderId.value === "string") {
+  } else if (
+    holderId &&
+    typeof holderId === "object" &&
+    typeof holderId.value === "string"
+  ) {
     holderPointerKey = holderId.value;
   } else if (typeof record.holderPointerKey === "string") {
     holderPointerKey = record.holderPointerKey;
@@ -82,7 +93,11 @@ function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRe
     entityPointerKeys = entityRefs
       .map((ref) => {
         if (typeof ref === "string") return ref;
-        if (ref && typeof ref === "object" && typeof (ref as Record<string, unknown>).value === "string") {
+        if (
+          ref &&
+          typeof ref === "object" &&
+          typeof (ref as Record<string, unknown>).value === "string"
+        ) {
           return (ref as Record<string, unknown>).value as string;
         }
         return null;
@@ -101,8 +116,14 @@ function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRe
     entityPointerKeys,
     stance: typeof record.stance === "string" ? record.stance : undefined,
     basis: typeof record.basis === "string" ? record.basis : undefined,
-    preContestedStance: typeof record.preContestedStance === "string" ? record.preContestedStance : undefined,
-    conflictSummary: typeof record.conflictSummary === "string" ? record.conflictSummary : undefined,
+    preContestedStance:
+      typeof record.preContestedStance === "string"
+        ? record.preContestedStance
+        : undefined,
+    conflictSummary:
+      typeof record.conflictSummary === "string"
+        ? record.conflictSummary
+        : undefined,
     conflictFactorRefs: record.conflictFactorRefs,
   };
 }
@@ -134,7 +155,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
 
     const rows = await this.sql`
       SELECT id, agent_id, cognition_key, kind, op, record_json,
-             settlement_id, committed_time, created_at
+             settlement_id, committed_time, request_id, created_at
       FROM private_cognition_events
       WHERE agent_id = ${agentId}
       ORDER BY committed_time ASC, id ASC
@@ -150,6 +171,7 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         record_json: stringifyJsonbNullable(row.record_json),
         settlement_id: row.settlement_id as string,
         committed_time: Number(row.committed_time),
+        request_id: (row.request_id as string) ?? null,
         created_at: Number(row.created_at),
       };
       await this.upsertFromEvent(eventRow);
@@ -198,7 +220,9 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
       status: row.status as string,
       pre_contested_stance: (row.pre_contested_stance as string) ?? null,
       conflict_summary: (row.conflict_summary as string) ?? null,
-      conflict_factor_refs_json: stringifyJsonbNullable(row.conflict_factor_refs_json),
+      conflict_factor_refs_json: stringifyJsonbNullable(
+        row.conflict_factor_refs_json,
+      ),
       summary_text: (row.summary_text as string) ?? null,
       record_json: stringifyJsonb(row.record_json),
       source_event_id: Number(row.source_event_id),
@@ -211,20 +235,24 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
     record: ParsedAssertionRecord,
   ): Promise<void> {
     const isContested = record.stance === "contested";
-    const normalizedFactors = normalizeConflictFactorRefs(record.conflictFactorRefs);
+    const normalizedFactors = normalizeConflictFactorRefs(
+      record.conflictFactorRefs,
+    );
     const fallbackSummary =
       normalizedFactors.dropped > 0
         ? `contested (${normalizedFactors.refs.length} factors resolved, ${normalizedFactors.dropped} dropped)`
         : `contested (${normalizedFactors.refs.length} factors)`;
     const conflictSummary = isContested
-      ? (record.conflictSummary?.trim() || fallbackSummary)
+      ? record.conflictSummary?.trim() || fallbackSummary
       : null;
     const conflictFactorRefsJsonb = isContested
       ? this.jsonb(normalizedFactors.refs)
       : null;
-    const entitySuffix = Array.isArray(record.entityPointerKeys) && record.entityPointerKeys.length > 0
-      ? ` | entities: ${record.entityPointerKeys.join(", ")}`
-      : "";
+    const entitySuffix =
+      Array.isArray(record.entityPointerKeys) &&
+      record.entityPointerKeys.length > 0
+        ? ` | entities: ${record.entityPointerKeys.join(", ")}`
+        : "";
     const summaryText = record.claim
       ? `[${event.cognition_key}] [${record.holderPointerKey ?? "?"}] ${record.claim}${entitySuffix}`
       : null;
@@ -392,7 +420,10 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
     `;
   }
 
-  async resolveEntityByPointerKey(pointerKey: string, agentId: string): Promise<number | null> {
+  async resolveEntityByPointerKey(
+    pointerKey: string,
+    agentId: string,
+  ): Promise<number | null> {
     const normalizedPointerKey = pointerKey.normalize("NFC");
     const rows = await this.sql<{ id: string | number }[]>`
       SELECT id

@@ -21,7 +21,11 @@ import type { QueryRoute, QueryRouter } from "./query-routing-types.js";
 import type { QueryPlan, QueryPlanBuilder } from "./query-plan-types.js";
 import type { RetrievalService } from "./retrieval.js";
 import { GraphEdgeView } from "./graph-edge-view.js";
-import { RedactionPolicy, AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
+import {
+  RedactionPolicy,
+  AuthorizationPolicy,
+  type VisibilityDisposition,
+} from "./redaction-policy.js";
 import {
   filterEvidencePathsByTimeSlice,
   hasTimeSlice,
@@ -57,11 +61,18 @@ type ModelProviderClientLike = {
 };
 
 export type EmbedProviderLike = {
-  embed(texts: string[], purpose: string, modelId: string): Promise<Float32Array[]>;
+  embed(
+    texts: string[],
+    purpose: string,
+    modelId: string,
+  ): Promise<Float32Array[]>;
 };
 
 export type NarrativeSearchServiceLike = {
-  searchNarrative(query: string, viewerContext: ViewerContext): Promise<Array<{ source_ref: string }>>;
+  searchNarrative(
+    query: string,
+    viewerContext: ViewerContext,
+  ): Promise<Array<{ source_ref: string }>>;
 };
 
 export type CognitionSearchServiceLike = {
@@ -102,6 +113,29 @@ export type NavigatorOptions = {
   beamWidth?: number;
   maxDepth?: number;
   maxCandidates?: number;
+};
+
+type NavigatorTraceHooks = {
+  onStep?: (step: {
+    depth: number;
+    visited_ref: string;
+    via_ref?: string;
+    via_relation?: string;
+    score?: number;
+    pruned?: string | null;
+  }) => void;
+  onComplete?: (capture: {
+    seeds: string[];
+    steps: Array<{
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }>;
+    final_selection: string[];
+  }) => void;
 };
 
 const DEFAULT_OPTIONS: Required<NavigatorOptions> = {
@@ -146,12 +180,40 @@ export const GRAPH_RETRIEVAL_STRATEGIES = {
 
 const QUERY_TYPE_PRIORITY = {
   entity: ["fact_relation", "participant", "fact_support", "semantic_similar"],
-  event: ["same_episode", "temporal_prev", "temporal_next", "causal", "fact_support"],
+  event: [
+    "same_episode",
+    "temporal_prev",
+    "temporal_next",
+    "causal",
+    "fact_support",
+  ],
   why: ["causal", "fact_support", "fact_relation", "temporal_prev"],
-  relationship: ["fact_relation", "fact_support", "participant", "semantic_similar"],
-  timeline: ["temporal_prev", "temporal_next", "same_episode", "causal", "fact_support"],
-  state: ["fact_relation", "conflict_or_update", "fact_support", "temporal_next"],
-  conflict: ["conflict_or_update", "fact_relation", "fact_support", "causal", "temporal_prev"],
+  relationship: [
+    "fact_relation",
+    "fact_support",
+    "participant",
+    "semantic_similar",
+  ],
+  timeline: [
+    "temporal_prev",
+    "temporal_next",
+    "same_episode",
+    "causal",
+    "fact_support",
+  ],
+  state: [
+    "fact_relation",
+    "conflict_or_update",
+    "fact_support",
+    "temporal_next",
+  ],
+  conflict: [
+    "conflict_or_update",
+    "fact_relation",
+    "fact_support",
+    "causal",
+    "temporal_prev",
+  ],
 } satisfies Record<QueryType, NavigatorEdgeKind[]>;
 
 const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
@@ -205,8 +267,10 @@ export function effectiveEdgeMultiplier(
   strategy: GraphRetrievalStrategy | undefined,
   plan: QueryPlan | null,
 ): number {
-  const strategyMultiplier = strategy?.edgeWeights[kind as MemoryRelationType] ?? 1.0;
-  if (plan == null || !isNavigatorPlanConsumptionEnabled()) return strategyMultiplier;
+  const strategyMultiplier =
+    strategy?.edgeWeights[kind as MemoryRelationType] ?? 1.0;
+  if (plan == null || !isNavigatorPlanConsumptionEnabled())
+    return strategyMultiplier;
   const planMultiplier = plan.graphPlan.edgeBias?.[kind as string] ?? 1.0;
   return strategyMultiplier * planMultiplier;
 }
@@ -229,7 +293,8 @@ export function resolveEffectivePrimaryIntent(
   analysis: { query_type: QueryType },
   plan: QueryPlan | null,
 ): QueryType {
-  if (plan == null || !isNavigatorPlanConsumptionEnabled()) return analysis.query_type;
+  if (plan == null || !isNavigatorPlanConsumptionEnabled())
+    return analysis.query_type;
   return plan.graphPlan.primaryIntent;
 }
 
@@ -295,7 +360,10 @@ export class GraphNavigator {
   private readonly redactionPolicy: RedactionPolicy;
   private readonly edgeView: GraphEdgeView;
   private readonly privateNodeOwnerCache = new Map<NodeRef, string | null>();
-  private readonly visibilityRecordCache = new Map<NodeRef, GraphNodeVisibilityRecord | null>();
+  private readonly visibilityRecordCache = new Map<
+    NodeRef,
+    GraphNodeVisibilityRecord | null
+  >();
 
   constructor(
     readRepo: GraphReadQueryRepo,
@@ -312,8 +380,10 @@ export class GraphNavigator {
     private readonly queryRouter?: QueryRouter,
     private readonly queryPlanBuilder?: QueryPlanBuilder,
   ) {
-    const effectiveAuthorization = authorizationPolicy ?? new AuthorizationPolicy();
-    this.visibilityPolicy = visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
+    const effectiveAuthorization =
+      authorizationPolicy ?? new AuthorizationPolicy();
+    this.visibilityPolicy =
+      visibilityPolicy ?? new VisibilityPolicy(effectiveAuthorization);
     this.redactionPolicy = redactionPolicy ?? new RedactionPolicy();
     this.readRepo = this.coerceReadRepo(readRepo);
     this.edgeView = new GraphEdgeView(this.readRepo);
@@ -331,11 +401,41 @@ export class GraphNavigator {
     this.privateNodeOwnerCache.clear();
     this.visibilityRecordCache.clear();
 
-    const effectiveStrategy = strategy ?? GRAPH_RETRIEVAL_STRATEGIES.default_retrieval;
+    const effectiveStrategy =
+      strategy ?? GRAPH_RETRIEVAL_STRATEGIES.default_retrieval;
     const opts = this.normalizeOptions(this.asNavigatorOptions(optionsOrInput));
+    const traceHooks = this.asTraceHooks(optionsOrInput);
+    const navigatorSteps: Array<{
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }> = [];
+    const recordNavigatorStep = (step: {
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }): void => {
+      navigatorSteps.push(step);
+      try {
+        traceHooks?.onStep?.(step);
+      } catch {
+        // diagnostics hook is optional/non-fatal
+      }
+    };
     const input = this.asExploreInput(query, optionsOrInput);
     const analysis = await this.analyzeQuery(query, viewerContext, input.mode);
-    const planContext = await this.emitQueryRouteAndPlanShadow(query, viewerContext, input.mode, analysis.query_type);
+    const planContext = await this.emitQueryRouteAndPlanShadow(
+      query,
+      viewerContext,
+      input.mode,
+      analysis.query_type,
+    );
     // GAP-4 §2: only consume the plan when the flag is on. Stage A
     // (edge/seed bias, time slice) and Stage B (primaryIntent +
     // secondaryIntents) both gate on `activePlan != null` downstream.
@@ -346,12 +446,26 @@ export class GraphNavigator {
 
     let queryEmbedding: Float32Array | undefined;
     if (this.embedProvider && this.embeddingModelId) {
-      const [embedding] = await this.embedProvider.embed([query], "query_expansion", this.embeddingModelId);
+      const [embedding] = await this.embedProvider.embed(
+        [query],
+        "query_expansion",
+        this.embeddingModelId,
+      );
       queryEmbedding = embedding;
     }
 
-    const rawSeeds = await this.retrieval.localizeSeedsHybrid(query, viewerContext, opts.seedCount, queryEmbedding, this.embeddingModelId);
-    const supplementalSeeds = await this.collectSupplementalSeeds(query, viewerContext, rawSeeds);
+    const rawSeeds = await this.retrieval.localizeSeedsHybrid(
+      query,
+      viewerContext,
+      opts.seedCount,
+      queryEmbedding,
+      this.embeddingModelId,
+    );
+    const supplementalSeeds = await this.collectSupplementalSeeds(
+      query,
+      viewerContext,
+      rawSeeds,
+    );
     const mergedSeeds = this.mergeSeeds(rawSeeds, supplementalSeeds);
     const fallbackSeeds = this.fallbackSeedsFromAnalysis(mergedSeeds, analysis);
     const focusedSeeds = this.injectFocusSeed(fallbackSeeds, input.focusRef);
@@ -359,7 +473,9 @@ export class GraphNavigator {
       focusedSeeds.map((seed) => seed.node_ref),
       viewerContext,
     );
-    const visibleSeeds = focusedSeeds.filter((seed) => visibleSeedRefs.has(seed.node_ref));
+    const visibleSeeds = focusedSeeds.filter((seed) =>
+      visibleSeedRefs.has(seed.node_ref),
+    );
 
     if (visibleSeeds.length === 0) {
       return {
@@ -367,7 +483,12 @@ export class GraphNavigator {
         query_type: analysis.query_type,
         summary: `No explain evidence found for '${query}'`,
         evidence_paths: [],
-        drilldown: this.buildDrilldown(input, undefined, planContext, analysis.query_type),
+        drilldown: this.buildDrilldown(
+          input,
+          undefined,
+          planContext,
+          analysis.query_type,
+        ),
       };
     }
 
@@ -376,29 +497,75 @@ export class GraphNavigator {
     // seed scoring, beam expansion, and reranking. When the flag is off
     // `effectivePrimary === analysis.query_type` and `effectiveSecondaries`
     // is `[]`, so the five call sites below are byte-equal to pre-Phase-4.
-    const effectivePrimary = resolveEffectivePrimaryIntent(analysis, activePlan);
+    const effectivePrimary = resolveEffectivePrimaryIntent(
+      analysis,
+      activePlan,
+    );
     const effectiveSecondaries = resolveEffectiveSecondaryIntents(activePlan);
 
-    const seedScores = await this.computeSeedScores(visibleSeeds, analysis, activePlan, effectivePrimary);
-    const expandedPaths = await this.expandTypedBeam(visibleSeeds, seedScores, effectivePrimary, viewerContext, opts, input, effectiveStrategy, activePlan, effectiveSecondaries);
-    const rerankedPaths = await this.rerankPaths(expandedPaths, seedScores, effectivePrimary, opts.maxDepth, effectiveStrategy, activePlan, effectiveSecondaries);
-    const effectiveMaxCandidates = input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
-    const assembled = await this.assembleEvidence(rerankedPaths, viewerContext, effectiveMaxCandidates);
+    const seedScores = await this.computeSeedScores(
+      visibleSeeds,
+      analysis,
+      activePlan,
+      effectivePrimary,
+    );
+    const expandedPaths = await this.expandTypedBeam(
+      visibleSeeds,
+      seedScores,
+      effectivePrimary,
+      viewerContext,
+      opts,
+      input,
+      effectiveStrategy,
+      activePlan,
+      effectiveSecondaries,
+      recordNavigatorStep,
+    );
+    const rerankedPaths = await this.rerankPaths(
+      expandedPaths,
+      seedScores,
+      effectivePrimary,
+      opts.maxDepth,
+      effectiveStrategy,
+      activePlan,
+      effectiveSecondaries,
+    );
+    const effectiveMaxCandidates =
+      input.detailLevel === "audit" ? rerankedPaths.length : opts.maxCandidates;
+    const assembled = await this.assembleEvidence(
+      rerankedPaths,
+      viewerContext,
+      effectiveMaxCandidates,
+    );
     // GAP-4 §2 Stage A: prefer plan.graphPlan.timeSlice over the legacy
     // input.asOf* time slice when present and the flag is on. Falls back
     // to `input` exactly as before when no plan or flag off.
     const planTimeSlice = activePlan?.graphPlan.timeSlice;
     const effectiveTimeSlice = planTimeSlice != null ? planTimeSlice : input;
-    const sliced = filterEvidencePathsByTimeSlice(assembled, effectiveTimeSlice);
+    const sliced = filterEvidencePathsByTimeSlice(
+      assembled,
+      effectiveTimeSlice,
+    );
     const seedsByRef = new Map(visibleSeeds.map((s) => [s.node_ref, s]));
-    const levelFiltered = this.applyDetailLevel(sliced, input.detailLevel, seedsByRef);
-    const pathSummaries = hasTimeSlice(input) ? summarizeTimeSlicedPaths(assembled, input) : undefined;
+    const levelFiltered = this.applyDetailLevel(
+      sliced,
+      input.detailLevel,
+      seedsByRef,
+    );
+    const pathSummaries = hasTimeSlice(input)
+      ? summarizeTimeSlicedPaths(assembled, input)
+      : undefined;
 
     const result: NavigatorResult = {
       query,
       query_type: analysis.query_type,
       summary: this.summarizeResult(query, analysis.query_type, levelFiltered),
-      drilldown: this.buildDrilldown(input, pathSummaries, planContext, analysis.query_type),
+      drilldown: this.buildDrilldown(
+        input,
+        pathSummaries,
+        planContext,
+        analysis.query_type,
+      ),
       evidence_paths: levelFiltered,
     };
 
@@ -406,10 +573,52 @@ export class GraphNavigator {
       result.audit_summary = this.buildAuditSummary(levelFiltered);
     }
 
+    try {
+      traceHooks?.onComplete?.({
+        seeds: visibleSeeds.map((seed) => seed.node_ref),
+        steps: navigatorSteps,
+        final_selection: levelFiltered.map((path) => path.path.seed),
+      });
+    } catch {
+      // diagnostics hook is optional/non-fatal
+    }
+
     return result;
   }
 
-  private asNavigatorOptions(optionsOrInput?: NavigatorOptions | MemoryExploreInput): NavigatorOptions | undefined {
+  private asTraceHooks(
+    optionsOrInput?: NavigatorOptions | MemoryExploreInput,
+  ): NavigatorTraceHooks | undefined {
+    if (!optionsOrInput || typeof optionsOrInput !== "object") {
+      return undefined;
+    }
+    const candidate = (optionsOrInput as { traceHooks?: unknown }).traceHooks;
+    if (!candidate || typeof candidate !== "object") {
+      return undefined;
+    }
+    const onStepCandidate = (candidate as { onStep?: unknown }).onStep;
+    const onCompleteCandidate = (candidate as { onComplete?: unknown })
+      .onComplete;
+    const onStep =
+      typeof onStepCandidate === "function"
+        ? (onStepCandidate as NavigatorTraceHooks["onStep"])
+        : undefined;
+    const onComplete =
+      typeof onCompleteCandidate === "function"
+        ? (onCompleteCandidate as NavigatorTraceHooks["onComplete"])
+        : undefined;
+    if (typeof onStep !== "function" && typeof onComplete !== "function") {
+      return undefined;
+    }
+    return {
+      ...(typeof onStep === "function" ? { onStep } : {}),
+      ...(typeof onComplete === "function" ? { onComplete } : {}),
+    };
+  }
+
+  private asNavigatorOptions(
+    optionsOrInput?: NavigatorOptions | MemoryExploreInput,
+  ): NavigatorOptions | undefined {
     if (!optionsOrInput) {
       return undefined;
     }
@@ -422,12 +631,23 @@ export class GraphNavigator {
     return hasOptionKeys ? maybeOptions : undefined;
   }
 
-  private asExploreInput(query: string, optionsOrInput?: NavigatorOptions | MemoryExploreInput): MemoryExploreInput {
+  private asExploreInput(
+    query: string,
+    optionsOrInput?: NavigatorOptions | MemoryExploreInput,
+  ): MemoryExploreInput {
     const maybeInput = optionsOrInput as MemoryExploreInput | undefined;
     if (!maybeInput) {
       return { query };
     }
-    if (maybeInput.query != null || maybeInput.mode != null || maybeInput.focusRef != null || maybeInput.focusCognitionKey != null || maybeInput.asOfValidTime != null || maybeInput.asOfCommittedTime != null || maybeInput.detailLevel != null) {
+    if (
+      maybeInput.query != null ||
+      maybeInput.mode != null ||
+      maybeInput.focusRef != null ||
+      maybeInput.focusCognitionKey != null ||
+      maybeInput.asOfValidTime != null ||
+      maybeInput.asOfCommittedTime != null ||
+      maybeInput.detailLevel != null
+    ) {
       return {
         query,
         mode: maybeInput.mode,
@@ -441,16 +661,34 @@ export class GraphNavigator {
     return { query };
   }
 
-  private normalizeOptions(options?: NavigatorOptions): Required<NavigatorOptions> {
+  private normalizeOptions(
+    options?: NavigatorOptions,
+  ): Required<NavigatorOptions> {
     return {
-      seedCount: Math.min(32, Math.max(1, options?.seedCount ?? DEFAULT_OPTIONS.seedCount)),
-      beamWidth: Math.min(32, Math.max(1, options?.beamWidth ?? DEFAULT_OPTIONS.beamWidth)),
-      maxDepth: Math.min(2, Math.max(1, options?.maxDepth ?? DEFAULT_OPTIONS.maxDepth)),
-      maxCandidates: Math.min(64, Math.max(1, options?.maxCandidates ?? DEFAULT_OPTIONS.maxCandidates)),
+      seedCount: Math.min(
+        32,
+        Math.max(1, options?.seedCount ?? DEFAULT_OPTIONS.seedCount),
+      ),
+      beamWidth: Math.min(
+        32,
+        Math.max(1, options?.beamWidth ?? DEFAULT_OPTIONS.beamWidth),
+      ),
+      maxDepth: Math.min(
+        2,
+        Math.max(1, options?.maxDepth ?? DEFAULT_OPTIONS.maxDepth),
+      ),
+      maxCandidates: Math.min(
+        64,
+        Math.max(1, options?.maxCandidates ?? DEFAULT_OPTIONS.maxCandidates),
+      ),
     };
   }
 
-  private async analyzeQuery(query: string, viewerContext: ViewerContext, mode?: ExploreMode): Promise<QueryAnalysis> {
+  private async analyzeQuery(
+    query: string,
+    viewerContext: ViewerContext,
+    mode?: ExploreMode,
+  ): Promise<QueryAnalysis> {
     const normalized = query.trim().toLowerCase();
     const tokens = tokenizeQuery(query);
 
@@ -461,7 +699,10 @@ export class GraphNavigator {
       if (aliasToken.length < 2) {
         continue;
       }
-      const entityId = await this.alias.resolveAlias(aliasToken, viewerContext.viewer_agent_id);
+      const entityId = await this.alias.resolveAlias(
+        aliasToken,
+        viewerContext.viewer_agent_id,
+      );
       if (entityId !== null) {
         resolvedEntityIds.add(entityId);
         entityHints.add(aliasToken);
@@ -490,7 +731,10 @@ export class GraphNavigator {
       query_type: queryType,
       resolved_entity_ids: resolvedEntityIds,
       entity_hints: Array.from(entityHints),
-      has_time_constraint: this.includesAny(normalized, TIME_CONSTRAINT_KEYWORDS),
+      has_time_constraint: this.includesAny(
+        normalized,
+        TIME_CONSTRAINT_KEYWORDS,
+      ),
     };
   }
 
@@ -579,7 +823,9 @@ export class GraphNavigator {
           narrative: Number(plan.surfacePlans.narrative.weight.toFixed(3)),
           cognition: Number(plan.surfacePlans.cognition.weight.toFixed(3)),
           episode: Number(plan.surfacePlans.episode.weight.toFixed(3)),
-          conflict_notes: Number(plan.surfacePlans.conflictNotes.weight.toFixed(3)),
+          conflict_notes: Number(
+            plan.surfacePlans.conflictNotes.weight.toFixed(3),
+          ),
         },
         surface_enabled: {
           narrative: plan.surfacePlans.narrative.enabledByRole,
@@ -651,7 +897,9 @@ export class GraphNavigator {
           narrative: Number(plan.surfacePlans.narrative.weight.toFixed(3)),
           cognition: Number(plan.surfacePlans.cognition.weight.toFixed(3)),
           episode: Number(plan.surfacePlans.episode.weight.toFixed(3)),
-          conflict_notes: Number(plan.surfacePlans.conflictNotes.weight.toFixed(3)),
+          conflict_notes: Number(
+            plan.surfacePlans.conflictNotes.weight.toFixed(3),
+          ),
         },
         seed_bias: plan.graphPlan.seedBias as unknown as Record<string, number>,
         edge_bias: (plan.graphPlan.edgeBias ?? {}) as Record<string, number>,
@@ -661,7 +909,10 @@ export class GraphNavigator {
     return drilldown;
   }
 
-  private injectFocusSeed(seeds: SeedCandidate[], focusRef?: NodeRef): SeedCandidate[] {
+  private injectFocusSeed(
+    seeds: SeedCandidate[],
+    focusRef?: NodeRef,
+  ): SeedCandidate[] {
     if (!focusRef) {
       return seeds;
     }
@@ -686,7 +937,10 @@ export class GraphNavigator {
     ];
   }
 
-  private fallbackSeedsFromAnalysis(seeds: SeedCandidate[], analysis: QueryAnalysis): SeedCandidate[] {
+  private fallbackSeedsFromAnalysis(
+    seeds: SeedCandidate[],
+    analysis: QueryAnalysis,
+  ): SeedCandidate[] {
     if (seeds.length > 0) {
       return seeds;
     }
@@ -714,12 +968,17 @@ export class GraphNavigator {
     viewerContext: ViewerContext,
     existingSeeds: SeedCandidate[],
   ): Promise<SeedCandidate[]> {
-    const existingRefs = new Set(existingSeeds.map((s) => s.node_ref as string));
+    const existingRefs = new Set(
+      existingSeeds.map((s) => s.node_ref as string),
+    );
     const supplemental: SeedCandidate[] = [];
 
     if (this.narrativeSearch) {
       try {
-        const hits = await this.narrativeSearch.searchNarrative(query, viewerContext);
+        const hits = await this.narrativeSearch.searchNarrative(
+          query,
+          viewerContext,
+        );
         for (const hit of hits) {
           if (existingRefs.has(hit.source_ref)) continue;
           const parsed = this.parseNodeRef(hit.source_ref as NodeRef);
@@ -779,7 +1038,10 @@ export class GraphNavigator {
     return supplemental;
   }
 
-  private mergeSeeds(primary: SeedCandidate[], supplemental: SeedCandidate[]): SeedCandidate[] {
+  private mergeSeeds(
+    primary: SeedCandidate[],
+    supplemental: SeedCandidate[],
+  ): SeedCandidate[] {
     if (supplemental.length === 0) return primary;
     const seen = new Set(primary.map((s) => s.node_ref as string));
     const merged = [...primary];
@@ -798,7 +1060,9 @@ export class GraphNavigator {
     plan: QueryPlan | null = null,
     effectivePrimary: QueryType = analysis.query_type,
   ): Promise<Map<NodeRef, number>> {
-    const salienceByRef = await this.loadSalienceForRefs(seeds.map((seed) => seed.node_ref));
+    const salienceByRef = await this.loadSalienceForRefs(
+      seeds.map((seed) => seed.node_ref),
+    );
     const scores = new Map<NodeRef, number>();
 
     for (const seed of seeds) {
@@ -807,7 +1071,9 @@ export class GraphNavigator {
       // GAP-4 §2 Stage B: use effectivePrimary (plan-driven when flag on)
       // to look up the nodeTypePrior matrix. Default arg = analysis.query_type
       // preserves pre-Stage-B behavior for any direct/test caller.
-      const baseNodeTypePrior = parsedSeed ? this.nodeTypePrior(effectivePrimary, parsedSeed.kind) : 0.2;
+      const baseNodeTypePrior = parsedSeed
+        ? this.nodeTypePrior(effectivePrimary, parsedSeed.kind)
+        : 0.2;
       // GAP-4 §2 Stage A: when a plan is supplied, multiply (not replace)
       // the hand-tuned `nodeTypePrior` matrix by `(1 + planBias)` for the
       // matching kind. Plan bias is sparse: only six kinds are listed
@@ -816,8 +1082,11 @@ export class GraphNavigator {
       // semantics let plan-driven scoring degrade gracefully when the plan
       // is wrong: a 0 bias falls back to the matrix exactly, a 1 bias
       // doubles it.
-      const planBiasMap = plan?.graphPlan.seedBias as Record<string, number> | undefined;
-      const planSeedBias = parsedSeed && planBiasMap ? (planBiasMap[parsedSeed.kind] ?? 0) : 0;
+      const planBiasMap = plan?.graphPlan.seedBias as
+        | Record<string, number>
+        | undefined;
+      const planSeedBias =
+        parsedSeed && planBiasMap ? (planBiasMap[parsedSeed.kind] ?? 0) : 0;
       const nodeTypePrior = baseNodeTypePrior * (1 + planSeedBias);
       const salience = salienceByRef.get(seed.node_ref) ?? 0;
       const seedScore =
@@ -832,7 +1101,9 @@ export class GraphNavigator {
     return scores;
   }
 
-  private async loadSalienceForRefs(refs: NodeRef[]): Promise<Map<NodeRef, number>> {
+  private async loadSalienceForRefs(
+    refs: NodeRef[],
+  ): Promise<Map<NodeRef, number>> {
     const unique = Array.from(new Set(refs));
     if (unique.length === 0) {
       return new Map();
@@ -846,7 +1117,10 @@ export class GraphNavigator {
     return map;
   }
 
-  private isAliasMatchedSeed(seed: SeedCandidate, analysis: QueryAnalysis): boolean {
+  private isAliasMatchedSeed(
+    seed: SeedCandidate,
+    analysis: QueryAnalysis,
+  ): boolean {
     if (seed.node_kind !== "entity") {
       return false;
     }
@@ -859,13 +1133,69 @@ export class GraphNavigator {
 
   private nodeTypePrior(queryType: QueryType, nodeKind: NodeRefKind): number {
     const priors = {
-      entity: { entity: 1, fact: 0.75, event: 0.4, assertion: 0.7, evaluation: 0.4, commitment: 0.4, episode: 0.35 },
-      event: { event: 1, fact: 0.7, entity: 0.55, assertion: 0.45, evaluation: 0.8, commitment: 0.6, episode: 0.85 },
-      why: { event: 1, fact: 0.85, entity: 0.5, assertion: 0.65, evaluation: 0.85, commitment: 0.75, episode: 0.8 },
-      relationship: { entity: 1, fact: 0.9, event: 0.45, assertion: 0.7, evaluation: 0.45, commitment: 0.5, episode: 0.3 },
-      timeline: { event: 1, fact: 0.5, entity: 0.3, assertion: 0.45, evaluation: 0.85, commitment: 0.7, episode: 0.9 },
-      state: { fact: 1, entity: 0.85, event: 0.5, assertion: 0.8, evaluation: 0.5, commitment: 0.75, episode: 0.4 },
-      conflict: { assertion: 1, fact: 0.9, event: 0.7, evaluation: 0.75, commitment: 0.6, entity: 0.6, episode: 0.65 },
+      entity: {
+        entity: 1,
+        fact: 0.75,
+        event: 0.4,
+        assertion: 0.7,
+        evaluation: 0.4,
+        commitment: 0.4,
+        episode: 0.35,
+      },
+      event: {
+        event: 1,
+        fact: 0.7,
+        entity: 0.55,
+        assertion: 0.45,
+        evaluation: 0.8,
+        commitment: 0.6,
+        episode: 0.85,
+      },
+      why: {
+        event: 1,
+        fact: 0.85,
+        entity: 0.5,
+        assertion: 0.65,
+        evaluation: 0.85,
+        commitment: 0.75,
+        episode: 0.8,
+      },
+      relationship: {
+        entity: 1,
+        fact: 0.9,
+        event: 0.45,
+        assertion: 0.7,
+        evaluation: 0.45,
+        commitment: 0.5,
+        episode: 0.3,
+      },
+      timeline: {
+        event: 1,
+        fact: 0.5,
+        entity: 0.3,
+        assertion: 0.45,
+        evaluation: 0.85,
+        commitment: 0.7,
+        episode: 0.9,
+      },
+      state: {
+        fact: 1,
+        entity: 0.85,
+        event: 0.5,
+        assertion: 0.8,
+        evaluation: 0.5,
+        commitment: 0.75,
+        episode: 0.4,
+      },
+      conflict: {
+        assertion: 1,
+        fact: 0.9,
+        event: 0.7,
+        evaluation: 0.75,
+        commitment: 0.6,
+        entity: 0.6,
+        episode: 0.65,
+      },
     } satisfies Record<QueryType, Record<NodeRefKind, number>>;
 
     return (priors[queryType] as Record<string, number>)[nodeKind] ?? 0.2;
@@ -881,34 +1211,70 @@ export class GraphNavigator {
     strategy: GraphRetrievalStrategy,
     plan: QueryPlan | null = null,
     secondaries: readonly QueryType[] = [],
+    onStep?: (step: {
+      depth: number;
+      visited_ref: string;
+      via_ref?: string;
+      via_relation?: string;
+      score?: number;
+      pruned?: string | null;
+    }) => void,
   ): Promise<InternalBeamPath[]> {
-    const effectiveBeamWidth = Math.min(32, Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)));
-    const sortedSeeds = [...seeds].sort((a, b) => (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0));
-    let currentLayer: InternalBeamPath[] = sortedSeeds.slice(0, effectiveBeamWidth).map((seed) => ({
-      seed,
-      path: {
-        seed: seed.node_ref,
-        nodes: [seed.node_ref],
-        edges: [],
-        depth: 0,
-      },
-      internal_edges: [],
-    }));
+    const effectiveBeamWidth = Math.min(
+      32,
+      Math.max(1, Math.ceil(options.beamWidth * strategy.beamWidthMultiplier)),
+    );
+    const sortedSeeds = [...seeds].sort(
+      (a, b) =>
+        (seedScores.get(b.node_ref) ?? 0) - (seedScores.get(a.node_ref) ?? 0),
+    );
+    let currentLayer: InternalBeamPath[] = sortedSeeds
+      .slice(0, effectiveBeamWidth)
+      .map((seed) => ({
+        seed,
+        path: {
+          seed: seed.node_ref,
+          nodes: [seed.node_ref],
+          edges: [],
+          depth: 0,
+        },
+        internal_edges: [],
+      }));
 
     const allPaths: InternalBeamPath[] = [...currentLayer];
 
     for (let depth = 1; depth <= options.maxDepth; depth += 1) {
       const frontier = this.groupFrontierByKind(currentLayer);
-      const neighborMap = await this.fetchNeighborsByFrontier(frontier, viewerContext, input);
+      const neighborMap = await this.fetchNeighborsByFrontier(
+        frontier,
+        viewerContext,
+        input,
+      );
 
       const nextCandidates: InternalBeamPath[] = [];
       for (const pathItem of currentLayer) {
         const tail = pathItem.path.nodes[pathItem.path.nodes.length - 1];
         const neighbors = [...(neighborMap.get(tail) ?? [])];
-        neighbors.sort((a, b) => this.compareNeighborEdges(a, b, queryType, strategy, plan, secondaries));
+        neighbors.sort((a, b) =>
+          this.compareNeighborEdges(
+            a,
+            b,
+            queryType,
+            strategy,
+            plan,
+            secondaries,
+          ),
+        );
 
         for (const edge of neighbors) {
           if (pathItem.path.nodes.includes(edge.to)) {
+            onStep?.({
+              depth,
+              visited_ref: edge.to,
+              via_ref: edge.from,
+              via_relation: edge.kind,
+              pruned: "cycle",
+            });
             continue;
           }
           const nextPath: InternalBeamPath = {
@@ -921,6 +1287,21 @@ export class GraphNavigator {
             },
             internal_edges: [...pathItem.internal_edges, edge],
           };
+          const pathScore = this.preliminaryPathScore(
+            nextPath,
+            seedScores,
+            queryType,
+            strategy,
+            plan,
+            secondaries,
+          );
+          onStep?.({
+            depth,
+            visited_ref: edge.to,
+            via_ref: edge.from,
+            via_relation: edge.kind,
+            score: pathScore,
+          });
           nextCandidates.push(nextPath);
         }
       }
@@ -930,7 +1311,45 @@ export class GraphNavigator {
       }
 
       const unique = this.deduplicatePaths(nextCandidates);
-      unique.sort((a, b) => this.preliminaryPathScore(b, seedScores, queryType, strategy, plan, secondaries) - this.preliminaryPathScore(a, seedScores, queryType, strategy, plan, secondaries));
+      unique.sort(
+        (a, b) =>
+          this.preliminaryPathScore(
+            b,
+            seedScores,
+            queryType,
+            strategy,
+            plan,
+            secondaries,
+          ) -
+          this.preliminaryPathScore(
+            a,
+            seedScores,
+            queryType,
+            strategy,
+            plan,
+            secondaries,
+          ),
+      );
+      for (const dropped of unique.slice(effectiveBeamWidth)) {
+        const lastEdge = dropped.path.edges[dropped.path.edges.length - 1];
+        const tail = dropped.path.nodes[dropped.path.nodes.length - 1];
+        onStep?.({
+          depth,
+          visited_ref: tail,
+          ...(lastEdge
+            ? { via_ref: lastEdge.from, via_relation: lastEdge.kind }
+            : {}),
+          score: this.preliminaryPathScore(
+            dropped,
+            seedScores,
+            queryType,
+            strategy,
+            plan,
+            secondaries,
+          ),
+          pruned: "beam_width",
+        });
+      }
       currentLayer = unique.slice(0, effectiveBeamWidth);
       allPaths.push(...currentLayer);
     }
@@ -938,7 +1357,9 @@ export class GraphNavigator {
     return allPaths;
   }
 
-  private groupFrontierByKind(paths: InternalBeamPath[]): Map<NodeRefKind, Set<NodeRef>> {
+  private groupFrontierByKind(
+    paths: InternalBeamPath[],
+  ): Map<NodeRefKind, Set<NodeRef>> {
     const grouped = new Map<NodeRefKind, Set<NodeRef>>();
     for (const path of paths) {
       const tail = path.path.nodes[path.path.nodes.length - 1];
@@ -960,19 +1381,44 @@ export class GraphNavigator {
   ): Promise<Map<NodeRef, InternalBeamEdge[]>> {
     const map = new Map<NodeRef, InternalBeamEdge[]>();
 
-    await this.expandEventFrontier(frontier.get("event"), viewerContext, map, timeSlice);
-    await this.expandEntityFrontier(frontier.get("entity"), viewerContext, map, timeSlice);
-    await this.expandFactFrontier(frontier.get("fact"), viewerContext, map, timeSlice);
+    await this.expandEventFrontier(
+      frontier.get("event"),
+      viewerContext,
+      map,
+      timeSlice,
+    );
+    await this.expandEntityFrontier(
+      frontier.get("entity"),
+      viewerContext,
+      map,
+      timeSlice,
+    );
+    await this.expandFactFrontier(
+      frontier.get("fact"),
+      viewerContext,
+      map,
+      timeSlice,
+    );
     const privateEventFrontier = new Set<NodeRef>([
       ...(frontier.get("evaluation") ?? []),
       ...(frontier.get("commitment") ?? []),
     ]);
-    await this.expandPrivateEventFrontier(privateEventFrontier.size > 0 ? privateEventFrontier : undefined, viewerContext, map, timeSlice);
+    await this.expandPrivateEventFrontier(
+      privateEventFrontier.size > 0 ? privateEventFrontier : undefined,
+      viewerContext,
+      map,
+      timeSlice,
+    );
 
     const privateBeliefFrontier = new Set<NodeRef>([
       ...(frontier.get("assertion") ?? []),
     ]);
-    await this.expandPrivateBeliefFrontier(privateBeliefFrontier.size > 0 ? privateBeliefFrontier : undefined, viewerContext, map, timeSlice);
+    await this.expandPrivateBeliefFrontier(
+      privateBeliefFrontier.size > 0 ? privateBeliefFrontier : undefined,
+      viewerContext,
+      map,
+      timeSlice,
+    );
     await this.expandRelationEdges(frontier, viewerContext, map, timeSlice);
 
     return map;
@@ -993,7 +1439,11 @@ export class GraphNavigator {
       return;
     }
 
-    const logicEdges = await this.edgeView.readLogicEdges(frontier, viewerContext, timeSlice);
+    const logicEdges = await this.edgeView.readLogicEdges(
+      frontier,
+      viewerContext,
+      timeSlice,
+    );
     for (const edge of logicEdges) {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
@@ -1008,7 +1458,11 @@ export class GraphNavigator {
       });
     }
 
-    const stateSupportEdges = await this.edgeView.readStateFactEdges(frontier, viewerContext, timeSlice);
+    const stateSupportEdges = await this.edgeView.readStateFactEdges(
+      frontier,
+      viewerContext,
+      timeSlice,
+    );
     for (const edge of stateSupportEdges) {
       const parsedFact = this.parseNodeRef(edge.target_ref);
       this.pushEdge(map, edge.source_ref, {
@@ -1024,14 +1478,20 @@ export class GraphNavigator {
       });
     }
 
-    const contexts = await this.readRepo.readEventParticipantContexts(eventRefs, viewerContext);
+    const contexts = await this.readRepo.readEventParticipantContexts(
+      eventRefs,
+      viewerContext,
+    );
     const candidateEntityRefs = new Set<NodeRef>();
     for (const context of contexts) {
       for (const participantRef of context.participantEntityRefs) {
         candidateEntityRefs.add(participantRef);
       }
     }
-    const visibleEntityRefs = await this.filterVisibleNodeRefs(Array.from(candidateEntityRefs), viewerContext);
+    const visibleEntityRefs = await this.filterVisibleNodeRefs(
+      Array.from(candidateEntityRefs),
+      viewerContext,
+    );
 
     for (const context of contexts) {
       const srcRef = context.eventRef;
@@ -1071,12 +1531,16 @@ export class GraphNavigator {
       return;
     }
 
-    const factRows = await this.readRepo.readActiveFactsForEntityFrontier(frontierRefs);
+    const factRows =
+      await this.readRepo.readActiveFactsForEntityFrontier(frontierRefs);
     const factEntityCandidates: NodeRef[] = [];
     for (const row of factRows) {
       factEntityCandidates.push(row.sourceEntityRef, row.targetEntityRef);
     }
-    const visibleFactEntities = await this.filterVisibleNodeRefs(factEntityCandidates, viewerContext);
+    const visibleFactEntities = await this.filterVisibleNodeRefs(
+      factEntityCandidates,
+      viewerContext,
+    );
 
     for (const row of factRows) {
       const sourceRef = row.sourceEntityRef;
@@ -1111,7 +1575,11 @@ export class GraphNavigator {
       }
     }
 
-    const participantRows = await this.readRepo.readVisibleEventsForEntityFrontier(frontierRefs, viewerContext);
+    const participantRows =
+      await this.readRepo.readVisibleEventsForEntityFrontier(
+        frontierRefs,
+        viewerContext,
+      );
     for (const row of participantRows) {
       const eventRef = row.eventRef;
       for (const entityRef of row.participantEntityRefs) {
@@ -1193,7 +1661,8 @@ export class GraphNavigator {
       return;
     }
 
-    const factRows = await this.readRepo.readActiveFactsForEntityFrontier(factRefs);
+    const factRows =
+      await this.readRepo.readActiveFactsForEntityFrontier(factRefs);
     const candidateRefs: NodeRef[] = [];
     for (const row of factRows) {
       candidateRefs.push(row.sourceEntityRef, row.targetEntityRef);
@@ -1201,7 +1670,10 @@ export class GraphNavigator {
         candidateRefs.push(row.sourceEventRef);
       }
     }
-    const visibleRefs = await this.filterVisibleNodeRefs(candidateRefs, viewerContext);
+    const visibleRefs = await this.filterVisibleNodeRefs(
+      candidateRefs,
+      viewerContext,
+    );
 
     for (const row of factRows) {
       const factRef = row.factRef;
@@ -1263,7 +1735,13 @@ export class GraphNavigator {
       return;
     }
 
-    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
+    await this.expandSemanticEdges(
+      frontier,
+      viewerContext,
+      map,
+      timeSlice,
+      true,
+    );
   }
 
   private async expandPrivateBeliefFrontier(
@@ -1306,7 +1784,10 @@ export class GraphNavigator {
         candidateRefs.push(detail.sourceEventRef);
       }
     }
-    const visibleRefs = await this.filterVisibleNodeRefs(candidateRefs, viewerContext);
+    const visibleRefs = await this.filterVisibleNodeRefs(
+      candidateRefs,
+      viewerContext,
+    );
 
     for (const detail of details) {
       const beliefRef = detail.assertionRef;
@@ -1314,8 +1795,10 @@ export class GraphNavigator {
         continue;
       }
       const parsedBelief = this.parseNodeRef(beliefRef);
-      const beliefId = parsedBelief?.kind === "assertion" ? parsedBelief.id : null;
-      const canonicalBeliefRef = beliefId != null ? (idToRef.get(beliefId) ?? beliefRef) : beliefRef;
+      const beliefId =
+        parsedBelief?.kind === "assertion" ? parsedBelief.id : null;
+      const canonicalBeliefRef =
+        beliefId != null ? (idToRef.get(beliefId) ?? beliefRef) : beliefRef;
       const summary = detail.predicate ?? detail.summary;
 
       const sourceRef = detail.sourceEntityRef;
@@ -1361,7 +1844,13 @@ export class GraphNavigator {
       }
     }
 
-    await this.expandSemanticEdges(frontier, viewerContext, map, timeSlice, true);
+    await this.expandSemanticEdges(
+      frontier,
+      viewerContext,
+      map,
+      timeSlice,
+      true,
+    );
   }
 
   private async expandRelationEdges(
@@ -1376,7 +1865,11 @@ export class GraphNavigator {
     }
     if (allRefs.length === 0) return;
 
-    const edges = await this.edgeView.readMemoryRelations(new Set(allRefs), viewerContext, timeSlice);
+    const edges = await this.edgeView.readMemoryRelations(
+      new Set(allRefs),
+      viewerContext,
+      timeSlice,
+    );
     for (const edge of edges) {
       this.pushEdge(map, edge.source_ref, {
         from: edge.source_ref,
@@ -1399,9 +1892,20 @@ export class GraphNavigator {
     timeSlice: TimeSliceQuery,
     privateFrontier = false,
   ): Promise<void> {
-    const edges = await this.edgeView.readSemanticEdges(frontier, viewerContext, timeSlice);
+    const edges = await this.edgeView.readSemanticEdges(
+      frontier,
+      viewerContext,
+      timeSlice,
+    );
     for (const edge of edges) {
-      if (privateFrontier && !(await this.isSameAgentPrivateCompatibility(edge.source_ref, edge.target_ref, viewerContext.viewer_agent_id))) {
+      if (
+        privateFrontier &&
+        !(await this.isSameAgentPrivateCompatibility(
+          edge.source_ref,
+          edge.target_ref,
+          viewerContext.viewer_agent_id,
+        ))
+      ) {
         continue;
       }
       this.pushEdge(map, edge.source_ref, {
@@ -1418,17 +1922,32 @@ export class GraphNavigator {
     }
   }
 
-  private async isSameAgentPrivateCompatibility(from: NodeRef, to: NodeRef, viewerAgentId: string): Promise<boolean> {
+  private async isSameAgentPrivateCompatibility(
+    from: NodeRef,
+    to: NodeRef,
+    viewerAgentId: string,
+  ): Promise<boolean> {
     const fromKind = this.parseNodeRef(from)?.kind;
     const toKind = this.parseNodeRef(to)?.kind;
-    const fromPrivate = fromKind === "assertion" || fromKind === "evaluation" || fromKind === "commitment" || fromKind === "episode";
-    const toPrivate = toKind === "assertion" || toKind === "evaluation" || toKind === "commitment" || toKind === "episode";
+    const fromPrivate =
+      fromKind === "assertion" ||
+      fromKind === "evaluation" ||
+      fromKind === "commitment" ||
+      fromKind === "episode";
+    const toPrivate =
+      toKind === "assertion" ||
+      toKind === "evaluation" ||
+      toKind === "commitment" ||
+      toKind === "episode";
 
     if (!fromPrivate && !toPrivate) {
       return true;
     }
 
-    if (fromPrivate && (await this.getPrivateNodeAgentId(from)) !== viewerAgentId) {
+    if (
+      fromPrivate &&
+      (await this.getPrivateNodeAgentId(from)) !== viewerAgentId
+    ) {
       return false;
     }
     if (toPrivate && (await this.getPrivateNodeAgentId(to)) !== viewerAgentId) {
@@ -1436,13 +1955,18 @@ export class GraphNavigator {
     }
 
     if (fromPrivate && toPrivate) {
-      return (await this.getPrivateNodeAgentId(from)) === (await this.getPrivateNodeAgentId(to));
+      return (
+        (await this.getPrivateNodeAgentId(from)) ===
+        (await this.getPrivateNodeAgentId(to))
+      );
     }
 
     return true;
   }
 
-  private async getPrivateNodeAgentId(nodeRef: NodeRef): Promise<string | null> {
+  private async getPrivateNodeAgentId(
+    nodeRef: NodeRef,
+  ): Promise<string | null> {
     const cached = this.privateNodeOwnerCache.get(nodeRef);
     if (cached !== undefined) {
       return cached;
@@ -1452,7 +1976,12 @@ export class GraphNavigator {
       this.privateNodeOwnerCache.set(nodeRef, null);
       return null;
     }
-    if (parsed.kind === "assertion" || parsed.kind === "evaluation" || parsed.kind === "commitment" || parsed.kind === "episode") {
+    if (
+      parsed.kind === "assertion" ||
+      parsed.kind === "evaluation" ||
+      parsed.kind === "commitment" ||
+      parsed.kind === "episode"
+    ) {
       const owners = await this.readRepo.getPrivateNodeOwners([nodeRef]);
       const owner = owners[0]?.agentId ?? null;
       this.privateNodeOwnerCache.set(nodeRef, owner);
@@ -1485,7 +2014,6 @@ export class GraphNavigator {
     return (b.timestamp ?? 0) - (a.timestamp ?? 0);
   }
 
-
   private edgePriorityScore(
     kind: NavigatorEdgeKind | MemoryRelationType,
     queryType: QueryType,
@@ -1496,9 +2024,10 @@ export class GraphNavigator {
     // When secondaries is empty (flag off OR no plan OR no secondaries),
     // use the original single-intent priority list — byte-equal to
     // pre-Stage-B behavior.
-    const ordered = secondaries.length === 0
-      ? QUERY_TYPE_PRIORITY[queryType]
-      : mergedEdgePriority(queryType, secondaries);
+    const ordered =
+      secondaries.length === 0
+        ? QUERY_TYPE_PRIORITY[queryType]
+        : mergedEdgePriority(queryType, secondaries);
     const index = (ordered as readonly string[]).indexOf(kind);
     if (index !== -1) {
       // Normalization side effect (documented for future readers):
@@ -1532,13 +2061,22 @@ export class GraphNavigator {
     secondaries: readonly QueryType[] = [],
   ): number {
     const seed = seedScores.get(path.path.seed) ?? 0;
-    const edgeScore = path.internal_edges.length === 0
-      ? 0
-      : path.internal_edges.reduce((acc, edge) => {
-          const base = this.edgePriorityScore(edge.kind, queryType, secondaries);
-          const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
-          return acc + base * multiplier;
-        }, 0) / path.internal_edges.length;
+    const edgeScore =
+      path.internal_edges.length === 0
+        ? 0
+        : path.internal_edges.reduce((acc, edge) => {
+            const base = this.edgePriorityScore(
+              edge.kind,
+              queryType,
+              secondaries,
+            );
+            const multiplier = effectiveEdgeMultiplier(
+              edge.kind,
+              strategy,
+              plan,
+            );
+            return acc + base * multiplier;
+          }, 0) / path.internal_edges.length;
     const hopPenalty = path.path.depth / 2;
     return 0.55 * seed + 0.45 * edgeScore - 0.1 * hopPenalty;
   }
@@ -1563,21 +2101,37 @@ export class GraphNavigator {
     plan: QueryPlan | null = null,
     secondaries: readonly QueryType[] = [],
   ): Promise<Array<{ path: InternalBeamPath; score: PathScore }>> {
-    const snapshots = await this.loadNodeSnapshots(paths.flatMap((p) => p.path.nodes));
+    const snapshots = await this.loadNodeSnapshots(
+      paths.flatMap((p) => p.path.nodes),
+    );
 
     const scored = paths.map((path) => {
       const seedScore = seedScores.get(path.path.seed) ?? 0;
-      const edgeTypeScore = this.average(path.internal_edges.map((edge) => {
-        const base = this.edgePriorityScore(edge.kind, queryType, secondaries);
-        const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
-        return base * multiplier;
-      }));
-      const temporalConsistency = this.calculateTemporalConsistency(path.internal_edges);
-      const queryIntentMatch = this.calculateQueryIntentMatch(path.internal_edges, queryType, secondaries);
+      const edgeTypeScore = this.average(
+        path.internal_edges.map((edge) => {
+          const base = this.edgePriorityScore(
+            edge.kind,
+            queryType,
+            secondaries,
+          );
+          const multiplier = effectiveEdgeMultiplier(edge.kind, strategy, plan);
+          return base * multiplier;
+        }),
+      );
+      const temporalConsistency = this.calculateTemporalConsistency(
+        path.internal_edges,
+      );
+      const queryIntentMatch = this.calculateQueryIntentMatch(
+        path.internal_edges,
+        queryType,
+        secondaries,
+      );
       const supportScore = this.calculateSupportScore(path);
       const recencyScore = this.calculateRecencyScore(path, snapshots);
       const hopPenalty = path.path.depth / Math.max(1, maxDepth);
-      const redundancyPenalty = this.calculateRedundancyPenalty(path.path.nodes);
+      const redundancyPenalty = this.calculateRedundancyPenalty(
+        path.path.nodes,
+      );
 
       const finalScore =
         0.3 * seedScore +
@@ -1608,7 +2162,9 @@ export class GraphNavigator {
     return scored;
   }
 
-  private async loadNodeSnapshots(refs: NodeRef[]): Promise<Map<NodeRef, NodeSnapshot>> {
+  private async loadNodeSnapshots(
+    refs: NodeRef[],
+  ): Promise<Map<NodeRef, NodeSnapshot>> {
     const unique = Array.from(new Set(refs));
     const rows = await this.readRepo.getNodeSnapshots(unique);
     const map = new Map<NodeRef, NodeSnapshot>();
@@ -1622,7 +2178,9 @@ export class GraphNavigator {
   }
 
   private calculateTemporalConsistency(edges: InternalBeamEdge[]): number {
-    const times = edges.map((edge) => edge.timestamp).filter((timestamp): timestamp is number => timestamp !== null);
+    const times = edges
+      .map((edge) => edge.timestamp)
+      .filter((timestamp): timestamp is number => timestamp !== null);
     if (times.length <= 1) {
       return 1;
     }
@@ -1653,12 +2211,15 @@ export class GraphNavigator {
     // 的边类型优先级" requirement. The widening is +1 top kind per
     // secondary intent, capped at 4 so a large secondary list can't
     // reduce the signal to a meaningless "any match counts" floor.
-    const orderedForIntents = secondaries.length === 0
-      ? QUERY_TYPE_PRIORITY[queryType]
-      : mergedEdgePriority(queryType, secondaries);
+    const orderedForIntents =
+      secondaries.length === 0
+        ? QUERY_TYPE_PRIORITY[queryType]
+        : mergedEdgePriority(queryType, secondaries);
     const sliceWidth = Math.min(2 + secondaries.length, 4);
     const topKinds = new Set<NavigatorEdgeKind | MemoryRelationType>(
-      (orderedForIntents as readonly (NavigatorEdgeKind | MemoryRelationType)[]).slice(0, sliceWidth),
+      (
+        orderedForIntents as readonly (NavigatorEdgeKind | MemoryRelationType)[]
+      ).slice(0, sliceWidth),
     );
     const matched = edges.filter((edge) => topKinds.has(edge.kind)).length;
     return matched / edges.length;
@@ -1667,7 +2228,11 @@ export class GraphNavigator {
   private calculateSupportScore(path: InternalBeamPath): number {
     const corroborating = new Set<string>();
     for (const edge of path.internal_edges) {
-      if (edge.kind === "semantic_similar" || edge.kind === "entity_bridge" || edge.kind === "conflict_or_update") {
+      if (
+        edge.kind === "semantic_similar" ||
+        edge.kind === "entity_bridge" ||
+        edge.kind === "conflict_or_update"
+      ) {
         continue;
       }
 
@@ -1692,7 +2257,10 @@ export class GraphNavigator {
     return Math.min(1, corroborating.size / 3);
   }
 
-  private calculateRecencyScore(path: InternalBeamPath, snapshots: Map<NodeRef, NodeSnapshot>): number {
+  private calculateRecencyScore(
+    path: InternalBeamPath,
+    snapshots: Map<NodeRef, NodeSnapshot>,
+  ): number {
     const latest = path.path.nodes
       .map((node) => snapshots.get(node)?.timestamp ?? null)
       .filter((timestamp): timestamp is number => timestamp !== null)
@@ -1737,7 +2305,9 @@ export class GraphNavigator {
         path: candidate.path.path,
         score: candidate.score,
         supporting_nodes: this.collectSupportingNodes(candidate.path.path),
-        supporting_facts: this.collectSupportingFacts(candidate.path.internal_edges),
+        supporting_facts: this.collectSupportingFacts(
+          candidate.path.internal_edges,
+        ),
       };
 
       const safe = await this.applyPostFilterSafetyNet(evidence, viewerContext);
@@ -1748,7 +2318,11 @@ export class GraphNavigator {
     return result;
   }
 
-  private applyDetailLevel(paths: EvidencePath[], detailLevel?: ExplainDetailLevel, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath[] {
+  private applyDetailLevel(
+    paths: EvidencePath[],
+    detailLevel?: ExplainDetailLevel,
+    seedsByRef?: Map<NodeRef, SeedCandidate>,
+  ): EvidencePath[] {
     if (!detailLevel || detailLevel === "standard") {
       return paths;
     }
@@ -1761,14 +2335,18 @@ export class GraphNavigator {
     return paths;
   }
 
-  private enrichWithProvenance(evidencePath: EvidencePath, seedsByRef?: Map<NodeRef, SeedCandidate>): EvidencePath {
+  private enrichWithProvenance(
+    evidencePath: EvidencePath,
+    seedsByRef?: Map<NodeRef, SeedCandidate>,
+  ): EvidencePath {
     const seed = seedsByRef?.get(evidencePath.path.seed);
     const sourceSurface = seed?.source_scope ?? "unknown";
 
     const edgeTimestamps = evidencePath.path.edges
       .map((e) => e.timestamp)
       .filter((t): t is number => t !== null);
-    const committedTime = edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : null;
+    const committedTime =
+      edgeTimestamps.length > 0 ? Math.max(...edgeTimestamps) : null;
 
     const confidenceScore = this.clamp01(evidencePath.score.path_score);
 
@@ -1780,11 +2358,13 @@ export class GraphNavigator {
     }
     const uniqueConflictRefs = Array.from(new Set(conflictRefs));
 
-    const edgeLayers = Array.from(new Set(
-      evidencePath.path.edges
-        .map((e) => e.layer)
-        .filter((l): l is EdgeLayer => l !== undefined),
-    ));
+    const edgeLayers = Array.from(
+      new Set(
+        evidencePath.path.edges
+          .map((e) => e.layer)
+          .filter((l): l is EdgeLayer => l !== undefined),
+      ),
+    );
 
     const provenance: AuditProvenance = {
       source_surface: sourceSurface,
@@ -1797,7 +2377,9 @@ export class GraphNavigator {
     return { ...evidencePath, provenance };
   }
 
-  private buildAuditSummary(paths: EvidencePath[]): NavigatorResult["audit_summary"] {
+  private buildAuditSummary(
+    paths: EvidencePath[],
+  ): NavigatorResult["audit_summary"] {
     const surfaces = new Set<string>();
     let earliest: number | null = null;
     let latest: number | null = null;
@@ -1841,11 +2423,17 @@ export class GraphNavigator {
     return Array.from(facts).sort((a, b) => a - b);
   }
 
-  private applyPostFilterSafetyNet(evidencePath: EvidencePath, viewerContext: ViewerContext): Promise<EvidencePath | null> {
+  private applyPostFilterSafetyNet(
+    evidencePath: EvidencePath,
+    viewerContext: ViewerContext,
+  ): Promise<EvidencePath | null> {
     return this.applyPostFilterSafetyNetAsync(evidencePath, viewerContext);
   }
 
-  private async applyPostFilterSafetyNetAsync(evidencePath: EvidencePath, viewerContext: ViewerContext): Promise<EvidencePath | null> {
+  private async applyPostFilterSafetyNetAsync(
+    evidencePath: EvidencePath,
+    viewerContext: ViewerContext,
+  ): Promise<EvidencePath | null> {
     const visibleNodes: NodeRef[] = [];
     const redactedPlaceholders: RedactedPlaceholder[] = [];
     await this.primeVisibilityRecords(evidencePath.path.nodes);
@@ -1854,7 +2442,9 @@ export class GraphNavigator {
       if (disposition === "visible") {
         visibleNodes.push(node);
       } else {
-        redactedPlaceholders.push(this.redactionPolicy.toPlaceholder(node, disposition));
+        redactedPlaceholders.push(
+          this.redactionPolicy.toPlaceholder(node, disposition),
+        );
       }
     }
 
@@ -1866,11 +2456,15 @@ export class GraphNavigator {
     const filteredEdges = evidencePath.path.edges.filter(
       (edge) => visibleSet.has(edge.from) && visibleSet.has(edge.to),
     );
-    const filteredSupportingNodes = evidencePath.supporting_nodes.filter((node) => visibleSet.has(node));
+    const filteredSupportingNodes = evidencePath.supporting_nodes.filter(
+      (node) => visibleSet.has(node),
+    );
 
     const filtered: EvidencePath = {
       path: {
-        seed: visibleSet.has(evidencePath.path.seed) ? evidencePath.path.seed : visibleNodes[0],
+        seed: visibleSet.has(evidencePath.path.seed)
+          ? evidencePath.path.seed
+          : visibleNodes[0],
         nodes: visibleNodes,
         edges: filteredEdges,
         depth: Math.min(evidencePath.path.depth, filteredEdges.length),
@@ -1878,7 +2472,9 @@ export class GraphNavigator {
       score: evidencePath.score,
       supporting_nodes: filteredSupportingNodes,
       supporting_facts: evidencePath.supporting_facts,
-      ...(redactedPlaceholders.length > 0 ? { redacted_placeholders: redactedPlaceholders } : {}),
+      ...(redactedPlaceholders.length > 0
+        ? { redacted_placeholders: redactedPlaceholders }
+        : {}),
     };
 
     filtered.summary = this.summarizeEvidencePath(filtered);
@@ -1889,7 +2485,10 @@ export class GraphNavigator {
     return filtered;
   }
 
-  private async filterVisibleNodeRefs(nodeRefs: NodeRef[], viewerContext: ViewerContext): Promise<Set<NodeRef>> {
+  private async filterVisibleNodeRefs(
+    nodeRefs: NodeRef[],
+    viewerContext: ViewerContext,
+  ): Promise<Set<NodeRef>> {
     const unique = Array.from(new Set(nodeRefs));
     await this.primeVisibilityRecords(unique);
     const visible = new Set<NodeRef>();
@@ -1902,7 +2501,10 @@ export class GraphNavigator {
     return visible;
   }
 
-  private async getNodeDisposition(nodeRef: NodeRef, viewerContext: ViewerContext): Promise<VisibilityDisposition> {
+  private async getNodeDisposition(
+    nodeRef: NodeRef,
+    viewerContext: ViewerContext,
+  ): Promise<VisibilityDisposition> {
     await this.primeVisibilityRecords([nodeRef]);
     const record = this.visibilityRecordCache.get(nodeRef) ?? null;
     if (!record) {
@@ -1912,11 +2514,17 @@ export class GraphNavigator {
     if (!nodeData) {
       return "hidden";
     }
-    return this.visibilityPolicy.getNodeDisposition(viewerContext, nodeRef, nodeData);
+    return this.visibilityPolicy.getNodeDisposition(
+      viewerContext,
+      nodeRef,
+      nodeData,
+    );
   }
 
   private async primeVisibilityRecords(nodeRefs: NodeRef[]): Promise<void> {
-    const missing = nodeRefs.filter((nodeRef) => !this.visibilityRecordCache.has(nodeRef));
+    const missing = nodeRefs.filter(
+      (nodeRef) => !this.visibilityRecordCache.has(nodeRef),
+    );
     if (missing.length === 0) {
       return;
     }
@@ -1927,7 +2535,9 @@ export class GraphNavigator {
     }
   }
 
-  private toVisibilityNodeData(record: GraphNodeVisibilityRecord): Record<string, unknown> | null {
+  private toVisibilityNodeData(
+    record: GraphNodeVisibilityRecord,
+  ): Record<string, unknown> | null {
     if (record.kind === "entity") {
       return {
         memory_scope: record.memoryScope,
@@ -1941,7 +2551,11 @@ export class GraphNavigator {
         owner_agent_id: record.ownerAgentId,
       };
     }
-    if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment") {
+    if (
+      record.kind === "assertion" ||
+      record.kind === "evaluation" ||
+      record.kind === "commitment"
+    ) {
       return { agent_id: record.agentId };
     }
     if (record.kind === "episode") {
@@ -1957,22 +2571,33 @@ export class GraphNavigator {
     const stepCount = path.path.nodes.length;
     const redactedCount = path.redacted_placeholders?.length ?? 0;
     const facts = path.supporting_facts.length;
-    const confidence = Number.isFinite(path.score.path_score) ? path.score.path_score.toFixed(2) : "0.00";
+    const confidence = Number.isFinite(path.score.path_score)
+      ? path.score.path_score.toFixed(2)
+      : "0.00";
     return `${stepCount} visible step${stepCount === 1 ? "" : "s"}, ${facts} supporting fact${facts === 1 ? "" : "s"}, score ${confidence}${redactedCount > 0 ? `, ${redactedCount} redacted` : ""}`;
   }
 
-  private summarizeResult(query: string, queryType: QueryType, evidencePaths: EvidencePath[]): string {
+  private summarizeResult(
+    query: string,
+    queryType: QueryType,
+    evidencePaths: EvidencePath[],
+  ): string {
     if (evidencePaths.length === 0) {
       return `No explain evidence found for '${query}'`;
     }
-    const redacted = evidencePaths.reduce((count, path) => count + (path.redacted_placeholders?.length ?? 0), 0);
+    const redacted = evidencePaths.reduce(
+      (count, path) => count + (path.redacted_placeholders?.length ?? 0),
+      0,
+    );
     return `Explain ${queryType}: ${evidencePaths.length} evidence path${evidencePaths.length === 1 ? "" : "s"}${redacted > 0 ? ` (${redacted} redacted placeholder${redacted === 1 ? "" : "s"})` : ""}`;
   }
 
   private pushEdge(
     map: Map<NodeRef, InternalBeamEdge[]>,
     from: NodeRef,
-    edge: Omit<InternalBeamEdge, "layer"> & { layer?: InternalBeamEdge["layer"] },
+    edge: Omit<InternalBeamEdge, "layer"> & {
+      layer?: InternalBeamEdge["layer"];
+    },
   ): void {
     const list = map.get(from) ?? [];
     list.push({
@@ -1982,11 +2607,22 @@ export class GraphNavigator {
     map.set(from, list);
   }
 
-  private inferEdgeLayer(kind: NavigatorEdgeKind | MemoryRelationType): InternalBeamEdge["layer"] {
-    if (kind === "semantic_similar" || kind === "entity_bridge" || kind === "conflict_or_update") {
+  private inferEdgeLayer(
+    kind: NavigatorEdgeKind | MemoryRelationType,
+  ): InternalBeamEdge["layer"] {
+    if (
+      kind === "semantic_similar" ||
+      kind === "entity_bridge" ||
+      kind === "conflict_or_update"
+    ) {
       return "heuristic";
     }
-    if (kind === "causal" || kind === "temporal_prev" || kind === "temporal_next" || kind === "same_episode") {
+    if (
+      kind === "causal" ||
+      kind === "temporal_prev" ||
+      kind === "temporal_next" ||
+      kind === "same_episode"
+    ) {
       return "symbolic";
     }
     return "state";

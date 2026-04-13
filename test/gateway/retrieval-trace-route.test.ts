@@ -37,6 +37,26 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
             narrative_facets_used: ["entity_filters"],
             cognition_facets_used: ["kind"],
             segment_count: 3,
+            segments: [
+              {
+                source: "event:11",
+                content: "A short snippet",
+                score: 0.88,
+              },
+            ],
+            navigator: {
+              seeds: ["event:11"],
+              steps: [
+                {
+                  depth: 1,
+                  visited_ref: "event:12",
+                  via_ref: "event:11",
+                  via_relation: "causal",
+                  score: 0.72,
+                },
+              ],
+              final_selection: ["event:11"],
+            },
           },
         }),
       },
@@ -52,6 +72,19 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
         narrative_facets_used: string[];
         cognition_facets_used: string[];
         segment_count: number;
+        segments?: Array<{ source: string; content: string; score?: number }>;
+        navigator?: {
+          seeds: string[];
+          steps: Array<{
+            depth: number;
+            visited_ref: string;
+            via_ref?: string;
+            via_relation?: string;
+            score?: number;
+            pruned?: string | null;
+          }>;
+          final_selection: string[];
+        };
       };
     };
 
@@ -59,6 +92,66 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
     expect(body.retrieval.query_string).toBe("hello");
     expect(body.retrieval.strategy).toBe("default_retrieval");
     expect(body.retrieval.segment_count).toBe(3);
+    expect(body.retrieval.segments).toEqual([
+      {
+        source: "event:11",
+        content: "A short snippet",
+        score: 0.88,
+      },
+    ]);
+    expect(body.retrieval.navigator).toEqual({
+      seeds: ["event:11"],
+      steps: [
+        {
+          depth: 1,
+          visited_ref: "event:12",
+          via_ref: "event:11",
+          via_relation: "causal",
+          score: 0.72,
+        },
+      ],
+      final_selection: ["event:11"],
+    });
+  });
+
+  it("returns retrieval with segments only when navigator is absent", async () => {
+    const baseUrl = startServer({
+      traceStore: {
+        getTrace: (requestId: string) => ({
+          request_id: requestId,
+          session_id: "sess-1",
+          agent_id: "rp:default",
+          captured_at: 1,
+          public_chunks: [],
+          log_entries: [],
+          retrieval: {
+            query_string: "hello",
+            strategy: "default_retrieval",
+            narrative_facets_used: [],
+            cognition_facets_used: [],
+            segment_count: 1,
+            segments: [{ source: "fact:5", content: "fact snippet" }],
+          },
+        }),
+      },
+    });
+
+    const res = await fetch(
+      `${baseUrl}/v1/requests/req-segments/retrieval-trace`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      request_id: string;
+      retrieval: {
+        segments?: Array<{ source: string; content: string }>;
+        navigator?: unknown;
+      };
+    };
+    expect(body.request_id).toBe("req-segments");
+    expect(body.retrieval.segments).toEqual([
+      { source: "fact:5", content: "fact snippet" },
+    ]);
+    expect(body.retrieval.navigator).toBeUndefined();
   });
 
   it("returns retrieval: null when request exists with no retrieval capture", async () => {
@@ -97,7 +190,9 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
 
     const res = await fetch(`${baseUrl}/v1/requests/unknown/retrieval-trace`);
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: { code: string; message: string } };
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
     expect(body.error.code).toBe("REQUEST_NOT_FOUND");
     expect(body.error.message.includes("Unknown request_id")).toBe(true);
   });
@@ -107,7 +202,9 @@ describe("GET /v1/requests/{request_id}/retrieval-trace", () => {
 
     const res = await fetch(`${baseUrl}/v1/requests/req-3/retrieval-trace`);
     expect(res.status).toBe(501);
-    const body = (await res.json()) as { error: { code: string; message: string } };
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
     expect(body.error.code).toBe("UNSUPPORTED_RUNTIME_MODE");
     expect(body.error.message.includes("traceStore")).toBe(true);
   });
