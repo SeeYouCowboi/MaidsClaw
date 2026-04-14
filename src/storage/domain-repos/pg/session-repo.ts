@@ -18,6 +18,7 @@ type SessionListRow = {
   created_at: number | string;
   closed_at: number | string | null;
   recovery_required: number;
+  title: string | null;
 };
 
 export class PgSessionRepo implements SessionRepo {
@@ -65,7 +66,7 @@ export class PgSessionRepo implements SessionRepo {
     }
 
     const rows = await this.sql<SessionListRow[]>`
-      SELECT session_id, agent_id, created_at, closed_at, recovery_required
+      SELECT session_id, agent_id, created_at, closed_at, recovery_required, title
       FROM sessions
       WHERE (${params.agentId ?? null}::text IS NULL OR agent_id = ${params.agentId ?? null})
         AND (
@@ -109,6 +110,7 @@ export class PgSessionRepo implements SessionRepo {
         created_at: Number(row.created_at),
         ...(closedAt !== undefined ? { closed_at: closedAt } : {}),
         status,
+        ...(row.title ? { title: row.title } : {}),
       };
     });
 
@@ -199,5 +201,11 @@ export class PgSessionRepo implements SessionRepo {
 
   async isRecoveryRequired(sessionId: string): Promise<boolean> {
     return this.requiresRecovery(sessionId);
+  }
+
+  async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+    await this.sql`
+      UPDATE sessions SET title = ${title} WHERE session_id = ${sessionId}
+    `;
   }
 }

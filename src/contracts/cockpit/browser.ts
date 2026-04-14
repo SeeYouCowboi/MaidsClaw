@@ -149,6 +149,7 @@ export const SessionListItemSchema = z
     created_at: z.number().int().nonnegative(),
     closed_at: z.number().int().nonnegative().optional(),
     status: SessionStatusSchema,
+    title: z.string().optional(),
   })
   .strict();
 export type SessionListItem = z.infer<typeof SessionListItemSchema>;

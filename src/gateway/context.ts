@@ -117,6 +117,27 @@ export interface CognitionEventRepoService {
   readByCognitionKey(agentId: string, cognitionKey: string): Promise<unknown[]>;
 }
 
+export type LightweightCompleteOptions = {
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  system?: string;
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+};
+
+export type LightweightCompleteResult = {
+  text: string;
+  model: string;
+};
+
+/**
+ * Stateless, fire-and-forget LLM completion service — no memory, no session.
+ * Designed for lightweight utility tasks such as generating titles.
+ */
+export interface LightweightLlmService {
+  complete(options: LightweightCompleteOptions): Promise<LightweightCompleteResult>;
+}
+
 export type GraphEdgeFamilyFilter = "logic" | "semantic" | "memory";
 export type GraphEdgeDirectionFilter = "out" | "in" | "both";
 
@@ -225,6 +246,7 @@ export interface GatewayContext {
   cognitionEventRepo?: CognitionEventRepoService;
   graphReadRepo?: GraphReadRepoService;
   entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
+  lightweightLlm?: LightweightLlmService;
 
   corsAllowedOrigins?: string[];
 

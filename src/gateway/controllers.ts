@@ -570,7 +570,7 @@ function mapTurnValidationErrorCode(error: unknown): string {
     error.details !== null &&
     "reason" in error.details &&
     (error.details as { reason?: unknown }).reason ===
-      "SESSION_RECOVERY_REQUIRED"
+    "SESSION_RECOVERY_REQUIRED"
   ) {
     return "SESSION_RECOVERY_REQUIRED";
   }
@@ -789,49 +789,49 @@ export async function handleRequestRetrievalTrace(
       request_id: requestId,
       retrieval: trace.retrieval
         ? {
-            query_string: trace.retrieval.query_string,
-            strategy: trace.retrieval.strategy,
-            narrative_facets_used: [...trace.retrieval.narrative_facets_used],
-            cognition_facets_used: [...trace.retrieval.cognition_facets_used],
-            segment_count: trace.retrieval.segment_count,
-            ...(trace.retrieval.segments !== undefined
-              ? {
-                  segments: trace.retrieval.segments.map((segment) => ({
-                    source: segment.source,
-                    content: segment.content,
-                    ...(segment.score !== undefined
-                      ? { score: segment.score }
-                      : {}),
-                  })),
-                }
-              : {}),
-            ...(trace.retrieval.navigator !== undefined
-              ? {
-                  navigator: {
-                    seeds: [...trace.retrieval.navigator.seeds],
-                    steps: trace.retrieval.navigator.steps.map((step) => ({
-                      depth: step.depth,
-                      visited_ref: step.visited_ref,
-                      ...(step.via_ref !== undefined
-                        ? { via_ref: step.via_ref }
-                        : {}),
-                      ...(step.via_relation !== undefined
-                        ? { via_relation: step.via_relation }
-                        : {}),
-                      ...(step.score !== undefined
-                        ? { score: step.score }
-                        : {}),
-                      ...(step.pruned !== undefined
-                        ? { pruned: step.pruned }
-                        : {}),
-                    })),
-                    final_selection: [
-                      ...trace.retrieval.navigator.final_selection,
-                    ],
-                  },
-                }
-              : {}),
-          }
+          query_string: trace.retrieval.query_string,
+          strategy: trace.retrieval.strategy,
+          narrative_facets_used: [...trace.retrieval.narrative_facets_used],
+          cognition_facets_used: [...trace.retrieval.cognition_facets_used],
+          segment_count: trace.retrieval.segment_count,
+          ...(trace.retrieval.segments !== undefined
+            ? {
+              segments: trace.retrieval.segments.map((segment) => ({
+                source: segment.source,
+                content: segment.content,
+                ...(segment.score !== undefined
+                  ? { score: segment.score }
+                  : {}),
+              })),
+            }
+            : {}),
+          ...(trace.retrieval.navigator !== undefined
+            ? {
+              navigator: {
+                seeds: [...trace.retrieval.navigator.seeds],
+                steps: trace.retrieval.navigator.steps.map((step) => ({
+                  depth: step.depth,
+                  visited_ref: step.visited_ref,
+                  ...(step.via_ref !== undefined
+                    ? { via_ref: step.via_ref }
+                    : {}),
+                  ...(step.via_relation !== undefined
+                    ? { via_relation: step.via_relation }
+                    : {}),
+                  ...(step.score !== undefined
+                    ? { score: step.score }
+                    : {}),
+                  ...(step.pruned !== undefined
+                    ? { pruned: step.pruned }
+                    : {}),
+                })),
+                final_selection: [
+                  ...trace.retrieval.navigator.final_selection,
+                ],
+              },
+            }
+            : {}),
+        }
         : null,
     });
   } catch (error) {
@@ -2133,9 +2133,9 @@ function projectAgent(
       max_tokens: agent.contextBudget.maxTokens,
       ...(agent.contextBudget.reservedForCoordination !== undefined
         ? {
-            reserved_for_coordination:
-              agent.contextBudget.reservedForCoordination,
-          }
+          reserved_for_coordination:
+            agent.contextBudget.reservedForCoordination,
+        }
         : {}),
     };
   }
@@ -2158,14 +2158,14 @@ export async function handleGetRuntime(
     const runtimeSnapshot = ctx.getRuntimeSnapshot?.();
     const runtimeRecord =
       runtimeSnapshot &&
-      typeof runtimeSnapshot === "object" &&
-      !Array.isArray(runtimeSnapshot)
+        typeof runtimeSnapshot === "object" &&
+        !Array.isArray(runtimeSnapshot)
         ? (runtimeSnapshot as Record<string, unknown>)
         : undefined;
     const runtimeTalkerThinker =
       runtimeRecord?.talkerThinker &&
-      typeof runtimeRecord.talkerThinker === "object" &&
-      !Array.isArray(runtimeRecord.talkerThinker)
+        typeof runtimeRecord.talkerThinker === "object" &&
+        !Array.isArray(runtimeRecord.talkerThinker)
         ? (runtimeRecord.talkerThinker as Record<string, unknown>)
         : undefined;
 
@@ -2203,8 +2203,8 @@ export async function handleGetRuntime(
           ) ?? 500,
         ...(typeof runtimeTalkerThinker?.globalConcurrencyCap === "number"
           ? {
-              global_concurrency_cap: runtimeTalkerThinker.globalConcurrencyCap,
-            }
+            global_concurrency_cap: runtimeTalkerThinker.globalConcurrencyCap,
+          }
           : {}),
       },
       orchestration: {
@@ -3470,6 +3470,66 @@ export async function handleRunEntityReconciliation(
     return errorResponse(
       new MaidsClawError({
         code: "UNKNOWN",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      }),
+      500,
+    );
+  }
+}
+
+const LightweightCompleteBodySchema = z
+  .object({
+    messages: z
+      .array(
+        z
+          .object({
+            role: z.enum(["user", "assistant"]),
+            content: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+    system: z.string().optional(),
+    model: z.string().min(1).optional(),
+    max_tokens: z.number().int().min(1).max(4096).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+  })
+  .strict();
+
+/** POST /v1/util/complete — stateless, fire-and-forget LLM completion */
+export async function handleLightweightComplete(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const service = requireService(ctx.lightweightLlm, "lightweightLlm");
+
+  const parsed = await validateBody(req, LightweightCompleteBodySchema);
+  if (parsed instanceof Response) {
+    return parsed;
+  }
+
+  try {
+    const result = await service.complete({
+      messages: parsed.messages,
+      system: parsed.system,
+      model: parsed.model,
+      maxTokens: parsed.max_tokens,
+      temperature: parsed.temperature,
+    });
+    return jsonResponse(result);
+  } catch (error) {
+    if (isMaidsClawError(error)) {
+      const status =
+        error.code === "MODEL_NOT_CONFIGURED" ? 503
+        : error.code === "MODEL_RATE_LIMIT" ? 429
+        : error.code === "INPUT_TOO_LARGE" ? 422
+        : 500;
+      return errorResponse(error, status);
+    }
+    return errorResponse(
+      new MaidsClawError({
+        code: "INTERNAL_ERROR",
         message: error instanceof Error ? error.message : String(error),
         retriable: false,
       }),

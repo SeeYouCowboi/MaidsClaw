@@ -15,6 +15,7 @@ export type SessionListItem = {
   created_at: number;
   closed_at?: number;
   status: SessionListStatus;
+  title?: string;
 };
 
 export type SessionListResult = {
@@ -33,4 +34,5 @@ export interface SessionRepo {
   clearRecoveryRequired(sessionId: string): Promise<void>;
   requiresRecovery(sessionId: string): Promise<boolean>;
   isRecoveryRequired(sessionId: string): Promise<boolean>;
+  updateSessionTitle(sessionId: string, title: string): Promise<void>;
 }

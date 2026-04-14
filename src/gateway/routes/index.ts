@@ -13,6 +13,7 @@ import { REQUEST_ROUTES } from "./requests.js";
 import { RUNTIME_ROUTES } from "./runtime.js";
 import { SESSION_ROUTES } from "./sessions.js";
 import { STATE_ROUTES } from "./state.js";
+import { UTIL_ROUTES } from "./util.js";
 
 export type { RouteEntry, RouteHandler } from "../route-definition.js";
 export { extractParam } from "../route-definition.js";
@@ -33,6 +34,7 @@ export const ROUTES: RouteEntry[] = [
   ...GRAPH_ROUTES,
   ...STATE_ROUTES,
   ...MAINTENANCE_ROUTES,
+  ...UTIL_ROUTES,
 ];
 
 function matchPath(pathname: string, pattern: string): boolean {

@@ -33,6 +33,7 @@ import {
   PersonaAdapter,
 } from "../core/prompt-data-adapters/index.js";
 import { MemoryAdapter } from "../core/prompt-data-adapters/memory-adapter.js";
+import { MaidsClawError, type ErrorCode } from "../core/errors.js";
 import type {
   LoreDataSource,
   PersonaDataSource,
@@ -43,6 +44,9 @@ import type { GatewayTokenSnapshot } from "../gateway/auth.js";
 import type {
   GraphReadRepoService,
   GatewayContext,
+  LightweightLlmService,
+  LightweightCompleteOptions,
+  LightweightCompleteResult,
   ProviderCatalogListResponse,
   ProviderCatalogService,
   ResolvedEntityNodeRow,
@@ -323,6 +327,70 @@ export function createProviderCatalogService(options: {
     options.providerOverrides,
   );
   return new RuntimeProviderCatalogService(providers, options.auth);
+}
+
+class LightweightLlmServiceImpl implements LightweightLlmService {
+  private readonly modelRegistry: RuntimeBootstrapResult["modelRegistry"];
+
+  constructor(modelRegistry: RuntimeBootstrapResult["modelRegistry"]) {
+    this.modelRegistry = modelRegistry;
+  }
+
+  async complete(options: LightweightCompleteOptions): Promise<LightweightCompleteResult> {
+    const model = options.model ?? this.resolveDefaultModel();
+    if (!model) {
+      throw new MaidsClawError({
+        code: "MODEL_NOT_CONFIGURED",
+        message: "No chat model is available for lightweight completion. Configure at least one provider.",
+        retriable: false,
+      });
+    }
+
+    const provider = this.modelRegistry.resolveChat(model);
+
+    const messages = options.messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+
+    let text = "";
+    for await (const chunk of provider.chatCompletion({
+      modelId: model,
+      messages,
+      systemPrompt: options.system,
+      maxTokens: options.maxTokens ?? 512,
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      disableThinking: true,
+    })) {
+      if (chunk.type === "text_delta") {
+        text += chunk.text;
+      } else if (chunk.type === "error") {
+        throw new MaidsClawError({
+          code: chunk.code as ErrorCode,
+          message: chunk.message,
+          retriable: chunk.retriable,
+        });
+      }
+    }
+
+    return { text, model };
+  }
+
+  private resolveDefaultModel(): string | undefined {
+    for (const entry of BUILT_IN_PROVIDERS) {
+      if (!entry.selectionPolicy.isAutoDefault || !entry.defaultChatModelId) {
+        continue;
+      }
+      const candidate = `${entry.id}/${entry.defaultChatModelId}`;
+      try {
+        this.modelRegistry.resolveChat(candidate);
+        return candidate;
+      } catch {
+        // provider not configured, try next
+      }
+    }
+    return undefined;
+  }
 }
 
 function buildAgentRegistry(
@@ -2575,6 +2643,7 @@ export function buildGatewayRuntimeContextExtensions(
   | "cognitionEventRepo"
   | "graphReadRepo"
   | "entityReconciliation"
+  | "lightweightLlm"
   | "getAuthSnapshot"
   | "getRuntimeSnapshot"
 > {
@@ -2670,6 +2739,7 @@ export function buildGatewayRuntimeContextExtensions(
     cognitionEventRepo: buildCognitionEventRepoService(runtime),
     graphReadRepo: buildGraphReadRepoService(runtime),
     entityReconciliation: runtime.entityReconciliation,
+    lightweightLlm: new LightweightLlmServiceImpl(runtime.modelRegistry),
     getAuthSnapshot,
     getRuntimeSnapshot,
   };
