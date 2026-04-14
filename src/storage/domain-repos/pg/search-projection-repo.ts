@@ -532,6 +532,13 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
 
   async upsertEpisodeDoc(params: UpsertEpisodeDocParams): Promise<number> {
     const now = params.createdAt ?? Date.now();
+    const entityPointerKeys = params.entityPointerKeys ?? [];
+    // Append entity keys onto content so trigram/CJK ngram matching surfaces
+    // them too, in addition to the typed entity_pointer_keys column.
+    const contentWithEntities =
+      entityPointerKeys.length > 0
+        ? `${params.content} | entities: ${entityPointerKeys.join(" ")}`
+        : params.content;
 
     const existing = await this.sql<{ id: string | number; content: string; category: string }[]>`
       SELECT id, content, category
@@ -543,20 +550,24 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
 
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
-        INSERT INTO search_docs_episode (doc_type, source_ref, agent_id, category, content, committed_at, created_at)
-        VALUES ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category}, ${params.content}, ${params.committedAt}, ${now})
+        INSERT INTO search_docs_episode
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys)
+        VALUES
+          ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category},
+           ${contentWithEntities}, ${params.committedAt}, ${now}, ${entityPointerKeys})
         RETURNING id
       `;
       return toNumber(inserted[0]?.id);
     }
 
     const row = existing[0];
-    if (row.content !== params.content || row.category !== params.category) {
+    if (row.content !== contentWithEntities || row.category !== params.category) {
       await this.sql`
         UPDATE search_docs_episode
-        SET content = ${params.content},
+        SET content = ${contentWithEntities},
             category = ${params.category},
-            committed_at = ${params.committedAt}
+            committed_at = ${params.committedAt},
+            entity_pointer_keys = ${entityPointerKeys}
         WHERE id = ${row.id}
       `;
     }

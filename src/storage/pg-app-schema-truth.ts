@@ -334,22 +334,29 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS private_episode_events (
-      id                  BIGSERIAL PRIMARY KEY,
-      agent_id            TEXT NOT NULL,
-      session_id          TEXT NOT NULL,
-      settlement_id       TEXT NOT NULL,
-      category            TEXT NOT NULL
-                          CHECK (category IN ('speech', 'action', 'observation', 'state_change')),
-      summary             TEXT NOT NULL,
-      private_notes       TEXT,
-      location_entity_id  INTEGER,
-      location_text       TEXT,
-      valid_time          BIGINT,
-      committed_time      BIGINT NOT NULL,
-      source_local_ref    TEXT,
-      request_id          VARCHAR,
-      created_at          BIGINT NOT NULL
+      id                   BIGSERIAL PRIMARY KEY,
+      agent_id             TEXT NOT NULL,
+      session_id           TEXT NOT NULL,
+      settlement_id        TEXT NOT NULL,
+      category             TEXT NOT NULL
+                           CHECK (category IN ('speech', 'action', 'observation', 'state_change')),
+      summary              TEXT NOT NULL,
+      private_notes        TEXT,
+      location_entity_id   INTEGER,
+      location_text        TEXT,
+      valid_time           BIGINT,
+      committed_time       BIGINT NOT NULL,
+      source_local_ref     TEXT,
+      request_id           VARCHAR,
+      created_at           BIGINT NOT NULL,
+      entity_pointer_keys  TEXT[] NOT NULL DEFAULT '{}'
     )
+  `);
+
+  // Idempotent upgrade for databases created before entity_pointer_keys existed.
+  await sql.unsafe(`
+    ALTER TABLE private_episode_events
+      ADD COLUMN IF NOT EXISTS entity_pointer_keys TEXT[] NOT NULL DEFAULT '{}'
   `);
 
   await sql.unsafe(`

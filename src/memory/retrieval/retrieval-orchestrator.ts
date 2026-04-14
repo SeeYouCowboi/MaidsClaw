@@ -607,7 +607,8 @@ export class RetrievalOrchestrator {
   private scoreEpisodeRow(row: EpisodeRow, query: string, viewerContext: ViewerContext): number {
     let score = row.committed_time;
     const queryText = query.trim().toLowerCase();
-    const haystack = `${row.summary} ${row.location_text ?? ""} ${row.category}`.toLowerCase();
+    const entityKeysText = (row.entity_pointer_keys ?? []).join(" ").toLowerCase();
+    const haystack = `${row.summary} ${row.location_text ?? ""} ${row.category} ${entityKeysText}`.toLowerCase();
 
     if (queryText.length > 0) {
       const terms = tokenizeQuery(queryText);

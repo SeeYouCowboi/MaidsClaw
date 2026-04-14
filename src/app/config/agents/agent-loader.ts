@@ -171,6 +171,12 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 	const modelId = entry.modelId
 		? normalizeModelRef(entry.modelId)
 		: defaults.modelId;
+	const talkerModelId = entry.talkerModelId
+		? normalizeModelRef(entry.talkerModelId)
+		: undefined;
+	const thinkerModelId = entry.thinkerModelId
+		? normalizeModelRef(entry.thinkerModelId)
+		: undefined;
 
 	return {
 		id: entry.id,
@@ -179,6 +185,8 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 		userFacing: entry.userFacing ?? defaults.userFacing,
 		outputMode: entry.outputMode ?? defaults.outputMode,
 		modelId,
+		talkerModelId,
+		thinkerModelId,
 		maxOutputTokens: entry.maxOutputTokens ?? defaults.maxOutputTokens,
 		personaId: entry.personaId,
 		toolPermissions,

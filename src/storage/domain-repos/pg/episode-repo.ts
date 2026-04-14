@@ -29,7 +29,8 @@ export class PgEpisodeRepo implements EpisodeRepo {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, request_id, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at,
+             entity_pointer_keys
       FROM private_episode_events
       WHERE id = ${id}
       LIMIT 1
@@ -60,19 +61,22 @@ export class PgEpisodeRepo implements EpisodeRepo {
     }
 
     const now = Date.now();
+    const entityPointerKeys = params.entityPointerKeys ?? [];
 
     const rows = await this.sql`
       INSERT INTO private_episode_events
         (agent_id, session_id, settlement_id, category, summary,
          private_notes, location_entity_id, location_text,
-         valid_time, committed_time, source_local_ref, request_id, created_at)
+         valid_time, committed_time, source_local_ref, request_id, created_at,
+         entity_pointer_keys)
       VALUES
         (${params.agentId}, ${params.sessionId}, ${params.settlementId},
          ${params.category}, ${params.summary},
          ${params.privateNotes ?? null}, ${params.locationEntityId ?? null},
          ${params.locationText ?? null}, ${params.validTime ?? null},
          ${params.committedTime}, ${params.sourceLocalRef ?? null},
-         ${params.requestId ?? null}, ${now})
+         ${params.requestId ?? null}, ${now},
+         ${entityPointerKeys})
       ON CONFLICT (settlement_id, source_local_ref)
         WHERE source_local_ref IS NOT NULL
         DO NOTHING
@@ -92,7 +96,8 @@ export class PgEpisodeRepo implements EpisodeRepo {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, request_id, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at,
+             entity_pointer_keys
       FROM private_episode_events
       WHERE settlement_id = ${settlementId}
         AND agent_id = ${agentId}
@@ -123,7 +128,8 @@ export class PgEpisodeRepo implements EpisodeRepo {
     const rows = await this.sql`
       SELECT id, agent_id, session_id, settlement_id, category, summary,
              private_notes, location_entity_id, location_text,
-             valid_time, committed_time, source_local_ref, request_id, created_at
+             valid_time, committed_time, source_local_ref, request_id, created_at,
+             entity_pointer_keys
       FROM private_episode_events
       WHERE agent_id = ${agentId}
       ORDER BY created_at DESC, id DESC
@@ -134,6 +140,10 @@ export class PgEpisodeRepo implements EpisodeRepo {
 }
 
 function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
+  const rawKeys = row.entity_pointer_keys;
+  const entityPointerKeys: string[] = Array.isArray(rawKeys)
+    ? (rawKeys as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
   return {
     id: Number(row.id),
     agent_id: row.agent_id as string,
@@ -150,5 +160,6 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
     source_local_ref: (row.source_local_ref as string) ?? null,
     request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
+    entity_pointer_keys: entityPointerKeys,
   };
 }

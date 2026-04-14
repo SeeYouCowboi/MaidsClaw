@@ -65,7 +65,8 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
 
     const episodeRows = await this.sql<postgres.Row[]>`
       SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes,
-             location_entity_id, location_text, valid_time, committed_time, source_local_ref, created_at
+             location_entity_id, location_text, valid_time, committed_time, source_local_ref,
+             created_at, entity_pointer_keys
       FROM private_episode_events
       WHERE agent_id = ${viewerContext.viewer_agent_id}
         AND location_entity_id = ${entity.id}
@@ -320,6 +321,10 @@ function normalizeFactRow(row: postgres.Row): FactEdge {
 }
 
 function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
+  const rawKeys = row.entity_pointer_keys;
+  const entityPointerKeys: string[] = Array.isArray(rawKeys)
+    ? (rawKeys as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
   return {
     id: Number(row.id),
     agent_id: row.agent_id as string,
@@ -336,5 +341,6 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
     source_local_ref: (row.source_local_ref as string) ?? null,
     request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
+    entity_pointer_keys: entityPointerKeys,
   };
 }

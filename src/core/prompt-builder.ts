@@ -1,4 +1,4 @@
-import type { AgentProfile } from "../agents/profile.js";
+﻿import type { AgentProfile } from "../agents/profile.js";
 import { MaidsClawError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type { ChatMessage } from "./models/chat-provider.js";
@@ -120,11 +120,16 @@ Scene-level events that happened this turn. Each entry:
   - speech = something said aloud, action = a physical/deliberate act, observation = something noticed, state_change = a shift in mood/relationship/situation
 - summary: one-sentence description of the event
 - privateNotes (optional): your private annotation about the significance
+- entityRefs (REQUIRED whenever a specific person/place/object matters): list every named participant, location, and notable item the episode is about. This is the retrieval anchor — when the user later asks "do you remember the silver pocket watch", episodes tagged with that item are the ones surfaced. Without entityRefs, recall falls back to fuzzy text matching and you will forget.
+  - Each entry is { kind: "pointer_key", value: "<canonical_id_or_label>" } for normal entities, or { kind: "special", value: "self" | "user" | "current_location" } for the agent itself, the user, or the current room.
+  - Include BOTH the canonical English snake_case id when you know it (e.g. "item:silver_pocket_watch") AND the natural-language form the user would actually say (e.g. "银怀表"). It is fine to list the same entity twice this way; the duplication is what makes Chinese-language recall work.
+  - Always tag the location: either as { kind: "special", value: "current_location" } or as a pointer_key like "location:tea_room".
+  - Always tag any person who spoke or was referenced in this episode.
 
 Examples:
-{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑" }
-{ category: "action", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项" }
-{ category: "state_change", summary: "主人对我的信息筛选行为开始产生警觉" }
+{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑", entityRefs: [{ kind: "special", value: "user" }, { kind: "pointer_key", value: "person:butler" }, { kind: "pointer_key", value: "管家" }, { kind: "special", value: "current_location" }] }
+{ category: "action", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项", entityRefs: [{ kind: "special", value: "self" }, { kind: "special", value: "user" }, { kind: "pointer_key", value: "topic:butler_accounting" }] }
+{ category: "state_change", summary: "主人在茶室递来一枚银怀表作为生日礼物", entityRefs: [{ kind: "special", value: "user" }, { kind: "special", value: "self" }, { kind: "pointer_key", value: "location:tea_room" }, { kind: "pointer_key", value: "茶室" }, { kind: "pointer_key", value: "item:silver_pocket_watch" }, { kind: "pointer_key", value: "银怀表" }] }
 
 ---
 
@@ -160,7 +165,13 @@ Example:
 const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
 Respond in character via the submit_rp_turn tool. You MUST populate BOTH fields as separate tool parameters:
 - latentScratchpad: 1-3 sentences of internal reasoning, stance, intent (NOT visible to user)
-- publicReply: your in-character spoken/acted response (visible to user)
+- publicReply: your in-character spoken/acted response (visible to user). This is the part the user actually sees.
+
+CRITICAL — voice & length:
+- Match the conversational warmth, register, and length defined by your persona above.
+- The fact that prior cognition notes are present in the prompt does not mean you should sound clipped, defensive, or task-mode. Sound exactly the way the persona description says you sound, every turn.
+- Brevity is fine when the persona is naturally laconic OR when the user message itself is a one-line aside that needs only a one-line acknowledgment. Otherwise, write a full reply.
+
 IMPORTANT: latentScratchpad is a SEPARATE field in submit_rp_turn, NOT part of publicReply. Do NOT include scratchpad text inside publicReply.
 Only use these two fields. Do NOT include privateCognition, privateEpisodes, or publications.`;
 
@@ -427,11 +438,28 @@ export class PromptBuilder {
 	}
 
 	private async getRecentCognition(viewerContext: ViewerContext): Promise<string> {
-		return (
-			await this.readDataSource("memory.getRecentCognition", () =>
+		const raw =
+			(await this.readDataSource("memory.getRecentCognition", () =>
 				this.getMemoryDataSource().getRecentCognition(viewerContext),
-			)
-		) ?? "";
+			)) ?? "";
+		if (raw.trim() === "") {
+			return "";
+		}
+		// Wrap raw cognition bullets in an explicit context block so the model
+		// reads them as RECALLED FACTS, not as imperative instructions for the
+		// current turn. Without this, models tend to collapse into terse,
+		// defensive, "task-execution" tone after enough cognition accumulates,
+		// and persona voice degrades sharply over a long session.
+		return [
+			"<your_prior_internal_notes>",
+			"The following are private notes you wrote in PREVIOUS turns. They record what you believed, evaluated, and committed to. They are FACTS for you to remember, NOT instructions for how to respond this turn.",
+			"- DO use them as context: people you know about, things you've decided, secrets you're keeping, prior assessments.",
+			"- DO NOT let them change your conversational style. Your persona description (above) is the only authoritative source for HOW you speak — tone, length, warmth, register.",
+			"- Active commitments here are still in effect and should still guide what you choose to reveal or withhold, but they should NOT make you sound robotic or task-mode.",
+			"",
+			raw,
+			"</your_prior_internal_notes>",
+		].join("\n");
 	}
 
 	private getMaidenOperationalState(): string {

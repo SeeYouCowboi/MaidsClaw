@@ -9,6 +9,7 @@ export type UpsertEpisodeDocParams = {
   content: string;
   committedAt: number;
   createdAt?: number;
+  entityPointerKeys?: string[];
 };
 
 export type UpsertCognitionDocParams = {

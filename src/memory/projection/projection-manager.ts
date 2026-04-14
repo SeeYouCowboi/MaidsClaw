@@ -3,6 +3,7 @@ import type { ArtifactEnforcementContext } from "../../core/tools/artifact-contr
 import type { ArtifactContract } from "../../core/tools/tool-definition.js";
 import type {
   CognitionOp,
+  EpisodeEntityRef,
   PrivateEpisodeArtifact,
   PublicationDeclaration,
 } from "../../runtime/rp-turn-contract.js";
@@ -148,6 +149,55 @@ function resolveSearchSourceRefKind(
   }
 
   return op.target.kind;
+}
+
+/**
+ * Flatten an episode artifact's entityRefs into a deduplicated array of
+ * canonical pointer-key strings. `special` refs are expanded into anchor
+ * tokens that downstream retrieval can match against:
+ *   - `self` → `self:<agentId>`
+ *   - `user` → `user`
+ *   - `current_location` → `location:<currentLocationEntityId>` when known,
+ *     otherwise the literal `current_location`.
+ * `pointer_key` refs pass through unchanged.
+ */
+function resolveEpisodeEntityPointerKeys(
+  refs: EpisodeEntityRef[] | undefined,
+  agentId: string,
+  currentLocationEntityId: number | undefined,
+): string[] {
+  if (!refs || refs.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of refs) {
+    let key: string | null = null;
+    if (ref.kind === "pointer_key") {
+      const trimmed = ref.value.trim();
+      if (trimmed.length > 0) key = trimmed;
+    } else if (ref.kind === "special") {
+      switch (ref.value) {
+        case "self":
+          key = `self:${agentId}`;
+          break;
+        case "user":
+          key = "user";
+          break;
+        case "current_location":
+          key =
+            currentLocationEntityId !== undefined
+              ? `location:${currentLocationEntityId}`
+              : "current_location";
+          break;
+      }
+    }
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  return out;
 }
 
 function isPromiseLike<T = unknown>(value: unknown): value is PromiseLike<T> {
@@ -368,6 +418,11 @@ export class ProjectionManager {
     changedNodeRefs: NodeRef[],
   ): void | Promise<void> {
     const steps = params.privateEpisodes.map((episode) => () => {
+      const entityPointerKeys = resolveEpisodeEntityPointerKeys(
+        episode.entityRefs,
+        params.agentId,
+        params.viewerSnapshot?.currentLocationEntityId,
+      );
       const appendResult = episodeRepo.append({
         agentId: params.agentId,
         sessionId: params.sessionId,
@@ -380,6 +435,7 @@ export class ProjectionManager {
         validTime: episode.validTime,
         committedTime: now,
         sourceLocalRef: episode.localRef,
+        entityPointerKeys,
       });
 
       if (isPromiseLike(appendResult)) {

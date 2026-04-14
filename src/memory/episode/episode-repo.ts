@@ -30,6 +30,8 @@ export type EpisodeAppendParams = {
   committedTime: number;
   sourceLocalRef?: string;
   requestId?: string;
+  /** Canonical pointer-key strings of entities involved in this episode. */
+  entityPointerKeys?: string[];
 };
 
 export type EpisodeRow = {
@@ -47,6 +49,7 @@ export type EpisodeRow = {
   source_local_ref: string | null;
   request_id: string | null;
   created_at: number;
+  entity_pointer_keys: string[];
 };
 
 export class EpisodeRepository {
@@ -70,8 +73,11 @@ export class EpisodeRepository {
     }
 
     const now = Date.now();
+    // SQLite has no native array type, so we serialize entity_pointer_keys as
+    // JSON. The PG repo (which is the live path) uses TEXT[] directly.
+    const entityKeysJson = JSON.stringify(params.entityPointerKeys ?? []);
     const result = this.db.run(
-      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.agentId,
         params.sessionId,
@@ -86,6 +92,7 @@ export class EpisodeRepository {
         params.sourceLocalRef ?? null,
         params.requestId ?? null,
         now,
+        entityKeysJson,
       ],
     );
 
@@ -93,17 +100,37 @@ export class EpisodeRepository {
   }
 
   readBySettlement(settlementId: string, agentId: string): EpisodeRow[] {
-    return this.db.query<EpisodeRow>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
+    const rows = this.db.query<Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null }>(
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
       [settlementId, agentId],
     );
+    return rows.map(deserializeEntityPointerKeys);
   }
 
   readByAgent(agentId: string, limit?: number): EpisodeRow[] {
     const effectiveLimit = limit ?? 100;
-    return this.db.query<EpisodeRow>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+    const rows = this.db.query<Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null }>(
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
       [agentId, effectiveLimit],
     );
+    return rows.map(deserializeEntityPointerKeys);
   }
+}
+
+function deserializeEntityPointerKeys(
+  row: Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null },
+): EpisodeRow {
+  let keys: string[] = [];
+  const raw = row.entity_pointer_keys;
+  if (typeof raw === "string" && raw.length > 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        keys = parsed.filter((v): v is string => typeof v === "string");
+      }
+    } catch {
+      keys = [];
+    }
+  }
+  return { ...row, entity_pointer_keys: keys };
 }

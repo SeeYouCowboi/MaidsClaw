@@ -10,6 +10,9 @@ async function main(): Promise<void> {
   const host = await createAppHost({
     role: "server",
     requireAllProviders: false,
+    // Enable per-request trace capture so the dashboard's Retrieval Trace
+    // panel has data to show. Disable by setting MAIDSCLAW_TRACE_CAPTURE=off.
+    traceCaptureEnabled: process.env.MAIDSCLAW_TRACE_CAPTURE !== "off",
   });
 
   await host.start();

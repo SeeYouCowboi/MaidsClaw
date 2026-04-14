@@ -365,10 +365,23 @@ export async function createAppHost(
 		: undefined;
 	const workerConsumer =
 		options.role === "worker" ? createJobConsumer(runtime) : undefined;
-	const serverDurableConsumer =
-		options.role === "server" && options.enableDurableOrchestration
-			? createJobConsumer(runtime)
-			: undefined;
+	// Server mode: start a durable consumer when enableDurableOrchestration is set,
+	// OR when talkerThinker is enabled (the thinker pipeline is useless without a
+	// consumer draining jobs_current — jobs would accumulate forever).
+	const serverShouldConsume =
+		options.role === "server" &&
+		(options.enableDurableOrchestration === true ||
+			runtime.talkerThinkerConfig?.enabled === true);
+	const serverDurableConsumer = (() => {
+		if (!serverShouldConsume) return undefined;
+		const store = (runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
+		if (!store) return undefined;
+		try {
+			return createJobConsumer(runtime);
+		} catch {
+			return undefined;
+		}
+	})();
 	// Local mode: start a job consumer when talkerThinker is enabled and PG store is available
 	const localDurableConsumer = (() => {
 		if (options.role !== "local") return undefined;

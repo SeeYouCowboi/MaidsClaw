@@ -3,6 +3,16 @@ export type CognitionEntityRef =
   | { kind: "special"; value: "self" | "user" | "current_location" };
 
 /**
+ * Entities related to a private episode artifact, used for retrieval indexing.
+ * Mirrors {@link CognitionEntityRef} in shape but kept as a separate type so
+ * episode-side validation, prompt guidance, and downstream resolvers can
+ * evolve independently from cognition's holder/claim semantics.
+ */
+export type EpisodeEntityRef =
+  | { kind: "pointer_key"; value: string }
+  | { kind: "special"; value: "self" | "user" | "current_location" };
+
+/**
  * @deprecated Retained only for CommitmentRecord.target union type.
  * Will be removed in a follow-up when commitments are migrated to holderId model.
  */
@@ -117,6 +127,14 @@ export type PrivateEpisodeArtifact = {
   privateNotes?: string;
   locationText?: string;
   validTime?: number;
+  /**
+   * People, places, and items involved in this episode. Used as the
+   * retrieval-index surface for "do you remember <entity>" recall — episodes
+   * with a matching entity ref get scored above pure full-text candidates.
+   * Empty/omitted means "no structured anchor"; the summary text is still
+   * indexed.
+   */
+  entityRefs?: EpisodeEntityRef[];
 };
 
 export type PublicationDeclaration = {
@@ -396,6 +414,7 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
     if (typeof ep.summary !== "string") {
       throw new Error("privateEpisode summary must be a string");
     }
+    const entityRefs = normalizeEpisodeEntityRefs(ep.entityRefs);
     episodes.push({
       ...(typeof ep.localRef === "string" ? { localRef: ep.localRef } : {}),
       category: ep.category as PrivateEpisodeArtifact["category"],
@@ -403,9 +422,49 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
       ...(typeof ep.privateNotes === "string" ? { privateNotes: ep.privateNotes } : {}),
       ...(typeof ep.locationText === "string" ? { locationText: ep.locationText } : {}),
       ...(typeof ep.validTime === "number" ? { validTime: ep.validTime } : {}),
+      ...(entityRefs.length > 0 ? { entityRefs } : {}),
     });
   }
   return episodes;
+}
+
+const EPISODE_SPECIAL_REFS: ReadonlySet<string> = new Set([
+  "self",
+  "user",
+  "current_location",
+]);
+
+function normalizeEpisodeEntityRefs(raw: unknown): EpisodeEntityRef[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const refs: EpisodeEntityRef[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      if (trimmed.length > 0) {
+        refs.push({ kind: "pointer_key", value: trimmed });
+      }
+      continue;
+    }
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const candidate = entry as Record<string, unknown>;
+    const value = typeof candidate.value === "string" ? candidate.value.trim() : "";
+    if (value.length === 0) {
+      continue;
+    }
+    if (candidate.kind === "special" && EPISODE_SPECIAL_REFS.has(value)) {
+      refs.push({ kind: "special", value: value as "self" | "user" | "current_location" });
+      continue;
+    }
+    refs.push({ kind: "pointer_key", value });
+  }
+  return refs;
 }
 
 function normalizePinnedSummaryProposal(raw: unknown): PinnedSummaryProposal | undefined {

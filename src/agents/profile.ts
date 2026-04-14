@@ -24,6 +24,8 @@ export type AgentProfile = {
   userFacing: boolean;
   outputMode: OutputMode;
   modelId: string;
+  talkerModelId?: string;
+  thinkerModelId?: string;
   maxOutputTokens?: number;
   personaId?: string;
   toolPermissions: ToolPermission[];

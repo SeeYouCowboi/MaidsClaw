@@ -108,6 +108,22 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               privateNotes: { type: "string" },
               locationText: { type: "string" },
               validTime: { type: "number" },
+              entityRefs: {
+                type: "array",
+                description:
+                  "People, places, and items involved in this episode. Each entry is either { kind: 'pointer_key', value: '<id_or_label>' } or { kind: 'special', value: 'self' | 'user' | 'current_location' }. Used as the retrieval anchor when the user later asks about a specific person/place/object.",
+                items: {
+                  type: "object",
+                  properties: {
+                    kind: {
+                      type: "string",
+                      enum: ["pointer_key", "special"],
+                    },
+                    value: { type: "string" },
+                  },
+                  required: ["kind", "value"],
+                },
+              },
             },
             required: ["category", "summary"],
           },

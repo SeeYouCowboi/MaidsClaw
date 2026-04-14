@@ -14,6 +14,8 @@ export type AgentFileEntry = {
 	userFacing?: boolean;
 	outputMode?: OutputMode;
 	modelId?: string;
+	talkerModelId?: string;
+	thinkerModelId?: string;
 	personaId?: string;
 	enabled?: boolean;
 	maxOutputTokens?: number;

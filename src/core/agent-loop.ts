@@ -466,7 +466,7 @@ export class AgentLoop {
 					workingMessages,
 					systemPrompt,
 					bufferedToolExecutor,
-					{ forceToolUse: true },
+					{ forceToolUse: true, isTalkerMode: request.isTalkerMode },
 				);
 				for await (const chunk of this.modelProvider.chatCompletion(
 					completionRequest,
@@ -898,7 +898,11 @@ export class AgentLoop {
 		messages: ChatMessage[],
 		systemPrompt: string,
 		toolExecutor: ToolExecutor = this.toolExecutor,
-		options?: { forceToolUse?: boolean; forceToolName?: string },
+		options?: {
+			forceToolUse?: boolean;
+			forceToolName?: string;
+			isTalkerMode?: boolean;
+		},
 	): ChatCompletionRequest {
 		let toolChoice: ToolChoiceSpec | undefined;
 		if (options?.forceToolName) {
@@ -910,8 +914,18 @@ export class AgentLoop {
 			toolChoice = { type: "any" };
 		}
 
+		// Talker mode: fast low-latency replies for the user — pick talkerModelId if
+		// configured, and turn off provider-level "thinking" (Kimi K2.5 etc.) so the
+		// model skips its reasoning phase and streams straight to output.
+		// Thinker mode (default): use thinkerModelId if configured, else modelId,
+		// and leave thinking enabled so cognition/episode extraction is high quality.
+		const isTalkerMode = options?.isTalkerMode === true;
+		const modelId = isTalkerMode
+			? (this.profile.talkerModelId ?? this.profile.modelId)
+			: (this.profile.thinkerModelId ?? this.profile.modelId);
+
 		return {
-			modelId: this.profile.modelId,
+			modelId,
 			systemPrompt,
 			messages,
 			maxTokens: this.profile.maxOutputTokens,
@@ -921,6 +935,7 @@ export class AgentLoop {
 				description: tool.description,
 				inputSchema: tool.parameters,
 			})),
+			disableThinking: isTalkerMode,
 		};
 	}
 

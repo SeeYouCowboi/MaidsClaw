@@ -162,12 +162,16 @@ export class PgSearchRebuilder {
     const rows = await this.buildEpisodeSearchAuthorityRows(agentId);
 
     for (const row of rows) {
+      const contentWithEntities =
+        row.entityPointerKeys.length > 0
+          ? `${row.content} | entities: ${row.entityPointerKeys.join(" ")}`
+          : row.content;
       await this.sql`
         INSERT INTO search_docs_episode
-          (doc_type, source_ref, agent_id, category, content, committed_at, created_at)
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys)
         VALUES
           ('episode', ${row.sourceRef}, ${row.agentId}, ${row.category},
-           ${row.content}, ${row.committedAt}, ${now})
+           ${contentWithEntities}, ${row.committedAt}, ${now}, ${row.entityPointerKeys})
       `;
     }
   }
@@ -192,6 +196,7 @@ export class PgSearchRebuilder {
       category: string;
       content: string;
       committedAt: number;
+      entityPointerKeys: string[];
     }>
   > {
     const rows = await this.sql<
@@ -200,9 +205,10 @@ export class PgSearchRebuilder {
         category: string;
         summary: string;
         committed_time: string | number;
+        entity_pointer_keys: string[] | null;
       }[]
     >`
-      SELECT id, category, summary, committed_time
+      SELECT id, category, summary, committed_time, entity_pointer_keys
       FROM private_episode_events
       WHERE agent_id = ${agentId}
       ORDER BY id ASC
@@ -214,6 +220,9 @@ export class PgSearchRebuilder {
       category: row.category,
       content: row.summary,
       committedAt: Number(row.committed_time),
+      entityPointerKeys: Array.isArray(row.entity_pointer_keys)
+        ? row.entity_pointer_keys.filter((v): v is string => typeof v === "string")
+        : [],
     }));
   }
 
