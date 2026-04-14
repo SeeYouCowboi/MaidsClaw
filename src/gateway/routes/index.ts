@@ -5,6 +5,7 @@ import { GRAPH_ROUTES } from "./graph.js";
 import { HEALTH_ROUTES } from "./health.js";
 import { JOB_ROUTES } from "./jobs.js";
 import { LORE_ROUTES } from "./lore.js";
+import { MAINTENANCE_ROUTES } from "./maintenance.js";
 import { MEMORY_ROUTES } from "./memory.js";
 import { PERSONA_ROUTES } from "./personas.js";
 import { PROVIDER_ROUTES } from "./providers.js";
@@ -31,6 +32,7 @@ export const ROUTES: RouteEntry[] = [
   ...COGNITION_ROUTES,
   ...GRAPH_ROUTES,
   ...STATE_ROUTES,
+  ...MAINTENANCE_ROUTES,
 ];
 
 function matchPath(pathname: string, pattern: string): boolean {

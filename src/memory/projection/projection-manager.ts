@@ -12,6 +12,7 @@ import type { SettlementRepos } from "../../storage/unit-of-work.js";
 import type { CognitionEventRepo } from "../../storage/domain-repos/contracts/cognition-event-repo.js";
 import type { SearchProjectionRepo } from "../../storage/domain-repos/contracts/search-projection-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
+import { normalizePointerKeys } from "../contracts/pointer-key.js";
 import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
 import { materializePublications } from "../materialization.js";
@@ -169,35 +170,29 @@ function resolveEpisodeEntityPointerKeys(
   if (!refs || refs.length === 0) {
     return [];
   }
-  const seen = new Set<string>();
-  const out: string[] = [];
+  const raw: string[] = [];
   for (const ref of refs) {
-    let key: string | null = null;
     if (ref.kind === "pointer_key") {
-      const trimmed = ref.value.trim();
-      if (trimmed.length > 0) key = trimmed;
+      raw.push(ref.value);
     } else if (ref.kind === "special") {
       switch (ref.value) {
         case "self":
-          key = `self:${agentId}`;
+          raw.push(`self:${agentId}`);
           break;
         case "user":
-          key = "user";
+          raw.push("user");
           break;
         case "current_location":
-          key =
+          raw.push(
             currentLocationEntityId !== undefined
               ? `location:${currentLocationEntityId}`
-              : "current_location";
+              : "current_location",
+          );
           break;
       }
     }
-    if (key && !seen.has(key)) {
-      seen.add(key);
-      out.push(key);
-    }
   }
-  return out;
+  return normalizePointerKeys(raw);
 }
 
 function isPromiseLike<T = unknown>(value: unknown): value is PromiseLike<T> {

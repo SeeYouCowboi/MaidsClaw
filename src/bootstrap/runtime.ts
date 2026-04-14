@@ -45,6 +45,7 @@ import type {
   GatewayContext,
   ProviderCatalogListResponse,
   ProviderCatalogService,
+  ResolvedEntityNodeRow,
 } from "../gateway/context.js";
 import { CommitService } from "../interaction/commit-service.js";
 import type {
@@ -73,6 +74,7 @@ import { CoreMemoryService } from "../memory/core-memory.js";
 import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
+import { EntityReconciliationSweeper } from "../memory/entity-reconciliation-sweeper.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
@@ -1248,6 +1250,10 @@ export function bootstrapRuntime(
           }
         })()
       : undefined;
+  const entityReconciliation: EntityReconciliationSweeper | undefined =
+    pgFactory && memoryTaskModelProvider
+      ? new EntityReconciliationSweeper(pgFactory, memoryTaskModelProvider)
+      : undefined;
   // queryRouter + queryPlanBuilder are created above, shared with RetrievalService.
   const graphNavigator = new GraphNavigator(
     pgGraphReadQueryRepo,
@@ -1527,6 +1533,7 @@ export function bootstrapRuntime(
     createAgentLoop,
     turnService,
     memoryTaskAgent,
+    entityReconciliation,
     memoryPipelineReady,
     memoryPipelineStatus,
     effectiveOrganizerEmbeddingModelId,
@@ -2505,6 +2512,42 @@ function buildGraphReadRepoService(
         );
       });
     },
+
+    async resolveEntityNodesByPointerKeys(params) {
+      const sql = runtime.pgFactory?.getPool();
+      if (!sql || params.pointerKeys.length === 0) {
+        return {};
+      }
+      const keys = [...params.pointerKeys];
+      const rows = await sql<
+        {
+          id: number | string;
+          pointer_key: string;
+          display_name: string;
+          entity_type: string;
+          memory_scope: "shared_public" | "private_overlay";
+        }[]
+      >`
+        SELECT id, pointer_key, display_name, entity_type, memory_scope
+        FROM entity_nodes
+        WHERE pointer_key = ANY(${keys})
+          AND (
+            memory_scope = 'shared_public'
+            OR (memory_scope = 'private_overlay' AND owner_agent_id = ${params.agentId})
+          )
+      `;
+      const out: Record<string, ResolvedEntityNodeRow> = {};
+      for (const row of rows) {
+        out[row.pointer_key] = {
+          id: Number(row.id),
+          pointer_key: row.pointer_key,
+          display_name: row.display_name,
+          entity_type: row.entity_type,
+          memory_scope: row.memory_scope,
+        };
+      }
+      return out;
+    },
   };
 }
 
@@ -2531,6 +2574,7 @@ export function buildGatewayRuntimeContextExtensions(
   | "cognitionRepo"
   | "cognitionEventRepo"
   | "graphReadRepo"
+  | "entityReconciliation"
   | "getAuthSnapshot"
   | "getRuntimeSnapshot"
 > {
@@ -2625,6 +2669,7 @@ export function buildGatewayRuntimeContextExtensions(
     cognitionRepo: buildCognitionRepoService(runtime),
     cognitionEventRepo: buildCognitionEventRepoService(runtime),
     graphReadRepo: buildGraphReadRepoService(runtime),
+    entityReconciliation: runtime.entityReconciliation,
     getAuthSnapshot,
     getRuntimeSnapshot,
   };

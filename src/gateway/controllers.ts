@@ -13,6 +13,7 @@ import type { Chunk } from "../core/chunk.js";
 import { isMaidsClawError, MaidsClawError } from "../core/errors.js";
 import type { GatewayEvent, GatewayEventType } from "../core/types.js";
 import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
+import { normalizePointerKeys } from "../memory/contracts/pointer-key.js";
 import {
   VIEWER_ROLES,
   type ViewerContext,
@@ -1211,6 +1212,16 @@ export async function handleAgentMemoryEpisodes(
           item.location_text = locationText;
         }
 
+        const rawEntityKeys = record.entity_pointer_keys;
+        if (Array.isArray(rawEntityKeys)) {
+          const refs = normalizePointerKeys(
+            rawEntityKeys.filter((v): v is string => typeof v === "string"),
+          );
+          if (refs.length > 0) {
+            item.entity_refs = refs;
+          }
+        }
+
         return item;
       })
       .filter((item): item is Record<string, unknown> => item !== null)
@@ -1223,7 +1234,38 @@ export async function handleAgentMemoryEpisodes(
       })
       .slice(0, limit);
 
-    return jsonResponse({ agent_id: agentId, items });
+    const uniqueRefs = new Set<string>();
+    for (const item of items) {
+      const refs = item.entity_refs;
+      if (Array.isArray(refs)) {
+        for (const ref of refs) {
+          if (typeof ref === "string" && ref.length > 0) uniqueRefs.add(ref);
+        }
+      }
+    }
+
+    let resolvedEntities: Record<string, unknown> | undefined;
+    if (uniqueRefs.size > 0 && ctx.graphReadRepo) {
+      try {
+        const resolved = await ctx.graphReadRepo.resolveEntityNodesByPointerKeys(
+          {
+            agentId,
+            pointerKeys: Array.from(uniqueRefs),
+          },
+        );
+        if (Object.keys(resolved).length > 0) {
+          resolvedEntities = resolved;
+        }
+      } catch {
+        // best-effort enrichment — don't fail the episode list on resolve failure
+      }
+    }
+
+    return jsonResponse({
+      agent_id: agentId,
+      items,
+      ...(resolvedEntities ? { entity_refs_resolved: resolvedEntities } : {}),
+    });
   } catch (error) {
     if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
       return errorResponse(error, 501);
@@ -3367,5 +3409,71 @@ export async function handleListGraphNodeEdges(
       return errorResponse(error, 501);
     }
     throw error;
+  }
+}
+
+const EntityReconciliationRequestSchema = z
+  .object({
+    dry_run: z.boolean().optional(),
+    merge_threshold: z.number().min(0).max(1).optional(),
+    borderline_threshold: z.number().min(0).max(1).optional(),
+    cluster_threshold: z.number().min(0).max(1).optional(),
+    max_new_keys: z.number().int().positive().max(2000).optional(),
+    since: z.number().int().nonnegative().optional(),
+    model_id: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** POST /v1/admin/entity-reconciliation:run */
+export async function handleRunEntityReconciliation(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const sweeper = ctx.entityReconciliation;
+  if (!sweeper) {
+    return errorResponse(
+      new MaidsClawError({
+        code: "UNSUPPORTED_RUNTIME_MODE",
+        message: "Entity reconciliation sweeper unavailable in this runtime",
+        retriable: false,
+      }),
+      501,
+    );
+  }
+  let body: z.infer<typeof EntityReconciliationRequestSchema> = {};
+  try {
+    const text = await req.text();
+    if (text.trim().length > 0) {
+      body = EntityReconciliationRequestSchema.parse(JSON.parse(text));
+    }
+  } catch (error) {
+    return badRequest(
+      `Invalid request body: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const modelId = body.model_id ?? "bailian/text-embedding-v4";
+  try {
+    const report = await sweeper.runSweep({
+      modelId,
+      dryRun: body.dry_run ?? true,
+      mergeThreshold: body.merge_threshold,
+      borderlineThreshold: body.borderline_threshold,
+      clusterThreshold: body.cluster_threshold,
+      maxNewKeys: body.max_new_keys,
+      since: body.since,
+    });
+    return jsonResponse(report);
+  } catch (error) {
+    if (isMaidsClawError(error)) {
+      return errorResponse(error, 500);
+    }
+    return errorResponse(
+      new MaidsClawError({
+        code: "UNKNOWN",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      }),
+      500,
+    );
   }
 }

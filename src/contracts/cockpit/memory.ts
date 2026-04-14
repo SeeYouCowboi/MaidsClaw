@@ -59,15 +59,30 @@ export const EpisodeItemSchema = z
     private_notes: z.string().optional(),
     location_text: z.string().optional(),
     request_id: z.string().optional().nullable(),
+    entity_refs: z.array(z.string()).optional(),
   })
   .strict();
 export type EpisodeItem = z.infer<typeof EpisodeItemSchema>;
 export type EpisodeItemDto = EpisodeItem;
 
+export const ResolvedEntityNodeSchema = z
+  .object({
+    id: z.number(),
+    pointer_key: z.string(),
+    display_name: z.string(),
+    entity_type: z.string(),
+    memory_scope: z.enum(["shared_public", "private_overlay"]),
+  })
+  .strict();
+export type ResolvedEntityNode = z.infer<typeof ResolvedEntityNodeSchema>;
+
 export const EpisodeListResponseSchema = z
   .object({
     agent_id: z.string(),
     items: z.array(EpisodeItemSchema),
+    entity_refs_resolved: z
+      .record(z.string(), ResolvedEntityNodeSchema)
+      .optional(),
   })
   .strict();
 export type EpisodeListResponse = z.infer<typeof EpisodeListResponseSchema>;

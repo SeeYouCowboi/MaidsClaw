@@ -94,6 +94,7 @@ export type RuntimeBootstrapResult = {
 	createAgentLoop: (agentId: string) => AgentLoop | null;
 	turnService: TurnService;
 	memoryTaskAgent: MemoryTaskAgent | null;
+	entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
 	memoryPipelineReady: boolean;
 	memoryPipelineStatus: MemoryPipelineStatus;
 	effectiveOrganizerEmbeddingModelId: string | undefined;

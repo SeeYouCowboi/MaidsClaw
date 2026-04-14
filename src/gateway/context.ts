@@ -151,6 +151,14 @@ export type GraphEdgeItem = {
   };
 };
 
+export interface ResolvedEntityNodeRow {
+  id: number;
+  pointer_key: string;
+  display_name: string;
+  entity_type: string;
+  memory_scope: "shared_public" | "private_overlay";
+}
+
 export interface GraphReadRepoService {
   listNodes(params: {
     agentId: string;
@@ -177,6 +185,11 @@ export interface GraphReadRepoService {
     types: GraphEdgeFamilyFilter[];
     direction: GraphEdgeDirectionFilter;
   }): Promise<GraphEdgeItem[] | null>;
+
+  resolveEntityNodesByPointerKeys(params: {
+    agentId: string;
+    pointerKeys: readonly string[];
+  }): Promise<Record<string, ResolvedEntityNodeRow>>;
 }
 
 /**
@@ -211,6 +224,7 @@ export interface GatewayContext {
   cognitionRepo?: CognitionRepoService;
   cognitionEventRepo?: CognitionEventRepoService;
   graphReadRepo?: GraphReadRepoService;
+  entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
 
   corsAllowedOrigins?: string[];
 
