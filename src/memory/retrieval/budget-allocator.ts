@@ -37,9 +37,7 @@ export function allocateBudget(
   const baseBudgets: Record<SurfaceKey, number> = {
     narrative: template.narrativeEnabled ? template.narrativeBudget : 0,
     cognition: template.cognitionEnabled ? template.cognitionBudget : 0,
-    episode: template.episodeEnabled
-      ? Math.max(template.episodicBudget, template.episodeBudget)
-      : 0,
+    episode: template.episodeEnabled ? template.episodeBudget : 0,
     conflict: template.conflictNotesEnabled ? template.conflictNotesBudget : 0,
   };
 
@@ -66,10 +64,16 @@ export function allocateBudget(
 
   // Raw weights mirror query-plan-builder's surface weight formulas.
   // Disabled surfaces get 0; enabled surfaces get a floor + signal boost.
+  //
+  // P2-A+: episode floor bumped 0.3 → 0.6 to match the role-default
+  // `episodeBudget` bump from 3 → 6. The floor must track the baseline
+  // ratio so conservation doesn't starve episode when other signals
+  // dominate. Pre-bump ratio was 3/13 ≈ 0.23 (floor 0.3 slightly above);
+  // post-bump ratio is 6/16 = 0.375 (floor 0.6 keeps slight headroom).
   const rawWeights: Record<SurfaceKey, number> = {
     narrative: template.narrativeEnabled ? 0.5 + signals.needsEntityFocus : 0,
     cognition: template.cognitionEnabled ? 0.5 + signals.needsCognition : 0,
-    episode: template.episodeEnabled ? 0.3 + signals.needsEpisode : 0,
+    episode: template.episodeEnabled ? 0.6 + signals.needsEpisode : 0,
     conflict: template.conflictNotesEnabled ? signals.needsConflict : 0,
   };
 
@@ -111,7 +115,6 @@ export function allocateBudget(
     ...template,
     narrativeBudget: allocated.narrative,
     cognitionBudget: allocated.cognition,
-    episodicBudget: allocated.episode,
     episodeBudget: allocated.episode,
     conflictNotesBudget: allocated.conflict,
     maxNarrativeHits: allocated.narrative,

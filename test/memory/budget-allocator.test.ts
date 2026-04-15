@@ -21,9 +21,7 @@ function totalEnabledBudget(template: Required<RetrievalTemplate>): number {
   return (
     (template.narrativeEnabled ? template.narrativeBudget : 0) +
     (template.cognitionEnabled ? template.cognitionBudget : 0) +
-    (template.episodeEnabled
-      ? Math.max(template.episodicBudget, template.episodeBudget)
-      : 0) +
+    (template.episodeEnabled ? template.episodeBudget : 0) +
     (template.conflictNotesEnabled ? template.conflictNotesBudget : 0)
   );
 }
@@ -123,7 +121,7 @@ describe("BudgetAllocator — minimum-of-1 floor", () => {
     const allocated = allocateBudget(template, signals);
     expect(allocated.narrativeBudget).toBeGreaterThanOrEqual(1);
     expect(allocated.cognitionBudget).toBeGreaterThanOrEqual(1);
-    expect(allocated.episodicBudget).toBeGreaterThanOrEqual(1);
+    expect(allocated.episodeBudget).toBeGreaterThanOrEqual(1);
   });
 
   it("role-disabled surfaces stay at 0 even with signal pressure", () => {
@@ -145,7 +143,7 @@ describe("BudgetAllocator — minimum-of-1 floor", () => {
 describe("BudgetAllocator — signal-directed reallocation", () => {
   it("heavy needsEpisode shifts budget toward episode", () => {
     const template = getDefaultTemplate("rp_agent");
-    const baseEpisode = Math.max(template.episodicBudget, template.episodeBudget);
+    const baseEpisode = template.episodeBudget;
 
     const signals: QuerySignals = {
       needsEpisode: 1,
@@ -158,7 +156,7 @@ describe("BudgetAllocator — signal-directed reallocation", () => {
     const allocated = allocateBudget(template, signals);
     // Episode should be at least as large as base or larger (relative
     // share increased, though conservation caps the absolute).
-    expect(allocated.episodicBudget).toBeGreaterThanOrEqual(baseEpisode);
+    expect(allocated.episodeBudget).toBeGreaterThanOrEqual(baseEpisode);
   });
 
   it("heavy needsCognition shifts budget toward cognition", () => {
@@ -205,8 +203,8 @@ describe("BudgetAllocator — signal-directed reallocation", () => {
       needsCognition: 1,
     });
     expect(episodeHeavy).not.toEqual(cognitionHeavy);
-    expect(episodeHeavy.episodicBudget).toBeGreaterThanOrEqual(
-      cognitionHeavy.episodicBudget,
+    expect(episodeHeavy.episodeBudget).toBeGreaterThanOrEqual(
+      cognitionHeavy.episodeBudget,
     );
     expect(cognitionHeavy.cognitionBudget).toBeGreaterThanOrEqual(
       episodeHeavy.cognitionBudget,
@@ -282,7 +280,6 @@ describe("BudgetAllocator — edge cases", () => {
       ...getDefaultTemplate("rp_agent"),
       narrativeBudget: 1,
       cognitionBudget: 1,
-      episodicBudget: 1,
       episodeBudget: 1,
       conflictNotesBudget: 1,
     };
@@ -299,7 +296,7 @@ describe("BudgetAllocator — edge cases", () => {
     // With uniform signals, each surface should still get at least 1.
     expect(allocated.narrativeBudget).toBe(1);
     expect(allocated.cognitionBudget).toBe(1);
-    expect(allocated.episodicBudget).toBe(1);
+    expect(allocated.episodeBudget).toBe(1);
     // Conflict may end up 0 or 1 depending on rounding; just ensure it's ≤ 1.
     expect(allocated.conflictNotesBudget).toBeLessThanOrEqual(1);
   });

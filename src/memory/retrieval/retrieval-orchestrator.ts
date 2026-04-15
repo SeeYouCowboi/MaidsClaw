@@ -304,7 +304,6 @@ export class RetrievalOrchestrator {
       narrativeBudget,
       cognitionBudget,
       conflictNotesBudget: template.conflictNotesBudget + 1,
-      episodicBudget: template.episodicBudget + 1,
       episodeBudget: template.episodeBudget + 1,
       maxNarrativeHits: narrativeBudget,
       maxCognitionHits: cognitionBudget,
@@ -635,11 +634,11 @@ export class RetrievalOrchestrator {
     // EPISODE_MEMORY_KEYWORDS / EPISODE_DETECTIVE_KEYWORDS /
     // EPISODE_SCENE_KEYWORDS in query-routing-keywords.ts) drives episode
     // budget reallocation via budget-allocator before this function runs;
-    // the role-default `episodicBudget` was bumped from 2 → 3 in the §4
+    // the role-default `episodeBudget` was bumped from 2 → 3 in the §4
     // prereq commit (ff8a44e) to absorb the +1 boost the regex used to
     // add. The signal path is strictly broader than the regex path on the
     // bilingual parity fixture (test/memory/episode-signal-parity.test.ts).
-    return Math.max(0, Math.max(template.episodicBudget, template.episodeBudget));
+    return Math.max(0, template.episodeBudget);
   }
 
   private resolveConflictNotesBudget(

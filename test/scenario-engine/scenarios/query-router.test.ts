@@ -42,7 +42,7 @@ function normalizePlanAndBudget(route: QueryRoute, plan: QueryPlan) {
       conflictNotesWeight: plan.surfacePlans.conflictNotes.weight,
       narrativeBudget: allocated.narrativeBudget,
       cognitionBudget: allocated.cognitionBudget,
-      episodeBudget: allocated.episodicBudget,
+      episodeBudget: allocated.episodeBudget,
       conflictNotesBudget: allocated.conflictNotesBudget,
     },
   };
