@@ -14,10 +14,24 @@ import type { TimeSliceQuery } from "./time-slice-query.js";
 import type { QueryRoute } from "./query-routing-types.js";
 import type { QueryType } from "./types.js";
 
-/** Generic per-surface facets — purely metadata, never includes rewritten queries. */
+/**
+ * Generic per-surface facets.
+ *
+ * Phase 2 was strictly metadata-only ("NEVER rewritten"). Phase 3+ allows an
+ * optional `rewrittenQuery` — a deterministic enrichment of `baseQuery` with
+ * router-resolved signals (entity hints + intent keywords) — which each
+ * per-surface search is free to prefer over the raw text. When undefined,
+ * callers fall back to `baseQuery`, so existing consumers stay correct.
+ */
 export type SurfaceFacets = {
-  /** Always === route.normalizedQuery. NEVER rewritten in Phase 2. */
+  /** Always === route.normalizedQuery. */
   baseQuery: string;
+  /**
+   * Optional search-friendly rewrite of baseQuery. Phase 3 construction is
+   * deterministic: intent keywords + entity hints + the normalized query,
+   * joined with spaces. undefined when the rewrite would equal baseQuery.
+   */
+  rewrittenQuery?: string;
   /** Resolved entity IDs to filter on at the surface layer. */
   entityFilters: number[];
   /** Optional valid/committed time window. */

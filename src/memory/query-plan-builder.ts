@@ -45,10 +45,21 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
     const hasTimelineIntent = hasIntent("timeline");
     const hasStateIntent = hasIntent("state");
 
+    // === Search-friendly rewrite ===
+    // Inject the router-resolved signals (entity hints + intent keywords) in
+    // front of the normalized query. This gives pg_trgm / CJK bigram ILIKE
+    // prefilters a higher-information seed than the raw user text — queries
+    // like "你还记得我们一开始在聊什么吗？" whose tokens are all common
+    // Chinese function words get supplemented with the resolved entities
+    // from recent routing context. Deterministic and pure: same route in,
+    // same rewrite out. undefined if the rewrite adds nothing new.
+    const rewrittenQuery = this.buildRewrittenQuery(route);
+
     // === Surface facets ===
     // Weight = 0 if role disables the surface; otherwise derived from signals.
     const narrative: SurfaceFacets = {
       baseQuery: route.normalizedQuery,
+      rewrittenQuery,
       entityFilters: [...route.resolvedEntityIds],
       timeWindow: route.timeConstraint,
       weight: template.narrativeEnabled
@@ -59,6 +70,7 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
 
     const cognition: CognitionFacets = {
       baseQuery: route.normalizedQuery,
+      rewrittenQuery,
       entityFilters: [...route.resolvedEntityIds],
       timeWindow: route.timeConstraint,
       weight: template.cognitionEnabled
@@ -71,6 +83,7 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
 
     const episode: SurfaceFacets = {
       baseQuery: route.normalizedQuery,
+      rewrittenQuery,
       entityFilters: [...route.resolvedEntityIds],
       timeWindow: route.timeConstraint,
       weight: template.episodeEnabled
@@ -81,6 +94,7 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
 
     const conflictNotes: SurfaceFacets = {
       baseQuery: route.normalizedQuery,
+      rewrittenQuery,
       entityFilters: [...route.resolvedEntityIds],
       timeWindow: route.timeConstraint,
       weight: template.conflictNotesEnabled
@@ -133,6 +147,56 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
       rationale: this.buildRationale(route, role, graphPlan),
       matchedRules,
     };
+  }
+
+  /**
+   * Deterministic query rewrite: prepend entity hints and intent type
+   * keywords in front of the normalized query. Returns `undefined` if the
+   * rewrite would be identical to the input (nothing to add).
+   *
+   * Token ordering: [intent types] + [entity hints] + [normalizedQuery].
+   * Duplicates are removed so a repeated mention doesn't dominate the
+   * rewritten string. This is intentionally NOT called an "expansion" —
+   * it's a prefix enrichment, not a synonym rewrite.
+   */
+  private buildRewrittenQuery(route: QueryRoute): string | undefined {
+    const parts: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (value: string | undefined | null): void => {
+      if (!value) return;
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      parts.push(trimmed);
+    };
+
+    // Intent types as keyword markers (e.g. "why", "timeline", "conflict").
+    // Low cardinality (≤ QueryType count); dedup guard prevents repeats.
+    for (const intent of route.intents) {
+      push(intent.type);
+    }
+
+    // Entity hints — the tokens the user typed that resolved to known entities
+    for (const hint of route.entityHints) {
+      push(hint);
+    }
+
+    if (parts.length === 0) {
+      return undefined;
+    }
+
+    // Always suffix the original normalized query so the raw text dominates
+    // when there are very few enrichment tokens.
+    parts.push(route.normalizedQuery);
+
+    const rewritten = parts.join(" ").trim();
+    if (rewritten === route.normalizedQuery.trim()) {
+      return undefined;
+    }
+    return rewritten;
   }
 
   private deriveEdgeBias(flags: {

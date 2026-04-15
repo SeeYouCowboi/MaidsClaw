@@ -197,7 +197,6 @@ export class RetrievalOrchestrator {
     }
 
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(template);
-    const episodeHints = await this.resolveEpisodeHints(query, viewerContext, effectiveEpisodeBudget);
 
     // GAP-4 §1: extract surface-level facets from the plan if a plan is
     // present and the facet consumption flag is on. Empty `entityFilters`
@@ -219,10 +218,30 @@ export class RetrievalOrchestrator {
         }
       : undefined;
 
+    // Phase 3 P1-B: per-surface query rewrite. Each surface gets the plan's
+    // deterministically enriched query text (entity hints + intent keywords
+    // + original) if one was emitted, else falls back to the raw query. See
+    // DeterministicQueryPlanBuilder.buildRewrittenQuery.
+    const narrativeQuery = facetsEnabled
+      ? (queryPlan.surfacePlans.narrative.rewrittenQuery ?? query)
+      : query;
+    const cognitionQuery = facetsEnabled
+      ? (queryPlan.surfacePlans.cognition.rewrittenQuery ?? query)
+      : query;
+    const episodeQuery = facetsEnabled
+      ? (queryPlan.surfacePlans.episode.rewrittenQuery ?? query)
+      : query;
+
+    const episodeHints = await this.resolveEpisodeHints(
+      episodeQuery,
+      viewerContext,
+      effectiveEpisodeBudget,
+    );
+
     const narrativeHints: MemoryHint[] =
       template.narrativeEnabled && (template.narrativeBudget > 0 || effectiveEpisodeBudget > 0)
         ? await this.narrativeService.generateMemoryHints(
-            query,
+            narrativeQuery,
             viewerContext,
             Math.max(template.narrativeBudget + effectiveEpisodeBudget + 4, template.narrativeBudget),
             narrativeFacets,
@@ -233,7 +252,7 @@ export class RetrievalOrchestrator {
       template.cognitionEnabled && (template.cognitionBudget > 0 || effectiveConflictNotesBudget > 0)
         ? await this.cognitionService.searchCognition({
             agentId: viewerContext.viewer_agent_id,
-            query,
+            query: cognitionQuery,
             activeOnly: true,
             limit: Math.max(template.cognitionBudget + effectiveConflictNotesBudget + 4, template.cognitionBudget),
             kind: cognitionFacets?.kind,
