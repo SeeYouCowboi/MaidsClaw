@@ -199,6 +199,23 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     };
   }
 
+  if (obj.lightweightLlm !== undefined) {
+    if (typeof obj.lightweightLlm !== "object" || obj.lightweightLlm === null || Array.isArray(obj.lightweightLlm)) {
+      return {
+        ok: false,
+        errors: [{
+          type: "CONFIG_ERROR",
+          field: "lightweightLlm",
+          message: "'lightweightLlm' must be an object",
+        }],
+      };
+    }
+    const lwl = obj.lightweightLlm as Record<string, unknown>;
+    if (typeof lwl.defaultChatModelId === "string") {
+      runtime.lightweightLlm = { defaultChatModelId: lwl.defaultChatModelId };
+    }
+  }
+
   // Always set talkerThinker with defaults (even if not in config)
   const tt = typeof obj.talkerThinker === "object" && obj.talkerThinker !== null && !Array.isArray(obj.talkerThinker)
     ? obj.talkerThinker as Record<string, unknown>

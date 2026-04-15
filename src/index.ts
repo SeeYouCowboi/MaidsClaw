@@ -1,4 +1,5 @@
 import { createAppHost } from "./app/host/index.js";
+import { startWithPortCheck } from "./utils/port-check.js";
 
 export const VERSION = "0.1.0";
 
@@ -15,7 +16,8 @@ async function main(): Promise<void> {
     traceCaptureEnabled: process.env.MAIDSCLAW_TRACE_CAPTURE !== "off",
   });
 
-  await host.start();
+  const port = parseInt(process.env.MAIDSCLAW_PORT ?? "3000", 10);
+  await startWithPortCheck(port, () => host.start());
 
   console.log(`MaidsClaw v${VERSION} started on port ${host.getBoundPort!()}`);
 

@@ -36,6 +36,13 @@ export type MemoryConfig = {
   organizerEmbeddingModelId?: string;
 };
 
+// Lightweight LLM config — used by the gateway's /v1/util/complete endpoint
+// (session-title generation, ad-hoc completions). Falls back to the first
+// auto-default provider in BUILT_IN_PROVIDERS when unset.
+export type LightweightLlmConfig = {
+  defaultChatModelId?: string;
+};
+
 // Complete V1 runtime config
 export type MaidsClawConfig = {
   providers: ProviderConfigs;
@@ -105,6 +112,7 @@ export type AuthConfigResult =
 // Runtime config (file-backed via config/runtime.json)
 export type RuntimeConfig = {
   memory?: MemoryConfig;
+  lightweightLlm?: LightweightLlmConfig;
   talkerThinker?: {
     enabled: boolean;
     stalenessThreshold: number;

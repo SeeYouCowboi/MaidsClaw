@@ -21,8 +21,14 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
       agent_id            TEXT NOT NULL,
       created_at          BIGINT NOT NULL,
       closed_at           BIGINT,
-      recovery_required   INTEGER NOT NULL DEFAULT 0
+      recovery_required   INTEGER NOT NULL DEFAULT 0,
+      title               TEXT
     )
+  `);
+
+  await sql.unsafe(`
+    ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS title TEXT
   `);
 
   await sql.unsafe(`

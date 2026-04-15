@@ -331,17 +331,25 @@ export function createProviderCatalogService(options: {
 
 class LightweightLlmServiceImpl implements LightweightLlmService {
   private readonly modelRegistry: RuntimeBootstrapResult["modelRegistry"];
+  private readonly configuredDefaultModelId: string | undefined;
 
-  constructor(modelRegistry: RuntimeBootstrapResult["modelRegistry"]) {
+  constructor(
+    modelRegistry: RuntimeBootstrapResult["modelRegistry"],
+    configuredDefaultModelId?: string,
+  ) {
     this.modelRegistry = modelRegistry;
+    this.configuredDefaultModelId = configuredDefaultModelId;
   }
 
   async complete(options: LightweightCompleteOptions): Promise<LightweightCompleteResult> {
     const model = options.model ?? this.resolveDefaultModel();
     if (!model) {
+      console.warn(
+        "[lightweight_llm] request rejected: no model resolvable (set runtime.json lightweightLlm.defaultChatModelId)",
+      );
       throw new MaidsClawError({
         code: "MODEL_NOT_CONFIGURED",
-        message: "No chat model is available for lightweight completion. Configure at least one provider.",
+        message: "No chat model is available for lightweight completion. Set runtime.json lightweightLlm.defaultChatModelId or configure an auto-default provider.",
         retriable: false,
       });
     }
@@ -353,30 +361,64 @@ class LightweightLlmServiceImpl implements LightweightLlmService {
       content: m.content,
     }));
 
+    const promptChars = messages.reduce((n, m) => n + m.content.length, 0)
+      + (options.system?.length ?? 0);
+    const maxTokens = options.maxTokens ?? 512;
+    const startMs = Date.now();
+    console.log(
+      `[lightweight_llm] start model=${model} messages=${messages.length} prompt_chars=${promptChars} max_tokens=${maxTokens}`,
+    );
+
     let text = "";
-    for await (const chunk of provider.chatCompletion({
-      modelId: model,
-      messages,
-      systemPrompt: options.system,
-      maxTokens: options.maxTokens ?? 512,
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-      disableThinking: true,
-    })) {
-      if (chunk.type === "text_delta") {
-        text += chunk.text;
-      } else if (chunk.type === "error") {
-        throw new MaidsClawError({
-          code: chunk.code as ErrorCode,
-          message: chunk.message,
-          retriable: chunk.retriable,
-        });
+    try {
+      for await (const chunk of provider.chatCompletion({
+        modelId: model,
+        messages,
+        systemPrompt: options.system,
+        maxTokens,
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        disableThinking: true,
+      })) {
+        if (chunk.type === "text_delta") {
+          text += chunk.text;
+        } else if (chunk.type === "error") {
+          throw new MaidsClawError({
+            code: chunk.code as ErrorCode,
+            message: chunk.message,
+            retriable: chunk.retriable,
+          });
+        }
       }
+    } catch (error) {
+      const elapsed = Date.now() - startMs;
+      const code = error instanceof MaidsClawError ? error.code : "INTERNAL_ERROR";
+      console.error(
+        `[lightweight_llm] failed model=${model} code=${code} elapsed_ms=${elapsed}:`,
+        error instanceof Error ? error.message : error,
+      );
+      throw error;
     }
 
+    const elapsed = Date.now() - startMs;
+    const preview = text.replace(/\s+/g, " ").slice(0, 60);
+    console.log(
+      `[lightweight_llm] done  model=${model} elapsed_ms=${elapsed} output_chars=${text.length} preview="${preview}${text.length > 60 ? "…" : ""}"`,
+    );
     return { text, model };
   }
 
   private resolveDefaultModel(): string | undefined {
+    if (this.configuredDefaultModelId) {
+      try {
+        this.modelRegistry.resolveChat(this.configuredDefaultModelId);
+        return this.configuredDefaultModelId;
+      } catch (error) {
+        console.warn(
+          `[lightweightLlm] configured defaultChatModelId '${this.configuredDefaultModelId}' is not resolvable; falling back to auto-default. Error:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
     for (const entry of BUILT_IN_PROVIDERS) {
       if (!entry.selectionPolicy.isAutoDefault || !entry.defaultChatModelId) {
         continue;
@@ -2739,7 +2781,10 @@ export function buildGatewayRuntimeContextExtensions(
     cognitionEventRepo: buildCognitionEventRepoService(runtime),
     graphReadRepo: buildGraphReadRepoService(runtime),
     entityReconciliation: runtime.entityReconciliation,
-    lightweightLlm: new LightweightLlmServiceImpl(runtime.modelRegistry),
+    lightweightLlm: new LightweightLlmServiceImpl(
+      runtime.modelRegistry,
+      runtime.runtimeConfigSnapshot?.lightweightLlm?.defaultChatModelId,
+    ),
     getAuthSnapshot,
     getRuntimeSnapshot,
   };

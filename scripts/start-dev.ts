@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { createAppHost } from "../src/app/host/create-app-host.js";
 import { VERSION } from "../src/index.js";
+import { startWithPortCheck } from "../src/utils/port-check.js";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_HOST = "localhost";
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
     host,
   });
 
-  await appHost.start();
+  await startWithPortCheck(port, () => appHost.start());
 
   console.log(`MaidsClaw v${VERSION} [dev] started on port ${appHost.getBoundPort!()}`);
 
