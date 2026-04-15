@@ -137,6 +137,22 @@ export class PgEpisodeRepo implements EpisodeRepo {
     `;
     return rows.map(normalizeEpisodeRow);
   }
+
+  async readByIds(agentId: string, ids: number[]): Promise<EpisodeRow[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    const rows = await this.sql`
+      SELECT id, agent_id, session_id, settlement_id, category, summary,
+             private_notes, location_entity_id, location_text,
+             valid_time, committed_time, source_local_ref, request_id, created_at,
+             entity_pointer_keys
+      FROM private_episode_events
+      WHERE agent_id = ${agentId}
+        AND id = ANY(${ids}::bigint[])
+    `;
+    return rows.map(normalizeEpisodeRow);
+  }
 }
 
 function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {

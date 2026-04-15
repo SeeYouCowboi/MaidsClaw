@@ -22,12 +22,27 @@ type EpisodeSearchHit = {
 
 type EpisodeSearchFn = (query: string, agentId: string, limit: number) => Promise<EpisodeSearchHit[]>;
 
+/**
+ * Optional embedding-based episode search, called alongside the lexical
+ * episodeSearchFn and RRF-merged into the final hint list. The callback
+ * is responsible for embedding the query, invoking cosineSearch with an
+ * agent-scoped visibility filter, hydrating the neighbor node_refs back
+ * to full episode rows, and returning the same hit shape as
+ * episodeSearchFn so the orchestrator can treat both sources uniformly.
+ */
+type EpisodeEmbeddingSearchFn = (
+  query: string,
+  agentId: string,
+  limit: number,
+) => Promise<EpisodeSearchHit[]>;
+
 type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
   currentProjectionReader?: CurrentProjectionReader | null;
   episodeRepository?: EpisodeRepo | null;
   episodeSearchFn?: EpisodeSearchFn | null;
+  episodeEmbeddingFn?: EpisodeEmbeddingSearchFn | null;
 };
 
 type TypedRetrievalSegment = {
@@ -124,6 +139,7 @@ export class RetrievalOrchestrator {
   private readonly cognitionService: CognitionSearchService;
   private readonly episodeRepository: EpisodeRepo | null;
   private readonly episodeSearchFn: EpisodeSearchFn | null;
+  private readonly episodeEmbeddingFn: EpisodeEmbeddingSearchFn | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
@@ -131,6 +147,7 @@ export class RetrievalOrchestrator {
     this.currentProjectionReader = deps.currentProjectionReader ?? null;
     this.episodeRepository = deps.episodeRepository ?? null;
     this.episodeSearchFn = deps.episodeSearchFn ?? null;
+    this.episodeEmbeddingFn = deps.episodeEmbeddingFn ?? null;
   }
 
   async search(
@@ -472,29 +489,45 @@ export class RetrievalOrchestrator {
       return [];
     }
 
-    // Prefer FTS when available
-    if (this.episodeSearchFn && query.trim().length > 0) {
-      try {
-        const ftsHits = await this.episodeSearchFn(
-          query,
-          viewerContext.viewer_agent_id,
-          Math.max(effectiveEpisodeBudget * 3, effectiveEpisodeBudget + 4),
-        );
-        if (ftsHits.length > 0) {
-          return ftsHits.map((hit) => ({
-            source_ref: hit.sourceRef,
-            content: hit.content,
-            score: hit.score,
-            doc_type: `episode_${hit.category}`,
-            scope: "private" as const,
-          }));
-        }
-      } catch {
-        // Fall through to readByAgent scan
-      }
+    const trimmedQuery = query.trim();
+    const fetchLimit = Math.max(
+      effectiveEpisodeBudget * 3,
+      effectiveEpisodeBudget + 4,
+    );
+
+    // Run lexical FTS and embedding recall in parallel when both are available.
+    // Each signal is independently recoverable — if one throws we still have
+    // the other. RRF-merge the two rankings into a single hint list so queries
+    // that only match semantically (e.g. "那个银色的东西" → 银怀表) can
+    // surface episodes even when the CJK ILIKE pre-filter misses them.
+    let ftsHits: EpisodeSearchHit[] = [];
+    let embeddingHits: EpisodeSearchHit[] = [];
+    if (trimmedQuery.length > 0) {
+      const [ftsResult, embResult] = await Promise.allSettled([
+        this.episodeSearchFn
+          ? this.episodeSearchFn(
+              trimmedQuery,
+              viewerContext.viewer_agent_id,
+              fetchLimit,
+            )
+          : Promise.resolve<EpisodeSearchHit[]>([]),
+        this.episodeEmbeddingFn
+          ? this.episodeEmbeddingFn(
+              trimmedQuery,
+              viewerContext.viewer_agent_id,
+              fetchLimit,
+            )
+          : Promise.resolve<EpisodeSearchHit[]>([]),
+      ]);
+      if (ftsResult.status === "fulfilled") ftsHits = ftsResult.value;
+      if (embResult.status === "fulfilled") embeddingHits = embResult.value;
     }
 
-    // Fallback: direct scan via episodeRepository
+    if (ftsHits.length > 0 || embeddingHits.length > 0) {
+      return this.rrfMergeEpisodeHits(ftsHits, embeddingHits, effectiveEpisodeBudget);
+    }
+
+    // Fallback: direct scan via episodeRepository (no lexical or embedding match)
     if (!this.episodeRepository) {
       return [];
     }
@@ -602,6 +635,53 @@ export class RetrievalOrchestrator {
 
   private isEpisodeCandidate(hint: MemoryHint): boolean {
     return hint.doc_type.includes("event") || String(hint.source_ref).startsWith("event:");
+  }
+
+  /**
+   * Reciprocal Rank Fusion over two independent episode ranking signals:
+   * pg_trgm/CJK bigram lexical hits (`ftsHits`) and embedding cosineSearch
+   * neighbors (`embeddingHits`). Produces a single ordered segment list of
+   * length `effectiveEpisodeBudget`, with hits present in both signals
+   * naturally boosted to the top. Matches the `NarrativeSearchService.rrfMerge`
+   * pattern (RRF_K = 60).
+   */
+  private rrfMergeEpisodeHits(
+    ftsHits: EpisodeSearchHit[],
+    embeddingHits: EpisodeSearchHit[],
+    effectiveEpisodeBudget: number,
+  ): TypedNarrativeSegment[] {
+    const RRF_K = 60;
+    const merged = new Map<
+      string,
+      { hit: EpisodeSearchHit; score: number }
+    >();
+
+    for (const [rank, hit] of ftsHits.entries()) {
+      const key = hit.sourceRef;
+      const entry = merged.get(key) ?? { hit, score: 0 };
+      entry.score += 1 / (RRF_K + rank + 1);
+      merged.set(key, entry);
+    }
+    for (const [rank, hit] of embeddingHits.entries()) {
+      const key = hit.sourceRef;
+      const existing = merged.get(key);
+      if (existing) {
+        existing.score += 1 / (RRF_K + rank + 1);
+      } else {
+        merged.set(key, { hit, score: 1 / (RRF_K + rank + 1) });
+      }
+    }
+
+    return Array.from(merged.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, effectiveEpisodeBudget)
+      .map(({ hit, score }) => ({
+        source_ref: hit.sourceRef,
+        content: hit.content,
+        score,
+        doc_type: `episode_${hit.category}`,
+        scope: "private" as const,
+      }));
   }
 
   private scoreEpisodeRow(row: EpisodeRow, query: string, viewerContext: ViewerContext): number {

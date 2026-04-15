@@ -1299,40 +1299,10 @@ export function bootstrapRuntime(
   );
   const currentProjectionReader =
     cognitionSearchService.createCurrentProjectionReader();
-  const retrievalOrchestrator = new RetrievalOrchestrator({
-    narrativeService: narrativeSearchService,
-    cognitionService: cognitionSearchService,
-    currentProjectionReader,
-    episodeRepository: episodeRepo,
-    episodeSearchFn: async (query, agentId, limit) =>
-      searchProjectionRepo.searchEpisode(query, agentId, limit),
-  });
-  // GAP-4 query understanding stack (Phase 1: router, Phase 2: plan builder,
-  // Phase 3: plan-driven retrieval budget reallocation). Both are shared
-  // between RetrievalService and GraphNavigator so the same instances power
-  // both entry points.
-  //   - MAIDSCLAW_QUERY_ROUTER_SHADOW=0 disables the router entirely.
-  //   - MAIDSCLAW_QUERY_PLAN_SHADOW=0 disables plan construction.
-  //   - MAIDSCLAW_RETRIEVAL_USE_PLAN=off disables plan consumption inside
-  //     the orchestrator (falls back to the legacy template path).
-  const queryRouterEnabled = process.env.MAIDSCLAW_QUERY_ROUTER_SHADOW !== "0";
-  const queryRouter = queryRouterEnabled
-    ? new RuleBasedQueryRouter(aliasService)
-    : undefined;
-  const queryPlanBuilderEnabled =
-    process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
-  const queryPlanBuilder = queryPlanBuilderEnabled
-    ? new DeterministicQueryPlanBuilder()
-    : undefined;
-  const retrievalService = new RetrievalService({
-    retrievalRepo: pgRetrievalReadRepo,
-    embeddingService,
-    narrativeSearch: narrativeSearchService,
-    cognitionSearch: cognitionSearchService,
-    orchestrator: retrievalOrchestrator,
-    queryRouter,
-    queryPlanBuilder,
-  });
+  // Build the memory task model provider eagerly so that retrieval-side
+  // components (episodeEmbeddingFn) can reference it via closure. Previously
+  // this was constructed after the orchestrator; moved up as part of P1-A
+  // (episode embedding recall).
   const memoryTaskModelProvider: MemoryTaskModelProvider | undefined =
     memoryEmbeddingModelId
       ? (() => {
@@ -1361,6 +1331,100 @@ export function bootstrapRuntime(
           }
         })()
       : undefined;
+  const retrievalOrchestrator = new RetrievalOrchestrator({
+    narrativeService: narrativeSearchService,
+    cognitionService: cognitionSearchService,
+    currentProjectionReader,
+    episodeRepository: episodeRepo,
+    episodeSearchFn: async (query, agentId, limit) =>
+      searchProjectionRepo.searchEpisode(query, agentId, limit),
+    episodeEmbeddingFn:
+      memoryTaskModelProvider && memoryEmbeddingModelId
+        ? async (query, agentId, limit) => {
+            const provider = memoryTaskModelProvider;
+            const modelId = memoryEmbeddingModelId;
+            try {
+              const [vector] = await provider.embed(
+                [query],
+                "query_expansion",
+                modelId,
+              );
+              if (!vector || vector.length === 0) return [];
+              const neighbors = await embeddingRepo.cosineSearch(vector, {
+                nodeKind: "episode",
+                agentId,
+                modelId,
+                limit,
+              });
+              if (neighbors.length === 0) return [];
+              const ids: number[] = [];
+              for (const neighbor of neighbors) {
+                const parts = neighbor.nodeRef.split(":");
+                if (parts[0] !== "episode") continue;
+                const id = Number(parts[1]);
+                if (Number.isFinite(id)) ids.push(id);
+              }
+              if (ids.length === 0) return [];
+              const rows = await episodeRepo.readByIds(agentId, ids);
+              const byId = new Map(rows.map((r) => [r.id, r]));
+              const hits: Array<{
+                sourceRef: string;
+                content: string;
+                category: string;
+                score: number;
+              }> = [];
+              for (const neighbor of neighbors) {
+                const parts = neighbor.nodeRef.split(":");
+                if (parts[0] !== "episode") continue;
+                const id = Number(parts[1]);
+                const row = byId.get(id);
+                if (!row) continue;
+                hits.push({
+                  sourceRef: neighbor.nodeRef,
+                  content: row.summary,
+                  category: row.category,
+                  score: neighbor.similarity,
+                });
+              }
+              return hits;
+            } catch (err) {
+              console.warn(
+                "[runtime] episodeEmbeddingFn failed (non-fatal):",
+                err,
+              );
+              return [];
+            }
+          }
+        : undefined,
+  });
+  // GAP-4 query understanding stack (Phase 1: router, Phase 2: plan builder,
+  // Phase 3: plan-driven retrieval budget reallocation). Both are shared
+  // between RetrievalService and GraphNavigator so the same instances power
+  // both entry points.
+  //   - MAIDSCLAW_QUERY_ROUTER_SHADOW=0 disables the router entirely.
+  //   - MAIDSCLAW_QUERY_PLAN_SHADOW=0 disables plan construction.
+  //   - MAIDSCLAW_RETRIEVAL_USE_PLAN=off disables plan consumption inside
+  //     the orchestrator (falls back to the legacy template path).
+  const queryRouterEnabled = process.env.MAIDSCLAW_QUERY_ROUTER_SHADOW !== "0";
+  const queryRouter = queryRouterEnabled
+    ? new RuleBasedQueryRouter(aliasService)
+    : undefined;
+  const queryPlanBuilderEnabled =
+    process.env.MAIDSCLAW_QUERY_PLAN_SHADOW !== "0";
+  const queryPlanBuilder = queryPlanBuilderEnabled
+    ? new DeterministicQueryPlanBuilder()
+    : undefined;
+  const retrievalService = new RetrievalService({
+    retrievalRepo: pgRetrievalReadRepo,
+    embeddingService,
+    narrativeSearch: narrativeSearchService,
+    cognitionSearch: cognitionSearchService,
+    orchestrator: retrievalOrchestrator,
+    queryRouter,
+    queryPlanBuilder,
+  });
+  // (memoryTaskModelProvider is constructed above, just before
+  // RetrievalOrchestrator so that episodeEmbeddingFn can close over it.)
   const entityReconciliation: EntityReconciliationSweeper | undefined =
     pgFactory && memoryTaskModelProvider
       ? new EntityReconciliationSweeper(pgFactory, memoryTaskModelProvider)

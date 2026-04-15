@@ -162,17 +162,36 @@ export class PgEmbeddingRepo implements EmbeddingRepo {
     }
 
     if (options.agentId == null) {
-      whereClauses.push("ne.node_kind NOT IN ('assertion', 'evaluation', 'commitment')");
+      // Without an agent context, exclude any kind that is per-agent private:
+      // cognition overlays (assertion/evaluation/commitment) and episodes.
+      whereClauses.push(
+        "ne.node_kind NOT IN ('assertion', 'evaluation', 'commitment', 'episode')",
+      );
     } else {
+      // Allow public kinds (anything that is not a private per-agent kind)
+      // OR allow cognition/episode rows that belong to this specific agent,
+      // gated by an EXISTS against the authoritative source table.
+      const agentIdx = paramIndex;
       whereClauses.push(`(
-        ne.node_kind NOT IN ('assertion', 'evaluation', 'commitment')
+        ne.node_kind NOT IN ('assertion', 'evaluation', 'commitment', 'episode')
         OR (
-          ne.node_ref ~ '^[^:]+:[0-9]+$'
+          ne.node_kind IN ('assertion', 'evaluation', 'commitment')
+          AND ne.node_ref ~ '^[^:]+:[0-9]+$'
           AND EXISTS (
             SELECT 1
             FROM private_cognition_current pcc
             WHERE pcc.id = split_part(ne.node_ref, ':', 2)::bigint
-              AND pcc.agent_id = $${paramIndex}
+              AND pcc.agent_id = $${agentIdx}
+          )
+        )
+        OR (
+          ne.node_kind = 'episode'
+          AND ne.node_ref ~ '^episode:[0-9]+$'
+          AND EXISTS (
+            SELECT 1
+            FROM private_episode_events pee
+            WHERE pee.id = split_part(ne.node_ref, ':', 2)::bigint
+              AND pee.agent_id = $${agentIdx}
           )
         )
       )`);

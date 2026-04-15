@@ -6,6 +6,13 @@ import type {
 export interface EpisodeRepo {
   append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number>;
   readById(id: number): Promise<EpisodeRow | null>;
+  /**
+   * Batch-read episodes by id with an agent_id gate. Used by retrieval paths
+   * that resolve node_embedding neighbors (which carry only `episode:N` refs)
+   * back to their full row content while ensuring cross-agent leakage is
+   * impossible. Rows whose agent_id does not match are silently omitted.
+   */
+  readByIds(agentId: string, ids: number[]): Promise<EpisodeRow[]>;
   readBySettlement(settlementId: string, agentId: string): Promise<EpisodeRow[]>;
   readPublicationsBySettlement(
     settlementId: string,
