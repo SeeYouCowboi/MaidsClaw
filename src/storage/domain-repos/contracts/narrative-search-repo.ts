@@ -8,6 +8,17 @@ export type NarrativeSearchQuery = {
   includeArea?: boolean;
   includeWorld?: boolean;
   /**
+   * P2-B: when true, also search `search_docs_episode` for rows whose
+   * `agent_id` matches `viewerContext.viewer_agent_id`. Strict single-agent
+   * isolation — there is no cross-agent read path. When false/undefined,
+   * behavior is identical to the pre-P2-B narrative-only shape.
+   *
+   * Safe to enable now that Commit A populates `search_docs_episode` on
+   * every settlement; before Commit A the table was table-wide empty and
+   * this flag would have been a no-op.
+   */
+  includeEpisode?: boolean;
+  /**
    * GAP-4 §1: optional entity-id filter sourced from
    * `plan.surfacePlans.narrative.entityFilters`. An empty array is treated
    * the same as `undefined` (no filter); only a non-empty list narrows
@@ -32,14 +43,20 @@ export type NarrativeSearchHit = {
   sourceRef: NodeRef;
   docType: string;
   content: string;
-  scope: "area" | "world";
+  scope: "area" | "world" | "episode";
   score: number;
 };
 
 export interface NarrativeSearchRepo {
   /**
-   * Executes narrative-only full-text search for the caller's visibility context.
-   * Implementations must search only narrative surfaces (area/world), never private cognition.
+   * Executes full-text search across the caller's visible narrative surfaces.
+   *
+   * Default behavior (pre-P2-B): searches `search_docs_area` +
+   * `search_docs_world` only. Never reads `search_docs_private` or
+   * `search_docs_cognition` (those go through the cognition layer).
+   *
+   * P2-B extension: when `query.includeEpisode === true`, also reads
+   * `search_docs_episode` gated by `viewerContext.viewer_agent_id`.
    */
   searchNarrative(query: NarrativeSearchQuery, viewerContext: ViewerContext): Promise<NarrativeSearchHit[]>;
 }

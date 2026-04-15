@@ -15,13 +15,21 @@ import type { MemoryHint, NodeRef, ViewerContext } from "../types.js";
 export type NarrativeSearchFilters = {
   entityIds?: number[];
   timeWindow?: TimeSliceQuery;
+  /**
+   * P2-B: when true, also search `search_docs_episode` for rows whose
+   * agent_id matches the viewer. Episode-scope hits are mapped to the
+   * `private` scope in the emitted MemoryHints so downstream consumers
+   * don't need to learn a new enum value. Defaults to false — callers
+   * must opt in to include episode surface.
+   */
+  includeEpisode?: boolean;
 };
 
 type NarrativeSearchResult = {
   source_ref: NodeRef;
   doc_type: string;
   content: string;
-  scope: "area" | "world";
+  scope: "area" | "world" | "private";
   score: number;
 };
 
@@ -34,9 +42,17 @@ export type EmbeddingFallbackConfig = {
 };
 
 /**
- * Narrative-only search — queries ONLY `search_docs_area` + `search_docs_world`.
- * Never reads `search_docs_private` (cognition layer, T12).
- * Visibility: `viewer_agent_id` + `current_area_id`, NOT `viewer_role`.
+ * Narrative-only search.
+ *
+ * Default: queries `search_docs_area` + `search_docs_world` only. Never reads
+ * `search_docs_cognition` (cognition layer, T12). Visibility: `viewer_agent_id`
+ * + `current_area_id`, NOT `viewer_role`.
+ *
+ * P2-B extension: when `filters.includeEpisode === true`, also queries
+ * `search_docs_episode` with a strict `agent_id = viewer_agent_id` gate.
+ * Episode hits are mapped to the `private` scope in the emitted
+ * `NarrativeSearchResult` / `MemoryHint` so downstream consumers don't
+ * need a new enum value.
  *
  * When an optional `embeddingFallback` is configured, the service will
  * fall back to embedding cosine similarity when pg_trgm text search
@@ -64,6 +80,7 @@ export class NarrativeSearchService {
         text: query,
         entityIds: filters?.entityIds,
         timeWindow: filters?.timeWindow,
+        includeEpisode: filters?.includeEpisode,
       },
       viewerContext,
     );
@@ -208,11 +225,16 @@ export class NarrativeSearchService {
   }
 
   private mapHit(hit: NarrativeSearchHit): NarrativeSearchResult {
+    // P2-B: narrate episode hits under the `private` scope so downstream
+    // consumers (MemoryHint emitters, retrieval trace) don't need to learn
+    // a new enum value. Episode rows are per-agent-private by construction.
+    const scope: NarrativeSearchResult["scope"] =
+      hit.scope === "episode" ? "private" : hit.scope;
     return {
       source_ref: hit.sourceRef,
       doc_type: hit.docType,
       content: hit.content,
-      scope: hit.scope,
+      scope,
       score: hit.score,
     };
   }
