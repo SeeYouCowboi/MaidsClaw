@@ -34,13 +34,26 @@ export type CjkDecomposition = {
 };
 
 /**
- * Decompose a CJK string into weighted bigrams and unigrams.
+ * Extracts Latin word-like tokens (length >= 2) from mixed-script text.
+ * Used by decomposeCjk so mixed queries like "Alice有时候比管家还麻烦"
+ * keep "Alice" as a retrievable unigram instead of silently dropping it.
+ */
+const LATIN_TOKEN_RE = /[a-zA-Z][a-zA-Z0-9]+/g;
+
+/**
+ * Decompose a mixed CJK + Latin string into weighted bigrams and unigrams.
  *
  * For query "储藏室":
  * - bigrams: ["储藏", "藏室"]  (weight=3 each)
  * - unigrams: ["储", "藏", "室"]  (weight=1 each, stopwords excluded)
  * - exact match weight: 5
  * - maxScore: 5 + 2*3 + 3*1 = 14
+ *
+ * For query "Alice有时候比管家还麻烦":
+ * - bigrams: ["有时", "时候", "候比", "比管", "管家", "家还", "还麻", "麻烦"]
+ * - unigrams: ["有", "时", "候", "管", "家", "还", "麻", "烦", "alice"]
+ *   (CJK stopwords excluded; "比" is a stopword so it's dropped; "Alice"
+ *    preserved as a lower-cased Latin unigram)
  */
 export function decomposeCjk(query: string): CjkDecomposition {
   const chars = Array.from(query).filter((ch) => CJK_CHAR_RE.test(ch));
@@ -50,7 +63,18 @@ export function decomposeCjk(query: string): CjkDecomposition {
     bigrams.push(chars[i] + chars[i + 1]);
   }
 
-  const unigrams = chars.filter((ch) => !CJK_STOPWORDS.has(ch));
+  const unigrams: string[] = chars.filter((ch) => !CJK_STOPWORDS.has(ch));
+
+  // Also extract Latin word tokens (length >= 2) so mixed-script queries
+  // don't silently lose their most informative ASCII terms (proper names,
+  // codes, identifiers). Normalized to lowercase for case-insensitive match
+  // against content.toLowerCase() in the scorer path.
+  const latinMatches = query.match(LATIN_TOKEN_RE) ?? [];
+  for (const token of latinMatches) {
+    if (token.length >= 2) {
+      unigrams.push(token.toLowerCase());
+    }
+  }
 
   const WEIGHT_EXACT = 5;
   const WEIGHT_BIGRAM = 3;
@@ -122,8 +146,22 @@ export function buildCjkScoreSql(
 }
 
 /**
+ * Maximum number of ILIKE patterns to emit in a single WHERE expression.
+ * Bounded so the generated SQL stays manageable even for very long queries.
+ */
+const CJK_PREFILTER_PATTERN_CAP = 20;
+
+/**
  * Build a SQL WHERE condition that matches any CJK gram.
- * Uses a small set of non-stopword unigrams for efficient pre-filtering.
+ *
+ * Pre-P2-A: used only the first 3 unigrams, which for long queries meant
+ * dropping high-information bigrams like `管家`/`茶室`/`怀表` from the
+ * pre-filter entirely and seeding with whatever 3 common characters happened
+ * to come first after stopword removal. Now:
+ *
+ *  - Prefer bigrams (higher information density per gram) when available
+ *  - Fall back to unigrams for very short (single-char) queries
+ *  - Cap total patterns at CJK_PREFILTER_PATTERN_CAP
  */
 export function buildCjkWhereSql(
   contentColumn: string,
@@ -133,10 +171,12 @@ export function buildCjkWhereSql(
   const params: string[] = [];
   let idx = startParamIndex;
 
-  // Use exact pattern + up to 3 unigrams for pre-filter
-  const filterPatterns = [`%${decomp.original}%`];
-  for (const ug of decomp.unigrams.slice(0, 3)) {
-    filterPatterns.push(`%${ug}%`);
+  const filterPatterns: string[] = [`%${decomp.original}%`];
+  const grams =
+    decomp.bigrams.length > 0 ? decomp.bigrams : decomp.unigrams;
+  for (const g of grams) {
+    if (filterPatterns.length >= CJK_PREFILTER_PATTERN_CAP) break;
+    filterPatterns.push(`%${g}%`);
   }
 
   const conditions = filterPatterns.map((p) => {

@@ -643,10 +643,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     score: number;
   }>> {
     const decomp = decomposeCjk(query);
-    const filterPatterns = [
-      `%${decomp.original}%`,
-      ...decomp.unigrams.slice(0, 3).map((u) => `%${u}%`),
-    ];
+    // P2-A: prefer high-information bigrams (`管家`/`茶室`/`怀表`) as the
+    // pre-filter. Falls back to unigrams for single-char queries. Capped
+    // at 20 patterns to keep the ILIKE ANY expression bounded. Mirrors
+    // buildCjkWhereSql in cjk-search-utils.ts for the cognition path.
+    const CJK_EPISODE_PATTERN_CAP = 20;
+    const filterPatterns: string[] = [`%${decomp.original}%`];
+    const grams =
+      decomp.bigrams.length > 0 ? decomp.bigrams : decomp.unigrams;
+    for (const g of grams) {
+      if (filterPatterns.length >= CJK_EPISODE_PATTERN_CAP) break;
+      filterPatterns.push(`%${g}%`);
+    }
 
     const rows = await this.sql<{
       id: string | number;

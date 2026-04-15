@@ -703,29 +703,49 @@ export class RetrievalOrchestrator {
       }));
   }
 
+  /**
+   * P2-A: rebalanced so relevance dominates recency.
+   *
+   * Pre-fix: `committed_time` (epoch-ms, ~1.776e12) was the base score,
+   * then `1_000_000` was added per matched term. That made one matched
+   * term equal to ~17 minutes of recency — recency still dominated for
+   * any pair of episodes within the same session. In practice the
+   * fallback path degenerated to pure "newest N" ordering.
+   *
+   * Post-fix: relevance is scored independently (per-term hits + area/
+   * session bonuses) and `committed_time` is added only as a sub-1.0
+   * tiebreaker via `committed_time / 1e15` (always < 0.002 for plausible
+   * epoch-ms timestamps). Two episodes with different matched_terms
+   * counts will never have their order flipped by recency.
+   */
   private scoreEpisodeRow(row: EpisodeRow, query: string, viewerContext: ViewerContext): number {
-    let score = row.committed_time;
     const queryText = query.trim().toLowerCase();
     const entityKeysText = (row.entity_pointer_keys ?? []).join(" ").toLowerCase();
     const haystack = `${row.summary} ${row.location_text ?? ""} ${row.category} ${entityKeysText}`.toLowerCase();
 
+    let relevance = 0;
     if (queryText.length > 0) {
       const terms = tokenizeQuery(queryText);
       for (const term of terms) {
         if (haystack.includes(term)) {
-          score += 1_000_000;
+          relevance += 100;
         }
       }
     }
 
-    if (viewerContext.current_area_id != null && row.location_entity_id === viewerContext.current_area_id) {
-      score += 2_000_000;
+    if (
+      viewerContext.current_area_id != null &&
+      row.location_entity_id === viewerContext.current_area_id
+    ) {
+      relevance += 200;
     }
     if (row.session_id === viewerContext.session_id) {
-      score += 500_000;
+      relevance += 50;
     }
 
-    return score;
+    // Recency as a strictly-sub-relevance tiebreaker.
+    const recencyFrac = row.committed_time / 1e15;
+    return relevance + recencyFrac;
   }
 
   private normalizeText(text: string): string {
