@@ -2,60 +2,6 @@
   "_comment": "Optional provider overrides. Copy relevant sections to config/providers.json to override built-in providers or add custom ones.",
   "providers": [
     {
-      "_comment": "Example: add a custom OpenAI-compatible provider",
-      "id": "my-local-llm",
-      "displayName": "My Local LLM",
-      "transportFamily": "openai-compatible",
-      "apiKind": "openai",
-      "riskTier": "compatible",
-      "baseUrl": "http://localhost:11434/v1",
-      "authModes": ["api-key"],
-      "selectionPolicy": {
-        "enabledByDefault": true,
-        "eligibleForAutoFallback": false,
-        "isAutoDefault": false
-      },
-      "defaultChatModelId": "llama3",
-      "models": [
-        {
-          "id": "llama3",
-          "displayName": "Llama 3",
-          "contextWindow": 8192,
-          "maxOutputTokens": 4096,
-          "supportsTools": false,
-          "supportsVision": false,
-          "supportsEmbedding": false
-        }
-      ]
-    },
-    {
-      "_comment": "Kimi for Coding — subscription-based. Set KIMI_CODING_API_KEY in .env or use config/auth.json",
-      "id": "kimi-coding",
-      "displayName": "Kimi for Coding",
-      "transportFamily": "openai-compatible",
-      "apiKind": "openai",
-      "riskTier": "compatible",
-      "baseUrl": "https://api.kimi.com/coding",
-      "authModes": ["api-key"],
-      "selectionPolicy": {
-        "enabledByDefault": true,
-        "eligibleForAutoFallback": false,
-        "isAutoDefault": false
-      },
-      "defaultChatModelId": "kimi-for-coding",
-      "models": [
-        {
-          "id": "kimi-for-coding",
-          "displayName": "Kimi For Coding",
-          "contextWindow": 262144,
-          "maxOutputTokens": 32768,
-          "supportsTools": true,
-          "supportsVision": true,
-          "supportsEmbedding": false
-        }
-      ]
-    },
-    {
       "_comment": "Moonshot Platform — pay-per-token metered API. Set MOONSHOT_API_KEY in .env or use config/auth.json",
       "id": "moonshot",
       "displayName": "Moonshot (Metered API)",
@@ -64,6 +10,7 @@
       "riskTier": "compatible",
       "baseUrl": "https://api.moonshot.cn",
       "authModes": ["api-key"],
+      "disableToolChoiceRequired": true,
       "selectionPolicy": {
         "enabledByDefault": true,
         "eligibleForAutoFallback": false,
@@ -101,6 +48,59 @@
       ]
     },
     {
+      "_comment": "Alibaba Cloud DashScope / Bailian — embedding models. Set DASHSCOPE_API_KEY in .env or use config/auth.json",
+      "id": "bailian",
+      "displayName": "Bailian (DashScope)",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "models": [
+        {
+          "id": "text-embedding-v4",
+          "displayName": "Text Embedding V4",
+          "contextWindow": 8192,
+          "maxOutputTokens": 0,
+          "supportsTools": false,
+          "supportsVision": false,
+          "supportsEmbedding": true
+        }
+      ]
+    },
+    {
+      "_comment": "Kimi for Coding — subscription-based. Set KIMI_CODING_API_KEY in .env or use config/auth.json",
+      "id": "kimi-coding",
+      "displayName": "Kimi for Coding",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "https://api.kimi.com/coding",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "defaultChatModelId": "kimi-for-coding",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "displayName": "Kimi For Coding",
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsEmbedding": false
+        }
+      ]
+    },
+    {
       "_comment": "MiniMax — Anthropic-compatible. Set MINIMAX_API_KEY in .env or use config/auth.json",
       "id": "minimax",
       "displayName": "MiniMax",
@@ -122,6 +122,33 @@
           "contextWindow": 204800,
           "maxOutputTokens": 8192,
           "supportsTools": true,
+          "supportsVision": false,
+          "supportsEmbedding": false
+        }
+      ]
+    },
+    {
+      "_comment": "Example: add a custom OpenAI-compatible local provider (e.g. Ollama)",
+      "id": "my-local-llm",
+      "displayName": "My Local LLM",
+      "transportFamily": "openai-compatible",
+      "apiKind": "openai",
+      "riskTier": "compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "authModes": ["api-key"],
+      "selectionPolicy": {
+        "enabledByDefault": true,
+        "eligibleForAutoFallback": false,
+        "isAutoDefault": false
+      },
+      "defaultChatModelId": "llama3",
+      "models": [
+        {
+          "id": "llama3",
+          "displayName": "Llama 3",
+          "contextWindow": 8192,
+          "maxOutputTokens": 4096,
+          "supportsTools": false,
           "supportsVision": false,
           "supportsEmbedding": false
         }

@@ -2,32 +2,38 @@
   "_comment": "Project-local credentials for MaidsClaw providers. Copy to config/auth.json and fill in real values. This file is gitignored.",
   "credentials": [
     {
-      "_comment_1": "Tier B: Kimi for Coding API key — subscription-based (replaces KIMI_CODING_API_KEY env var)",
-      "type": "api-key",
-      "provider": "kimi-coding",
-      "apiKey": "sk-kimi-PLACEHOLDER"
-    },
-    {
-      "_comment_1b": "Tier B: Moonshot Platform metered API key — pay-per-token (replaces MOONSHOT_API_KEY env var)",
+      "_comment": "Moonshot Platform metered API key — pay-per-token (replaces MOONSHOT_API_KEY env var)",
       "type": "api-key",
       "provider": "moonshot",
       "apiKey": "sk-PLACEHOLDER"
     },
     {
-      "_comment_2": "Tier B: MiniMax API key (replaces MINIMAX_API_KEY env var)",
+      "_comment": "Alibaba Cloud DashScope / Bailian API key — used for bailian/text-embedding-v4 and other bailian models (replaces DASHSCOPE_API_KEY env var)",
+      "type": "api-key",
+      "provider": "bailian",
+      "apiKey": "sk-PLACEHOLDER"
+    },
+    {
+      "_comment": "Kimi for Coding — subscription-based API key (replaces KIMI_CODING_API_KEY env var)",
+      "type": "api-key",
+      "provider": "kimi-coding",
+      "apiKey": "sk-kimi-PLACEHOLDER"
+    },
+    {
+      "_comment": "MiniMax API key (replaces MINIMAX_API_KEY env var)",
       "type": "api-key",
       "provider": "minimax",
       "apiKey": "eyJ-minimax-PLACEHOLDER"
     },
     {
-      "_comment_3": "Tier C: OpenAI ChatGPT Codex OAuth token (manually obtained from Codex CLI login). HIGH RISK: undocumented endpoint.",
+      "_comment": "OpenAI ChatGPT Codex OAuth token (manually obtained from Codex CLI login). HIGH RISK: undocumented endpoint.",
       "type": "oauth-token",
       "provider": "openai-chatgpt-codex-oauth",
       "accessToken": "oa-PLACEHOLDER",
       "expiresAt": 9999999999000
     },
     {
-      "_comment_4": "Tier C: Anthropic Claude Pro/Max OAuth via setup-token (run 'claude setup-token' to obtain). HIGH RISK: may violate Anthropic ToS.",
+      "_comment": "Anthropic Claude Pro/Max OAuth via setup-token (run 'claude setup-token' to obtain). HIGH RISK: may violate Anthropic ToS.",
       "type": "setup-token",
       "provider": "anthropic-claude-pro-max-oauth",
       "token": "stp-PLACEHOLDER",
@@ -35,7 +41,7 @@
     }
   ],
   "gateway": {
-    "_comment": "Gateway bearer tokens for cockpit routes. Keep separate from provider credentials[].",
+    "_comment": "Gateway bearer tokens for dashboard/cockpit routes. Keep separate from provider credentials[].",
     "tokens": [
       {
         "id": "dashboard-local-read",

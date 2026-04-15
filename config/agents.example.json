@@ -1,11 +1,12 @@
 [
   {
+    "_comment": "General-purpose maiden agent. Handles user requests, delegates to task agents, and orchestrates sessions.",
     "id": "maid:main",
     "role": "maiden",
     "lifecycle": "persistent",
     "userFacing": true,
     "outputMode": "freeform",
-    "modelId": "claude-3-5-sonnet-20241022",
+    "modelId": "moonshot/kimi-k2.5",
     "maxOutputTokens": 8192,
     "toolPermissions": [],
     "maxDelegationDepth": 3,
@@ -17,15 +18,22 @@
     }
   },
   {
+    "_comment": "RP agent bound to a persona. toolPermissions must include submit_rp_turn to use the structured turn protocol.",
     "id": "rp:alice",
     "role": "rp_agent",
     "lifecycle": "persistent",
     "userFacing": true,
     "outputMode": "freeform",
-    "modelId": "claude-3-5-sonnet-20241022",
+    "modelId": "moonshot/kimi-k2.5",
     "personaId": "alice",
     "maxOutputTokens": 4096,
-    "toolPermissions": [],
+    "toolPermissions": [
+      "memory_read",
+      "memory_search",
+      "memory_explore",
+      "persona_check_drift",
+      "submit_rp_turn"
+    ],
     "maxDelegationDepth": 1,
     "lorebookEnabled": true,
     "narrativeContextEnabled": true,
@@ -34,12 +42,37 @@
     }
   },
   {
+    "_comment": "Additional RP agent example — same toolPermissions pattern, different persona.",
+    "id": "rp:eveline",
+    "role": "rp_agent",
+    "lifecycle": "persistent",
+    "userFacing": true,
+    "outputMode": "freeform",
+    "modelId": "moonshot/kimi-k2.5",
+    "personaId": "eveline",
+    "maxOutputTokens": 8192,
+    "toolPermissions": [
+      "memory_read",
+      "memory_search",
+      "memory_explore",
+      "persona_check_drift",
+      "submit_rp_turn"
+    ],
+    "maxDelegationDepth": 1,
+    "lorebookEnabled": true,
+    "narrativeContextEnabled": true,
+    "contextBudget": {
+      "maxTokens": 200000
+    }
+  },
+  {
+    "_comment": "Ephemeral task agent for structured subtasks. Does not use lorebook or narrative context.",
     "id": "task:runner",
     "role": "task_agent",
     "lifecycle": "ephemeral",
     "userFacing": false,
     "outputMode": "structured",
-    "modelId": "claude-3-haiku-20240307",
+    "modelId": "MiniMax-M2.7-highspeed",
     "maxOutputTokens": 2048,
     "toolPermissions": [],
     "maxDelegationDepth": 0,

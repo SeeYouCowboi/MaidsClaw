@@ -1267,6 +1267,7 @@ export class TurnService {
           settlementId,
           sessionId: effectiveRequest.sessionId,
           agentId: ownerAgentId,
+          requestId: effectiveRequest.requestId,
           cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
           privateEpisodes: canonicalOutcome.privateEpisodes,
           publications,

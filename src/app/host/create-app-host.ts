@@ -20,6 +20,7 @@ import { LocalTurnClient } from "../clients/local/local-turn-client.js";
 import { TraceStore } from "../diagnostics/trace-store.js";
 import { AppMaintenanceFacadeImpl } from "./maintenance-facade.js";
 import { MaintenanceOrchestrationService } from "./maintenance-orchestration-service.js";
+import type { NodeRef } from "../../memory/types.js";
 import type {
 	AppHost,
 	AppHostAdmin,
@@ -74,6 +75,42 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 
 		await thinkerWorker({
 			payload: job.payload_json,
+		});
+	});
+
+	runner.registerWorker("memory.organize", async (job) => {
+		const memoryTaskAgent = runtime.memoryTaskAgent;
+		if (!memoryTaskAgent) {
+			throw new Error(
+				"[memory.organize] memoryTaskAgent not available — embedding model may not be configured",
+			);
+		}
+
+		const payload = job.payload_json as {
+			agentId: string;
+			chunkNodeRefs: NodeRef[];
+			settlementId: string;
+			sourceSessionId?: string;
+			embeddingModelId?: string;
+		};
+
+		if (!payload?.agentId || !Array.isArray(payload.chunkNodeRefs)) {
+			throw new Error(
+				`[memory.organize] invalid payload: ${JSON.stringify(payload)}`,
+			);
+		}
+
+		const embeddingModelId =
+			payload.embeddingModelId ??
+			runtime.effectiveOrganizerEmbeddingModelId ??
+			"";
+
+		await memoryTaskAgent.runOrganize({
+			agentId: payload.agentId,
+			sessionId: payload.sourceSessionId ?? "",
+			batchId: payload.settlementId,
+			changedNodeRefs: payload.chunkNodeRefs,
+			embeddingModelId,
 		});
 	});
 

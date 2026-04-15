@@ -1,13 +1,17 @@
 {
+  "_comment": "Runtime configuration. Copy to config/runtime.json and adjust for your setup.",
   "memory": {
-    "migrationChatModelId": "claude-3-5-sonnet-20241022",
-    "embeddingModelId": "text-embedding-3-small",
-    "organizerEmbeddingModelId": "text-embedding-3-small"
+    "_comment": "Models used by the memory pipeline. Use provider-qualified IDs (e.g. 'moonshot/kimi-k2.5', 'bailian/text-embedding-v4') or bare model IDs if the provider is globally defaulted.",
+    "migrationChatModelId": "moonshot/kimi-k2.5",
+    "embeddingModelId": "bailian/text-embedding-v4",
+    "organizerEmbeddingModelId": "bailian/text-embedding-v4"
   },
   "lightweightLlm": {
-    "defaultChatModelId": "anthropic/claude-3-5-sonnet-20241022"
+    "_comment": "Fast/cheap model used for lightweight tasks such as session title generation. Must be explicitly set — no automatic fallback.",
+    "defaultChatModelId": "moonshot/kimi-k2.5"
   },
   "talkerThinker": {
+    "_comment": "When enabled, the thinker runs as an async PG job after each turn (requires PG backend and a job consumer). Set enabled:false for local/SQLite setups.",
     "enabled": false,
     "stalenessThreshold": 2,
     "softBlockTimeoutMs": 3000,

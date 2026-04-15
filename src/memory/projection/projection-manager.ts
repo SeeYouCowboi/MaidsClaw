@@ -454,6 +454,7 @@ export class ProjectionManager {
         agentId: params.agentId,
         sessionId: params.sessionId,
         settlementId: params.settlementId,
+        requestId: params.requestId,
         category: episode.category,
         summary: episode.summary,
         privateNotes: episode.privateNotes,
@@ -466,6 +467,7 @@ export class ProjectionManager {
       });
 
       const afterAppend = (episodeId: number): void | Promise<void> => {
+        if (episodeId <= 0) return; // ON CONFLICT DO NOTHING — episode already exists, skip
         if (!searchProjectionRepo) {
           changedNodeRefs.push(toEpisodeNodeRef(episodeId));
           return;
