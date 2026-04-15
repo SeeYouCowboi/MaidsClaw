@@ -176,10 +176,20 @@ const RetrievalTraceDataSchema = z
   })
   .strict();
 
+const RetrievalTracePromptSectionsSchema = z
+  .object({
+    pinned_shared: z.string().optional(),
+    recent_cognition: z.string().optional(),
+    typed_retrieval: z.string().optional(),
+    lore_entries: z.string().optional(),
+  })
+  .strict();
+
 export const RetrievalTraceResponseSchema = z
   .object({
     request_id: z.string(),
     retrieval: RetrievalTraceDataSchema.nullable(),
+    prompt_sections: RetrievalTracePromptSectionsSchema.optional(),
   })
   .strict();
 export type RetrievalTraceResponse = z.infer<

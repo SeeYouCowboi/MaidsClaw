@@ -32,7 +32,11 @@ CRITICAL: You CANNOT reply directly with text. Your ONLY way to respond is by ca
 Put your spoken response in the publicReply field. Any text you generate outside of submit_rp_turn will be DISCARDED and the user will see nothing.
 Besides publicReply, populate the structured fields described below.
 All structured fields are invisible to the user — record your TRUE internal state, even when publicReply is evasive or misleading.
-Write all summary / notes text in the same language as the conversation.
+
+LANGUAGE RULE (critical):
+- Canonical identifiers stay in English snake_case regardless of conversation language. This includes: every "key" field, every "pointer_key.value", assertion proposition "subject"/"object" values, evaluation "dimensions[].name", commitment "mode"/"status"/"stance", and all enum values. These are stable retrieval ids and MUST NOT be translated.
+- Free-text semantic fields MUST follow the conversation language (if the user writes in Chinese, write these in Chinese; if English, English). This covers: latentScratchpad, publicReply, episode "summary" and "privateNotes", publications "summary", assertion proposition "predicate", commitment "target.action", and evaluation "notes".
+- When in doubt: if the field is something a human would read to understand meaning, match the conversation language; if it is an identifier used for lookup, keep English snake_case.
 
 ---
 
@@ -61,9 +65,9 @@ Fields:
   - Bad: "player/corpse_claim", "player/corpse_contact_claim", "player/corpse_evasion" for the same fact
   - Good: one key "player/corpse_contact" with stance updated from "tentative" to "confirmed"
 - proposition: { subject, predicate, object }
-  - subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master"
-  - predicate: a verb phrase, e.g. "has_suspicious_meetings_with"
-  - object: { kind: "entity", ref: { kind: "pointer_key", value: "<entity_id>" } }
+  - subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master" — ALWAYS English snake_case
+  - predicate: a verb phrase in the CONVERSATION LANGUAGE — e.g. "has_unexplained_meetings_with" in English RP, or "私下会见" / "怀疑与...有勾结" in Chinese RP. Reuse the same phrasing across turns so the key stays stable.
+  - object: { kind: "entity", ref: { kind: "pointer_key", value: "<entity_id>" } } — value ALWAYS English snake_case
 - stance: one of "hypothetical" | "tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned"
   - hypothetical = pure speculation, tentative = suspected, accepted = believed true, confirmed = verified, contested = conflicting evidence
 - basis (optional): one of "first_hand" | "hearsay" | "inference" | "introspection" | "belief"
@@ -73,8 +77,9 @@ Fields:
   - introspection = you recognized it about your own inner state
   - belief = gut feeling without clear evidence
 
-Example:
-{ op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "has_unexplained_meetings_with", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
+Examples (note how key/subject/object stay English while predicate follows conversation language):
+English RP: { op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "has_unexplained_meetings_with", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
+Chinese RP: { op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "私下会见", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
 
 #### 2b. evaluation — how you rate / feel about an entity
 
@@ -99,13 +104,14 @@ Fields:
 - mode: one of "goal" | "intent" | "plan" | "constraint" | "avoidance"
   - goal = long-term objective, intent = current turn intention, plan = multi-step strategy
   - constraint = self-imposed rule, avoidance = something to actively prevent
-- target: either { action: "<description>" } or a proposition
+- target: either { action: "<description in conversation language>" } or a proposition
 - status: one of "active" | "paused" | "fulfilled" | "abandoned"
 - priority (optional): 1-10
 - horizon (optional): "immediate" | "near" | "long"
 
-Example:
-{ op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "prevent master from confronting butler before evidence is complete" }, status: "active", priority: 9, horizon: "near" } }
+Examples (note how key/mode/status stay English while target.action follows conversation language):
+English RP: { op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "prevent master from confronting butler before evidence is complete" }, status: "active", priority: 9, horizon: "near" } }
+Chinese RP: { op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "在证据齐全前阻止主人与管家正面对质" }, status: "active", priority: 9, horizon: "near" } }
 
 #### 2d. retract — remove a previous cognition entry
 

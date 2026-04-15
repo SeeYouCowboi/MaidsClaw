@@ -1429,9 +1429,9 @@ export function bootstrapRuntime(
     pgFactory && memoryTaskModelProvider
       ? new EntityReconciliationSweeper(pgFactory, memoryTaskModelProvider)
       : undefined;
-  const searchRebuilder: PgSearchRebuilder | undefined = pgFactory
-    ? new PgSearchRebuilder(pgFactory.getPool())
-    : undefined;
+  // Constructed lazily in initializePgBackendForRuntime once the pg pool
+  // actually exists — pgFactory.getPool() throws before .initialize().
+  let searchRebuilder: PgSearchRebuilder | undefined = undefined;
   // queryRouter + queryPlanBuilder are created above, shared with RetrievalService.
   const graphNavigator = new GraphNavigator(
     pgGraphReadQueryRepo,
@@ -2870,6 +2870,8 @@ export async function initializePgBackendForRuntime(
     type: "pg",
     pg: { url: process.env.PG_APP_URL ?? "" },
   });
+
+  result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
 
   if (result.turnService && pgFactory.isInitialized()) {
     result.turnService.setSettlementUnitOfWork({
