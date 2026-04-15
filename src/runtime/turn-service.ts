@@ -32,7 +32,12 @@ import type { InteractionStore } from "../interaction/store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
 import { materializePublications } from "../memory/materialization.js";
-import type { ProjectionManager } from "../memory/projection/projection-manager.js";
+import type {
+  CommitSettlementResult,
+  ProjectionManager,
+} from "../memory/projection/projection-manager.js";
+import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
+import type { NodeRef } from "../memory/types.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
   MemoryFlushRequest,
@@ -967,6 +972,7 @@ export class TurnService {
           retriable: false,
         });
       }
+      let changedNodeRefsForOrganize: NodeRef[] = [];
       await this.settlementUnitOfWork.run(async (repos) => {
         await repos.settlementLedger.markApplying(settlementId, ownerAgentId);
         await this.commitSettlementRecordsWithRepos({
@@ -979,7 +985,7 @@ export class TurnService {
           publicReply: canonicalOutcome.publicReply,
           userText: getLatestUserMessage(effectiveRequest.messages),
         });
-        await this.commitSettlementProjectionWithRepos({
+        const projectionResult = await this.commitSettlementProjectionWithRepos({
           repos,
           effectiveRequest,
           settlementId,
@@ -991,8 +997,30 @@ export class TurnService {
           committedAt,
           canonicalOutcome,
         });
+        changedNodeRefsForOrganize = projectionResult.changedNodeRefs;
         await repos.settlementLedger.markApplied(settlementId);
       });
+
+      // [T13 mirror] enqueueOrganizerJobs outside the settlement transaction.
+      // Without this the GraphOrganizer never runs for the sync RP turn path,
+      // which means no embeddings / semantic edges / node scores ever get
+      // written for ANY node kind. Errors are non-fatal — the settlement is
+      // already committed and the organizer can be retried / replayed.
+      if (this.jobPersistence && changedNodeRefsForOrganize.length > 0) {
+        try {
+          await enqueueOrganizerJobs(
+            this.jobPersistence,
+            ownerAgentId,
+            settlementId,
+            changedNodeRefsForOrganize,
+          );
+        } catch (enqueueErr) {
+          console.warn(
+            "[turn-service] enqueueOrganizerJobs failed (non-fatal):",
+            enqueueErr,
+          );
+        }
+      }
 
       settlementPayloadAfterCommit = settlementPayload;
     } catch (error: unknown) {
@@ -1219,7 +1247,7 @@ export class TurnService {
     slotEntries: RecentCognitionEntry[];
     committedAt: number;
     canonicalOutcome: CanonicalRpTurnOutcome;
-  }): Promise<void> {
+  }): Promise<CommitSettlementResult> {
     const {
       repos,
       effectiveRequest,
@@ -1234,7 +1262,7 @@ export class TurnService {
     } = params;
 
     if (this.projectionManager) {
-      await this.projectionManager.commitSettlement(
+      return await this.projectionManager.commitSettlement(
         {
           settlementId,
           sessionId: effectiveRequest.sessionId,
@@ -1263,7 +1291,6 @@ export class TurnService {
           recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
         },
       );
-      return;
     }
 
     await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
@@ -1272,6 +1299,7 @@ export class TurnService {
       settlementId,
       JSON.stringify(slotEntries),
     );
+    return { changedNodeRefs: [] };
   }
 
   private async resolveViewerSnapshot(
