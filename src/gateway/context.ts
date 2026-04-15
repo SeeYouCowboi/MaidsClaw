@@ -246,6 +246,7 @@ export interface GatewayContext {
   cognitionEventRepo?: CognitionEventRepoService;
   graphReadRepo?: GraphReadRepoService;
   entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
+  searchRebuilder?: import("../memory/search-rebuild-pg.js").PgSearchRebuilder;
   lightweightLlm?: LightweightLlmService;
 
   corsAllowedOrigins?: string[];

@@ -785,6 +785,21 @@ export async function handleRequestRetrievalTrace(
       );
     }
 
+    const promptSectionMap = trace.prompt?.sections ?? {};
+    const memorySlotKeys = [
+      "pinned_shared",
+      "recent_cognition",
+      "typed_retrieval",
+      "lore_entries",
+    ] as const;
+    const promptSections: Record<string, string> = {};
+    for (const slot of memorySlotKeys) {
+      const value = promptSectionMap[slot];
+      if (typeof value === "string" && value.trim().length > 0) {
+        promptSections[slot] = value;
+      }
+    }
+
     return jsonResponse({
       request_id: requestId,
       retrieval: trace.retrieval
@@ -833,6 +848,9 @@ export async function handleRequestRetrievalTrace(
             : {}),
         }
         : null,
+      ...(Object.keys(promptSections).length > 0
+        ? { prompt_sections: promptSections }
+        : {}),
     });
   } catch (error) {
     if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
@@ -3423,6 +3441,81 @@ const EntityReconciliationRequestSchema = z
     model_id: z.string().min(1).optional(),
   })
   .strict();
+
+const SearchRebuildRequestSchema = z
+  .object({
+    scope: z
+      .enum(["private", "area", "world", "cognition", "episode", "all"])
+      .optional(),
+    agent_id: z.string().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * POST /v1/admin/search-rebuild
+ *
+ * One-shot rebuild of the search projection tables (`search_docs_*`) from the
+ * canonical authority sources. Body: `{ scope?: "private"|"area"|"world"|
+ * "cognition"|"episode"|"all", agent_id?: string }`. Defaults to
+ * `scope: "episode"` and `agent_id: "_all_agents"`.
+ *
+ * Intended as an operator backfill for agents whose projection rows pre-date
+ * the production wiring that writes them inline during settlement. Idempotent
+ * — safe to run multiple times.
+ */
+export async function handleRunSearchRebuild(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  const rebuilder = ctx.searchRebuilder;
+  if (!rebuilder) {
+    return errorResponse(
+      new MaidsClawError({
+        code: "UNSUPPORTED_RUNTIME_MODE",
+        message: "Search rebuilder unavailable in this runtime",
+        retriable: false,
+      }),
+      501,
+    );
+  }
+
+  let body: z.infer<typeof SearchRebuildRequestSchema> = {};
+  try {
+    const text = await req.text();
+    if (text.trim().length > 0) {
+      body = SearchRebuildRequestSchema.parse(JSON.parse(text));
+    }
+  } catch (error) {
+    return badRequest(
+      `Invalid request body: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  // Allow query-string overrides for convenience (curl, browser dev).
+  const url = new URL(req.url);
+  const scope = (url.searchParams.get("scope") ??
+    body.scope ??
+    "episode") as "private" | "area" | "world" | "cognition" | "episode" | "all";
+  const agentId =
+    url.searchParams.get("agent_id") ?? body.agent_id ?? "_all_agents";
+
+  try {
+    await rebuilder.rebuild({ scope, agentId });
+    return jsonResponse({ ok: true, scope, agent_id: agentId });
+  } catch (error) {
+    if (isMaidsClawError(error)) {
+      return errorResponse(error, 500);
+    }
+    return errorResponse(
+      new MaidsClawError({
+        code: "INTERNAL_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      }),
+      500,
+    );
+  }
+}
 
 /** POST /v1/admin/entity-reconciliation:run */
 export async function handleRunEntityReconciliation(

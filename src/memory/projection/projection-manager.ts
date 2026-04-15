@@ -60,6 +60,15 @@ type ProjectionSearchProjectionRepo = {
     sourceRefKind: "assertion" | "evaluation" | "commitment";
     now: number;
   }) => MaybePromise<number | undefined>;
+  upsertEpisodeSearchDoc: (params: {
+    episodeId: number;
+    agentId: string;
+    category: string;
+    content: string;
+    committedAt: number;
+    now: number;
+    entityPointerKeys: string[];
+  }) => MaybePromise<number | undefined>;
 };
 
 type ProjectionAreaWorldProjectionRepo = {
@@ -112,6 +121,21 @@ function resolveSearchProjectionRepo(
         content: params.content,
         updatedAt: params.now,
         createdAt: params.now,
+      });
+
+      if (isPromiseLike(result)) {
+        return Promise.resolve(result).then(() => undefined);
+      }
+    },
+    upsertEpisodeSearchDoc: (params) => {
+      const result = repo.upsertEpisodeDoc({
+        sourceRef: `episode:${params.episodeId}`,
+        agentId: params.agentId,
+        category: params.category,
+        content: params.content,
+        committedAt: params.committedAt,
+        createdAt: params.now,
+        entityPointerKeys: params.entityPointerKeys,
       });
 
       if (isPromiseLike(result)) {
@@ -315,7 +339,14 @@ export class ProjectionManager {
     const recentCognitionSlotRepo = repoOverrides?.recentCognitionSlotRepo;
     const changedNodeRefs: NodeRef[] = [];
     const result = runSeries([
-      () => this.appendEpisodes(params, now, episodeRepo, changedNodeRefs),
+      () =>
+        this.appendEpisodes(
+          params,
+          now,
+          episodeRepo,
+          searchProjectionRepo,
+          changedNodeRefs,
+        ),
       () =>
         this.appendCognitionEvents(
           params,
@@ -410,6 +441,7 @@ export class ProjectionManager {
     params: SettlementProjectionParams,
     now: number,
     episodeRepo: ProjectionEpisodeRepo,
+    searchProjectionRepo: ProjectionSearchProjectionRepo | undefined,
     changedNodeRefs: NodeRef[],
   ): void | Promise<void> {
     const steps = params.privateEpisodes.map((episode) => () => {
@@ -433,14 +465,39 @@ export class ProjectionManager {
         entityPointerKeys,
       });
 
+      const afterAppend = (episodeId: number): void | Promise<void> => {
+        if (!searchProjectionRepo) {
+          changedNodeRefs.push(toEpisodeNodeRef(episodeId));
+          return;
+        }
+        const searchResult = searchProjectionRepo.upsertEpisodeSearchDoc({
+          episodeId,
+          agentId: params.agentId,
+          category: episode.category,
+          content: episode.summary,
+          committedAt: now,
+          now,
+          entityPointerKeys,
+        });
+        if (isPromiseLike(searchResult)) {
+          return Promise.resolve(searchResult).then(() => {
+            changedNodeRefs.push(toEpisodeNodeRef(episodeId));
+          });
+        }
+        changedNodeRefs.push(toEpisodeNodeRef(episodeId));
+      };
+
       if (isPromiseLike(appendResult)) {
         return Promise.resolve(appendResult).then((episodeId) => {
-          changedNodeRefs.push(toEpisodeNodeRef(episodeId));
+          const result = afterAppend(episodeId);
+          if (isPromiseLike(result)) {
+            return Promise.resolve(result).then(() => undefined);
+          }
           return undefined;
         });
       }
 
-      changedNodeRefs.push(toEpisodeNodeRef(appendResult));
+      return afterAppend(appendResult);
     });
 
     return runSeries(steps);

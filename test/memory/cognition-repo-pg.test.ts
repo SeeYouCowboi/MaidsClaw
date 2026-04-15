@@ -201,6 +201,10 @@ class MockSearchProjectionRepo implements SearchProjectionRepo {
     return id;
   }
 
+  async upsertEpisodeDoc(): Promise<number> {
+    return 0;
+  }
+
   async updateCognitionSearchDocStanceBySourceRef(
     sourceRef: NodeRef,
     agentId: string,

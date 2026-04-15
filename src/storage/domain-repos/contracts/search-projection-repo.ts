@@ -34,6 +34,7 @@ export interface SearchProjectionRepo {
   removeSearchDoc(scope: "private" | "area" | "world", sourceRef: NodeRef): Promise<void>;
   rebuildForScope(scope: SearchProjectionScope, agentId?: string): Promise<void>;
   upsertCognitionDoc(params: UpsertCognitionDocParams): Promise<number>;
+  upsertEpisodeDoc(params: UpsertEpisodeDocParams): Promise<number>;
   updateCognitionSearchDocStanceBySourceRef(
     sourceRef: NodeRef,
     agentId: string,

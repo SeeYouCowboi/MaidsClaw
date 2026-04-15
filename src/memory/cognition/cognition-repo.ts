@@ -1002,6 +1002,7 @@ function createUnsupportedDeps(): CognitionRepositoryDeps {
       removeSearchDoc: async () => unsupported(),
       rebuildForScope: async () => unsupported(),
       upsertCognitionDoc: async () => unsupported(),
+      upsertEpisodeDoc: async () => unsupported(),
       updateCognitionSearchDocStanceBySourceRef: async () => unsupported(),
     },
     entityResolver: async () => unsupported(),

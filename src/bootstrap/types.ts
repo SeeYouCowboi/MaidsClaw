@@ -95,6 +95,7 @@ export type RuntimeBootstrapResult = {
 	turnService: TurnService;
 	memoryTaskAgent: MemoryTaskAgent | null;
 	entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
+	searchRebuilder?: import("../memory/search-rebuild-pg.js").PgSearchRebuilder;
 	memoryPipelineReady: boolean;
 	memoryPipelineStatus: MemoryPipelineStatus;
 	effectiveOrganizerEmbeddingModelId: string | undefined;

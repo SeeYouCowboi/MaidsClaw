@@ -79,6 +79,7 @@ import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { EntityReconciliationSweeper } from "../memory/entity-reconciliation-sweeper.js";
+import { PgSearchRebuilder } from "../memory/search-rebuild-pg.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
@@ -1364,6 +1365,9 @@ export function bootstrapRuntime(
     pgFactory && memoryTaskModelProvider
       ? new EntityReconciliationSweeper(pgFactory, memoryTaskModelProvider)
       : undefined;
+  const searchRebuilder: PgSearchRebuilder | undefined = pgFactory
+    ? new PgSearchRebuilder(pgFactory.getPool())
+    : undefined;
   // queryRouter + queryPlanBuilder are created above, shared with RetrievalService.
   const graphNavigator = new GraphNavigator(
     pgGraphReadQueryRepo,
@@ -1644,6 +1648,7 @@ export function bootstrapRuntime(
     turnService,
     memoryTaskAgent,
     entityReconciliation,
+    searchRebuilder,
     memoryPipelineReady,
     memoryPipelineStatus,
     effectiveOrganizerEmbeddingModelId,
@@ -2685,6 +2690,7 @@ export function buildGatewayRuntimeContextExtensions(
   | "cognitionEventRepo"
   | "graphReadRepo"
   | "entityReconciliation"
+  | "searchRebuilder"
   | "lightweightLlm"
   | "getAuthSnapshot"
   | "getRuntimeSnapshot"
@@ -2781,6 +2787,7 @@ export function buildGatewayRuntimeContextExtensions(
     cognitionEventRepo: buildCognitionEventRepoService(runtime),
     graphReadRepo: buildGraphReadRepoService(runtime),
     entityReconciliation: runtime.entityReconciliation,
+    searchRebuilder: runtime.searchRebuilder,
     lightweightLlm: new LightweightLlmServiceImpl(
       runtime.modelRegistry,
       runtime.runtimeConfigSnapshot?.lightweightLlm?.defaultChatModelId,
