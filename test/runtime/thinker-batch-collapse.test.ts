@@ -452,9 +452,9 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(fixture.listPendingByKindAndPayload.mock.calls.length).toBe(1);
 		const prompt = fixture.getCapturedPrompt();
 		expect(prompt).toContain("Cognitive sketches from Talker (batch)");
-		expect(prompt).toContain("[Turn 3] sketch-v3");
-		expect(prompt).toContain("[Turn 4] sketch-v4");
-		expect(prompt).toContain("[Turn 5] sketch-v5");
+		expect(prompt).toContain("[Turn 3 | stl:req-3] sketch-v3");
+		expect(prompt).toContain("[Turn 4 | stl:req-4] sketch-v4");
+		expect(prompt).toContain("[Turn 5 | stl:req-5] sketch-v5");
 	});
 
 	it("sketch chain ordering is ascending by talkerTurnVersion", async () => {
@@ -492,9 +492,9 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		);
 
 		const prompt = fixture.getCapturedPrompt();
-		const idx3 = prompt.indexOf("[Turn 3]");
-		const idx4 = prompt.indexOf("[Turn 4]");
-		const idx5 = prompt.indexOf("[Turn 5]");
+		const idx3 = prompt.indexOf("[Turn 3 | ");
+		const idx4 = prompt.indexOf("[Turn 4 | ");
+		const idx5 = prompt.indexOf("[Turn 5 | ");
 		expect(idx3).toBeGreaterThanOrEqual(0);
 		expect(idx4).toBeGreaterThan(idx3);
 		expect(idx5).toBeGreaterThan(idx4);
@@ -530,18 +530,18 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		);
 
 		const prompt = fixture.getCapturedPrompt();
-		const turnMatches = prompt.match(/\[Turn \d+\]/g) ?? [];
+		const turnMatches = prompt.match(/\[Turn \d+ \| [^\]]+\]/g) ?? [];
 		// Soft cap trims 25 → 20 (excludes oldest 5: v1-v5).
 		// Batch split (threshold=3) then takes only the first 3 (v6-v8)
 		// for this worker, enqueueing the rest as sub-jobs.
 		expect(turnMatches).toHaveLength(3);
-		expect(prompt).not.toContain("[Turn 1]");
-		expect(prompt).not.toContain("[Turn 5]");
-		expect(prompt).toContain("[Turn 6]");
-		expect(prompt).toContain("[Turn 8]");
+		expect(prompt).not.toContain("[Turn 1 | ");
+		expect(prompt).not.toContain("[Turn 5 | ");
+		expect(prompt).toContain("[Turn 6 | ");
+		expect(prompt).toContain("[Turn 8 | ");
 		// v9+ are in enqueued sub-jobs, not in this worker's prompt
-		expect(prompt).not.toContain("[Turn 9]");
-		expect(prompt).not.toContain("[Turn 25]");
+		expect(prompt).not.toContain("[Turn 9 | ");
+		expect(prompt).not.toContain("[Turn 25 | ");
 
 		// Soft cap warning was emitted (5 older sketches excluded)
 		expect(
@@ -591,7 +591,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		const prompt = fixture.getCapturedPrompt();
 		expect(prompt).toContain("Cognitive sketch from Talker: sketch-v3");
 		expect(prompt).not.toContain("Cognitive sketches from Talker (batch)");
-		expect(prompt).not.toContain("[Turn 5]");
+		expect(prompt).not.toContain("[Turn 5 | ");
 		expect(fixture.settlementCalls).toContain(settlementIdFor(4));
 		expect(fixture.settlementCalls).not.toContain(settlementIdFor(5));
 	});
@@ -707,7 +707,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(call?.[5]).toBe(5);
 	});
 
-	it("markThinkerProjecting and markApplied target the effective settlement while intermediate settlements noop", async () => {
+	it("markThinkerProjecting and markApplied are called for all batch members", async () => {
 		const fixture = createFixture({
 			claimedVersion: 3,
 			pendingPayloads: [
@@ -734,17 +734,35 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 
 		await fixture.worker({ payload: fixture.payload });
 
+		// Effective settlement gets markThinkerProjecting first
 		expect(fixture.settlementLedger.markThinkerProjecting).toHaveBeenCalledWith(
 			settlementIdFor(5),
 			AGENT_ID,
 		);
+		// All batch members get markThinkerProjecting (P1: per-settlement projection)
+		expect(fixture.settlementLedger.markThinkerProjecting).toHaveBeenCalledWith(
+			settlementIdFor(3),
+			AGENT_ID,
+		);
+		expect(fixture.settlementLedger.markThinkerProjecting).toHaveBeenCalledWith(
+			settlementIdFor(4),
+			AGENT_ID,
+		);
+		// All projected members get markApplied
+		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
+			settlementIdFor(3),
+		);
+		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
+			settlementIdFor(4),
+		);
 		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
 			settlementIdFor(5),
 		);
-		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+		// markReplayedNoop not called for successfully projected members
+		expect(fixture.settlementLedger.markReplayedNoop).not.toHaveBeenCalledWith(
 			settlementIdFor(3),
 		);
-		expect(fixture.settlementLedger.markReplayedNoop).toHaveBeenCalledWith(
+		expect(fixture.settlementLedger.markReplayedNoop).not.toHaveBeenCalledWith(
 			settlementIdFor(4),
 		);
 	});
@@ -855,10 +873,12 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		const originalRegisterWorker = PgJobRunner.prototype.registerWorker;
 		const originalProcessNext = PgJobRunner.prototype.processNext;
 		PgJobRunner.prototype.registerWorker = function patchedRegisterWorker(
-			_kind,
+			kind,
 			handler,
 		) {
-			registeredHandler = handler as typeof registeredHandler;
+			if (kind === "cognition.thinker") {
+				registeredHandler = handler as typeof registeredHandler;
+			}
 		};
 		PgJobRunner.prototype.processNext = async function patchedProcessNext() {
 			if (registeredHandler) {
@@ -895,7 +915,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			healthChecks: { bootstrap: "ok" },
 			traceStore: undefined,
 			sessionService: {} as RuntimeBootstrapResult["sessionService"],
-			turnService: {} as RuntimeBootstrapResult["turnService"],
+			turnService: { setSettlementUnitOfWork: () => undefined } as unknown as RuntimeBootstrapResult["turnService"],
 			memoryTaskAgent: null,
 			interactionRepo: {} as RuntimeBootstrapResult["interactionRepo"],
 			agentRegistry: createRegistry(),
@@ -915,6 +935,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 				type: "pg",
 				initialize: async () => undefined,
 				close: async () => undefined,
+				isInitialized: () => true,
 				getPool: () => ({}) as postgres.Sql,
 				pool: null,
 				store,
@@ -1014,7 +1035,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		const prompt = fixture.getCapturedPrompt();
 		expect(prompt).toContain("Cognitive sketch from Talker: sketch-v3");
 		expect(prompt).not.toContain("(batch)");
-		expect(prompt).not.toContain("[Turn 5]");
+		expect(prompt).not.toContain("[Turn 5 | ");
 
 		const call = fixture.slotUpsertSpy.mock.calls.at(-1);
 		expect(call?.[4]).toBe("thinker");
@@ -1147,9 +1168,9 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			.filter((m) => m.role === "user" && typeof m.content === "string")
 			.map((m) => m.content)
 			.join("\n");
-		expect(secondPrompt).toContain("[Turn 3]");
-		expect(secondPrompt).toContain("[Turn 5]");
-		expect(secondPrompt).not.toContain("[Turn 4]");
+		expect(secondPrompt).toContain("[Turn 3 | ");
+		expect(secondPrompt).toContain("[Turn 5 | ");
+		expect(secondPrompt).not.toContain("[Turn 4 | ");
 	});
 
 	it("S6: version monotonicity keeps thinkerCommittedVersion at 5 when late v3 retries", async () => {
@@ -1259,10 +1280,10 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			expect.any(Number),
 		);
 		const prompt = fixture.getCapturedPrompt();
-		expect(prompt).toContain("[Turn 3] session-a-v3");
-		expect(prompt).toContain("[Turn 4] session-a-v4");
-		expect(prompt).toContain("[Turn 5] session-a-v5");
+		expect(prompt).toContain("[Turn 3 | stl:req-3] session-a-v3");
+		expect(prompt).toContain("[Turn 4 | stl:req-4] session-a-v4");
+		expect(prompt).toContain("[Turn 5 | stl:req-5] session-a-v5");
 		expect(prompt).not.toContain("session-b");
-		expect(prompt).not.toContain("[Turn 99]");
+		expect(prompt).not.toContain("[Turn 99 | ");
 	});
 });
