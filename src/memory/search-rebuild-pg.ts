@@ -344,6 +344,30 @@ export class PgSearchRebuilder {
       });
     }
 
+    // Episode privateNotes → private search scope (split-path)
+    const episodesWithNotes = await this.sql<
+      {
+        id: string | number;
+        private_notes: string;
+      }[]
+    >`
+      SELECT id, private_notes
+      FROM private_episode_events
+      WHERE agent_id = ${agentId}
+        AND private_notes IS NOT NULL
+        AND private_notes != ''
+      ORDER BY id ASC
+    `;
+
+    for (const row of episodesWithNotes) {
+      result.push({
+        docType: "episode_note",
+        sourceRef: `episode:${Number(row.id)}`,
+        agentId,
+        content: row.private_notes,
+      });
+    }
+
     return result;
   }
 

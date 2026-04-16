@@ -100,6 +100,10 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
             type: "object",
             properties: {
               localRef: { type: "string" },
+              settlementId: {
+                type: "string",
+                description: "In batch mode, the settlementId of the turn this episode belongs to",
+              },
               category: {
                 type: "string",
                 enum: ["speech", "action", "observation", "state_change"],

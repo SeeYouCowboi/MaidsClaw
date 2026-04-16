@@ -148,7 +148,7 @@ const CONCURRENCY_KEY_CAPS: Record<string, number> = {
   "maintenance.replay_projection:global": CONCURRENCY_CAPS.maintenance_replay_global,
   "maintenance.rebuild_derived:global": CONCURRENCY_CAPS.maintenance_rebuild_derived_global,
   "maintenance.full:global": CONCURRENCY_CAPS.maintenance_full_global,
-  "cognition.thinker:session:{sessionId}": 2,
+  "cognition.thinker:session:{sessionId}": 1, // Temporarily reduced from 2 to prevent duplicate thinker jobs during batch split (see P3)
   "cognition.thinker:global": CONCURRENCY_CAPS.cognition_thinker_global,
 };
 
@@ -1080,6 +1080,19 @@ export class PgJobStore implements DurableJobStore {
         terminal_at: Number(row.terminal_at ?? nowMs),
       };
     });
+  }
+
+  async cancelPendingByKey(job_key: string): Promise<boolean> {
+    const nowMs = Date.now();
+    const updated = await this.sql`
+      UPDATE jobs_current
+      SET status = 'cancelled',
+          terminal_at = ${nowMs},
+          updated_at = ${nowMs}
+      WHERE job_key = ${job_key}
+        AND status = 'pending'
+    `;
+    return (updated.count ?? 0) > 0;
   }
 
   async reclaimExpiredLeases(nowMs: number): Promise<number> {

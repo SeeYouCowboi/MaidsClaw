@@ -300,6 +300,8 @@ export interface DurableJobStore {
   complete(job_key: string, claim_version: number, resultJson?: unknown): Promise<CompleteResult>;
   fail(job_key: string, claim_version: number, error: PgJobFailInput): Promise<FailResult>;
   cancel(job_key: string, claim_version: number): Promise<CancelResult>;
+  /** Cancel a pending (unclaimed) job by key. Returns true if a row was cancelled. */
+  cancelPendingByKey?(job_key: string): Promise<boolean>;
 
   reclaimExpiredLeases(nowMs: number): Promise<number>;
 

@@ -28,4 +28,6 @@ export interface JobPersistence {
   listPending(limit?: number): Promise<JobEntry[]>;
   listRetryable(beforeTime: number, limit?: number): Promise<JobEntry[]>;
   countByStatus(status: PersistentJobStatus): Promise<number>;
+  /** Cancel a pending (unclaimed) job by key. Returns true if a job was cancelled. */
+  cancelPendingByKey?(jobKey: string): Promise<boolean>;
 }

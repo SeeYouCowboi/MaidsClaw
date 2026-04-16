@@ -100,6 +100,14 @@ export class PgJobPersistence implements JobPersistence {
     return 0;
   }
 
+  async cancelPendingByKey(jobKey: string): Promise<boolean> {
+    const store = this.resolveStore();
+    if (!store.cancelPendingByKey) {
+      return false;
+    }
+    return store.cancelPendingByKey(jobKey);
+  }
+
   private resolveStore(): DurableJobStore {
     const store = (this.pgFactory as PgFactoryWithStore).store;
     if (!store) {

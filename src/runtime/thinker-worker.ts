@@ -53,6 +53,7 @@ import {
 	type ConflictFactor,
 	type EvaluationRecord,
 	normalizeRpTurnOutcome,
+	type PrivateEpisodeArtifact,
 	type RelationIntent,
 } from "./rp-turn-contract.js";
 
@@ -329,6 +330,42 @@ function createThinkerSlotRepo(
 	};
 }
 
+/**
+ * Groups episodes by settlementId for per-settlement projection in batch mode.
+ * Falls back to assigning all episodes to effectiveSettlementId if the LLM
+ * did not tag episodes with settlementId.
+ */
+function parseEpisodesBySettlement(
+	episodes: PrivateEpisodeArtifact[],
+	batchMemberSettlementIds: string[],
+	effectiveSettlementId: string,
+): Map<string, PrivateEpisodeArtifact[]> {
+	const memberSet = new Set(batchMemberSettlementIds);
+	const grouped = new Map<string, PrivateEpisodeArtifact[]>();
+	for (const id of batchMemberSettlementIds) {
+		grouped.set(id, []);
+	}
+
+	let attributedCount = 0;
+	for (const episode of episodes) {
+		if (episode.settlementId && memberSet.has(episode.settlementId)) {
+			grouped.get(episode.settlementId)!.push(episode);
+			attributedCount++;
+		} else {
+			// Unattributed episodes fall back to effectiveSettlementId
+			grouped.get(effectiveSettlementId)!.push(episode);
+		}
+	}
+
+	if (episodes.length > 0) {
+		console.log(
+			`[thinker_worker] parseEpisodesBySettlement: ${attributedCount}/${episodes.length} episodes attributed by settlementId, ${episodes.length - attributedCount} fell back to ${effectiveSettlementId}`,
+		);
+	}
+
+	return grouped;
+}
+
 export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 	return async (job: { payload: unknown }): Promise<void> => {
 		// Handle both object payloads and legacy double-JSON-encoded string payloads
@@ -496,6 +533,18 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							}
 						}
 
+						// Cancel original pending jobs absorbed into sub-batches
+						if (deps.jobPersistence.cancelPendingByKey) {
+							for (const sub of subBatches) {
+								for (const entry of sub) {
+									const originalJobKey = `thinker:${payload.sessionId}:${entry.settlementId}`;
+									try {
+										await deps.jobPersistence.cancelPendingByKey(originalJobKey);
+									} catch { /* non-fatal */ }
+								}
+							}
+						}
+
 						// Current worker processes only myChain
 						console.log(
 							`[thinker_worker] batch split: processing v${myChain[0].version}..${myChain[myChain.length - 1].version} (${myChain.length}), split off ${remainder.length} into ${subBatches.length} parallel job(s)`,
@@ -545,7 +594,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				}
 
 				const sketchChainText = sketchChain
-					.map((entry) => `[Turn ${entry.version}] ${entry.sketch}`)
+					.map((entry) => `[Turn ${entry.version} | ${entry.settlementId}] ${entry.sketch}`)
 					.join("\n");
 				const sketchlessCount = sketchChain.filter((e) =>
 					e.sketch.startsWith("(no explicit sketch"),
@@ -558,7 +607,9 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					role: "user",
 					content:
 						`[Thinker context] Cognitive sketches from Talker (batch):\n${sketchChainText}\n${sketchNote}\n` +
-						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
+						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.\n" +
+						"IMPORTANT: For each privateEpisode, include the \"settlementId\" field matching the settlement of the turn it belongs to (shown in brackets above). " +
+						"This is required for correct per-turn episode attribution.",
 				});
 			} else {
 				const requestId = payload.settlementId.replace(/^stl:/, "");
@@ -636,39 +687,104 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			);
 			const recentCognitionSlotJson = JSON.stringify(slotEntries);
 
+			// --- Per-settlement episode grouping (batch mode) ---
+			let effectiveEpisodes = canonicalOutcome.privateEpisodes ?? [];
+			const perMemberEpisodes = new Map<string, PrivateEpisodeArtifact[]>();
+			const projectedMembers = new Set<string>();
+
+			if (batchMode) {
+				const grouped = parseEpisodesBySettlement(
+					canonicalOutcome.privateEpisodes ?? [],
+					batchMemberSettlementIds,
+					effectiveSettlementId,
+				);
+
+				// Mark effective settlement as projecting (abort if fails)
+				try {
+					await deps.settlementLedger?.markThinkerProjecting(
+						effectiveSettlementId,
+						payload.agentId,
+					);
+					projectedMembers.add(effectiveSettlementId);
+				} catch (ledgerErr) {
+					console.error(
+						"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
+						ledgerErr,
+					);
+					return;
+				}
+
+				// Mark non-effective members as projecting; fall back on failure
+				for (const memberId of batchMemberSettlementIds) {
+					if (memberId === effectiveSettlementId) continue;
+					try {
+						await deps.settlementLedger?.markThinkerProjecting(
+							memberId,
+							payload.agentId,
+						);
+						projectedMembers.add(memberId);
+					} catch (ledgerErr) {
+						console.warn(
+							`[thinker_worker] markThinkerProjecting for batch member ${memberId} failed — episodes fall back to ${effectiveSettlementId}:`,
+							ledgerErr,
+						);
+						const fallback = grouped.get(memberId) ?? [];
+						if (fallback.length > 0) {
+							grouped.get(effectiveSettlementId)!.push(...fallback);
+							grouped.set(memberId, []);
+						}
+						try {
+							await deps.settlementLedger?.markReplayedNoop(memberId);
+						} catch { /* non-fatal */ }
+					}
+				}
+
+				effectiveEpisodes = grouped.get(effectiveSettlementId) ?? [];
+				for (const memberId of batchMemberSettlementIds) {
+					if (memberId !== effectiveSettlementId && projectedMembers.has(memberId)) {
+						const eps = grouped.get(memberId) ?? [];
+						if (eps.length > 0) perMemberEpisodes.set(memberId, eps);
+					}
+				}
+			} else {
+				// Single-turn mode: mark projecting as before
+				try {
+					await deps.settlementLedger?.markThinkerProjecting(
+						effectiveSettlementId,
+						payload.agentId,
+					);
+					projectedMembers.add(effectiveSettlementId);
+				} catch (ledgerErr) {
+					console.error(
+						"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
+						ledgerErr,
+					);
+					return;
+				}
+			}
+
+			const viewerSnapshot = settlementPayload.viewerSnapshot
+				? {
+						currentLocationEntityId:
+							settlementPayload.viewerSnapshot.currentLocationEntityId,
+					}
+				: undefined;
+
 			const params: SettlementProjectionParams = {
 				settlementId: effectiveSettlementId,
 				sessionId: payload.sessionId,
 				agentId: payload.agentId,
-				requestId: payload.requestId ?? effectiveSettlementId.replace(/^stl:/, ""),
+				requestId: batchMode
+					? effectiveSettlementId.replace(/^stl:/, "")
+					: (payload.requestId ?? effectiveSettlementId.replace(/^stl:/, "")),
 				cognitionOps,
-				privateEpisodes: canonicalOutcome.privateEpisodes ?? [],
+				privateEpisodes: effectiveEpisodes,
 				publications: canonicalOutcome.publications ?? [],
 				areaStateArtifacts: areaStateArtifacts ?? [],
 				recentCognitionSlotJson,
 				committedAt,
-				viewerSnapshot: settlementPayload.viewerSnapshot
-					? {
-							currentLocationEntityId:
-								settlementPayload.viewerSnapshot.currentLocationEntityId,
-						}
-					: undefined,
+				viewerSnapshot,
 			};
-
-			try {
-				await deps.settlementLedger?.markThinkerProjecting(
-					effectiveSettlementId,
-					payload.agentId,
-				);
-			} catch (ledgerErr) {
-				// markThinkerProjecting throws when status is NOT talker_committed/failed_retryable
-				// (e.g. already applied). Abort rather than proceeding with duplicate projection.
-				console.error(
-					"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
-					ledgerErr,
-				);
-				return;
-			}
 
 			let changedNodeRefs: NodeRef[] = [];
 			await deps.sql.begin(async (tx) => {
@@ -689,11 +805,34 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					),
 				};
 
+				// Commit effective settlement (carries cognitionOps, publications, areaStateArtifacts)
 				const result = await deps.projectionManager.commitSettlement(
 					params,
 					repoOverrides,
 				);
 				changedNodeRefs = result.changedNodeRefs;
+
+				// Per-member episode commits (batch mode only)
+				for (const [memberId, memberEpisodes] of perMemberEpisodes) {
+					const memberParams: SettlementProjectionParams = {
+						settlementId: memberId,
+						sessionId: payload.sessionId,
+						agentId: payload.agentId,
+						requestId: memberId.replace(/^stl:/, ""),
+						cognitionOps: [],
+						privateEpisodes: memberEpisodes,
+						publications: [],
+						areaStateArtifacts: [],
+						recentCognitionSlotJson: "[]",
+						committedAt,
+						viewerSnapshot,
+					};
+					const memberResult = await deps.projectionManager.commitSettlement(
+						memberParams,
+						repoOverrides,
+					);
+					changedNodeRefs.push(...memberResult.changedNodeRefs);
+				}
 
 				const episodeRows = await txEpisodeRepo.readBySettlement(
 					effectiveSettlementId,
@@ -825,26 +964,15 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				}
 			});
 
-			try {
-				await deps.settlementLedger?.markApplied(effectiveSettlementId);
-			} catch (ledgerErr) {
-				console.warn(
-					"[thinker_worker] markApplied failed (non-fatal):",
-					ledgerErr,
-				);
-			}
-			if (batchMode) {
-				for (const memberId of batchMemberSettlementIds) {
-					if (memberId !== effectiveSettlementId) {
-						try {
-							await deps.settlementLedger?.markReplayedNoop(memberId);
-						} catch (ledgerErr) {
-							console.warn(
-								`[thinker_worker] markReplayedNoop for ${memberId} failed (non-fatal):`,
-								ledgerErr,
-							);
-						}
-					}
+			// Mark all projected members as applied
+			for (const memberId of projectedMembers) {
+				try {
+					await deps.settlementLedger?.markApplied(memberId);
+				} catch (ledgerErr) {
+					console.warn(
+						`[thinker_worker] markApplied for ${memberId} failed (non-fatal):`,
+						ledgerErr,
+					);
 				}
 			}
 			// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)

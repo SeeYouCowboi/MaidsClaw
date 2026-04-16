@@ -122,6 +122,8 @@ export type PinnedSummaryProposal = {
 
 export type PrivateEpisodeArtifact = {
   localRef?: LocalRef;
+  /** In batch mode, the settlementId of the turn this episode belongs to. */
+  settlementId?: string;
   category: "speech" | "action" | "observation" | "state_change";
   summary: string;
   privateNotes?: string;
@@ -417,6 +419,7 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
     const entityRefs = normalizeEpisodeEntityRefs(ep.entityRefs);
     episodes.push({
       ...(typeof ep.localRef === "string" ? { localRef: ep.localRef } : {}),
+      ...(typeof ep.settlementId === "string" ? { settlementId: ep.settlementId } : {}),
       category: ep.category as PrivateEpisodeArtifact["category"],
       summary: ep.summary,
       ...(typeof ep.privateNotes === "string" ? { privateNotes: ep.privateNotes } : {}),
