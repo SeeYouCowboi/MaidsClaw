@@ -59,12 +59,18 @@ export class GraphOrganizer {
       job.embeddingModelId,
     );
 
+    if (vectors.length !== nodes.length) {
+      throw new Error(
+        `[GraphOrganizer] embed() returned ${vectors.length} vectors for ${nodes.length} inputs (model: ${job.embeddingModelId})`,
+      );
+    }
+
     const entries: OrganizerEmbeddingEntry[] = nodes.map((node, index) => ({
       nodeRef: node.nodeRef,
       nodeKind: node.nodeKind,
       viewType: "primary",
       modelId: job.embeddingModelId,
-      embedding: vectors[index] ?? new Float32Array([0]),
+      embedding: vectors[index],
     }));
 
     await this.embeddings.batchStoreEmbeddings(entries);
@@ -74,7 +80,7 @@ export class GraphOrganizer {
     const scoreRefs = Array.from(scoreTargets);
     for (const nodeRef of scoreRefs) {
       const score = await this.computeNodeScore(nodeRef, job.agentId);
-      this.storage.upsertNodeScores(nodeRef, score.salience, score.centrality, score.bridgeScore);
+      await this.storage.async.upsertNodeScores(nodeRef, score.salience, score.centrality, score.bridgeScore);
     }
 
     for (const nodeRef of uniqueRefs) {
@@ -88,6 +94,7 @@ export class GraphOrganizer {
     };
   }
 
+  /** NOTE: graph_nodes is currently a write-only shadow registry — no read queries exist in the codebase. */
   private async shadowRegisterNodes(nodes: OrganizerNode[]): Promise<void> {
     await this.nodeScoringQueryRepo.registerGraphNodeShadows(nodes.map((node) => node.nodeRef), Date.now());
   }
@@ -232,8 +239,13 @@ export class GraphOrganizer {
     const recurrence = Math.min(1, edgeRows.length / 10);
     const updatedAt = (await this.nodeScoringQueryRepo.getNodeRecencyTimestamp(nodeRef)) ?? now;
     const recency = Math.max(0, 1 - (now - updatedAt) / (7 * 24 * 60 * 60 * 1000));
-    const indexBlock = await this.coreMemory.getBlock(agentId, "index");
-    const indexPresence = indexBlock.value.includes(nodeRef) ? 1 : 0;
+    let indexPresence = 0;
+    try {
+      const indexBlock = await this.coreMemory.getBlock(agentId, "index");
+      indexPresence = indexBlock.value.includes(nodeRef) ? 1 : 0;
+    } catch {
+      // index block may not exist for newly created agents
+    }
     const hasPersistedScore = await this.nodeScoringQueryRepo.hasNodeScore(nodeRef);
     const persistence = hasPersistedScore ? 1 : 0.5;
 
@@ -266,20 +278,20 @@ export class GraphOrganizer {
     }
 
     if (material.scope === "private" && material.removeExisting) {
-      this.storage.removeSearchDoc("private", nodeRef);
+      await this.storage.async.removeSearchDoc("private", nodeRef);
       return;
     }
 
     if (material.scope === "private") {
-      this.storage.syncSearchDoc("private", nodeRef, material.content, material.agentId);
+      await this.storage.async.syncSearchDoc("private", nodeRef, material.content, material.agentId);
       return;
     }
 
     if (material.scope === "area") {
-      this.storage.syncSearchDoc("area", nodeRef, material.content, undefined, material.locationEntityId);
+      await this.storage.async.syncSearchDoc("area", nodeRef, material.content, undefined, material.locationEntityId);
       return;
     }
 
-    this.storage.syncSearchDoc("world", nodeRef, material.content);
+    await this.storage.async.syncSearchDoc("world", nodeRef, material.content);
   }
 }

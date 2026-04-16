@@ -864,8 +864,9 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						`[thinker_worker] enqueued memory.organize jobs (${changedNodeRefs.length} refs) for settlement ${effectiveSettlementId}`,
 					);
 				} catch (enqueueErr) {
-					console.warn(
-						"[thinker_worker] enqueueOrganizerJobs failed (non-fatal):",
+					console.error(
+						`[thinker_worker] enqueueOrganizerJobs FAILED — organizer will NOT run for these nodes. ` +
+						`settlementId=${effectiveSettlementId}, nodeCount=${changedNodeRefs.length}`,
 						enqueueErr,
 					);
 				}

@@ -1015,8 +1015,9 @@ export class TurnService {
             changedNodeRefsForOrganize,
           );
         } catch (enqueueErr) {
-          console.warn(
-            "[turn-service] enqueueOrganizerJobs failed (non-fatal):",
+          console.error(
+            `[turn-service] enqueueOrganizerJobs FAILED — organizer will NOT run for these nodes. ` +
+            `settlementId=${settlementId}, nodeCount=${changedNodeRefsForOrganize.length}`,
             enqueueErr,
           );
         }

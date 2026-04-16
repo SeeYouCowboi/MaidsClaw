@@ -43,6 +43,12 @@ export class EmbeddingService {
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
+  /**
+   * Stores embeddings individually (PgTransactionBatcher is a no-op passthrough).
+   * Each upsert runs independently — partial failures do NOT roll back prior writes.
+   * This is acceptable because upserts are idempotent (ON CONFLICT DO UPDATE) and
+   * the caller (GraphOrganizer) validates vector count before calling.
+   */
   async batchStoreEmbeddings(entries: EmbeddingEntry[]): Promise<void> {
     if (entries.length === 0) {
       return;

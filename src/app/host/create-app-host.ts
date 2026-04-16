@@ -86,7 +86,10 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			);
 		}
 
-		const payload = job.payload_json as {
+		// payload_json may be a string due to double-serialization in pg-store
+		// (JSON.stringify before inserting into JSONB column). Parse if needed.
+		const rawPayload = job.payload_json;
+		const payload = (typeof rawPayload === "string" ? JSON.parse(rawPayload) : rawPayload) as {
 			agentId: string;
 			chunkNodeRefs: NodeRef[];
 			settlementId: string;
@@ -102,8 +105,13 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 
 		const embeddingModelId =
 			payload.embeddingModelId ??
-			runtime.effectiveOrganizerEmbeddingModelId ??
-			"";
+			runtime.effectiveOrganizerEmbeddingModelId;
+
+		if (!embeddingModelId) {
+			throw new Error(
+				"[memory.organize] no embeddingModelId — configure memory.organizerEmbeddingModelId or memory.embeddingModelId",
+			);
+		}
 
 		await memoryTaskAgent.runOrganize({
 			agentId: payload.agentId,
@@ -113,6 +121,22 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			embeddingModelId,
 		});
 	});
+
+	// Stub workers for maintenance job types — prevents retry noise from
+	// "No worker registered" errors while implementations are pending.
+	for (const stubType of [
+		"search.rebuild",
+		"maintenance.replay_projection",
+		"maintenance.rebuild_derived",
+		"maintenance.full",
+	] as const) {
+		runner.registerWorker(stubType, async (job) => {
+			console.warn(
+				`[job-consumer] ${stubType} not implemented — job ${job.job_key} completed as no-op`,
+			);
+			return { status: "not_implemented" };
+		});
+	}
 
 	let timer: ReturnType<typeof setInterval> | undefined;
 	const MAX_CONCURRENT_TICKS = 4; // Match global thinker concurrency cap
@@ -409,6 +433,13 @@ export async function createAppHost(
 		options.role === "server" &&
 		(options.enableDurableOrchestration === true ||
 			runtime.talkerThinkerConfig?.enabled === true);
+	if (options.role === "server") {
+		console.log(
+			`[app-host] server consumer: shouldConsume=${serverShouldConsume}, ` +
+			`durableOrch=${options.enableDurableOrchestration ?? false}, ` +
+			`talkerThinker=${runtime.talkerThinkerConfig?.enabled ?? false}`,
+		);
+	}
 	const serverDurableConsumer = (() => {
 		if (!serverShouldConsume) return undefined;
 		const store = (runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
@@ -423,10 +454,18 @@ export async function createAppHost(
 	const localDurableConsumer = (() => {
 		if (options.role !== "local") return undefined;
 		const store = (runtime.pgFactory as { store?: DurableJobStore } | null)?.store;
-		if (!store) return undefined;
-		if (!runtime.talkerThinkerConfig?.enabled) return undefined;
+		if (!store) {
+			console.log("[app-host] local consumer: skipped (no PG store)");
+			return undefined;
+		}
+		if (!runtime.talkerThinkerConfig?.enabled) {
+			console.log("[app-host] local consumer: skipped (talkerThinker not enabled)");
+			return undefined;
+		}
 		try {
-			return createJobConsumer(runtime);
+			const consumer = createJobConsumer(runtime);
+			console.log("[app-host] local consumer: created");
+			return consumer;
 		} catch {
 			return undefined;
 		}
@@ -450,15 +489,18 @@ export async function createAppHost(
 			server?.start();
 			started = true;
 			if (serverDurableConsumer) {
+				console.log("[app-host] starting job consumer (role=server)");
 				await serverDurableConsumer.start();
 				leaseReclaimSweeper?.start();
 			}
 		} else if (options.role === "worker") {
+			console.log("[app-host] starting job consumer (role=worker)");
 			await workerConsumer?.start();
 			leaseReclaimSweeper?.start();
 		} else if (options.role === "maintenance") {
 			leaseReclaimSweeper?.start();
 		} else if (options.role === "local" && localDurableConsumer) {
+			console.log("[app-host] starting job consumer (role=local)");
 			await localDurableConsumer.start();
 		}
 	};
