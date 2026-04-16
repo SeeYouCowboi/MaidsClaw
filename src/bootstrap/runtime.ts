@@ -1448,7 +1448,7 @@ export function bootstrapRuntime(
     queryRouter,
     queryPlanBuilder,
   );
-  const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService);
+  const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService, episodeRepo);
   const promptBuilder = new PromptBuilder({
     persona: personaAdapter,
     lore: loreAdapter,

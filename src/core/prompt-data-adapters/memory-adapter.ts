@@ -7,6 +7,7 @@ import {
   getTypedRetrievalSurfaceAsync,
   type PromptDataRepos,
 } from "../../memory/prompt-data.js";
+import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-repo.js";
 import type {
   MemoryDataSource,
   TypedRetrievalSurfaceOptions,
@@ -17,6 +18,7 @@ export class MemoryAdapter implements MemoryDataSource {
   constructor(
     private readonly repos: PromptDataRepos,
     private readonly retrievalService?: RetrievalService,
+    private readonly episodeRepo?: EpisodeRepo,
   ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
@@ -49,6 +51,7 @@ export class MemoryAdapter implements MemoryDataSource {
       this.repos,
       this.retrievalService,
       options,
+      this.episodeRepo,
     );
   }
 }

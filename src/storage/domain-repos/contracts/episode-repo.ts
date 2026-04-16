@@ -18,4 +18,14 @@ export interface EpisodeRepo {
     settlementId: string,
   ): Promise<Array<{ id: number; source_pub_index: number | null }>>;
   readByAgent(agentId: string, limit?: number): Promise<EpisodeRow[]>;
+  /**
+   * Returns distinct entity_pointer_keys from recent episodes in this session,
+   * ordered by episode recency (most recent first). Used for cross-turn
+   * entity context in query routing.
+   */
+  readRecentSessionEntityHints(
+    agentId: string,
+    sessionId: string,
+    episodeLimit: number,
+  ): Promise<string[]>;
 }

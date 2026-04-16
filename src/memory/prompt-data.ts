@@ -1,4 +1,5 @@
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
+import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
@@ -279,6 +280,7 @@ export async function getTypedRetrievalSurfaceAsync(
   repos: PromptDataRepos,
   retrievalService: RetrievalService,
   options?: TypedRetrievalSurfaceOptions,
+  episodeRepo?: EpisodeRepo,
 ): Promise<string> {
   if (userMessage.trim().length < 3) {
     return "";
@@ -312,10 +314,24 @@ export async function getTypedRetrievalSurfaceAsync(
     })
     .filter((text) => text.trim().length > 0);
 
+  let recentEntityHints: string[] | undefined;
+  if (episodeRepo) {
+    try {
+      recentEntityHints = await episodeRepo.readRecentSessionEntityHints(
+        viewerContext.viewer_agent_id,
+        viewerContext.session_id,
+        20,
+      );
+    } catch {
+      // Non-fatal — falls back to current-query-only entity resolution
+    }
+  }
+
   const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
     recentCognitionKeys,
     recentCognitionTexts,
     conversationTexts,
+    recentEntityHints,
   }, undefined, "default_retrieval", undefined, options?.onRetrievalTraceCapture);
 
   return renderTypedRetrieval(typed);

@@ -107,6 +107,10 @@ export class EpisodeRepository {
     return rows.map(deserializeEntityPointerKeys);
   }
 
+  readRecentSessionEntityHints(_agentId: string, _sessionId: string, _limit: number): string[] {
+    return [];
+  }
+
   readByAgent(agentId: string, limit?: number): EpisodeRow[] {
     const effectiveLimit = limit ?? 100;
     const rows = this.db.query<Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null }>(

@@ -153,6 +153,26 @@ export class PgEpisodeRepo implements EpisodeRepo {
     `;
     return rows.map(normalizeEpisodeRow);
   }
+  async readRecentSessionEntityHints(
+    agentId: string,
+    sessionId: string,
+    episodeLimit: number,
+  ): Promise<string[]> {
+    const rows = await this.sql`
+      SELECT DISTINCT key
+      FROM (
+        SELECT unnest(entity_pointer_keys) AS key
+        FROM private_episode_events
+        WHERE agent_id = ${agentId}
+          AND session_id = ${sessionId}
+          AND array_length(entity_pointer_keys, 1) > 0
+        ORDER BY created_at DESC
+        LIMIT ${episodeLimit}
+      ) sub
+      WHERE key IS NOT NULL AND key != ''
+    `;
+    return rows.map((r) => r.key as string);
+  }
 }
 
 function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {

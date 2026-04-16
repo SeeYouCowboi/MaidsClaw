@@ -208,7 +208,7 @@ export class RetrievalService {
     // Phase 3: build a QueryPlan per call when router + builder are wired.
     // Failures fall back to undefined — orchestrator then runs the legacy
     // template path without plan-driven budget reallocation.
-    const queryPlan = await this.buildPlanForQuery(query, viewerContext);
+    const queryPlan = await this.buildPlanForQuery(query, viewerContext, dedupContext?.recentEntityHints);
     const result = await this.orchestrator.search(
       query,
       viewerContext,
@@ -328,6 +328,7 @@ export class RetrievalService {
   private async buildPlanForQuery(
     query: string,
     viewerContext: ViewerContext,
+    recentEntityHints?: string[],
   ): Promise<QueryPlan | undefined> {
     if (!this.queryRouter || !this.queryPlanBuilder) return undefined;
     try {
@@ -335,6 +336,7 @@ export class RetrievalService {
         query,
         viewerAgentId: viewerContext.viewer_agent_id,
         currentAreaId: viewerContext.current_area_id ?? null,
+        recentEntityHints,
       });
       return this.queryPlanBuilder.build({
         route,

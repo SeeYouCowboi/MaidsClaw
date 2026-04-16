@@ -708,6 +708,7 @@ export class TurnService {
           agentId: ownerAgentId,
           settlementId,
           talkerTurnVersion,
+          requestId,
         } satisfies import("../jobs/durable-store.js").CognitionThinkerJobPayload,
         status: "pending" as const,
         maxAttempts: 3,

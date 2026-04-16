@@ -168,6 +168,7 @@ export class RuleBasedQueryRouter implements QueryRouter {
     viewerAgentId: string;
     explicitMode?: QueryType;
     currentAreaId?: number | null;
+    recentEntityHints?: string[];
   }): Promise<QueryRoute> {
     const originalQuery = input.query;
     const normalizedQuery = originalQuery.trim().toLowerCase();
@@ -230,6 +231,26 @@ export class RuleBasedQueryRouter implements QueryRouter {
           error: err instanceof Error ? (err.stack ?? err.message) : String(err),
         });
         // Swallow — first-pass result is preserved.
+      }
+    }
+
+    // === Cross-turn entity fallback ===
+    // When neither token-based resolution nor private-alias scan found any
+    // entities, try resolving from recent session entity hints. This handles
+    // demonstrative/pronominal queries like "那人呢？" or "饮品呢？".
+    if (resolvedEntityIds.length === 0 && input.recentEntityHints?.length) {
+      for (const hint of input.recentEntityHints) {
+        if (resolvedEntityIds.length >= 3) break;
+        if (hint.length < 2) continue;
+        const entityId = await this.alias.resolveAlias(hint, input.viewerAgentId);
+        if (entityId !== null && !seenEntityIds.has(entityId)) {
+          seenEntityIds.add(entityId);
+          resolvedEntityIds.push(entityId);
+          entityHints.push(hint);
+        }
+      }
+      if (resolvedEntityIds.length > 0) {
+        matchedRules.push("cross_turn_entity_fallback");
       }
     }
 

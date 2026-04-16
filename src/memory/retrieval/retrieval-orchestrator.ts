@@ -87,6 +87,8 @@ export type RetrievalDedupContext = {
   conversationTexts?: string[];
   surfacedNarrativeTexts?: string[];
   allSurfacedTexts?: Set<string>;
+  /** Cross-turn entity context for query routing fallback. */
+  recentEntityHints?: string[];
 };
 
 /**

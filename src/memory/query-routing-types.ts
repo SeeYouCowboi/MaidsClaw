@@ -81,5 +81,7 @@ export interface QueryRouter {
      * resolveEpisodeBudget did with `viewerContext.current_area_id`.
      */
     currentAreaId?: number | null;
+    /** Recent entity pointer keys from session episodes for cross-turn fallback. */
+    recentEntityHints?: string[];
   }): Promise<QueryRoute>;
 }

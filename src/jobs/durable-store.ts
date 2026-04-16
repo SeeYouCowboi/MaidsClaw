@@ -51,6 +51,7 @@ export type CognitionThinkerJobPayload = {
   agentId: string;
   settlementId: string;
   talkerTurnVersion: number;
+  requestId?: string;
 };
 
 export type DurablePayloadByKind = {

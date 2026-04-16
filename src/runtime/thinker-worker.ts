@@ -351,6 +351,14 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			return;
 		}
 
+		// --- Settlement-level idempotency guard (mirrors explicit-settlement-processor.ts:153-159) ---
+		if (deps.settlementLedger) {
+			const ledgerState = await deps.settlementLedger.check(payload.settlementId);
+			if (ledgerState === "applied") {
+				return;
+			}
+		}
+
 		let batchMode = false;
 		let sketchChain: Array<{
 			version: number;
@@ -504,6 +512,19 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			}
 		}
 
+		// --- Batch-mode idempotency: check effective settlement before projection ---
+		if (deps.settlementLedger && batchMode) {
+			const effectiveState = await deps.settlementLedger.check(effectiveSettlementId);
+			if (effectiveState === "applied") {
+				for (const memberId of batchMemberSettlementIds) {
+					try {
+						await deps.settlementLedger.markReplayedNoop(memberId);
+					} catch { /* non-fatal */ }
+				}
+				return;
+			}
+		}
+
 		try {
 			let settlementPayload: TurnSettlementPayload | undefined;
 			const messageRecords = await deps.interactionRepo.getMessageRecords(
@@ -619,6 +640,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				settlementId: effectiveSettlementId,
 				sessionId: payload.sessionId,
 				agentId: payload.agentId,
+				requestId: payload.requestId ?? effectiveSettlementId.replace(/^stl:/, ""),
 				cognitionOps,
 				privateEpisodes: canonicalOutcome.privateEpisodes ?? [],
 				publications: canonicalOutcome.publications ?? [],
@@ -639,10 +661,13 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					payload.agentId,
 				);
 			} catch (ledgerErr) {
-				console.warn(
-					"[thinker_worker] markThinkerProjecting failed (non-fatal):",
+				// markThinkerProjecting throws when status is NOT talker_committed/failed_retryable
+				// (e.g. already applied). Abort rather than proceeding with duplicate projection.
+				console.error(
+					"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
 					ledgerErr,
 				);
+				return;
 			}
 
 			let changedNodeRefs: NodeRef[] = [];

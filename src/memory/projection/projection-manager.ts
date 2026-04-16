@@ -444,7 +444,7 @@ export class ProjectionManager {
     searchProjectionRepo: ProjectionSearchProjectionRepo | undefined,
     changedNodeRefs: NodeRef[],
   ): void | Promise<void> {
-    const steps = params.privateEpisodes.map((episode) => () => {
+    const steps = params.privateEpisodes.map((episode, index) => () => {
       const entityPointerKeys = resolveEpisodeEntityPointerKeys(
         episode.entityRefs,
         params.agentId,
@@ -462,7 +462,7 @@ export class ProjectionManager {
         locationText: episode.locationText,
         validTime: episode.validTime,
         committedTime: now,
-        sourceLocalRef: episode.localRef,
+        sourceLocalRef: episode.localRef ?? `${params.settlementId}:_auto:${index}`,
         entityPointerKeys,
       });
 
