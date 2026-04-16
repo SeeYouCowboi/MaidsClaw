@@ -19,6 +19,7 @@ export class MemoryAdapter implements MemoryDataSource {
     private readonly repos: PromptDataRepos,
     private readonly retrievalService?: RetrievalService,
     private readonly episodeRepo?: EpisodeRepo,
+    private readonly personaEntityHints?: string[],
   ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
@@ -45,13 +46,32 @@ export class MemoryAdapter implements MemoryDataSource {
     if (!this.retrievalService) {
       return "";
     }
+    // Merge caller-provided persona hints with constructor-level hints
+    const mergedOptions: TypedRetrievalSurfaceOptions = {
+      ...options,
+      personaEntityHints: mergeHints(
+        this.personaEntityHints,
+        options?.personaEntityHints,
+      ),
+    };
     return getTypedRetrievalSurfaceAsync(
       userMessage,
       viewerContext,
       this.repos,
       this.retrievalService,
-      options,
+      mergedOptions,
       this.episodeRepo,
     );
   }
+}
+
+function mergeHints(
+  a: string[] | undefined,
+  b: string[] | undefined,
+): string[] | undefined {
+  if (!a && !b) return undefined;
+  const set = new Set<string>();
+  if (a) for (const h of a) set.add(h);
+  if (b) for (const h of b) set.add(h);
+  return set.size > 0 ? [...set] : undefined;
 }

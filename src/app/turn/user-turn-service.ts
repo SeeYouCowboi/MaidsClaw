@@ -12,6 +12,31 @@ export type ExecuteUserTurnDeps = {
 	turnService: Pick<TurnService, "runUserTurn">;
 };
 
+/**
+ * Per-session turn lock.
+ *
+ * Serializes concurrent `executeUserTurn` calls on the same session so that
+ * a second request waits until the first turn's generator has been fully
+ * consumed (i.e. the DB commit + chunk yield are done). This prevents two
+ * turns from reading the same stale conversation history and producing
+ * duplicate responses.
+ *
+ * The lock wraps the *entire* async generator lifecycle: it is acquired
+ * before entering `runUserTurn` and released only when the returned
+ * generator finishes or throws.
+ */
+const sessionTurnLocks = new Map<string, Promise<void>>();
+
+function acquireSessionLock(sessionId: string): { ready: Promise<void>; release: () => void } {
+	const previous = sessionTurnLocks.get(sessionId) ?? Promise.resolve();
+	let release: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	sessionTurnLocks.set(sessionId, gate);
+	return { ready: previous, release: release! };
+}
+
 export async function executeUserTurn(
 	params: ExecuteUserTurnParams,
 	deps: ExecuteUserTurnDeps,
@@ -70,5 +95,25 @@ export async function executeUserTurn(
 		});
 	}
 
-	return deps.turnService.runUserTurn(params);
+	// Acquire per-session lock: wait for any in-flight turn to finish before
+	// starting this one.  The lock covers the full generator lifecycle so the
+	// next caller cannot read DB history until our chunks have been yielded
+	// (which happens AFTER the settlement DB commit).
+	const lock = acquireSessionLock(params.sessionId);
+	await lock.ready;
+
+	const innerStream = deps.turnService.runUserTurn(params);
+
+	// Wrap the inner generator so that the lock is released when the stream
+	// finishes — whether it completes normally, errors, or the consumer
+	// breaks out early.
+	async function* lockedStream(): AsyncGenerator<Chunk> {
+		try {
+			yield* innerStream;
+		} finally {
+			lock.release();
+		}
+	}
+
+	return lockedStream();
 }

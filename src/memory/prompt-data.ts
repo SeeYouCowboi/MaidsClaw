@@ -327,6 +327,18 @@ export async function getTypedRetrievalSurfaceAsync(
     }
   }
 
+  // Merge persona-derived entity names (character names from card registry) so
+  // the query router's cross-turn fallback can resolve references like
+  // "花房那边的人" → Alice even when Alice hasn't been mentioned recently in
+  // episode entity_pointer_keys.
+  if (options?.personaEntityHints && options.personaEntityHints.length > 0) {
+    const merged = new Set(recentEntityHints ?? []);
+    for (const hint of options.personaEntityHints) {
+      merged.add(hint);
+    }
+    recentEntityHints = [...merged];
+  }
+
   const typed = await retrieval.generateTypedRetrieval(userMessage, viewerContext, {
     recentCognitionKeys,
     recentCognitionTexts,

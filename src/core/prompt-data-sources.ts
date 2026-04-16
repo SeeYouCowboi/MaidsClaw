@@ -3,6 +3,9 @@ import type { RetrievalTraceCapture } from "../app/contracts/trace.js";
 
 export type TypedRetrievalSurfaceOptions = {
   onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void;
+  /** Persona-derived entity names (e.g. character names from the active card registry)
+   *  to inject as additional entity hints for retrieval query expansion. */
+  personaEntityHints?: string[];
 };
 
 export type PersonaDataSource = {

@@ -1448,7 +1448,39 @@ export function bootstrapRuntime(
     queryRouter,
     queryPlanBuilder,
   );
-  const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService, episodeRepo);
+  // Seed world entities (characters + locations) into entity_nodes and generate
+  // their embeddings. This is idempotent and enables the embedding-linker's
+  // entity_bridge pass to create cross-type semantic edges.
+  if (memoryTaskModelProvider && effectiveOrganizerEmbeddingModelId) {
+    void (async () => {
+      try {
+        const { seedWorldEntities } = await import("../memory/entity-seed.js");
+        const result = await seedWorldEntities(
+          graphStoreRepo,
+          embeddingRepo,
+          memoryTaskModelProvider,
+          effectiveOrganizerEmbeddingModelId,
+          personaService,
+        );
+        if (result.seeded > 0) {
+          console.log(`[bootstrap] Seeded ${result.seeded} world entities, embedded ${result.embedded}`);
+        }
+      } catch (err) {
+        console.warn("[bootstrap] Entity seed failed (non-fatal):", err);
+      }
+    })();
+  }
+
+  // Extract character names from all persona cards so the retrieval query
+  // router can resolve indirect references (e.g. "花房那边的人" → Alice)
+  // even when the character hasn't appeared in recent episode entity_pointer_keys.
+  const personaEntityHints: string[] = [];
+  for (const [, card] of personaService.getSnapshot().cards) {
+    if (card.name && card.name.trim().length > 0) {
+      personaEntityHints.push(card.name.trim());
+    }
+  }
+  const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService, episodeRepo, personaEntityHints);
   const promptBuilder = new PromptBuilder({
     persona: personaAdapter,
     lore: loreAdapter,

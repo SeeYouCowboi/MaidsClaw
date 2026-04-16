@@ -122,9 +122,10 @@ export class TurnService {
     const messages: ChatMessage[] = [];
 
     // Dynamic conversation window: sized to cover all turns the thinker hasn't processed yet,
-    // plus a few extra turns for continuity overlap with thinker cognition.
-    // Each turn = 2 messages (user + assistant). Minimum 3 turns overlap.
-    const OVERLAP_TURNS = 3;
+    // plus extra turns for continuity overlap with thinker cognition.
+    // Each turn = 2 messages (user + assistant). 8 turns overlap ensures the model
+    // has sufficient context even when thinker cognition is sparse or stale.
+    const OVERLAP_TURNS = 8;
     const MIN_WINDOW_MESSAGES = OVERLAP_TURNS * 2;
     let conversationWindowSize: number | undefined; // undefined = no limit (full history)
 
@@ -592,17 +593,25 @@ export class TurnService {
           effectivePublicReply = extracted.cleanedReply;
         }
       }
-      // Fallback: if model still didn't produce a sketch, derive one from publicReply
-      // This ensures pending cognition entries always have content for prompt continuity
+      // Fallback: if model still didn't produce a sketch, derive one from publicReply.
+      // Prepend the user's original message as [user-stated] so the thinker can
+      // distinguish user-asserted facts from model-generated text. This prevents
+      // hallucinated attributes (e.g. "旧铜壳" when user said "银怀表") from
+      // overwriting user-stated facts in cognition extraction.
       if (!effectiveSketch && effectivePublicReply) {
         const replyText = effectivePublicReply
           .replace(/[（(].*?[）)]/g, "")
           .trim();
         if (replyText.length > 0) {
-          effectiveSketch =
+          const userText = getLatestUserMessage(effectiveRequest.messages);
+          const userTag = userText.length > 0
+            ? `[user-stated] ${userText.length <= 120 ? userText : `${userText.substring(0, 120)}…`}\n`
+            : "";
+          const sketchBody =
             replyText.length <= 200
               ? `[auto-sketch] ${replyText}`
               : `[auto-sketch] ${replyText.substring(0, 200)}…`;
+          effectiveSketch = `${userTag}${sketchBody}`;
         }
       }
 
