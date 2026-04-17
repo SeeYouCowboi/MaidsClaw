@@ -347,7 +347,6 @@ export class TurnService {
     };
     const rpTraceStore = effectiveRequest.traceStore;
 
-    let bufferedResult: RpBufferedExecutionResult;
     let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
 
     const ownerAgentIdForGap =
@@ -407,43 +406,56 @@ export class TurnService {
       }
     }
 
-    try {
-      if (!this.agentLoop.runBuffered) {
-        throw new Error("RP buffered execution is unavailable");
+    // ── Talker retry loop ─────────────────────────────────────────────
+    // Wraps runBuffered → normalize → empty-check in up to TALKER_MAX_ATTEMPTS
+    // attempts with exponential backoff. Retries are invisible to SSE —
+    // nothing is yielded until either success or final failure. Settlement
+    // / DB errors are non-retriable (they surface downstream of this loop).
+    const TALKER_MAX_ATTEMPTS = 3;
+    let canonicalOutcome: CanonicalRpTurnOutcome | undefined;
+    let lastError:
+      | { code: string; message: string; retriable: boolean; partialReply: string }
+      | undefined;
+
+    for (let attempt = 1; attempt <= TALKER_MAX_ATTEMPTS; attempt += 1) {
+      const attemptResult = await this.attemptRpTalkerBuffered(effectiveRequest);
+      if (attemptResult.ok) {
+        canonicalOutcome = attemptResult.canonicalOutcome;
+        if (attempt > 1) {
+          this.traceLog(
+            requestId,
+            "warn",
+            `Talker recovered on attempt ${attempt}/${TALKER_MAX_ATTEMPTS}`,
+          );
+        }
+        lastError = undefined;
+        break;
       }
-      bufferedResult = await this.agentLoop.runBuffered(effectiveRequest);
-    } catch (error: unknown) {
-      this.traceLog(requestId, "error", "RP buffered execution threw");
-      const errorChunk = {
-        code: "AGENT_LOOP_EXCEPTION",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      await this.handleFailedTurn({
-        request: effectiveRequest,
-        turnRangeStart,
-        errorChunk,
-        assistantText: "",
-        hasAssistantVisibleActivity: false,
-      });
-      rpTraceStore?.finalizeTrace(requestId);
-      return;
+
+      lastError = attemptResult;
+      this.traceLog(
+        requestId,
+        "warn",
+        `Talker attempt ${attempt}/${TALKER_MAX_ATTEMPTS} failed: ${attemptResult.code}: ${attemptResult.message}`,
+      );
+
+      if (!attemptResult.retriable || attempt === TALKER_MAX_ATTEMPTS) {
+        break;
+      }
+
+      const backoffMs = 1000 * 2 ** (attempt - 1);
+      await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
     }
 
-    if ("error" in bufferedResult) {
+    if (!canonicalOutcome) {
       const errorChunk = {
-        code: "RP_BUFFERED_EXECUTION_FAILED",
-        message: bufferedResult.error,
+        code: lastError?.code ?? "TALKER_FAILED",
+        message: lastError?.message ?? "Talker failed without explicit error",
       };
       this.traceLog(
         requestId,
         "error",
-        `RP buffered execution failed: ${bufferedResult.error}`,
+        `Talker exhausted retries (${TALKER_MAX_ATTEMPTS}): ${errorChunk.code}`,
       );
       yield {
         type: "error" as const,
@@ -455,38 +467,7 @@ export class TurnService {
         request: effectiveRequest,
         turnRangeStart,
         errorChunk,
-        assistantText: "",
-        hasAssistantVisibleActivity: false,
-      });
-      rpTraceStore?.finalizeTrace(requestId);
-      return;
-    }
-
-    let canonicalOutcome: CanonicalRpTurnOutcome;
-    try {
-      canonicalOutcome = normalizeRpTurnOutcome(
-        structuredClone(bufferedResult.outcome),
-      );
-    } catch (error: unknown) {
-      this.traceLog(requestId, "error", "RP outcome normalization failed");
-      const errorChunk = {
-        code: "RP_OUTCOME_NORMALIZATION_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      await this.handleFailedTurn({
-        request: effectiveRequest,
-        turnRangeStart,
-        errorChunk,
-        assistantText:
-          typeof bufferedResult.outcome?.publicReply === "string"
-            ? bufferedResult.outcome.publicReply
-            : "",
+        assistantText: lastError?.partialReply ?? "",
         hasAssistantVisibleActivity: false,
       });
       rpTraceStore?.finalizeTrace(requestId);
@@ -495,28 +476,6 @@ export class TurnService {
 
     const hasPublicReply = canonicalOutcome.publicReply.length > 0;
     const hasAssistantVisibleActivity = hasPublicReply;
-    if (!hasPublicReply) {
-      const errorChunk = {
-        code: "RP_EMPTY_TURN",
-        message: "empty turn: publicReply is empty",
-      };
-      this.traceLog(requestId, "warn", "RP talker outcome was empty");
-      yield {
-        type: "error" as const,
-        code: errorChunk.code,
-        message: errorChunk.message,
-        retriable: false,
-      };
-      await this.handleFailedTurn({
-        request: effectiveRequest,
-        turnRangeStart,
-        errorChunk,
-        assistantText: canonicalOutcome.publicReply,
-        hasAssistantVisibleActivity,
-      });
-      rpTraceStore?.finalizeTrace(requestId);
-      return;
-    }
 
     const settlementId = `stl:${requestId}`;
     const existingPayload = await this.getExistingSettlementPayload(
@@ -752,6 +711,91 @@ export class TurnService {
     yield messageEndChunk;
 
     rpTraceStore?.finalizeTrace(requestId);
+  }
+
+  /**
+   * Single talker attempt: runBuffered → normalize → empty-check.
+   * Pure — does not yield, does not commit, does not mutate service state.
+   * All four known failure modes are mapped to `retriable: true` so the
+   * caller's retry loop can back off and try again. Success returns the
+   * canonical outcome for settlement commit.
+   */
+  private async attemptRpTalkerBuffered(
+    effectiveRequest: AgentRunRequest,
+  ): Promise<
+    | { ok: true; canonicalOutcome: CanonicalRpTurnOutcome }
+    | {
+        ok: false;
+        code: string;
+        message: string;
+        retriable: boolean;
+        partialReply: string;
+      }
+  > {
+    if (!this.agentLoop.runBuffered) {
+      return {
+        ok: false,
+        code: "RP_BUFFERED_EXECUTION_UNAVAILABLE",
+        message: "RP buffered execution is unavailable",
+        retriable: false,
+        partialReply: "",
+      };
+    }
+
+    let bufferedResult: RpBufferedExecutionResult;
+    try {
+      bufferedResult = await this.agentLoop.runBuffered(effectiveRequest);
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        code: "AGENT_LOOP_EXCEPTION",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: true,
+        partialReply: "",
+      };
+    }
+
+    if ("error" in bufferedResult) {
+      return {
+        ok: false,
+        code: "RP_BUFFERED_EXECUTION_FAILED",
+        message: bufferedResult.error,
+        retriable: true,
+        partialReply: "",
+      };
+    }
+
+    const rawReply =
+      typeof bufferedResult.outcome?.publicReply === "string"
+        ? bufferedResult.outcome.publicReply
+        : "";
+
+    let canonicalOutcome: CanonicalRpTurnOutcome;
+    try {
+      canonicalOutcome = normalizeRpTurnOutcome(
+        structuredClone(bufferedResult.outcome),
+      );
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        code: "RP_OUTCOME_NORMALIZATION_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: true,
+        partialReply: rawReply,
+      };
+    }
+
+    if (canonicalOutcome.publicReply.length === 0) {
+      return {
+        ok: false,
+        code: "RP_EMPTY_TURN",
+        message: "empty turn: publicReply is empty",
+        retriable: true,
+        partialReply: canonicalOutcome.publicReply,
+      };
+    }
+
+    return { ok: true, canonicalOutcome };
   }
 
   private async *runRpBufferedTurn(

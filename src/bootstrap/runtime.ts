@@ -1772,6 +1772,7 @@ export function bootstrapRuntime(
     coreMemoryService,
     episodeRepo,
     settlementLedgerRepo,
+    settlementLedger,
     areaWorldProjectionRepo,
     personaService,
     loreService,

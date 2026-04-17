@@ -137,6 +137,7 @@ export class AgentLoop {
 		});
 		const workingMessages = [...initialPromptState.messages];
 		const systemPrompt = initialPromptState.systemPrompt;
+		const viewerContext = initialPromptState.viewerContext;
 		let turnIndex = 0;
 		const turnToolsUsed = new Set<string>();
 		const defaultPermissions = getDefaultPermissions(
@@ -335,6 +336,7 @@ export class AgentLoop {
 						{
 							sessionId: request.sessionId,
 							agentId: this.profile.id,
+							viewerContext,
 						},
 					);
 					activeToolCall = undefined;
@@ -427,6 +429,7 @@ export class AgentLoop {
 		});
 		const workingMessages = [...initialPromptState.messages];
 		const systemPrompt = initialPromptState.systemPrompt;
+		const viewerContext = initialPromptState.viewerContext;
 		let turnIndex = 0;
 
 		const systemPromptLen = systemPrompt.length;
@@ -693,6 +696,7 @@ export class AgentLoop {
 						{
 							sessionId: request.sessionId,
 							agentId: runContext.agentId,
+							viewerContext,
 						},
 					);
 					turnToolsUsed.add(toolCall.name);
@@ -809,7 +813,11 @@ export class AgentLoop {
 
 	private async buildInitialPromptState(
 		request: AgentRunRequest,
-	): Promise<{ systemPrompt: string; messages: ChatMessage[] }> {
+	): Promise<{
+		systemPrompt: string;
+		messages: ChatMessage[];
+		viewerContext?: ViewerContext;
+	}> {
 		if (!this.promptBuilder || !this.promptRenderer) {
 			const fallbackSystemPrompt = buildSystemPrompt(this.profile);
 			if (request.requestId) {
@@ -891,6 +899,7 @@ export class AgentLoop {
 		return {
 			systemPrompt: rendered.systemPrompt,
 			messages: rendered.conversationMessages,
+			viewerContext,
 		};
 	}
 

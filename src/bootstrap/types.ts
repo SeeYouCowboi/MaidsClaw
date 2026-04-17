@@ -29,6 +29,7 @@ import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { SettlementLedgerRepo } from "../storage/domain-repos/contracts/settlement-ledger-repo.js";
+import type { SettlementLedger } from "../memory/settlement-ledger.js";
 import type { SharedBlockRepo } from "../storage/domain-repos/contracts/shared-block-repo.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
 
@@ -138,6 +139,7 @@ export type RuntimeBootstrapResult = {
 	coreMemoryService: CoreMemoryService;
 	episodeRepo: EpisodeRepo;
 	settlementLedgerRepo: SettlementLedgerRepo;
+	settlementLedger: SettlementLedger;
 	areaWorldProjectionRepo: AreaWorldProjectionRepo;
 	personaService: PersonaService;
 	loreService: LoreService;

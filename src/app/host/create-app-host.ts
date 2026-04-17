@@ -71,6 +71,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			createAgentLoop: runtime.createAgentLoop,
 			durableJobStore: store as DurableJobStore,
 			jobPersistence: runtime.jobPersistence,
+			settlementLedger: runtime.settlementLedger,
 		});
 
 		await thinkerWorker({
