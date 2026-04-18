@@ -127,6 +127,12 @@ export type TurnSettlementPayload = {
   usedStaleState?: boolean;
   /** Talker turn counter at commit time — enables Phase 2 recovery sweeper to map settlement → version */
   talkerTurnVersion?: number;
+  /** Whether the turn's cognitive sketch originated from an explicit scratchpad ("explicit") 
+   *  or was synthesized as auto-fallback ("auto_fallback"). Set by turn-service. */
+  cognitiveSketchSource?: "explicit" | "auto_fallback";
+  /** Telemetry-only flag set when the latest user message opens with a common correction phrase. 
+   *  Never gates thinker behavior. */
+  correctionSuspected?: boolean;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

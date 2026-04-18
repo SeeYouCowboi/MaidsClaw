@@ -37,7 +37,12 @@ const SESSION_ID = "session:batch";
 const FAIL_AFTER_PROMPT = "STOP_AFTER_PROMPT_CAPTURE";
 
 type SettlementBehavior = {
-	[settlementId: string]: string | Error | { sketch: string; viewerLocation?: number } | undefined;
+	[settlementId: string]: string | Error | {
+		sketch: string;
+		viewerLocation?: number;
+		cognitiveSketchSource?: "explicit" | "auto_fallback";
+		correctionSuspected?: boolean;
+	} | undefined;
 };
 
 type MockLedger = SettlementLedger & {
@@ -62,6 +67,10 @@ function makeSettlementPayload(
 	settlementId: string,
 	sketch: string,
 	viewerLocation = 42,
+	options?: {
+		cognitiveSketchSource?: "explicit" | "auto_fallback";
+		correctionSuspected?: boolean;
+	},
 ): TurnSettlementPayload {
 	const requestId = requestIdFromSettlement(settlementId);
 	return {
@@ -78,6 +87,8 @@ function makeSettlementPayload(
 		},
 		schemaVersion: "turn_settlement_v5",
 		cognitiveSketch: sketch,
+		...(options?.cognitiveSketchSource ? { cognitiveSketchSource: options.cognitiveSketchSource } : {}),
+		...(options?.correctionSuspected ? { correctionSuspected: options.correctionSuspected } : {}),
 	};
 }
 
@@ -134,6 +145,10 @@ function createInteractionRepo(params: {
 				settlementId,
 				behavior.sketch,
 				behavior.viewerLocation,
+				{
+					cognitiveSketchSource: behavior.cognitiveSketchSource,
+					correctionSuspected: behavior.correctionSuspected,
+				},
 			);
 		},
 		async getMessageRecords(sessionId) {
@@ -1285,5 +1300,186 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(prompt).toContain("[Turn 5 | stl:req-5] session-a-v5");
 		expect(prompt).not.toContain("session-b");
 		expect(prompt).not.toContain("[Turn 99 | ");
+	});
+
+	it("worker constructs and runs without assertionCanonicalization bundle (no-op fallback)", async () => {
+		const debugSpy = jest
+			.spyOn(console, "debug")
+			.mockImplementation(() => undefined);
+
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: "sketch-v7-no-canon",
+			},
+			agentOutcome: makeSuccessOutcome(),
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		expect(fixture.projectionManager.commitSettlement.mock.calls.length).toBe(1);
+
+		expect(
+			debugSpy.mock.calls.some((call) =>
+				call.some(
+					(part) =>
+						typeof part === "string" &&
+						part.includes("assertionCanonicalization bundle absent"),
+				),
+			),
+		).toBe(true);
+	});
+
+	it("single-turn settlement with explicit sketch carries cognitiveSketchSource=explicit", async () => {
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: {
+					sketch: "explicit-sketch-v7",
+					cognitiveSketchSource: "explicit",
+				},
+			},
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("Cognitive sketch from Talker: explicit-sketch-v7");
+	});
+
+	it("single-turn settlement with auto_fallback sketch carries cognitiveSketchSource=auto_fallback", async () => {
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: {
+					sketch: "[auto-sketch] some fallback text",
+					cognitiveSketchSource: "auto_fallback",
+				},
+			},
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("Cognitive sketch from Talker: [auto-sketch] some fallback text");
+	});
+
+	it("batch chain with mixed explicit/auto_fallback preserves per-turn cognitiveSketchSource", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: {
+					sketch: "sketch-v3-explicit",
+					cognitiveSketchSource: "explicit",
+				},
+				[settlementIdFor(4)]: {
+					sketch: "sketch-v4-auto",
+					cognitiveSketchSource: "auto_fallback",
+				},
+				[settlementIdFor(5)]: {
+					sketch: "sketch-v5-explicit",
+					cognitiveSketchSource: "explicit",
+				},
+			},
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("[Turn 3 | stl:req-3] sketch-v3-explicit [source:explicit]");
+		expect(prompt).toContain("[Turn 4 | stl:req-4] sketch-v4-auto [source:auto_fallback]");
+		expect(prompt).toContain("[Turn 5 | stl:req-5] sketch-v5-explicit [source:explicit]");
+	});
+
+	it("settlement with correctionSuspected=true preserves the flag on payload", async () => {
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: {
+					sketch: "sketch-with-correction",
+					correctionSuspected: true,
+				},
+			},
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("Cognitive sketch from Talker: sketch-with-correction");
+		expect(prompt).not.toContain("correctionSuspected");
+	});
+
+	it("settlement without correction phrase omits correctionSuspected entirely", () => {
+		const payload = makeSettlementPayload(SESSION_ID, settlementIdFor(7), "normal-sketch");
+		expect(payload.correctionSuspected).toBeUndefined();
+		expect("correctionSuspected" in payload).toBe(false);
+	});
+
+	it("correctionSuspected never appears in thinker prompt text (batch mode)", async () => {
+		const fixture = createFixture({
+			claimedVersion: 3,
+			pendingPayloads: [
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(4),
+					talkerTurnVersion: 4,
+				},
+				{
+					sessionId: SESSION_ID,
+					agentId: AGENT_ID,
+					settlementId: settlementIdFor(5),
+					talkerTurnVersion: 5,
+				},
+			],
+			settlementBehavior: {
+				[settlementIdFor(3)]: {
+					sketch: "sketch-v3",
+					correctionSuspected: true,
+				},
+				[settlementIdFor(4)]: {
+					sketch: "sketch-v4",
+					correctionSuspected: true,
+				},
+				[settlementIdFor(5)]: {
+					sketch: "sketch-v5",
+				},
+			},
+		});
+
+		await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+			FAIL_AFTER_PROMPT,
+		);
+
+		const prompt = fixture.getCapturedPrompt();
+		expect(prompt).toContain("Cognitive sketches from Talker (batch)");
+		expect(prompt).not.toContain("correctionSuspected");
+		expect(prompt).not.toContain("correction");
 	});
 });

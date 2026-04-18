@@ -53,6 +53,34 @@ export type AssertionBasis =
   | "introspection"
   | "belief";
 
+export type AssertionGroundingKind =
+  | "user_message"
+  | "cognitive_sketch"
+  | "private_episode"
+  | "existing_cognition";
+
+export type AssertionGroundingRef = {
+  kind: AssertionGroundingKind;
+  /** Exact prefix rule: user_message→"request:<requestId>", cognitive_sketch→"settlement:<id>",
+   *  private_episode→"episode:<localRef>", existing_cognition→"cognition:<key>" */
+  ref: string;
+  /** Optional excerpt from the source, max 160 chars (trim to 160 if longer) */
+  excerpt?: string;
+};
+
+export type AssertionProvenance =
+  | "user_stated"
+  | "talker_sketch_explicit"
+  | "talker_sketch_auto"
+  | "thinker_inferred"
+  | "explicit_settlement"
+  | "legacy_unknown";
+
+export type AssertionVerificationLevel =
+  | "unverified"
+  | "context_verified"
+  | "strong_verified";
+
 export type AssertionRecordV4 = CognitionRecordBase & {
   kind: "assertion";
   /** Who holds this belief — must be a character/agent, not a location or item. */
@@ -64,6 +92,9 @@ export type AssertionRecordV4 = CognitionRecordBase & {
   stance: AssertionStance;
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
+  claimedGroundingRefs?: AssertionGroundingRef[];
+  verifiedGroundingRefs?: AssertionGroundingRef[];
+  groundingVerificationLevel?: AssertionVerificationLevel;
 };
 
 export type EvaluationRecord = CognitionRecordBase & {
@@ -194,6 +225,22 @@ const V4_ASSERTION_BASES: ReadonlySet<AssertionBasis> = new Set([
   "inference",
   "introspection",
   "belief",
+]);
+
+const V4_ASSERTION_GROUNDING_KINDS: ReadonlySet<AssertionGroundingKind> = new Set([
+  "user_message",
+  "cognitive_sketch",
+  "private_episode",
+  "existing_cognition",
+]);
+
+const V4_ASSERTION_PROVENANCE: ReadonlySet<AssertionProvenance> = new Set([
+  "user_stated",
+  "talker_sketch_explicit",
+  "talker_sketch_auto",
+  "thinker_inferred",
+  "explicit_settlement",
+  "legacy_unknown",
 ]);
 
 
@@ -591,11 +638,9 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
           throw new Error("retract target.key must be a non-empty string");
         }
         normalizedOps.push({ op: "retract", target: target as CognitionSelector });
-        continue;
       }
 
       // Unknown op type — skip gracefully instead of killing the turn
-      continue;
     } catch (opError) {
       // Graceful degradation: skip malformed ops, preserve valid ones + publicReply.
       // A single bad cognition op should never kill the entire RP turn.
@@ -605,7 +650,6 @@ function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefi
       console.warn(
         `[rp-turn-contract] skipping malformed cognition op (key=${key}): ${opError instanceof Error ? opError.message : String(opError)}`,
       );
-      continue;
     }
   }
 
@@ -675,6 +719,19 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
     });
   }
 
+  record.claimedGroundingRefs = normalizeAssertionGroundingRefs(
+    record.claimedGroundingRefs,
+  );
+
+  const rawProvenance = typeof record.provenance === "string" ? record.provenance : "";
+  record.provenance = V4_ASSERTION_PROVENANCE.has(rawProvenance as AssertionProvenance)
+    ? rawProvenance
+    : "legacy_unknown";
+
+  // Verification is intentionally post-commit. Raw claimed refs are untrusted here.
+  record.verifiedGroundingRefs = [];
+  record.groundingVerificationLevel = "unverified";
+
   // Remove legacy proposition field after migration
   delete record.proposition;
 
@@ -703,6 +760,42 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
       record.preContestedStance = "tentative";
     }
   }
+}
+
+function normalizeAssertionGroundingRefs(raw: unknown): AssertionGroundingRef[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const refs: AssertionGroundingRef[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    const kind = typeof candidate.kind === "string" ? candidate.kind : "";
+    if (!V4_ASSERTION_GROUNDING_KINDS.has(kind as AssertionGroundingKind)) {
+      continue;
+    }
+
+    const ref = typeof candidate.ref === "string" ? candidate.ref.trim() : "";
+    if (ref.length === 0) {
+      continue;
+    }
+
+    const excerpt = typeof candidate.excerpt === "string"
+      ? candidate.excerpt.slice(0, 160)
+      : undefined;
+
+    refs.push({
+      kind: kind as AssertionGroundingKind,
+      ref,
+      ...(excerpt !== undefined ? { excerpt } : {}),
+    });
+  }
+
+  return refs;
 }
 
 function isCognitionEntityRef(value: unknown): value is CognitionEntityRef {

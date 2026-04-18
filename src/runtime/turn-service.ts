@@ -539,6 +539,10 @@ export class TurnService {
     let talkerTurnVersion: number | undefined;
     let effectivePublicReply = canonicalOutcome.publicReply;
     let effectiveSketch = canonicalOutcome.latentScratchpad;
+    let cognitiveSketchSource: TurnSettlementPayload["cognitiveSketchSource"];
+    if (effectiveSketch) {
+      cognitiveSketchSource = "explicit";
+    }
     try {
       const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
         effectiveRequest.sessionId,
@@ -550,6 +554,7 @@ export class TurnService {
         if (extracted) {
           effectiveSketch = extracted.scratchpad;
           effectivePublicReply = extracted.cleanedReply;
+          cognitiveSketchSource = "explicit";
         }
       }
       // Fallback: if model still didn't produce a sketch, derive one from publicReply.
@@ -571,6 +576,19 @@ export class TurnService {
               ? `[auto-sketch] ${replyText}`
               : `[auto-sketch] ${replyText.substring(0, 200)}…`;
           effectiveSketch = `${userTag}${sketchBody}`;
+          cognitiveSketchSource = "auto_fallback";
+        }
+      }
+
+      // Detect correction signal from latest user message (telemetry only — never gates thinker behavior)
+      let correctionSuspected: true | undefined;
+      {
+        const latestUserText = getLatestUserMessage(effectiveRequest.messages);
+        if (latestUserText) {
+          const trimmed = latestUserText.replace(/^[\s\p{P}]+/u, "").toLowerCase();
+          if (["actually", "wait", "其实", "等等", "算了"].some(p => trimmed.startsWith(p))) {
+            correctionSuspected = true;
+          }
         }
       }
 
@@ -587,6 +605,8 @@ export class TurnService {
         privateEpisodes: undefined,
         publications: undefined,
         cognitiveSketch: effectiveSketch,
+        ...(cognitiveSketchSource ? { cognitiveSketchSource } : {}),
+        ...(correctionSuspected ? { correctionSuspected } : {}),
         cognitionVersionGap: gap,
         usedStaleState,
       };

@@ -190,6 +190,17 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
             required: ["kind", "ref"],
           },
         },
+        cognitiveSketchSource: {
+          type: "string",
+          enum: ["explicit", "auto_fallback"],
+          description:
+            "Optional settlement metadata: source of cognitive sketch generation.",
+        },
+        correctionSuspected: {
+          type: "boolean",
+          description:
+            "Optional settlement metadata: telemetry-only user correction suspicion flag.",
+        },
       },
       required: ["schemaVersion", "publicReply"],
     },

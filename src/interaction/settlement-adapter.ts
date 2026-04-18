@@ -23,6 +23,8 @@ export type NormalizedSettlementPayload = {
 	pinnedSummaryProposal?: PinnedSummaryProposal;
 	relationIntents: RelationIntent[];
 	conflictFactors: ConflictFactor[];
+	cognitiveSketchSource?: TurnSettlementPayload["cognitiveSketchSource"];
+	correctionSuspected?: boolean;
 };
 
 export function detectSettlementVersion(
@@ -61,6 +63,8 @@ export function normalizeSettlementPayload(
 		conflictFactors: Array.isArray(payload.conflictFactors)
 			? payload.conflictFactors
 			: [],
+		...(payload.cognitiveSketchSource !== undefined ? { cognitiveSketchSource: payload.cognitiveSketchSource } : {}),
+		...(payload.correctionSuspected !== undefined ? { correctionSuspected: payload.correctionSuspected } : {}),
 	};
 }
 

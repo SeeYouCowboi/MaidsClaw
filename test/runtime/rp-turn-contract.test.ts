@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import { MaidsClawError } from "../../src/core/errors.js";
+import type {
+  CanonicalRpTurnOutcome,
+  RpTurnOutcomeSubmissionV5,
+} from "../../src/runtime/rp-turn-contract.js";
 import {
   normalizeRpTurnOutcome,
   normalizeToCanonicalOutcome,
   validateRpTurnOutcome,
   validateRpTurnOutcomeV5,
-} from "../../src/runtime/rp-turn-contract.js";
-import type {
-  CanonicalRpTurnOutcome,
-  RpTurnOutcomeSubmissionV5,
 } from "../../src/runtime/rp-turn-contract.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 
@@ -110,6 +110,303 @@ describe("normalizeRpTurnOutcome", () => {
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
     expect(result.publicReply).toBe("canonical");
   });
+
+  it("preserves valid claimedGroundingRefs across all supported kinds", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-all-kinds",
+              holderId: { kind: "special", value: "self" },
+              claim: "All sources align",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              claimedGroundingRefs: [
+                { kind: "user_message", ref: "request:req-1" },
+                { kind: "cognitive_sketch", ref: "settlement:set-1" },
+                { kind: "private_episode", ref: "episode:ep-1" },
+                { kind: "existing_cognition", ref: "cognition:fact-1" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    expect(op?.op).toBe("upsert");
+    if (!op || op.op !== "upsert") {
+      throw new Error("expected upsert assertion op");
+    }
+    expect(op.record.kind).toBe("assertion");
+    if (op.record.kind !== "assertion") {
+      throw new Error("expected assertion record");
+    }
+    expect(op.record.claimedGroundingRefs).toEqual([
+      { kind: "user_message", ref: "request:req-1" },
+      { kind: "cognitive_sketch", ref: "settlement:set-1" },
+      { kind: "private_episode", ref: "episode:ep-1" },
+      { kind: "existing_cognition", ref: "cognition:fact-1" },
+    ]);
+  });
+
+  it("drops invalid claimedGroundingRefs entries individually without rejecting turn", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-filter",
+              holderId: { kind: "special", value: "self" },
+              claim: "Source filtering",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              claimedGroundingRefs: [
+                { kind: "user_message", ref: "request:req-2" },
+                { kind: "unknown_kind", ref: "request:req-3" },
+                { kind: "private_episode", ref: "" },
+                { kind: "existing_cognition", ref: "cognition:fact-2" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    expect(op?.op).toBe("upsert");
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+    expect(op.record.claimedGroundingRefs).toEqual([
+      { kind: "user_message", ref: "request:req-2" },
+      { kind: "existing_cognition", ref: "cognition:fact-2" },
+    ]);
+  });
+
+  it("trims claimedGroundingRefs excerpt to 160 chars", () => {
+    const longExcerpt = "x".repeat(200);
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-excerpt",
+              holderId: { kind: "special", value: "self" },
+              claim: "Long excerpt",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              claimedGroundingRefs: [
+                {
+                  kind: "user_message",
+                  ref: "request:req-4",
+                  excerpt: longExcerpt,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+    expect(op.record.claimedGroundingRefs?.[0]?.excerpt?.length).toBe(160);
+  });
+
+  it("initializes claimedGroundingRefs to [] when missing", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-default-empty",
+              holderId: { kind: "special", value: "self" },
+              claim: "No explicit refs",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+    expect(op.record.claimedGroundingRefs).toEqual([]);
+  });
+
+  it("normalizes missing or invalid assertion provenance to legacy_unknown", () => {
+    const missingResult = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "prov-missing",
+              holderId: { kind: "special", value: "self" },
+              claim: "No provenance",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+            },
+          },
+        ],
+      },
+    });
+
+    const invalidResult = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "prov-invalid",
+              holderId: { kind: "special", value: "self" },
+              claim: "Invalid provenance",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              provenance: "not_allowed",
+            },
+          },
+        ],
+      },
+    });
+
+    const missingOp = missingResult.privateCognition?.ops[0];
+    const invalidOp = invalidResult.privateCognition?.ops[0];
+    if (!missingOp || missingOp.op !== "upsert" || missingOp.record.kind !== "assertion") {
+      throw new Error("expected missing provenance assertion upsert");
+    }
+    if (!invalidOp || invalidOp.op !== "upsert" || invalidOp.record.kind !== "assertion") {
+      throw new Error("expected invalid provenance assertion upsert");
+    }
+    expect(missingOp.record.provenance).toBe("legacy_unknown");
+    expect(invalidOp.record.provenance).toBe("legacy_unknown");
+  });
+
+  it("preserves valid assertion provenance values", () => {
+    const provenances = [
+      "user_stated",
+      "talker_sketch_explicit",
+      "thinker_inferred",
+    ];
+
+    for (const provenance of provenances) {
+      const result = normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "ok",
+        privateCognition: {
+          schemaVersion: "rp_private_cognition_v4",
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: `prov-valid-${provenance}`,
+                holderId: { kind: "special", value: "self" },
+                claim: "Valid provenance",
+                entityRefs: [{ kind: "special", value: "user" }],
+                stance: "accepted",
+                provenance,
+              },
+            },
+          ],
+        },
+      });
+      const op = result.privateCognition?.ops[0];
+      if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+        throw new Error("expected assertion upsert");
+      }
+      expect(op.record.provenance).toBe(provenance);
+    }
+  });
+
+  it("defaults assertion verification fields to unverified and []", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "verification-defaults",
+              holderId: { kind: "special", value: "self" },
+              claim: "Unverified by default",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              verifiedGroundingRefs: [
+                { kind: "private_episode", ref: "episode:ep-9" },
+              ],
+              groundingVerificationLevel: "strong_verified",
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+    expect(op.record.verifiedGroundingRefs).toEqual([]);
+    expect(op.record.groundingVerificationLevel).toBe("unverified");
+  });
+
+  it("keeps existing v5 payloads without new fields valid", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "no new fields",
+      privateEpisodes: [],
+      publications: [],
+      relationIntents: [],
+      conflictFactors: [],
+    });
+
+    expect(result).toEqual({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "no new fields",
+      privateEpisodes: [],
+      publications: [],
+      relationIntents: [],
+      conflictFactors: [],
+    });
+  });
 });
 
 describe("makeSubmitRpTurnTool", () => {
@@ -134,6 +431,26 @@ describe("makeSubmitRpTurnTool", () => {
       relationIntents: [],
       conflictFactors: [],
     });
+  });
+
+  it("accepts optional settlement metadata cognitiveSketchSource=explicit", async () => {
+    const result = await tool.execute({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "Hello, Master.",
+      cognitiveSketchSource: "explicit",
+    });
+
+    expect((result as CanonicalRpTurnOutcome).publicReply).toBe("Hello, Master.");
+  });
+
+  it("accepts omitted correctionSuspected in settlement metadata", async () => {
+    const result = await tool.execute({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "Hello, Master.",
+      cognitiveSketchSource: "auto_fallback",
+    });
+
+    expect((result as CanonicalRpTurnOutcome).schemaVersion).toBe("rp_turn_outcome_v5");
   });
 
   it("execute throws MaidsClawError with RP_TURN_OUTCOME_INVALID on invalid input", async () => {
@@ -356,7 +673,11 @@ describe("V5 contract: assertion/evaluation/commitment kind boundary fixtures", 
       },
     });
     expect(result.privateCognition?.ops[0]).toBeDefined();
-    const op = result.privateCognition!.ops[0]!;
+    const op = result.privateCognition?.ops[0];
+    expect(op).toBeDefined();
+    if (!op) {
+      throw new Error("expected cognition op");
+    }
     expect(op.op).toBe("upsert");
     if (op.op === "upsert") {
       expect(op.record.kind).toBe("assertion");
@@ -383,7 +704,11 @@ describe("V5 contract: assertion/evaluation/commitment kind boundary fixtures", 
       },
     });
     expect(result.privateCognition?.ops[0]).toBeDefined();
-    const op = result.privateCognition!.ops[0]!;
+    const op = result.privateCognition?.ops[0];
+    expect(op).toBeDefined();
+    if (!op) {
+      throw new Error("expected cognition op");
+    }
     if (op.op === "upsert") {
       expect(op.record.kind).toBe("evaluation");
     }
@@ -410,7 +735,11 @@ describe("V5 contract: assertion/evaluation/commitment kind boundary fixtures", 
       },
     });
     expect(result.privateCognition?.ops[0]).toBeDefined();
-    const op = result.privateCognition!.ops[0]!;
+    const op = result.privateCognition?.ops[0];
+    expect(op).toBeDefined();
+    if (!op) {
+      throw new Error("expected cognition op");
+    }
     if (op.op === "upsert") {
       expect(op.record.kind).toBe("commitment");
     }
