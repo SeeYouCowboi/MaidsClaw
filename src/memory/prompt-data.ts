@@ -204,6 +204,27 @@ function getWeakMemoryPrefix(entry: RecentCognitionEntry): string {
   return `[basis=${basis} provenance=${provenance} verification=${verification}] `;
 }
 
+function isWeakCognitionSegment(segment: { basis: string | null; groundingVerificationLevel?: string | null }): boolean {
+  const basis = segment.basis ?? "unknown";
+  const verification = (segment.groundingVerificationLevel as string | undefined) ?? "unverified";
+
+  if (verification === "unverified") return true;
+  if (basis === "belief" || basis === "unknown") return true;
+  if (basis === "inference" && verification !== "strong_verified") return true;
+
+  return false;
+}
+
+function getWeakMemoryPrefixForSegment(segment: { basis: string | null; provenance?: string | null; groundingVerificationLevel?: string | null }): string {
+  if (!isWeakCognitionSegment(segment)) return "";
+
+  const basis = segment.basis ?? "unknown";
+  const provenance = (segment.provenance as string | undefined) ?? "legacy_unknown";
+  const verification = (segment.groundingVerificationLevel as string | undefined) ?? "unverified";
+
+  return `[basis=${basis} provenance=${provenance} verification=${verification}] `;
+}
+
 export function formatContestedEntry(entry: RecentCognitionEntry): string {
   const preStance = entry.preContestedStance ?? "unknown";
   const summary = entry.conflictSummary?.trim();
@@ -222,7 +243,8 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
     parts.push("[cognition]");
     for (const hit of result.cognition) {
       const key = hit.cognitionKey ? `:${hit.cognitionKey}` : "";
-      parts.push(`• [${hit.kind}${key}] ${hit.content}`);
+      const prefix = getWeakMemoryPrefixForSegment(hit);
+      parts.push(`• [${hit.kind}${key}] ${prefix}${hit.content}`);
     }
   }
 

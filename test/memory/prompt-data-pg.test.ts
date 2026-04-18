@@ -784,3 +784,82 @@ describe("WEAK_MEMORY_INTERPRETATION_GUIDANCE content assertions (unit)", () => 
     expect(WEAK_MEMORY_INTERPRETATION_GUIDANCE).toContain("basis is belief or unknown");
   });
 });
+
+describe("getTypedRetrievalSurfaceAsync — weak-memory label on typed cognition segments (Task 8)", () => {
+  let recentCognitionSlotRepo: StubRecentCognitionSlotRepo;
+  let interactionRepo: StubInteractionRepo;
+  let repos: PromptDataRepos;
+  let retrievalService: StubRetrievalService;
+
+  const viewerContext: ViewerContext = {
+    viewer_agent_id: "agent-1",
+    viewer_role: "rp_agent",
+    session_id: "session-1",
+    current_area_id: 99,
+  };
+
+  beforeEach(() => {
+    recentCognitionSlotRepo = new StubRecentCognitionSlotRepo();
+    interactionRepo = new StubInteractionRepo();
+    repos = {
+      coreMemoryBlockRepo: new StubCoreMemoryBlockRepo(),
+      recentCognitionSlotRepo,
+      interactionRepo,
+      sharedBlockRepo: new StubSharedBlockRepo(),
+    };
+    retrievalService = new StubRetrievalService();
+  });
+
+  it("renders weak-label prefix on cognition segments with unverified verification", async () => {
+    retrievalService.nextResult = {
+      cognition: [
+        {
+          source_ref: "assertion:20",
+          content: "she might be lying",
+          score: 10,
+          kind: "assertion",
+          basis: "belief",
+          stance: "accepted",
+          cognitionKey: "trust:lie",
+          provenance: "talker_sketch_auto",
+          groundingVerificationLevel: "unverified",
+        },
+      ],
+      narrative: [],
+      conflict_notes: [],
+      episode: [],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync("lies", viewerContext, repos, retrievalService);
+
+    expect(output).toContain("[basis=belief provenance=talker_sketch_auto verification=unverified]");
+    expect(output).toContain("she might be lying");
+  });
+
+  it("does NOT render weak-label prefix on strong_verified first_hand cognition segments", async () => {
+    retrievalService.nextResult = {
+      cognition: [
+        {
+          source_ref: "assertion:21",
+          content: "her name is Alice",
+          score: 10,
+          kind: "assertion",
+          basis: "first_hand",
+          stance: "accepted",
+          cognitionKey: "name:alice",
+          provenance: "user_stated",
+          groundingVerificationLevel: "strong_verified",
+        },
+      ],
+      narrative: [],
+      conflict_notes: [],
+      episode: [],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync("alice", viewerContext, repos, retrievalService);
+
+    expect(output).toContain("her name is Alice");
+    expect(output).not.toContain("[basis=");
+    expect(output).not.toContain("verification=");
+  });
+});

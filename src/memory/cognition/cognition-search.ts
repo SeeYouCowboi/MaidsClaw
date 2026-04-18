@@ -23,6 +23,69 @@ export type CognitionEmbeddingConfig = {
 
 const COGNITION_KINDS: CognitionKind[] = ["assertion", "evaluation", "commitment"];
 
+/**
+ * Trust-order ranking for grounding verification levels.
+ * Lower number = higher trust.
+ */
+const VERIFICATION_TRUST_ORDER: Record<string, number> = {
+  strong_verified: 0,
+  context_verified: 1,
+  unverified: 2,
+};
+
+/**
+ * Trust-order ranking for assertion basis.
+ * Lower number = higher trust.
+ */
+const BASIS_TRUST_ORDER: Record<string, number> = {
+  first_hand: 0,
+  introspection: 1,
+  hearsay: 2,
+  inference: 3,
+  belief: 4,
+};
+
+function getVerificationRank(level: string | undefined | null): number {
+  return VERIFICATION_TRUST_ORDER[level ?? "unverified"] ?? 2;
+}
+
+function getBasisRank(basis: string | undefined | null): number {
+  return BASIS_TRUST_ORDER[basis ?? ""] ?? 5; // null/unknown = lowest
+}
+
+/**
+ * Stable post-search sort for assertion hits by trust order:
+ * strong_verified > context_verified > unverified, then within bucket
+ * first_hand > introspection > hearsay > inference > belief > null/unknown,
+ * ties broken by updated_at descending.
+ */
+function sortByTrustOrder(hits: CognitionHit[]): CognitionHit[] {
+  return hits.sort((a, b) => {
+    // Only sort assertion hits by trust order; non-assertions keep relative order
+    const aIsAssertion = a.kind === "assertion" ? 0 : 1;
+    const bIsAssertion = b.kind === "assertion" ? 0 : 1;
+    if (aIsAssertion !== bIsAssertion) return aIsAssertion - bIsAssertion;
+    if (aIsAssertion === 1) return 0; // both non-assertion: keep stable
+
+    // Both assertions: sort by verification, then basis, then updated_at desc
+    const vDiff = getVerificationRank(a.groundingVerificationLevel) - getVerificationRank(b.groundingVerificationLevel);
+    if (vDiff !== 0) return vDiff;
+    const bDiff = getBasisRank(a.basis) - getBasisRank(b.basis);
+    if (bDiff !== 0) return bDiff;
+    return b.updated_at - a.updated_at;
+  });
+}
+
+function safeParseRecordJson(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 type ConflictEvidenceItem = {
   targetRef: string;
   strength: number;
@@ -64,6 +127,8 @@ type CognitionHit = {
   source_ref: NodeRef;
   content: string;
   updated_at: number;
+  provenance?: string;
+  groundingVerificationLevel?: string;
   conflictEvidence?: ConflictEvidenceItem[];
   conflictSummary?: string | null;
   conflictFactorRefs?: NodeRef[];
@@ -103,6 +168,9 @@ export class CognitionSearchService {
       const prefixes = params.allowedSourceRefPrefixes;
       hits = hits.filter((hit) => prefixes.some((prefix) => hit.source_ref.startsWith(prefix)));
     }
+
+    hits = await this.populateGroundingFields(hits, params.agentId);
+    hits = sortByTrustOrder(hits);
 
     return this.enrichContestedHits(params.agentId, hits);
   }
@@ -251,6 +319,30 @@ export class CognitionSearchService {
     return this.searchRepo.filterActiveCommitments(hits, agentId);
   }
 
+  private async populateGroundingFields(hits: CognitionHit[], agentId: string): Promise<CognitionHit[]> {
+    for (const hit of hits) {
+      if (hit.provenance != null && hit.groundingVerificationLevel != null) continue;
+
+      const cognitionKey = hit.cognitionKey ?? await this.resolveCognitionKey(hit.source_ref, agentId);
+      if (cognitionKey) hit.cognitionKey = cognitionKey;
+
+      const current = cognitionKey ? await this.projectionRepo.getCurrent(agentId, cognitionKey) : null;
+      if (current) {
+        const record = safeParseRecordJson(current.record_json);
+        if (hit.provenance == null && typeof record.provenance === "string") {
+          hit.provenance = record.provenance;
+        }
+        if (hit.groundingVerificationLevel == null && typeof record.groundingVerificationLevel === "string") {
+          hit.groundingVerificationLevel = record.groundingVerificationLevel;
+        }
+        if (hit.basis == null && current.basis != null) {
+          hit.basis = current.basis as AssertionBasis;
+        }
+      }
+    }
+    return hits;
+  }
+
   private async enrichContestedHits(agentId: string, hits: CognitionHit[]): Promise<CognitionHit[]> {
     for (const hit of hits) {
       // Enrich currently-contested assertions AND resolved assertions that
@@ -392,6 +484,7 @@ export class CurrentProjectionReader {
   }
 
   toHit(row: CognitionCurrentRow): CognitionHit {
+    const record = safeParseRecordJson(row.record_json);
     return {
       kind: row.kind as CognitionKind,
       basis: (row.basis as AssertionBasis) ?? null,
@@ -400,6 +493,8 @@ export class CurrentProjectionReader {
       source_ref: `projection:${row.id}` as NodeRef,
       content: row.summary_text ?? "",
       updated_at: row.updated_at,
+      provenance: typeof record.provenance === "string" ? record.provenance : undefined,
+      groundingVerificationLevel: typeof record.groundingVerificationLevel === "string" ? record.groundingVerificationLevel : undefined,
     };
   }
 }

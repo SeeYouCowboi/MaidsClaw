@@ -1,0 +1,21 @@
+Task 8 — Weak-memory prompt labels evidence
+=============================================
+
+## Changes
+- retrieval-orchestrator.ts: Extended TypedCognitionSegment with provenance and groundingVerificationLevel fields.
+  buildTypedSurface populates them from CognitionHit.
+- prompt-data.ts: Added isWeakCognitionSegment() and getWeakMemoryPrefixForSegment() helpers.
+  renderTypedRetrieval() now prepends [basis=X provenance=Y verification=Z] on weak segments.
+
+## Weak-label rule
+Applied when ANY of:
+1. basis is belief or unknown
+2. basis is inference AND verification is NOT strong_verified
+3. verification is unverified (regardless of basis)
+
+NOT applied when basis is first_hand/hearsay/introspection AND verification is context_verified or strong_verified.
+
+## Test results (bun test)
+- prompt-data-pg.test.ts: 2 new Task 8 tests — PASS
+- surface-facets-consumption.test.ts: 1 new Task 8 test — PASS
+- memory-adapter-pg.test.ts: existing tests — PASS (WEAK_MEMORY_INTERPRETATION_GUIDANCE already present)

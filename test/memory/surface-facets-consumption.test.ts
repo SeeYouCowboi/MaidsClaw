@@ -334,4 +334,44 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
     expect(cognition.lastParams?.kind).toBe("evaluation");
     expect(cognition.lastParams?.stance).toBeUndefined();
   });
+
+  it("default search path preserves contested enrichment and provenance/groundingVerificationLevel in typed result (Task 8)", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    const contestedHit: CognitionHit = {
+      kind: "assertion",
+      basis: "first_hand",
+      stance: "contested",
+      cognitionKey: "ck:contested",
+      source_ref: "assertion:50" as unknown as string,
+      content: "contested claim from retrieval",
+      updated_at: 500,
+      provenance: "user_stated",
+      groundingVerificationLevel: "context_verified",
+      conflictEvidence: [{ targetRef: "assertion:51", strength: 0.9, sourceKind: "agent_op", sourceRef: "settlement:5" }],
+      conflictSummary: "conflict detected",
+      conflictFactorRefs: ["assertion:51" as unknown as string],
+    };
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        return [contestedHit];
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service);
+    const result = await orchestrator.search("contested", makeViewer(), "rp_agent");
+
+    expect(result.typed.cognition).toHaveLength(1);
+    const seg = result.typed.cognition[0];
+    expect(seg.basis).toBe("first_hand");
+    expect(seg.stance).toBe("contested");
+    expect(seg.cognitionKey).toBe("ck:contested");
+    expect(seg.provenance).toBe("user_stated");
+    expect(seg.groundingVerificationLevel).toBe("context_verified");
+  });
 });

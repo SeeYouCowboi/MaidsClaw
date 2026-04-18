@@ -1,4 +1,4 @@
-﻿import type { AgentRole } from "../../agents/profile.js";
+import type { AgentRole } from "../../agents/profile.js";
 import type { ViewerContext } from "../../core/contracts/viewer-context.js";
 import type { MemoryHint } from "../types.js";
 import type { NarrativeSearchService } from "../narrative/narrative-search.js";
@@ -61,6 +61,8 @@ type TypedCognitionSegment = TypedRetrievalSegment & {
   basis: string | null;
   stance: string | null;
   cognitionKey: string | null;
+  provenance: string | null;
+  groundingVerificationLevel: string | null;
 };
 
 type TypedConflictNoteSegment = TypedRetrievalSegment & {
@@ -366,6 +368,8 @@ export class RetrievalOrchestrator {
           basis: hit.basis,
           stance: hit.stance,
           cognitionKey: key,
+          provenance: hit.provenance ?? null,
+          groundingVerificationLevel: hit.groundingVerificationLevel ?? null,
         });
       }
     }

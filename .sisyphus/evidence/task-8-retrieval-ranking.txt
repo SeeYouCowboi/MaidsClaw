@@ -1,0 +1,18 @@
+Task 8 — Trust-order ranking evidence
+======================================
+
+## Changes
+- cognition-search.ts: Added VERIFICATION_TRUST_ORDER and BASIS_TRUST_ORDER constants,
+  sortByTrustOrder() function, safeParseRecordJson() helper, populateGroundingFields() method.
+- searchCognition() now calls populateGroundingFields → sortByTrustOrder before enrichContestedHits.
+- CognitionHit extended with provenance?: string, groundingVerificationLevel?: string.
+
+## Sort order
+Verification: strong_verified(0) > context_verified(1) > unverified(2)
+Basis within bucket: first_hand(0) > introspection(1) > hearsay(2) > inference(3) > belief(4) > null/unknown(5)
+Ties: updated_at descending
+
+## Test results (bun test)
+- "sorts assertion hits by verification then basis trust order" — PASS
+- "populates provenance and groundingVerificationLevel from record_json" — PASS
+- 2 pre-existing failures unrelated to Task 8 (query: "no" triggers FTS path)

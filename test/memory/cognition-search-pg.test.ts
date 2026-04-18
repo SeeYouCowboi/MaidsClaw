@@ -268,3 +268,165 @@ describe("CurrentProjectionReader (async)", () => {
     expect(active[0].id).toBe(10);
   });
 });
+
+describe("CognitionSearchService — trust-order ranking (Task 8)", () => {
+  it("sorts assertion hits by verification then basis trust order", async () => {
+    const searchRepo = makeSearchRepo({
+      async searchByKind() {
+        return [
+          makeHit({
+            source_ref: "assertion:1" as NodeRef,
+            basis: "belief",
+            stance: "accepted",
+            updated_at: 300,
+            cognitionKey: "k1",
+          }),
+          makeHit({
+            source_ref: "assertion:2" as NodeRef,
+            basis: "first_hand",
+            stance: "accepted",
+            updated_at: 100,
+            cognitionKey: "k2",
+          }),
+          makeHit({
+            source_ref: "assertion:3" as NodeRef,
+            basis: "inference",
+            stance: "accepted",
+            updated_at: 200,
+            cognitionKey: "k3",
+          }),
+        ];
+      },
+    });
+
+    const projectionRepo = makeProjectionRepo({
+      async getCurrent(_agentId: string, key: string) {
+        const map: Record<string, { groundingVerificationLevel: string; provenance: string; basis: string }> = {
+          k1: { groundingVerificationLevel: "unverified", provenance: "talker_sketch_auto", basis: "belief" },
+          k2: { groundingVerificationLevel: "strong_verified", provenance: "user_stated", basis: "first_hand" },
+          k3: { groundingVerificationLevel: "context_verified", provenance: "thinker_inferred", basis: "inference" },
+        };
+        const data = map[key];
+        if (!data) return null;
+        return {
+          id: 1,
+          agent_id: "agent-1",
+          cognition_key: key,
+          kind: "assertion",
+          stance: "accepted",
+          basis: data.basis,
+          status: "active",
+          pre_contested_stance: null,
+          conflict_summary: null,
+          conflict_factor_refs_json: null,
+          summary_text: "",
+          record_json: JSON.stringify({ provenance: data.provenance, groundingVerificationLevel: data.groundingVerificationLevel }),
+          source_event_id: 1,
+          updated_at: 100,
+        };
+      },
+    });
+
+    const service = new CognitionSearchService(searchRepo, makeRelationRepo(), projectionRepo);
+    const hits = await service.searchCognition({
+      agentId: "agent-1",
+      kind: "assertion",
+      query: "x",
+    });
+
+    expect(hits).toHaveLength(3);
+    expect(hits[0].source_ref).toBe("assertion:2");
+    expect(hits[0].groundingVerificationLevel).toBe("strong_verified");
+    expect(hits[1].source_ref).toBe("assertion:3");
+    expect(hits[1].groundingVerificationLevel).toBe("context_verified");
+    expect(hits[2].source_ref).toBe("assertion:1");
+    expect(hits[2].groundingVerificationLevel).toBe("unverified");
+  });
+
+  it("populates provenance and groundingVerificationLevel from record_json", async () => {
+    const searchRepo = makeSearchRepo({
+      async searchByKind() {
+        return [
+          makeHit({
+            source_ref: "assertion:10" as NodeRef,
+            basis: "belief",
+            stance: "accepted",
+            cognitionKey: "key-weak",
+          }),
+          makeHit({
+            source_ref: "assertion:11" as NodeRef,
+            basis: "first_hand",
+            stance: "accepted",
+            cognitionKey: "key-strong",
+          }),
+        ];
+      },
+    });
+
+    const projectionRepo = makeProjectionRepo({
+      async getCurrent(_agentId: string, key: string) {
+        if (key === "key-weak") {
+          return {
+            id: 10,
+            agent_id: "agent-1",
+            cognition_key: "key-weak",
+            kind: "assertion",
+            stance: "accepted",
+            basis: "belief",
+            status: "active",
+            pre_contested_stance: null,
+            conflict_summary: null,
+            conflict_factor_refs_json: null,
+            summary_text: "weak claim",
+            record_json: JSON.stringify({
+              provenance: "talker_sketch_auto",
+              groundingVerificationLevel: "unverified",
+            }),
+            source_event_id: 1,
+            updated_at: 100,
+          };
+        }
+        if (key === "key-strong") {
+          return {
+            id: 11,
+            agent_id: "agent-1",
+            cognition_key: "key-strong",
+            kind: "assertion",
+            stance: "accepted",
+            basis: "first_hand",
+            status: "active",
+            pre_contested_stance: null,
+            conflict_summary: null,
+            conflict_factor_refs_json: null,
+            summary_text: "strong claim",
+            record_json: JSON.stringify({
+              provenance: "user_stated",
+              groundingVerificationLevel: "strong_verified",
+            }),
+            source_event_id: 2,
+            updated_at: 200,
+          };
+        }
+        return null;
+      },
+    });
+
+    const service = new CognitionSearchService(searchRepo, makeRelationRepo(), projectionRepo);
+    const hits = await service.searchCognition({
+      agentId: "agent-1",
+      kind: "assertion",
+      query: "x",
+    });
+
+    const strong = hits.find((h) => h.cognitionKey === "key-strong");
+    const weak = hits.find((h) => h.cognitionKey === "key-weak");
+
+    expect(strong).toBeDefined();
+    expect(strong!.provenance).toBe("user_stated");
+    expect(strong!.groundingVerificationLevel).toBe("strong_verified");
+
+    expect(weak).toBeDefined();
+    expect(weak!.provenance).toBe("talker_sketch_auto");
+    expect(weak!.groundingVerificationLevel).toBe("unverified");
+  });
+});
