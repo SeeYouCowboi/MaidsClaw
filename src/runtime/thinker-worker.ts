@@ -29,7 +29,9 @@ import type {
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
 import { CALL_TWO_TOOLS, type CreatedState } from "../memory/task-agent.js";
 import type { NodeRef } from "../memory/types.js";
+import type { MemoryTaskModelProvider } from "../memory/task-agent.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
+import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
@@ -43,6 +45,8 @@ import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-r
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 
 import {
+	type AssertionBasis,
+	type AssertionProvenance,
 	type AssertionRecordV4,
 	type CanonicalRpTurnOutcome,
 	type CognitionEntityRef,
@@ -57,7 +61,7 @@ import {
 	type RelationIntent,
 } from "./rp-turn-contract.js";
 
-const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
+export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
 
 ### A. Cognition Hygiene (MANDATORY — apply BEFORE generating new ops)
 
@@ -77,24 +81,162 @@ const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output
 
 4. EVALUATION STABILITY: For trust/X evaluations, the key MUST be exactly "trust/{entity}" (e.g. "trust/player"). NEVER create variant keys like "trust/player_revised". Upsert the same key.
 
-### B. relationIntents
+### B. Grounding refs vs relation edges (STRICT SEPARATION)
 
-Array of { sourceRef, targetRef, intent }:
-- sourceRef: "episode:{local_key}" — MUST match a privateEpisode's local_key from THIS turn
-- targetRef: "cognition:{key}" — MUST match an assertion/evaluation/commitment key you are upserting THIS turn
-- intent: "supports" | "triggered"
+claimedGroundingRefs belongs to assertion records and is ONLY evidence/source trace for the claim itself.
+- Use request:<id>, settlement:<id>, episode:<localRef>, cognition:<key> prefixes exactly.
+- claimedGroundingRefs is NOT a same-turn structure graph.
+
+relationIntents is ONLY same-turn artifact structure linking turn-local episodes to cognition writes.
+- Array of { sourceRef, targetRef, intent }.
+- sourceRef: "episode:{local_key}" — MUST match a privateEpisode localRef generated THIS turn.
+- targetRef: "cognition:{key}" — MUST match an assertion/evaluation/commitment key upserted THIS turn.
+- intent: "supports" | "triggered".
 
 Rules:
-- Every privateEpisode MUST have at least one relationIntent with sourceRef pointing to it
-- Every new assertion MUST have at least one relationIntent with targetRef pointing to it
-- local_key in episodes and sourceRef MUST use the SAME string (e.g. episode generates local_key="door_evidence", sourceRef="episode:door_evidence")
+- Every privateEpisode MUST have at least one relationIntent with sourceRef pointing to it.
+- Every new assertion MUST have at least one relationIntent with targetRef pointing to it.
+- localRef in episodes and sourceRef MUST use the SAME token.
 
-### C. conflictFactors
+### C. v1 cross-turn revision contract
+
+For v1, cross-turn revision is ONLY:
+1) KEY REUSE (same cognition key for same topic), and
+2) MANDATORY RETRACT of superseded keys.
+
+Do NOT emit extra advisory revision labels/fields.
+
+### D. conflictFactors
 
 Array of { kind, ref, note? }:
 - kind: "contradicts" | "supersedes"
 - ref: exact cognition key from existingCognition that conflicts
 - When generating stance="contested", MUST include at least one conflictFactor`;
+
+const V1_ASSERTION_PROVENANCE = new Set<AssertionProvenance>([
+	"user_stated",
+	"talker_sketch_explicit",
+	"talker_sketch_auto",
+	"thinker_inferred",
+	"explicit_settlement",
+	"legacy_unknown",
+]);
+
+function normalizeThinkerProvenanceFromSettlement(
+	rawProvenance: string | undefined,
+	cognitiveSketchSource: TurnSettlementPayload["cognitiveSketchSource"] | undefined,
+): AssertionProvenance {
+	const normalized = V1_ASSERTION_PROVENANCE.has(
+		rawProvenance as AssertionProvenance,
+	)
+		? (rawProvenance as AssertionProvenance)
+		: "legacy_unknown";
+
+	if (cognitiveSketchSource === "auto_fallback") {
+		return "talker_sketch_auto";
+	}
+
+	if (cognitiveSketchSource === "explicit") {
+		if (normalized === "user_stated") {
+			return "user_stated";
+		}
+		return "talker_sketch_explicit";
+	}
+
+	return normalized;
+}
+
+function capAssertionBasisAtInference(
+	basis: AssertionBasis | undefined,
+): AssertionBasis | undefined {
+	if (!basis) {
+		return basis;
+	}
+
+	if (
+		basis === "first_hand" ||
+		basis === "introspection" ||
+		basis === "hearsay"
+	) {
+		return "inference";
+	}
+
+	return basis;
+}
+
+function hasOnlyClaimedCognitionRefs(
+	claimedGroundingRefs: AssertionRecordV4["claimedGroundingRefs"],
+): boolean {
+	if (!claimedGroundingRefs || claimedGroundingRefs.length === 0) {
+		return false;
+	}
+
+	return claimedGroundingRefs.every((entry) =>
+		typeof entry.ref === "string" && entry.ref.startsWith("cognition:"),
+	);
+}
+
+function normalizeThinkerAssertionOpsBeforeProjection(
+	ops: CognitionOp[],
+	cognitiveSketchSource: TurnSettlementPayload["cognitiveSketchSource"] | undefined,
+	authoritativeSourceTurnVersion: number,
+): CognitionOp[] {
+	return ops.map((op) => {
+		if (op.op !== "upsert" || op.record.kind !== "assertion") {
+			return op;
+		}
+
+		const assertion = {
+			...(op.record as AssertionRecordV4),
+		} as AssertionRecordV4 & { sourceTurnVersion?: number };
+
+		let provenance = normalizeThinkerProvenanceFromSettlement(
+			assertion.provenance,
+			cognitiveSketchSource,
+		);
+		let basis = assertion.basis;
+
+		if (
+			provenance === "talker_sketch_explicit" ||
+			provenance === "talker_sketch_auto"
+		) {
+			basis = "belief";
+		}
+
+		if (provenance === "user_stated" || provenance === "explicit_settlement") {
+			basis = capAssertionBasisAtInference(basis);
+		}
+
+		if (hasOnlyClaimedCognitionRefs(assertion.claimedGroundingRefs)) {
+			provenance = "thinker_inferred";
+		}
+
+		if (!basis) {
+			basis = "belief";
+		}
+
+		let stance = assertion.stance;
+		if (
+			(provenance === "talker_sketch_explicit" ||
+				provenance === "talker_sketch_auto") &&
+			stance === "confirmed"
+		) {
+			stance = "tentative";
+		}
+
+		assertion.provenance = provenance;
+		assertion.basis = basis;
+		assertion.stance = stance;
+		assertion.verifiedGroundingRefs = [];
+		assertion.groundingVerificationLevel = "unverified";
+		assertion.sourceTurnVersion = authoritativeSourceTurnVersion;
+
+		return {
+			...op,
+			record: assertion,
+		};
+	});
+}
 
 type RecentCognitionEntry = {
 	settlementId: string;
@@ -103,6 +245,15 @@ type RecentCognitionEntry = {
 	key: string;
 	summary: string;
 	status: "active" | "retracted";
+	basis?: AssertionBasis | "unknown";
+	provenance?: AssertionProvenance | "legacy_unknown";
+	sourceTurnVersion?: number;
+};
+
+export type AssertionCanonicalizationBundle = {
+	embeddingRepo: EmbeddingRepo;
+	modelProvider: MemoryTaskModelProvider;
+	embeddingModelId: string;
 };
 
 export type ThinkerWorkerDeps = {
@@ -119,6 +270,7 @@ export type ThinkerWorkerDeps = {
 	jobPersistence?: JobPersistence;
 	settlementLedger?: SettlementLedger;
 	durableJobStore?: DurableJobStore;
+	assertionCanonicalization?: AssertionCanonicalizationBundle;
 };
 
 function toConversationMessages(records: InteractionRecord[]): ChatMessage[] {
@@ -176,6 +328,7 @@ function buildCognitionSlotPayloadForThinker(
 	ops: CognitionOp[],
 	settlementId: string,
 	committedAt: number,
+	sourceTurnVersion?: number,
 ): RecentCognitionEntry[] {
 	const items: RecentCognitionEntry[] = [];
 
@@ -183,10 +336,16 @@ function buildCognitionSlotPayloadForThinker(
 		if (op.op === "upsert") {
 			const record = op.record;
 			let summary: string;
+			let basis: RecentCognitionEntry["basis"] | undefined;
+			let provenance: RecentCognitionEntry["provenance"] | undefined;
 			switch (record.kind) {
-				case "assertion":
-					summary = summarizeAssertion(record as AssertionRecordV4);
+				case "assertion": {
+					const assertion = record as AssertionRecordV4;
+					summary = summarizeAssertion(assertion);
+					basis = assertion.basis ?? "unknown";
+					provenance = (assertion.provenance as AssertionProvenance) ?? "legacy_unknown";
 					break;
+				}
 				case "evaluation":
 					summary = summarizeEvaluation(record as EvaluationRecord);
 					break;
@@ -194,23 +353,29 @@ function buildCognitionSlotPayloadForThinker(
 					summary = summarizeCommitment(record as CommitmentRecord);
 					break;
 			}
-			items.push({
+			const entry: RecentCognitionEntry = {
 				settlementId,
 				committedAt,
 				kind: record.kind,
 				key: record.key,
 				summary,
 				status: "active",
-			});
+			};
+			if (basis !== undefined) entry.basis = basis;
+			if (provenance !== undefined) entry.provenance = provenance;
+			if (sourceTurnVersion !== undefined) entry.sourceTurnVersion = sourceTurnVersion;
+			items.push(entry);
 		} else if (op.op === "retract") {
-			items.push({
+			const entry: RecentCognitionEntry = {
 				settlementId,
 				committedAt,
 				kind: op.target.kind,
 				key: op.target.key,
 				summary: "(retracted)",
 				status: "retracted",
-			});
+			};
+			if (sourceTurnVersion !== undefined) entry.sourceTurnVersion = sourceTurnVersion;
+			items.push(entry);
 		}
 	}
 
@@ -367,6 +532,11 @@ function parseEpisodesBySettlement(
 }
 
 export function createThinkerWorker(deps: ThinkerWorkerDeps) {
+	if (!deps.assertionCanonicalization) {
+		console.debug(
+			"[thinker_worker] assertionCanonicalization bundle absent — canonicalization will be skipped",
+		);
+	}
 	return async (job: { payload: unknown }): Promise<void> => {
 		// Handle both object payloads and legacy double-JSON-encoded string payloads
 		const rawPayload = job.payload;
@@ -401,6 +571,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			version: number;
 			settlementId: string;
 			sketch: string;
+			cognitiveSketchSource?: "explicit" | "auto_fallback";
 		}> = [];
 		let effectiveHighestVersion = payload.talkerTurnVersion;
 		let effectiveSettlementId = payload.settlementId;
@@ -455,11 +626,12 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 							rawSketch ||
 							"(no explicit sketch — derive from conversation context)";
 
-						sketchChain.push({
-							version: jobEntry.version,
-							settlementId: jobEntry.settlementId,
-							sketch,
-						});
+					sketchChain.push({
+						version: jobEntry.version,
+						settlementId: jobEntry.settlementId,
+						sketch,
+						cognitiveSketchSource: sp.cognitiveSketchSource,
+					});
 						effectiveHighestVersion = jobEntry.version;
 						effectiveSettlementId = jobEntry.settlementId;
 					} catch (loadErr) {
@@ -594,7 +766,10 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				}
 
 				const sketchChainText = sketchChain
-					.map((entry) => `[Turn ${entry.version} | ${entry.settlementId}] ${entry.sketch}`)
+					.map((entry) => {
+						const sourceTag = entry.cognitiveSketchSource ? ` [source:${entry.cognitiveSketchSource}]` : "";
+						return `[Turn ${entry.version} | ${entry.settlementId}] ${entry.sketch}${sourceTag}`;
+					})
 					.join("\n");
 				const sketchlessCount = sketchChain.filter((e) =>
 					e.sketch.startsWith("(no explicit sketch"),
@@ -678,12 +853,20 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const relationIntents = canonicalOutcome.relationIntents ?? [];
 			const conflictFactors = canonicalOutcome.conflictFactors ?? [];
 
-			const cognitionOps = canonicalOutcome.privateCognition?.ops ?? [];
+			const authoritativeSourceTurnVersion = batchMode
+				? effectiveHighestVersion
+				: payload.talkerTurnVersion;
+			const cognitionOps = normalizeThinkerAssertionOpsBeforeProjection(
+				canonicalOutcome.privateCognition?.ops ?? [],
+				settlementPayload?.cognitiveSketchSource,
+				authoritativeSourceTurnVersion,
+			);
 			const committedAt = Date.now();
 			const slotEntries = buildCognitionSlotPayloadForThinker(
 				cognitionOps,
 				effectiveSettlementId,
 				committedAt,
+				authoritativeSourceTurnVersion,
 			);
 			const recentCognitionSlotJson = JSON.stringify(slotEntries);
 

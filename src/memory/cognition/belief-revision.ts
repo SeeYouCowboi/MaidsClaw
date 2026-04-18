@@ -1,5 +1,9 @@
 import { MaidsClawError } from "../../core/errors.js";
-import type { AssertionBasis, AssertionStance } from "../../runtime/rp-turn-contract.js";
+import type {
+  AssertionBasis,
+  AssertionProvenance,
+  AssertionStance,
+} from "../../runtime/rp-turn-contract.js";
 
 /**
  * Stances that cannot be transitioned out of.
@@ -41,7 +45,23 @@ type ExistingAssertionState = {
   stance: AssertionStance | null;
   basis: AssertionBasis | null;
   preContestedStance: AssertionStance | null;
+  provenance: string | null;
 };
+
+type AssertionRevisionGuardrailOptions = {
+  isThinkerGuardrailPath?: boolean;
+  currentProvenance?: string | null;
+  nextProvenance?: string | null;
+};
+
+const SKETCH_ORIGIN_PROVENANCE = new Set<AssertionProvenance>([
+  "talker_sketch_explicit",
+  "talker_sketch_auto",
+]);
+
+function isSketchOriginProvenance(value: string | null | undefined): boolean {
+  return SKETCH_ORIGIN_PROVENANCE.has(value as AssertionProvenance);
+}
 
 /**
  * Asserts that a stance transition is legal according to the state machine rules.
@@ -59,9 +79,20 @@ function assertLegalStanceTransition(
   existing: ExistingAssertionState,
   nextStance: AssertionStance,
   cognitionKey: string,
+  options?: AssertionRevisionGuardrailOptions,
 ): void {
   const currentStance = existing.stance;
   if (!currentStance) {
+    return;
+  }
+
+  if (
+    options?.isThinkerGuardrailPath === true &&
+    currentStance === "confirmed" &&
+    nextStance === "tentative" &&
+    (isSketchOriginProvenance(options.nextProvenance) ||
+      isSketchOriginProvenance(options.currentProvenance))
+  ) {
     return;
   }
 
@@ -121,8 +152,17 @@ function assertBasisUpgradeOnly(
   currentBasis: AssertionBasis | null,
   nextBasis: AssertionBasis | undefined,
   cognitionKey: string,
+  options?: AssertionRevisionGuardrailOptions,
 ): void {
   if (!currentBasis || !nextBasis || currentBasis === nextBasis) {
+    return;
+  }
+
+  if (
+    options?.isThinkerGuardrailPath === true &&
+    (isSketchOriginProvenance(options.nextProvenance) ||
+      isSketchOriginProvenance(options.currentProvenance))
+  ) {
     return;
   }
 

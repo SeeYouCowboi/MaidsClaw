@@ -344,7 +344,7 @@ describe("CognitionRepository (PG repos, unit)", () => {
       opIndex: 1,
       holderPointerKey: "pointer:shared",
       claim: "trusts",
-      entityPointerKeys: ["pointer:shared", "pointer:target"],
+      entityPointerKeys: ["pointer:target"],
       stance: "accepted",
       basis: "first_hand",
     });
@@ -355,10 +355,9 @@ describe("CognitionRepository (PG repos, unit)", () => {
     expect(row!.targetEntityId).toBe(202);
     expect(resolverCalls).toEqual([
       { pointerKey: "pointer:shared", agentId: "agent-1" },
-      { pointerKey: "pointer:shared", agentId: "agent-1" },
       { pointerKey: "pointer:target", agentId: "agent-1" },
       { pointerKey: "pointer:shared", agentId: "agent-1" },
-      { pointerKey: "pointer:shared", agentId: "agent-1" },
+      { pointerKey: "pointer:target", agentId: "agent-1" },
     ]);
   });
 
@@ -397,5 +396,179 @@ describe("CognitionRepository (PG repos, unit)", () => {
     expect(searchRepo.stanceUpdateCalls[0].sourceRef).toBe(`assertion:${upserted.id}`);
     expect(searchRepo.stanceUpdateCalls[0].agentId).toBe("agent-1");
     expect(searchRepo.stanceUpdateCalls[0].stance).toBe("rejected");
+  });
+
+  it("default repo path blocks basis downgrade for non-thinker callers", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "state:basis:downgrade:block",
+      settlementId: "settlement-1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "keeps evidence",
+      entityPointerKeys: ["src", "dst"],
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "talker_sketch_auto",
+    });
+
+    await expect(
+      repo.upsertAssertion({
+        agentId: "agent-1",
+        cognitionKey: "state:basis:downgrade:block",
+        settlementId: "settlement-2",
+        opIndex: 1,
+        holderPointerKey: "src",
+        claim: "keeps evidence",
+        entityPointerKeys: ["src", "dst"],
+        stance: "accepted",
+        basis: "belief",
+        provenance: "talker_sketch_auto",
+      }),
+    ).rejects.toThrow("assertion basis change is not an allowed upgrade");
+  });
+
+  it("default repo path blocks confirmed→tentative downgrade for non-thinker callers", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "state:stance:downgrade:block",
+      settlementId: "settlement-1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "is true",
+      entityPointerKeys: ["src", "dst"],
+      stance: "confirmed",
+      basis: "first_hand",
+      provenance: "talker_sketch_explicit",
+    });
+
+    await expect(
+      repo.upsertAssertion({
+        agentId: "agent-1",
+        cognitionKey: "state:stance:downgrade:block",
+        settlementId: "settlement-2",
+        opIndex: 1,
+        holderPointerKey: "src",
+        claim: "is true",
+        entityPointerKeys: ["src", "dst"],
+        stance: "tentative",
+        basis: "first_hand",
+        provenance: "talker_sketch_explicit",
+      }),
+    ).rejects.toThrow("illegal stance transition");
+  });
+
+  it("thinker-only path allows confirmed→tentative for sketch-origin assertions", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "state:stance:downgrade:allow",
+      settlementId: "settlement-1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "is true",
+      entityPointerKeys: ["src", "dst"],
+      stance: "confirmed",
+      basis: "first_hand",
+      provenance: "talker_sketch_auto",
+      isThinkerGuardrailPath: true,
+    });
+
+    await expect(
+      repo.upsertAssertion({
+        agentId: "agent-1",
+        cognitionKey: "state:stance:downgrade:allow",
+        settlementId: "settlement-2",
+        opIndex: 1,
+        holderPointerKey: "src",
+        claim: "is true",
+        entityPointerKeys: ["src", "dst"],
+        stance: "tentative",
+        basis: "belief",
+        provenance: "talker_sketch_auto",
+        isThinkerGuardrailPath: true,
+      }),
+    ).resolves.toEqual({ id: expect.any(Number) });
+
+    const row = await repo.getAssertionByKey("agent-1", "state:stance:downgrade:allow");
+    expect(row?.stance).toBe("tentative");
+  });
+
+  it("thinker-only path allows basis downgrade to belief for sketch-origin assertions", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "state:basis:downgrade:allow",
+      settlementId: "settlement-1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "keeps evidence",
+      entityPointerKeys: ["src", "dst"],
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "talker_sketch_explicit",
+      isThinkerGuardrailPath: true,
+    });
+
+    await expect(
+      repo.upsertAssertion({
+        agentId: "agent-1",
+        cognitionKey: "state:basis:downgrade:allow",
+        settlementId: "settlement-2",
+        opIndex: 1,
+        holderPointerKey: "src",
+        claim: "keeps evidence",
+        entityPointerKeys: ["src", "dst"],
+        stance: "accepted",
+        basis: "belief",
+        provenance: "talker_sketch_explicit",
+        isThinkerGuardrailPath: true,
+      }),
+    ).resolves.toEqual({ id: expect.any(Number) });
+
+    const row = await repo.getAssertionByKey("agent-1", "state:basis:downgrade:allow");
+    expect(row?.basis).toBe("belief");
   });
 });

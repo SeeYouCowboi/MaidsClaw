@@ -33,6 +33,7 @@ type UpsertAssertionParams = {
   preContestedStance?: AssertionStance;
   provenance?: string;
   requestId?: string;
+  isThinkerGuardrailPath?: boolean;
 };
 
 type UpsertEvaluationParams = {
@@ -228,11 +229,19 @@ export class CognitionRepository {
       }
 
       if (existing?.stance && params.stance !== existing.stance) {
-        assertLegalStanceTransition(existing, params.stance, cognitionKey);
+        assertLegalStanceTransition(existing, params.stance, cognitionKey, {
+          isThinkerGuardrailPath: params.isThinkerGuardrailPath,
+          currentProvenance: existing.provenance,
+          nextProvenance: params.provenance ?? null,
+        });
       }
 
       if (existing) {
-        assertBasisUpgradeOnly(existing.basis, params.basis, cognitionKey);
+        assertBasisUpgradeOnly(existing.basis, params.basis, cognitionKey, {
+          isThinkerGuardrailPath: params.isThinkerGuardrailPath,
+          currentProvenance: existing.provenance,
+          nextProvenance: params.provenance ?? null,
+        });
       }
 
       const projectionId = await this.appendAndProject({
@@ -671,12 +680,17 @@ export class CognitionRepository {
     if (!current || current.kind !== "assertion") {
       return null;
     }
+    const parsed = safeParseJson(current.record_json);
     return {
       id: current.id,
       stance: (current.stance as AssertionStance | null) ?? null,
       basis: (current.basis as AssertionBasis | null) ?? null,
       preContestedStance:
         (current.pre_contested_stance as AssertionStance | null) ?? null,
+      provenance:
+        typeof parsed.provenance === "string"
+          ? (parsed.provenance as string)
+          : null,
     };
   }
 

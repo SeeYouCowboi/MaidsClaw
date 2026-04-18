@@ -150,6 +150,7 @@ describe("belief-revision / assertLegalStanceTransition", () => {
     stance,
     basis: null as AssertionBasis | null,
     preContestedStance,
+    provenance: null as string | null,
   });
 
   it("should not throw when current stance is null", () => {

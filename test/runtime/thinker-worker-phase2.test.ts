@@ -19,8 +19,12 @@ import { PgRelationWriteRepo } from "../../src/storage/domain-repos/pg/relation-
 import { PgSettlementUnitOfWork } from "../../src/storage/pg-settlement-uow.js";
 import {
 	createThinkerWorker,
+	THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS,
 	type ThinkerWorkerDeps,
 } from "../../src/runtime/thinker-worker.js";
+import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
+import { ExplicitSettlementProcessor } from "../../src/memory/explicit-settlement-processor.js";
+import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
 import type { AgentLoop } from "../../src/core/agent-loop.js";
 import { AgentRegistry } from "../../src/agents/registry.js";
 import type { AgentProfile } from "../../src/agents/profile.js";
@@ -53,11 +57,12 @@ function makeTestSettlementPayload(
 				record: {
 					kind: "assertion",
 					key: `test:belief:${overrides.settlementId}`,
-					proposition: {
-						subject: { kind: "special", value: "self" },
-						predicate: "trusts",
-						object: { kind: "entity", ref: { kind: "special", value: "user" } },
-					},
+					holderId: { kind: "special", value: "self" },
+					claim: "trusts",
+					entityRefs: [
+						{ kind: "special", value: "self" },
+						{ kind: "special", value: "user" },
+					],
 					stance: "accepted",
 					basis: "first_hand",
 				},
@@ -93,6 +98,229 @@ function createMockJobPersistence(): JobPersistence & { enqueuedJobs: Array<Omit
 		async listRetryable() { return []; },
 		async countByStatus() { return 0; },
 	};
+}
+
+function createMockInteractionRepo(
+	sessionId: string,
+	requestId: string,
+	payloadOverrides: Partial<TurnSettlementPayload> = {},
+): InteractionRepo {
+	const repo: InteractionRepo = {
+		async getSettlementPayload(inputSessionId, inputRequestId) {
+			if (inputSessionId !== sessionId || inputRequestId !== requestId) {
+				return undefined;
+			}
+			return {
+				settlementId: `stl:${inputRequestId}`,
+				requestId: inputRequestId,
+				sessionId: inputSessionId,
+				ownerAgentId: AGENT_ID,
+				publicReply: "Hello from test",
+				hasPublicReply: true,
+				viewerSnapshot: {
+					selfPointerKey: "entity:self",
+					userPointerKey: "entity:user",
+					currentLocationEntityId: 42,
+				},
+				schemaVersion: "turn_settlement_v5",
+				cognitiveSketch: "The user greeted me warmly.",
+				...payloadOverrides,
+			};
+		},
+		async getMessageRecords(inputSessionId) {
+			if (inputSessionId !== sessionId) {
+				return [];
+			}
+			return [
+				{
+					sessionId: inputSessionId,
+					recordId: "rec:e2e:001",
+					recordIndex: 0,
+					actorType: "user",
+					recordType: "message",
+					payload: { role: "user", content: "Hello!" },
+					committedAt: Date.now(),
+				},
+			];
+		},
+		async commit() {},
+		async runInTransaction<T>(
+			fn: (tx: InteractionTransactionContext) => Promise<T>,
+		) {
+			return fn({ interactionRepo: repo });
+		},
+		async settlementExists() {
+			return false;
+		},
+		async findRecordByCorrelatedTurnId() {
+			return undefined;
+		},
+		async findSessionIdByRequestId() {
+			return undefined;
+		},
+		async getBySession() {
+			return [];
+		},
+		async getByRange() {
+			return [];
+		},
+		async markProcessed() {},
+		async markRangeProcessed() {},
+		async countUnprocessedRpTurns() {
+			return 0;
+		},
+		async getMinMaxUnprocessedIndex() {
+			return undefined;
+		},
+		async getMaxIndex() {
+			return undefined;
+		},
+		async getPendingSettlementJobState() {
+			return null;
+		},
+		async countUnprocessedSettlements() {
+			return 0;
+		},
+		async getUnprocessedSettlementRange() {
+			return null;
+		},
+		async listStalePendingSettlementSessions() {
+			return [];
+		},
+		async getUnprocessedRangeForSession() {
+			return null;
+		},
+	};
+
+	return repo;
+}
+
+async function runThinkerWorkerIntegration(opts: {
+	pool: postgres.Sql;
+	settlementId: string;
+	requestId: string;
+	sessionId: string;
+	talkerTurnVersion?: number;
+	settlementPayloadOverrides?: Partial<TurnSettlementPayload>;
+	outcome: unknown;
+}): Promise<void> {
+	const {
+		pool,
+		settlementId,
+		requestId,
+		sessionId,
+		talkerTurnVersion = 1,
+		settlementPayloadOverrides,
+		outcome,
+	} = opts;
+
+	const ledger = new PgSettlementLedgerRepo(pool);
+	await ledger.markTalkerCommitted(settlementId, AGENT_ID);
+	const settlementLedgerAdapter: NonNullable<
+		ThinkerWorkerDeps["settlementLedger"]
+	> = {
+		check: (inputSettlementId) => ledger.check(inputSettlementId),
+		rawStatus: (inputSettlementId) => ledger.rawStatus(inputSettlementId),
+		markPending: (inputSettlementId, inputAgentId) =>
+			ledger.markPending(inputSettlementId, inputAgentId),
+		markClaimed: (inputSettlementId, claimedBy) =>
+			ledger.markClaimed(inputSettlementId, claimedBy),
+		markApplying: (inputSettlementId, inputAgentId, payloadHash) =>
+			ledger.markApplying(inputSettlementId, inputAgentId, payloadHash),
+		markApplied: (inputSettlementId) => ledger.markApplied(inputSettlementId),
+		markReplayedNoop: (inputSettlementId) =>
+			ledger.markReplayedNoop(inputSettlementId),
+		markConflict: (inputSettlementId, errorMessage) =>
+			ledger.markConflict(inputSettlementId, errorMessage),
+		markFailed: (inputSettlementId, errorMessage, retryable) =>
+			retryable
+				? ledger.markFailedRetryScheduled(inputSettlementId, errorMessage)
+				: ledger.markFailedTerminal(inputSettlementId, errorMessage),
+		markTalkerCommitted: (inputSettlementId, inputAgentId) =>
+			ledger.markTalkerCommitted(inputSettlementId, inputAgentId),
+		markThinkerProjecting: (inputSettlementId, inputAgentId) =>
+			ledger.markThinkerProjecting(inputSettlementId, inputAgentId),
+	};
+
+	const projectionManager = new ProjectionManager(
+		new PgEpisodeRepo(pool),
+		new PgCognitionEventRepo(pool),
+		new PgCognitionProjectionRepo(pool),
+		null,
+		new PgAreaWorldProjectionRepo(pool),
+	);
+
+	const mockJobs = createMockJobPersistence();
+	const mockInteractionRepo = createMockInteractionRepo(
+		sessionId,
+		requestId,
+		settlementPayloadOverrides,
+	);
+
+	const mockSlotRepo: RecentCognitionSlotRepo = {
+		async upsertRecentCognitionSlot() {
+			return {};
+		},
+		async getSlotPayload() {
+			return undefined;
+		},
+		async getBySession() {
+			return undefined;
+		},
+		async getVersionGap() {
+			return undefined;
+		},
+	};
+
+	const registry = new AgentRegistry();
+	const agentProfile: AgentProfile = {
+		id: AGENT_ID,
+		role: "rp_agent",
+		lifecycle: "persistent",
+		userFacing: true,
+		outputMode: "freeform",
+		modelId: "test-model",
+		toolPermissions: [],
+		maxDelegationDepth: 1,
+		lorebookEnabled: true,
+		narrativeContextEnabled: true,
+	};
+	registry.register(agentProfile);
+
+	const mockAgentLoop = {
+		async runBuffered() {
+			return { outcome };
+		},
+	} as unknown as AgentLoop;
+
+	const deps: ThinkerWorkerDeps = {
+		sql: pool,
+		projectionManager,
+		interactionRepo: mockInteractionRepo,
+		recentCognitionSlotRepo: mockSlotRepo,
+		agentRegistry: registry,
+		createAgentLoop: (agentId: string) =>
+			agentId === AGENT_ID ? mockAgentLoop : null,
+		jobPersistence: mockJobs,
+		settlementLedger: settlementLedgerAdapter,
+	};
+
+	const worker = createThinkerWorker(deps);
+	const payload: CognitionThinkerJobPayload = {
+		sessionId,
+		agentId: AGENT_ID,
+		settlementId,
+		talkerTurnVersion,
+	};
+
+	await worker({ payload });
+}
+
+async function createSessionId(pool: postgres.Sql): Promise<string> {
+	return new PgSettlementUnitOfWork(pool).run(async (repos) => {
+		const session = await repos.sessionRepo.createSession(AGENT_ID);
+		return session.sessionId;
+	});
 }
 
 describe.skipIf(skipPgTests)(
@@ -209,7 +437,7 @@ describe.skipIf(skipPgTests)(
 					expect(result.changedNodeRefs.length).toBe(2);
 
 					const episodeRef = result.changedNodeRefs.find((r) =>
-						r.startsWith("event:"),
+						r.startsWith("episode:"),
 					);
 					const cognitionRef = result.changedNodeRefs.find((r) =>
 						r.startsWith("assertion:"),
@@ -329,17 +557,18 @@ describe.skipIf(skipPgTests)(
 							cognitionOps: [
 								{
 									op: "upsert",
-									record: {
-										kind: "assertion",
-										key: cognitionKey,
-										proposition: {
-											subject: { kind: "special", value: "self" },
-											predicate: "likes",
-											object: { kind: "entity", ref: { kind: "special", value: "user" } },
-										},
-										stance: "accepted",
-										basis: "first_hand",
-									},
+								record: {
+									kind: "assertion",
+									key: cognitionKey,
+									holderId: { kind: "special", value: "self" },
+									claim: "likes",
+									entityRefs: [
+										{ kind: "special", value: "self" },
+										{ kind: "special", value: "user" },
+									],
+									stance: "accepted",
+									basis: "first_hand",
+								},
 								},
 							],
 						}),
@@ -692,14 +921,12 @@ describe.skipIf(skipPgTests)(
 											record: {
 												kind: "assertion" as const,
 												key: "test:e2e:belief-warmth",
-												proposition: {
-													subject: { kind: "special" as const, value: "self" },
-													predicate: "feels_warmth_toward",
-													object: {
-														kind: "entity" as const,
-														ref: { kind: "special" as const, value: "user" },
-													},
-												},
+												holderId: { kind: "special" as const, value: "self" },
+												claim: "feels_warmth_toward",
+												entityRefs: [
+													{ kind: "special" as const, value: "self" },
+													{ kind: "special" as const, value: "user" },
+												],
 												stance: "accepted" as const,
 												basis: "first_hand" as const,
 											},
@@ -807,11 +1034,11 @@ describe.skipIf(skipPgTests)(
 				});
 
 				expect(enqueuedNodeRefs.length).toBeGreaterThanOrEqual(1);
-				expect(enqueuedNodeRefs.some((ref) => ref.startsWith("event:"))).toBe(true);
+				expect(enqueuedNodeRefs.some((ref) => ref.startsWith("episode:"))).toBe(true);
 				expect(enqueuedNodeRefs.some((ref) => ref.startsWith("assertion:"))).toBe(true);
 				expect(
 					enqueuedNodeRefs.every((ref) =>
-						/^(event|assertion|evaluation|commitment):\d+$/.test(ref),
+						/^(episode|assertion|evaluation|commitment):\d+$/.test(ref),
 					),
 				).toBe(true);
 				expect(
@@ -829,6 +1056,426 @@ describe.skipIf(skipPgTests)(
 			},
 			30_000,
 		);
+
+		it(
+			"sketch-only assertion with hallucinated claimed refs remains weak/unverified pre-verification",
+			async () => {
+				const settlementId = "stl:guardrail-sketch-weak:001";
+				const requestId = "guardrail-sketch-weak:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:weak-sketch",
+										holderId: { kind: "special", value: "self" },
+										claim: "The user confessed yesterday",
+										entityRefs: [
+											{ kind: "special", value: "self" },
+											{ kind: "special", value: "user" },
+										],
+										stance: "accepted",
+										basis: "first_hand",
+										claimedGroundingRefs: [
+											{ kind: "user_message", ref: "request:fake-req" },
+											{ kind: "private_episode", ref: "episode:fake-ep" },
+										],
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:weak-sketch"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("belief");
+
+				const record = (typeof rows[0].record_json === "string"
+					? JSON.parse(rows[0].record_json)
+					: rows[0].record_json) as {
+					groundingVerificationLevel?: string;
+					verifiedGroundingRefs?: unknown[];
+					provenance?: string;
+				};
+				expect(record.groundingVerificationLevel).toBe("unverified");
+				expect(record.verifiedGroundingRefs).toEqual([]);
+				expect(record.provenance).toBe("talker_sketch_explicit");
+			},
+			30_000,
+		);
+
+		it(
+			"auto_fallback forces provenance to talker_sketch_auto and basis=belief with sourceTurnVersion stamp",
+			async () => {
+				const settlementId = "stl:guardrail-auto-fallback:001";
+				const requestId = "guardrail-auto-fallback:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					talkerTurnVersion: 9,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "auto_fallback",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:auto-fallback",
+										holderId: { kind: "special", value: "self" },
+										claim: "User said they are innocent",
+										entityRefs: [
+											{ kind: "special", value: "self" },
+											{ kind: "special", value: "user" },
+										],
+										stance: "accepted",
+										basis: "first_hand",
+										provenance: "user_stated",
+										claimedGroundingRefs: [
+											{ kind: "user_message", ref: "request:123" },
+										],
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:auto-fallback"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("belief");
+				const record = (typeof rows[0].record_json === "string"
+					? JSON.parse(rows[0].record_json)
+					: rows[0].record_json) as {
+					provenance?: string;
+					sourceTurnVersion?: number;
+				};
+				expect(record.provenance).toBe("talker_sketch_auto");
+				expect(record.sourceTurnVersion).toBe(9);
+
+			},
+			30_000,
+		);
+
+		it(
+			"confirmed sketch-origin assertion is downgraded to tentative before projection",
+			async () => {
+				const settlementId = "stl:guardrail-confirmed-downgrade:001";
+				const requestId = "guardrail-confirmed-downgrade:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:confirmed-downgrade",
+										holderId: { kind: "special", value: "self" },
+										claim: "Sketch said door is locked",
+										entityRefs: [{ kind: "special", value: "self" }],
+										stance: "confirmed",
+										basis: "first_hand",
+										provenance: "talker_sketch_explicit",
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT stance
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:confirmed-downgrade"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].stance).toBe("tentative");
+			},
+			30_000,
+		);
+
+		it(
+			"assertion with only cognition:* claimed refs is normalized to thinker_inferred provenance",
+			async () => {
+				const settlementId = "stl:guardrail-cognition-only-refs:001";
+				const requestId = "guardrail-cognition-only-refs:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:cognition-only-refs",
+										holderId: { kind: "special", value: "self" },
+										claim: "Another cognition key supports this",
+										entityRefs: [{ kind: "special", value: "self" }],
+										stance: "accepted",
+										basis: "inference",
+										provenance: "user_stated",
+										claimedGroundingRefs: [
+											{ kind: "existing_cognition", ref: "cognition:prior:key" },
+											{ kind: "existing_cognition", ref: "cognition:other:key" },
+										],
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:cognition-only-refs"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				const record = (typeof rows[0].record_json === "string"
+					? JSON.parse(rows[0].record_json)
+					: rows[0].record_json) as {
+					provenance?: string;
+				};
+				expect(record.provenance).toBe("thinker_inferred");
+			},
+			30_000,
+		);
+
+		it("explicit settlement processing still rejects uncontrolled basis downgrade", async () => {
+			const cognitionRepo = new CognitionRepository({
+				cognitionProjectionRepo: new PgCognitionProjectionRepo(pool),
+				cognitionEventRepo: new PgCognitionEventRepo(pool),
+				searchProjectionRepo: new PgSearchProjectionRepo(pool),
+				entityResolver: async (pointerKey: string) => {
+					if (pointerKey === "__self__") return 100;
+					if (pointerKey === "__user__") return 200;
+					return null;
+				},
+			});
+
+			const processor = new ExplicitSettlementProcessor(
+				{
+					cognitionRepo,
+					relationBuilder: {
+						async writeContestRelations() {},
+					},
+					relationWriteRepo: {
+						async upsertRelation() {},
+					},
+					cognitionProjectionRepo: new PgCognitionProjectionRepo(pool),
+					episodeRepo: new PgEpisodeRepo(pool),
+				},
+				{
+					getEntityById: () => null,
+					resolveEntityByPointerKey: (pointerKey: string) => {
+						if (pointerKey === "__self__") return 100;
+						if (pointerKey === "__user__") return 200;
+						return null;
+					},
+				} as never,
+				{ chat: async () => [] },
+				async () => ({ entities: [], privateBeliefs: [] }),
+				async () => {},
+			);
+
+			const settlementId = "stl:explicit-downgrade-block:001";
+			const requestId = "explicit-downgrade-block:001";
+			const payload: TurnSettlementPayload = {
+				settlementId,
+				requestId,
+				sessionId: "sess-explicit-1",
+				ownerAgentId: AGENT_ID,
+				publicReply: "ok",
+				hasPublicReply: true,
+				viewerSnapshot: {
+					selfPointerKey: "__self__",
+					userPointerKey: "__user__",
+				},
+				schemaVersion: "turn_settlement_v5",
+				privateCognition: {
+					schemaVersion: "rp_private_cognition_v4",
+					ops: [
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "test:explicit:basis-downgrade",
+								holderId: { kind: "special", value: "self" },
+								claim: "A claim",
+								entityRefs: [
+									{ kind: "special", value: "self" },
+									{ kind: "special", value: "user" },
+								],
+								stance: "accepted",
+								basis: "first_hand",
+								provenance: "explicit_settlement",
+							},
+						},
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "test:explicit:basis-downgrade",
+								holderId: { kind: "special", value: "self" },
+								claim: "A claim",
+								entityRefs: [
+									{ kind: "special", value: "self" },
+									{ kind: "special", value: "user" },
+								],
+								stance: "accepted",
+								basis: "belief",
+								provenance: "explicit_settlement",
+							},
+						},
+					],
+				},
+				relationIntents: [],
+				conflictFactors: [],
+				publications: [],
+			};
+
+			const ingest = {
+				batchId: "batch-explicit-1",
+				agentId: AGENT_ID,
+				sessionId: "sess-explicit-1",
+				dialogue: [],
+				attachments: [
+					{
+						recordType: "turn_settlement" as const,
+						payload,
+						committedAt: Date.now(),
+						correlatedTurnId: requestId,
+						explicitMeta: {
+							settlementId,
+							requestId,
+							ownerAgentId: AGENT_ID,
+							privateCognition: payload.privateCognition,
+						},
+					},
+				],
+				explicitSettlements: [
+					{
+						settlementId,
+						requestId,
+						ownerAgentId: AGENT_ID,
+						privateCognition: payload.privateCognition,
+					},
+				],
+			};
+
+			await expect(
+				processor.process(
+					{
+						sessionId: "sess-explicit-1",
+						agentId: AGENT_ID,
+						rangeStart: 0,
+						rangeEnd: 1,
+						flushMode: "manual",
+						idempotencyKey: "explicit-downgrade-1",
+					},
+					ingest,
+					{
+						episodeEventIds: [],
+						assertionIds: [],
+						entityIds: [],
+						factIds: [],
+						changedNodeRefs: [],
+					},
+					[],
+					{ agentRole: "rp_agent", skipEnforcement: true },
+				),
+			).rejects.toThrow("assertion basis change is not an allowed upgrade");
+		}, 30_000);
+
+		it("thinker instructions define claimedGroundingRefs vs relationIntents separately", () => {
+			expect(THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS).toContain(
+				"claimedGroundingRefs belongs to assertion records",
+			);
+			expect(THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS).toContain(
+				"relationIntents is ONLY same-turn artifact structure",
+			);
+			expect(THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS).toContain(
+				"For v1, cross-turn revision is ONLY",
+			);
+		});
 
 		it(
 			"changedNodeRefs count matches cognitionOps + privateEpisodes count",
@@ -863,11 +1510,12 @@ describe.skipIf(skipPgTests)(
 								record: {
 									kind: "assertion",
 									key: `test:count:belief-a:${settlementId}`,
-									proposition: {
-										subject: { kind: "special", value: "self" },
-										predicate: "knows",
-										object: { kind: "entity", ref: { kind: "special", value: "user" } },
-									},
+									holderId: { kind: "special", value: "self" },
+									claim: "knows",
+									entityRefs: [
+										{ kind: "special", value: "self" },
+										{ kind: "special", value: "user" },
+									],
 									stance: "accepted",
 									basis: "first_hand",
 								},
@@ -916,7 +1564,7 @@ describe.skipIf(skipPgTests)(
 					expect(result.changedNodeRefs.length).toBe(5);
 
 					const episodeRefs = result.changedNodeRefs.filter((r) =>
-						r.startsWith("event:"),
+						r.startsWith("episode:"),
 					);
 					const cognitionRefs = result.changedNodeRefs.filter((r) =>
 						r.startsWith("assertion:") || r.startsWith("evaluation:") || r.startsWith("commitment:"),
