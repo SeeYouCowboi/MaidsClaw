@@ -16,6 +16,19 @@ function keyFor(agentId: string, cognitionKey: string): string {
   return `${agentId}::${cognitionKey}`;
 }
 
+function parseRowRecordJson(value: unknown): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === "object") {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    return JSON.parse(value) as Record<string, unknown>;
+  }
+  return {};
+}
+
 class MockCognitionEventRepo implements CognitionEventRepo {
   public nextId = 1;
   public readonly appendCalls: CognitionEventAppendParams[] = [];
@@ -707,6 +720,176 @@ describe("CognitionRepository (PG repos, unit)", () => {
     expect(current!.basis).toBe("first_hand");
   });
 
+  it("verification-upsert remains replay-safe from append-only event history", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:append-only-replay",
+      settlementId: "stl:append-only:1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "initial assertion",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-a" }],
+      verifiedGroundingRefs: [],
+      groundingVerificationLevel: "unverified",
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:append-only-replay",
+      settlementId: "stl:append-only:1:verify",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "initial assertion",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-a" }],
+      verifiedGroundingRefs: [{ kind: "user_message", ref: "request:req-a" }],
+      groundingVerificationLevel: "context_verified",
+    });
+
+    const sameKeyEvents = eventRepo.rows.filter(
+      (row) => row.cognition_key === "grounding:append-only-replay",
+    );
+    expect(sameKeyEvents).toHaveLength(2);
+    const latestEventRecord = parseRowRecordJson(sameKeyEvents[1].record_json);
+    expect(Array.isArray(latestEventRecord.verifiedGroundingRefs)).toBe(true);
+    expect((latestEventRecord.verifiedGroundingRefs as unknown[]).length).toBe(1);
+
+    projectionRepo.state.clear();
+    for (const row of eventRepo.rows) {
+      await projectionRepo.upsertFromEvent(row);
+    }
+
+    const rebuilt = await projectionRepo.getCurrent(
+      "agent-1",
+      "grounding:append-only-replay",
+    );
+    expect(rebuilt).not.toBeNull();
+    expect(rebuilt!.basis).toBe("first_hand");
+    const rebuiltRecord = parseRowRecordJson(rebuilt!.record_json);
+    expect(rebuiltRecord.groundingVerificationLevel).toBe("context_verified");
+    expect(Array.isArray(rebuiltRecord.verifiedGroundingRefs)).toBe(true);
+    expect((rebuiltRecord.verifiedGroundingRefs as unknown[]).length).toBe(1);
+  });
+
+  it("verified user_stated assertion can upgrade basis to first_hand", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "verify:user-stated-upgrade",
+      settlementId: "stl:user-upgrade:1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "user asserted this",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-u1" }],
+      verifiedGroundingRefs: [],
+      groundingVerificationLevel: "unverified",
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "verify:user-stated-upgrade",
+      settlementId: "stl:user-upgrade:1:verify",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "user asserted this",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-u1" }],
+      verifiedGroundingRefs: [{ kind: "user_message", ref: "request:req-u1" }],
+      groundingVerificationLevel: "context_verified",
+    });
+
+    const current = await projectionRepo.getCurrent("agent-1", "verify:user-stated-upgrade");
+    expect(current).not.toBeNull();
+    expect(current!.basis).toBe("first_hand");
+  });
+
+  it("verified sketch-origin assertion upgrades only to inference (not first_hand)", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "verify:sketch-origin-cap",
+      settlementId: "stl:sketch-cap:1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "sketch-origin claim",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "talker_sketch_explicit",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-s1" }],
+      verifiedGroundingRefs: [],
+      groundingVerificationLevel: "unverified",
+      isThinkerGuardrailPath: true,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "verify:sketch-origin-cap",
+      settlementId: "stl:sketch-cap:1:verify",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "sketch-origin claim",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "inference",
+      provenance: "talker_sketch_explicit",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-s1" }],
+      verifiedGroundingRefs: [{ kind: "user_message", ref: "request:req-s1" }],
+      groundingVerificationLevel: "context_verified",
+      isThinkerGuardrailPath: true,
+    });
+
+    const current = await projectionRepo.getCurrent("agent-1", "verify:sketch-origin-cap");
+    expect(current).not.toBeNull();
+    expect(current!.basis).toBe("inference");
+    expect(current!.basis).not.toBe("first_hand");
+  });
+
   it("verified cognition refs do not launder weak memory into strong trust", async () => {
     const eventRepo = new MockCognitionEventRepo();
     const projectionRepo = new MockCognitionProjectionRepo();
@@ -823,5 +1006,59 @@ describe("CognitionRepository (PG repos, unit)", () => {
     };
     expect(payload.sourceTurnVersion).toBe(5);
     expect(payload.claim).toBe("new");
+  });
+
+  it("rejects terminal assertion key reuse", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "terminal:key-reuse",
+      settlementId: "stl:terminal:1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "initial",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "user_stated",
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "terminal:key-reuse",
+      settlementId: "stl:terminal:2",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "terminal",
+      entityPointerKeys: ["src"],
+      stance: "rejected",
+      basis: "belief",
+      provenance: "user_stated",
+    });
+
+    await expect(
+      repo.upsertAssertion({
+        agentId: "agent-1",
+        cognitionKey: "terminal:key-reuse",
+        settlementId: "stl:terminal:3",
+        opIndex: 2,
+        holderPointerKey: "src",
+        claim: "attempt reuse",
+        entityPointerKeys: ["src"],
+        stance: "accepted",
+        basis: "belief",
+        provenance: "user_stated",
+      }),
+    ).rejects.toThrow("terminal assertion keys cannot be reused");
   });
 });

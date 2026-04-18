@@ -228,4 +228,17 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 
     expect(result).not.toContain(WEAK_MEMORY_INTERPRETATION_GUIDANCE);
   });
+
+  it("guidance includes non-restatement sentence and low-confidence + strong_verified rescue rules", () => {
+    expect(WEAK_MEMORY_INTERPRETATION_GUIDANCE).toContain(
+      "do not repeat the bracketed metadata verbatim",
+    );
+    expect(WEAK_MEMORY_INTERPRETATION_GUIDANCE).toContain(
+      "Treat the entry as low-confidence, fragmentary memory",
+    );
+    expect(WEAK_MEMORY_INTERPRETATION_GUIDANCE).toContain("strong_verified");
+    expect(WEAK_MEMORY_INTERPRETATION_GUIDANCE).toContain(
+      "Strong verification can rescue",
+    );
+  });
 });

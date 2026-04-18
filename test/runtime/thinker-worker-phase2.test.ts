@@ -1698,6 +1698,94 @@ describe.skipIf(skipPgTests)(
 		);
 
 		it(
+			"self-certified fake grounding refs stay weak on retrieval surfaces",
+			async () => {
+				const settlementId = "stl:guardrail-self-certified-fake:001";
+				const requestId = "guardrail-self-certified-fake:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:self-certified-fake",
+										holderId: { kind: "special", value: "self" },
+										claim: "I have perfect evidence",
+										entityRefs: [
+											{ kind: "special", value: "self" },
+											{ kind: "special", value: "user" },
+										],
+										stance: "accepted",
+										basis: "first_hand",
+										provenance: "user_stated",
+										claimedGroundingRefs: [
+											{ kind: "user_message", ref: "request:does-not-exist" },
+											{ kind: "private_episode", ref: "episode:missing-ep" },
+										],
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:self-certified-fake"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("inference");
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					groundingVerificationLevel?: string;
+					verifiedGroundingRefs?: unknown[];
+				};
+				expect(record.groundingVerificationLevel).toBe("unverified");
+				expect(record.verifiedGroundingRefs).toEqual([]);
+
+				const slotRows = await pool`
+					SELECT slot_payload
+					FROM recent_cognition_slots
+					WHERE session_id = ${sessionId}
+					  AND agent_id = ${AGENT_ID}
+					LIMIT 1
+				`;
+				expect(slotRows.length).toBe(1);
+				const slotEntries = (Array.isArray(slotRows[0].slot_payload)
+					? slotRows[0].slot_payload
+					: JSON.parse(String(slotRows[0].slot_payload))) as Array<{
+					key?: string;
+					basis?: string;
+				}>;
+				const assertionEntry = slotEntries.find(
+					(entry) => entry.key === "test:guardrail:self-certified-fake",
+				);
+				expect(assertionEntry).toBeDefined();
+				expect(assertionEntry!.basis).toBe("inference");
+			},
+			30_000,
+		);
+
+		it(
 			"auto_fallback forces provenance to talker_sketch_auto and basis=belief with sourceTurnVersion stamp",
 			async () => {
 				const settlementId = "stl:guardrail-auto-fallback:001";
@@ -1764,6 +1852,69 @@ describe.skipIf(skipPgTests)(
 				expect(record.provenance).toBe("talker_sketch_auto");
 				expect(record.sourceTurnVersion).toBe(9);
 
+			},
+			30_000,
+		);
+
+		it(
+			"auto_fallback cannot impersonate user_stated provenance",
+			async () => {
+				const settlementId = "stl:guardrail-auto-provenance-crosscheck:001";
+				const requestId = "guardrail-auto-provenance-crosscheck:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "auto_fallback",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								{
+									op: "upsert",
+									record: {
+										kind: "assertion",
+										key: "test:guardrail:auto-provenance-crosscheck",
+										holderId: { kind: "special", value: "self" },
+										claim: "attempt impersonation",
+										entityRefs: [{ kind: "special", value: "user" }],
+										stance: "accepted",
+										basis: "first_hand",
+										provenance: "user_stated",
+										claimedGroundingRefs: [
+											{ kind: "user_message", ref: "request:fake-impersonation" },
+										],
+									},
+								},
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:guardrail:auto-provenance-crosscheck"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("belief");
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					provenance?: string;
+				};
+				expect(record.provenance).toBe("talker_sketch_auto");
+				expect(record.provenance).not.toBe("user_stated");
 			},
 			30_000,
 		);

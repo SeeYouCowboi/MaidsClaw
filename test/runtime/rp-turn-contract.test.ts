@@ -388,6 +388,96 @@ describe("normalizeRpTurnOutcome", () => {
     expect(op.record.groundingVerificationLevel).toBe("unverified");
   });
 
+  it("keeps valid claimedGroundingRefs while always resetting verification fields", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-preserve-and-reset",
+              holderId: { kind: "special", value: "self" },
+              claim: "Grounded claim",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              provenance: "user_stated",
+              claimedGroundingRefs: [
+                { kind: "user_message", ref: "request:req-valid" },
+                { kind: "private_episode", ref: "episode:ep-valid" },
+              ],
+              verifiedGroundingRefs: [
+                { kind: "private_episode", ref: "episode:ep-valid" },
+              ],
+              groundingVerificationLevel: "strong_verified",
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.claimedGroundingRefs).toEqual([
+      { kind: "user_message", ref: "request:req-valid" },
+      { kind: "private_episode", ref: "episode:ep-valid" },
+    ]);
+    expect(op.record.verifiedGroundingRefs).toEqual([]);
+    expect(op.record.groundingVerificationLevel).toBe("unverified");
+  });
+
+  it("drops malformed grounding refs individually while trimming valid long excerpts", () => {
+    const longExcerpt = "y".repeat(240);
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "grounding-malformed-mixed",
+              holderId: { kind: "special", value: "self" },
+              claim: "Malformed grounding refs",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              claimedGroundingRefs: [
+                { kind: "user_message", ref: "request:req-good", excerpt: longExcerpt },
+                { kind: "existing_cognition", ref: "cognition:fact-77" },
+                { kind: "unknown_kind", ref: "request:req-bad-kind" },
+                { kind: "private_episode", ref: "" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.claimedGroundingRefs).toHaveLength(2);
+    expect(op.record.claimedGroundingRefs?.[0]).toEqual({
+      kind: "user_message",
+      ref: "request:req-good",
+      excerpt: longExcerpt.slice(0, 160),
+    });
+    expect(op.record.claimedGroundingRefs?.[1]).toEqual({
+      kind: "existing_cognition",
+      ref: "cognition:fact-77",
+    });
+  });
+
   it("keeps existing v5 payloads without new fields valid", () => {
     const result = normalizeRpTurnOutcome({
       schemaVersion: "rp_turn_outcome_v5",
@@ -451,6 +541,22 @@ describe("makeSubmitRpTurnTool", () => {
     });
 
     expect((result as CanonicalRpTurnOutcome).schemaVersion).toBe("rp_turn_outcome_v5");
+  });
+
+  it("accepts correctionSuspected=true as telemetry metadata without affecting canonical payload", async () => {
+    const result = await tool.execute({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "Telemetry only",
+      cognitiveSketchSource: "explicit",
+      correctionSuspected: true,
+    });
+
+    const canonical = result as CanonicalRpTurnOutcome & {
+      correctionSuspected?: boolean;
+    };
+    expect(canonical.schemaVersion).toBe("rp_turn_outcome_v5");
+    expect(canonical.publicReply).toBe("Telemetry only");
+    expect(canonical.correctionSuspected).toBeUndefined();
   });
 
   it("execute throws MaidsClawError with RP_TURN_OUTCOME_INVALID on invalid input", async () => {

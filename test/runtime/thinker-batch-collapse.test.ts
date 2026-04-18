@@ -1478,7 +1478,7 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(prompt).toContain("Cognitive sketch from Talker: [auto-sketch] some fallback text");
 	});
 
-	it("batch chain: later corrected value wins within invocation", async () => {
+  it("batch chain: later corrected value wins within invocation", async () => {
 		const canonicalKey = "belief:batch-chain:canonical";
 		const oldClaim = "The user is in the kitchen";
 		const correctedClaim = "The user is in the library";
@@ -1571,8 +1571,196 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			key: string;
 		};
 		expect(lastRecord.key).toBe(canonicalKey);
-		expect(lastRecord.claim).toBe(correctedClaim);
-	});
+    expect(lastRecord.claim).toBe(correctedClaim);
+  });
+
+  it("batch-local canonicalization overlay reuses canonical key for silent correction in same invocation", async () => {
+    const canonicalKey = "belief:batch-overlay:canonical";
+    const fixture = createFixture({
+      claimedVersion: 7,
+      withDurableJobStore: false,
+      settlementBehavior: {
+        [settlementIdFor(7)]: {
+          sketch: "overlay-silent-correction",
+          cognitiveSketchSource: "explicit",
+        },
+      },
+      assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+        neighbors: [{ nodeRef: "assertion:701", similarity: 0.93 }],
+      }),
+      cognitionProjectionRows: [
+        makeCurrentAssertionRow({
+          id: 701,
+          key: canonicalKey,
+          holderId: "self",
+          claim: "legacy",
+          entityRefs: ["entity:user", "entity:kitchen"],
+        }),
+      ],
+      agentOutcome: {
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "ok",
+        privateCognition: {
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "belief:draft:overlay:old",
+                holderId: { kind: "special", value: "self" },
+                claim: "user in kitchen",
+                entityRefs: [
+                  { kind: "pointer_key", value: "entity:user" },
+                  { kind: "pointer_key", value: "entity:kitchen" },
+                ],
+                stance: "accepted",
+                basis: "first_hand",
+                provenance: "user_stated",
+                claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-7" }],
+              },
+            },
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: "belief:draft:overlay:new",
+                holderId: { kind: "special", value: "self" },
+                claim: "user moved to library",
+                entityRefs: [
+                  { kind: "pointer_key", value: "entity:user" },
+                  { kind: "pointer_key", value: "entity:library" },
+                ],
+                stance: "accepted",
+                basis: "first_hand",
+                provenance: "user_stated",
+                claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-7" }],
+              },
+            },
+          ],
+        },
+        privateEpisodes: [],
+        publications: [],
+        relationIntents: [],
+        conflictFactors: [],
+      },
+    });
+
+    await fixture.worker({ payload: fixture.payload });
+
+    const [projectionParams] = fixture.projectionManager.commitSettlement.mock.calls[0];
+    const upserts = projectionParams.cognitionOps.filter(
+      (op: { op: string }) => op.op === "upsert",
+    ) as Array<{ record: { key: string; claim?: string } }>;
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0].record.key).toBe(canonicalKey);
+    expect(upserts[0].record.claim).toBe("user moved to library");
+
+    const keys = upserts.map((u) => u.record.key);
+    expect(keys.some((key) => key.endsWith("_revised") || key.endsWith("_v2"))).toBe(false);
+  });
+
+  it("explicit sketch provenance remains non-canonicalized in v1 (known limitation)", async () => {
+    const canonicalKey = "belief:known-limitation:canonical";
+    const originalKey = "belief:draft:known-limitation";
+
+    const fixture = createFixture({
+      claimedVersion: 7,
+      withDurableJobStore: false,
+      settlementBehavior: {
+        [settlementIdFor(7)]: {
+          sketch: "explicit sketch path",
+          cognitiveSketchSource: "explicit",
+        },
+      },
+      assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+        neighbors: [{ nodeRef: "assertion:702", similarity: 0.95 }],
+      }),
+      cognitionProjectionRows: [
+        makeCurrentAssertionRow({
+          id: 702,
+          key: canonicalKey,
+          holderId: "self",
+          claim: "legacy claim",
+          entityRefs: ["entity:user", "entity:room"],
+        }),
+      ],
+      agentOutcome: {
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "ok",
+        privateCognition: {
+          ops: [
+            {
+              op: "upsert",
+              record: {
+                kind: "assertion",
+                key: originalKey,
+                holderId: { kind: "special", value: "self" },
+                claim: "sketch-only correction candidate",
+                entityRefs: [
+                  { kind: "pointer_key", value: "entity:user" },
+                  { kind: "pointer_key", value: "entity:room" },
+                ],
+                stance: "accepted",
+                basis: "belief",
+                provenance: "talker_sketch_explicit",
+                claimedGroundingRefs: [{ kind: "cognitive_sketch", ref: "settlement:stl:req-7" }],
+              },
+            },
+          ],
+        },
+        privateEpisodes: [],
+        publications: [],
+        relationIntents: [],
+        conflictFactors: [],
+      },
+    });
+
+    await fixture.worker({ payload: fixture.payload });
+
+    const [projectionParams] = fixture.projectionManager.commitSettlement.mock.calls[0];
+    const upserts = projectionParams.cognitionOps.filter(
+      (op: { op: string }) => op.op === "upsert",
+    ) as Array<{ record: { key: string } }>;
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0].record.key).toBe(originalKey);
+    expect(upserts[0].record.key).not.toBe(canonicalKey);
+  });
+
+  it("correctionSuspected is telemetry-only and does not alter batch control flow", async () => {
+    const fixture = createFixture({
+      claimedVersion: 3,
+      pendingPayloads: [
+        {
+          sessionId: SESSION_ID,
+          agentId: AGENT_ID,
+          settlementId: settlementIdFor(4),
+          talkerTurnVersion: 4,
+        },
+        {
+          sessionId: SESSION_ID,
+          agentId: AGENT_ID,
+          settlementId: settlementIdFor(5),
+          talkerTurnVersion: 5,
+        },
+      ],
+      settlementBehavior: {
+        [settlementIdFor(3)]: { sketch: "s3", correctionSuspected: true },
+        [settlementIdFor(4)]: { sketch: "s4", correctionSuspected: true },
+        [settlementIdFor(5)]: { sketch: "s5", correctionSuspected: true },
+      },
+    });
+
+    await expect(fixture.worker({ payload: fixture.payload })).rejects.toThrow(
+      FAIL_AFTER_PROMPT,
+    );
+
+    const prompt = fixture.getCapturedPrompt();
+    expect(prompt).toContain("Cognitive sketches from Talker (batch)");
+    expect(prompt).toContain("[Turn 3 | stl:req-3] s3");
+    expect(prompt).toContain("[Turn 4 | stl:req-4] s4");
+    expect(prompt).toContain("[Turn 5 | stl:req-5] s5");
+    expect(prompt).not.toContain("correctionSuspected");
+  });
 
 	it("batch chain with mixed explicit/auto_fallback preserves per-turn cognitiveSketchSource", async () => {
 		const fixture = createFixture({

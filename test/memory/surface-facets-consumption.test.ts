@@ -374,4 +374,110 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
     expect(seg.provenance).toBe("user_stated");
     expect(seg.groundingVerificationLevel).toBe("context_verified");
   });
+
+  it("default typed cognition facets exclude retracted items via activeOnly=true", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        if (params.activeOnly) {
+          return [
+            {
+              kind: "assertion",
+              basis: "first_hand",
+              stance: "accepted",
+              cognitionKey: "active:key",
+              source_ref: "assertion:80" as unknown as string,
+              content: "active cognition only",
+              updated_at: 800,
+              provenance: "user_stated",
+              groundingVerificationLevel: "strong_verified",
+            },
+          ];
+        }
+        return [
+          {
+            kind: "assertion",
+            basis: "first_hand",
+            stance: "accepted",
+            cognitionKey: "active:key",
+            source_ref: "assertion:80" as unknown as string,
+            content: "active cognition only",
+            updated_at: 800,
+          },
+          {
+            kind: "assertion",
+            basis: "belief",
+            stance: "rejected",
+            cognitionKey: "retracted:key",
+            source_ref: "assertion:81" as unknown as string,
+            content: "retracted cognition",
+            updated_at: 700,
+          },
+        ];
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service);
+    const result = await orchestrator.search("test", makeViewer(), "rp_agent");
+
+    expect(cognitionCapture.lastParams?.activeOnly).toBe(true);
+    expect(result.typed.cognition).toHaveLength(1);
+    expect(result.typed.cognition[0].cognitionKey).toBe("active:key");
+    expect(result.typed.cognition[0].content).toBe("active cognition only");
+  });
+
+  it("weak labeled cognition remains below strong grounded entry in typed facets", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    const strongThenWeak: CognitionHit[] = [
+      {
+        kind: "assertion",
+        basis: "first_hand",
+        stance: "accepted",
+        cognitionKey: "strong:key",
+        source_ref: "assertion:90" as unknown as string,
+        content: "strong grounded claim",
+        updated_at: 900,
+        provenance: "user_stated",
+        groundingVerificationLevel: "strong_verified",
+      },
+      {
+        kind: "assertion",
+        basis: "belief",
+        stance: "accepted",
+        cognitionKey: "weak:key",
+        source_ref: "assertion:91" as unknown as string,
+        content: "weak inferred claim",
+        updated_at: 901,
+        provenance: "talker_sketch_auto",
+        groundingVerificationLevel: "unverified",
+      },
+    ];
+
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        return strongThenWeak;
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service);
+    const result = await orchestrator.search("test", makeViewer(), "rp_agent");
+
+    expect(result.typed.cognition).toHaveLength(2);
+    expect(result.typed.cognition[0].cognitionKey).toBe("strong:key");
+    expect(result.typed.cognition[1].cognitionKey).toBe("weak:key");
+    expect(result.typed.cognition[0].groundingVerificationLevel).toBe("strong_verified");
+    expect(result.typed.cognition[1].groundingVerificationLevel).toBe("unverified");
+  });
 });

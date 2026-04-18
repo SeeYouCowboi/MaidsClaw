@@ -324,3 +324,24 @@ describeWithSkip.skipIf(false)(
 		});
 	},
 );
+
+describe("pipeline-e2e cognition grounding metadata round-trip smoke (unit harness)", () => {
+	it("bootstrap wiring exposes canonicalization bundle required for grounding metadata round-trip", () => {
+		const runtime = bootstrapRuntime({
+			modelRegistry: createMockModelRegistry(),
+			memoryMigrationModelId: "test/chat",
+			memoryEmbeddingModelId: "test/embed",
+		});
+
+		try {
+			expect(runtime.memoryTaskAgent).not.toBeNull();
+			expect(runtime.memoryPipelineStatus).toBe("ready");
+			expect(runtime.assertionCanonicalizationBundle).toBeDefined();
+			expect(runtime.assertionCanonicalizationBundle?.embeddingModelId).toBe(
+				"test/embed",
+			);
+		} finally {
+			runtime.shutdown();
+		}
+	});
+});

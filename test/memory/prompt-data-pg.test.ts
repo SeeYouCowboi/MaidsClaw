@@ -748,6 +748,74 @@ describe("formatRecentCognitionFromPayload — weak-memory label rendering (unit
     expect(output).toContain("[basis=unknown provenance=legacy_unknown verification=unverified]");
     expect(output).toContain("legacy entry");
   });
+
+  it("does NOT prefix context-verified first_hand entries (trust rescue)", () => {
+    const payload = JSON.stringify([
+      entry({
+        key: "rescued-first-hand",
+        summary: "verified user fact",
+        basis: "first_hand",
+        provenance: "user_stated",
+        groundingVerificationLevel: "context_verified",
+      }),
+    ]);
+
+    const output = formatRecentCognitionFromPayload(payload);
+    expect(output).toContain("verified user fact");
+    expect(output).not.toContain("[basis=");
+  });
+
+  it("applies full fallback label when basis/provenance/verification are explicitly null", () => {
+    const payload = JSON.stringify([
+      entry({
+        key: "legacy-null-metadata",
+        summary: "legacy null metadata",
+        basis: null,
+        provenance: null,
+        groundingVerificationLevel: null,
+      }),
+    ]);
+
+    const output = formatRecentCognitionFromPayload(payload);
+    expect(output).toContain("[basis=unknown provenance=legacy_unknown verification=unverified]");
+    expect(output).toContain("legacy null metadata");
+  });
+});
+
+describe("formatRecentCognitionFromPayload — additional regression guards", () => {
+  function entry(overrides: Record<string, unknown> = {}) {
+    return {
+      settlementId: "stl:extra",
+      committedAt: 1000,
+      kind: "assertion",
+      key: "extra/key",
+      summary: "extra summary",
+      status: "active",
+      ...overrides,
+    };
+  }
+
+  it("retracted higher-version entries remain excluded from rendered output", () => {
+    const payload = JSON.stringify([
+      entry({ key: "fact/retracted-priority", sourceTurnVersion: 3, summary: "keep active", status: "active" }),
+      entry({ key: "fact/retracted-priority", sourceTurnVersion: 9, summary: "(retracted)", status: "retracted" }),
+    ]);
+
+    const output = formatRecentCognitionFromPayload(payload);
+    expect(output).toContain("keep active");
+    expect(output).not.toContain("(retracted)");
+  });
+
+  it("sourceTurnVersion-first winner keeps corrected row despite later lower-version append", () => {
+    const payload = JSON.stringify([
+      entry({ key: "fact/version-first", sourceTurnVersion: 7, committedAt: 1000, summary: "corrected-v7" }),
+      entry({ key: "fact/version-first", sourceTurnVersion: 2, committedAt: 9000, summary: "late-v2" }),
+    ]);
+
+    const output = formatRecentCognitionFromPayload(payload);
+    expect(output).toContain("corrected-v7");
+    expect(output).not.toContain("late-v2");
+  });
 });
 
 describe("WEAK_MEMORY_INTERPRETATION_GUIDANCE content assertions (unit)", () => {
