@@ -15,6 +15,10 @@ type ParsedAssertionRecord = {
   preContestedStance?: string;
   conflictSummary?: string;
   conflictFactorRefs?: unknown;
+  provenance?: string;
+  claimedGroundingRefs?: unknown;
+  verifiedGroundingRefs?: unknown;
+  groundingVerificationLevel?: string;
 };
 
 type ParsedCommitmentRecord = {
@@ -125,6 +129,18 @@ function extractAssertionRecord(
         ? record.conflictSummary
         : undefined,
     conflictFactorRefs: record.conflictFactorRefs,
+    provenance:
+      typeof record.provenance === "string" ? record.provenance : undefined,
+    claimedGroundingRefs: Array.isArray(record.claimedGroundingRefs)
+      ? record.claimedGroundingRefs
+      : undefined,
+    verifiedGroundingRefs: Array.isArray(record.verifiedGroundingRefs)
+      ? record.verifiedGroundingRefs
+      : undefined,
+    groundingVerificationLevel:
+      typeof record.groundingVerificationLevel === "string"
+        ? record.groundingVerificationLevel
+        : undefined,
   };
 }
 
@@ -300,7 +316,35 @@ export class PgCognitionProjectionRepo implements CognitionProjectionRepo {
         record_json = excluded.record_json,
         source_event_id = excluded.source_event_id,
         updated_at = excluded.updated_at
-      WHERE excluded.updated_at >= private_cognition_current.updated_at
+      WHERE (
+        CASE
+          WHEN jsonb_typeof(excluded.record_json -> 'sourceTurnVersion') = 'number'
+            THEN (excluded.record_json ->> 'sourceTurnVersion')::bigint
+          ELSE 0
+        END
+      ) > (
+        CASE
+          WHEN jsonb_typeof(private_cognition_current.record_json -> 'sourceTurnVersion') = 'number'
+            THEN (private_cognition_current.record_json ->> 'sourceTurnVersion')::bigint
+          ELSE 0
+        END
+      )
+      OR (
+        (
+          CASE
+            WHEN jsonb_typeof(excluded.record_json -> 'sourceTurnVersion') = 'number'
+              THEN (excluded.record_json ->> 'sourceTurnVersion')::bigint
+            ELSE 0
+          END
+        ) = (
+          CASE
+            WHEN jsonb_typeof(private_cognition_current.record_json -> 'sourceTurnVersion') = 'number'
+              THEN (private_cognition_current.record_json ->> 'sourceTurnVersion')::bigint
+            ELSE 0
+          END
+        )
+        AND excluded.updated_at >= private_cognition_current.updated_at
+      )
     `;
   }
 

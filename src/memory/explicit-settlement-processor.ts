@@ -378,6 +378,18 @@ export class ExplicitSettlementProcessor {
         "preContestedStance" in record
           ? (record as AssertionRecordV4).preContestedStance
           : undefined;
+      const claimedGroundingRefs =
+        "claimedGroundingRefs" in record
+          ? (record as AssertionRecordV4).claimedGroundingRefs
+          : undefined;
+      const verifiedGroundingRefs =
+        "verifiedGroundingRefs" in record
+          ? (record as AssertionRecordV4).verifiedGroundingRefs
+          : undefined;
+      const groundingVerificationLevel =
+        "groundingVerificationLevel" in record
+          ? (record as AssertionRecordV4).groundingVerificationLevel
+          : undefined;
 
       const result = await this.cognitionRepo.upsertAssertion({
         agentId,
@@ -391,6 +403,9 @@ export class ExplicitSettlementProcessor {
         basis,
         preContestedStance,
         provenance: record.provenance,
+        claimedGroundingRefs,
+        verifiedGroundingRefs,
+        groundingVerificationLevel,
         requestId,
       });
       return { nodeRef: makeNodeRef("assertion", result.id) };

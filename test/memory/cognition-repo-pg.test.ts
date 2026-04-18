@@ -84,6 +84,26 @@ class MockCognitionProjectionRepo implements CognitionProjectionRepo {
     }
 
     const parsed = event.record_json ? JSON.parse(event.record_json) as Record<string, unknown> : {};
+    const incomingVersion =
+      typeof parsed.sourceTurnVersion === "number" && Number.isFinite(parsed.sourceTurnVersion)
+        ? parsed.sourceTurnVersion
+        : 0;
+
+    if (existing && event.op !== "retract") {
+      const existingParsed = existing.record_json
+        ? JSON.parse(existing.record_json) as Record<string, unknown>
+        : {};
+      const existingVersion =
+        typeof existingParsed.sourceTurnVersion === "number" && Number.isFinite(existingParsed.sourceTurnVersion)
+          ? existingParsed.sourceTurnVersion
+          : 0;
+      if (incomingVersion < existingVersion) {
+        return;
+      }
+      if (incomingVersion === existingVersion && event.committed_time < existing.updated_at) {
+        return;
+      }
+    }
     const base: CognitionCurrentRow = {
       id: existing?.id ?? this.nextProjectionId++,
       agent_id: event.agent_id,
@@ -102,9 +122,18 @@ class MockCognitionProjectionRepo implements CognitionProjectionRepo {
     };
 
     if (event.kind === "assertion") {
-      const sourcePointerKey = typeof parsed.sourcePointerKey === "string" ? parsed.sourcePointerKey : "?";
-      const predicate = typeof parsed.predicate === "string" ? parsed.predicate : null;
-      const targetPointerKey = typeof parsed.targetPointerKey === "string" ? parsed.targetPointerKey : "?";
+      const sourcePointerKey =
+        typeof parsed.holderPointerKey === "string"
+          ? parsed.holderPointerKey
+          : (typeof parsed.sourcePointerKey === "string" ? parsed.sourcePointerKey : "?");
+      const predicate =
+        typeof parsed.claim === "string"
+          ? parsed.claim
+          : (typeof parsed.predicate === "string" ? parsed.predicate : null);
+      const targetPointerKey =
+        Array.isArray(parsed.entityPointerKeys) && parsed.entityPointerKeys.length > 0 && typeof parsed.entityPointerKeys[0] === "string"
+          ? String(parsed.entityPointerKeys[0])
+          : (typeof parsed.targetPointerKey === "string" ? parsed.targetPointerKey : "?");
       base.kind = "assertion";
       base.stance = (parsed.stance as string | null) ?? null;
       base.basis = (parsed.basis as string | null) ?? null;
@@ -570,5 +599,229 @@ describe("CognitionRepository (PG repos, unit)", () => {
 
     const row = await repo.getAssertionByKey("agent-1", "state:basis:downgrade:allow");
     expect(row?.basis).toBe("belief");
+  });
+
+  it("records grounding metadata in recordJson", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:record-json",
+      settlementId: "settlement-grounding-json",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "tracks grounding",
+      entityPointerKeys: ["src", "dst"],
+      stance: "accepted",
+      basis: "inference",
+      provenance: "user_stated",
+      claimedGroundingRefs: [
+        { kind: "user_message", ref: "request:req-1" },
+        { kind: "private_episode", ref: "episode:ep-1" },
+      ],
+      verifiedGroundingRefs: [{ kind: "user_message", ref: "request:req-1" }],
+      groundingVerificationLevel: "context_verified",
+    });
+
+    const event = eventRepo.rows.find((row) => row.cognition_key === "grounding:record-json");
+    expect(event).toBeDefined();
+    const payload = JSON.parse(String(event!.record_json)) as {
+      claimedGroundingRefs?: unknown[];
+      verifiedGroundingRefs?: unknown[];
+      groundingVerificationLevel?: string;
+      provenance?: string;
+    };
+    expect(payload.claimedGroundingRefs).toHaveLength(2);
+    expect(payload.verifiedGroundingRefs).toHaveLength(1);
+    expect(payload.groundingVerificationLevel).toBe("context_verified");
+    expect(payload.provenance).toBe("user_stated");
+  });
+
+  it("projection rebuild reproduces verified grounding metadata", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:replay",
+      settlementId: "settlement-grounding-replay",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "initial write",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-2" }],
+      verifiedGroundingRefs: [],
+      groundingVerificationLevel: "unverified",
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:replay",
+      settlementId: "settlement-grounding-replay::verification",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "initial write",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "first_hand",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "user_message", ref: "request:req-2" }],
+      verifiedGroundingRefs: [{ kind: "user_message", ref: "request:req-2" }],
+      groundingVerificationLevel: "context_verified",
+    });
+
+    projectionRepo.state.clear();
+    for (const row of eventRepo.rows) {
+      await projectionRepo.upsertFromEvent(row);
+    }
+
+    const current = await projectionRepo.getCurrent("agent-1", "grounding:replay");
+    expect(current).not.toBeNull();
+    const record = JSON.parse(current!.record_json) as {
+      verifiedGroundingRefs?: unknown[];
+      groundingVerificationLevel?: string;
+      basis?: string;
+    };
+    expect(record.verifiedGroundingRefs).toHaveLength(1);
+    expect(record.groundingVerificationLevel).toBe("context_verified");
+    expect(current!.basis).toBe("first_hand");
+  });
+
+  it("verified cognition refs do not launder weak memory into strong trust", async () => {
+    const eventRepo = new MockCognitionEventRepo();
+    const projectionRepo = new MockCognitionProjectionRepo();
+    const searchRepo = new MockSearchProjectionRepo();
+
+    const repo = new CognitionRepository({
+      cognitionProjectionRepo: projectionRepo,
+      cognitionEventRepo: eventRepo,
+      searchProjectionRepo: searchRepo,
+      entityResolver: async () => 1,
+    });
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:no-launder:cognition-only",
+      settlementId: "settlement-grounding-no-launder-1",
+      opIndex: 0,
+      holderPointerKey: "src",
+      claim: "cognition refs only",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "thinker_inferred",
+      claimedGroundingRefs: [{ kind: "existing_cognition", ref: "cognition:other" }],
+      verifiedGroundingRefs: [{ kind: "existing_cognition", ref: "cognition:other" }],
+      groundingVerificationLevel: "context_verified",
+    });
+
+    const cognitionOnly = await projectionRepo.getCurrent(
+      "agent-1",
+      "grounding:no-launder:cognition-only",
+    );
+    expect(cognitionOnly).not.toBeNull();
+    const cognitionOnlyRecord = JSON.parse(String(cognitionOnly!.record_json)) as {
+      groundingVerificationLevel?: string;
+    };
+    expect(cognitionOnlyRecord.groundingVerificationLevel).not.toBe("strong_verified");
+
+    await repo.upsertAssertion({
+      agentId: "agent-1",
+      cognitionKey: "grounding:no-launder:episode",
+      settlementId: "settlement-grounding-no-launder-2",
+      opIndex: 1,
+      holderPointerKey: "src",
+      claim: "episode ref present",
+      entityPointerKeys: ["src"],
+      stance: "accepted",
+      basis: "belief",
+      provenance: "user_stated",
+      claimedGroundingRefs: [{ kind: "private_episode", ref: "episode:ep-local" }],
+      verifiedGroundingRefs: [{ kind: "private_episode", ref: "episode:ep-local" }],
+      groundingVerificationLevel: "strong_verified",
+    });
+
+    const episodeStrong = await projectionRepo.getCurrent(
+      "agent-1",
+      "grounding:no-launder:episode",
+    );
+    expect(episodeStrong).not.toBeNull();
+    const episodeStrongRecord = JSON.parse(String(episodeStrong!.record_json)) as {
+      groundingVerificationLevel?: string;
+    };
+    expect(episodeStrongRecord.groundingVerificationLevel).toBe("strong_verified");
+  });
+
+  it("lower-version replay cannot beat higher-version correction", async () => {
+    const projectionRepo = new MockCognitionProjectionRepo();
+
+    const lowVersionEvent: CognitionEventRow = {
+      id: 1,
+      agent_id: "agent-1",
+      cognition_key: "grounding:version-priority",
+      kind: "assertion",
+      op: "upsert",
+      record_json: JSON.stringify({
+        holderPointerKey: "src",
+        claim: "old",
+        entityPointerKeys: ["dst"],
+        stance: "accepted",
+        basis: "belief",
+        sourceTurnVersion: 2,
+      }),
+      settlement_id: "stl:version-low",
+      committed_time: 1_000,
+      request_id: "version-low",
+      created_at: 1_000,
+    };
+
+    const highVersionEvent: CognitionEventRow = {
+      ...lowVersionEvent,
+      id: 2,
+      record_json: JSON.stringify({
+        holderPointerKey: "src",
+        claim: "new",
+        entityPointerKeys: ["dst"],
+        stance: "accepted",
+        basis: "first_hand",
+        sourceTurnVersion: 5,
+      }),
+      settlement_id: "stl:version-high",
+      committed_time: 900,
+      request_id: "version-high",
+      created_at: 900,
+    };
+
+    await projectionRepo.upsertFromEvent(highVersionEvent);
+    await projectionRepo.upsertFromEvent(lowVersionEvent);
+
+    const current = await projectionRepo.getCurrent("agent-1", "grounding:version-priority");
+    expect(current).not.toBeNull();
+    const payload = JSON.parse(String(current!.record_json)) as {
+      sourceTurnVersion?: number;
+      claim?: string;
+    };
+    expect(payload.sourceTurnVersion).toBe(5);
+    expect(payload.claim).toBe("new");
   });
 });

@@ -36,6 +36,9 @@ type ParsedAssertionRecord = {
   conflictSummary?: string;
   conflictFactorRefs?: unknown;
   provenance?: string;
+  claimedGroundingRefs?: unknown;
+  verifiedGroundingRefs?: unknown;
+  groundingVerificationLevel?: string;
 };
 
 type ParsedCommitmentRecord = {
@@ -82,6 +85,11 @@ function extractAssertionRecord(raw: Record<string, unknown>): ParsedAssertionRe
     conflictSummary: typeof raw.conflictSummary === "string" ? raw.conflictSummary : undefined,
     conflictFactorRefs: raw.conflictFactorRefs,
     provenance: typeof raw.provenance === "string" ? raw.provenance : undefined,
+    claimedGroundingRefs: Array.isArray(raw.claimedGroundingRefs) ? raw.claimedGroundingRefs : undefined,
+    verifiedGroundingRefs: Array.isArray(raw.verifiedGroundingRefs) ? raw.verifiedGroundingRefs : undefined,
+    groundingVerificationLevel: typeof raw.groundingVerificationLevel === "string"
+      ? raw.groundingVerificationLevel
+      : undefined,
   };
 }
 

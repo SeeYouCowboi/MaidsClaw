@@ -32,6 +32,9 @@ type UpsertAssertionParams = {
   basis?: AssertionBasis;
   preContestedStance?: AssertionStance;
   provenance?: string;
+  claimedGroundingRefs?: unknown;
+  verifiedGroundingRefs?: unknown;
+  groundingVerificationLevel?: string;
   requestId?: string;
   isThinkerGuardrailPath?: boolean;
 };
@@ -205,7 +208,10 @@ export class CognitionRepository {
       stance: params.stance,
       basis: params.basis ?? null,
       preContestedStance: params.preContestedStance ?? null,
-      provenance: params.provenance ?? null,
+      provenance: params.provenance,
+      claimedGroundingRefs: params.claimedGroundingRefs,
+      verifiedGroundingRefs: params.verifiedGroundingRefs,
+      groundingVerificationLevel: params.groundingVerificationLevel,
     });
 
     if (cognitionKey) {

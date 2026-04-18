@@ -1513,6 +1513,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					episodeRepo: txEpisodeRepo,
 					cognitionEventRepo: new PgCognitionEventRepo(txSql),
 					cognitionProjectionRepo: txCognitionProjectionRepo,
+					interactionRepo: deps.interactionRepo,
 					relationWriteRepo: txRelationWriteRepo,
 					searchProjectionRepo: new PgSearchProjectionRepo(txSql),
 					areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),

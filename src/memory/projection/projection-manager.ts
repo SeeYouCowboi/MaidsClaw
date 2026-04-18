@@ -2,6 +2,11 @@ import type { AgentRole } from "../../agents/profile.js";
 import type { ArtifactEnforcementContext } from "../../core/tools/artifact-contract-policy.js";
 import type { ArtifactContract } from "../../core/tools/tool-definition.js";
 import type {
+  AssertionBasis,
+  AssertionGroundingRef,
+  AssertionProvenance,
+  AssertionRecordV4,
+  AssertionVerificationLevel,
   CognitionOp,
   EpisodeEntityRef,
   PrivateEpisodeArtifact,
@@ -10,6 +15,7 @@ import type {
 
 import type { SettlementRepos } from "../../storage/unit-of-work.js";
 import type { CognitionEventRepo } from "../../storage/domain-repos/contracts/cognition-event-repo.js";
+import type { InteractionRepo } from "../../storage/domain-repos/contracts/interaction-repo.js";
 import type { SearchProjectionRepo } from "../../storage/domain-repos/contracts/search-projection-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
 import { normalizePointerKeys } from "../contracts/pointer-key.js";
@@ -31,6 +37,10 @@ type ProjectionEpisodeRepo = {
   append: (
     params: Parameters<EpisodeRepository["append"]>[0],
   ) => MaybePromise<number>;
+  readBySettlement?: (
+    settlementId: string,
+    agentId: string,
+  ) => MaybePromise<Array<{ id: number; source_local_ref: string | null }>>;
 };
 
 type ProjectionCognitionEventRepo = {
@@ -94,11 +104,25 @@ type ProjectionCommitRepos = Pick<
   | "areaWorldProjectionRepo"
   | "recentCognitionSlotRepo"
 > & {
+  interactionRepo?: InteractionRepo;
   searchProjectionRepo?: SearchProjectionRepo | ProjectionSearchProjectionRepo;
 };
 
 export type CommitSettlementResult = {
   changedNodeRefs: NodeRef[];
+};
+
+type AssertionUpsertSnapshot = {
+  opIndex: number;
+  cognitionKey: string;
+  record: AssertionRecordV4 & { sourceTurnVersion?: number };
+};
+
+type AssertionVerificationOutcome = {
+  basis: AssertionBasis | undefined;
+  provenance: AssertionProvenance;
+  verifiedGroundingRefs: AssertionGroundingRef[];
+  groundingVerificationLevel: AssertionVerificationLevel;
 };
 
 /** Map an episode row id to the canonical `episode:N` ref. */
@@ -265,6 +289,123 @@ function runSeries(
   return;
 }
 
+const ASSERTION_PROVENANCE_VALUES = new Set<AssertionProvenance>([
+  "user_stated",
+  "talker_sketch_explicit",
+  "talker_sketch_auto",
+  "thinker_inferred",
+  "explicit_settlement",
+  "legacy_unknown",
+]);
+
+type RecentCognitionSlotEntry = {
+  kind?: string;
+  key?: string;
+  basis?: AssertionBasis | "unknown";
+  provenance?: AssertionProvenance | "legacy_unknown";
+};
+
+function normalizeAssertionProvenance(value: unknown): AssertionProvenance {
+  if (
+    typeof value === "string" &&
+    ASSERTION_PROVENANCE_VALUES.has(value as AssertionProvenance)
+  ) {
+    return value as AssertionProvenance;
+  }
+  return "legacy_unknown";
+}
+
+function normalizeAssertionGroundingRefs(
+  value: unknown,
+): AssertionGroundingRef[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const refs: AssertionGroundingRef[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.kind !== "string" || typeof candidate.ref !== "string") {
+      continue;
+    }
+    const ref = candidate.ref.trim();
+    if (ref.length === 0) {
+      continue;
+    }
+    refs.push({
+      kind: candidate.kind as AssertionGroundingRef["kind"],
+      ref,
+      ...(typeof candidate.excerpt === "string"
+        ? { excerpt: candidate.excerpt.slice(0, 160) }
+        : {}),
+    });
+  }
+  return refs;
+}
+
+function toContextVerificationLevel(params: {
+  hasVerifiedEpisodeRef: boolean;
+  hasVerifiedContextRef: boolean;
+}): AssertionVerificationLevel {
+  if (params.hasVerifiedEpisodeRef) {
+    return "strong_verified";
+  }
+  if (params.hasVerifiedContextRef) {
+    return "context_verified";
+  }
+  return "unverified";
+}
+
+function toPostVerificationBasis(params: {
+  basis: AssertionBasis | undefined;
+  provenance: AssertionProvenance;
+  hasVerifiedAnchorRef: boolean;
+}): AssertionBasis | undefined {
+  if (!params.hasVerifiedAnchorRef) {
+    return params.basis;
+  }
+
+  if (
+    params.provenance === "user_stated" ||
+    params.provenance === "explicit_settlement"
+  ) {
+    return "first_hand";
+  }
+
+  if (
+    params.provenance === "talker_sketch_explicit" ||
+    params.provenance === "talker_sketch_auto"
+  ) {
+    if (
+      params.basis === undefined ||
+      params.basis === "belief" ||
+      params.basis === "inference"
+    ) {
+      return "inference";
+    }
+    return "inference";
+  }
+
+  return params.basis;
+}
+
+function parseRecentCognitionSlotEntries(
+  value: string,
+): RecentCognitionSlotEntry[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as RecentCognitionSlotEntry[];
+  } catch {
+    return [];
+  }
+}
+
 export type SettlementAreaStateArtifact = {
   key: string;
   value: unknown;
@@ -367,16 +508,25 @@ export class ProjectionManager {
     const areaWorldProjectionRepo =
       repoOverrides?.areaWorldProjectionRepo ?? this.areaWorldProjectionRepo;
     const recentCognitionSlotRepo = repoOverrides?.recentCognitionSlotRepo;
+    const interactionRepo = repoOverrides?.interactionRepo;
+    const assertionUpsertSnapshots: AssertionUpsertSnapshot[] = [];
+    for (let index = 0; index < params.cognitionOps.length; index += 1) {
+      const op = params.cognitionOps[index];
+      if (op.op !== "upsert" || op.record.kind !== "assertion") {
+        continue;
+      }
+      assertionUpsertSnapshots.push({
+        opIndex: index,
+        cognitionKey: op.record.key,
+        record: {
+          ...op.record,
+        } as AssertionRecordV4 & { sourceTurnVersion?: number },
+      });
+    }
+
+    let verifiedSlotJson = params.recentCognitionSlotJson;
     const changedNodeRefs: NodeRef[] = [];
     const result = runSeries([
-      () =>
-        this.appendEpisodes(
-          params,
-          now,
-          episodeRepo,
-          searchProjectionRepo,
-          changedNodeRefs,
-        ),
       () =>
         this.appendCognitionEvents(
           params,
@@ -386,6 +536,48 @@ export class ProjectionManager {
           searchProjectionRepo,
           changedNodeRefs,
         ),
+      () =>
+        this.appendEpisodes(
+          params,
+          now,
+          episodeRepo,
+          searchProjectionRepo,
+          changedNodeRefs,
+        ),
+      () => {
+        this.materializePublicationsSafe(
+          params,
+          now,
+          areaWorldProjectionRepo,
+          repoOverrides,
+        );
+      },
+      () => {
+        const verificationResult = this.runSynchronousGroundingVerification({
+          params,
+          now,
+          interactionRepo,
+          episodeRepo,
+          cognitionEventRepo,
+          cognitionProjectionRepo,
+          searchProjectionRepo,
+          assertionUpsertSnapshots,
+        });
+
+        if (isPromiseLike(verificationResult)) {
+          return Promise.resolve(verificationResult).then((verificationByKey) => {
+            verifiedSlotJson = this.applyVerificationResultsToRecentSlotJson(
+              params.recentCognitionSlotJson,
+              verificationByKey,
+            );
+          });
+        }
+
+        verifiedSlotJson = this.applyVerificationResultsToRecentSlotJson(
+          params.recentCognitionSlotJson,
+          verificationResult,
+        );
+      },
       () => {
         if (!recentCognitionSlotRepo && !params.upsertRecentCognitionSlot) {
           throw new Error(
@@ -398,13 +590,13 @@ export class ProjectionManager {
               params.sessionId,
               params.agentId,
               params.settlementId,
-              params.recentCognitionSlotJson,
+              verifiedSlotJson,
             )
           : params.upsertRecentCognitionSlot?.(
               params.sessionId,
               params.agentId,
               params.settlementId,
-              params.recentCognitionSlotJson,
+              verifiedSlotJson,
             );
 
         if (isPromiseLike(writeResult)) {
@@ -412,13 +604,6 @@ export class ProjectionManager {
         }
       },
       () => this.upsertAreaStateArtifacts(params, now, areaWorldProjectionRepo),
-      () =>
-        this.materializePublicationsSafe(
-          params,
-          now,
-          areaWorldProjectionRepo,
-          repoOverrides,
-        ),
     ]);
 
     if (isPromiseLike(result)) {
@@ -723,6 +908,297 @@ export class ProjectionManager {
     });
 
     return runSeries(steps);
+  }
+
+  private async runSynchronousGroundingVerification(params: {
+    params: SettlementProjectionParams;
+    now: number;
+    interactionRepo: InteractionRepo | undefined;
+    episodeRepo: ProjectionEpisodeRepo;
+    cognitionEventRepo: ProjectionCognitionEventRepo;
+    cognitionProjectionRepo: ProjectionCognitionProjectionRepo;
+    searchProjectionRepo: ProjectionSearchProjectionRepo | undefined;
+    assertionUpsertSnapshots: AssertionUpsertSnapshot[];
+  }): Promise<Map<string, AssertionVerificationOutcome>> {
+    const outcomesByKey = new Map<string, AssertionVerificationOutcome>();
+    if (params.assertionUpsertSnapshots.length === 0) {
+      return outcomesByKey;
+    }
+
+    const requestVerifiedCache = new Map<string, Promise<boolean>>();
+    const settlementVerifiedCache = new Map<string, Promise<boolean>>();
+    const cognitionVerifiedCache = new Map<string, Promise<boolean>>();
+
+    const verifyRequestRef = async (requestId: string): Promise<boolean> => {
+      const interactionRepo = params.interactionRepo;
+      if (!interactionRepo) {
+        return false;
+      }
+      const cached = requestVerifiedCache.get(requestId);
+      if (cached) {
+        return cached;
+      }
+      const verificationPromise = (async () => {
+        const sessionId = await interactionRepo.findSessionIdByRequestId(
+          requestId,
+        );
+        if (!sessionId || sessionId !== params.params.sessionId) {
+          return false;
+        }
+        const payload = await interactionRepo.getSettlementPayload(
+          sessionId,
+          requestId,
+        );
+        if (!payload) {
+          return false;
+        }
+        return payload.ownerAgentId === params.params.agentId;
+      })();
+      requestVerifiedCache.set(requestId, verificationPromise);
+      return verificationPromise;
+    };
+
+    const verifySettlementRef = async (settlementRef: string): Promise<boolean> => {
+      const interactionRepo = params.interactionRepo;
+      if (!interactionRepo) {
+        return false;
+      }
+      const cached = settlementVerifiedCache.get(settlementRef);
+      if (cached) {
+        return cached;
+      }
+      const verificationPromise = (async () => {
+        const settlementId = settlementRef.startsWith("stl:")
+          ? settlementRef
+          : `stl:${settlementRef}`;
+        const requestId = settlementId.replace(/^stl:/, "");
+        const sessionId = await interactionRepo.findSessionIdByRequestId(
+          requestId,
+        );
+        if (!sessionId || sessionId !== params.params.sessionId) {
+          return false;
+        }
+        const exists = await interactionRepo.settlementExists(
+          sessionId,
+          settlementId,
+        );
+        if (!exists) {
+          return false;
+        }
+        const payload = await interactionRepo.getSettlementPayload(
+          sessionId,
+          requestId,
+        );
+        if (!payload) {
+          return false;
+        }
+        return (
+          payload.ownerAgentId === params.params.agentId &&
+          payload.settlementId === settlementId
+        );
+      })();
+      settlementVerifiedCache.set(settlementRef, verificationPromise);
+      return verificationPromise;
+    };
+
+    const episodeRows = params.episodeRepo.readBySettlement
+      ? await params.episodeRepo.readBySettlement(
+          params.params.settlementId,
+          params.params.agentId,
+        )
+      : [];
+    const localRefIndex = new Map<string, number>();
+    for (const row of episodeRows) {
+      if (row.source_local_ref) {
+        localRefIndex.set(row.source_local_ref, Number(row.id));
+      }
+    }
+
+    const verifyCognitionRef = async (cognitionKey: string): Promise<boolean> => {
+      if (!params.cognitionProjectionRepo.getCurrent) {
+        return false;
+      }
+      const cached = cognitionVerifiedCache.get(cognitionKey);
+      if (cached) {
+        return cached;
+      }
+      const verificationPromise = Promise.resolve(
+        params.cognitionProjectionRepo.getCurrent(
+          params.params.agentId,
+          cognitionKey,
+        ),
+      ).then((row) => Boolean(row));
+      cognitionVerifiedCache.set(cognitionKey, verificationPromise);
+      return verificationPromise;
+    };
+
+    for (const snapshot of params.assertionUpsertSnapshots) {
+      const claimedGroundingRefs = normalizeAssertionGroundingRefs(
+        snapshot.record.claimedGroundingRefs,
+      );
+      const verifiedGroundingRefs: AssertionGroundingRef[] = [];
+
+      let hasVerifiedEpisodeRef = false;
+      let hasVerifiedContextRef = false;
+      let hasVerifiedAnchorRef = false;
+
+      for (const ref of claimedGroundingRefs) {
+        if (ref.ref.startsWith("request:")) {
+          const requestId = ref.ref.slice("request:".length).trim();
+          if (requestId.length > 0 && (await verifyRequestRef(requestId))) {
+            verifiedGroundingRefs.push(ref);
+            hasVerifiedContextRef = true;
+            hasVerifiedAnchorRef = true;
+          }
+          continue;
+        }
+
+        if (ref.ref.startsWith("settlement:")) {
+          const settlementRef = ref.ref.slice("settlement:".length).trim();
+          if (
+            settlementRef.length > 0 &&
+            (await verifySettlementRef(settlementRef))
+          ) {
+            verifiedGroundingRefs.push(ref);
+            hasVerifiedContextRef = true;
+            hasVerifiedAnchorRef = true;
+          }
+          continue;
+        }
+
+        if (ref.ref.startsWith("episode:")) {
+          const localRef = ref.ref.slice("episode:".length).trim();
+          if (localRef.length > 0 && localRefIndex.has(localRef)) {
+            verifiedGroundingRefs.push(ref);
+            hasVerifiedEpisodeRef = true;
+            hasVerifiedAnchorRef = true;
+          }
+          continue;
+        }
+
+        if (ref.ref.startsWith("cognition:")) {
+          const cognitionKey = ref.ref.slice("cognition:".length).trim();
+          if (cognitionKey.length > 0 && (await verifyCognitionRef(cognitionKey))) {
+            verifiedGroundingRefs.push(ref);
+          }
+        }
+      }
+
+      const groundingVerificationLevel = toContextVerificationLevel({
+        hasVerifiedEpisodeRef,
+        hasVerifiedContextRef,
+      });
+      const provenance = normalizeAssertionProvenance(snapshot.record.provenance);
+      const basis = toPostVerificationBasis({
+        basis: snapshot.record.basis,
+        provenance,
+        hasVerifiedAnchorRef,
+      });
+
+      outcomesByKey.set(snapshot.cognitionKey, {
+        basis,
+        provenance,
+        verifiedGroundingRefs,
+        groundingVerificationLevel,
+      });
+
+      const verifiedRecord: AssertionRecordV4 & { sourceTurnVersion?: number } = {
+        ...snapshot.record,
+        basis,
+        provenance,
+        claimedGroundingRefs,
+        verifiedGroundingRefs,
+        groundingVerificationLevel,
+        sourceTurnVersion: snapshot.record.sourceTurnVersion,
+      };
+
+      const verificationSettlementId = `${params.params.settlementId}::verification:${snapshot.opIndex}`;
+      const eventId = await params.cognitionEventRepo.append({
+        agentId: params.params.agentId,
+        cognitionKey: snapshot.cognitionKey,
+        kind: "assertion",
+        op: "upsert",
+        recordJson: JSON.stringify(verifiedRecord),
+        settlementId: verificationSettlementId,
+        committedTime: params.now,
+        requestId: params.params.requestId,
+      });
+
+      if (eventId === null) {
+        continue;
+      }
+
+      await params.cognitionProjectionRepo.upsertFromEvent({
+        id: eventId,
+        agent_id: params.params.agentId,
+        cognition_key: snapshot.cognitionKey,
+        kind: "assertion",
+        op: "upsert",
+        record_json: JSON.stringify(verifiedRecord),
+        settlement_id: verificationSettlementId,
+        committed_time: params.now,
+        request_id: params.params.requestId ?? null,
+        created_at: params.now,
+      });
+
+      if (params.searchProjectionRepo) {
+        const current = params.cognitionProjectionRepo.getCurrent
+          ? await params.cognitionProjectionRepo.getCurrent(
+              params.params.agentId,
+              snapshot.cognitionKey,
+            )
+          : null;
+        const holderLabel = snapshot.record.holderId?.value ?? "?";
+        const entityValues = Array.isArray(snapshot.record.entityRefs)
+          ? snapshot.record.entityRefs
+              .map((entry) => entry.value)
+              .filter((value): value is string => typeof value === "string")
+          : [];
+        const entitySuffix =
+          entityValues.length > 0
+            ? ` | entities: ${entityValues.join(", ")}`
+            : "";
+
+        await params.searchProjectionRepo.upsertCognitionSearchDoc({
+          overlayId: current?.id ?? eventId,
+          agentId: params.params.agentId,
+          kind: current?.kind ?? "assertion",
+          content:
+            current?.summary_text ??
+            `[${snapshot.cognitionKey}] [${holderLabel}] ${snapshot.record.claim}${entitySuffix}`,
+          stance: current?.stance ?? snapshot.record.stance,
+          basis: current?.basis ?? basis ?? null,
+          sourceRefKind: "assertion",
+          now: params.now,
+        });
+      }
+    }
+
+    return outcomesByKey;
+  }
+
+  private applyVerificationResultsToRecentSlotJson(
+    recentCognitionSlotJson: string,
+    verificationByKey: Map<string, AssertionVerificationOutcome>,
+  ): string {
+    if (verificationByKey.size === 0) {
+      return recentCognitionSlotJson;
+    }
+    const entries = parseRecentCognitionSlotEntries(recentCognitionSlotJson);
+    for (const entry of entries) {
+      if (entry.kind !== "assertion" || typeof entry.key !== "string") {
+        continue;
+      }
+      const verification = verificationByKey.get(entry.key);
+      if (!verification) {
+        continue;
+      }
+      if (verification.basis) {
+        entry.basis = verification.basis;
+      }
+      entry.provenance = verification.provenance;
+    }
+    return JSON.stringify(entries);
   }
 
   /**

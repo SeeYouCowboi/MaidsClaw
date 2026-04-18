@@ -151,13 +151,13 @@ function createMockInteractionRepo(
 			return fn({ interactionRepo: repo });
 		},
 		async settlementExists() {
-			return false;
+			return true;
 		},
 		async findRecordByCorrelatedTurnId() {
 			return undefined;
 		},
 		async findSessionIdByRequestId() {
-			return undefined;
+			return sessionId;
 		},
 		async getBySession() {
 			return [];
@@ -439,6 +439,7 @@ function makeAssertionUpsert(params: {
 	key: string;
 	claim: string;
 	entityRefs: string[];
+	stance?: "hypothetical" | "tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned";
 	basis?: "first_hand" | "hearsay" | "inference" | "introspection" | "belief";
 	provenance?: string;
 	claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
@@ -454,7 +455,7 @@ function makeAssertionUpsert(params: {
 				kind: "pointer_key",
 				value,
 			})),
-			stance: "accepted",
+			stance: params.stance ?? "accepted",
 			basis: params.basis ?? "first_hand",
 			provenance: params.provenance ?? "user_stated",
 			claimedGroundingRefs:
@@ -1882,6 +1883,257 @@ describe.skipIf(skipPgTests)(
 					provenance?: string;
 				};
 				expect(record.provenance).toBe("thinker_inferred");
+			},
+			30_000,
+		);
+
+		it(
+			"synchronous verification upgrades user-stated basis to first_hand",
+			async () => {
+				const settlementId = "stl:sync-verify-first-hand:001";
+				const requestId = "sync-verify-first-hand:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key: "test:verify:first-hand",
+									claim: "user gave direct statement",
+									entityRefs: ["entity:user"],
+									basis: "belief",
+									provenance: "user_stated",
+									claimedGroundingRefs: [
+										{ kind: "user_message", ref: `request:${requestId}` },
+									],
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:verify:first-hand"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("first_hand");
+
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					groundingVerificationLevel?: string;
+					verifiedGroundingRefs?: unknown[];
+				};
+				expect(record.groundingVerificationLevel).toBe("context_verified");
+				expect(Array.isArray(record.verifiedGroundingRefs)).toBe(true);
+				expect((record.verifiedGroundingRefs ?? []).length).toBeGreaterThanOrEqual(1);
+
+				const slotRows = await pool`
+					SELECT slot_payload
+					FROM recent_cognition_slots
+					WHERE session_id = ${sessionId}
+					  AND agent_id = ${AGENT_ID}
+					LIMIT 1
+				`;
+				expect(slotRows.length).toBe(1);
+				const slotEntries = (Array.isArray(slotRows[0].slot_payload)
+					? slotRows[0].slot_payload
+					: JSON.parse(String(slotRows[0].slot_payload))) as Array<{
+					kind?: string;
+					key?: string;
+					basis?: string;
+				}>;
+				const assertionEntry = slotEntries.find(
+					(entry) => entry.kind === "assertion" && entry.key === "test:verify:first-hand",
+				);
+				expect(assertionEntry).toBeDefined();
+				expect(assertionEntry!.basis).toBe("first_hand");
+			},
+			30_000,
+		);
+
+		it(
+			"verified sketch-origin assertion reaches at most inference",
+			async () => {
+				const settlementId = "stl:sync-verify-sketch-cap:001";
+				const requestId = "sync-verify-sketch-cap:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key: "test:verify:sketch-cap",
+									claim: "sketch-origin assertion",
+									entityRefs: ["entity:user"],
+									basis: "belief",
+									provenance: "talker_sketch_explicit",
+									claimedGroundingRefs: [
+										{ kind: "user_message", ref: `request:${requestId}` },
+									],
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${"test:verify:sketch-cap"}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].basis).toBe("inference");
+
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					provenance?: string;
+					groundingVerificationLevel?: string;
+				};
+				expect(record.provenance).toBe("talker_sketch_explicit");
+				expect(record.groundingVerificationLevel).toBe("context_verified");
+
+				const slotRows = await pool`
+					SELECT slot_payload
+					FROM recent_cognition_slots
+					WHERE session_id = ${sessionId}
+					  AND agent_id = ${AGENT_ID}
+					LIMIT 1
+				`;
+				expect(slotRows.length).toBe(1);
+				const slotEntries = (Array.isArray(slotRows[0].slot_payload)
+					? slotRows[0].slot_payload
+					: JSON.parse(String(slotRows[0].slot_payload))) as Array<{
+					kind?: string;
+					key?: string;
+					basis?: string;
+				}>;
+				const assertionEntry = slotEntries.find(
+					(entry) => entry.kind === "assertion" && entry.key === "test:verify:sketch-cap",
+				);
+				expect(assertionEntry).toBeDefined();
+				expect(assertionEntry!.basis).toBe("inference");
+				expect(assertionEntry!.basis).not.toBe("first_hand");
+			},
+			30_000,
+		);
+
+		it(
+			"lower-version verification-upsert cannot beat higher-version correction",
+			async () => {
+				const key = "test:verify:version-priority";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId: "stl:verify-version-high:001",
+					requestId: "verify-version-high:001",
+					sessionId,
+					talkerTurnVersion: 9,
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key,
+									claim: "higher-version correction",
+									entityRefs: ["entity:user"],
+									basis: "belief",
+									provenance: "user_stated",
+									claimedGroundingRefs: [
+										{ kind: "user_message", ref: "request:verify-version-high:001" },
+									],
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId: "stl:verify-version-low:001",
+					requestId: "verify-version-low:001",
+					sessionId,
+					talkerTurnVersion: 3,
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key,
+									claim: "lower-version replay",
+									entityRefs: ["entity:user"],
+									basis: "belief",
+									provenance: "user_stated",
+									claimedGroundingRefs: [
+										{ kind: "user_message", ref: "request:verify-version-low:001" },
+									],
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+					LIMIT 1
+				`;
+				expect(rows.length).toBe(1);
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					claim?: string;
+					sourceTurnVersion?: number;
+				};
+				expect(record.claim).toBe("higher-version correction");
+				expect(record.sourceTurnVersion).toBe(9);
+
+				const eventRows = await pool`
+					SELECT id
+					FROM private_cognition_events
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+				`;
+				expect(eventRows.length).toBe(4);
 			},
 			30_000,
 		);
