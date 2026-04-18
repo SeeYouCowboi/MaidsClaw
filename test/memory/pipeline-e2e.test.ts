@@ -217,10 +217,14 @@ describeWithSkip.skipIf(skipPgTests)("memory pipeline e2e wiring (PG)", () => {
 		await testDb.cleanup();
 	});
 
-	it("bootstraps with mock embedding model and constructs the memory pipeline wiring", () => {
+	it("pipeline-e2e: embedding-enabled bootstrap wiring smoke test", () => {
 		expect(runtime.memoryTaskAgent).not.toBeNull();
 		expect(runtime.memoryPipelineStatus).toBe("ready");
 		expect(runtime.memoryPipelineReady).toBe(true);
+		expect(runtime.assertionCanonicalizationBundle).toBeDefined();
+		expect(runtime.assertionCanonicalizationBundle?.embeddingModelId).toBe(
+			"test/embed",
+		);
 		expect(sweeperStartSpy.mock.calls.length).toBe(1);
 	});
 
@@ -289,6 +293,7 @@ describeWithSkip.skipIf(false)(
 
 			expect(runtime.memoryTaskAgent).toBeNull();
 			expect(runtime.memoryPipelineStatus).toBe("missing_embedding_model");
+			expect(runtime.assertionCanonicalizationBundle).toBeUndefined();
 
 			const sessionId = "session:no-model";
 			const flushRequest: MemoryFlushRequest = {

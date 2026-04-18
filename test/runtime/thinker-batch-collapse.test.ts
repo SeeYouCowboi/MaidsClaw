@@ -13,6 +13,7 @@ import type {
 } from "../../src/jobs/durable-store.js";
 import type { JobPersistence } from "../../src/jobs/persistence.js";
 import { PgJobRunner } from "../../src/jobs/pg-runner.js";
+import type { CognitionCurrentRow } from "../../src/memory/cognition/private-cognition-current.js";
 import * as contestConflictApplicatorModule from "../../src/memory/cognition/contest-conflict-applicator.js";
 import * as relationIntentResolverModule from "../../src/memory/cognition/relation-intent-resolver.js";
 import * as organizeEnqueueModule from "../../src/memory/organize-enqueue.js";
@@ -317,14 +318,114 @@ function extractUserPrompt(request: AgentRunRequest | undefined): string {
 		.join("\n");
 }
 
+function makeCurrentAssertionRow(params: {
+	id: number;
+	key: string;
+	holderId: string;
+	claim: string;
+	entityRefs: string[];
+	status?: "active" | "retracted";
+	stance?:
+		| "hypothetical"
+		| "tentative"
+		| "accepted"
+		| "confirmed"
+		| "contested"
+		| "rejected"
+		| "abandoned";
+}): CognitionCurrentRow {
+	return {
+		id: params.id,
+		agent_id: AGENT_ID,
+		cognition_key: params.key,
+		kind: "assertion",
+		stance: params.stance ?? "accepted",
+		basis: "inference",
+		status: params.status ?? "active",
+		pre_contested_stance: null,
+		conflict_summary: null,
+		conflict_factor_refs_json: null,
+		summary_text: null,
+		record_json: JSON.stringify({
+			holderId: { kind: "pointer_key", value: params.holderId },
+			claim: params.claim,
+			entityRefs: params.entityRefs.map((value) => ({
+				kind: "pointer_key",
+				value,
+			})),
+		}),
+		source_event_id: params.id * 10,
+		updated_at: Date.now(),
+	};
+}
+
+function createMockCognitionProjectionRepo(
+	rows: CognitionCurrentRow[],
+): NonNullable<ThinkerWorkerDeps["cognitionProjectionRepo"]> {
+	return {
+		async upsertFromEvent() {},
+		async rebuild() {},
+		async getCurrent() {
+			return null;
+		},
+		async getAllCurrent() {
+			return rows;
+		},
+		async updateConflictFactors() {},
+		async patchRecordJsonSourceEventRef() {},
+		async resolveEntityByPointerKey() {
+			return null;
+		},
+	};
+}
+
+function createMockAssertionCanonicalizationBundle(params: {
+	neighbors: Array<{ nodeRef: string; similarity: number; nodeKind?: string }>;
+}): NonNullable<ThinkerWorkerDeps["assertionCanonicalization"]> {
+	return {
+		embeddingRepo: {
+			async upsert() {},
+			async query() {
+				return [];
+			},
+			async dimensionCheck() {
+				return true;
+			},
+			async deleteByModel() {
+				return 0;
+			},
+			async cosineSearch() {
+				return params.neighbors.map((neighbor) => ({
+					nodeRef: neighbor.nodeRef as NodeRef,
+					similarity: neighbor.similarity,
+					nodeKind: neighbor.nodeKind ?? "assertion",
+				}));
+			},
+		},
+		modelProvider: {
+			defaultEmbeddingModelId: "test/embed",
+			async chat() {
+				return [];
+			},
+			async embed() {
+				return [new Float32Array([0.1, 0.2, 0.3])];
+			},
+		},
+		embeddingModelId: "test/embed",
+	};
+}
+
 function createFixture(params: {
 	claimedVersion: number;
 	settlementBehavior: SettlementBehavior;
 	pendingPayloads?: CognitionThinkerJobPayload[];
 	withDurableJobStore?: boolean;
 	initialThinkerCommittedVersion?: number;
-	agentOutcome?: ReturnType<typeof makeSuccessOutcome>;
+	agentOutcome?: unknown;
 	changedNodeRefs?: string[];
+	assertionCanonicalization?: ThinkerWorkerDeps["assertionCanonicalization"];
+	cognitionProjectionRows?: CognitionCurrentRow[];
+	canonicalizationSimilarityThreshold?: number;
 }) {
 	const settlementCalls: string[] = [];
 	let capturedRequest: AgentRunRequest | undefined;
@@ -402,6 +503,12 @@ function createFixture(params: {
 		jobPersistence,
 		settlementLedger,
 		durableJobStore,
+		assertionCanonicalization: params.assertionCanonicalization,
+		cognitionProjectionRepo: params.cognitionProjectionRows
+			? createMockCognitionProjectionRepo(params.cognitionProjectionRows)
+			: undefined,
+		canonicalizationSimilarityThreshold:
+			params.canonicalizationSimilarityThreshold,
 	};
 
 	const readBySettlementSpy = jest
@@ -1369,6 +1476,102 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 
 		const prompt = fixture.getCapturedPrompt();
 		expect(prompt).toContain("Cognitive sketch from Talker: [auto-sketch] some fallback text");
+	});
+
+	it("batch chain: later corrected value wins within invocation", async () => {
+		const canonicalKey = "belief:batch-chain:canonical";
+		const oldClaim = "The user is in the kitchen";
+		const correctedClaim = "The user is in the library";
+
+		const fixture = createFixture({
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: {
+					sketch: "single-sketch-v7",
+					cognitiveSketchSource: "explicit",
+				},
+			},
+			assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+				neighbors: [{ nodeRef: "assertion:991", similarity: 0.92 }],
+			}),
+			cognitionProjectionRows: [
+				makeCurrentAssertionRow({
+					id: 991,
+					key: canonicalKey,
+					holderId: "self",
+					claim: "legacy",
+					entityRefs: ["entity:user", "entity:kitchen", "entity:library"],
+				}),
+			],
+			agentOutcome: {
+				schemaVersion: "rp_turn_outcome_v5",
+				publicReply: "ok",
+				privateCognition: {
+					ops: [
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "belief:draft:batch-chain:old",
+								holderId: { kind: "special", value: "self" },
+								claim: oldClaim,
+								entityRefs: [
+									{ kind: "pointer_key", value: "entity:user" },
+									{ kind: "pointer_key", value: "entity:kitchen" },
+								],
+								stance: "accepted",
+								basis: "first_hand",
+								provenance: "user_stated",
+								claimedGroundingRefs: [
+									{ kind: "user_message", ref: "request:req-7" },
+								],
+							},
+						},
+						{
+							op: "upsert",
+							record: {
+								kind: "assertion",
+								key: "belief:draft:batch-chain:new",
+								holderId: { kind: "special", value: "self" },
+								claim: correctedClaim,
+								entityRefs: [
+									{ kind: "pointer_key", value: "entity:user" },
+									{ kind: "pointer_key", value: "entity:library" },
+								],
+								stance: "accepted",
+								basis: "first_hand",
+								provenance: "user_stated",
+								claimedGroundingRefs: [
+									{ kind: "user_message", ref: "request:req-7" },
+								],
+							},
+						},
+					],
+				},
+				privateEpisodes: [],
+				publications: [],
+				relationIntents: [],
+				conflictFactors: [],
+			},
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+
+		const [projectionParams] = fixture.projectionManager.commitSettlement.mock.calls[0];
+		const upsertKeys = projectionParams.cognitionOps
+			.filter((op: { op: string }) => op.op === "upsert")
+			.map((op: { record: { key: string } }) => op.record.key);
+		expect(upsertKeys).toEqual([canonicalKey]);
+
+		const lastRecord = projectionParams.cognitionOps.find(
+			(op: { op: string }) => op.op === "upsert",
+		)?.record as {
+			claim?: string;
+			key: string;
+		};
+		expect(lastRecord.key).toBe(canonicalKey);
+		expect(lastRecord.claim).toBe(correctedClaim);
 	});
 
 	it("batch chain with mixed explicit/auto_fallback preserves per-turn cognitiveSketchSource", async () => {

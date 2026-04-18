@@ -73,6 +73,8 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			jobPersistence: runtime.jobPersistence,
 			settlementLedger: runtime.settlementLedger,
 			assertionCanonicalization: runtime.assertionCanonicalizationBundle,
+			canonicalizationSimilarityThreshold:
+				runtime.talkerThinkerConfig?.canonicalizationSimilarityThreshold,
 		});
 
 		await thinkerWorker({

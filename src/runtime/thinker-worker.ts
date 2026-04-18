@@ -20,6 +20,7 @@ import {
 	resolveLocalRefs,
 	type SettledArtifacts,
 } from "../memory/cognition/relation-intent-resolver.js";
+import { TERMINAL_STANCES } from "../memory/cognition/belief-revision.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import type {
@@ -60,6 +61,7 @@ import {
 	type PrivateEpisodeArtifact,
 	type RelationIntent,
 } from "./rp-turn-contract.js";
+import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
 
 export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
 
@@ -250,6 +252,519 @@ type RecentCognitionEntry = {
 	sourceTurnVersion?: number;
 };
 
+type AssertionCanonicalizationCandidate = {
+	key: string;
+	holderId: string;
+	claim: string;
+	entityRefs: string[];
+	basis?: AssertionBasis;
+	status: string;
+	stance: AssertionRecordV4["stance"] | null;
+	isTerminal: boolean;
+};
+
+type AssertionCanonicalizationCurrentCandidate =
+	AssertionCanonicalizationCandidate & {
+		id: number;
+	};
+
+const CANONICALIZATION_MIN_SIMILARITY = 0.86;
+const CANONICALIZATION_WEAK_BASES = new Set<AssertionBasis>([
+	"belief",
+	"inference",
+	"introspection",
+]);
+
+function safeParseJsonObject(value: unknown): Record<string, unknown> {
+	if (!value) {
+		return {};
+	}
+
+	if (typeof value === "object") {
+		return value as Record<string, unknown>;
+	}
+
+	if (typeof value !== "string") {
+		return {};
+	}
+
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (parsed && typeof parsed === "object") {
+			return parsed as Record<string, unknown>;
+		}
+	} catch {
+		// noop
+	}
+
+	return {};
+}
+
+function extractAssertionHolderPointerKey(raw: Record<string, unknown>): string | null {
+	if (typeof raw.holderPointerKey === "string" && raw.holderPointerKey.length > 0) {
+		return raw.holderPointerKey;
+	}
+	if (typeof raw.sourcePointerKey === "string" && raw.sourcePointerKey.length > 0) {
+		return raw.sourcePointerKey;
+	}
+
+	const holderId = raw.holderId;
+	if (typeof holderId === "string" && holderId.length > 0) {
+		return holderId;
+	}
+	if (
+		holderId &&
+		typeof holderId === "object" &&
+		typeof (holderId as { value?: unknown }).value === "string"
+	) {
+		const value = (holderId as { value: string }).value;
+		if (value.length > 0) {
+			return value;
+		}
+	}
+
+	return null;
+}
+
+function extractAssertionClaim(raw: Record<string, unknown>): string | null {
+	if (typeof raw.claim === "string" && raw.claim.length > 0) {
+		return raw.claim;
+	}
+	if (typeof raw.predicate === "string" && raw.predicate.length > 0) {
+		return raw.predicate;
+	}
+	return null;
+}
+
+function normalizeEntityRefValuesFromRaw(rawEntityRefs: unknown): string[] {
+	if (!Array.isArray(rawEntityRefs)) {
+		return [];
+	}
+
+	const refs: string[] = [];
+	for (const item of rawEntityRefs) {
+		if (typeof item === "string" && item.length > 0) {
+			refs.push(item);
+			continue;
+		}
+		if (
+			item &&
+			typeof item === "object" &&
+			typeof (item as { value?: unknown }).value === "string"
+		) {
+			const value = (item as { value: string }).value;
+			if (value.length > 0) {
+				refs.push(value);
+			}
+		}
+	}
+
+	return [...new Set(refs)].sort();
+}
+
+function extractAssertionEntityRefValues(raw: Record<string, unknown>): string[] {
+	if (Array.isArray(raw.entityPointerKeys)) {
+		return normalizeEntityRefValuesFromRaw(raw.entityPointerKeys);
+	}
+	if (typeof raw.targetPointerKey === "string" && raw.targetPointerKey.length > 0) {
+		return [raw.targetPointerKey];
+	}
+	return normalizeEntityRefValuesFromRaw(raw.entityRefs);
+}
+
+function normalizeEntityRefValues(entityRefs: CognitionEntityRef[]): string[] {
+	const refs: string[] = [];
+	for (const ref of entityRefs) {
+		if (typeof ref.value === "string" && ref.value.length > 0) {
+			refs.push(ref.value);
+		}
+	}
+	return [...new Set(refs)].sort();
+}
+
+function hasEntityOverlap(left: string[], right: string[]): boolean {
+	if (left.length === 0 || right.length === 0) {
+		return false;
+	}
+
+	const rightSet = new Set(right);
+	for (const value of left) {
+		if (rightSet.has(value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isCjkCodePoint(codePoint: number): boolean {
+	return (
+		(codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+		(codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+		(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+		(codePoint >= 0x20000 && codePoint <= 0x2a6df) ||
+		(codePoint >= 0x2a700 && codePoint <= 0x2b73f) ||
+		(codePoint >= 0x2b740 && codePoint <= 0x2b81f) ||
+		(codePoint >= 0x2b820 && codePoint <= 0x2ceaf) ||
+		(codePoint >= 0x2f800 && codePoint <= 0x2fa1f)
+	);
+}
+
+function isMostlyCjkWithoutAsciiWhitespace(text: string): boolean {
+	if (/[\t\n\r\f\v ]/.test(text)) {
+		return false;
+	}
+
+	let total = 0;
+	let cjk = 0;
+	for (const char of text) {
+		if (/\s/u.test(char)) {
+			continue;
+		}
+		total += 1;
+		const codePoint = char.codePointAt(0);
+		if (codePoint !== undefined && isCjkCodePoint(codePoint)) {
+			cjk += 1;
+		}
+	}
+
+	if (total === 0) {
+		return false;
+	}
+
+	return cjk / total >= 0.6;
+}
+
+function hasStrongGroundingRef(assertion: AssertionRecordV4): boolean {
+	for (const entry of assertion.claimedGroundingRefs ?? []) {
+		if (typeof entry.ref !== "string") {
+			continue;
+		}
+		if (entry.ref.startsWith("request:") || entry.ref.startsWith("episode:")) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function shouldSkipWeakAssertionCanonicalization(assertion: AssertionRecordV4): boolean {
+	const basis = assertion.basis;
+	if (!basis || !CANONICALIZATION_WEAK_BASES.has(basis)) {
+		return false;
+	}
+	return !hasStrongGroundingRef(assertion);
+}
+
+function buildCanonicalizationQueryText(assertion: AssertionRecordV4): string {
+	const holder = assertion.holderId.value;
+	const entityRefs = normalizeEntityRefValues(assertion.entityRefs);
+	return `holder=${holder} | claim=${assertion.claim} | entities=${entityRefs.join(",")}`;
+}
+
+function parseAssertionNodeRefId(nodeRef: string): number | null {
+	const match = /^assertion:(\d+)$/.exec(nodeRef);
+	if (!match) {
+		return null;
+	}
+	const id = Number(match[1]);
+	if (!Number.isInteger(id) || id <= 0) {
+		return null;
+	}
+	return id;
+}
+
+function toCanonicalizationCandidateFromCurrent(
+	row: CognitionCurrentRow,
+): AssertionCanonicalizationCurrentCandidate | null {
+	if (row.kind !== "assertion") {
+		return null;
+	}
+
+	const record = safeParseJsonObject(row.record_json);
+	const holderId = extractAssertionHolderPointerKey(record);
+	const claim = extractAssertionClaim(record);
+	if (!holderId || !claim) {
+		return null;
+	}
+
+	const entityRefs = extractAssertionEntityRefValues(record);
+	const stance = typeof row.stance === "string"
+		? (row.stance as AssertionRecordV4["stance"])
+		: null;
+	const basis = typeof row.basis === "string"
+		? (row.basis as AssertionBasis)
+		: undefined;
+
+	return {
+		id: row.id,
+		key: row.cognition_key,
+		holderId,
+		claim,
+		entityRefs,
+		basis,
+		status: row.status,
+		stance,
+		isTerminal: stance !== null && TERMINAL_STANCES.has(stance),
+	};
+}
+
+function toCanonicalizationCandidateFromAssertion(
+	assertion: AssertionRecordV4,
+): AssertionCanonicalizationCandidate {
+	return {
+		key: assertion.key,
+		holderId: assertion.holderId.value,
+		claim: assertion.claim,
+		entityRefs: normalizeEntityRefValues(assertion.entityRefs),
+		basis: assertion.basis,
+		status: "active",
+		stance: assertion.stance,
+		isTerminal: TERMINAL_STANCES.has(assertion.stance),
+	};
+}
+
+function collectHolderCandidates(
+	holderId: string,
+	currentByHolder: Map<string, Map<string, AssertionCanonicalizationCandidate>>,
+	overlayByHolder: Map<string, Map<string, AssertionCanonicalizationCandidate>>,
+): AssertionCanonicalizationCandidate[] {
+	const merged = new Map<string, AssertionCanonicalizationCandidate>();
+	for (const candidate of currentByHolder.get(holderId)?.values() ?? []) {
+		merged.set(candidate.key, candidate);
+	}
+	for (const candidate of overlayByHolder.get(holderId)?.values() ?? []) {
+		merged.set(candidate.key, candidate);
+	}
+	return [...merged.values()];
+}
+
+function addOverlayCandidate(
+	candidate: AssertionCanonicalizationCandidate,
+	overlayByKey: Map<string, AssertionCanonicalizationCandidate>,
+	overlayByHolder: Map<string, Map<string, AssertionCanonicalizationCandidate>>,
+): void {
+	overlayByKey.set(candidate.key, candidate);
+	let holderMap = overlayByHolder.get(candidate.holderId);
+	if (!holderMap) {
+		holderMap = new Map();
+		overlayByHolder.set(candidate.holderId, holderMap);
+	}
+	holderMap.set(candidate.key, candidate);
+}
+
+async function canonicalizeThinkerAssertionKeysBeforeProjection(params: {
+	ops: CognitionOp[];
+	agentId: string;
+	cognitionProjectionRepo: CognitionProjectionRepo;
+	assertionCanonicalization?: AssertionCanonicalizationBundle;
+	canonicalizationSimilarityThreshold?: number;
+}): Promise<CognitionOp[]> {
+	if (!params.assertionCanonicalization) {
+		return params.ops;
+	}
+
+	const similarityThreshold =
+		typeof params.canonicalizationSimilarityThreshold === "number"
+			? params.canonicalizationSimilarityThreshold
+			: CANONICALIZATION_MIN_SIMILARITY;
+
+	const currentRows = await params.cognitionProjectionRepo.getAllCurrent(
+		params.agentId,
+	);
+	const currentById = new Map<number, AssertionCanonicalizationCurrentCandidate>();
+	const currentByHolder = new Map<
+		string,
+		Map<string, AssertionCanonicalizationCandidate>
+	>();
+	for (const row of currentRows) {
+		const candidate = toCanonicalizationCandidateFromCurrent(row);
+		if (!candidate) {
+			continue;
+		}
+		currentById.set(candidate.id, candidate);
+		let holderMap = currentByHolder.get(candidate.holderId);
+		if (!holderMap) {
+			holderMap = new Map();
+			currentByHolder.set(candidate.holderId, holderMap);
+		}
+		holderMap.set(candidate.key, candidate);
+	}
+
+	const overlayByKey = new Map<string, AssertionCanonicalizationCandidate>();
+	const overlayByHolder = new Map<
+		string,
+		Map<string, AssertionCanonicalizationCandidate>
+	>();
+
+	const canonicalizedOps: CognitionOp[] = [];
+	const assertionUpsertIndexByKey = new Map<string, number>();
+	const pushCanonicalizedOp = (nextOp: CognitionOp): void => {
+		if (nextOp.op === "upsert" && nextOp.record.kind === "assertion") {
+			const key = nextOp.record.key;
+			const existingIndex = assertionUpsertIndexByKey.get(key);
+			if (existingIndex !== undefined) {
+				canonicalizedOps[existingIndex] = nextOp;
+				return;
+			}
+			assertionUpsertIndexByKey.set(key, canonicalizedOps.length);
+			canonicalizedOps.push(nextOp);
+			return;
+		}
+
+		canonicalizedOps.push(nextOp);
+	};
+
+	for (const op of params.ops) {
+		if (op.op !== "upsert" || op.record.kind !== "assertion") {
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		const assertion = op.record as AssertionRecordV4;
+		if (
+			assertion.provenance !== "user_stated" &&
+			assertion.provenance !== "explicit_settlement"
+		) {
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		if (shouldSkipWeakAssertionCanonicalization(assertion)) {
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		const holderId = assertion.holderId.value;
+		const opEntityRefs = normalizeEntityRefValues(assertion.entityRefs);
+		const holderCandidates = collectHolderCandidates(
+			holderId,
+			currentByHolder,
+			overlayByHolder,
+		);
+
+		if (
+			opEntityRefs.length > 0 &&
+			!holderCandidates.some((candidate) =>
+				hasEntityOverlap(opEntityRefs, candidate.entityRefs),
+			)
+		) {
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		const queryText = buildCanonicalizationQueryText(assertion);
+		let neighbors: Array<{
+			nodeRef: NodeRef;
+			similarity: number;
+			nodeKind: string;
+		}> = [];
+		try {
+			const [queryEmbedding] = await params.assertionCanonicalization.modelProvider.embed(
+				[queryText],
+				"query_expansion",
+				params.assertionCanonicalization.embeddingModelId,
+			);
+			if (!queryEmbedding || queryEmbedding.length === 0) {
+				pushCanonicalizedOp(op);
+				continue;
+			}
+
+			neighbors = await params.assertionCanonicalization.embeddingRepo.cosineSearch(
+				queryEmbedding,
+				{
+					nodeKind: "assertion",
+					agentId: params.agentId,
+					modelId: params.assertionCanonicalization.embeddingModelId,
+					limit: 12,
+				},
+			);
+		} catch (error) {
+			console.warn(
+				"[thinker_worker] assertion canonicalization query failed (non-fatal):",
+				error,
+			);
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		const requiresEntityOverlapForCjk =
+			opEntityRefs.length > 0 && isMostlyCjkWithoutAsciiWhitespace(assertion.claim);
+		const eligibleByKey = new Map<string, AssertionCanonicalizationCandidate>();
+		for (const neighbor of neighbors) {
+			if (neighbor.nodeKind !== "assertion") {
+				continue;
+			}
+			if (neighbor.similarity < similarityThreshold) {
+				continue;
+			}
+
+			const candidateId = parseAssertionNodeRefId(neighbor.nodeRef);
+			if (!candidateId) {
+				continue;
+			}
+
+			const currentCandidate = currentById.get(candidateId);
+			if (!currentCandidate) {
+				continue;
+			}
+
+			const candidate =
+				overlayByKey.get(currentCandidate.key) ?? currentCandidate;
+			if (candidate.holderId !== holderId) {
+				continue;
+			}
+			if (candidate.status === "retracted") {
+				continue;
+			}
+			if (candidate.stance === "contested") {
+				continue;
+			}
+			if (candidate.isTerminal) {
+				continue;
+			}
+			if (
+				requiresEntityOverlapForCjk &&
+				!hasEntityOverlap(opEntityRefs, candidate.entityRefs)
+			) {
+				continue;
+			}
+
+			eligibleByKey.set(candidate.key, candidate);
+		}
+
+		if (eligibleByKey.size !== 1) {
+			pushCanonicalizedOp(op);
+			continue;
+		}
+
+		const canonicalCandidate = [...eligibleByKey.values()][0];
+		const canonicalKey = canonicalCandidate.key;
+		const rewrittenRecord =
+			assertion.key === canonicalKey
+				? assertion
+				: ({
+					...assertion,
+					key: canonicalKey,
+				} as AssertionRecordV4);
+
+		if (assertion.key !== canonicalKey) {
+			pushCanonicalizedOp({
+				...op,
+				record: rewrittenRecord,
+			});
+		} else {
+			pushCanonicalizedOp(op);
+		}
+
+		addOverlayCandidate(
+			toCanonicalizationCandidateFromAssertion(rewrittenRecord),
+			overlayByKey,
+			overlayByHolder,
+		);
+	}
+
+	return canonicalizedOps;
+}
+
 export type AssertionCanonicalizationBundle = {
 	embeddingRepo: EmbeddingRepo;
 	modelProvider: MemoryTaskModelProvider;
@@ -271,6 +786,7 @@ export type ThinkerWorkerDeps = {
 	settlementLedger?: SettlementLedger;
 	durableJobStore?: DurableJobStore;
 	assertionCanonicalization?: AssertionCanonicalizationBundle;
+	canonicalizationSimilarityThreshold?: number;
 };
 
 function toConversationMessages(records: InteractionRecord[]): ChatMessage[] {
@@ -514,11 +1030,17 @@ function parseEpisodesBySettlement(
 	let attributedCount = 0;
 	for (const episode of episodes) {
 		if (episode.settlementId && memberSet.has(episode.settlementId)) {
-			grouped.get(episode.settlementId)!.push(episode);
+			const attributed = grouped.get(episode.settlementId);
+			if (attributed) {
+				attributed.push(episode);
+			}
 			attributedCount++;
 		} else {
 			// Unattributed episodes fall back to effectiveSettlementId
-			grouped.get(effectiveSettlementId)!.push(episode);
+			const fallback = grouped.get(effectiveSettlementId);
+			if (fallback) {
+				fallback.push(episode);
+			}
 		}
 	}
 
@@ -861,9 +1383,18 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				settlementPayload?.cognitiveSketchSource,
 				authoritativeSourceTurnVersion,
 			);
+			const canonicalizedCognitionOps = await canonicalizeThinkerAssertionKeysBeforeProjection({
+				ops: cognitionOps,
+				agentId: payload.agentId,
+				cognitionProjectionRepo:
+					deps.cognitionProjectionRepo ?? new PgCognitionProjectionRepo(deps.sql),
+				assertionCanonicalization: deps.assertionCanonicalization,
+				canonicalizationSimilarityThreshold:
+					deps.canonicalizationSimilarityThreshold,
+			});
 			const committedAt = Date.now();
 			const slotEntries = buildCognitionSlotPayloadForThinker(
-				cognitionOps,
+				canonicalizedCognitionOps,
 				effectiveSettlementId,
 				committedAt,
 				authoritativeSourceTurnVersion,
@@ -913,7 +1444,10 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						);
 						const fallback = grouped.get(memberId) ?? [];
 						if (fallback.length > 0) {
-							grouped.get(effectiveSettlementId)!.push(...fallback);
+							const effectiveGroup = grouped.get(effectiveSettlementId);
+							if (effectiveGroup) {
+								effectiveGroup.push(...fallback);
+							}
 							grouped.set(memberId, []);
 						}
 						try {
@@ -960,7 +1494,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				requestId: batchMode
 					? effectiveSettlementId.replace(/^stl:/, "")
 					: (payload.requestId ?? effectiveSettlementId.replace(/^stl:/, "")),
-				cognitionOps,
+				cognitionOps: canonicalizedCognitionOps,
 				privateEpisodes: effectiveEpisodes,
 				publications: canonicalOutcome.publications ?? [],
 				areaStateArtifacts: areaStateArtifacts ?? [],
@@ -1041,7 +1575,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					string,
 					{ kind: CognitionKind; nodeRef: string }
 				>();
-				for (const op of cognitionOps) {
+				for (const op of canonicalizedCognitionOps) {
 					if (op.op === "upsert") {
 						const projection = await txCognitionProjectionRepo.getCurrent(
 							payload.agentId,
@@ -1094,7 +1628,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					cognitionKey: string;
 					nodeRef: string;
 				}> = [];
-				for (const op of cognitionOps) {
+				for (const op of canonicalizedCognitionOps) {
 					if (
 						op.op === "upsert" &&
 						op.record.kind === "assertion" &&
@@ -1160,8 +1694,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			}
 			// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)
 			const shouldUpdateIndex =
-				cognitionOps.length >= 3 ||
-				cognitionOps.some(
+				canonicalizedCognitionOps.length >= 3 ||
+				canonicalizedCognitionOps.some(
 					(op) =>
 						op.op === "upsert" &&
 						(op.record as AssertionRecordV4).stance === "contested",

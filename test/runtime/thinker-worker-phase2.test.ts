@@ -25,6 +25,7 @@ import {
 import type { TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import { ExplicitSettlementProcessor } from "../../src/memory/explicit-settlement-processor.js";
 import { CognitionRepository } from "../../src/memory/cognition/cognition-repo.js";
+import type { CognitionCurrentRow } from "../../src/memory/cognition/private-cognition-current.js";
 import type { AgentLoop } from "../../src/core/agent-loop.js";
 import { AgentRegistry } from "../../src/agents/registry.js";
 import type { AgentProfile } from "../../src/agents/profile.js";
@@ -203,6 +204,9 @@ async function runThinkerWorkerIntegration(opts: {
 	talkerTurnVersion?: number;
 	settlementPayloadOverrides?: Partial<TurnSettlementPayload>;
 	outcome: unknown;
+	assertionCanonicalization?: ThinkerWorkerDeps["assertionCanonicalization"];
+	cognitionProjectionRepo?: ThinkerWorkerDeps["cognitionProjectionRepo"];
+	canonicalizationSimilarityThreshold?: number;
 }): Promise<void> {
 	const {
 		pool,
@@ -212,6 +216,9 @@ async function runThinkerWorkerIntegration(opts: {
 		talkerTurnVersion = 1,
 		settlementPayloadOverrides,
 		outcome,
+		assertionCanonicalization,
+		cognitionProjectionRepo,
+		canonicalizationSimilarityThreshold,
 	} = opts;
 
 	const ledger = new PgSettlementLedgerRepo(pool);
@@ -303,6 +310,9 @@ async function runThinkerWorkerIntegration(opts: {
 			agentId === AGENT_ID ? mockAgentLoop : null,
 		jobPersistence: mockJobs,
 		settlementLedger: settlementLedgerAdapter,
+		assertionCanonicalization,
+		cognitionProjectionRepo,
+		canonicalizationSimilarityThreshold,
 	};
 
 	const worker = createThinkerWorker(deps);
@@ -321,6 +331,149 @@ async function createSessionId(pool: postgres.Sql): Promise<string> {
 		const session = await repos.sessionRepo.createSession(AGENT_ID);
 		return session.sessionId;
 	});
+}
+
+function makeCurrentAssertionRow(params: {
+	id: number;
+	key: string;
+	holderId: string;
+	claim: string;
+	entityRefs: string[];
+	status?: "active" | "retracted";
+	stance?:
+		| "hypothetical"
+		| "tentative"
+		| "accepted"
+		| "confirmed"
+		| "contested"
+		| "rejected"
+		| "abandoned";
+	basis?: "first_hand" | "hearsay" | "inference" | "introspection" | "belief";
+}): CognitionCurrentRow {
+	return {
+		id: params.id,
+		agent_id: AGENT_ID,
+		cognition_key: params.key,
+		kind: "assertion",
+		stance: params.stance ?? "accepted",
+		basis: params.basis ?? "inference",
+		status: params.status ?? "active",
+		pre_contested_stance: null,
+		conflict_summary: null,
+		conflict_factor_refs_json: null,
+		summary_text: null,
+		record_json: JSON.stringify({
+			holderId: { kind: "pointer_key", value: params.holderId },
+			claim: params.claim,
+			entityRefs: params.entityRefs.map((value) => ({
+				kind: "pointer_key",
+				value,
+			})),
+		}),
+		source_event_id: params.id * 10,
+		updated_at: Date.now(),
+	};
+}
+
+function createMockCognitionProjectionRepo(
+	rows: CognitionCurrentRow[],
+): NonNullable<ThinkerWorkerDeps["cognitionProjectionRepo"]> {
+	return {
+		async upsertFromEvent() {},
+		async rebuild() {},
+		async getCurrent() {
+			return null;
+		},
+		async getAllCurrent() {
+			return rows;
+		},
+		async updateConflictFactors() {},
+		async patchRecordJsonSourceEventRef() {},
+		async resolveEntityByPointerKey() {
+			return null;
+		},
+	};
+}
+
+function createMockAssertionCanonicalizationBundle(params: {
+	neighbors: Array<{ nodeRef: string; similarity: number; nodeKind?: string }>;
+	onEmbed?: () => void;
+	onCosineSearch?: () => void;
+}): NonNullable<ThinkerWorkerDeps["assertionCanonicalization"]> {
+	return {
+		embeddingRepo: {
+			async upsert() {},
+			async query() {
+				return [];
+			},
+			async dimensionCheck() {
+				return true;
+			},
+			async deleteByModel() {
+				return 0;
+			},
+			async cosineSearch() {
+				params.onCosineSearch?.();
+				return params.neighbors.map((neighbor) => ({
+					nodeRef: neighbor.nodeRef as NodeRef,
+					similarity: neighbor.similarity,
+					nodeKind: neighbor.nodeKind ?? "assertion",
+				}));
+			},
+		},
+		modelProvider: {
+			defaultEmbeddingModelId: "test/embed",
+			async chat() {
+				return [];
+			},
+			async embed() {
+				params.onEmbed?.();
+				return [new Float32Array([0.1, 0.2, 0.3])];
+			},
+		},
+		embeddingModelId: "test/embed",
+	};
+}
+
+function makeAssertionUpsert(params: {
+	key: string;
+	claim: string;
+	entityRefs: string[];
+	basis?: "first_hand" | "hearsay" | "inference" | "introspection" | "belief";
+	provenance?: string;
+	claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
+}) {
+	return {
+		op: "upsert",
+		record: {
+			kind: "assertion",
+			key: params.key,
+			holderId: { kind: "special", value: "self" },
+			claim: params.claim,
+			entityRefs: params.entityRefs.map((value) => ({
+				kind: "pointer_key",
+				value,
+			})),
+			stance: "accepted",
+			basis: params.basis ?? "first_hand",
+			provenance: params.provenance ?? "user_stated",
+			claimedGroundingRefs:
+				params.claimedGroundingRefs ?? [{ kind: "user_message", ref: "request:canonical-1" }],
+		},
+	} as const;
+}
+
+function parseRowRecordJson(value: unknown): Record<string, unknown> {
+	if (!value) {
+		return {};
+	}
+	if (typeof value === "object") {
+		return value as Record<string, unknown>;
+	}
+	if (typeof value === "string") {
+		return JSON.parse(value) as Record<string, unknown>;
+	}
+	return {};
 }
 
 describe.skipIf(skipPgTests)(
@@ -1056,6 +1209,420 @@ describe.skipIf(skipPgTests)(
 			},
 			30_000,
 		);
+
+		it(
+			"user-anchored correction rewrites to one canonical key",
+			async () => {
+				const settlementId = "stl:canonicalize-single-match:001";
+				const requestId = "canonicalize-single-match:001";
+				const sessionId = await createSessionId(pool);
+
+				const canonicalKey = "belief:canonical:user-location";
+				const originalKey = "belief:draft:user-location:v2";
+				const correctedClaim = "User relocated to the library";
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+						neighbors: [{ nodeRef: "assertion:101", similarity: 0.93 }],
+					}),
+					cognitionProjectionRepo: createMockCognitionProjectionRepo([
+						makeCurrentAssertionRow({
+							id: 101,
+							key: canonicalKey,
+							holderId: "self",
+							claim: "User was in the hall",
+							entityRefs: ["entity:user", "entity:library"],
+						}),
+					]),
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key: originalKey,
+									claim: correctedClaim,
+									entityRefs: ["entity:user", "entity:library"],
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT cognition_key, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key IN (${canonicalKey}, ${originalKey})
+				`;
+				expect(rows.length).toBe(1);
+				expect(rows[0].cognition_key).toBe(canonicalKey);
+				const record = parseRowRecordJson(rows[0].record_json);
+				expect(record.claim).toBe(correctedClaim);
+			},
+			30_000,
+		);
+
+		it("no-match case preserves original key", async () => {
+			const settlementId = "stl:canonicalize-no-match:001";
+			const requestId = "canonicalize-no-match:001";
+			const sessionId = await createSessionId(pool);
+
+			const canonicalKey = "belief:canonical:no-match";
+			const originalKey = "belief:draft:no-match";
+
+			await runThinkerWorkerIntegration({
+				pool,
+				settlementId,
+				requestId,
+				sessionId,
+				assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+					neighbors: [],
+				}),
+				cognitionProjectionRepo: createMockCognitionProjectionRepo([
+					makeCurrentAssertionRow({
+						id: 111,
+						key: canonicalKey,
+						holderId: "self",
+						claim: "legacy",
+						entityRefs: ["entity:user"],
+					}),
+				]),
+				outcome: {
+					schemaVersion: "rp_turn_outcome_v5",
+					publicReply: "ok",
+					privateCognition: {
+						ops: [
+							makeAssertionUpsert({
+								key: originalKey,
+								claim: "No canonical neighbor should match",
+								entityRefs: ["entity:user"],
+							}),
+						],
+					},
+					privateEpisodes: [],
+					publications: [],
+					relationIntents: [],
+					conflictFactors: [],
+				},
+			});
+
+			const rows = await pool`
+				SELECT cognition_key
+				FROM private_cognition_current
+				WHERE agent_id = ${AGENT_ID}
+				  AND cognition_key IN (${canonicalKey}, ${originalKey})
+			`;
+			expect(rows.length).toBe(1);
+			expect(rows[0].cognition_key).toBe(originalKey);
+		}, 30_000);
+
+		it("multi-match case preserves original key", async () => {
+			const settlementId = "stl:canonicalize-multi-match:001";
+			const requestId = "canonicalize-multi-match:001";
+			const sessionId = await createSessionId(pool);
+
+			const canonicalKeyA = "belief:canonical:multi-a";
+			const canonicalKeyB = "belief:canonical:multi-b";
+			const originalKey = "belief:draft:multi";
+
+			await runThinkerWorkerIntegration({
+				pool,
+				settlementId,
+				requestId,
+				sessionId,
+				assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+					neighbors: [
+						{ nodeRef: "assertion:121", similarity: 0.92 },
+						{ nodeRef: "assertion:122", similarity: 0.9 },
+					],
+				}),
+				cognitionProjectionRepo: createMockCognitionProjectionRepo([
+					makeCurrentAssertionRow({
+						id: 121,
+						key: canonicalKeyA,
+						holderId: "self",
+						claim: "candidate a",
+						entityRefs: ["entity:user", "entity:room"],
+					}),
+					makeCurrentAssertionRow({
+						id: 122,
+						key: canonicalKeyB,
+						holderId: "self",
+						claim: "candidate b",
+						entityRefs: ["entity:user", "entity:room"],
+					}),
+				]),
+				outcome: {
+					schemaVersion: "rp_turn_outcome_v5",
+					publicReply: "ok",
+					privateCognition: {
+						ops: [
+							makeAssertionUpsert({
+								key: originalKey,
+								claim: "ambiguous match should not rewrite",
+								entityRefs: ["entity:user", "entity:room"],
+							}),
+						],
+					},
+					privateEpisodes: [],
+					publications: [],
+					relationIntents: [],
+					conflictFactors: [],
+				},
+			});
+
+			const rows = await pool`
+				SELECT cognition_key
+				FROM private_cognition_current
+				WHERE agent_id = ${AGENT_ID}
+				  AND cognition_key = ${originalKey}
+			`;
+			expect(rows.length).toBe(1);
+		}, 30_000);
+
+		it("terminal/retracted/cross-holder neighbors excluded", async () => {
+			const settlementId = "stl:canonicalize-exclusions:001";
+			const requestId = "canonicalize-exclusions:001";
+			const sessionId = await createSessionId(pool);
+
+			const originalKey = "belief:draft:exclusions";
+
+			await runThinkerWorkerIntegration({
+				pool,
+				settlementId,
+				requestId,
+				sessionId,
+				assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+					neighbors: [
+						{ nodeRef: "assertion:131", similarity: 0.93 },
+						{ nodeRef: "assertion:132", similarity: 0.92 },
+						{ nodeRef: "assertion:133", similarity: 0.91 },
+					],
+				}),
+				cognitionProjectionRepo: createMockCognitionProjectionRepo([
+					makeCurrentAssertionRow({
+						id: 131,
+						key: "belief:terminal",
+						holderId: "self",
+						claim: "terminal candidate",
+						entityRefs: ["entity:user"],
+						stance: "rejected",
+					}),
+					makeCurrentAssertionRow({
+						id: 132,
+						key: "belief:retracted",
+						holderId: "self",
+						claim: "retracted candidate",
+						entityRefs: ["entity:user"],
+						status: "retracted",
+					}),
+					makeCurrentAssertionRow({
+						id: 133,
+						key: "belief:other-holder",
+						holderId: "user",
+						claim: "other holder candidate",
+						entityRefs: ["entity:user"],
+					}),
+				]),
+				outcome: {
+					schemaVersion: "rp_turn_outcome_v5",
+					publicReply: "ok",
+					privateCognition: {
+						ops: [
+							makeAssertionUpsert({
+								key: originalKey,
+								claim: "all candidates should be excluded",
+								entityRefs: ["entity:user"],
+							}),
+						],
+					},
+					privateEpisodes: [],
+					publications: [],
+					relationIntents: [],
+					conflictFactors: [],
+				},
+			});
+
+			const rows = await pool`
+				SELECT cognition_key
+				FROM private_cognition_current
+				WHERE agent_id = ${AGENT_ID}
+				  AND cognition_key = ${originalKey}
+			`;
+			expect(rows.length).toBe(1);
+		}, 30_000);
+
+		it("weak assertion excluded from canonicalization", async () => {
+			const settlementId = "stl:canonicalize-weak-excluded:001";
+			const requestId = "canonicalize-weak-excluded:001";
+			const sessionId = await createSessionId(pool);
+
+			let embedCalled = false;
+			let cosineCalled = false;
+			const canonicalKey = "belief:canonical:weak";
+			const originalKey = "belief:draft:weak";
+
+			await runThinkerWorkerIntegration({
+				pool,
+				settlementId,
+				requestId,
+				sessionId,
+				assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+					neighbors: [{ nodeRef: "assertion:141", similarity: 0.95 }],
+					onEmbed: () => {
+						embedCalled = true;
+					},
+					onCosineSearch: () => {
+						cosineCalled = true;
+					},
+				}),
+				cognitionProjectionRepo: createMockCognitionProjectionRepo([
+					makeCurrentAssertionRow({
+						id: 141,
+						key: canonicalKey,
+						holderId: "self",
+						claim: "candidate",
+						entityRefs: ["entity:user"],
+					}),
+				]),
+				outcome: {
+					schemaVersion: "rp_turn_outcome_v5",
+					publicReply: "ok",
+					privateCognition: {
+						ops: [
+							makeAssertionUpsert({
+								key: originalKey,
+								claim: "weak assertion should skip canonicalization",
+								entityRefs: ["entity:user"],
+								basis: "belief",
+								claimedGroundingRefs: [
+									{ kind: "existing_cognition", ref: "cognition:prior:weak" },
+								],
+							}),
+						],
+					},
+					privateEpisodes: [],
+					publications: [],
+					relationIntents: [],
+					conflictFactors: [],
+				},
+			});
+
+			expect(embedCalled).toBe(false);
+			expect(cosineCalled).toBe(false);
+			const rows = await pool`
+				SELECT cognition_key
+				FROM private_cognition_current
+				WHERE agent_id = ${AGENT_ID}
+				  AND cognition_key IN (${canonicalKey}, ${originalKey})
+			`;
+			expect(rows.length).toBe(1);
+			expect(rows[0].cognition_key).toBe(originalKey);
+		}, 30_000);
+
+		it("batch-local overlay: later batch member sees earlier correction", async () => {
+			const settlementId = "stl:canonicalize-overlay:001";
+			const requestId = "canonicalize-overlay:001";
+			const sessionId = await createSessionId(pool);
+
+			const canonicalKey = "belief:canonical:overlay";
+			const firstOriginalKey = "belief:draft:overlay:first";
+			const secondOriginalKey = "belief:draft:overlay:second";
+			const secondClaim = "User is definitely in the kitchen";
+			let cosineSearchCount = 0;
+
+			await runThinkerWorkerIntegration({
+				pool,
+				settlementId,
+				requestId,
+				sessionId,
+				assertionCanonicalization: createMockAssertionCanonicalizationBundle({
+					neighbors: [{ nodeRef: "assertion:151", similarity: 0.91 }],
+					onCosineSearch: () => {
+						cosineSearchCount += 1;
+					},
+				}),
+				cognitionProjectionRepo: createMockCognitionProjectionRepo([
+					makeCurrentAssertionRow({
+						id: 151,
+						key: canonicalKey,
+						holderId: "self",
+						claim: "legacy claim",
+						entityRefs: ["entity:legacy"],
+					}),
+				]),
+				outcome: {
+					schemaVersion: "rp_turn_outcome_v5",
+					publicReply: "ok",
+					privateCognition: {
+						ops: [
+							makeAssertionUpsert({
+								key: firstOriginalKey,
+								claim: "User moved toward the kitchen",
+								entityRefs: ["entity:legacy", "entity:user", "entity:kitchen"],
+							}),
+							makeAssertionUpsert({
+								key: secondOriginalKey,
+								claim: secondClaim,
+								entityRefs: ["entity:user", "entity:kitchen"],
+							}),
+						],
+					},
+					privateEpisodes: [],
+					publications: [],
+					relationIntents: [],
+					conflictFactors: [],
+				},
+			});
+
+			expect(cosineSearchCount).toBe(2);
+
+			const eventRows = await pool`
+				SELECT cognition_key
+				FROM private_cognition_events
+				WHERE agent_id = ${AGENT_ID}
+				  AND settlement_id = ${settlementId}
+				ORDER BY id ASC
+			`;
+			expect(eventRows.length).toBe(1);
+			expect(eventRows[0].cognition_key).toBe(canonicalKey);
+
+			const slotRows = await pool`
+				SELECT slot_payload
+				FROM recent_cognition_slots
+				WHERE session_id = ${sessionId}
+				  AND agent_id = ${AGENT_ID}
+				LIMIT 1
+			`;
+			expect(slotRows.length).toBe(1);
+			const slotPayload = JSON.parse(String(slotRows[0].slot_payload)) as Array<{
+				key?: string;
+				summary?: string;
+			}>;
+			expect(slotPayload.length).toBe(1);
+			expect(slotPayload[0].key).toBe(canonicalKey);
+			expect(slotPayload[0].summary).toContain(secondClaim);
+
+			const currentRows = await pool`
+				SELECT record_json
+				FROM private_cognition_current
+				WHERE agent_id = ${AGENT_ID}
+				  AND cognition_key = ${canonicalKey}
+				LIMIT 1
+			`;
+			expect(currentRows.length).toBe(1);
+			const current = parseRowRecordJson(currentRows[0].record_json);
+			expect(current.claim).toBe(secondClaim);
+		}, 30_000);
 
 		it(
 			"sketch-only assertion with hallucinated claimed refs remains weak/unverified pre-verification",
