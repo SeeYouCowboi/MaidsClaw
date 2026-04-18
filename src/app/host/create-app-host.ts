@@ -72,6 +72,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			durableJobStore: store as DurableJobStore,
 			jobPersistence: runtime.jobPersistence,
 			settlementLedger: runtime.settlementLedger,
+			assertionCanonicalization: runtime.assertionCanonicalizationBundle,
 		});
 
 		await thinkerWorker({

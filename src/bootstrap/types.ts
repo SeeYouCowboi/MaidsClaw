@@ -113,11 +113,17 @@ export type RuntimeBootstrapResult = {
 	sharedBlockRepo: SharedBlockRepo;
 	jobPersistence: JobPersistence;
 	thinkerGlobalConcurrencyCap?: number;
+	assertionCanonicalizationBundle?: {
+		embeddingRepo: import("../storage/domain-repos/contracts/embedding-repo.js").EmbeddingRepo;
+		modelProvider: import("../memory/task-agent.js").MemoryTaskModelProvider;
+		embeddingModelId: string;
+	};
 	talkerThinkerConfig: {
 		enabled: boolean;
 		stalenessThreshold: number;
 		softBlockTimeoutMs: number;
 		softBlockPollIntervalMs: number;
+		canonicalizationSimilarityThreshold?: number;
 	};
 	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;

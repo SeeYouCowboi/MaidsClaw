@@ -1,6 +1,68 @@
 import type postgres from "postgres";
 import type { RecentCognitionSlotRepo } from "../contracts/recent-cognition-slot-repo.js";
 
+/**
+ * Compact slot entries: same-key winner selection and active-entry budget enforcement.
+ * Same `kind:key` duplicates → keep highest sourceTurnVersion (missing = 0), then committedAt.
+ * Retracted entries excluded from 64-entry active budget. Oldest active trimmed first.
+ */
+export function compactSlotEntries(entries: unknown[], activeCap: number = 64): unknown[] {
+	type SlotEntry = {
+		kind?: string;
+		key?: string;
+		status?: string;
+		sourceTurnVersion?: number;
+		committedAt?: number;
+	};
+
+	const winnerMap = new Map<string, { entry: unknown; typed: SlotEntry; index: number }>();
+	const nonKeyed: Array<{ entry: unknown; index: number }> = [];
+
+	for (let i = 0; i < entries.length; i++) {
+		const e = entries[i] as SlotEntry;
+		const kind = e?.kind;
+		const key = e?.key;
+		if (!kind || !key) {
+			nonKeyed.push({ entry: entries[i], index: i });
+			continue;
+		}
+		const compoundKey = `${kind}:${key}`;
+		const existing = winnerMap.get(compoundKey);
+		if (!existing) {
+			winnerMap.set(compoundKey, { entry: entries[i], typed: e, index: i });
+		} else {
+			const existingVer = existing.typed.sourceTurnVersion ?? 0;
+			const newVer = e.sourceTurnVersion ?? 0;
+			if (newVer > existingVer) {
+				winnerMap.set(compoundKey, { entry: entries[i], typed: e, index: i });
+			} else if (newVer === existingVer) {
+				const existingTs = existing.typed.committedAt ?? 0;
+				const newTs = e.committedAt ?? 0;
+				if (newTs >= existingTs) {
+					winnerMap.set(compoundKey, { entry: entries[i], typed: e, index: i });
+				}
+			}
+		}
+	}
+
+	const combined = [
+		...Array.from(winnerMap.values()).map((w) => ({ entry: w.entry, typed: w.typed, index: w.index })),
+		...nonKeyed.map((n) => ({ entry: n.entry, typed: n.entry as SlotEntry, index: n.index })),
+	].sort((a, b) => a.index - b.index);
+
+	const active = combined.filter((c) => c.typed?.status !== "retracted");
+	const retracted = combined.filter((c) => c.typed?.status === "retracted");
+
+	if (active.length > activeCap) {
+		const trimmed = active.slice(active.length - activeCap);
+		return [...retracted, ...trimmed]
+			.sort((a, b) => a.index - b.index)
+			.map((c) => c.entry);
+	}
+
+	return combined.map((c) => c.entry);
+}
+
 export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
   private readonly sql: postgres.Sql;
 
@@ -74,9 +136,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
         entries = entries.concat(newEntries);
 
-        if (entries.length > 64) {
-          entries = entries.slice(entries.length - 64);
-        }
+        entries = compactSlotEntries(entries);
         const payloadJson = JSON.stringify(entries);
 
         const result = await tx`
@@ -137,9 +197,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
         entries = entries.concat(newEntries);
 
-        if (entries.length > 64) {
-          entries = entries.slice(entries.length - 64);
-        }
+        entries = compactSlotEntries(entries);
         const payloadJson = JSON.stringify(entries);
 
         // Only advance last_settlement_id if this is the highest version seen so far
@@ -200,9 +258,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
     entries = entries.concat(newEntries);
 
-    if (entries.length > 64) {
-      entries = entries.slice(entries.length - 64);
-    }
+    entries = compactSlotEntries(entries);
 
     const payloadJson = JSON.stringify(entries);
     await this.sql`

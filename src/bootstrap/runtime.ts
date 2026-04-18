@@ -1760,8 +1760,16 @@ export function bootstrapRuntime(
     recentCognitionSlotRepo,
     sharedBlockRepo,
     jobPersistence: resolvedJobPersistence,
-    thinkerGlobalConcurrencyCap,
-    talkerThinkerConfig,
+		thinkerGlobalConcurrencyCap,
+		assertionCanonicalizationBundle:
+			embeddingRepo && memoryTaskModelProvider && memoryEmbeddingModelId
+				? {
+						embeddingRepo,
+						modelProvider: memoryTaskModelProvider,
+						embeddingModelId: memoryEmbeddingModelId,
+					}
+				: undefined,
+		talkerThinkerConfig,
     maidenDecisionLog,
     shutdown,
     segmenterReady,

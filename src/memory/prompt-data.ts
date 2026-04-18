@@ -94,6 +94,10 @@ type RecentCognitionEntry = {
   conflictEvidence?: string[];
   conflictSummary?: string;
   conflictFactorRefs?: string[];
+  basis?: string;
+  provenance?: string;
+  groundingVerificationLevel?: string;
+  sourceTurnVersion?: number;
 };
 
 export function formatRecentCognitionFromPayload(slotPayload: string | undefined): string {
@@ -117,22 +121,35 @@ function formatRecentCognitionEntries(entries: RecentCognitionEntry[]): string {
     return "";
   }
 
+  const activeEntries = entries.filter((e) => e.status !== "retracted");
+  if (activeEntries.length === 0) {
+    return "";
+  }
+
   const latestByKey = new Map<string, RecentCognitionEntry>();
-  for (const entry of entries) {
+  for (const entry of activeEntries) {
     const compoundKey = `${entry.kind}:${entry.key}`;
     const existing = latestByKey.get(compoundKey);
-    if (!existing || (entry.committedAt ?? 0) >= (existing.committedAt ?? 0)) {
+    if (!existing) {
       latestByKey.set(compoundKey, entry);
+    } else {
+      const existingVer = existing.sourceTurnVersion ?? 0;
+      const newVer = entry.sourceTurnVersion ?? 0;
+      if (newVer > existingVer) {
+        latestByKey.set(compoundKey, entry);
+      } else if (newVer === existingVer && (entry.committedAt ?? 0) >= (existing.committedAt ?? 0)) {
+        latestByKey.set(compoundKey, entry);
+      }
     }
   }
 
   const compacted = Array.from(latestByKey.values());
 
   const activeCommitments = compacted.filter(
-    (e) => e.kind === "commitment" && e.status !== "retracted",
+    (e) => e.kind === "commitment",
   );
   const nonCommitments = compacted.filter(
-    (e) => e.kind !== "commitment" || e.status === "retracted",
+    (e) => e.kind !== "commitment",
   );
 
   nonCommitments.sort((a, b) => (b.committedAt ?? 0) - (a.committedAt ?? 0));
@@ -149,15 +166,42 @@ function formatRecentCognitionEntries(entries: RecentCognitionEntry[]): string {
 
   return rendered
     .map((entry) => {
-      if (entry.status === "retracted") {
-        return `• [${entry.kind}:${entry.key}] (retracted)`;
-      }
       if (entry.stance === "contested") {
         return formatContestedEntry(entry);
       }
-      return `• [${entry.kind}:${entry.key}] ${entry.summary}`;
+      const prefix = getWeakMemoryPrefix(entry);
+      return `• [${entry.kind}:${entry.key}] ${prefix}${entry.summary}`;
     })
     .join("\n");
+}
+
+/**
+ * Returns true when an entry should be treated as low-confidence / fragmentary
+ * memory based on its grounding metadata.
+ */
+function isWeakMemoryEntry(entry: RecentCognitionEntry): boolean {
+  const basis = entry.basis ?? "unknown";
+  const verification = entry.groundingVerificationLevel ?? "unverified";
+
+  if (verification === "unverified") return true;
+  if (basis === "belief" || basis === "unknown") return true;
+  if (basis === "inference" && verification !== "strong_verified") return true;
+
+  return false;
+}
+
+/**
+ * Produces a `[basis=… provenance=… verification=…] ` prefix for weak-memory
+ * entries, or an empty string for strongly-grounded entries.
+ */
+function getWeakMemoryPrefix(entry: RecentCognitionEntry): string {
+  if (!isWeakMemoryEntry(entry)) return "";
+
+  const basis = entry.basis ?? "unknown";
+  const provenance = entry.provenance ?? "legacy_unknown";
+  const verification = entry.groundingVerificationLevel ?? "unverified";
+
+  return `[basis=${basis} provenance=${provenance} verification=${verification}] `;
 }
 
 export function formatContestedEntry(entry: RecentCognitionEntry): string {
@@ -292,8 +336,11 @@ export async function getTypedRetrievalSurfaceAsync(
     viewerContext.viewer_agent_id,
   );
   const recentEntries = parseRecentCognitionPayload(payload);
+  const activeRecentEntries = recentEntries.filter(
+    (e) => e.status !== "retracted" && (e.summary?.trim().length ?? 0) > 0,
+  );
   const recentCognitionKeys = new Set<string>();
-  for (const entry of recentEntries) {
+  for (const entry of activeRecentEntries) {
     const key = entry.key?.trim();
     const kind = entry.kind?.trim();
     if (!key || key.length === 0) {
@@ -304,7 +351,7 @@ export async function getTypedRetrievalSurfaceAsync(
       recentCognitionKeys.add(`${kind}:${key}`);
     }
   }
-  const recentCognitionTexts = recentEntries.map((entry) => entry.summary);
+  const recentCognitionTexts = activeRecentEntries.map((entry) => entry.summary);
   const messageRecords = await repos.interactionRepo.getMessageRecords(viewerContext.session_id);
   const conversationTexts = messageRecords
     .slice(-12)
