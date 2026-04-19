@@ -128,6 +128,7 @@ export type WritePathResult = {
 	errors: { beatId: string; error: Error }[];
 	perBeatStats?: BeatStats[];
 	capturedToolCallLog?: CachedToolCallLog;
+	recoveryReplaysAttempted?: number;
 };
 
 type WritePathDebugOptions = {
@@ -682,15 +683,16 @@ export async function executeThinkerPath(
 		weight?: number;
 	}> = [];
 
-	// Phase-2 scenario overlay: simulate batch-collapse only. Chain 6 beats 1-2
-	// are deferred and their sketches surface as pending jobs when chain 6 beat3
-	// triggers the batch sketch chain assembly in thinker-worker. Recovery
-	// simulation is intentionally out of scope for v1: thinker-worker's
-	// idempotency guard (slot.thinkerCommittedVersion >= payload.talkerTurnVersion)
-	// makes "crash + replay-after-many-later-beats" return replayed_noop in
-	// production, so a scenario-level replay cannot meaningfully re-write events.
+	// Phase-2 scenario overlay: simulate batch-collapse and recovery replay.
+	// Chain 6 beats 1-2 are deferred and their sketches surface as pending jobs
+	// when chain 6 beat3 triggers the batch sketch chain assembly in thinker-worker.
+	// Recovery: after all beats, chain 7 beat 2's handler is replayed to exercise
+	// the thinker-worker idempotency guard (slot.thinkerCommittedVersion >=
+	// payload.talkerTurnVersion). The replay should noop because beat 3 already
+	// committed at a higher version.
 	const BATCH_DEFER_BEAT_IDS = new Set<string>(["cg-06-b1", "cg-06-b2"]);
 	const BATCH_TRIGGER_BEAT_IDS = new Set<string>(["cg-06-b3"]);
+	const RECOVERY_REPLAY_BEAT_IDS = new Set<string>(["cg-07-b2"]);
 
 	type DeferredBeat = {
 		settlementId: string;
@@ -700,6 +702,15 @@ export async function executeThinkerPath(
 		privateEpisodes: PrivateEpisodeArtifact[];
 	};
 	const batchDeferred: DeferredBeat[] = [];
+
+	type RecoveryReplayEntry = {
+		sessionId: string;
+		agentId: string;
+		settlementId: string;
+		talkerTurnVersion: number;
+		requestId: string;
+	};
+	const recoveryReplayEntries: RecoveryReplayEntry[] = [];
 
 	const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
 	const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
@@ -1060,6 +1071,17 @@ export async function executeThinkerPath(
 				});
 			}
 
+			// Save recovery replay entries for post-loop idempotency verification.
+			if (RECOVERY_REPLAY_BEAT_IDS.has(beatId)) {
+				recoveryReplayEntries.push({
+					sessionId: settlement.sessionId,
+					agentId: settlement.agentId,
+					settlementId: settlement.settlementId,
+					talkerTurnVersion,
+					requestId,
+				});
+			}
+
 			// After commit, collect episode IDs from DB for deferred logic edges.
 			const rows = await infra.repos.episode.readBySettlement(
 				settlement.settlementId,
@@ -1140,10 +1162,32 @@ export async function executeThinkerPath(
 		);
 	}
 
+	// Recovery replay: re-invoke saved beats after all normal processing to
+	// exercise the thinker-worker idempotency guard.  Because later beats
+	// have already committed at higher versions, each replay should be a noop.
+	let recoveryReplaysAttempted = 0;
+	for (const entry of recoveryReplayEntries) {
+		try {
+			await handler({
+				payload: {
+					sessionId: entry.sessionId,
+					agentId: entry.agentId,
+					settlementId: entry.settlementId,
+					talkerTurnVersion: entry.talkerTurnVersion,
+					requestId: entry.requestId,
+				},
+			});
+			recoveryReplaysAttempted += 1;
+		} catch (error) {
+			errors.push({ beatId: `recovery:${entry.settlementId}`, error: toError(error) });
+		}
+	}
+
 	return {
 		beatsProcessed,
 		errors,
 		perBeatStats,
+		recoveryReplaysAttempted,
 	};
 }
 

@@ -95,6 +95,7 @@ export type ScenarioRunResult = {
   schemaName: string;
   writePath: "live" | "scripted" | "settlement" | "thinker";
   phase: "full" | "resume" | "probe_only";
+  recoveryReplaysAttempted?: number;
 };
 
 export type ScenarioHandle = {

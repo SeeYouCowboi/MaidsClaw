@@ -412,7 +412,7 @@ function makeCognitionSearch(services: MemoryToolServices): MemoryToolDefinition
         },
         active_only: {
           type: "boolean",
-          description: "If true, return only active cognition (default for commitments).",
+          description: "If true, return only active cognition; defaults to false (all entries including retracted).",
         },
       },
       additionalProperties: false,

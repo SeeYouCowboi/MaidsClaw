@@ -149,7 +149,7 @@ export class CognitionSearchService {
   }
 
   async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
-    const effectiveActiveOnly = params.activeOnly ?? true;
+    const effectiveActiveOnly = params.activeOnly ?? false;
     const limit = params.limit ?? 100;
 
     let hits: CognitionHit[];

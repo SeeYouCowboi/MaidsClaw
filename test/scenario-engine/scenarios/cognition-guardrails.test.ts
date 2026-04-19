@@ -163,10 +163,11 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     `;
     expect(rows).toHaveLength(COGNITION_GUARDRAILS_CORRECTION_KEYS.length);
     for (const row of rows) {
-      // Task 5 guardrail (b) caps user_stated basis at "inference" pre-verification.
-      // Without authoritative grounding refs, Task 7 verification has nothing to
-      // upgrade, so corrections stay at "inference" — the faithful v1 outcome.
-      expect(row.basis).toBe("inference");
+      // Correction beats attach request: grounding refs. Task 7 verification
+      // resolves them against the mock interaction repo, upgrading user_stated
+      // provenance from the Task 5 pre-verification cap ("inference") to
+      // "first_hand" — the authoritative user-anchored basis.
+      expect(row.basis).toBe("first_hand");
     }
   });
 
@@ -255,5 +256,16 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     const retracts = rows.filter((row) => row.op === "retract");
     expect(retracts).toHaveLength(EXPECTED_ENGLISH_AUDIT_CHAINS);
     expect(rows.length).toBeGreaterThan(EXPECTED_ENGLISH_AUDIT_CHAINS);
+  });
+
+  it("S) recovery replay exercised idempotency guard without errors", () => {
+    // After all 120 beats, chain 7 beat 2's handler was replayed.  The
+    // thinker-worker idempotency guard should have treated it as a noop
+    // because beat 3 already committed at a higher version.
+    expect(handle.runResult.recoveryReplaysAttempted).toBeGreaterThanOrEqual(1);
+    const recoveryErrors = handle.runResult.errors.filter((e) =>
+      e.beatId.startsWith("recovery:"),
+    );
+    expect(recoveryErrors).toHaveLength(0);
   });
 });

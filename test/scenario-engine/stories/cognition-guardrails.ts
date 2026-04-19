@@ -359,6 +359,12 @@ function chineseMysteryChainBeats(chain: number): StoryBeat[] {
       stance: "accepted",
       basis: "first_hand",
       provenance: "user_stated",
+      claimedGroundingRefs: [
+        {
+          kind: "user_message",
+          ref: `request:scenario_cognition-guardrails_beat_cg-${no}-b2`,
+        },
+      ],
     });
   }
 
@@ -372,6 +378,12 @@ function chineseMysteryChainBeats(chain: number): StoryBeat[] {
       stance: "accepted",
       basis: "first_hand",
       provenance: "user_stated",
+      claimedGroundingRefs: [
+        {
+          kind: "user_message",
+          ref: `request:scenario_cognition-guardrails_beat_cg-${no}-b3`,
+        },
+      ],
     });
   }
 

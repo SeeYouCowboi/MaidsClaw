@@ -189,7 +189,7 @@ describe("CognitionSearchService (PG repos)", () => {
     expect(hits).toHaveLength(1);
   });
 
-  it("defaults activeOnly=true for commitment searches", async () => {
+  it("defaults activeOnly=false for searches when not explicitly provided", async () => {
     let observedActiveOnly: boolean | undefined;
     const searchRepo = makeSearchRepo({
       async searchByKind(_agentId, _kind, options) {
@@ -205,7 +205,7 @@ describe("CognitionSearchService (PG repos)", () => {
       query: "x",
     });
 
-    expect(observedActiveOnly).toBe(true);
+    expect(observedActiveOnly).toBe(false);
   });
 });
 

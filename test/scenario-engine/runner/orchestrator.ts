@@ -195,6 +195,7 @@ export async function runScenario(
     schemaName: infra.schemaName,
     writePath: resolvedOptions.writePath,
     phase: resolvedOptions.phase ?? "full",
+    recoveryReplaysAttempted: writeResult.recoveryReplaysAttempted,
   };
 
   return {
