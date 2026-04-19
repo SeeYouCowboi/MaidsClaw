@@ -67,8 +67,8 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
       FROM private_cognition_events
       WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
         AND settlement_id NOT LIKE '%::verification:%'
-        AND stance = 'contested'
-        AND pre_contested_stance = 'accepted'
+        AND record_json->>'stance' = 'contested'
+        AND record_json->>'preContestedStance' = 'accepted'
     `;
     expect(rows[0]?.count).toBe(EXPECTED_CONTESTED);
   });
@@ -189,14 +189,18 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
   });
 
   it("N2) same-beat sourceEpisodeId refs produce at least context_verified", async () => {
-    const rows = await handle.infra.sql<Array<{ count: number }>>`
-      SELECT COUNT(*)::int AS count
-      FROM private_cognition_current
+    const rows = await handle.infra.sql<Array<{ key: string; verification: string | null }>>`
+      SELECT DISTINCT ON (cognition_key)
+        cognition_key AS key,
+        record_json->>'groundingVerificationLevel' AS verification
+      FROM private_cognition_events
       WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
         AND cognition_key IN ('cg:assertion:11', 'cg:assertion:12', 'cg:assertion:13')
+        AND settlement_id LIKE '%::verification:%'
         AND record_json->>'groundingVerificationLevel' IN ('context_verified', 'strong_verified')
+      ORDER BY cognition_key, id ASC
     `;
-    expect(rows[0]?.count).toBe(3);
+    expect(rows).toHaveLength(3);
   });
 
   it("O) fake episode refs remain unverified with verifiedGroundingRefs=[]", async () => {
