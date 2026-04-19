@@ -489,6 +489,10 @@ export async function createAppHost(
 	let stopped = false;
 
 	const start = async (): Promise<void> => {
+		// Ensure the CJK segmenter has finished loading shared aliases before
+		// accepting requests, so the very first query gets correct tokenization.
+		await runtime.segmenterReady;
+
 		if (options.role === "server") {
 			server?.start();
 			started = true;

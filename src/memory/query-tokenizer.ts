@@ -49,6 +49,33 @@ export function tokenizeQuery(text: string): string[] {
             tokens.push(seg);
           }
         }
+        // Bridge bigrams: recover single-char CJK modifiers that jieba
+        // emits as standalone tokens (filtered above by len >= 2). Pair
+        // each non-stopword single char with adjacent segment characters
+        // so "银怀表" produces "银怀" alongside "怀表", making the query
+        // distinguishable from bare "怀表".
+        for (let i = 0; i < jiebaSegments.length; i++) {
+          const seg = jiebaSegments[i];
+          if (seg.length !== 1 || !CJK_CHAR_RE.test(seg)) continue;
+          if (CJK_STOPWORDS.has(seg) || NOISE_TOKEN_RE.test(seg)) continue;
+          // Forward bigram: this char + first char of next segment
+          if (i + 1 < jiebaSegments.length) {
+            const next = jiebaSegments[i + 1];
+            const nextFirst = [...next][0];
+            if (nextFirst && CJK_CHAR_RE.test(nextFirst)) {
+              tokens.push(seg + nextFirst);
+            }
+          }
+          // Backward bigram: last char of previous segment + this char
+          if (i > 0) {
+            const prev = jiebaSegments[i - 1];
+            const prevChars = [...prev];
+            const prevLast = prevChars[prevChars.length - 1];
+            if (prevLast && CJK_CHAR_RE.test(prevLast)) {
+              tokens.push(prevLast + seg);
+            }
+          }
+        }
       } else {
         // Legacy fallback: full run + sliding bigrams.
         const cjkRuns: string[] = [];

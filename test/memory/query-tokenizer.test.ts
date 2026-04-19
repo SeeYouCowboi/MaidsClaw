@@ -52,9 +52,10 @@ describe("tokenizeQuery — CJK text (jieba-backed)", () => {
     expect(tokenizeQuery("好")).toEqual([]);
   });
 
-  it("drops two-character strings that jieba splits into two single chars", () => {
-    // "好的" is segmented by jieba as ["好", "的"] — both are filtered by len >= 2.
-    expect(tokenizeQuery("好的")).toEqual([]);
+  it("recovers two-character string via bridge bigram when jieba splits into single chars", () => {
+    // "好的" is segmented by jieba as ["好", "的"]. "好" is a non-stopword
+    // single char, so a bridge bigram "好的" is generated.
+    expect(tokenizeQuery("好的")).toEqual(["好的"]);
   });
 });
 

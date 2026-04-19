@@ -129,19 +129,45 @@ function isPrivateAliasScanEnabled(): boolean {
 }
 
 /**
- * True iff [aliasStart, aliasEnd) start and end positions both coincide
- * with some jieba token boundary in `spans`. This is the conservative
- * disambiguation rule for the private-alias substring scan: it accepts
- * `小红` when jieba breaks the surrounding run as `小|红` or `小红`, and
- * rejects it when jieba sees a longer covering word like `小红色`.
+ * Common single-character CJK function words that jieba may merge with an
+ * adjacent content word.  Used to relax the boundary check below: when an
+ * alias start/end falls *inside* a jieba token, we still accept it if the
+ * non-aligned sliver consists entirely of these function words.
  *
- * Known limitation: when jieba splits ambiguously (e.g. `小红|色` for
- * `小红色`), both boundaries align and the alias is accepted as a false
- * positive. The downstream impact is one extra entry in
- * resolvedEntityIds — not a security issue (no cross-agent leakage),
- * just minor over-recall. The rule can be tightened to "alias spans a
- * contiguous run of complete tokens" if shadow data shows the
- * false-positive rate matters.
+ * Kept in sync with query-tokenizer.ts's CJK_STOPWORDS.
+ */
+const CJK_BOUNDARY_STOPWORDS = new Set([
+  "的", "了", "是", "在", "和", "也", "就", "都",
+  "有", "着", "把", "被", "让", "给", "从", "到",
+  "对", "向", "跟", "比", "而", "又", "或", "但",
+  "与", "之", "以", "为", "于", "则", "其", "所",
+  "这", "那", "什", "么", "个", "们", "不", "没",
+]);
+
+/** True iff every character in `s` is a CJK function/stop word. */
+function allFunctionWords(s: string): boolean {
+  if (s.length === 0) return false;
+  for (const ch of s) {
+    if (!CJK_BOUNDARY_STOPWORDS.has(ch)) return false;
+  }
+  return true;
+}
+
+/**
+ * True iff [aliasStart, aliasEnd) start and end positions both coincide
+ * with some jieba token boundary in `spans`, with a relaxation for
+ * function-word prefixes/suffixes.
+ *
+ * Strict match: alias start/end lands exactly on a span boundary.
+ * Relaxed match: alias start/end falls inside a span, but the non-aligned
+ * portion (prefix or suffix) consists entirely of CJK function words.
+ * This handles the common case where jieba merges a leading particle with
+ * the next content word (e.g. "和小红" → alias "小红" starts inside the
+ * span, but the prefix "和" is a function word).
+ *
+ * The rule still rejects aliases that are fully covered by a longer jieba
+ * word (e.g. "小红" inside "小红色") because in that case the non-aligned
+ * portion "色" is a content word, not a function word.
  */
 function alignsToJiebaBoundaries(
   aliasStart: number,
@@ -152,7 +178,29 @@ function alignsToJiebaBoundaries(
   let endHit = false;
   for (const span of spans) {
     if (span.start === aliasStart) startHit = true;
+    // Relaxed start: alias begins inside a span whose leading prefix is
+    // entirely CJK function words (e.g. "和|小红" where "和" is a stopword).
+    if (
+      !startHit &&
+      span.start < aliasStart &&
+      aliasStart < span.end &&
+      allFunctionWords(span.text.slice(0, aliasStart - span.start))
+    ) {
+      startHit = true;
+    }
+
     if (span.end === aliasEnd) endHit = true;
+    // Relaxed end: alias ends inside a span whose trailing suffix is
+    // entirely CJK function words.
+    if (
+      !endHit &&
+      span.start < aliasEnd &&
+      aliasEnd < span.end &&
+      allFunctionWords(span.text.slice(aliasEnd - span.start))
+    ) {
+      endHit = true;
+    }
+
     if (startHit && endHit) return true;
   }
   return startHit && endHit;
