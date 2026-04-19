@@ -21,6 +21,7 @@ import {
   executeLivePath,
   executeScriptedPath,
   executeSettlementPath,
+  executeThinkerPath,
   type WritePathResult,
 } from "./write-paths.js";
 import { assertToolCallPatterns } from "../probes/tool-call-asserter.js";
@@ -144,10 +145,11 @@ export async function runScenario(
     deleteCheckpoint(story.id);
   }
 
-  // Settlement path doesn't need dialogue for its core processing. Avoid
-  // triggering LLM-based dialogue generation when no cache exists.
+  // Settlement and thinker paths don't need dialogue for their core processing.
+  // Avoid triggering LLM-based dialogue generation when no cache exists.
   const dialogue: GeneratedDialogue[] =
-    resolvedOptions.writePath === "settlement"
+    resolvedOptions.writePath === "settlement" ||
+    resolvedOptions.writePath === "thinker"
       ? (loadCachedDialogue(story.id) ?? [])
       : await generateOrLoadDialogue(story);
 
@@ -239,6 +241,8 @@ async function dispatchWritePath(
   switch (writePath) {
     case "settlement":
       return executeSettlementPath(infra, story, options);
+    case "thinker":
+      return executeThinkerPath(infra, story, options);
     case "scripted":
       return executeScriptedPath(infra, story, dialogue, options);
     case "live":

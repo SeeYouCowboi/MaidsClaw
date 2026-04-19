@@ -173,9 +173,9 @@ export async function diagnoseProbeFailure(
   probe: ProbeDefinition,
   missed: string[],
   infra: ScenarioInfra,
-  writePath: "live" | "scripted" | "settlement",
+  writePath: "live" | "scripted" | "settlement" | "thinker",
 ): Promise<DiagnosisResult[]> {
-  if (writePath === "settlement") {
+  if (writePath === "settlement" || writePath === "thinker") {
     return [];
   }
 

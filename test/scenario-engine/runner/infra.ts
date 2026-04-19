@@ -42,7 +42,7 @@ function getAppTestUrl(): string {
 }
 
 export type RunOptions = {
-  writePath: "live" | "scripted" | "settlement";
+  writePath: "live" | "scripted" | "settlement" | "thinker";
   phase?: "full" | "resume" | "probe_only";
   compareWithSettlement?: boolean;
   keepSchema?: boolean;
@@ -93,7 +93,7 @@ export type ScenarioRunResult = {
   errors: { beatId: string; error: Error }[];
   elapsedMs: number;
   schemaName: string;
-  writePath: "live" | "scripted" | "settlement";
+  writePath: "live" | "scripted" | "settlement" | "thinker";
   phase: "full" | "resume" | "probe_only";
 };
 

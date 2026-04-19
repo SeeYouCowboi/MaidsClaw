@@ -654,6 +654,406 @@ export async function executeLivePath(
 	};
 }
 
+export async function executeThinkerPath(
+	infra: ScenarioInfra,
+	story: Story,
+	options?: WritePathDebugOptions,
+): Promise<WritePathResult> {
+	const { createThinkerWorker } = await import(
+		"../../../src/runtime/thinker-worker.js"
+	);
+	const { ProjectionManager } = await import(
+		"../../../src/memory/projection/projection-manager.js"
+	);
+	const { AgentRegistry } = await import(
+		"../../../src/agents/registry.js"
+	);
+
+	const settlements = generateSettlements(story);
+	const errors: Array<{ beatId: string; error: Error }> = [];
+	const perBeatStats: BeatStats[] = [];
+	const beatById = new Map(story.beats.map((beat) => [beat.id, beat]));
+	const cumulativeEpisodeIdByLocalRef = new Map<string, number>();
+	const deferredEdges: Array<{
+		beatId: string;
+		fromLocalRef: string;
+		toLocalRef: string;
+		edgeType: string;
+		weight?: number;
+	}> = [];
+
+	const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
+	const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
+
+	const projectionManager = new ProjectionManager(
+		infra.repos.episode,
+		cognitionEventRepo,
+		infra.repos.cognition,
+		null,
+		areaWorldProjectionRepo,
+	);
+
+	const ledger = infra.repos.settlementLedger;
+	const settlementLedgerAdapter = {
+		check: (id: string) => ledger.check(id),
+		rawStatus: (id: string) => ledger.rawStatus(id),
+		markPending: (id: string, aid: string) => ledger.markPending(id, aid),
+		markClaimed: (id: string, by: string) => ledger.markClaimed(id, by),
+		markApplying: (id: string, aid: string, hash?: string) =>
+			ledger.markApplying(id, aid, hash),
+		markApplied: (id: string) => ledger.markApplied(id),
+		markReplayedNoop: (id: string) => ledger.markReplayedNoop(id),
+		markConflict: (id: string, msg: string) => ledger.markConflict(id, msg),
+		markFailed: (id: string, msg: string, retryable?: boolean) =>
+			retryable
+				? ledger.markFailedRetryScheduled(id, msg)
+				: ledger.markFailedTerminal(id, msg),
+		markTalkerCommitted: (id: string, aid: string) =>
+			ledger.markTalkerCommitted(id, aid),
+		markThinkerProjecting: (id: string, aid: string) =>
+			ledger.markThinkerProjecting(id, aid),
+	};
+
+	const registry = new AgentRegistry();
+	registry.register({
+		id: SCENARIO_DEFAULT_AGENT_ID,
+		role: "rp_agent",
+		lifecycle: "persistent",
+		userFacing: true,
+		outputMode: "freeform",
+		modelId: "scenario-thinker-scripted",
+		toolPermissions: [],
+		maxDelegationDepth: 1,
+		lorebookEnabled: true,
+		narrativeContextEnabled: true,
+	});
+
+	// Scripted outcomes keyed by settlementId, cursor-advanced per loop iteration.
+	const outcomesBySettlementId = new Map<string, unknown>();
+	let currentSettlementId = "";
+	let currentRequestId = "";
+	let currentPayload:
+		| Awaited<
+				ReturnType<
+					import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
+				>
+			>
+		| undefined;
+
+	const mockInteractionRepo = {
+		async getSettlementPayload(_sessionId: string, _requestId: string) {
+			// Scenario runner processes beats serially; always return the active payload.
+			return currentPayload;
+		},
+		async getMessageRecords() {
+			return [];
+		},
+		async commit() {},
+		async runInTransaction<T>(
+			fn: (tx: { interactionRepo: unknown }) => Promise<T>,
+		) {
+			return fn({ interactionRepo: mockInteractionRepo });
+		},
+		async settlementExists() {
+			return true;
+		},
+		async findRecordByCorrelatedTurnId() {
+			return undefined;
+		},
+		async findSessionIdByRequestId() {
+			return SCENARIO_DEFAULT_SESSION_ID;
+		},
+		async getBySession() {
+			return [];
+		},
+		async getByRange() {
+			return [];
+		},
+		async markProcessed() {},
+		async markRangeProcessed() {},
+		async countUnprocessedRpTurns() {
+			return 0;
+		},
+		async getMinMaxUnprocessedIndex() {
+			return undefined;
+		},
+		async getMaxIndex() {
+			return undefined;
+		},
+		async getPendingSettlementJobState() {
+			return null;
+		},
+		async countUnprocessedSettlements() {
+			return 0;
+		},
+		async getUnprocessedSettlementRange() {
+			return null;
+		},
+		async listStalePendingSettlementSessions() {
+			return [];
+		},
+		async getUnprocessedRangeForSession() {
+			return null;
+		},
+	};
+
+	const mockAgentLoop = {
+		async runBuffered() {
+			const outcome = outcomesBySettlementId.get(currentSettlementId);
+			if (!outcome) {
+				throw new Error(
+					`No scripted outcome registered for settlement '${currentSettlementId}'`,
+				);
+			}
+			return { outcome };
+		},
+	};
+
+	const deps = {
+		sql: infra.sql,
+		projectionManager,
+		interactionRepo: mockInteractionRepo,
+		recentCognitionSlotRepo: infra.repos.recentCognitionSlot,
+		agentRegistry: registry,
+		createAgentLoop: (agentId: string) =>
+			agentId === SCENARIO_DEFAULT_AGENT_ID ? mockAgentLoop : null,
+		jobPersistence: NOOP_JOB_PERSISTENCE,
+		settlementLedger: settlementLedgerAdapter,
+	};
+
+	// Cast deps/handler through unknown to avoid importing the full ThinkerWorkerDeps type surface.
+	const handler = (createThinkerWorker as (deps: unknown) => (job: { payload: unknown }) => Promise<void>)(
+		deps as unknown,
+	);
+
+	let beatsProcessed = 0;
+
+	for (let i = 0; i < settlements.length; i += 1) {
+		const settlement = settlements[i];
+		beatsProcessed += 1;
+		const beatStat: BeatStats = {
+			beatId: settlement.beatId,
+			entitiesCreated: 0,
+			episodesCreated: 0,
+			assertionsCreated: 0,
+			evaluationsCreated: 0,
+			commitmentsCreated: 0,
+			errors: 0,
+		};
+
+		try {
+			for (const entity of settlement.entityCreations) {
+				const entityId = await infra.repos.graphStore.upsertEntity({
+					pointerKey: entity.pointerId,
+					displayName: entity.displayName,
+					entityType: entity.entityType,
+					memoryScope: "shared_public",
+				});
+				infra.entityIdMap.set(entity.pointerId, entityId);
+				beatStat.entitiesCreated += 1;
+			}
+
+			for (const alias of settlement.aliasAdditions) {
+				const canonicalId = resolveEntityIdOrThrow(infra, alias.pointerId);
+				await infra.repos.graphStore.createEntityAlias(
+					canonicalId,
+					alias.alias,
+					"scenario_alias",
+				);
+			}
+
+			const beat = beatById.get(settlement.beatId);
+			const viewerLocationEntityId = beat
+				? resolveEntityIdOrThrow(infra, beat.locationId)
+				: undefined;
+
+			const cognitionOps = settlement.cognitionOps.map((op) =>
+				toProjectionCognitionOp(infra, op),
+			);
+			for (const op of settlement.cognitionOps) {
+				if (op.op === "retract") continue;
+				if (op.kind === "assertion") beatStat.assertionsCreated += 1;
+				else if (op.kind === "evaluation") beatStat.evaluationsCreated += 1;
+				else if (op.kind === "commitment") beatStat.commitmentsCreated += 1;
+			}
+			const privateEpisodes = settlement.privateEpisodes.map(
+				toPrivateEpisodeArtifact,
+			);
+			beatStat.episodesCreated = privateEpisodes.length;
+
+			const sketchSource = detectSketchSourceFromOps(settlement.cognitionOps);
+			const sketchText = sketchSource
+				? `[scenario sketch ${settlement.beatId}]`
+				: undefined;
+
+			const outcome = {
+				schemaVersion: "rp_turn_outcome_v5" as const,
+				publicReply: "",
+				latentScratchpad: sketchText ?? "",
+				privateCognition: {
+					schemaVersion: "rp_private_cognition_v4" as const,
+					ops: cognitionOps,
+				},
+				privateEpisodes,
+				publications: [],
+				relationIntents: [],
+				conflictFactors: [],
+			};
+
+			// thinker-worker derives requestId as payload.settlementId.replace(/^stl:/, "").
+			// Match that expectation so projection-time validation passes.
+			const requestId = settlement.settlementId.replace(/^stl:/, "");
+			const payload = {
+				settlementId: settlement.settlementId,
+				requestId,
+				sessionId: settlement.sessionId,
+				ownerAgentId: settlement.agentId,
+				publicReply: "",
+				hasPublicReply: false,
+				viewerSnapshot:
+					viewerLocationEntityId !== undefined
+						? {
+								selfPointerKey: "__self__",
+								userPointerKey: "__user__",
+								currentLocationEntityId: viewerLocationEntityId,
+							}
+						: {
+								selfPointerKey: "__self__",
+								userPointerKey: "__user__",
+								currentLocationEntityId: 0,
+							},
+				schemaVersion: "turn_settlement_v5" as const,
+				cognitiveSketch: sketchText,
+				...(sketchSource ? { cognitiveSketchSource: sketchSource } : {}),
+			};
+
+			outcomesBySettlementId.set(settlement.settlementId, outcome);
+			currentSettlementId = settlement.settlementId;
+			currentRequestId = requestId;
+			currentPayload = payload as unknown as Awaited<
+				ReturnType<
+					import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
+				>
+			>;
+
+			await ledger.markTalkerCommitted(
+				settlement.settlementId,
+				settlement.agentId,
+			);
+
+			await handler({
+				payload: {
+					sessionId: settlement.sessionId,
+					agentId: settlement.agentId,
+					settlementId: settlement.settlementId,
+					talkerTurnVersion: i + 1,
+					requestId,
+				},
+			});
+
+			// After commit, collect episode IDs from DB for deferred logic edges.
+			const rows = await infra.repos.episode.readBySettlement(
+				settlement.settlementId,
+				settlement.agentId,
+			);
+			for (const row of rows) {
+				if (row.source_local_ref) {
+					cumulativeEpisodeIdByLocalRef.set(row.source_local_ref, row.id);
+				}
+			}
+
+			for (const edge of settlement.logicEdges) {
+				deferredEdges.push({
+					beatId: settlement.beatId,
+					fromLocalRef: edge.fromLocalRef,
+					toLocalRef: edge.toLocalRef,
+					edgeType: edge.edgeType,
+					weight: edge.weight,
+				});
+			}
+		} catch (error) {
+			beatStat.errors += 1;
+			errors.push({ beatId: settlement.beatId, error: toError(error) });
+		}
+
+		await captureBeatSnapshots(infra, settlement.beatId, options);
+		perBeatStats.push(beatStat);
+	}
+
+	for (const edge of deferredEdges) {
+		const sourceId = cumulativeEpisodeIdByLocalRef.get(edge.fromLocalRef);
+		const targetId = cumulativeEpisodeIdByLocalRef.get(edge.toLocalRef);
+		if (!sourceId || !targetId) {
+			errors.push({
+				beatId: edge.beatId,
+				error: new Error(
+					`Missing episode mapping for logic edge '${edge.fromLocalRef}' -> '${edge.toLocalRef}'`,
+				),
+			});
+			continue;
+		}
+		try {
+			await infra.repos.graphStore.createLogicEdge(
+				sourceId,
+				targetId,
+				asLogicEdgeType(edge.edgeType),
+				edge.weight ?? null,
+			);
+		} catch (error) {
+			errors.push({ beatId: edge.beatId, error: toError(error) });
+		}
+	}
+
+	for (const [localRef, episodeId] of cumulativeEpisodeIdByLocalRef) {
+		const settlement = settlements.find((s) =>
+			s.privateEpisodes.some((ep) => ep.localRef === localRef),
+		);
+		const episode = settlement?.privateEpisodes.find(
+			(ep) => ep.localRef === localRef,
+		);
+		if (episode?.summary) {
+			try {
+				await infra.repos.searchProjection.syncSearchDoc(
+					"world",
+					`event:${episodeId}` as import("../../../src/memory/types.js").NodeRef,
+					episode.summary,
+				);
+			} catch {
+				// Non-fatal.
+			}
+		}
+	}
+
+	const enrichedCount = await enrichCognitionSearchDocsWithDisplayNames(infra);
+	if (enrichedCount > 0) {
+		console.log(
+			`[thinker] enriched ${enrichedCount} cognition search docs with display names`,
+		);
+	}
+
+	return {
+		beatsProcessed,
+		errors,
+		perBeatStats,
+	};
+}
+
+function detectSketchSourceFromOps(
+	ops: CognitionOpSpec[],
+): "explicit" | "auto_fallback" | undefined {
+	let hasExplicit = false;
+	let hasAuto = false;
+	for (const op of ops) {
+		if (op.op !== "upsert") continue;
+		const provenance = op.assertionData?.provenance;
+		if (provenance === "talker_sketch_explicit") hasExplicit = true;
+		if (provenance === "talker_sketch_auto") hasAuto = true;
+	}
+	if (hasExplicit) return "explicit";
+	if (hasAuto) return "auto_fallback";
+	return undefined;
+}
+
 function buildFlushRequest(
 	infra: ScenarioInfra,
 	beat: StoryBeat,

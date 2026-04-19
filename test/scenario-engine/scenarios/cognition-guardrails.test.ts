@@ -24,13 +24,13 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
 
   beforeAll(async () => {
     handle = await runScenario(cognitionGuardrails, {
-      writePath: "settlement",
+      writePath: "thinker",
       phase: "full",
     });
   }, 8 * 60 * 1000);
 
   it("A) settlement/full run completes all beats without engine errors", () => {
-    expect(handle.runResult.writePath).toBe("settlement");
+    expect(handle.runResult.writePath).toBe("thinker");
     expect(handle.runResult.phase).toBe("full");
     expect(handle.runResult.errors).toHaveLength(0);
     expect(handle.runResult.settlementCount).toBe(EXPECTED_BEATS);
@@ -139,7 +139,8 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     expect(rows).toHaveLength(COGNITION_GUARDRAILS_SKETCH_WEAK_KEYS.length);
     for (const row of rows) {
       expect(row.verification).toBe("unverified");
-      expect(row.basis).toBe("inference");
+      // Task 5 guardrail (a): talker_sketch_* provenance forces basis to at most "belief".
+      expect(row.basis).toBe("belief");
       const refs = (typeof row.verified_refs === "string"
         ? JSON.parse(row.verified_refs)
         : row.verified_refs) as unknown;
@@ -157,7 +158,10 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     `;
     expect(rows).toHaveLength(COGNITION_GUARDRAILS_CORRECTION_KEYS.length);
     for (const row of rows) {
-      expect(row.basis).toBe("first_hand");
+      // Task 5 guardrail (b) caps user_stated basis at "inference" pre-verification.
+      // Without authoritative grounding refs, Task 7 verification has nothing to
+      // upgrade, so corrections stay at "inference" — the faithful v1 outcome.
+      expect(row.basis).toBe("inference");
     }
   });
 
