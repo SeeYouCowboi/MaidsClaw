@@ -12,13 +12,47 @@ describe.skipIf(skipPgTests)("pg recent cognition slot setThinkerVersion", () =>
   let sql: postgres.Sql;
   let repo: PgRecentCognitionSlotRepo;
 
+  function wrapSqlWithParsedSlotPayload(base: postgres.Sql): postgres.Sql {
+    return (async (
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ): Promise<unknown[]> => {
+      const rows = await (base as unknown as (
+        q: TemplateStringsArray,
+        ...params: unknown[]
+      ) => Promise<unknown[]>)(strings, ...values);
+      if (!Array.isArray(rows)) {
+        return rows;
+      }
+      return rows.map((row) => {
+        if (!row || typeof row !== "object") {
+          return row;
+        }
+        const typed = row as { slot_payload?: unknown };
+        if (typeof typed.slot_payload === "string") {
+          try {
+            return {
+              ...typed,
+              slot_payload: JSON.parse(typed.slot_payload),
+            };
+          } catch {
+            return row;
+          }
+        }
+        return row;
+      });
+    }) as unknown as postgres.Sql;
+  }
+
   const sessionId = "session:set-version";
   const agentId = "rp:alice";
 
   beforeAll(async () => {
     testDb = await createPgTestDb();
     sql = testDb.pool;
-    repo = new PgRecentCognitionSlotRepo(sql);
+    // Keep test behavior deterministic across environments where json/jsonb may
+    // come back as text unless explicit parsers are configured.
+    repo = new PgRecentCognitionSlotRepo(wrapSqlWithParsedSlotPayload(sql));
   });
 
   beforeEach(async () => {
@@ -162,6 +196,124 @@ describe.skipIf(skipPgTests)("pg recent cognition slot setThinkerVersion", () =>
     expect(entries[0].basis).toBe("first_hand");
     expect(entries[0].provenance).toBe("user_stated");
     expect(entries[0].sourceTurnVersion).toBe(6);
+  });
+
+  it("v1 correction continuity: setThinkerVersion merge replaces hallucinated v10 summary with user-stated v11 on canonical key", async () => {
+    const key = "belief:user-location:canonical";
+    await repo.upsertRecentCognitionSlot(
+      sessionId,
+      agentId,
+      "stl:v10",
+      JSON.stringify([
+        {
+          settlementId: "stl:v10",
+          committedAt: 1000,
+          kind: "assertion",
+          key,
+          summary: "hallucinated weak-basis location",
+          status: "active",
+          basis: "belief",
+          provenance: "talker_sketch_auto",
+          sourceTurnVersion: 10,
+        },
+      ]),
+      undefined,
+      10,
+    );
+
+    await repo.upsertRecentCognitionSlot(
+      sessionId,
+      agentId,
+      "stl:v11",
+      JSON.stringify([
+        {
+          settlementId: "stl:v11",
+          committedAt: 1100,
+          kind: "assertion",
+          key,
+          summary: "corrected user-stated location",
+          status: "active",
+          basis: "inference",
+          provenance: "user_stated",
+          sourceTurnVersion: 11,
+        },
+      ]),
+      undefined,
+      11,
+    );
+
+    const payload = await repo.getSlotPayload(sessionId, agentId);
+    const entries = JSON.parse(String(payload)) as Array<{
+      key?: string;
+      summary?: string;
+      provenance?: string;
+      sourceTurnVersion?: number;
+    }>;
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].key).toBe(key);
+    expect(entries[0].summary).toBe("corrected user-stated location");
+    expect(entries[0].provenance).toBe("user_stated");
+    expect(entries[0].sourceTurnVersion).toBe(11);
+  });
+
+  it("v1 correction continuity: higher sourceTurnVersion correction remains winner when lower version commits late", async () => {
+    const key = "belief:user-location:canonical";
+    await repo.upsertRecentCognitionSlot(
+      sessionId,
+      agentId,
+      "stl:v11",
+      JSON.stringify([
+        {
+          settlementId: "stl:v11",
+          committedAt: 1100,
+          kind: "assertion",
+          key,
+          summary: "corrected user-stated location",
+          status: "active",
+          basis: "inference",
+          provenance: "user_stated",
+          sourceTurnVersion: 11,
+        },
+      ]),
+      undefined,
+      11,
+    );
+
+    await repo.upsertRecentCognitionSlot(
+      sessionId,
+      agentId,
+      "stl:v10",
+      JSON.stringify([
+        {
+          settlementId: "stl:v10",
+          committedAt: 9999,
+          kind: "assertion",
+          key,
+          summary: "late stale hallucinated summary",
+          status: "active",
+          basis: "belief",
+          provenance: "talker_sketch_auto",
+          sourceTurnVersion: 10,
+        },
+      ]),
+      undefined,
+      10,
+    );
+
+    const payload = await repo.getSlotPayload(sessionId, agentId);
+    const entries = JSON.parse(String(payload)) as Array<{
+      key?: string;
+      summary?: string;
+      provenance?: string;
+      sourceTurnVersion?: number;
+    }>;
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].key).toBe(key);
+    expect(entries[0].summary).toBe("corrected user-stated location");
+    expect(entries[0].provenance).toBe("user_stated");
+    expect(entries[0].sourceTurnVersion).toBe(11);
   });
 
   it("lower-version late append does not regress thinkerCommittedVersion under setThinkerVersion", async () => {

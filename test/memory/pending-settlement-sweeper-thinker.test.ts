@@ -7,6 +7,7 @@ import { PendingSettlementSweeper } from "../../src/memory/pending-settlement-sw
 import type { SettlementLedger } from "../../src/memory/settlement-ledger.js";
 import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import type { PendingFlushRecoveryRepo } from "../../src/storage/domain-repos/contracts/pending-flush-recovery-repo.js";
+import { compactSlotEntries } from "../../src/storage/domain-repos/pg/recent-cognition-slot-repo.js";
 
 type QueryQueues = {
 	recent?: unknown[][];
@@ -105,8 +106,7 @@ function createSweeper(params: {
 	listStaleSessions?: InteractionStore["listStalePendingSettlementSessions"];
 }): PendingSettlementSweeper {
 	const interactionStore = {
-		listStalePendingSettlementSessions:
-			params.listStaleSessions ?? (() => []),
+		listStalePendingSettlementSessions: params.listStaleSessions ?? (() => []),
 		getUnprocessedRangeForSession: () => null,
 		getByRange: () => [],
 		markProcessed: () => {},
@@ -394,7 +394,10 @@ describe("PendingSettlementSweeper thinker recovery", () => {
 			settlementId: "stl:req-corrected-5",
 			talkerTurnVersion: 5,
 		});
-		expect("hallucinatedSlotSummary" in (enqueues[0].payload as Record<string, unknown>)).toBe(false);
+		expect(
+			"hallucinatedSlotSummary" in
+				(enqueues[0].payload as Record<string, unknown>),
+		).toBe(false);
 	});
 
 	it("recovery path keeps settlement identity for auto_fallback sketch source payloads", async () => {
@@ -509,5 +512,97 @@ describe("PendingSettlementSweeper thinker recovery", () => {
 
 		expect(enqueues).toHaveLength(1);
 		expect(enqueues[0].id).toBe("thinker:session-3:stl:req-canonical-3");
+	});
+
+	it("v1 recovery continuity: re-enqueue of stale v10 gap does not resurrect hallucinated summary over corrected v11", async () => {
+		const nowMs = 6_000_000;
+		const { sql } = createSqlMock({
+			recent: [
+				[
+					{
+						session_id: "session-4",
+						agent_id: "agent-4",
+						thinker_committed_version: 9,
+						talker_turn_counter: 11,
+					},
+				],
+			],
+			settlements: [
+				[
+					{
+						payload: {
+							settlementId: "stl:req-10",
+							talkerTurnVersion: 10,
+							cognitiveSketchSource: "auto_fallback",
+						},
+						committed_at: nowMs - 3_000,
+					},
+					{
+						payload: {
+							settlementId: "stl:req-11",
+							talkerTurnVersion: 11,
+							cognitiveSketchSource: "explicit",
+						},
+						committed_at: nowMs - 1_000,
+					},
+				],
+			],
+			existingJobs: [[], [{ job_key: "thinker:session-4:stl:req-11" }]],
+		});
+		const { jobPersistence, enqueues } = createJobPersistenceMock();
+		const sweeper = createActiveSweeper({
+			now: () => nowMs,
+			sql,
+			jobPersistence,
+		});
+
+		await (
+			sweeper as unknown as { sweepThinkerJobs: () => Promise<void> }
+		).sweepThinkerJobs();
+
+		expect(enqueues).toHaveLength(1);
+		expect(enqueues[0].id).toBe("thinker:session-4:stl:req-10");
+		expect(enqueues[0].payload).toEqual({
+			sessionId: "session-4",
+			agentId: "agent-4",
+			settlementId: "stl:req-10",
+			talkerTurnVersion: 10,
+		});
+
+		const correctedV11Slot = [
+			{
+				settlementId: "stl:req-11",
+				committedAt: 1_100,
+				kind: "assertion",
+				key: "belief:user-location",
+				summary: "user location corrected to conservatory",
+				status: "active",
+				provenance: "user_stated",
+				sourceTurnVersion: 11,
+			},
+		];
+		const staleV10Replay = [
+			{
+				settlementId: "stl:req-10",
+				committedAt: 9_999,
+				kind: "assertion",
+				key: "belief:user-location",
+				summary: "hallucinated location in cellar",
+				status: "active",
+				provenance: "talker_sketch_auto",
+				sourceTurnVersion: 10,
+			},
+		];
+
+		const merged = compactSlotEntries([
+			...correctedV11Slot,
+			...staleV10Replay,
+		]) as Array<{ key: string; summary: string; sourceTurnVersion?: number }>;
+
+		expect(merged).toHaveLength(1);
+		expect(merged[0].key).toBe("belief:user-location");
+		expect(merged[0].summary).toBe("user location corrected to conservatory");
+		expect(merged[0].summary).not.toBe("hallucinated location in cellar");
+		expect(merged[0].sourceTurnVersion).toBe(11);
 	});
 });

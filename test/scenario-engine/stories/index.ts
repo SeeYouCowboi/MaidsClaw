@@ -8,3 +8,4 @@ export {
   adversarialTimeoutRecovery,
   adversarialRetractionCascade,
 } from "./adversarial.js";
+export { cognitionGuardrails } from "./cognition-guardrails.js";

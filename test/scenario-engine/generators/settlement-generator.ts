@@ -51,6 +51,9 @@ export type CognitionOpSpec = {
     preContestedStance?: string;
     confidence?: number;
     conflictFactors?: string[];
+    sourceEpisodeId?: string;
+    provenance?: string;
+    claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
   };
   evaluationData?: {
     dimensions: { name: string; value: number }[];
@@ -295,6 +298,9 @@ function buildAssertionOps(
         preContestedStance: assertion.preContestedStance,
         confidence: assertion.confidence,
         conflictFactors: assertion.conflictFactors,
+        sourceEpisodeId: assertion.sourceEpisodeId,
+        provenance: assertion.provenance,
+        claimedGroundingRefs: assertion.claimedGroundingRefs,
       },
     };
 
