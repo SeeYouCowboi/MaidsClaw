@@ -41,6 +41,7 @@ import { PgSemanticEdgeRepo } from "../../../src/storage/domain-repos/pg/semanti
 import {
 	SCENARIO_DEFAULT_AGENT_ID,
 	SCENARIO_DEFAULT_SESSION_ID,
+	SCENARIO_ENGINE_BASE_TIME,
 } from "../constants.js";
 import type { Story, StoryBeat } from "../dsl/story-types.js";
 import type {
@@ -769,14 +770,6 @@ export async function executeThinkerPath(
 
 	// Scripted outcomes keyed by settlementId, cursor-advanced per loop iteration.
 	const outcomesBySettlementId = new Map<string, unknown>();
-	// Settlement payloads keyed by requestId so batch-mode hydration (which
-	// iterates several pending turns) can look up each member payload.
-	type ScenarioSettlementPayload = Awaited<
-		ReturnType<
-			import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
-		>
-	>;
-	const payloadsByRequestId = new Map<string, ScenarioSettlementPayload>();
 
 	// Mock DurableJobStore for batch-collapse: returns whatever the orchestrating
 	// loop has staged as pending. Phase-2 triggers fill this transiently before
@@ -795,61 +788,16 @@ export async function executeThinkerPath(
 		},
 	};
 
-	const mockInteractionRepo = {
-		async getSettlementPayload(_sessionId: string, requestId: string) {
-			return payloadsByRequestId.get(requestId);
-		},
-		async getMessageRecords() {
-			return [];
-		},
-		async commit() {},
-		async runInTransaction<T>(
-			fn: (tx: { interactionRepo: unknown }) => Promise<T>,
-		) {
-			return fn({ interactionRepo: mockInteractionRepo });
-		},
-		async settlementExists() {
-			return true;
-		},
-		async findRecordByCorrelatedTurnId() {
-			return undefined;
-		},
-		async findSessionIdByRequestId() {
-			return SCENARIO_DEFAULT_SESSION_ID;
-		},
-		async getBySession() {
-			return [];
-		},
-		async getByRange() {
-			return [];
-		},
-		async markProcessed() {},
-		async markRangeProcessed() {},
-		async countUnprocessedRpTurns() {
-			return 0;
-		},
-		async getMinMaxUnprocessedIndex() {
-			return undefined;
-		},
-		async getMaxIndex() {
-			return undefined;
-		},
-		async getPendingSettlementJobState() {
-			return null;
-		},
-		async countUnprocessedSettlements() {
-			return 0;
-		},
-		async getUnprocessedSettlementRange() {
-			return null;
-		},
-		async listStalePendingSettlementSessions() {
-			return [];
-		},
-		async getUnprocessedRangeForSession() {
-			return null;
-		},
-	};
+	// Use the real PgInteractionRepo. orchestrator.seedInteractionHistory
+	// committed message rows before dispatch; the per-beat loop below also
+	// commits one turn_settlement interaction record per settlement (mirrors
+	// turn-service.ts:1279-1288) so the production verification path in
+	// projection-manager — findSessionIdByRequestId / settlementExists /
+	// getSettlementPayload — resolves against real SQL instead of a mock.
+	const realInteractionRepo = infra.repos.interaction;
+	// recordIndex offset for settlement rows: dialogue seeding uses 0..N, this
+	// base guarantees no collision with any realistic cached dialogue length.
+	const SETTLEMENT_RECORD_INDEX_BASE = 1_000_000;
 
 	const mockAgentLoop = {
 		// thinker-worker builds agentRunRequest with requestId === payload.settlementId
@@ -867,15 +815,45 @@ export async function executeThinkerPath(
 		},
 	};
 
-	// The mocks intentionally implement subsets of their real interfaces (only
-	// the methods thinker-worker invokes). We cast each mock through `unknown`
-	// at the assignment site so TypeScript still structurally validates the
-	// outer `deps` object against `ThinkerWorkerDeps` — a later addition of a
+	// AssertionCanonicalizationBundle: production wires real embedding repo +
+	// task model provider (bootstrap/runtime.ts:1764). When the bundle is absent,
+	// thinker-worker's canonicalization function short-circuits at
+	// runtime/thinker-worker.ts:562 and returns ops unchanged — which means the
+	// scenario never exercises embed / cosineSearch / similarity-filter /
+	// overlay-merge branches introduced for Task 6.
+	//
+	// We wire a real PgEmbeddingRepo (scenario schema already provisions the
+	// node_embeddings table + pgvector HNSW index) and a deterministic stub
+	// MemoryTaskModelProvider that hashes the query text to a 32-dim unit
+	// vector. No test beat currently seeds embeddings, so cosineSearch returns
+	// [] and each assertion falls through with `eligibleByKey.size === 0` —
+	// but the embed → cosineSearch → filter code path runs for real instead of
+	// being skipped entirely. Exercising the rewrite branch (size === 1 →
+	// canonicalKey rewrite) requires a dedicated test that seeds embeddings for
+	// already-committed assertions; tracked as follow-up work, out of scope
+	// for this scenario's primary purpose (Task 5/7/10 coverage).
+	const embeddingRepoForCanonicalization = new PgEmbeddingRepo(infra.sql);
+	const scenarioEmbeddingModelId = "scenario-canonicalization-stub";
+	const scenarioCanonicalizationProvider: MemoryTaskModelProvider = {
+		defaultEmbeddingModelId: scenarioEmbeddingModelId,
+		async chat() {
+			return [];
+		},
+		async embed(texts: string[]) {
+			return texts.map((text) => hashTextToUnitVector(text));
+		},
+	};
+
+	// The remaining mocks (durableJobStore, agentLoop, settlementLedger adapter)
+	// intentionally implement subsets of their real interfaces — only the
+	// methods thinker-worker invokes. We cast each through `unknown` at the
+	// assignment site so TypeScript still structurally validates the outer
+	// `deps` object against `ThinkerWorkerDeps` — a later addition of a
 	// required field to the dep contract will surface here at compile time.
 	const deps: ThinkerWorkerDeps = {
 		sql: infra.sql,
 		projectionManager,
-		interactionRepo: mockInteractionRepo as unknown as ThinkerWorkerDeps["interactionRepo"],
+		interactionRepo: realInteractionRepo,
 		recentCognitionSlotRepo: infra.repos.recentCognitionSlot,
 		agentRegistry: registry,
 		createAgentLoop: (agentId: string) =>
@@ -885,6 +863,11 @@ export async function executeThinkerPath(
 		jobPersistence: NOOP_JOB_PERSISTENCE,
 		settlementLedger: settlementLedgerAdapter as unknown as ThinkerWorkerDeps["settlementLedger"],
 		durableJobStore: mockDurableJobStore as unknown as ThinkerWorkerDeps["durableJobStore"],
+		assertionCanonicalization: {
+			embeddingRepo: embeddingRepoForCanonicalization,
+			modelProvider: scenarioCanonicalizationProvider,
+			embeddingModelId: scenarioEmbeddingModelId,
+		},
 	};
 
 	const handler = createThinkerWorker(deps);
@@ -991,10 +974,21 @@ export async function executeThinkerPath(
 			};
 
 			const talkerTurnVersion = i + 1;
-			payloadsByRequestId.set(
-				requestId,
-				payload as unknown as ScenarioSettlementPayload,
-			);
+			// Commit a real turn_settlement interaction record so
+			// thinker-worker + projection-manager hit real SQL for
+			// getSettlementPayload / findSessionIdByRequestId / settlementExists.
+			await realInteractionRepo.commit({
+				sessionId: settlement.sessionId,
+				recordId: settlement.settlementId,
+				recordIndex: SETTLEMENT_RECORD_INDEX_BASE + i,
+				actorType: "rp_agent",
+				recordType: "turn_settlement",
+				payload,
+				correlatedTurnId: requestId,
+				committedAt:
+					SCENARIO_ENGINE_BASE_TIME +
+					(SETTLEMENT_RECORD_INDEX_BASE + i) * 1000,
+			});
 			outcomesBySettlementId.set(settlement.settlementId, outcome);
 
 			await ledger.markTalkerCommitted(
@@ -1224,6 +1218,37 @@ export async function executeThinkerPath(
 		perBeatStats,
 		recoveryReplaysAttempted,
 	};
+}
+
+/**
+ * Deterministic text → 32-dim unit vector hash for the scenario
+ * canonicalization stub model provider. Uses FNV-1a seed + xorshift32 expansion
+ * so the output is purely a function of input and has zero external deps. The
+ * vector is L2-normalized so cosineSearch (dot product over normalized vectors)
+ * works with the PgEmbeddingRepo pipeline. Dimension 32 is arbitrary — it only
+ * needs to be stable for a given scenario run and match between upsert/query.
+ */
+function hashTextToUnitVector(text: string): Float32Array {
+	const dim = 32;
+	let seed = 2166136261;
+	for (let i = 0; i < text.length; i += 1) {
+		seed ^= text.charCodeAt(i);
+		seed = Math.imul(seed, 16777619) >>> 0;
+	}
+	const vec = new Float32Array(dim);
+	let state = seed || 1;
+	for (let i = 0; i < dim; i += 1) {
+		state ^= state << 13;
+		state ^= state >>> 17;
+		state ^= state << 5;
+		state = state >>> 0;
+		vec[i] = (state / 0xffffffff) * 2 - 1;
+	}
+	let norm = 0;
+	for (let i = 0; i < dim; i += 1) norm += vec[i] * vec[i];
+	norm = Math.sqrt(norm) || 1;
+	for (let i = 0; i < dim; i += 1) vec[i] /= norm;
+	return vec;
 }
 
 function detectSketchSourceFromOps(
