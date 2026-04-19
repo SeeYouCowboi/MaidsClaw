@@ -102,10 +102,13 @@ export class PgInteractionRepo implements InteractionRepo {
       }
     }
 
+    // postgres-js's `begin` return type is `UnwrapPromiseArray<T>` which the
+    // compiler cannot reconcile with our generic `T`. The callback's actual
+    // resolved type is `T`, so re-cast via unknown is safe.
     return this.sql.begin(async (rawTx) => {
       const tx = rawTx as unknown as postgres.Sql;
       return fn({ interactionRepo: new PgInteractionRepo(tx) });
-    });
+    }) as unknown as T;
   }
 
   async settlementExists(sessionId: string, settlementId: string): Promise<boolean> {

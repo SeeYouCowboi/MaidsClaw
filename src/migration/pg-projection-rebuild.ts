@@ -46,10 +46,13 @@ export class PgProjectionRebuilder {
       }
     }
 
+    // postgres-js's `begin` return type is `UnwrapPromiseArray<T>` which the
+    // compiler cannot reconcile with our generic `T`. The callback's actual
+    // resolved type is `T`, so re-cast via unknown is safe.
     return this.sql.begin(async (tx) => {
       const txSql = tx as unknown as postgres.Sql;
       return fn(txSql);
-    });
+    }) as unknown as T;
   }
 
   /**

@@ -111,11 +111,17 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     expect(hits.length).toBeGreaterThan(0);
   });
 
-  it("G/Q) default active-only cognition_search excludes retracted English audit keys", async () => {
+  it("G/Q) cognition_search excludes retracted English audit keys when activeOnly=true", async () => {
+    // activeOnly default was intentionally kept at false so audit/history
+    // surfaces remain visible by default (see cognition-search.ts:152 and
+    // tools.ts doc). Callers that want the "active only" default view must
+    // opt in explicitly, matching production prompt/retrieval surfaces
+    // (retrieval-orchestrator.ts:257 already passes activeOnly: true).
     const hits = await handle.infra.services.cognitionSearch.searchCognition({
       agentId: SCENARIO_DEFAULT_AGENT_ID,
       query: "English chain",
       limit: 100,
+      activeOnly: true,
     });
     const returned = new Set(hits.map((h) => h.cognitionKey));
     for (const key of COGNITION_GUARDRAILS_ENGLISH_KEYS) {

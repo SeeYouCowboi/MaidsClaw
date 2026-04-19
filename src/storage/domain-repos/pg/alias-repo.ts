@@ -83,13 +83,16 @@ export class PgAliasRepo implements AliasRepo {
         LIMIT 1
       `;
     } else if (aliasType === undefined) {
+      // Narrowing: the first if ruled out (undefined, undefined); being in this
+      // branch means ownerAgentId is defined even though TS can't infer it.
+      const owner = ownerAgentId as string;
       existing = await this.sql<{ id: number }[]>`
         SELECT id
         FROM entity_aliases
         WHERE canonical_id = ${canonicalId}
           AND alias = ${alias}
           AND alias_type IS NULL
-          AND owner_agent_id = ${ownerAgentId}
+          AND owner_agent_id = ${owner}
         LIMIT 1
       `;
     } else if (ownerAgentId === undefined) {
