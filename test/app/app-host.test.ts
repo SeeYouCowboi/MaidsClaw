@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
-import { skipPgTests } from "../helpers/pg-test-utils.js";
+import {
+  installResolvedPgAppUrl,
+  skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 describe.skipIf(skipPgTests)("createAppHost", () => {
   let host: AppHost | undefined;
+  let restorePgAppUrl: (() => void) | undefined;
 
   afterEach(async () => {
     if (host) {
       await host.shutdown();
       host = undefined;
     }
+    restorePgAppUrl?.();
+    restorePgAppUrl = undefined;
   });
 
   test("local role creates host with user + admin, no maintenance", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "local" });
     expect(host.role).toBe("local");
     expect(host.user).toBeDefined();
@@ -21,6 +28,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("local role start/shutdown lifecycle", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "local" });
     await host.start();
     await host.shutdown();
@@ -28,6 +36,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("admin.getHostStatus returns HostStatusDTO shape", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "local" });
     const status = await host.admin.getHostStatus();
 
@@ -37,6 +46,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("admin.getPipelineStatus returns PipelineStatusDTO shape", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "local" });
     const status = await host.admin.getPipelineStatus();
 
@@ -49,6 +59,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("server role start/shutdown lifecycle with getBoundPort", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "server", port: 0 });
     expect(host.role).toBe("server");
     expect(host.user).toBeDefined();
@@ -66,6 +77,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("server role without enableMaintenance has no maintenance facet", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "server", port: 0 });
     await host.start();
     expect(host.maintenance).toBeUndefined();
@@ -74,6 +86,7 @@ describe.skipIf(skipPgTests)("createAppHost", () => {
   });
 
   test("server role with enableMaintenance exposes maintenance facet", async () => {
+    restorePgAppUrl = installResolvedPgAppUrl();
     host = await createAppHost({ role: "server", port: 0, enableMaintenance: true });
     await host.start();
     expect(host.maintenance).toBeDefined();

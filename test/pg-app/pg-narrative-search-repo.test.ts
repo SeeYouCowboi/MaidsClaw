@@ -119,7 +119,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
     });
   });
 
-  it("searchNarrative returns empty for short queries (< 3 chars)", async () => {
+  it("searchNarrative returns empty for short queries (< 2 chars)", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapDerivedSchema(sql);
       const projRepo = new PgSearchProjectionRepo(sql);
@@ -128,7 +128,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
       await seedWorldDoc(projRepo, ref("event:30"), "Something searchable exists here");
 
       const viewer = makeViewerContext();
-      const hits = await repo.searchNarrative({ text: "ab" }, viewer);
+      const hits = await repo.searchNarrative({ text: "a" }, viewer);
       expect(hits.length).toBe(0);
     });
   });

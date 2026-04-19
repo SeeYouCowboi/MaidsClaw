@@ -222,8 +222,10 @@ describe("EmbeddingService async migration", () => {
 
     const linker = new EmbeddingLinker(
       {
-        upsertSemanticEdge: (source: NodeRef, target: NodeRef, relation: string) => {
-          semanticEdges.push({ source, target, relation });
+        async: {
+          upsertSemanticEdge: async (source: NodeRef, target: NodeRef, relation: string) => {
+            semanticEdges.push({ source, target, relation });
+          },
         },
       } as unknown as GraphStorageService,
       {

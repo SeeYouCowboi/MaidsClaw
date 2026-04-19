@@ -5,6 +5,7 @@ import { loadCheckpoint } from "../generators/scenario-cache.js";
 import {
   createPgTestDb,
   ensureTestPgAppDb,
+  resolvePgAppTestUrl,
   type PgTestDb,
 } from "../../helpers/pg-app-test-utils.js";
 
@@ -35,10 +36,8 @@ import { RetrievalOrchestrator } from "../../../src/memory/retrieval/retrieval-o
 import { RuleBasedQueryRouter } from "../../../src/memory/query-router.js";
 import { DeterministicQueryPlanBuilder } from "../../../src/memory/query-plan-builder.js";
 
-const DEFAULT_APP_TEST_URL = "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app_test";
-
 function getAppTestUrl(): string {
-  return process.env.PG_APP_TEST_URL ?? DEFAULT_APP_TEST_URL;
+  return resolvePgAppTestUrl();
 }
 
 export type RunOptions = {

@@ -7,7 +7,10 @@ import {
 	type AppUserFacade,
 	createAppHost,
 } from "../../src/app/host/index.js";
-import { skipPgTests } from "../helpers/pg-test-utils.js";
+import {
+	installResolvedPgAppUrl,
+	skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 async function bootstrapTestEnv(): Promise<{
 	host: AppHost;
@@ -48,8 +51,10 @@ function assertCloseResultShape(result: SessionCloseResult): void {
 describe.skipIf(skipPgTests)("AppUserFacade acceptance contract", () => {
 	let host: AppHost | undefined;
 	let facade: AppUserFacade | undefined;
+	let restorePgAppUrl: (() => void) | undefined;
 
 	beforeAll(async () => {
+		restorePgAppUrl = installResolvedPgAppUrl();
 		const env = await bootstrapTestEnv();
 		host = env.host;
 		facade = env.facade;
@@ -60,6 +65,8 @@ describe.skipIf(skipPgTests)("AppUserFacade acceptance contract", () => {
 			await host.shutdown();
 			host = undefined;
 		}
+		restorePgAppUrl?.();
+		restorePgAppUrl = undefined;
 	});
 
 	test("round-trip create host -> create session -> turn facade call -> close -> shutdown", async () => {

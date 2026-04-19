@@ -8,7 +8,7 @@ import {
 import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 describe.skipIf(skipPgTests)("pg recent cognition slot setThinkerVersion", () => {
-  let testDb: PgTestDb;
+  let testDb: PgTestDb | null = null;
   let sql: postgres.Sql;
   let repo: PgRecentCognitionSlotRepo;
 
@@ -60,7 +60,9 @@ describe.skipIf(skipPgTests)("pg recent cognition slot setThinkerVersion", () =>
   });
 
   afterAll(async () => {
-    await testDb.cleanup();
+    if (testDb !== null) {
+      await testDb.cleanup();
+    }
   });
 
   async function thinkerVersion(): Promise<number | undefined> {

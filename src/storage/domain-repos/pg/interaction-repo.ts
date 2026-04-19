@@ -10,6 +10,24 @@ function parsePayload(raw: unknown): unknown {
   return raw;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? String((err as { code?: unknown }).code ?? "")
+      : "";
+  if (code === "23505") {
+    return true;
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("unique") ||
+    message.includes("duplicate") ||
+    message.includes("唯一") ||
+    message.includes("重复键")
+  );
+}
+
 function rowToRecord(row: Record<string, unknown>): InteractionRecord {
   const record: InteractionRecord = {
     sessionId: row.session_id as string,
@@ -48,7 +66,7 @@ export class PgInteractionRepo implements InteractionRepo {
       `;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes("unique") || message.includes("duplicate")) {
+      if (isUniqueViolation(err)) {
         throw new MaidsClawError({
           code: "INTERACTION_DUPLICATE_RECORD",
           message: `Duplicate record: recordId=${record.recordId}`,
@@ -66,8 +84,28 @@ export class PgInteractionRepo implements InteractionRepo {
   }
 
   async runInTransaction<T>(fn: (tx: InteractionTransactionContext) => Promise<T>): Promise<T> {
-    // PG path: caller must provide tx-scoped repo via UoW; standalone tx not supported here
-    return fn({ interactionRepo: this });
+    if (typeof (this.sql as unknown as { begin?: unknown }).begin !== "function") {
+      await this.sql.unsafe("BEGIN");
+      try {
+        const result = await fn({ interactionRepo: new PgInteractionRepo(this.sql) });
+        await this.sql.unsafe("COMMIT");
+        return result;
+      } catch (err) {
+        try {
+          await this.sql.unsafe("ROLLBACK");
+        } catch {
+          // Preserve the original failure. The reserved test connection is
+          // dropped with its schema after each case, so a secondary rollback
+          // error would only hide the real cause.
+        }
+        throw err;
+      }
+    }
+
+    return this.sql.begin(async (rawTx) => {
+      const tx = rawTx as unknown as postgres.Sql;
+      return fn({ interactionRepo: new PgInteractionRepo(tx) });
+    });
   }
 
   async settlementExists(sessionId: string, settlementId: string): Promise<boolean> {
@@ -361,7 +399,7 @@ export class PgInteractionRepo implements InteractionRepo {
 
     const sessions: Array<{ sessionId: string; agentId: string; oldestSettlementAt: number }> = [];
     for (const row of rows) {
-      const payload = row.newest_payload as { ownerAgentId?: unknown } | null;
+      const payload = parsePayload(row.newest_payload) as { ownerAgentId?: unknown } | null;
       if (
         !payload ||
         typeof payload.ownerAgentId !== "string" ||

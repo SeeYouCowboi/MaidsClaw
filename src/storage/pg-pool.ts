@@ -15,6 +15,12 @@ const DEFAULT_CONFIG = {
   max_lifetime: 3600,
 };
 
+const BENIGN_NOTICE_CODES = new Set([
+  "42P07", // relation already exists
+  "42710", // extension already exists
+  "42701", // column already exists
+]);
+
 export function createPgPool(
   url: string,
   config: PgPoolConfig = {},
@@ -28,7 +34,7 @@ export function createPgPool(
     max_lifetime: merged.max_lifetime,
     onnotice(notice: postgres.Notice) {
       const code = (notice as Record<string, unknown>).code as string | undefined;
-      if (code === "42P07" || code === "42710") return;
+      if (code && BENIGN_NOTICE_CODES.has(code)) return;
       console.warn("[pg notice]", notice);
     },
   };

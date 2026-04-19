@@ -1,6 +1,21 @@
 import type postgres from "postgres";
 import type { RecentCognitionSlotRepo } from "../contracts/recent-cognition-slot-repo.js";
 
+function parseSlotPayload(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 /**
  * Compact slot entries: same-key winner selection and active-entry budget enforcement.
  * Same `kind:key` duplicates → keep highest sourceTurnVersion (missing = 0), then committedAt.
@@ -120,8 +135,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
         let entries: unknown[];
         if (existingRows.length > 0) {
-          const existing = existingRows[0].slot_payload;
-          entries = Array.isArray(existing) ? existing : [];
+          entries = parseSlotPayload(existingRows[0].slot_payload);
         } else {
           entries = [];
         }
@@ -181,8 +195,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
         let entries: unknown[];
         if (existingRows.length > 0) {
-          const existing = existingRows[0].slot_payload;
-          entries = Array.isArray(existing) ? existing : [];
+          entries = parseSlotPayload(existingRows[0].slot_payload);
         } else {
           entries = [];
         }
@@ -242,8 +255,7 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
     let entries: unknown[];
     if (rows.length > 0) {
-      const existing = rows[0].slot_payload;
-      entries = Array.isArray(existing) ? existing : [];
+      entries = parseSlotPayload(rows[0].slot_payload);
     } else {
       entries = [];
     }
@@ -298,10 +310,9 @@ export class PgRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
     `;
     if (rows.length === 0) return undefined;
     const row = rows[0];
-    const payload = row.slot_payload;
     return {
       lastSettlementId: (row.last_settlement_id as string) ?? null,
-      slotPayload: Array.isArray(payload) ? payload : [],
+      slotPayload: parseSlotPayload(row.slot_payload),
       updatedAt: Number(row.updated_at),
       talkerTurnCounter: Number(row.talker_turn_counter ?? 0),
       thinkerCommittedVersion: Number(row.thinker_committed_version ?? 0),

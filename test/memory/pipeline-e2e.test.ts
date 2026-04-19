@@ -20,19 +20,17 @@ import type {
 	SessionRecord,
 	SessionService,
 } from "../../src/session/service.js";
-import * as pgAppTestUtils from "../helpers/pg-app-test-utils.js";
+import {
+	createPgTestDb,
+	resolvePgAppTestUrl,
+	skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 const describeWithSkip = describe as typeof describe & {
 	skipIf(condition: boolean): typeof describe;
 };
 
-const { skipPgTests: skipPgTestsFromPgApp } = pgAppTestUtils as {
-	skipPgTests?: boolean;
-};
-const skipPgTests =
-	skipPgTestsFromPgApp ?? typeof process.env.PG_APP_TEST_URL === "undefined";
-
-type PgTestDb = Awaited<ReturnType<typeof pgAppTestUtils.createPgTestDb>>;
+type PgTestDb = Awaited<ReturnType<typeof createPgTestDb>>;
 
 const EMPTY_MIGRATION_RESULT: MigrationResult = {
 	batch_id: "memory.migrate:test",
@@ -180,17 +178,15 @@ async function invokeFlushIfDue(
 }
 
 describeWithSkip.skipIf(skipPgTests)("memory pipeline e2e wiring (PG)", () => {
-	let testDb: PgTestDb;
-	let runtime: RuntimeBootstrapResult;
+	let testDb: PgTestDb | null = null;
+	let runtime: RuntimeBootstrapResult | null = null;
 	let originalPgAppUrl: string | undefined;
-	let sweeperStartSpy: ReturnType<typeof spyOn>;
+	let sweeperStartSpy: ReturnType<typeof spyOn> | null = null;
 
 	beforeAll(async () => {
-		testDb = await pgAppTestUtils.createPgTestDb();
+		testDb = await createPgTestDb();
 		originalPgAppUrl = process.env.PG_APP_URL;
-		process.env.PG_APP_URL =
-			process.env.PG_APP_TEST_URL ??
-			"postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app_test";
+		process.env.PG_APP_URL = resolvePgAppTestUrl();
 
 		sweeperStartSpy = spyOn(
 			PendingSettlementSweeper.prototype,
@@ -207,17 +203,25 @@ describeWithSkip.skipIf(skipPgTests)("memory pipeline e2e wiring (PG)", () => {
 	});
 
 	afterAll(async () => {
-		runtime.shutdown();
-		sweeperStartSpy.mockRestore();
+		runtime?.shutdown();
+		sweeperStartSpy?.mockRestore();
 		if (originalPgAppUrl === undefined) {
 			delete process.env.PG_APP_URL;
 		} else {
 			process.env.PG_APP_URL = originalPgAppUrl;
 		}
-		await testDb.cleanup();
+		if (testDb !== null) {
+			await testDb.cleanup();
+		}
 	});
 
 	it("pipeline-e2e: embedding-enabled bootstrap wiring smoke test", () => {
+		if (runtime === null) {
+			throw new Error("Expected runtime to be initialized");
+		}
+		if (sweeperStartSpy === null) {
+			throw new Error("Expected sweeper start spy to be initialized");
+		}
 		expect(runtime.memoryTaskAgent).not.toBeNull();
 		expect(runtime.memoryPipelineStatus).toBe("ready");
 		expect(runtime.memoryPipelineReady).toBe(true);
@@ -229,6 +233,9 @@ describeWithSkip.skipIf(skipPgTests)("memory pipeline e2e wiring (PG)", () => {
 	});
 
 	it("flushIfDue proceeds past null-agent guard when memoryTaskAgent exists", async () => {
+		if (runtime === null) {
+			throw new Error("Expected runtime to be initialized");
+		}
 		if (runtime.memoryTaskAgent === null) {
 			throw new Error("Expected memoryTaskAgent to be constructed");
 		}

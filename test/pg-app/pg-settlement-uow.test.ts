@@ -187,7 +187,11 @@ describe.skipIf(skipPgTests)(
 							agentId,
 							"uow:atomic:belief",
 						);
-					expect(cognitionEvents).toHaveLength(1);
+					expect(cognitionEvents).toHaveLength(2);
+					expect(cognitionEvents[0]?.settlement_id).toBe(settlementId);
+					expect(cognitionEvents[1]?.settlement_id).toBe(
+						`${settlementId}::verification:0`,
+					);
 
 					const cognitionCurrent =
 						await repos.cognitionProjectionRepo.getCurrent(
@@ -232,8 +236,9 @@ describe.skipIf(skipPgTests)(
 				SELECT COUNT(*)::int AS c
 				FROM private_cognition_events
 				WHERE settlement_id = ${settlementId}
+				   OR settlement_id = ${`${settlementId}::verification:0`}
 			`;
-				expect(cognitionEventRows[0].c).toBe(1);
+				expect(cognitionEventRows[0].c).toBe(2);
 
 				const cognitionCurrentRows = await sql`
 				SELECT COUNT(*)::int AS c

@@ -3,6 +3,7 @@ import type postgres from "postgres";
 import {
   ensureTestPgAppDb,
   createTestPgAppPool,
+  resolvePgAppTestUrl,
   resetAppSchema,
   teardownAppPool,
 } from "../helpers/pg-app-test-utils.js";
@@ -24,7 +25,7 @@ describe.skipIf(skipPgTests)("pg-pool", () => {
 
   describe("createPgPool", () => {
     it("creates a pool that can execute queries", async () => {
-      const pool = createPgPool(process.env.PG_APP_TEST_URL!, { max: 2 });
+      const pool = createPgPool(resolvePgAppTestUrl(), { max: 2 });
       try {
         const [row] = await pool`SELECT 1 + 1 AS result`;
         expect(row.result).toBe(2);
@@ -34,7 +35,7 @@ describe.skipIf(skipPgTests)("pg-pool", () => {
     });
 
     it("applies custom configuration options", async () => {
-      const pool = createPgPool(process.env.PG_APP_TEST_URL!, {
+      const pool = createPgPool(resolvePgAppTestUrl(), {
         max: 5,
         connect_timeout: 60,
         idle_timeout: 600,
@@ -62,7 +63,7 @@ describe.skipIf(skipPgTests)("pg-pool", () => {
     });
 
     it("creates pool from PG_APP_URL when set", async () => {
-      process.env.PG_APP_URL = process.env.PG_APP_TEST_URL;
+      process.env.PG_APP_URL = resolvePgAppTestUrl();
       const pool = createAppPgPool();
       try {
         const [row] = await pool`SELECT 1 AS connected`;
@@ -86,12 +87,19 @@ describe.skipIf(skipPgTests)("pg-pool", () => {
     });
 
     it("creates pool from PG_APP_TEST_URL when set", async () => {
+      const originalUrl = process.env.PG_APP_TEST_URL;
+      process.env.PG_APP_TEST_URL = originalUrl ?? resolvePgAppTestUrl();
       const pool = createAppTestPgPool();
       try {
         const [row] = await pool`SELECT 1 AS connected`;
         expect(row.connected).toBe(1);
       } finally {
         await pool.end();
+        if (originalUrl === undefined) {
+          delete (process.env as Record<string, string | undefined>).PG_APP_TEST_URL;
+        } else {
+          process.env.PG_APP_TEST_URL = originalUrl;
+        }
       }
     });
   });

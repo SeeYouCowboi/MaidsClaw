@@ -25,6 +25,33 @@ function stringifyJsonbNullable(value: unknown): string | null {
 export class PgProjectionRebuilder {
   constructor(private readonly sql: postgres.Sql) {}
 
+  private async runInTransaction<T>(
+    fn: (txSql: postgres.Sql) => Promise<T>,
+  ): Promise<T> {
+    if (typeof (this.sql as unknown as { begin?: unknown }).begin !== "function") {
+      await this.sql.unsafe("BEGIN");
+      try {
+        const result = await fn(this.sql);
+        await this.sql.unsafe("COMMIT");
+        return result;
+      } catch (err) {
+        try {
+          await this.sql.unsafe("ROLLBACK");
+        } catch {
+          // Preserve the original rebuild failure. Tests using reserved
+          // connections drop the schema after each case, so rollback cleanup
+          // errors would only hide the real cause.
+        }
+        throw err;
+      }
+    }
+
+    return this.sql.begin(async (tx) => {
+      const txSql = tx as unknown as postgres.Sql;
+      return fn(txSql);
+    });
+  }
+
   /**
    * Rebuild `private_cognition_current` from `private_cognition_events`.
    *
@@ -35,8 +62,7 @@ export class PgProjectionRebuilder {
    * @param agentId — optional; when given, rebuild only that agent's rows
    */
   async rebuildCognitionCurrent(agentId?: string): Promise<void> {
-    await this.sql.begin(async (tx) => {
-      const txSql = tx as unknown as postgres.Sql;
+    await this.runInTransaction(async (txSql) => {
       const repo = new PgCognitionProjectionRepo(txSql);
 
       if (agentId) {
@@ -84,9 +110,7 @@ export class PgProjectionRebuilder {
     agentId?: string,
     areaId?: number,
   ): Promise<void> {
-    await this.sql.begin(async (tx) => {
-      const txSql = tx as unknown as postgres.Sql;
-
+    await this.runInTransaction(async (txSql) => {
       if (agentId != null && areaId != null) {
         await txSql`
           DELETE FROM area_state_current
@@ -171,9 +195,7 @@ export class PgProjectionRebuilder {
    * event row with the highest (committed_time, id).
    */
   async rebuildWorldStateCurrent(): Promise<void> {
-    await this.sql.begin(async (tx) => {
-      const txSql = tx as unknown as postgres.Sql;
-
+    await this.runInTransaction(async (txSql) => {
       await txSql`DELETE FROM world_state_current`;
 
       await txSql`

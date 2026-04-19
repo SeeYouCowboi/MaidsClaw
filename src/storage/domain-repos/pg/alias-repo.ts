@@ -70,15 +70,50 @@ export class PgAliasRepo implements AliasRepo {
     aliasType?: string,
     ownerAgentId?: string,
   ): Promise<number> {
-    const existing = await this.sql<{ id: number }[]>`
-      SELECT id
-      FROM entity_aliases
-      WHERE canonical_id = ${canonicalId}
-        AND alias = ${alias}
-        AND ((alias_type = ${aliasType ?? null}) OR (alias_type IS NULL AND ${aliasType ?? null} IS NULL))
-        AND ((owner_agent_id = ${ownerAgentId ?? null}) OR (owner_agent_id IS NULL AND ${ownerAgentId ?? null} IS NULL))
-      LIMIT 1
-    `;
+    let existing: { id: number }[];
+
+    if (aliasType === undefined && ownerAgentId === undefined) {
+      existing = await this.sql<{ id: number }[]>`
+        SELECT id
+        FROM entity_aliases
+        WHERE canonical_id = ${canonicalId}
+          AND alias = ${alias}
+          AND alias_type IS NULL
+          AND owner_agent_id IS NULL
+        LIMIT 1
+      `;
+    } else if (aliasType === undefined) {
+      existing = await this.sql<{ id: number }[]>`
+        SELECT id
+        FROM entity_aliases
+        WHERE canonical_id = ${canonicalId}
+          AND alias = ${alias}
+          AND alias_type IS NULL
+          AND owner_agent_id = ${ownerAgentId}
+        LIMIT 1
+      `;
+    } else if (ownerAgentId === undefined) {
+      existing = await this.sql<{ id: number }[]>`
+        SELECT id
+        FROM entity_aliases
+        WHERE canonical_id = ${canonicalId}
+          AND alias = ${alias}
+          AND alias_type = ${aliasType}
+          AND owner_agent_id IS NULL
+        LIMIT 1
+      `;
+    } else {
+      existing = await this.sql<{ id: number }[]>`
+        SELECT id
+        FROM entity_aliases
+        WHERE canonical_id = ${canonicalId}
+          AND alias = ${alias}
+          AND alias_type = ${aliasType}
+          AND owner_agent_id = ${ownerAgentId}
+        LIMIT 1
+      `;
+    }
+
     if (existing.length > 0) {
       return Number(existing[0].id);
     }
@@ -92,12 +127,18 @@ export class PgAliasRepo implements AliasRepo {
   }
 
   async getAliasesForEntity(canonicalId: number, ownerAgentId?: string): Promise<EntityAlias[]> {
-    const rows = await this.sql<EntityAlias[]>`
-      SELECT *
-      FROM entity_aliases
-      WHERE canonical_id = ${canonicalId}
-        AND (owner_agent_id IS NULL OR owner_agent_id = ${ownerAgentId ?? null})
-    `;
+    const rows = ownerAgentId === undefined
+      ? await this.sql<EntityAlias[]>`
+          SELECT *
+          FROM entity_aliases
+          WHERE canonical_id = ${canonicalId}
+        `
+      : await this.sql<EntityAlias[]>`
+          SELECT *
+          FROM entity_aliases
+          WHERE canonical_id = ${canonicalId}
+            AND (owner_agent_id IS NULL OR owner_agent_id = ${ownerAgentId})
+        `;
     return rows;
   }
 

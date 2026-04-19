@@ -480,7 +480,7 @@ function parseRowRecordJson(value: unknown): Record<string, unknown> {
 describe.skipIf(skipPgTests)(
 	"Thinker Worker Phase 2 — PG Integration",
 	() => {
-		let testDb: PgTestDb;
+		let testDb: PgTestDb | null = null;
 		let pool: postgres.Sql;
 
 		beforeAll(async () => {
@@ -489,7 +489,9 @@ describe.skipIf(skipPgTests)(
 		});
 
 		afterAll(async () => {
-			await testDb.cleanup();
+			if (testDb !== null) {
+				await testDb.cleanup();
+			}
 		});
 
 		it(

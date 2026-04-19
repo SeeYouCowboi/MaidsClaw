@@ -7,20 +7,127 @@ import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.
 import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
 
 const DEFAULT_HOST_PORT = "127.0.0.1:55433";
-const TEST_DB = "maidsclaw_app_test";
+const DEFAULT_TEST_DB = "maidsclaw_app_test";
+const INT8_OID = 20;
+const MAX_PG_IDENTIFIER_LENGTH = 63;
+const BENIGN_TEST_NOTICE_CODES = new Set([
+  "00000", // generic NOTICE, such as DROP SCHEMA CASCADE details
+  "42P07", // relation already exists
+  "42710", // extension already exists
+  "42701", // column already exists
+]);
+
+const safeInt8AsNumber = {
+  to: INT8_OID,
+  from: [INT8_OID],
+  serialize(value: number | bigint | string): string {
+    return value.toString();
+  },
+  parse(raw: string): number {
+    return Number(raw);
+  },
+} satisfies postgres.PostgresType<number>;
+
+function quotePgIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, "\"\"")}"`;
+}
+
+function deriveInvocationSchemaName(baseSchemaName: string): string {
+  const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
+  const separator = "_";
+  const maxBaseLength = MAX_PG_IDENTIFIER_LENGTH - separator.length - suffix.length;
+  const truncatedBase = baseSchemaName.slice(0, Math.max(1, maxBaseLength));
+  return `${truncatedBase}${separator}${suffix}`;
+}
+
+export function computeSkipPgTests(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return !env.PG_TEST_URL && !env.PG_APP_TEST_URL;
+}
+
+export const skipPgTests = computeSkipPgTests();
+
+export function deriveAppTestUrlFromPgTestUrl(
+  pgTestUrl: string,
+  dbName = DEFAULT_TEST_DB,
+): string | null {
+  try {
+    const parsed = new URL(pgTestUrl);
+    parsed.pathname = `/${dbName}`;
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function resolvePgAppTestUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const url = env.PG_APP_TEST_URL;
+  if (url) {
+    return url;
+  }
+  const pgTestUrl = env.PG_TEST_URL;
+  if (pgTestUrl) {
+    const derived = deriveAppTestUrlFromPgTestUrl(pgTestUrl);
+    if (derived) {
+      return derived;
+    }
+  }
+  return `postgres://maidsclaw:maidsclaw@${DEFAULT_HOST_PORT}/${DEFAULT_TEST_DB}`;
+}
+
+export function resolvePgAppTestDbName(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  try {
+    const parsed = new URL(resolvePgAppTestUrl(env));
+    const dbName = parsed.pathname.replace(/^\/+/, "").trim();
+    return dbName.length > 0 ? dbName : DEFAULT_TEST_DB;
+  } catch {
+    return DEFAULT_TEST_DB;
+  }
+}
+
+export function resolvePgAppAdminUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  try {
+    const parsed = new URL(resolvePgAppTestUrl(env));
+    parsed.pathname = "/postgres";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    const testUrl = resolvePgAppTestUrl(env);
+    return testUrl.replace(/\/[^/]+$/, "/postgres");
+  }
+}
+
+export function installResolvedPgAppUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): () => void {
+  const originalUrl = env.PG_APP_URL;
+  env.PG_APP_URL = resolvePgAppTestUrl(env);
+
+  return () => {
+    if (originalUrl === undefined) {
+      delete env.PG_APP_URL;
+    } else {
+      env.PG_APP_URL = originalUrl;
+    }
+  };
+}
 
 function getTestUrl(): string {
-  const url = process.env.PG_APP_TEST_URL;
-  if (!url) {
-    return `postgres://maidsclaw:maidsclaw@${DEFAULT_HOST_PORT}/${TEST_DB}`;
-  }
-  return url;
+  return resolvePgAppTestUrl();
 }
 
 function getAdminUrl(): string {
-  const testUrl = getTestUrl();
-  // Derive admin URL (postgres db) from the test URL so port stays consistent
-  return testUrl.replace(/\/[^/]+$/, "/postgres");
+  return resolvePgAppAdminUrl();
 }
 
 const schemaRegistry = new Map<postgres.Sql, string>();
@@ -28,11 +135,12 @@ const schemaRegistry = new Map<postgres.Sql, string>();
 export async function ensureTestPgAppDb(): Promise<void> {
   const admin = postgres(getAdminUrl(), { max: 1 });
   try {
+    const dbName = resolvePgAppTestDbName();
     const rows = await admin`
-      SELECT 1 FROM pg_database WHERE datname = ${TEST_DB}
+      SELECT 1 FROM pg_database WHERE datname = ${dbName}
     `;
     if (rows.length === 0) {
-      await admin.unsafe(`CREATE DATABASE ${TEST_DB}`);
+      await admin.unsafe(`CREATE DATABASE ${quotePgIdentifier(dbName)}`);
     }
   } finally {
     await admin.end();
@@ -42,8 +150,20 @@ export async function ensureTestPgAppDb(): Promise<void> {
 export function createTestPgAppPool(explicitSchemaName?: string): postgres.Sql {
   const schemaName = explicitSchemaName ?? `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const sql = postgres(getTestUrl(), {
-    max: 3,
+    // withTestAppSchema reserves one connection per running test case and
+    // assigns a unique schema per invocation. Match Bun's default test
+    // concurrency so queued tests don't burn their 5s timeout just waiting
+    // for a connection slot.
+    max: 20,
     connection: { search_path: `${schemaName},public` },
+    types: { bigint: safeInt8AsNumber },
+    onnotice(notice: postgres.Notice) {
+      const code = (notice as Record<string, unknown>).code as string | undefined;
+      if (code && BENIGN_TEST_NOTICE_CODES.has(code)) {
+        return;
+      }
+      console.warn("[pg test notice]", notice);
+    },
   });
   schemaRegistry.set(sql, schemaName);
   return sql;
@@ -53,19 +173,29 @@ export async function withTestAppSchema<T>(
   pool: postgres.Sql,
   fn: (sql: postgres.Sql) => Promise<T>,
 ): Promise<T> {
-  const schemaName = schemaRegistry.get(pool);
-  if (!schemaName) {
+  const baseSchemaName = schemaRegistry.get(pool);
+  if (!baseSchemaName) {
     throw new Error("No schema registered for this connection. Use createTestPgAppPool().");
   }
 
-  await pool.unsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+  const schemaName = deriveInvocationSchemaName(baseSchemaName);
+  const reserved = await pool.reserve();
+  const quotedSchemaName = quotePgIdentifier(schemaName);
 
   try {
-    return await fn(pool);
+    await reserved.unsafe(`CREATE SCHEMA ${quotedSchemaName}`);
+    await reserved.unsafe(`SET search_path TO ${quotedSchemaName}, public`);
+    return await fn(reserved);
   } finally {
     try {
-      await pool.unsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
-    } catch {}
+      await reserved.unsafe(`SET search_path TO public`);
+    } finally {
+      try {
+        await reserved.unsafe(`DROP SCHEMA IF EXISTS ${quotedSchemaName} CASCADE`);
+      } finally {
+        reserved.release();
+      }
+    }
   }
 }
 
@@ -223,7 +353,7 @@ export type PgTestDb = {
  * ```typescript
  * import { describe, beforeAll, afterAll } from "bun:test";
  * import { createPgTestDb } from "../helpers/pg-app-test-utils.js";
- * import { skipPgTests } from "../helpers/pg-test-utils.js";
+ * import { skipPgTests } from "../helpers/pg-app-test-utils.js";
  *
  * describe.skipIf(skipPgTests)("My PG Test", () => {
  *   let testDb: Awaited<ReturnType<typeof createPgTestDb>>;

@@ -235,7 +235,7 @@ describe.skipIf(skipPgTests)("pg-ops-schema bootstrap", () => {
           `;
           expect(true).toBe(false);
         } catch (err: unknown) {
-          expect((err as Error).message).toMatch(/unique|duplicate/i);
+          expect((err as Error).message).toMatch(/unique|duplicate|唯一|重复/i);
         }
       });
     });

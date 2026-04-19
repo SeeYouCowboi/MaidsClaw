@@ -6,6 +6,11 @@ import { createTestPg, ensureTestDb, resetSchema, skipPgTests, teardown } from "
 describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 	let sql: postgres.Sql;
 
+	async function currentSchema(): Promise<string> {
+		const [row] = await sql<{ schema_name: string }[]>`SELECT current_schema() AS schema_name`;
+		return row.schema_name;
+	}
+
 	beforeAll(async () => {
 		await ensureTestDb();
 		sql = createTestPg();
@@ -18,10 +23,11 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 
 	it("creates tables on first run", async () => {
 		await bootstrapPgJobsSchema(sql);
+		const schemaName = await currentSchema();
 
 		const tables = await sql`
 			SELECT table_name FROM information_schema.tables
-			WHERE table_schema = 'public'
+			WHERE table_schema = ${schemaName}
 			  AND table_name IN ('jobs_current', 'job_attempts')
 			ORDER BY table_name
 		`;
@@ -61,9 +67,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		];
 
 		it("has all required columns", async () => {
+			const schemaName = await currentSchema();
 			const cols = await sql`
 				SELECT column_name FROM information_schema.columns
-				WHERE table_schema = 'public' AND table_name = 'jobs_current'
+				WHERE table_schema = ${schemaName} AND table_name = 'jobs_current'
 			`;
 			const colNames = cols.map((r) => r.column_name);
 			for (const expected of EXPECTED_COLUMNS) {
@@ -97,9 +104,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		];
 
 		it("has all required columns", async () => {
+			const schemaName = await currentSchema();
 			const cols = await sql`
 				SELECT column_name FROM information_schema.columns
-				WHERE table_schema = 'public' AND table_name = 'job_attempts'
+				WHERE table_schema = ${schemaName} AND table_name = 'job_attempts'
 			`;
 			const colNames = cols.map((r) => r.column_name);
 			for (const expected of EXPECTED_COLUMNS) {
@@ -110,10 +118,11 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 
 	describe("constraints", () => {
 		it("has PK on jobs_current.job_key", async () => {
+			const schemaName = await currentSchema();
 			const pk = await sql`
 				SELECT c.constraint_name
 				FROM information_schema.table_constraints c
-				WHERE c.table_schema = 'public'
+				WHERE c.table_schema = ${schemaName}
 				  AND c.table_name = 'jobs_current'
 				  AND c.constraint_type = 'PRIMARY KEY'
 			`;
@@ -123,15 +132,16 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 				SELECT kcu.column_name
 				FROM information_schema.key_column_usage kcu
 				WHERE kcu.constraint_name = ${pk[0].constraint_name}
-				  AND kcu.table_schema = 'public'
+				  AND kcu.table_schema = ${schemaName}
 			`;
 			expect(cols.map((r) => r.column_name)).toEqual(["job_key"]);
 		});
 
 		it("has unique (job_key, claim_version) on job_attempts", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname, indexdef FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'job_attempts'
 				  AND indexname = 'ux_job_attempts_job_key_claim_version'
 			`;
@@ -142,9 +152,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has active-family unique partial index on jobs_current", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname, indexdef FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_current_family_active'
 			`;
@@ -156,9 +167,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has claim scanning index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_current_status_next_attempt'
 			`;
@@ -166,9 +178,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has concurrency running index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_current_concurrency_running'
 			`;
@@ -176,9 +189,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has pending thinker payload composite index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname, indexdef FROM pg_indexes
-				WHERE schemaname = current_schema()
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_pending_thinker_session'
 			`;
@@ -191,9 +205,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has lease expiry index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_current_lease_expiry'
 			`;
@@ -201,9 +216,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has terminal retention index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'jobs_current'
 				  AND indexname = 'idx_jobs_current_terminal'
 			`;
@@ -211,9 +227,10 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 		});
 
 		it("has job_attempts history index", async () => {
+			const schemaName = await currentSchema();
 			const idx = await sql`
 				SELECT indexname FROM pg_indexes
-				WHERE schemaname = 'public'
+				WHERE schemaname = ${schemaName}
 				  AND tablename = 'job_attempts'
 				  AND indexname = 'idx_job_attempts_job_key'
 			`;
@@ -322,7 +339,7 @@ describe.skipIf(skipPgTests)("pg-schema bootstrap", () => {
 				`;
 				expect(true).toBe(false);
 			} catch (err: unknown) {
-				expect((err as Error).message).toMatch(/unique|duplicate/i);
+				expect((err as Error).message).toMatch(/unique|duplicate|唯一/i);
 			}
 		});
 	});

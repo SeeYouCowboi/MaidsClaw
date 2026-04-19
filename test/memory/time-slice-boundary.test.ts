@@ -138,7 +138,7 @@ describe("time-slice-boundary", () => {
 });
 
 describe.skipIf(skipPgTests)("time-slice-boundary (PG)", () => {
-  let testDb: PgTestDb;
+  let testDb: PgTestDb | null = null;
   let repo: PgAreaWorldProjectionRepo;
 
   beforeAll(async () => {
@@ -147,12 +147,14 @@ describe.skipIf(skipPgTests)("time-slice-boundary (PG)", () => {
   });
 
   afterAll(async () => {
-    await testDb.cleanup();
+    if (testDb !== null) {
+      await testDb.cleanup();
+    }
   });
 
   it("getAreaStateAsOf returns state as of committed_time from events table", async () => {
     const agentId = "agent-ts-test";
-    const areaId = testDb.entities.locationId;
+    const areaId = testDb!.entities.locationId;
 
     await repo.upsertAreaState({
       agentId,
@@ -224,7 +226,7 @@ describe.skipIf(skipPgTests)("time-slice-boundary (PG)", () => {
 
   it("getAreaStateAsOf returns null when queried before any committed events", async () => {
     const agentId = "agent-ts-test";
-    const areaId = testDb.entities.locationId;
+    const areaId = testDb!.entities.locationId;
 
     const result = await repo.getAreaStateAsOf(agentId, areaId, "mood", 500);
     expect(result).toBeNull();

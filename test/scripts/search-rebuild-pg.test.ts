@@ -8,6 +8,7 @@ import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
   createTestPgAppPool,
   ensureTestPgAppDb,
+  skipPgTests,
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
@@ -59,7 +60,7 @@ async function seedTestData(sql: postgres.Sql): Promise<void> {
   `;
 }
 
-describeWithSkipIf.skipIf(!process.env.PG_APP_TEST_URL)("search-rebuild-pg (script)", () => {
+describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
   let pool: postgres.Sql;
 
   beforeAll(async () => {

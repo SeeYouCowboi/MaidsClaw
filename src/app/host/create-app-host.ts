@@ -557,6 +557,14 @@ export async function createAppHost(
 		},
 	};
 
+	// Local/CLI callers often use the returned `host.user` immediately
+	// without calling host.start(). Mirror the server start-path guarantee
+	// here so the first local request also sees the segmenter after shared
+	// aliases have been loaded into the user dictionary.
+	if (options.role === "local") {
+		await runtime.segmenterReady;
+	}
+
 	// Auto-start local job consumer for thinker-talker mode
 	if (localDurableConsumer) {
 		await localDurableConsumer.start();

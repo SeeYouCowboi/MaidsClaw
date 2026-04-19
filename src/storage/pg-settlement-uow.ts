@@ -17,24 +17,44 @@ export class PgSettlementUnitOfWork implements SettlementUnitOfWork {
 	constructor(private readonly sql: postgres.Sql) {}
 
 	run<T>(fn: (repos: SettlementRepos) => Promise<T>): Promise<T> {
+		const buildRepos = (txSql: postgres.Sql): SettlementRepos => ({
+			settlementLedger: new PgSettlementLedgerRepo(txSql),
+			episodeRepo: new PgEpisodeRepo(txSql),
+			cognitionEventRepo: new PgCognitionEventRepo(txSql),
+			cognitionProjectionRepo: new PgCognitionProjectionRepo(txSql),
+			areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
+			interactionRepo: new PgInteractionRepo(txSql),
+			sessionRepo: new PgSessionRepo(txSql),
+			recentCognitionSlotRepo: new PgRecentCognitionSlotRepo(txSql),
+			searchProjectionRepo: new PgSearchProjectionRepo(txSql),
+			coreMemoryBlockRepo: new PgCoreMemoryBlockRepo(txSql),
+			graphStoreRepo: new PgGraphMutableStoreRepo(txSql),
+			pendingFlushRecoveryRepo: new PgPendingFlushRecoveryRepo(txSql),
+		});
+
+		if (typeof (this.sql as unknown as { begin?: unknown }).begin !== "function") {
+			return (async () => {
+				await this.sql.unsafe("BEGIN");
+				try {
+					const result = await fn(buildRepos(this.sql));
+					await this.sql.unsafe("COMMIT");
+					return result;
+				} catch (err) {
+					try {
+						await this.sql.unsafe("ROLLBACK");
+					} catch {
+						// Preserve the original error. withTestAppSchema drops the
+						// reserved connection's schema after each case, so rollback
+						// cleanup failures would only hide the real cause.
+					}
+					throw err;
+				}
+			})();
+		}
+
 		return this.sql.begin(async (tx) => {
 			const txSql = tx as unknown as postgres.Sql;
-			const repos: SettlementRepos = {
-				settlementLedger: new PgSettlementLedgerRepo(txSql),
-				episodeRepo: new PgEpisodeRepo(txSql),
-				cognitionEventRepo: new PgCognitionEventRepo(txSql),
-				cognitionProjectionRepo: new PgCognitionProjectionRepo(txSql),
-				areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
-				interactionRepo: new PgInteractionRepo(txSql),
-				sessionRepo: new PgSessionRepo(txSql),
-				recentCognitionSlotRepo: new PgRecentCognitionSlotRepo(txSql),
-				searchProjectionRepo: new PgSearchProjectionRepo(txSql),
-				coreMemoryBlockRepo: new PgCoreMemoryBlockRepo(txSql),
-				graphStoreRepo: new PgGraphMutableStoreRepo(txSql),
-				pendingFlushRecoveryRepo: new PgPendingFlushRecoveryRepo(txSql),
-			};
-
-			return fn(repos);
+			return fn(buildRepos(txSql));
 		}) as Promise<T>;
 	}
 }

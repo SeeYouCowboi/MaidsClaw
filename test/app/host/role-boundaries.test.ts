@@ -44,6 +44,7 @@ function createMockRuntime(): {
 		pgFactory: {
 			type: "pg",
 			initialize: async () => {},
+			isInitialized: () => false,
 			close: async () => {},
 			getPool: () => null,
 			pool: null,
@@ -58,6 +59,7 @@ function createMockRuntime(): {
 				reclaimExpiredLeases: async () => 0,
 			},
 		},
+		segmenterReady: Promise.resolve(),
 		shutdown: () => {
 			shutdownCallCount += 1;
 		},
@@ -124,6 +126,17 @@ function patchLifecycleSpies(): {
 			LeaseReclaimSweeper.prototype.stop = originalSweeperStop;
 		},
 	};
+}
+
+function createDeferred(): {
+	promise: Promise<void>;
+	resolve: () => void;
+} {
+	let resolve!: () => void;
+	const promise = new Promise<void>((res) => {
+		resolve = res;
+	});
+	return { promise, resolve };
 }
 
 describe("createAppHost role boundaries", () => {
@@ -223,6 +236,27 @@ describe("createAppHost role boundaries", () => {
 		} finally {
 			spies.restore();
 		}
+	});
+
+	test("local role waits for segmenterReady before createAppHost resolves", async () => {
+		const deferred = createDeferred();
+		const { runtime } = createMockRuntime();
+		runtime.segmenterReady = deferred.promise;
+
+		let resolved = false;
+		const hostPromise = createAppHost({ role: "local" }, runtime).then((host) => {
+			resolved = true;
+			return host;
+		});
+
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(resolved).toBe(false);
+
+		deferred.resolve();
+		const host = await hostPromise;
+		expect(resolved).toBe(true);
+		await host.shutdown();
 	});
 
 	test("maintenance role exposes maintenance facade and does not start gateway", async () => {

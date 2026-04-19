@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { GatewaySessionClient } from "../../src/app/clients/gateway/gateway-session-client.js";
 import { LocalSessionClient } from "../../src/app/clients/local/local-session-client.js";
 import { type AppHost, createAppHost } from "../../src/app/host/index.js";
-import { skipPgTests } from "../helpers/pg-test-utils.js";
+import {
+	installResolvedPgAppUrl,
+	skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import type { TurnService } from "../../src/runtime/turn-service.js";
@@ -100,12 +103,15 @@ class CloseTrackingSessionService extends FixedAgentSessionService {
 
 describe("LocalSessionClient.closeSession flush decision matrix", () => {
 	let host: AppHost | undefined;
+	let restorePgAppUrl: (() => void) | undefined;
 
 	afterEach(async () => {
 		if (host) {
 			await host.shutdown();
 			host = undefined;
 		}
+		restorePgAppUrl?.();
+		restorePgAppUrl = undefined;
 	});
 
 	test("returns skipped_no_agent when session has no agent id", async () => {
@@ -120,6 +126,7 @@ describe("LocalSessionClient.closeSession flush decision matrix", () => {
 
 	describe.skipIf(skipPgTests)("PG-dependent", () => {
 		test("returns not_applicable when closing via app host with no memory agent", async () => {
+			restorePgAppUrl = installResolvedPgAppUrl();
 			host = await createAppHost({
 				role: "local",
 				memoryEmbeddingModelId: "",

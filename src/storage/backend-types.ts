@@ -61,7 +61,7 @@ export class PgBackendFactory implements BackendFactory {
 
 	async close(): Promise<void> {
 		if (this.pool) {
-			await this.pool.end();
+			await this.pool.end({ timeout: 5 });
 			this.pool = null;
 		}
 	}

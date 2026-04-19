@@ -3,7 +3,7 @@ import type postgres from "postgres";
 import {
   ensureTestPgAppDb,
   createTestPgAppPool,
-  resetAppSchema,
+  withTestAppSchema,
   teardownAppPool,
 } from "../helpers/pg-app-test-utils.js";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
@@ -14,7 +14,6 @@ describe.skipIf(skipPgTests)("pgvector-available", () => {
   beforeAll(async () => {
     await ensureTestPgAppDb();
     sql = createTestPgAppPool();
-    await resetAppSchema(sql);
   });
 
   afterAll(async () => {
@@ -30,43 +29,43 @@ describe.skipIf(skipPgTests)("pgvector-available", () => {
   });
 
   it("can create a table with vector column", async () => {
-    await sql`CREATE EXTENSION IF NOT EXISTS vector`;
-    await sql`
-      CREATE TABLE IF NOT EXISTS test_vectors (
-        id SERIAL PRIMARY KEY,
-        embedding VECTOR(1536)
-      )
-    `;
+    await withTestAppSchema(sql, async (pool) => {
+      await pool`CREATE EXTENSION IF NOT EXISTS vector`;
+      await pool`
+        CREATE TABLE IF NOT EXISTS test_vectors (
+          id SERIAL PRIMARY KEY,
+          embedding VECTOR(1536)
+        )
+      `;
 
-    const [row] = await sql`
-      SELECT 1 AS created FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'test_vectors'
-    `;
-    expect(row?.created).toBe(1);
-
-    await sql`DROP TABLE test_vectors`;
+      const [row] = await pool`
+        SELECT 1 AS created FROM information_schema.tables
+        WHERE table_schema = current_schema() AND table_name = 'test_vectors'
+      `;
+      expect(row?.created).toBe(1);
+    });
   });
 
   it("can insert and query vectors", async () => {
-    await sql`CREATE EXTENSION IF NOT EXISTS vector`;
-    await sql`
-      CREATE TABLE IF NOT EXISTS test_vectors (
-        id SERIAL PRIMARY KEY,
-        embedding VECTOR(3)
-      )
-    `;
+    await withTestAppSchema(sql, async (pool) => {
+      await pool`CREATE EXTENSION IF NOT EXISTS vector`;
+      await pool`
+        CREATE TABLE IF NOT EXISTS test_vectors (
+          id SERIAL PRIMARY KEY,
+          embedding VECTOR(3)
+        )
+      `;
 
-    const embedding = [1.0, 2.0, 3.0];
-    await sql`
-      INSERT INTO test_vectors (embedding) VALUES (${embedding}::vector)
-    `;
+      await pool`
+        INSERT INTO test_vectors (embedding) VALUES (${`[1,2,3]`}::vector)
+      `;
 
-    const [row] = await sql`
-      SELECT id, embedding::text AS embedding_str FROM test_vectors LIMIT 1
-    `;
-    expect(row).toBeDefined();
-    expect(row.id).toBeDefined();
-
-    await sql`DROP TABLE test_vectors`;
+      const [row] = await pool`
+        SELECT id, embedding::text AS embedding_str FROM test_vectors LIMIT 1
+      `;
+      expect(row).toBeDefined();
+      expect(row.id).toBeDefined();
+      expect(row.embedding_str).toBe("[1,2,3]");
+    });
   });
 });

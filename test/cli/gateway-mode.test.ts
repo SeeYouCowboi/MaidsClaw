@@ -15,8 +15,16 @@ import { registerTurnCommands } from "../../src/terminal-cli/commands/turn.js";
 import { CliError } from "../../src/terminal-cli/errors.js";
 import { GatewayClient } from "../../src/terminal-cli/gateway-client.js";
 import { dispatch, resetCommands } from "../../src/terminal-cli/parser.js";
+import {
+	installResolvedPgAppUrl,
+	skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 type RuntimeRef = ReturnType<typeof bootstrapRuntime>;
+type GatewayDescribe = typeof describe & {
+	skipIf(condition: boolean): typeof describe;
+};
+const describeWithSkip = describe as GatewayDescribe;
 
 const tempDirs: string[] = [];
 
@@ -58,16 +66,18 @@ function parseJsonLine(raw: string): unknown {
 	return JSON.parse(raw.trim().split("\n")[0]);
 }
 
-describe("gateway mode", () => {
-	let runtime: RuntimeRef;
-	let server: GatewayServer;
+describeWithSkip.skipIf(skipPgTests)("gateway mode", () => {
+	let runtime: RuntimeRef | undefined;
+	let server: GatewayServer | undefined;
 	let baseUrl: string;
+	let restorePgAppUrl: (() => void) | undefined;
 
 	beforeEach(async () => {
 		resetCommands();
 		registerDebugCommands();
 		registerSessionCommands();
 		registerTurnCommands();
+		restorePgAppUrl = installResolvedPgAppUrl();
 
 		runtime = bootstrapRuntime({
 			cwd: makeTempDir(),
@@ -113,9 +123,13 @@ describe("gateway mode", () => {
 	});
 
 	afterEach(() => {
-		server.stop();
-		runtime.shutdown();
+		server?.stop();
+		runtime?.shutdown();
+		server = undefined;
+		runtime = undefined;
 		cleanupTempDirs();
+		restorePgAppUrl?.();
+		restorePgAppUrl = undefined;
 	});
 
 	it("GatewayClient rejects remote unsafe raw", () => {

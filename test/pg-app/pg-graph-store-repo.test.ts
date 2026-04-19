@@ -107,14 +107,14 @@ describe.skipIf(skipPgTests)(
         expect(factId).toBeGreaterThan(0);
 
         const before = await sql`
-          SELECT t_invalid FROM fact_edges WHERE id = ${factId}
+          SELECT t_invalid::text AS t_invalid FROM fact_edges WHERE id = ${factId}
         `;
         expect(String(before[0].t_invalid)).toBe(PG_MAX_BIGINT);
 
         await repo.invalidateFact(factId);
 
         const after = await sql`
-          SELECT t_invalid FROM fact_edges WHERE id = ${factId}
+          SELECT t_invalid::text AS t_invalid FROM fact_edges WHERE id = ${factId}
         `;
         expect(String(after[0].t_invalid)).not.toBe(PG_MAX_BIGINT);
       });
@@ -193,9 +193,9 @@ describe.skipIf(skipPgTests)(
           cognitionKey: "assert:1",
           settlementId: "stl-1",
           opIndex: 0,
-          sourcePointerKey: "source:alice",
-          predicate: "knows",
-          targetPointerKey: "target:bob",
+          holderPointerKey: "source:alice",
+          claim: "knows",
+          entityPointerKeys: ["target:bob"],
           stance: "accepted",
           basis: "belief",
         });
@@ -205,9 +205,9 @@ describe.skipIf(skipPgTests)(
           cognitionKey: "assert:1",
           settlementId: "stl-2",
           opIndex: 1,
-          sourcePointerKey: "source:alice",
-          predicate: "knows",
-          targetPointerKey: "target:bob",
+          holderPointerKey: "source:alice",
+          claim: "knows",
+          entityPointerKeys: ["target:bob"],
           stance: "confirmed",
           basis: "first_hand",
         });

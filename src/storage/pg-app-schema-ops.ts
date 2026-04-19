@@ -127,20 +127,44 @@ export async function bootstrapOpsSchema(sql: postgres.Sql): Promise<void> {
   // Uses ON CONFLICT DO NOTHING at insert time; null-safe chain skips
   // applyProjection when conflict hit (event already applied in prior run).
   await sql.unsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_cognition_events_settlement_dedup
-    ON private_cognition_events (settlement_id, agent_id, cognition_key, op)
+    DO $$
+    BEGIN
+      IF to_regclass(format('%I.private_cognition_events', current_schema())) IS NOT NULL THEN
+        EXECUTE format(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_cognition_events_settlement_dedup
+           ON %I.private_cognition_events (settlement_id, agent_id, cognition_key, op)',
+          current_schema()
+        );
+      END IF;
+    END $$;
   `);
 
   // ── request_id correlation columns ──────────────────────────────────
   // Nullable VARCHAR for request-correlation tracing. Added post-V3 launch;
   // existing rows retain NULL and remain readable without backfill.
   await sql.unsafe(`
-    ALTER TABLE private_episode_events
-      ADD COLUMN IF NOT EXISTS request_id VARCHAR
+    DO $$
+    BEGIN
+      IF to_regclass(format('%I.private_episode_events', current_schema())) IS NOT NULL THEN
+        EXECUTE format(
+          'ALTER TABLE %I.private_episode_events
+             ADD COLUMN IF NOT EXISTS request_id VARCHAR',
+          current_schema()
+        );
+      END IF;
+    END $$;
   `);
   await sql.unsafe(`
-    ALTER TABLE private_cognition_events
-      ADD COLUMN IF NOT EXISTS request_id VARCHAR
+    DO $$
+    BEGIN
+      IF to_regclass(format('%I.private_cognition_events', current_schema())) IS NOT NULL THEN
+        EXECUTE format(
+          'ALTER TABLE %I.private_cognition_events
+             ADD COLUMN IF NOT EXISTS request_id VARCHAR',
+          current_schema()
+        );
+      END IF;
+    END $$;
   `);
 
   // ── pending_settlement_recovery ─────────────────────────────────────

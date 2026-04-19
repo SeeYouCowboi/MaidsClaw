@@ -406,6 +406,14 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       ON private_cognition_events(settlement_id)
   `);
 
+  // Idempotency constraint for cognition event replay / retry handling.
+  // Fresh truth-plane bootstraps must include it because PgCognitionEventRepo
+  // uses ON CONFLICT on this key even in tests that don't bootstrap ops schema.
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cognition_events_settlement_dedup
+      ON private_cognition_events (settlement_id, agent_id, cognition_key, op)
+  `);
+
   // ══════════════════════════════════════════════════════════════════
   // Append-only ledgers: area_state_events
   // ══════════════════════════════════════════════════════════════════
