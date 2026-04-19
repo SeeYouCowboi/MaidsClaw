@@ -682,6 +682,25 @@ export async function executeThinkerPath(
 		weight?: number;
 	}> = [];
 
+	// Phase-2 scenario overlay: simulate batch-collapse only. Chain 6 beats 1-2
+	// are deferred and their sketches surface as pending jobs when chain 6 beat3
+	// triggers the batch sketch chain assembly in thinker-worker. Recovery
+	// simulation is intentionally out of scope for v1: thinker-worker's
+	// idempotency guard (slot.thinkerCommittedVersion >= payload.talkerTurnVersion)
+	// makes "crash + replay-after-many-later-beats" return replayed_noop in
+	// production, so a scenario-level replay cannot meaningfully re-write events.
+	const BATCH_DEFER_BEAT_IDS = new Set<string>(["cg-06-b1", "cg-06-b2"]);
+	const BATCH_TRIGGER_BEAT_IDS = new Set<string>(["cg-06-b3"]);
+
+	type DeferredBeat = {
+		settlementId: string;
+		requestId: string;
+		talkerTurnVersion: number;
+		cognitionOps: CognitionOp[];
+		privateEpisodes: PrivateEpisodeArtifact[];
+	};
+	const batchDeferred: DeferredBeat[] = [];
+
 	const cognitionEventRepo = new PgCognitionEventRepo(infra.sql);
 	const areaWorldProjectionRepo = new PgAreaWorldProjectionRepo(infra.sql);
 
@@ -730,20 +749,36 @@ export async function executeThinkerPath(
 
 	// Scripted outcomes keyed by settlementId, cursor-advanced per loop iteration.
 	const outcomesBySettlementId = new Map<string, unknown>();
+	// Settlement payloads keyed by requestId so batch-mode hydration (which
+	// iterates several pending turns) can look up each member payload.
+	type ScenarioSettlementPayload = Awaited<
+		ReturnType<
+			import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
+		>
+	>;
+	const payloadsByRequestId = new Map<string, ScenarioSettlementPayload>();
 	let currentSettlementId = "";
-	let currentRequestId = "";
-	let currentPayload:
-		| Awaited<
-				ReturnType<
-					import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
-				>
-			>
-		| undefined;
+
+	// Mock DurableJobStore for batch-collapse: returns whatever the orchestrating
+	// loop has staged as pending. Phase-2 triggers fill this transiently before
+	// a batch-trigger beat and clear it afterwards.
+	type PendingRow = {
+		payload_json: { sessionId: string; agentId: string; settlementId: string; talkerTurnVersion: number };
+	};
+	let pendingFromStore: PendingRow[] = [];
+	const mockDurableJobStore = {
+		async listPendingByKindAndPayload(
+			_kind: string,
+			_filter: { sessionId?: string; agentId?: string },
+			_now: number,
+		) {
+			return pendingFromStore;
+		},
+	};
 
 	const mockInteractionRepo = {
-		async getSettlementPayload(_sessionId: string, _requestId: string) {
-			// Scenario runner processes beats serially; always return the active payload.
-			return currentPayload;
+		async getSettlementPayload(_sessionId: string, requestId: string) {
+			return payloadsByRequestId.get(requestId);
 		},
 		async getMessageRecords() {
 			return [];
@@ -819,6 +854,7 @@ export async function executeThinkerPath(
 			agentId === SCENARIO_DEFAULT_AGENT_ID ? mockAgentLoop : null,
 		jobPersistence: NOOP_JOB_PERSISTENCE,
 		settlementLedger: settlementLedgerAdapter,
+		durableJobStore: mockDurableJobStore,
 	};
 
 	// Cast deps/handler through unknown to avoid importing the full ThinkerWorkerDeps type surface.
@@ -927,29 +963,102 @@ export async function executeThinkerPath(
 				...(sketchSource ? { cognitiveSketchSource: sketchSource } : {}),
 			};
 
+			const talkerTurnVersion = i + 1;
+			payloadsByRequestId.set(
+				requestId,
+				payload as unknown as ScenarioSettlementPayload,
+			);
 			outcomesBySettlementId.set(settlement.settlementId, outcome);
 			currentSettlementId = settlement.settlementId;
-			currentRequestId = requestId;
-			currentPayload = payload as unknown as Awaited<
-				ReturnType<
-					import("../../../src/memory/interaction-repo.js").InteractionRepo["getSettlementPayload"]
-				>
-			>;
 
 			await ledger.markTalkerCommitted(
 				settlement.settlementId,
 				settlement.agentId,
 			);
 
-			await handler({
-				payload: {
-					sessionId: settlement.sessionId,
-					agentId: settlement.agentId,
-					settlementId: settlement.settlementId,
-					talkerTurnVersion: i + 1,
-					requestId,
-				},
-			});
+			const beatId = settlement.beatId;
+			const deferredEntry = {
+				settlementId: settlement.settlementId,
+				requestId,
+				talkerTurnVersion,
+				cognitionOps,
+				privateEpisodes,
+			};
+
+			if (BATCH_DEFER_BEAT_IDS.has(beatId)) {
+				// Phase-2 batch: defer this beat's handler; its ops/episodes will be
+				// merged into the trigger beat's outcome, and the job will surface via
+				// mockDurableJobStore.listPendingByKindAndPayload.
+				batchDeferred.push(deferredEntry);
+			} else if (BATCH_TRIGGER_BEAT_IDS.has(beatId) && batchDeferred.length > 0) {
+				// Merge all prior deferred ops + episodes into the current (trigger)
+				// outcome so the single batch thinker commit reflects the full chain.
+				// Deduplicate by (kind, key) keeping the LAST occurrence — this
+				// matches production thinker semantics, where the model re-derives
+				// one consolidated outcome from the full sketch chain (later
+				// corrections supersede earlier sketches) instead of applying each
+				// historical op sequentially.
+				const allOps = [
+					...batchDeferred.flatMap((d) => d.cognitionOps),
+					...cognitionOps,
+				];
+				const keyOf = (op: CognitionOp): string =>
+					op.op === "upsert"
+						? `${op.record.kind}:${op.record.key}`
+						: `${op.target.kind}:${op.target.key}`;
+				const lastIndexByKey = new Map<string, number>();
+				allOps.forEach((op, idx) => lastIndexByKey.set(keyOf(op), idx));
+				const mergedOps = allOps.filter(
+					(op, idx) => lastIndexByKey.get(keyOf(op)) === idx,
+				);
+				const mergedEpisodes = [
+					...batchDeferred.flatMap((d) => d.privateEpisodes),
+					...privateEpisodes,
+				];
+				const mergedOutcome = {
+					...outcome,
+					privateCognition: {
+						schemaVersion: "rp_private_cognition_v4" as const,
+						ops: mergedOps,
+					},
+					privateEpisodes: mergedEpisodes,
+				};
+				outcomesBySettlementId.set(settlement.settlementId, mergedOutcome);
+
+				pendingFromStore = batchDeferred.map((d) => ({
+					payload_json: {
+						sessionId: settlement.sessionId,
+						agentId: settlement.agentId,
+						settlementId: d.settlementId,
+						talkerTurnVersion: d.talkerTurnVersion,
+					},
+				}));
+
+				try {
+					await handler({
+						payload: {
+							sessionId: settlement.sessionId,
+							agentId: settlement.agentId,
+							settlementId: settlement.settlementId,
+							talkerTurnVersion,
+							requestId,
+						},
+					});
+					batchDeferred.length = 0;
+				} finally {
+					pendingFromStore = [];
+				}
+			} else {
+				await handler({
+					payload: {
+						sessionId: settlement.sessionId,
+						agentId: settlement.agentId,
+						settlementId: settlement.settlementId,
+						talkerTurnVersion,
+						requestId,
+					},
+				});
+			}
 
 			// After commit, collect episode IDs from DB for deferred logic edges.
 			const rows = await infra.repos.episode.readBySettlement(

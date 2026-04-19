@@ -17,7 +17,12 @@ const EXPECTED_ENGLISH_AUDIT_CHAINS = 12;
 const EXPECTED_RETRACTS = 12;
 const EXPECTED_CONTESTED = 13;
 const EXPECTED_LOGIC_EDGES = EXPECTED_CHAINS * 3;
-const EXPECTED_BASE_EVENTS = 79;
+// Phase-2 batch-collapse: chain 6's beat1 (3 upserts) + beat2 (1 correction)
+// fold into a single thinker commit at beat3 with de-duplicated ops (keeping
+// the correction for cg:assertion:06). Production thinker re-derives one
+// outcome from the sketch chain, so this matches reality. The de-dup drops
+// exactly one event vs the direct-projection baseline.
+const EXPECTED_BASE_EVENTS = 78;
 
 describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () => {
   let handle: ScenarioHandleExtended;
