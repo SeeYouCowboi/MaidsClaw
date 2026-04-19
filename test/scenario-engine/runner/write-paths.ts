@@ -69,6 +69,7 @@ import {
 } from "../generators/settlement-generator.js";
 import type { ScenarioDebuggerCollector } from "./debugger.js";
 import type { ScenarioInfra } from "./infra.js";
+import type { ThinkerWorkerDeps } from "../../../src/runtime/thinker-worker.js";
 
 export type BeatStats = {
 	beatId: string;
@@ -694,12 +695,20 @@ export async function executeThinkerPath(
 	const BATCH_TRIGGER_BEAT_IDS = new Set<string>(["cg-06-b3"]);
 	const RECOVERY_REPLAY_BEAT_IDS = new Set<string>(["cg-07-b2"]);
 
+	type DeferredBeatEdge = {
+		beatId: string;
+		fromLocalRef: string;
+		toLocalRef: string;
+		edgeType: string;
+		weight?: number;
+	};
 	type DeferredBeat = {
 		settlementId: string;
 		requestId: string;
 		talkerTurnVersion: number;
 		cognitionOps: CognitionOp[];
 		privateEpisodes: PrivateEpisodeArtifact[];
+		logicEdges: DeferredBeatEdge[];
 	};
 	const batchDeferred: DeferredBeat[] = [];
 
@@ -768,7 +777,6 @@ export async function executeThinkerPath(
 		>
 	>;
 	const payloadsByRequestId = new Map<string, ScenarioSettlementPayload>();
-	let currentSettlementId = "";
 
 	// Mock DurableJobStore for batch-collapse: returns whatever the orchestrating
 	// loop has staged as pending. Phase-2 triggers fill this transiently before
@@ -844,34 +852,42 @@ export async function executeThinkerPath(
 	};
 
 	const mockAgentLoop = {
-		async runBuffered() {
-			const outcome = outcomesBySettlementId.get(currentSettlementId);
+		// thinker-worker builds agentRunRequest with requestId === payload.settlementId
+		// (src/runtime/thinker-worker.ts:1361); look outcomes up by that key so the
+		// mock stays correct under any future caller-side refactor (e.g. per-member
+		// batch invocations) without relying on external mutable state.
+		async runBuffered(request: { requestId: string }) {
+			const outcome = outcomesBySettlementId.get(request.requestId);
 			if (!outcome) {
 				throw new Error(
-					`No scripted outcome registered for settlement '${currentSettlementId}'`,
+					`No scripted outcome registered for settlement '${request.requestId}'`,
 				);
 			}
 			return { outcome };
 		},
 	};
 
-	const deps = {
+	// The mocks intentionally implement subsets of their real interfaces (only
+	// the methods thinker-worker invokes). We cast each mock through `unknown`
+	// at the assignment site so TypeScript still structurally validates the
+	// outer `deps` object against `ThinkerWorkerDeps` — a later addition of a
+	// required field to the dep contract will surface here at compile time.
+	const deps: ThinkerWorkerDeps = {
 		sql: infra.sql,
 		projectionManager,
-		interactionRepo: mockInteractionRepo,
+		interactionRepo: mockInteractionRepo as unknown as ThinkerWorkerDeps["interactionRepo"],
 		recentCognitionSlotRepo: infra.repos.recentCognitionSlot,
 		agentRegistry: registry,
 		createAgentLoop: (agentId: string) =>
-			agentId === SCENARIO_DEFAULT_AGENT_ID ? mockAgentLoop : null,
+			agentId === SCENARIO_DEFAULT_AGENT_ID
+				? (mockAgentLoop as unknown as ReturnType<ThinkerWorkerDeps["createAgentLoop"]>)
+				: null,
 		jobPersistence: NOOP_JOB_PERSISTENCE,
-		settlementLedger: settlementLedgerAdapter,
-		durableJobStore: mockDurableJobStore,
+		settlementLedger: settlementLedgerAdapter as unknown as ThinkerWorkerDeps["settlementLedger"],
+		durableJobStore: mockDurableJobStore as unknown as ThinkerWorkerDeps["durableJobStore"],
 	};
 
-	// Cast deps/handler through unknown to avoid importing the full ThinkerWorkerDeps type surface.
-	const handler = (createThinkerWorker as (deps: unknown) => (job: { payload: unknown }) => Promise<void>)(
-		deps as unknown,
-	);
+	const handler = createThinkerWorker(deps);
 
 	let beatsProcessed = 0;
 
@@ -980,7 +996,6 @@ export async function executeThinkerPath(
 				payload as unknown as ScenarioSettlementPayload,
 			);
 			outcomesBySettlementId.set(settlement.settlementId, outcome);
-			currentSettlementId = settlement.settlementId;
 
 			await ledger.markTalkerCommitted(
 				settlement.settlementId,
@@ -988,19 +1003,41 @@ export async function executeThinkerPath(
 			);
 
 			const beatId = settlement.beatId;
-			const deferredEntry = {
+			const settlementLogicEdges: DeferredBeatEdge[] = settlement.logicEdges.map(
+				(edge) => ({
+					beatId: settlement.beatId,
+					fromLocalRef: edge.fromLocalRef,
+					toLocalRef: edge.toLocalRef,
+					edgeType: edge.edgeType,
+					weight: edge.weight,
+				}),
+			);
+			const deferredEntry: DeferredBeat = {
 				settlementId: settlement.settlementId,
 				requestId,
 				talkerTurnVersion,
 				cognitionOps,
 				privateEpisodes,
+				logicEdges: settlementLogicEdges,
 			};
 
+			// Edges inherited from any prior batch-defer beats; captured BEFORE
+			// the trigger branch clears batchDeferred so the push at the end of
+			// this iteration can pick them up alongside this beat's own edges.
+			const edgesFromDeferred: DeferredBeatEdge[] =
+				BATCH_TRIGGER_BEAT_IDS.has(beatId)
+					? batchDeferred.flatMap((d) => d.logicEdges)
+					: [];
+
 			if (BATCH_DEFER_BEAT_IDS.has(beatId)) {
-				// Phase-2 batch: defer this beat's handler; its ops/episodes will be
-				// merged into the trigger beat's outcome, and the job will surface via
-				// mockDurableJobStore.listPendingByKindAndPayload.
+				// Phase-2 batch: defer this beat's handler; its ops/episodes/edges
+				// will fold into the trigger beat's outcome. Skip the post-handler
+				// episode collection + edge accumulation for this iteration — the
+				// trigger beat re-runs both under its own settlement_id.
 				batchDeferred.push(deferredEntry);
+				await captureBeatSnapshots(infra, settlement.beatId, options);
+				perBeatStats.push(beatStat);
+				continue;
 			} else if (BATCH_TRIGGER_BEAT_IDS.has(beatId) && batchDeferred.length > 0) {
 				// Merge all prior deferred ops + episodes into the current (trigger)
 				// outcome so the single batch thinker commit reflects the full chain.
@@ -1093,14 +1130,12 @@ export async function executeThinkerPath(
 				}
 			}
 
-			for (const edge of settlement.logicEdges) {
-				deferredEdges.push({
-					beatId: settlement.beatId,
-					fromLocalRef: edge.fromLocalRef,
-					toLocalRef: edge.toLocalRef,
-					edgeType: edge.edgeType,
-					weight: edge.weight,
-				});
+			// Include any logic edges inherited from batch-deferred beats so their
+			// referenced episodes (committed under the trigger settlement_id) are
+			// resolved in the second pass. edgesFromDeferred was snapshotted
+			// above before batchDeferred was cleared.
+			for (const edge of [...edgesFromDeferred, ...settlementLogicEdges]) {
+				deferredEdges.push(edge);
 			}
 		} catch (error) {
 			beatStat.errors += 1;

@@ -17,14 +17,27 @@ const EXPECTED_ENGLISH_AUDIT_CHAINS = 12;
 const EXPECTED_RETRACTS = 12;
 const EXPECTED_CONTESTED = 13;
 const EXPECTED_LOGIC_EDGES = EXPECTED_CHAINS * 3;
-// Phase-2 batch-collapse: chain 6's beat1 (3 upserts) + beat2 (1 correction)
-// fold into a single thinker commit at beat3 with de-duplicated ops (keeping
-// the correction for cg:assertion:06). Production thinker re-derives one
-// outcome from the sketch chain, so this matches reality. The de-dup drops
-// exactly one event vs the direct-projection baseline.
+// Expected non-verification event count. Derivation (per chain, excluding
+// verification upserts appended with settlement_id LIKE '%::verification:%'):
+//   chain 1-5 (CORRECTION+SKETCH):    sketch + correction        = 2 × 5 = 10
+//   chain 6   (BATCH+CORRECTION):     batch-merged: primary once
+//                                      + batch:a + batch:b        = 3       = 3
+//   chain 7   (RECOVERY+SKETCH):      sketch + contested
+//                                      + reversal                 = 3       = 3
+//   chain 8-10 (FAKE_REF+SKETCH):     sketch only                = 1 × 3 = 3
+//   chain 11-13 (REAL_EPISODE+CORR.): grounded + correction       = 2 × 3 = 6
+//   chain 14-16 (COGNITION_ONLY):     cognition refs only         = 1 × 3 = 3
+//   chain 17-18 (SKETCH_EXPLICIT):    explicit sketch             = 1 × 2 = 2
+//   chain 19-30 (ENGLISH_AUDIT):      sketch + contested + retract + audit
+//                                                                  = 4 × 12 = 48
+//   ────────────────────────────────────────────────────────────
+//   total                                                                  = 78
+// The chain 6 batch-merge is the only deviation from a per-beat projection
+// count (would be 79): the thinker re-derives one consolidated outcome, so
+// the cg:assertion:06 sketch+correction pair folds into a single event.
 const EXPECTED_BASE_EVENTS = 78;
 
-describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () => {
+describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Thinker", () => {
   let handle: ScenarioHandleExtended;
 
   beforeAll(async () => {
@@ -34,7 +47,7 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
     });
   }, 8 * 60 * 1000);
 
-  it("A) settlement/full run completes all beats without engine errors", () => {
+  it("A) thinker/full run completes all beats without engine errors", () => {
     expect(handle.runResult.writePath).toBe("thinker");
     expect(handle.runResult.phase).toBe("full");
     expect(handle.runResult.errors).toHaveLength(0);
@@ -205,6 +218,10 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
   });
 
   it("N2) same-beat sourceEpisodeId refs produce at least context_verified", async () => {
+    // Take the LATEST verification event per key (id DESC) and check its level
+    // in JS rather than in the SQL filter. A regression that later downgrades
+    // a previously-strong assertion would still be caught — with id ASC + a
+    // SQL-level level filter, the earliest qualifying event would mask it.
     const rows = await handle.infra.sql<Array<{ key: string; verification: string | null }>>`
       SELECT DISTINCT ON (cognition_key)
         cognition_key AS key,
@@ -213,10 +230,12 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Settlement", () 
       WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
         AND cognition_key IN ('cg:assertion:11', 'cg:assertion:12', 'cg:assertion:13')
         AND settlement_id LIKE '%::verification:%'
-        AND record_json->>'groundingVerificationLevel' IN ('context_verified', 'strong_verified')
-      ORDER BY cognition_key, id ASC
+      ORDER BY cognition_key, id DESC
     `;
     expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(["context_verified", "strong_verified"]).toContain(row.verification);
+    }
   });
 
   it("O) fake episode refs remain unverified with verifiedGroundingRefs=[]", async () => {
