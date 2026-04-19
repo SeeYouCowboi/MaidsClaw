@@ -17,7 +17,7 @@ export class PgCognitionEventRepo implements CognitionEventRepo {
          settlement_id, committed_time, request_id, created_at)
       VALUES
         (${params.agentId}, ${params.cognitionKey}, ${params.kind},
-         ${params.op}, ${params.recordJson ?? null},
+         ${params.op}, ${params.recordJson ?? null}::text::jsonb,
          ${params.settlementId}, ${params.committedTime},
          ${params.requestId ?? null}, ${now})
       ON CONFLICT (settlement_id, agent_id, cognition_key, op) DO NOTHING

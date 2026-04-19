@@ -3562,7 +3562,7 @@ export async function handleRunEntityReconciliation(
     }
     return errorResponse(
       new MaidsClawError({
-        code: "UNKNOWN",
+        code: "INTERNAL_ERROR",
         message: error instanceof Error ? error.message : String(error),
         retriable: false,
       }),
