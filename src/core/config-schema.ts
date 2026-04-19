@@ -113,13 +113,14 @@ export type AuthConfigResult =
 export type RuntimeConfig = {
   memory?: MemoryConfig;
   lightweightLlm?: LightweightLlmConfig;
-  talkerThinker?: {
-    enabled: boolean;
-    stalenessThreshold: number;
-    softBlockTimeoutMs: number;
-    softBlockPollIntervalMs: number;
-    globalConcurrencyCap?: number;
-  };
+	talkerThinker?: {
+	    enabled: boolean;
+	    stalenessThreshold: number;
+	    softBlockTimeoutMs: number;
+	    softBlockPollIntervalMs: number;
+	    globalConcurrencyCap?: number;
+	    canonicalizationSimilarityThreshold?: number;
+	  };
   runtime?: {
     gateway?: {
       corsAllowedOrigins?: string[];

@@ -1,0 +1,31 @@
+Task 6 evidence — canonicalization edge cases
+
+Date: 2026-04-19
+
+Edge-case safeguards implemented in canonicalizeThinkerAssertionKeysBeforeProjection:
+
+1) Strict provenance gate
+- Only assertion upserts with provenance user_stated or explicit_settlement are eligible.
+
+2) Weak assertion exclusion
+- Bases belief/inference/introspection are skipped unless strong grounding refs include request:* or episode:*.
+
+3) Holder isolation
+- Candidate holder must match assertion holder; cross-holder candidates are ignored.
+
+4) Candidate exclusion set
+- Excludes candidates with status=retracted, stance=contested, and terminal stances.
+
+5) Conservative uniqueness
+- Canonicalization only applies when eligibleByKey.size === 1.
+- Zero or multiple eligible neighbors keep original key.
+
+6) CJK no-whitespace safeguard
+- For mostly-CJK claims without ASCII whitespace, requires entity overlap to permit rewrite.
+
+7) Bundle-absent no-op
+- If assertionCanonicalization bundle is undefined, returns original ops unchanged.
+
+8) Batch-local overlay + dedupe
+- Overlay updates allow later ops in same invocation to see earlier rewrites.
+- Assertion upserts are deduped by key with later-wins replacement, preventing duplicate canonical upserts in one invocation.

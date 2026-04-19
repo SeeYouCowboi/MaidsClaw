@@ -225,10 +225,13 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
     softBlockTimeoutMs: typeof tt.softBlockTimeoutMs === "number" ? tt.softBlockTimeoutMs : 3000,
     softBlockPollIntervalMs: typeof tt.softBlockPollIntervalMs === "number" ? tt.softBlockPollIntervalMs : 500,
-    ...(typeof tt.globalConcurrencyCap === "number" && Number.isFinite(tt.globalConcurrencyCap)
-      ? { globalConcurrencyCap: tt.globalConcurrencyCap }
-      : {}),
-  };
+		...(typeof tt.globalConcurrencyCap === "number" && Number.isFinite(tt.globalConcurrencyCap)
+			? { globalConcurrencyCap: tt.globalConcurrencyCap }
+			: {}),
+		...(typeof tt.canonicalizationSimilarityThreshold === "number" && Number.isFinite(tt.canonicalizationSimilarityThreshold)
+			? { canonicalizationSimilarityThreshold: tt.canonicalizationSimilarityThreshold }
+			: {}),
+	};
 
   if (obj.runtime !== undefined) {
     if (typeof obj.runtime !== "object" || obj.runtime === null || Array.isArray(obj.runtime)) {

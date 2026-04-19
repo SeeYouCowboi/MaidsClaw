@@ -1,0 +1,9 @@
+bun test test/runtime/rp-turn-contract.test.ts -t "grounding|provenance|verification"
+
+bun test v1.3.10 (30e609e0)
+
+ 3 pass
+ 29 filtered out
+ 0 fail
+ 7 expect() calls
+Ran 3 tests across 1 file. [51.00ms]

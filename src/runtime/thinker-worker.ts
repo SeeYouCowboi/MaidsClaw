@@ -249,6 +249,7 @@ type RecentCognitionEntry = {
 	status: "active" | "retracted";
 	basis?: AssertionBasis | "unknown";
 	provenance?: AssertionProvenance | "legacy_unknown";
+	groundingVerificationLevel?: string;
 	sourceTurnVersion?: number;
 };
 
@@ -880,6 +881,9 @@ function buildCognitionSlotPayloadForThinker(
 			if (basis !== undefined) entry.basis = basis;
 			if (provenance !== undefined) entry.provenance = provenance;
 			if (sourceTurnVersion !== undefined) entry.sourceTurnVersion = sourceTurnVersion;
+			if ((record as AssertionRecordV4).groundingVerificationLevel !== undefined) {
+				entry.groundingVerificationLevel = (record as AssertionRecordV4).groundingVerificationLevel;
+			}
 			items.push(entry);
 		} else if (op.op === "retract") {
 			const entry: RecentCognitionEntry = {

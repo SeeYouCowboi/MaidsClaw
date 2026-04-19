@@ -1,0 +1,26 @@
+Task 11 — Cognition Guardrails Scenario Evidence
+Date: 2026-04-19
+Repo: D:\ACodingWorkSpace\MaidsClaw
+
+Created files:
+- test/scenario-engine/stories/cognition-guardrails.ts
+- test/scenario-engine/scenarios/cognition-guardrails.test.ts
+- test/scenario-engine/stories/index.ts (export wiring)
+
+Deterministic scenario shape:
+- 120 beats total
+- 30 chains × 4 beats each
+- Per-chain transitions: accepted -> contested(preContestedStance=accepted) -> rejected -> retract
+- writePath/phase in test: settlement/full only
+
+Run command:
+Set-Item -Path Env:PG_TEST_URL -Value 'postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test'; bun test test/scenario-engine/scenarios/cognition-guardrails.test.ts
+
+Observed result:
+- Test bootstrap failed before assertions executed.
+- Postgres error: 操作符类 "gin_trgm_ops" 不存在 (ERROR 42704)
+- Failure source indicates missing pg_trgm opclass support in current local PG setup.
+
+Implication:
+- Scenario/test code compiles and LSP diagnostics are clean.
+- Runtime verification is blocked by DB environment capability, not by deterministic test logic.

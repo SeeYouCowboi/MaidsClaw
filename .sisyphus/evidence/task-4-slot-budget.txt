@@ -1,0 +1,14 @@
+Task 4 Budget Test Evidence
+===========================
+
+Test: "retracted tombstones do not consume the active budget (65 active + 5 retracted)"
+Location: test/storage/pg-recent-cognition-set-version.test.ts
+
+Setup: 65 active entries + 5 retracted entries = 70 total
+Result: After compactSlotEntries:
+  - 64 active entries (oldest active trimmed)
+  - 5 retracted entries preserved
+  - Total: 69 entries in payload
+
+Key assertion: retracted entries do NOT count toward 64-entry active cap.
+PASS

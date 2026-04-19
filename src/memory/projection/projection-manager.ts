@@ -303,6 +303,7 @@ type RecentCognitionSlotEntry = {
   key?: string;
   basis?: AssertionBasis | "unknown";
   provenance?: AssertionProvenance | "legacy_unknown";
+  groundingVerificationLevel?: string;
 };
 
 function normalizeAssertionProvenance(value: unknown): AssertionProvenance {
@@ -1196,9 +1197,10 @@ export class ProjectionManager {
       if (verification.basis) {
         entry.basis = verification.basis;
       }
-      entry.provenance = verification.provenance;
-    }
-    return JSON.stringify(entries);
+		entry.provenance = verification.provenance;
+			entry.groundingVerificationLevel = verification.groundingVerificationLevel;
+		}
+		return JSON.stringify(entries);
   }
 
   /**

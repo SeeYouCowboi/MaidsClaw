@@ -1,0 +1,28 @@
+Task 4 Version-Winner Test Evidence
+====================================
+
+Tests covering version-winner semantics:
+
+1. "higher sourceTurnVersion wins over lower even when lower arrives later"
+   v2 entry (committedAt=1000) beats v1 entry (committedAt=2000) for same key
+   PASS
+
+2. "falls back to committedAt when sourceTurnVersion is missing"
+   Entry with committedAt=2000 beats committedAt=1000 when both lack sourceTurnVersion
+   PASS
+
+3. "entries with explicit sourceTurnVersion beat legacy entries without version"
+   sourceTurnVersion=1 (committedAt=1000) beats no-version (committedAt=5000)
+   PASS
+
+4. "higher sourceTurnVersion wins over lower version even when lower has later committedAt" (prompt-data)
+   v5 entry beats v3 entry in formatRecentCognitionFromPayload
+   PASS
+
+5. "legacy entries without sourceTurnVersion fall back to committedAt ordering" (prompt-data)
+   newer committedAt wins when both lack sourceTurnVersion
+   PASS
+
+6. "entry with explicit sourceTurnVersion beats legacy entry without version" (prompt-data)
+   Versioned entry beats legacy in formatRecentCognitionFromPayload
+   PASS

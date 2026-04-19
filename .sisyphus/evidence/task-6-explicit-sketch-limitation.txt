@@ -1,0 +1,14 @@
+Task 6 evidence — explicit sketch limitation (scope boundary)
+
+Date: 2026-04-19
+
+v1 scope limitation enforced:
+- Canonicalization does NOT include talker sketch provenance as trigger.
+- Assertions with provenance talker_sketch_explicit or talker_sketch_auto are not canonicalized by Task 6 logic.
+
+Rationale
+- Prevents using sketch-origin assertions as canonical anchors before stronger verification.
+- Keeps conservative behavior aligned with user-anchored/explicit-settlement corrections only.
+
+Related test coverage
+- test/runtime/thinker-worker-phase2.test.ts includes sketch-origin guardrail scenarios and weak/unverified handling.

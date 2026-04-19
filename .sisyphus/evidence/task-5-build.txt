@@ -1,0 +1,2 @@
+$ tsc -p tsconfig.build.json --noEmit
+src/gateway/controllers.ts(3565,9): error TS2322: Type '"UNKNOWN"' is not assignable to type 'ErrorCode'.
