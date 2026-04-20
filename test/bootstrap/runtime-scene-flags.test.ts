@@ -152,4 +152,50 @@ describe("bootstrapRuntime talkerThinker rollout matrix", () => {
 			);
 		}
 	});
+
+	describe("post-cleanup validator simulation", () => {
+		it("final default matrix (true,true,true,false) is the post-cleanup production matrix and boots successfully today", () => {
+			const runtime = bootstrapRuntime({
+				runtimeConfig: {
+					talkerThinker: {
+						...BASE_TALKER_THINKER,
+						speakerNormalizationGate: true,
+						sceneFactWritePath: true,
+						sceneRetrieval: true,
+						legacyAreaStateCompat: false,
+					},
+				},
+			});
+
+			try {
+				expect(runtime.talkerThinkerConfig.speakerNormalizationGate).toBe(true);
+				expect(runtime.talkerThinkerConfig.sceneFactWritePath).toBe(true);
+				expect(runtime.talkerThinkerConfig.sceneRetrieval).toBe(true);
+				expect(runtime.talkerThinkerConfig.legacyAreaStateCompat).toBe(false);
+			} finally {
+				runtime.shutdown();
+			}
+		});
+
+		it("read-path rollback matrix (true,true,false,false) is currently rejected by Tasks-1-11 validator — Task 12 will add it", () => {
+			// This assertion documents the expected future post-cleanup state.
+			// After Task 12, this matrix must PASS bootstrap. For now it is deliberately
+			// illegal: Task 12 only needs to add (true,true,false,false) to the allowed list.
+			expect(() =>
+				bootstrapRuntime({
+					runtimeConfig: {
+						talkerThinker: {
+							...BASE_TALKER_THINKER,
+							speakerNormalizationGate: true,
+							sceneFactWritePath: true,
+							sceneRetrieval: false,
+							legacyAreaStateCompat: false,
+						},
+					},
+				}),
+			).toThrow(
+				"(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=false,legacyAreaStateCompat=false)",
+			);
+		});
+	});
 });

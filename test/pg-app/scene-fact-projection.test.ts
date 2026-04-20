@@ -434,4 +434,74 @@ describe.skipIf(skipPgTests)("scene-fact-projection", () => {
       expect(areaFacts[0].valueJson).toEqual({ state: "disarmed" });
     });
   });
+
+  it("same-session cross-agent sharing: area fact written by agent-A is readable regardless of source agent", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+      const repo = new PgAreaWorldProjectionRepo(pool);
+      const now = new Date("2026-04-20T18:10:00.000Z");
+
+      await repo.applyAreaFactCommit({
+        sessionId: "sess-cross-agent",
+        areaId: 20,
+        factKey: "status:lamp",
+        valueJson: { state: "lit" },
+        sourceKind: "action_commitment",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-cross-agent-1",
+        sourceAgentId: "agent-A",
+        validTime: now,
+        committedTime: now,
+      });
+
+      const rows = await repo.getVisibleAreaFacts({
+        sessionId: "sess-cross-agent",
+        areaId: 20,
+      });
+      expect(rows).toHaveLength(1);
+    });
+  });
+
+  it("ambiguous_action end-to-end: scene-fact write path is never reached when writeEligible=false", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+      const projectionManager = new ProjectionManager(
+        { append: async () => 1 },
+        { append: async () => 1 },
+        { upsertFromEvent: async () => {} },
+        null,
+        new PgAreaWorldProjectionRepo(pool),
+      );
+
+      await projectionManager.commitSettlement({
+        settlementId: "stl:ambiguous-action:guarded",
+        sessionId: "sess-ambiguous-action-guarded",
+        agentId: "rp:alice",
+        cognitionOps: [],
+        privateEpisodes: [],
+        publications: [],
+        recentCognitionSlotJson: "[]",
+        upsertRecentCognitionSlot: async () => {},
+        viewerSnapshot: { currentLocationEntityId: 20 },
+        sceneFactWritePath: false,
+        sceneFactCommits: [
+          {
+            scope: "area",
+            factKey: "status:lamp",
+            value: { state: "lit" },
+            sourceKind: "action_commitment",
+            exposureScope: "area_visible",
+          },
+        ],
+        committedAt: Date.parse("2026-04-20T18:10:01.000Z"),
+      });
+
+      const areaRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_area_fact_events
+        WHERE session_id = 'sess-ambiguous-action-guarded'
+      `;
+      expect(areaRows[0].c).toBe(0);
+    });
+  });
 });
