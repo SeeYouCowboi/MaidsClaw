@@ -539,26 +539,46 @@ describe("actionCommitments", () => {
     expect(result.actionCommitments).toEqual(payload.actionCommitments);
   });
 
-  it("malformed actionCommitments entries are filtered", () => {
-    const result = normalizeRpTurnOutcome({
-      schemaVersion: "rp_turn_outcome_v5",
-      publicReply: "Filtered.",
-      actionCommitments: [
-        {
-          effect: "move",
-          summary: "Valid",
-          commits: [],
-        },
-        {
-          effect: "teleport",
-          summary: "Invalid effect",
-          commits: [],
-        },
-      ],
-    });
+  it("malformed actionCommitments entries reject deterministically", () => {
+    expect(() =>
+      normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "Filtered.",
+        actionCommitments: [
+          {
+            effect: "move",
+            summary: "Valid",
+            commits: [],
+          },
+          {
+            effect: "teleport",
+            summary: "Invalid effect",
+            commits: [],
+          },
+        ],
+      }),
+    ).toThrow("actionCommitments[1].effect");
+  });
 
-    expect(result.actionCommitments).toHaveLength(1);
-    expect(result.actionCommitments?.[0]?.effect).toBe("move");
+  it("actionCommitments rejects malformed nested commit shapes", () => {
+    expect(() =>
+      normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "Broken.",
+        actionCommitments: [
+          {
+            effect: "status_change",
+            summary: "Door opens",
+            commits: {
+              scope: "area",
+              exposureScope: "area_visible",
+              factKey: "status:door",
+              value: "open",
+            },
+          },
+        ],
+      }),
+    ).toThrow("actionCommitments[0].commits must be an array");
   });
 
   it("sceneFactBinding with valid factKey is preserved", () => {
@@ -582,7 +602,7 @@ describe("actionCommitments", () => {
                 scope: "area",
                 factKey: "location:tavern",
                 areaId: 7,
-                expectedValue: { pointer: "tavern" },
+                expectedValue: "tavern",
               },
             },
           },
@@ -599,7 +619,7 @@ describe("actionCommitments", () => {
       scope: "area",
       factKey: "location:tavern",
       areaId: 7,
-      expectedValue: { pointer: "tavern" },
+      expectedValue: "tavern",
     });
   });
 
@@ -639,6 +659,79 @@ describe("actionCommitments", () => {
     expect(op.record.sceneFactBinding).toBeUndefined();
     expect(op.record.stance).toBe("accepted");
     expect(op.record.basis).toBe("belief");
+  });
+
+  it("sceneFactBinding with non-canonical expectedValue is dropped", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "bind-invalid-status",
+              holderId: { kind: "special", value: "self" },
+              claim: "The lantern is ajar somehow",
+              entityRefs: [{ kind: "pointer_key", value: "lantern" }],
+              stance: "accepted",
+              basis: "belief",
+              sceneFactBinding: {
+                scope: "world",
+                factKey: "status:lantern",
+                expectedValue: "ajar",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.sceneFactBinding).toBeUndefined();
+  });
+
+  it("sceneFactBinding with world scope and areaId is dropped", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "bind-invalid-world-area",
+              holderId: { kind: "special", value: "self" },
+              claim: "The key is here",
+              entityRefs: [{ kind: "pointer_key", value: "key" }],
+              stance: "accepted",
+              basis: "belief",
+              sceneFactBinding: {
+                scope: "world",
+                factKey: "holder:key",
+                areaId: 7,
+                expectedValue: "user",
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.sceneFactBinding).toBeUndefined();
   });
 
   it("legacyAreaStateCompat=false rejects areaStateArtifacts", () => {
@@ -850,6 +943,33 @@ describe("makeSubmitRpTurnTool", () => {
   it("execute throws MaidsClawError with RP_TURN_OUTCOME_INVALID on invalid input", async () => {
     try {
       await tool.execute({ publicReply: 123 });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err instanceof MaidsClawError).toBe(true);
+      const mcErr = err as MaidsClawError;
+      expect(mcErr.code).toBe("RP_TURN_OUTCOME_INVALID");
+      expect(mcErr.retriable).toBe(false);
+    }
+  });
+
+  it("execute throws RP_TURN_OUTCOME_INVALID on malformed actionCommitments", async () => {
+    try {
+      await tool.execute({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "ok",
+        actionCommitments: [
+          {
+            effect: "move",
+            summary: "bad payload",
+            commits: {
+              scope: "area",
+              exposureScope: "area_visible",
+              factKey: "location:watch",
+              value: "desk",
+            },
+          },
+        ],
+      });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err instanceof MaidsClawError).toBe(true);

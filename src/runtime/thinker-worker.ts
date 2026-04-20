@@ -200,6 +200,44 @@ function hasValidSceneFactBindingForRevision(
 	});
 }
 
+type BindingRejectionReason =
+	| "invalid_scope"
+	| "invalid_fact_key"
+	| "invalid_area_id"
+	| "invalid_expected_value";
+
+function classifyBindingRejectionReason(
+	binding: NonNullable<AssertionRecordV4["sceneFactBinding"]>,
+): BindingRejectionReason {
+	if (binding.scope !== "area" && binding.scope !== "world") {
+		return "invalid_scope";
+	}
+	if (!isValidSceneFactKey(binding.factKey)) {
+		return "invalid_fact_key";
+	}
+	if (
+		binding.areaId !== undefined &&
+		(!Number.isInteger(binding.areaId) || binding.scope !== "area")
+	) {
+		return "invalid_area_id";
+	}
+	return "invalid_expected_value";
+}
+
+function warnBindingInvalidFallback(
+	stage: "semantic_gate" | "projection_normalize",
+	assertion: AssertionRecordV4,
+	binding: NonNullable<AssertionRecordV4["sceneFactBinding"]>,
+): void {
+	console.warn("[thinker_worker] binding_invalid_fallback", {
+		stage,
+		reason: classifyBindingRejectionReason(binding),
+		cognitionKey: assertion.key,
+		provenance: assertion.provenance ?? null,
+		rejectedBinding: binding,
+	});
+}
+
 function applyNormalizedSemanticGate(
 	ops: CognitionOp[],
 	normalizedTurnInput: NormalizedTurnInput | undefined,
@@ -238,6 +276,7 @@ function applyNormalizedSemanticGate(
 		const hasValidBinding = hasValidSceneFactBindingForRevision(binding);
 
 		if (hasBinding && !hasValidBinding) {
+			warnBindingInvalidFallback("semantic_gate", assertion, binding!);
 			delete assertion.sceneFactBinding;
 		}
 
@@ -316,6 +355,11 @@ function normalizeThinkerAssertionOpsBeforeProjection(
 			assertion.sceneFactBinding,
 		);
 		if (hasSceneFactBinding && !hasValidSceneFactBinding) {
+			warnBindingInvalidFallback(
+				"projection_normalize",
+				assertion,
+				assertion.sceneFactBinding!,
+			);
 			delete assertion.sceneFactBinding;
 		}
 		const preserveNarratedActionFactualBelief =
@@ -944,9 +988,10 @@ function mapActionCommitmentsToSceneFactCommits(
 ): SceneFactCommit[] {
 	const commits: SceneFactCommit[] = [];
 	for (const ac of actionCommitments) {
-		for (const sc of ac.commits ?? []) {
+		const sceneCommits = Array.isArray(ac.commits) ? ac.commits : [];
+		for (const sc of sceneCommits) {
 			if (!isValidSceneFactKey(sc.factKey)) continue;
-		commits.push({
+			commits.push({
 				scope: sc.scope,
 				// AreaCommit has no areaId; projection-manager falls back to viewerSnapshot.currentLocationEntityId
 				factKey: sc.factKey,

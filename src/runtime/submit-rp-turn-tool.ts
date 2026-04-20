@@ -193,7 +193,40 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         actionCommitments: {
           type: "array",
           description: "Structured scene-fact commitments from this agent turn. Each entry declares an effect type (move/possession/status_change), a summary, and explicit fact commits keyed by scope + factKey + value. Replaces the legacy areaStateArtifacts field for scene-write authority.",
-          items: { type: "object" },
+          items: {
+            type: "object",
+            properties: {
+              effect: {
+                type: "string",
+                enum: ["move", "possession", "status_change"],
+              },
+              summary: { type: "string" },
+              commits: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    scope: {
+                      type: "string",
+                      enum: ["area", "world"],
+                    },
+                    exposureScope: {
+                      type: "string",
+                      enum: [
+                        "area_visible",
+                        "world_public",
+                        "system_only",
+                      ],
+                    },
+                    factKey: { type: "string" },
+                    value: {},
+                  },
+                  required: ["scope", "exposureScope", "factKey", "value"],
+                },
+              },
+            },
+            required: ["effect", "summary", "commits"],
+          },
         },
         cognitiveSketchSource: {
           type: "string",

@@ -291,6 +291,15 @@ const V4_ASSERTION_PROVENANCE: ReadonlySet<AssertionProvenance> = new Set([
 ]);
 
 const SCENE_FACT_KEY_RE = /^(location|holder|status):[a-z0-9_-]+$/;
+const SCENE_FACT_POINTER_VALUE_RE = /^[a-z0-9_-]+$/;
+const SCENE_FACT_STATUS_VALUES: ReadonlySet<string> = new Set([
+  "open",
+  "closed",
+  "locked",
+  "unlocked",
+  "lit",
+  "dark",
+]);
 
 const ACTION_COMMITMENT_EFFECTS: ReadonlySet<ActionCommitmentEffect> = new Set([
   "move",
@@ -298,8 +307,69 @@ const ACTION_COMMITMENT_EFFECTS: ReadonlySet<ActionCommitmentEffect> = new Set([
   "status_change",
 ]);
 
+type SceneFactNamespace = "location" | "holder" | "status";
+
 export function isValidSceneFactKey(factKey: string): boolean {
   return SCENE_FACT_KEY_RE.test(factKey);
+}
+
+function getSceneFactNamespace(factKey: string): SceneFactNamespace | null {
+  const match = /^(location|holder|status):/.exec(factKey);
+  return match ? match[1] as SceneFactNamespace : null;
+}
+
+function isCanonicalSceneFactPointerValue(value: unknown): value is string {
+  return typeof value === "string" && SCENE_FACT_POINTER_VALUE_RE.test(value);
+}
+
+function isValidSceneFactBindingExpectedValue(
+  factKey: string,
+  expectedValue: unknown,
+): boolean {
+  switch (getSceneFactNamespace(factKey)) {
+    case "location":
+      return isCanonicalSceneFactPointerValue(expectedValue);
+    case "holder":
+      return (
+        expectedValue === null ||
+        expectedValue === "user" ||
+        isCanonicalSceneFactPointerValue(expectedValue)
+      );
+    case "status":
+      return (
+        typeof expectedValue === "string" &&
+        SCENE_FACT_STATUS_VALUES.has(expectedValue)
+      );
+    default:
+      return false;
+  }
+}
+
+export function isValidSceneFactBinding(binding: {
+  scope: string;
+  factKey: string;
+  areaId?: number;
+  expectedValue: unknown;
+}): boolean {
+  if (binding.scope !== "area" && binding.scope !== "world") {
+    return false;
+  }
+
+  if (!isValidSceneFactKey(binding.factKey)) {
+    return false;
+  }
+
+  if (
+    binding.areaId !== undefined &&
+    (!Number.isInteger(binding.areaId) || binding.scope !== "area")
+  ) {
+    return false;
+  }
+
+  return isValidSceneFactBindingExpectedValue(
+    binding.factKey,
+    binding.expectedValue,
+  );
 }
 
 
@@ -680,25 +750,15 @@ function normalizeConflictFactors(raw: unknown): ConflictFactor[] {
 }
 
 function normalizeActionCommitments(raw: unknown): ActionCommitment[] {
-  if (!Array.isArray(raw)) {
+  if (raw === undefined) {
     return [];
   }
 
-  const commitments: ActionCommitment[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
-    const candidate = entry as Record<string, unknown>;
-    if (!ACTION_COMMITMENT_EFFECTS.has(candidate.effect as ActionCommitmentEffect)) {
-      continue;
-    }
-
-    commitments.push(cloneForNormalization(entry) as ActionCommitment);
+  if (!Array.isArray(raw)) {
+    throw new Error("actionCommitments must be an array");
   }
 
-  return commitments;
+  return raw.map((entry, index) => normalizeActionCommitment(entry, index));
 }
 
 function cloneForNormalization<T>(value: T): T {
@@ -707,6 +767,108 @@ function cloneForNormalization<T>(value: T): T {
   } catch {
     return value;
   }
+}
+
+function normalizeActionCommitment(
+  raw: unknown,
+  index: number,
+): ActionCommitment {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(`actionCommitments[${index}] must be an object`);
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  if (!ACTION_COMMITMENT_EFFECTS.has(candidate.effect as ActionCommitmentEffect)) {
+    throw new Error(
+      `actionCommitments[${index}].effect must be one of ${Array.from(ACTION_COMMITMENT_EFFECTS).join(", ")}`,
+    );
+  }
+
+  if (typeof candidate.summary !== "string" || candidate.summary.trim() === "") {
+    throw new Error(
+      `actionCommitments[${index}].summary must be a non-empty string`,
+    );
+  }
+
+  if (!Array.isArray(candidate.commits)) {
+    throw new Error(`actionCommitments[${index}].commits must be an array`);
+  }
+
+  return {
+    effect: candidate.effect as ActionCommitmentEffect,
+    summary: candidate.summary.trim(),
+    commits: candidate.commits.map((commit, commitIndex) =>
+      normalizeSceneCommit(commit, index, commitIndex),
+    ),
+  };
+}
+
+function normalizeSceneCommit(
+  raw: unknown,
+  actionIndex: number,
+  commitIndex: number,
+): SceneCommit {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(
+      `actionCommitments[${actionIndex}].commits[${commitIndex}] must be an object`,
+    );
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  const scope = candidate.scope as "area" | "world";
+  if (scope !== "area" && scope !== "world") {
+    throw new Error(
+      `actionCommitments[${actionIndex}].commits[${commitIndex}].scope must be "area" or "world"`,
+    );
+  }
+
+  const factKey =
+    typeof candidate.factKey === "string" ? candidate.factKey.trim() : "";
+  if (!isValidSceneFactKey(factKey)) {
+    throw new Error(
+      `actionCommitments[${actionIndex}].commits[${commitIndex}].factKey must use a supported scene fact namespace`,
+    );
+  }
+
+  if (!("value" in candidate)) {
+    throw new Error(
+      `actionCommitments[${actionIndex}].commits[${commitIndex}].value is required`,
+    );
+  }
+
+  if (scope === "area") {
+    if (
+      candidate.exposureScope !== "area_visible" &&
+      candidate.exposureScope !== "system_only"
+    ) {
+      throw new Error(
+        `actionCommitments[${actionIndex}].commits[${commitIndex}].exposureScope must be "area_visible" or "system_only" for area scope`,
+      );
+    }
+
+    return {
+      scope,
+      exposureScope: candidate.exposureScope,
+      factKey,
+      value: cloneForNormalization(candidate.value),
+    };
+  }
+
+  if (
+    candidate.exposureScope !== "world_public" &&
+    candidate.exposureScope !== "system_only"
+  ) {
+    throw new Error(
+      `actionCommitments[${actionIndex}].commits[${commitIndex}].exposureScope must be "world_public" or "system_only" for world scope`,
+    );
+  }
+
+  return {
+    scope,
+    exposureScope: candidate.exposureScope,
+    factKey,
+    value: cloneForNormalization(candidate.value),
+  };
 }
 
 function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefined {
@@ -884,24 +1046,25 @@ function normalizeSceneFactBinding(
   if (candidate.scope !== "area" && candidate.scope !== "world") {
     return undefined;
   }
+  const scope = candidate.scope as "area" | "world";
 
   const factKey = typeof candidate.factKey === "string"
     ? candidate.factKey.trim()
     : "";
-  if (!isValidSceneFactKey(factKey)) {
-    return undefined;
-  }
-
   if (!("expectedValue" in candidate)) {
     return undefined;
   }
 
-  return {
-    scope: candidate.scope,
+  const normalizedBinding: NonNullable<AssertionRecordV4["sceneFactBinding"]> = {
+    scope,
     factKey,
     ...(typeof candidate.areaId === "number" ? { areaId: candidate.areaId } : {}),
     expectedValue: candidate.expectedValue,
   };
+
+  return isValidSceneFactBinding(normalizedBinding)
+    ? normalizedBinding
+    : undefined;
 }
 
 function normalizeAssertionGroundingRefs(raw: unknown): AssertionGroundingRef[] {

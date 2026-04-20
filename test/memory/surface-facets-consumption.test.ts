@@ -632,6 +632,73 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
     expect(result.typed.conflict_notes.some((note) => note.source_ref.startsWith("divergence_note:"))).toBe(false);
   });
 
+  it("does not emit divergence notes for area bindings from a different areaId", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        return [];
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const mismatchedAreaBindingRow = makeAssertionCurrentRow(
+      "assertion:watch_elsewhere",
+      JSON.stringify({
+        kind: "assertion",
+        key: "assertion:watch_elsewhere",
+        claim: "the watch is in the greenhouse",
+        sceneFactBinding: {
+          scope: "area",
+          factKey: "location:watch",
+          areaId: 7,
+          expectedValue: "greenhouse",
+        },
+      }),
+    );
+
+    const currentProjectionReader = {
+      async getCurrent(): Promise<CognitionCurrentRow | null> {
+        return null;
+      },
+      async getAllCurrent(): Promise<CognitionCurrentRow[]> {
+        return [mismatchedAreaBindingRow];
+      },
+      async getAllCurrentByKind(): Promise<CognitionCurrentRow[]> {
+        return [mismatchedAreaBindingRow];
+      },
+      async getActiveCurrent(): Promise<CognitionCurrentRow[]> {
+        return [mismatchedAreaBindingRow];
+      },
+    };
+
+    const sceneSearchService = {
+      async getVisibleAreaFacts() {
+        return [{ factKey: "location:watch", value: "tea_room", sourceKind: "action_commitment" }];
+      },
+      async getVisibleWorldFacts() {
+        return [];
+      },
+    } as unknown as SceneSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service, {
+      currentProjectionReader,
+      sceneSearchService,
+    });
+    const result = await orchestrator.search("watch", makeViewer(), "rp_agent", {
+      override: {
+        sceneRetrieval: true,
+        conflictNotesBudget: 4,
+      },
+    });
+
+    expect(result.typed.conflict_notes.some((note) => note.source_ref.startsWith("divergence_note:"))).toBe(false);
+  });
+
   it("weak labeled cognition remains below strong grounded entry in typed facets", async () => {
     const narrative = makeFacetRecordingNarrative();
     const cognitionCapture = makeFacetRecordingCognition();

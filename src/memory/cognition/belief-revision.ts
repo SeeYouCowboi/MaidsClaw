@@ -1,5 +1,5 @@
 import { MaidsClawError } from "../../core/errors.js";
-import { isValidSceneFactKey } from "../../runtime/rp-turn-contract.js";
+import { isValidSceneFactBinding } from "../../runtime/rp-turn-contract.js";
 import type {
   AssertionBasis,
   AssertionProvenance,
@@ -18,7 +18,7 @@ export function validateSceneFactBindingForRevision(
     return false;
   }
 
-  return isValidSceneFactKey(binding.factKey);
+  return isValidSceneFactBinding(binding);
 }
 
 /**

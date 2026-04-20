@@ -359,6 +359,7 @@ export class RetrievalOrchestrator {
       seenText,
       allSurfacedTexts,
       recentCognitionKeys,
+      viewerContext.current_area_id,
       effectiveEpisodeBudget,
       effectiveConflictNotesBudget,
       sceneBindingIndex,
@@ -409,6 +410,7 @@ export class RetrievalOrchestrator {
     seenText: Set<string>,
     allSurfacedTexts: Set<string>,
     recentCognitionKeys: Set<string>,
+    currentAreaId: number | null | undefined,
     effectiveEpisodeBudget: number,
     effectiveConflictNotesBudget: number,
     sceneBindingIndex: Map<string, SceneFactBindingIndexEntry>,
@@ -549,6 +551,12 @@ export class RetrievalOrchestrator {
         let sceneValue: unknown;
         let found = false;
         if (binding.scope === "area") {
+          if (
+            binding.areaId !== undefined &&
+            (currentAreaId == null || binding.areaId !== currentAreaId)
+          ) {
+            continue;
+          }
           const fact = sceneAreaFacts.find((f) => f.factKey === binding.factKey);
           if (fact) {
             sceneValue = fact.value;

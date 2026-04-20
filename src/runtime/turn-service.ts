@@ -1998,7 +1998,8 @@ function mapActionCommitmentsToSceneFactCommits(
 ): SceneFactCommit[] {
 	const commits: SceneFactCommit[] = [];
 	for (const ac of actionCommitments) {
-		for (const sc of ac.commits ?? []) {
+		const sceneCommits = Array.isArray(ac.commits) ? ac.commits : [];
+		for (const sc of sceneCommits) {
 			if (!isValidSceneFactKey(sc.factKey)) continue;
 			commits.push({
 				scope: sc.scope,
