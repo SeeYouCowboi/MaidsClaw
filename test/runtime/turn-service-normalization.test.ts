@@ -149,7 +149,14 @@ function makeTurnService(params: {
 		episodeRepo: {},
 		cognitionEventRepo: {},
 		cognitionProjectionRepo: {},
-		areaWorldProjectionRepo: {},
+		areaWorldProjectionRepo: {
+			async applyAreaFactCommit() {
+				return { eventId: 1n };
+			},
+			async applyWorldFactCommit() {
+				return { eventId: 1n };
+			},
+		},
 		interactionRepo: {
 			async getSettlementPayload(_sessionId: string, requestId: string) {
 				const row = records.find(

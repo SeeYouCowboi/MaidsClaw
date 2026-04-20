@@ -1,6 +1,8 @@
 import { decodeCursor, encodeCursor } from "../contracts/cockpit/cursor.js";
 import { MaidsClawError } from "../core/errors.js";
+import type { LoreService } from "../lore/service.js";
 import type { Db } from "../storage/db-types.js";
+import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
 import type { SessionRepo } from "../storage/domain-repos/contracts/session-repo.js";
 
 export type SessionRecord = {
@@ -119,15 +121,39 @@ function buildPagedResult(items: SessionListItem[], limit: number): SessionListR
 export class SessionService {
   private readonly pgRepo?: SessionRepo;
   private readonly db?: Db;
+  private loreService?: LoreService;
+  private areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+  private resolveAreaPointerKeyImpl?: (
+    areaPointerKey: string,
+    agentId: string,
+  ) => Promise<number | null>;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly recoveryRequired = new Set<string>();
 
-  constructor(optionsOrDb?: { pgRepo: SessionRepo } | Db) {
+  constructor(optionsOrDb?: {
+    pgRepo: SessionRepo;
+    loreService?: LoreService;
+    areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+    resolveAreaPointerKey?: (areaPointerKey: string, agentId: string) => Promise<number | null>;
+  } | Db) {
     if (optionsOrDb && "pgRepo" in optionsOrDb) {
       this.pgRepo = optionsOrDb.pgRepo;
+      this.loreService = optionsOrDb.loreService;
+      this.areaWorldProjectionRepo = optionsOrDb.areaWorldProjectionRepo;
+      this.resolveAreaPointerKeyImpl = optionsOrDb.resolveAreaPointerKey;
     } else {
       this.db = optionsOrDb as Db | undefined;
     }
+  }
+
+  configureSceneSeedBootstrap(deps: {
+    loreService?: LoreService;
+    areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+    resolveAreaPointerKey?: (areaPointerKey: string, agentId: string) => Promise<number | null>;
+  }): void {
+    this.loreService = deps.loreService;
+    this.areaWorldProjectionRepo = deps.areaWorldProjectionRepo;
+    this.resolveAreaPointerKeyImpl = deps.resolveAreaPointerKey;
   }
 
   private pgAvailable(): boolean {
@@ -153,8 +179,28 @@ export class SessionService {
 
   async createSession(agentId: string): Promise<SessionRecord> {
     if (this.pgAvailable()) {
-      return this.pgRepoOrThrow().createSession(agentId);
+      const pgRepo = this.pgRepoOrThrow();
+      if (typeof pgRepo.createSessionWithLoreSeedBootstrap === "function") {
+        return pgRepo.createSessionWithLoreSeedBootstrap(agentId, {
+          loreSeedPrecheck: async (seedAgentId) => {
+            await this.prepareSceneSeedCommits(seedAgentId);
+          },
+          loreSeedApply: async (session) => {
+            const preparedSceneSeeds = await this.prepareSceneSeedCommits(
+              session.agentId,
+            );
+            await this.applySceneSeedCommits(session, preparedSceneSeeds);
+          },
+        });
+      }
+
+      const preparedSceneSeeds = await this.prepareSceneSeedCommits(agentId);
+      const session = await pgRepo.createSession(agentId);
+      await this.applySceneSeedCommits(session, preparedSceneSeeds);
+      return session;
     }
+
+    const preparedSceneSeeds = await this.prepareSceneSeedCommits(agentId);
 
     const sessionId = crypto.randomUUID();
     const createdAt = Date.now();
@@ -164,11 +210,13 @@ export class SessionService {
         "INSERT INTO sessions (session_id, agent_id, created_at, closed_at, recovery_required) VALUES (?, ?, ?, NULL, 0)",
         [sessionId, agentId, createdAt],
       );
-      return {
+      const session = {
         sessionId,
         createdAt,
         agentId,
       };
+      await this.applySceneSeedCommits(session, preparedSceneSeeds);
+      return session;
     }
 
     const record: SessionRecord = {
@@ -177,7 +225,164 @@ export class SessionService {
       agentId,
     };
     this.sessions.set(sessionId, record);
+    await this.applySceneSeedCommits(record, preparedSceneSeeds);
     return record;
+  }
+
+  private async prepareSceneSeedCommits(agentId: string): Promise<Array<
+    | {
+        scope: "world";
+        factKey: string;
+        value: unknown;
+        exposureScope: "world_public" | "system_only";
+      }
+    | {
+        scope: "area";
+        areaId: number;
+        factKey: string;
+        value: unknown;
+        exposureScope: "area_visible" | "system_only";
+      }
+  >> {
+    if (!this.loreService || !this.areaWorldProjectionRepo) {
+      return [];
+    }
+
+    if (!this.resolveAreaPointerKeyImpl) {
+      const hasAreaSeed = this.loreService
+        .getAllEntries()
+        .some(
+          (entry) =>
+            entry.enabled &&
+            (entry.sceneSeed ?? []).some((seed) => seed.scope === "area"),
+        );
+      if (hasAreaSeed) {
+        throw new Error(
+          "[session] lore sceneSeed includes area scope but resolveAreaPointerKey is unavailable. Session bootstrap aborted.",
+        );
+      }
+    }
+
+    const prepared: Array<
+      | {
+          scope: "world";
+          factKey: string;
+          value: unknown;
+          exposureScope: "world_public" | "system_only";
+        }
+      | {
+          scope: "area";
+          areaId: number;
+          factKey: string;
+          value: unknown;
+          exposureScope: "area_visible" | "system_only";
+        }
+    > = [];
+
+    const loreEntries = this.loreService.getAllEntries();
+    const enabledWithSeeds = loreEntries.filter(
+      (entry) => entry.enabled && (entry.sceneSeed?.length ?? 0) > 0,
+    );
+
+    for (const entry of enabledWithSeeds) {
+      for (const seed of entry.sceneSeed ?? []) {
+        if (seed.scope === "area") {
+          const areaId = await this.resolveAreaPointerKey(seed.areaPointerKey, agentId);
+          if (areaId === null) {
+            throw new Error(
+              `[session] lore sceneSeed has unknown areaPointerKey=${seed.areaPointerKey} for lore entry=${entry.id}. Session bootstrap aborted.`,
+            );
+          }
+          prepared.push({
+            scope: "area",
+            areaId,
+            factKey: seed.factKey,
+            value: seed.value,
+            exposureScope: seed.exposureScope,
+          });
+          continue;
+        }
+
+        prepared.push({
+          scope: "world",
+          factKey: seed.factKey,
+          value: seed.value,
+          exposureScope: seed.exposureScope,
+        });
+      }
+    }
+
+    return prepared;
+  }
+
+  private async applySceneSeedCommits(
+    session: SessionRecord,
+    preparedSceneSeeds: Array<
+      | {
+          scope: "world";
+          factKey: string;
+          value: unknown;
+          exposureScope: "world_public" | "system_only";
+        }
+      | {
+          scope: "area";
+          areaId: number;
+          factKey: string;
+          value: unknown;
+          exposureScope: "area_visible" | "system_only";
+        }
+    >,
+  ): Promise<void> {
+    if (!this.areaWorldProjectionRepo || preparedSceneSeeds.length === 0) {
+      return;
+    }
+
+    const committedTime = new Date(session.createdAt);
+    for (const seed of preparedSceneSeeds) {
+      if (seed.scope === "area") {
+        await this.areaWorldProjectionRepo.applyAreaFactCommit({
+          sessionId: session.sessionId,
+          areaId: seed.areaId,
+          factKey: seed.factKey,
+          valueJson: seed.value,
+          sourceKind: "lore_seed",
+          exposureScope: seed.exposureScope,
+          sourceSettlementId: null,
+          sourceAgentId: null,
+          validTime: committedTime,
+          committedTime,
+        });
+        continue;
+      }
+
+      await this.areaWorldProjectionRepo.applyWorldFactCommit({
+        sessionId: session.sessionId,
+        factKey: seed.factKey,
+        valueJson: seed.value,
+        sourceKind: "lore_seed",
+        exposureScope: seed.exposureScope,
+        sourceSettlementId: null,
+        sourceAgentId: null,
+        validTime: committedTime,
+        committedTime,
+      });
+    }
+  }
+
+  private async resolveAreaPointerKey(
+    areaPointerKey: string,
+    agentId: string,
+  ): Promise<number | null> {
+    if (!this.resolveAreaPointerKeyImpl) {
+      throw new Error(
+        `[session] resolveAreaPointerKey is unavailable for areaPointerKey=${areaPointerKey}. Session bootstrap aborted.`,
+      );
+    }
+    const resolved = await this.resolveAreaPointerKeyImpl(areaPointerKey, agentId);
+    if (!Number.isInteger(resolved) || (resolved ?? 0) <= 0) {
+      return null;
+    }
+    return resolved;
   }
 
   async listSessions(params: SessionListParams = {}): Promise<SessionListResult> {

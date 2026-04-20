@@ -25,6 +25,13 @@ export type SessionListResult = {
 
 export interface SessionRepo {
   createSession(agentId: string): Promise<SessionRecord>;
+  createSessionWithLoreSeedBootstrap?(
+    agentId: string,
+    options?: {
+      loreSeedPrecheck?: (agentId: string) => Promise<void>;
+      loreSeedApply?: (session: SessionRecord) => Promise<void>;
+    },
+  ): Promise<SessionRecord>;
   listSessions(params: SessionListParams): Promise<SessionListResult>;
   getSession(sessionId: string): Promise<SessionRecord | undefined>;
   closeSession(sessionId: string): Promise<SessionRecord>;

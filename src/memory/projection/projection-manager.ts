@@ -2,6 +2,7 @@ import type { AgentRole } from "../../agents/profile.js";
 import type { ArtifactEnforcementContext } from "../../core/tools/artifact-contract-policy.js";
 import type { ArtifactContract } from "../../core/tools/tool-definition.js";
 import type {
+  SceneFactCommit,
   AssertionBasis,
   AssertionGroundingRef,
   AssertionProvenance,
@@ -26,9 +27,11 @@ import type { GraphStorageService } from "../storage.js";
 import type { NodeRef, NodeRefKind } from "../types.js";
 import { makeNodeRef } from "../schema.js";
 import type {
+  AreaFactExposureScope,
   AreaStateSourceType,
   AreaWorldProjectionRepo,
   SurfacingClassification,
+  WorldFactExposureScope,
 } from "./area-world-projection-repo.js";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -93,6 +96,12 @@ type ProjectionAreaWorldProjectionRepo = {
   upsertAreaState: (
     input: Parameters<AreaWorldProjectionRepo["upsertAreaState"]>[0],
   ) => MaybePromise<void>;
+  applyAreaFactCommit: (
+    input: Parameters<AreaWorldProjectionRepo["applyAreaFactCommit"]>[0],
+  ) => MaybePromise<{ eventId: bigint }>;
+  applyWorldFactCommit: (
+    input: Parameters<AreaWorldProjectionRepo["applyWorldFactCommit"]>[0],
+  ) => MaybePromise<{ eventId: bigint }>;
   applyPublicationProjection?: AreaWorldProjectionRepo["applyPublicationProjection"];
 };
 
@@ -442,6 +451,10 @@ export type SettlementProjectionParams = {
   artifactEnforcementContext?: ArtifactEnforcementContext;
   /** Optional pre-generated settlement timestamp. When provided, all sync projections use this value instead of calling Date.now(). */
   committedAt?: number;
+  /** Scene fact commits to write inside the same transaction as cognition/episodes/slots. */
+  sceneFactCommits?: SceneFactCommit[];
+  /** Rollout flag: only write scene facts when this is true */
+  sceneFactWritePath?: boolean;
 };
 
 /**
@@ -545,6 +558,7 @@ export class ProjectionManager {
           searchProjectionRepo,
           changedNodeRefs,
         ),
+      () => this.applySceneFactCommits(params, areaWorldProjectionRepo),
       () => {
         this.materializePublicationsSafe(
           params,
@@ -909,6 +923,51 @@ export class ProjectionManager {
     });
 
     return runSeries(steps);
+  }
+
+  private async applySceneFactCommits(
+    params: SettlementProjectionParams,
+    areaWorldProjectionRepo: ProjectionAreaWorldProjectionRepo | null,
+  ): Promise<void> {
+    if (!params.sceneFactWritePath) return;
+    if (!params.sceneFactCommits?.length) return;
+    if (!areaWorldProjectionRepo) return;
+
+    const committedTime = new Date(params.committedAt ?? Date.now());
+
+    for (const commit of params.sceneFactCommits) {
+      if (commit.scope === "area") {
+        const areaId =
+          commit.areaId ?? params.viewerSnapshot?.currentLocationEntityId;
+        if (areaId === undefined) {
+          continue;
+        }
+        await areaWorldProjectionRepo.applyAreaFactCommit({
+          sessionId: params.sessionId,
+          areaId,
+          factKey: commit.factKey,
+          valueJson: commit.value,
+          sourceKind: commit.sourceKind,
+          exposureScope: commit.exposureScope as AreaFactExposureScope,
+          sourceSettlementId: params.settlementId,
+          sourceAgentId: params.agentId,
+          validTime: committedTime,
+          committedTime,
+        });
+      } else {
+        await areaWorldProjectionRepo.applyWorldFactCommit({
+          sessionId: params.sessionId,
+          factKey: commit.factKey,
+          valueJson: commit.value,
+          sourceKind: commit.sourceKind,
+          exposureScope: commit.exposureScope as WorldFactExposureScope,
+          sourceSettlementId: params.settlementId,
+          sourceAgentId: params.agentId,
+          validTime: committedTime,
+          committedTime,
+        });
+      }
+    }
   }
 
   private async runSynchronousGroundingVerification(params: {

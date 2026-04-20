@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
+import { ProjectionManager } from "../../src/memory/projection/projection-manager.js";
+import { SessionService } from "../../src/session/service.js";
 import { PgAreaWorldProjectionRepo } from "../../src/storage/domain-repos/pg/area-world-projection-repo.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
@@ -272,6 +274,164 @@ describe.skipIf(skipPgTests)("scene-fact-projection", () => {
       expect(rows).toHaveLength(2);
       expect(rows[0].table_name).toBe("area_state_events");
       expect(rows[1].table_name).toBe("world_state_events");
+    });
+  });
+
+  it("lore seed idempotency: applySceneSeedCommits twice keeps one current row per fact key", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+      const repo = new PgAreaWorldProjectionRepo(pool);
+      const service = new SessionService();
+      service.configureSceneSeedBootstrap({ areaWorldProjectionRepo: repo });
+
+      const session = {
+        sessionId: "sess-seed-idempotent",
+        agentId: "rp:seed",
+        createdAt: Date.parse("2026-04-20T15:00:00.000Z"),
+      };
+      const preparedSceneSeeds = [
+        {
+          scope: "area" as const,
+          areaId: 33,
+          factKey: "status:gate",
+          value: { open: false },
+          exposureScope: "area_visible" as const,
+        },
+      ];
+
+      const applySceneSeedCommits = (
+        service as unknown as {
+          applySceneSeedCommits: (
+            inputSession: {
+              sessionId: string;
+              agentId: string;
+              createdAt: number;
+            },
+            seeds: Array<{
+              scope: "area";
+              areaId: number;
+              factKey: string;
+              value: unknown;
+              exposureScope: "area_visible" | "system_only";
+            }>,
+          ) => Promise<void>;
+        }
+      ).applySceneSeedCommits.bind(service);
+
+      await applySceneSeedCommits(session, preparedSceneSeeds);
+      await applySceneSeedCommits(session, preparedSceneSeeds);
+
+      const currentRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_area_fact_current
+        WHERE session_id = ${session.sessionId}
+          AND area_id = 33
+          AND fact_key = 'status:gate'
+      `;
+      expect(currentRows[0].c).toBe(1);
+
+      const eventRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_area_fact_events
+        WHERE session_id = ${session.sessionId}
+          AND area_id = 33
+          AND fact_key = 'status:gate'
+      `;
+      expect(eventRows[0].c).toBe(2);
+    });
+  });
+
+  it("graphStorage=null + no areaWorldProjectionRepo: sceneFactCommits become a no-op", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+
+      const projectionManager = new ProjectionManager(
+        { append: async () => 1 },
+        { append: async () => 1 },
+        { upsertFromEvent: async () => {} },
+        null,
+        null,
+      );
+
+      await projectionManager.commitSettlement({
+        settlementId: "stl:scene-fact:no-op",
+        sessionId: "sess:scene-fact:no-op",
+        agentId: "rp:alice",
+        cognitionOps: [],
+        privateEpisodes: [],
+        publications: [],
+        recentCognitionSlotJson: "[]",
+        upsertRecentCognitionSlot: async () => {},
+        viewerSnapshot: { currentLocationEntityId: 99 },
+        sceneFactWritePath: true,
+        sceneFactCommits: [
+          {
+            scope: "area",
+            factKey: "status:torch",
+            value: { lit: true },
+            sourceKind: "action_commitment",
+            exposureScope: "area_visible",
+          },
+        ],
+        committedAt: Date.parse("2026-04-20T16:00:00.000Z"),
+      });
+
+      const areaRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_area_fact_events
+        WHERE session_id = 'sess:scene-fact:no-op'
+      `;
+      const worldRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_world_fact_events
+        WHERE session_id = 'sess:scene-fact:no-op'
+      `;
+      expect(areaRows[0].c).toBe(0);
+      expect(worldRows[0].c).toBe(0);
+    });
+  });
+
+  it("tie-break: same committed_time chooses higher source_event_id in scene_area_fact_current", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+      const repo = new PgAreaWorldProjectionRepo(pool);
+
+      const sameTime = new Date("2026-04-20T17:00:00.000Z");
+
+      const first = await repo.applyAreaFactCommit({
+        sessionId: "sess-tie-area",
+        areaId: 9,
+        factKey: "status:alarm",
+        valueJson: { state: "armed" },
+        sourceKind: "system_event",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-a-1",
+        sourceAgentId: "agent-a",
+        validTime: sameTime,
+        committedTime: sameTime,
+      });
+      const second = await repo.applyAreaFactCommit({
+        sessionId: "sess-tie-area",
+        areaId: 9,
+        factKey: "status:alarm",
+        valueJson: { state: "disarmed" },
+        sourceKind: "action_commitment",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-a-2",
+        sourceAgentId: "agent-b",
+        validTime: sameTime,
+        committedTime: sameTime,
+      });
+
+      expect(second.eventId > first.eventId).toBeTrue();
+
+      const areaFacts = await repo.getVisibleAreaFacts({
+        sessionId: "sess-tie-area",
+        areaId: 9,
+      });
+      expect(areaFacts).toHaveLength(1);
+      expect(areaFacts[0].sourceEventId).toBe(second.eventId);
+      expect(areaFacts[0].valueJson).toEqual({ state: "disarmed" });
     });
   });
 });

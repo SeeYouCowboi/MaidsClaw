@@ -49,6 +49,7 @@ import type {
 	SettlementUnitOfWork,
 } from "../storage/unit-of-work.js";
 import type {
+	ActionCommitment,
 	AssertionRecordV4,
 	CanonicalRpTurnOutcome,
 	CognitionEntityRef,
@@ -58,8 +59,9 @@ import type {
 	CommitmentRecord,
 	EvaluationRecord,
 	RpBufferedExecutionResult,
+	SceneFactCommit,
 } from "./rp-turn-contract.js";
-import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+import { isValidSceneFactKey, normalizeRpTurnOutcome } from "./rp-turn-contract.js";
 import {
 	type NormalizedTurnInput,
 	normalizeTurnInput,
@@ -1400,6 +1402,11 @@ export class TurnService {
 					privateEpisodes: canonicalOutcome.privateEpisodes,
 					publications,
 					areaStateArtifacts: settlementPayload.areaStateArtifacts,
+					sceneFactCommits: mapActionCommitmentsToSceneFactCommits(
+						canonicalOutcome.actionCommitments ?? [],
+					),
+					sceneFactWritePath:
+						this.talkerThinkerConfig.sceneFactWritePath ?? false,
 					viewerSnapshot: resolvedViewerSnapshot,
 					recentCognitionSlotJson: JSON.stringify(slotEntries),
 					agentRole: "rp_agent",
@@ -1970,6 +1977,25 @@ function buildCognitionSlotPayload(
 	}
 
 	return items;
+}
+
+function mapActionCommitmentsToSceneFactCommits(
+	actionCommitments: ActionCommitment[],
+): SceneFactCommit[] {
+	const commits: SceneFactCommit[] = [];
+	for (const ac of actionCommitments) {
+		for (const sc of ac.commits ?? []) {
+			if (!isValidSceneFactKey(sc.factKey)) continue;
+			commits.push({
+				scope: sc.scope,
+				factKey: sc.factKey,
+				value: sc.value,
+				sourceKind: "action_commitment",
+				exposureScope: sc.exposureScope,
+			});
+		}
+	}
+	return commits;
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {

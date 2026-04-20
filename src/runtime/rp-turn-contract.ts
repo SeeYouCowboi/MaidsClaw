@@ -1,3 +1,9 @@
+import type {
+  AreaFactExposureScope,
+  SceneFactSourceKind,
+  WorldFactExposureScope,
+} from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+
 export type CognitionEntityRef =
   | { kind: "pointer_key"; value: string }
   | { kind: "special"; value: "self" | "user" | "current_location" };
@@ -175,6 +181,15 @@ export type ActionCommitment = {
   summary: string;
   commits: SceneCommit[];
 };
+
+export interface SceneFactCommit {
+  scope: "area" | "world";
+  areaId?: number;
+  factKey: string;
+  value: unknown;
+  sourceKind: SceneFactSourceKind;
+  exposureScope: AreaFactExposureScope | WorldFactExposureScope;
+}
 
 export type PinnedSummaryProposal = {
   proposedText: string;

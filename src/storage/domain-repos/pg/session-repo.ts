@@ -38,6 +38,21 @@ export class PgSessionRepo implements SessionRepo {
     return { sessionId, createdAt, agentId };
   }
 
+  async createSessionWithLoreSeedBootstrap(
+    agentId: string,
+    options?: {
+      loreSeedPrecheck?: (agentId: string) => Promise<void>;
+      loreSeedApply?: (session: SessionRecord) => Promise<void>;
+    },
+  ): Promise<SessionRecord> {
+    return this.sql.begin(async () => {
+      const session = await this.createSession(agentId);
+      await options?.loreSeedPrecheck?.(agentId);
+      await options?.loreSeedApply?.(session);
+      return session;
+    }) as Promise<SessionRecord>;
+  }
+
   async listSessions(params: SessionListParams): Promise<SessionListResult> {
     const requestedLimit = Number.isFinite(params.limit) ? Math.floor(params.limit) : DEFAULT_LIMIT;
     const effectiveLimit = Math.max(1, Math.min(MAX_LIMIT, requestedLimit || DEFAULT_LIMIT));

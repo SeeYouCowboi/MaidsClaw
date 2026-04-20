@@ -49,6 +49,7 @@ import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-r
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 
 import {
+	type ActionCommitment,
 	type AssertionBasis,
 	type AssertionProvenance,
 	type AssertionRecordV4,
@@ -60,9 +61,11 @@ import {
 	type CommitmentRecord,
 	type ConflictFactor,
 	type EvaluationRecord,
+	isValidSceneFactKey,
 	normalizeRpTurnOutcome,
 	type PrivateEpisodeArtifact,
 	type RelationIntent,
+	type SceneFactCommit,
 } from "./rp-turn-contract.js";
 import type { NormalizedTurnInput } from "./speaker-normalization.js";
 import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
@@ -933,7 +936,28 @@ export type ThinkerWorkerDeps = {
 	durableJobStore?: DurableJobStore;
 	assertionCanonicalization?: AssertionCanonicalizationBundle;
 	canonicalizationSimilarityThreshold?: number;
+	sceneFactWritePath?: boolean;
 };
+
+function mapActionCommitmentsToSceneFactCommits(
+	actionCommitments: ActionCommitment[],
+): SceneFactCommit[] {
+	const commits: SceneFactCommit[] = [];
+	for (const ac of actionCommitments) {
+		for (const sc of ac.commits ?? []) {
+			if (!isValidSceneFactKey(sc.factKey)) continue;
+		commits.push({
+				scope: sc.scope,
+				// AreaCommit has no areaId; projection-manager falls back to viewerSnapshot.currentLocationEntityId
+				factKey: sc.factKey,
+				value: sc.value,
+				sourceKind: "action_commitment",
+				exposureScope: sc.exposureScope,
+			});
+		}
+	}
+	return commits;
+}
 
 function toConversationMessages(records: InteractionRecord[]): ChatMessage[] {
 	const messages: ChatMessage[] = [];
@@ -1521,6 +1545,10 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					areaStateArtifacts?: SettlementProjectionParams["areaStateArtifacts"];
 				}
 			).areaStateArtifacts;
+			const sceneFactCommits: SceneFactCommit[] =
+				mapActionCommitmentsToSceneFactCommits(
+					canonicalOutcome.actionCommitments ?? [],
+				);
 			const relationIntents = canonicalOutcome.relationIntents ?? [];
 			const conflictFactors = canonicalOutcome.conflictFactors ?? [];
 
@@ -1648,6 +1676,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				privateEpisodes: effectiveEpisodes,
 				publications: canonicalOutcome.publications ?? [],
 				areaStateArtifacts: areaStateArtifacts ?? [],
+				sceneFactCommits,
+				sceneFactWritePath: deps.sceneFactWritePath ?? false,
 				recentCognitionSlotJson,
 				committedAt,
 				viewerSnapshot,

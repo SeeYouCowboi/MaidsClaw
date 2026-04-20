@@ -1311,6 +1311,31 @@ export function bootstrapRuntime(
   const settlementLedgerRepo = createLazyPgRepo(
     () => new PgSettlementLedgerRepo(resolvePgPool()),
   );
+  const resolveAreaPointerKeyForSessionSeed = async (
+    areaPointerKey: string,
+    agentId: string,
+  ): Promise<number | null> => {
+    const rows = await resolvePgPool()`
+      SELECT id
+      FROM entity_nodes
+      WHERE pointer_key = ${areaPointerKey}
+        AND (
+          (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
+          OR memory_scope = 'shared_public'
+        )
+      ORDER BY CASE WHEN memory_scope = 'private_overlay' THEN 0 ELSE 1 END
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return null;
+    }
+    return Number(rows[0].id);
+  };
+  sessionService.configureSceneSeedBootstrap({
+    loreService,
+    areaWorldProjectionRepo,
+    resolveAreaPointerKey: resolveAreaPointerKeyForSessionSeed,
+  });
   const projectionManager = new ProjectionManager(
     episodeRepo,
     cognitionEventRepo,

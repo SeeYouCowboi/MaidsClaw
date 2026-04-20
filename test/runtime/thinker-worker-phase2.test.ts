@@ -207,6 +207,8 @@ async function runThinkerWorkerIntegration(opts: {
 	assertionCanonicalization?: ThinkerWorkerDeps["assertionCanonicalization"];
 	cognitionProjectionRepo?: ThinkerWorkerDeps["cognitionProjectionRepo"];
 	canonicalizationSimilarityThreshold?: number;
+	sceneFactWritePath?: boolean;
+	projectionManager?: ProjectionManager;
 }): Promise<void> {
 	const {
 		pool,
@@ -219,6 +221,8 @@ async function runThinkerWorkerIntegration(opts: {
 		assertionCanonicalization,
 		cognitionProjectionRepo,
 		canonicalizationSimilarityThreshold,
+		sceneFactWritePath,
+		projectionManager,
 	} = opts;
 
 	const ledger = new PgSettlementLedgerRepo(pool);
@@ -249,7 +253,7 @@ async function runThinkerWorkerIntegration(opts: {
 			ledger.markThinkerProjecting(inputSettlementId, inputAgentId),
 	};
 
-	const projectionManager = new ProjectionManager(
+	const runtimeProjectionManager = projectionManager ?? new ProjectionManager(
 		new PgEpisodeRepo(pool),
 		new PgCognitionEventRepo(pool),
 		new PgCognitionProjectionRepo(pool),
@@ -302,7 +306,7 @@ async function runThinkerWorkerIntegration(opts: {
 
 	const deps: ThinkerWorkerDeps = {
 		sql: pool,
-		projectionManager,
+		projectionManager: runtimeProjectionManager,
 		interactionRepo: mockInteractionRepo,
 		recentCognitionSlotRepo: mockSlotRepo,
 		agentRegistry: registry,
@@ -313,6 +317,7 @@ async function runThinkerWorkerIntegration(opts: {
 		assertionCanonicalization,
 		cognitionProjectionRepo,
 		canonicalizationSimilarityThreshold,
+		sceneFactWritePath: sceneFactWritePath ?? false,
 	};
 
 	const worker = createThinkerWorker(deps);
@@ -2671,6 +2676,105 @@ describe.skipIf(skipPgTests)(
 				"For v1, cross-turn revision is ONLY",
 			);
 		});
+
+		it(
+			"actionCommitments area scope calls applyAreaFactCommit on projection repo",
+			async () => {
+				const settlementId = "stl:scene-fact:action-commitment:001";
+				const requestId = "scene-fact:action-commitment:001";
+				const sessionId = await createSessionId(pool);
+
+				let applyAreaFactCommitCalled = 0;
+				const mockAreaWorldProjectionRepo = {
+					async applyAreaFactCommit(params: {
+						sessionId: string;
+						areaId: number;
+						factKey: string;
+						valueJson: unknown;
+						sourceKind: string;
+						exposureScope: string;
+						sourceSettlementId: string | null;
+						sourceAgentId: string | null;
+						validTime: Date;
+						committedTime: Date;
+					}) {
+						expect(params.sessionId).toBe(sessionId);
+						expect(params.areaId).toBe(42);
+						expect(params.factKey).toBe("status:door");
+						applyAreaFactCommitCalled += 1;
+						return { eventId: 1n };
+					},
+				};
+
+				const mockProjectionManager = {
+					async commitSettlement(params: SettlementProjectionParams) {
+						for (const commit of params.sceneFactCommits ?? []) {
+							if (commit.scope !== "area") {
+								continue;
+							}
+							await mockAreaWorldProjectionRepo.applyAreaFactCommit({
+								sessionId: params.sessionId,
+								areaId:
+									commit.areaId ??
+									params.viewerSnapshot?.currentLocationEntityId ??
+									0,
+								factKey: commit.factKey,
+								valueJson: commit.value,
+								sourceKind: commit.sourceKind,
+								exposureScope: String(commit.exposureScope),
+								sourceSettlementId: params.settlementId,
+								sourceAgentId: params.agentId,
+								validTime: new Date(params.committedAt ?? Date.now()),
+								committedTime: new Date(params.committedAt ?? Date.now()),
+							});
+						}
+						return { changedNodeRefs: [] };
+					},
+				} as unknown as ProjectionManager;
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					projectionManager: mockProjectionManager,
+					sceneFactWritePath: true,
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: { ops: [] },
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+						actionCommitments: [
+							{
+								effect: "status_change",
+								summary: "door opens",
+								commits: [
+									{
+										scope: "area",
+										exposureScope: "area_visible",
+										factKey: "status:door",
+										value: { open: true },
+									},
+								],
+							},
+						],
+					},
+					settlementPayloadOverrides: {
+						viewerSnapshot: {
+							selfPointerKey: "entity:self",
+							userPointerKey: "entity:user",
+							currentLocationEntityId: 42,
+						},
+					},
+				});
+
+				expect(applyAreaFactCommitCalled).toBe(1);
+			},
+			30_000,
+		);
 
 		it(
 			"changedNodeRefs count matches cognitionOps + privateEpisodes count",

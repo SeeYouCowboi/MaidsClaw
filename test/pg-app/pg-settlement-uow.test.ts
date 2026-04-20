@@ -6,6 +6,7 @@ import { PgCognitionEventRepo } from "../../src/storage/domain-repos/pg/cognitio
 import { PgCognitionProjectionRepo } from "../../src/storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgEpisodeRepo } from "../../src/storage/domain-repos/pg/episode-repo.js";
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
+import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import { PgSettlementUnitOfWork } from "../../src/storage/pg-settlement-uow.js";
 import {
@@ -433,6 +434,88 @@ describe.skipIf(skipPgTests)(
 				WHERE session_id = ${sessionId} AND agent_id = ${agentId}
 			`;
 				expect(slotRows[0].c).toBe(0);
+			});
+			},
+			20_000,
+		);
+
+		it(
+			"rollback atomicity: scene fact event writes roll back with transaction",
+			async () => {
+			await withTestAppSchema(pool, async (sql) => {
+				await bootstrapTruthSchema(sql);
+				await bootstrapDerivedSchema(sql);
+				await bootstrapOpsSchema(sql);
+				await bootstrapSettlementProjectionTables(sql);
+
+				const uow = new PgSettlementUnitOfWork(sql);
+				const projectionManager = new ProjectionManager(
+					new PgEpisodeRepo(sql),
+					new PgCognitionEventRepo(sql),
+					new PgCognitionProjectionRepo(sql),
+					null,
+					new PgAreaWorldProjectionRepo(sql),
+				);
+
+				const settlementId = "stl:uow:rollback:scene-fact";
+				const agentId = "rp:alice";
+
+				let rollbackCaught = false;
+				try {
+					await uow.run(async (repos) => {
+						const session = await repos.sessionRepo.createSession(agentId);
+
+						await repos.settlementLedger.markApplying(
+							settlementId,
+							agentId,
+							"hash:rollback:scene-fact",
+						);
+
+						await projectionManager.commitSettlement(
+							{
+								settlementId,
+								sessionId: session.sessionId,
+								agentId,
+								cognitionOps: [],
+								privateEpisodes: [],
+								publications: [],
+								viewerSnapshot: { currentLocationEntityId: 42 },
+								recentCognitionSlotJson: "[]",
+								sceneFactWritePath: true,
+								sceneFactCommits: [
+									{
+										scope: "area",
+										factKey: "status:gate",
+										value: { open: true },
+										sourceKind: "action_commitment",
+										exposureScope: "area_visible",
+									},
+								],
+								committedAt: 1_700_000_000_456,
+							},
+							{
+								episodeRepo: repos.episodeRepo,
+								cognitionEventRepo: repos.cognitionEventRepo,
+								cognitionProjectionRepo: repos.cognitionProjectionRepo,
+								areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
+								recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
+							},
+						);
+
+						throw new Error("injected rollback after scene facts");
+					});
+				} catch (e: any) {
+					rollbackCaught = true;
+					expect(e.message).toContain("injected rollback after scene facts");
+				}
+				expect(rollbackCaught).toBe(true);
+
+				const sceneFactRows = await sql`
+					SELECT COUNT(*)::int AS c
+					FROM scene_area_fact_events
+					WHERE source_settlement_id = ${settlementId}
+				`;
+				expect(sceneFactRows[0].c).toBe(0);
 			});
 			},
 			20_000,
