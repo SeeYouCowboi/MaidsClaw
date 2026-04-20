@@ -239,7 +239,23 @@ export function formatContestedEntry(entry: RecentCognitionEntry): string {
 function renderTypedRetrieval(result: TypedRetrievalResult): string {
   const parts: string[] = [];
 
+  if (result.scene_area.length > 0) {
+    parts.push("[scene_area]");
+    for (const fact of result.scene_area) {
+      parts.push(`? [${fact.factKey}] ${JSON.stringify(fact.value)}`);
+    }
+  }
+
+  if (result.scene_world.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[scene_world]");
+    for (const fact of result.scene_world) {
+      parts.push(`? [${fact.factKey}] ${JSON.stringify(fact.value)}`);
+    }
+  }
+
   if (result.cognition.length > 0) {
+    if (parts.length > 0) parts.push("");
     parts.push("[cognition]");
     for (const hit of result.cognition) {
       const key = hit.cognitionKey ? `:${hit.cognitionKey}` : "";
@@ -248,19 +264,19 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
     }
   }
 
-  if (result.narrative.length > 0) {
-    if (parts.length > 0) parts.push("");
-    parts.push("[narrative]");
-    for (const hit of result.narrative) {
-      parts.push(`• [${hit.doc_type}] ${hit.content}`);
-    }
-  }
-
   if (result.conflict_notes.length > 0) {
     if (parts.length > 0) parts.push("");
     parts.push("[conflict_notes]");
     for (const hit of result.conflict_notes) {
       parts.push(`• ${hit.content}`);
+    }
+  }
+
+  if (result.narrative.length > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[narrative]");
+    for (const hit of result.narrative) {
+      parts.push(`• [${hit.doc_type}] ${hit.content}`);
     }
   }
 
@@ -413,7 +429,7 @@ export async function getTypedRetrievalSurfaceAsync(
     recentCognitionTexts,
     conversationTexts,
     recentEntityHints,
-  }, undefined, "default_retrieval", undefined, options?.onRetrievalTraceCapture);
+  }, undefined, "default_retrieval", undefined, options?.sceneRetrieval, options?.onRetrievalTraceCapture);
 
   return renderTypedRetrieval(typed);
 }

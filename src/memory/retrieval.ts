@@ -203,18 +203,27 @@ export class RetrievalService {
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
     contestedCount?: number,
+    sceneRetrieval?: boolean,
     onTraceCapture?: RetrievalTraceCaptureHook,
   ): Promise<TypedRetrievalResult> {
     // Phase 3: build a QueryPlan per call when router + builder are wired.
     // Failures fall back to undefined — orchestrator then runs the legacy
     // template path without plan-driven budget reallocation.
     const queryPlan = await this.buildPlanForQuery(query, viewerContext, dedupContext?.recentEntityHints);
+    const overrideTemplate =
+      sceneRetrieval === undefined
+        ? retrievalTemplate
+        : {
+            ...retrievalTemplate,
+            sceneRetrieval,
+          };
+
     const result = await this.orchestrator.search(
       query,
       viewerContext,
       viewerContext.viewer_role,
       {
-        override: retrievalTemplate,
+        override: overrideTemplate,
         dedupContext,
         queryStrategy,
         contestedCount,
@@ -272,11 +281,21 @@ export class RetrievalService {
           narrative_facets_used: narrativeFacetsUsed,
           cognition_facets_used: cognitionFacetsUsed,
           segment_count:
+            typed.scene_area.length +
+            typed.scene_world.length +
             typed.narrative.length +
             typed.cognition.length +
             typed.conflict_notes.length +
             typed.episode.length,
           segments: [
+            ...typed.scene_area.map((segment) => ({
+              source: `scene_area:${segment.factKey}`,
+              content: JSON.stringify(segment.value),
+            })),
+            ...typed.scene_world.map((segment) => ({
+              source: `scene_world:${segment.factKey}`,
+              content: JSON.stringify(segment.value),
+            })),
             ...typed.narrative.map((segment) => ({
               source: String(segment.source_ref),
               content: segment.content,

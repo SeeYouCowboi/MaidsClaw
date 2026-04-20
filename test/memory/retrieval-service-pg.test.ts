@@ -67,6 +67,8 @@ function makeFact(id: number): FactEdge {
 
 function emptyTypedResult(): TypedRetrievalResult {
   return {
+    scene_area: [],
+    scene_world: [],
     cognition: [],
     narrative: [],
     conflict_notes: [],
@@ -279,6 +281,7 @@ class StubRetrievalOrchestrator extends RetrievalOrchestrator {
       dedupContext?: RetrievalDedupContext;
       queryStrategy?: RetrievalQueryStrategy;
       contestedCount?: number;
+      queryPlan?: unknown;
     } = {},
   ): Promise<RetrievalResult> {
     this.calls.push({
@@ -400,6 +403,8 @@ describe("RetrievalService (PG-native, unit)", () => {
 
   it("generateTypedRetrieval delegates to orchestrator and returns typed result", async () => {
     const typed: TypedRetrievalResult = {
+      scene_area: [],
+      scene_world: [],
       cognition: [
         {
           source_ref: "assertion:8",

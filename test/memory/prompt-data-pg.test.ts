@@ -22,6 +22,8 @@ import type { CognitionProjectionRepo } from "../../src/storage/domain-repos/con
 
 function emptyTypedResult(): TypedRetrievalResult {
   return {
+    scene_area: [],
+    scene_world: [],
     cognition: [],
     narrative: [],
     conflict_notes: [],
@@ -344,6 +346,7 @@ class StubRetrievalService extends RetrievalService {
     retrievalTemplate?: RetrievalTemplate;
     queryStrategy: RetrievalQueryStrategy;
     contestedCount?: number;
+    sceneRetrieval?: boolean;
   }> = [];
 
   nextResult: TypedRetrievalResult = emptyTypedResult();
@@ -400,6 +403,7 @@ class StubRetrievalService extends RetrievalService {
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy: RetrievalQueryStrategy = "default_retrieval",
     contestedCount?: number,
+    sceneRetrieval?: boolean,
   ): Promise<TypedRetrievalResult> {
     this.calls.push({
       query,
@@ -408,6 +412,7 @@ class StubRetrievalService extends RetrievalService {
       retrievalTemplate,
       queryStrategy,
       contestedCount,
+      sceneRetrieval,
     });
     return this.nextResult;
   }
@@ -463,6 +468,8 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
 
   it("returns non-empty string when retrieval service returns results", async () => {
     retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [],
       cognition: [],
       narrative: [
         {
@@ -485,6 +492,8 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
 
   it("includes [cognition] and [narrative] markers when corresponding results exist", async () => {
     retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [],
       cognition: [
         {
           source_ref: "assertion:7",
@@ -513,6 +522,71 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
 
     expect(output).toContain("[cognition]");
     expect(output).toContain("[narrative]");
+  });
+
+  it("renders sections in required order: scene_area, scene_world, cognition, conflict_notes, narrative, episode", async () => {
+    retrievalService.nextResult = {
+      scene_area: [
+        { factKey: "location:parlor", value: { lit: true }, sourceKind: "lore_seed" },
+      ],
+      scene_world: [
+        { factKey: "status:storm", value: "incoming", sourceKind: "system_event" },
+      ],
+      cognition: [
+        {
+          source_ref: "assertion:7",
+          content: "the butler is trustworthy",
+          score: 11,
+          kind: "assertion",
+          basis: "first_hand",
+          stance: "accepted",
+          cognitionKey: "trust:butler",
+        },
+      ],
+      conflict_notes: [
+        {
+          source_ref: "conflict_note:assertion:7",
+          from_source_ref: "assertion:7",
+          cognitionKey: "trust:butler",
+          content: "Conflicts with assertion:8 (strength: 0.9)",
+          score: 10,
+        },
+      ],
+      narrative: [
+        {
+          source_ref: "event:8",
+          content: "they spoke in the hallway",
+          score: 10,
+          doc_type: "event_summary",
+          scope: "world",
+        },
+      ],
+      episode: [
+        {
+          source_ref: "episode:1",
+          content: "episode recall",
+          score: 9,
+          doc_type: "episode_event",
+          scope: "private",
+        },
+      ],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync("hallway", viewerContext, repos, retrievalService);
+
+    const idxSceneArea = output.indexOf("[scene_area]");
+    const idxSceneWorld = output.indexOf("[scene_world]");
+    const idxCognition = output.indexOf("[cognition]");
+    const idxConflict = output.indexOf("[conflict_notes]");
+    const idxNarrative = output.indexOf("[narrative]");
+    const idxEpisode = output.indexOf("[episode]");
+
+    expect(idxSceneArea).toBeGreaterThanOrEqual(0);
+    expect(idxSceneWorld).toBeGreaterThan(idxSceneArea);
+    expect(idxCognition).toBeGreaterThan(idxSceneWorld);
+    expect(idxConflict).toBeGreaterThan(idxCognition);
+    expect(idxNarrative).toBeGreaterThan(idxConflict);
+    expect(idxEpisode).toBeGreaterThan(idxNarrative);
   });
 });
 
@@ -880,6 +954,8 @@ describe("getTypedRetrievalSurfaceAsync — weak-memory label on typed cognition
 
   it("renders weak-label prefix on cognition segments with unverified verification", async () => {
     retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [],
       cognition: [
         {
           source_ref: "assertion:20",
@@ -906,6 +982,8 @@ describe("getTypedRetrievalSurfaceAsync — weak-memory label on typed cognition
 
   it("does NOT render weak-label prefix on strong_verified first_hand cognition segments", async () => {
     retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [],
       cognition: [
         {
           source_ref: "assertion:21",

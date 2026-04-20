@@ -7,6 +7,7 @@ import type { QueryRoute, QuerySignals } from "../../src/memory/query-routing-ty
 import type { ViewerContext } from "../../src/core/contracts/viewer-context";
 import type { NarrativeSearchService } from "../../src/memory/narrative/narrative-search";
 import type { CognitionSearchService, CognitionHit } from "../../src/memory/cognition/cognition-search";
+import type { SceneSearchService } from "../../src/memory/scene/scene-search";
 import type { MemoryHint } from "../../src/memory/types";
 
 /**
@@ -161,10 +162,12 @@ function makeRecordingCognition(): {
 function makeOrchestrator(deps: {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
+  sceneSearchService?: SceneSearchService;
 }): RetrievalOrchestrator {
   return new RetrievalOrchestrator({
     narrativeService: deps.narrativeService,
     cognitionService: deps.cognitionService,
+    sceneSearchService: deps.sceneSearchService,
     currentProjectionReader: null,
     episodeRepository: null,
     episodeSearchFn: null,
@@ -343,5 +346,57 @@ describe("RetrievalOrchestrator — strategy + plan composition", () => {
     // The exact number depends on rounding, but it should remain >= 7
     // (the boosted baseline) and the non-boosted baseline was 11.
     expect(cognition.lastLimit.value).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe("RetrievalOrchestrator — scene retrieval surfaces", () => {
+  it("populates scene_area and scene_world when sceneRetrieval=true", async () => {
+    const narrative = makeRecordingNarrative();
+    const cognition = makeRecordingCognition();
+    const sceneSearchService = {
+      async getVisibleAreaFacts() {
+        return [
+          {
+            factKey: "location:parlor",
+            value: { lit: true },
+            sourceKind: "lore_seed",
+          },
+        ];
+      },
+      async getVisibleWorldFacts() {
+        return [
+          {
+            factKey: "status:storm",
+            value: "incoming",
+            sourceKind: "system_event",
+          },
+        ];
+      },
+    } as unknown as SceneSearchService;
+
+    const orchestrator = makeOrchestrator({
+      narrativeService: narrative.service,
+      cognitionService: cognition.service,
+      sceneSearchService,
+    });
+
+    const result = await orchestrator.search("test", makeViewer(), "rp_agent", {
+      override: { sceneRetrieval: true },
+    });
+
+    expect(result.typed.scene_area).toEqual([
+      {
+        factKey: "location:parlor",
+        value: { lit: true },
+        sourceKind: "lore_seed",
+      },
+    ]);
+    expect(result.typed.scene_world).toEqual([
+      {
+        factKey: "status:storm",
+        value: "incoming",
+        sourceKind: "system_event",
+      },
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 import type { AgentRole } from "../../agents/profile.js";
 
 export type RetrievalTemplate = {
+  sceneRetrieval?: boolean;
   narrativeEnabled?: boolean;
   cognitionEnabled?: boolean;
   conflictNotesEnabled?: boolean;
@@ -39,6 +40,7 @@ export function estimateTokens(text: string): number {
 //      EPISODE_MEMORY/DETECTIVE/SCENE keyword buckets)
 const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
   rp_agent: {
+    sceneRetrieval: false,
     narrativeEnabled: true,
     cognitionEnabled: true,
     conflictNotesEnabled: true,
@@ -64,6 +66,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     maxCognitionHits: 5,
   },
   maiden: {
+    sceneRetrieval: false,
     narrativeEnabled: true,
     cognitionEnabled: false,
     conflictNotesEnabled: false,
@@ -82,6 +85,7 @@ const ROLE_DEFAULTS: Record<AgentRole, Required<RetrievalTemplate>> = {
     maxCognitionHits: 0,
   },
   task_agent: {
+    sceneRetrieval: false,
     narrativeEnabled: false,
     cognitionEnabled: false,
     conflictNotesEnabled: false,
@@ -114,6 +118,7 @@ export function resolveTemplate(
   const cognitionBudget = override.cognitionBudget ?? override.maxCognitionHits ?? base.cognitionBudget;
   const episodeBudget = override.episodeBudget ?? base.episodeBudget;
   return {
+    sceneRetrieval: override.sceneRetrieval ?? base.sceneRetrieval,
     narrativeEnabled: override.narrativeEnabled ?? base.narrativeEnabled,
     cognitionEnabled: override.cognitionEnabled ?? base.cognitionEnabled,
     conflictNotesEnabled: override.conflictNotesEnabled ?? base.conflictNotesEnabled,

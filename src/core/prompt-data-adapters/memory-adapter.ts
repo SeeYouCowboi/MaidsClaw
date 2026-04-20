@@ -29,6 +29,7 @@ export class MemoryAdapter implements MemoryDataSource {
     private readonly retrievalService?: RetrievalService,
     private readonly episodeRepo?: EpisodeRepo,
     private readonly personaEntityHints?: string[],
+    private readonly sceneRetrieval?: boolean,
   ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
@@ -59,6 +60,7 @@ export class MemoryAdapter implements MemoryDataSource {
     // Merge caller-provided persona hints with constructor-level hints
     const mergedOptions: TypedRetrievalSurfaceOptions = {
       ...options,
+      sceneRetrieval: options?.sceneRetrieval ?? this.sceneRetrieval,
       personaEntityHints: mergeHints(
         this.personaEntityHints,
         options?.personaEntityHints,

@@ -122,6 +122,8 @@ describe("retrieval trace capture", () => {
       orchestrator: {
         search: async () => ({
           typed: {
+            scene_area: [],
+            scene_world: [],
             narrative: [
               {
                 source_ref: "event:1",
@@ -177,6 +179,7 @@ describe("retrieval trace capture", () => {
       undefined,
       "deep_explain",
       undefined,
+      undefined,
       (c) => {
         capture = c;
       },
@@ -211,6 +214,8 @@ describe("retrieval trace capture", () => {
       orchestrator: {
         search: async () => ({
           typed: {
+            scene_area: [],
+            scene_world: [],
             narrative: [
               {
                 source_ref: "event:1",

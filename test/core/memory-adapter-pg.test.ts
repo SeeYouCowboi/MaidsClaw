@@ -22,6 +22,8 @@ describe("MemoryAdapter", () => {
 
   const stubRetrievalService: RetrievalService = {
     generateTypedRetrieval: async () => ({
+      scene_area: [],
+      scene_world: [],
       narrative: [],
       cognition: [],
       conflict_notes: [],
@@ -187,6 +189,8 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
   it("includes guidance when typed retrieval surface has content", async () => {
     const retrievalService = {
       generateTypedRetrieval: async () => ({
+        scene_area: [],
+        scene_world: [],
         cognition: [
           {
             source_ref: "assertion:5",
@@ -215,6 +219,8 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
   it("does NOT include guidance when typed retrieval surface is empty", async () => {
     const retrievalService = {
       generateTypedRetrieval: async () => ({
+        scene_area: [],
+        scene_world: [],
         cognition: [],
         narrative: [],
         conflict_notes: [],

@@ -10,6 +10,11 @@ import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-r
 import type { QueryPlan } from "../query-plan-types.js";
 import { tokenizeQuery } from "../query-tokenizer.js";
 import { allocateBudget } from "./budget-allocator.js";
+import type {
+  SceneAreaFact,
+  SceneSearchService,
+  SceneWorldFact,
+} from "../scene/scene-search.js";
 
 export type RetrievalQueryStrategy = "default_retrieval" | "deep_explain";
 
@@ -39,6 +44,7 @@ type EpisodeEmbeddingSearchFn = (
 type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
+  sceneSearchService?: SceneSearchService | null;
   currentProjectionReader?: CurrentProjectionReader | null;
   episodeRepository?: EpisodeRepo | null;
   episodeSearchFn?: EpisodeSearchFn | null;
@@ -70,7 +76,15 @@ type TypedConflictNoteSegment = TypedRetrievalSegment & {
   cognitionKey: string | null;
 };
 
+export type TypedSceneFactSegment = {
+  factKey: string;
+  value: unknown;
+  sourceKind: string;
+};
+
 export type TypedRetrievalResult = {
+  scene_area: TypedSceneFactSegment[];
+  scene_world: TypedSceneFactSegment[];
   cognition: TypedCognitionSegment[];
   narrative: TypedNarrativeSegment[];
   conflict_notes: TypedConflictNoteSegment[];
@@ -141,6 +155,7 @@ export class RetrievalOrchestrator {
   private readonly currentProjectionReader: CurrentProjectionReader | null;
   private readonly narrativeService: NarrativeSearchService;
   private readonly cognitionService: CognitionSearchService;
+  private readonly sceneSearchService: SceneSearchService | null;
   private readonly episodeRepository: EpisodeRepo | null;
   private readonly episodeSearchFn: EpisodeSearchFn | null;
   private readonly episodeEmbeddingFn: EpisodeEmbeddingSearchFn | null;
@@ -148,6 +163,7 @@ export class RetrievalOrchestrator {
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
     this.cognitionService = deps.cognitionService;
+    this.sceneSearchService = deps.sceneSearchService ?? null;
     this.currentProjectionReader = deps.currentProjectionReader ?? null;
     this.episodeRepository = deps.episodeRepository ?? null;
     this.episodeSearchFn = deps.episodeSearchFn ?? null;
@@ -201,6 +217,24 @@ export class RetrievalOrchestrator {
     }
 
     const effectiveEpisodeBudget = this.resolveEpisodeBudget(template);
+
+    let sceneAreaFacts: TypedSceneFactSegment[] = [];
+    let sceneWorldFacts: TypedSceneFactSegment[] = [];
+    if (
+      template.sceneRetrieval
+      && this.sceneSearchService
+      && viewerContext.current_area_id != null
+    ) {
+      const [areaFacts, worldFacts] = await Promise.all([
+        this.sceneSearchService.getVisibleAreaFacts(
+          viewerContext.session_id,
+          viewerContext.current_area_id,
+        ),
+        this.sceneSearchService.getVisibleWorldFacts(viewerContext.session_id),
+      ]);
+      sceneAreaFacts = this.toTypedSceneFacts(areaFacts);
+      sceneWorldFacts = this.toTypedSceneFacts(worldFacts);
+    }
 
     // GAP-4 §1: extract surface-level facets from the plan if a plan is
     // present and the facet consumption flag is on. Empty `entityFilters`
@@ -269,6 +303,8 @@ export class RetrievalOrchestrator {
     const cognitionHits = this.filterCognitionHits(rawCognitionHits, recentCognitionKeys, seenText);
     const typed = this.buildTypedSurface(
       template,
+      sceneAreaFacts,
+      sceneWorldFacts,
       cognitionHits,
       narrativeHints,
       episodeHints,
@@ -316,6 +352,8 @@ export class RetrievalOrchestrator {
 
   private buildTypedSurface(
     template: Required<RetrievalTemplate>,
+    sceneAreaFacts: TypedSceneFactSegment[],
+    sceneWorldFacts: TypedSceneFactSegment[],
     cognitionHits: CognitionHit[],
     narrativeHints: MemoryHint[],
     episodeHints: TypedNarrativeSegment[],
@@ -326,6 +364,8 @@ export class RetrievalOrchestrator {
     effectiveConflictNotesBudget: number,
   ): TypedRetrievalResult {
     const typed: TypedRetrievalResult = {
+      scene_area: sceneAreaFacts,
+      scene_world: sceneWorldFacts,
       cognition: [],
       narrative: [],
       conflict_notes: [],
@@ -502,6 +542,16 @@ export class RetrievalOrchestrator {
     }
 
     return typed;
+  }
+
+  private toTypedSceneFacts(
+    facts: SceneAreaFact[] | SceneWorldFact[],
+  ): TypedSceneFactSegment[] {
+    return facts.map((fact) => ({
+      factKey: fact.factKey,
+      value: fact.value,
+      sourceKind: fact.sourceKind,
+    }));
   }
 
   private async resolveEpisodeHints(
@@ -765,6 +815,7 @@ export class RetrievalOrchestrator {
     const key = text.slice(COGNITION_KEY_PREFIX.length).trim();
     return key.length > 0 ? key : null;
   }
+
 }
 
 /**

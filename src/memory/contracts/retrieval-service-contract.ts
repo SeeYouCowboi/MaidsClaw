@@ -55,6 +55,7 @@ export interface RetrievalServiceLike {
     retrievalTemplate?: RetrievalTemplate,
     queryStrategy?: RetrievalQueryStrategy,
     contestedCount?: number,
+    sceneRetrieval?: boolean,
     onTraceCapture?: RetrievalTraceCaptureHook,
   ): Promise<TypedRetrievalResult>;
   localizeSeedsHybrid(

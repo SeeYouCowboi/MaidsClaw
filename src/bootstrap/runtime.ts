@@ -91,6 +91,7 @@ import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
 import { RuleBasedQueryRouter } from "../memory/query-router.js";
 import { RetrievalOrchestrator } from "../memory/retrieval/retrieval-orchestrator.js";
 import { RetrievalService } from "../memory/retrieval.js";
+import { SceneSearchService } from "../memory/scene/scene-search.js";
 import type { NodeRef, ViewerContext } from "../memory/types.js";
 import { VisibilityPolicy } from "../memory/visibility-policy.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
@@ -1402,6 +1403,7 @@ export function bootstrapRuntime(
   );
   const currentProjectionReader =
     cognitionSearchService.createCurrentProjectionReader();
+  const sceneSearchService = new SceneSearchService(areaWorldProjectionRepo);
   // Build the memory task model provider eagerly so that retrieval-side
   // components (episodeEmbeddingFn) can reference it via closure. Previously
   // this was constructed after the orchestrator; moved up as part of P1-A
@@ -1437,6 +1439,7 @@ export function bootstrapRuntime(
   const retrievalOrchestrator = new RetrievalOrchestrator({
     narrativeService: narrativeSearchService,
     cognitionService: cognitionSearchService,
+    sceneSearchService,
     currentProjectionReader,
     episodeRepository: episodeRepo,
     episodeSearchFn: async (query, agentId, limit) =>
@@ -1583,7 +1586,13 @@ export function bootstrapRuntime(
       personaEntityHints.push(card.name.trim());
     }
   }
-  const memoryAdapter = new MemoryAdapter(promptDataRepos, retrievalService, episodeRepo, personaEntityHints);
+  const memoryAdapter = new MemoryAdapter(
+    promptDataRepos,
+    retrievalService,
+    episodeRepo,
+    personaEntityHints,
+    talkerThinkerConfig.sceneRetrieval,
+  );
   const promptBuilder = new PromptBuilder({
     persona: personaAdapter,
     lore: loreAdapter,

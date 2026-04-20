@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator";
+import { getTypedRetrievalSurfaceAsync, type PromptDataRepos } from "../../src/memory/prompt-data";
 import type { QueryPlan } from "../../src/memory/query-plan-types";
 import type { QueryRoute, QuerySignals } from "../../src/memory/query-routing-types";
 import type { ViewerContext } from "../../src/core/contracts/viewer-context";
@@ -14,6 +15,7 @@ import type {
 } from "../../src/memory/cognition/cognition-search";
 import type { TimeSliceQuery } from "../../src/memory/time-slice-query";
 import type { MemoryHint } from "../../src/memory/types";
+import type { RetrievalService } from "../../src/memory/retrieval";
 
 /**
  * GAP-4 §1 — surface facets consumption tests.
@@ -479,5 +481,134 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
     expect(result.typed.cognition[1].cognitionKey).toBe("weak:key");
     expect(result.typed.cognition[0].groundingVerificationLevel).toBe("strong_verified");
     expect(result.typed.cognition[1].groundingVerificationLevel).toBe("unverified");
+  });
+
+  it("renders [scene_area] before [cognition] when both are present", async () => {
+    const retrievalService = {
+      async generateTypedRetrieval(
+        _query: string,
+        _viewerContext: ViewerContext,
+        _dedupContext?: unknown,
+        _retrievalTemplate?: unknown,
+        _queryStrategy?: unknown,
+        _contestedCount?: unknown,
+        sceneRetrieval?: boolean,
+      ) {
+        return {
+          scene_area: sceneRetrieval
+            ? [{ factKey: "location:parlor", value: { lit: true }, sourceKind: "lore_seed" }]
+            : [],
+          scene_world: sceneRetrieval
+            ? [{ factKey: "status:storm", value: "incoming", sourceKind: "system_event" }]
+            : [],
+          cognition: [
+            {
+              source_ref: "assertion:1",
+              content: "the butler is nearby",
+              score: 1,
+              kind: "assertion",
+              basis: "first_hand",
+              stance: "accepted",
+              cognitionKey: "butler:nearby",
+            },
+          ],
+          narrative: [],
+          conflict_notes: [],
+          episode: [],
+        };
+      },
+    } as unknown as RetrievalService;
+
+    const repos: PromptDataRepos = {
+      coreMemoryBlockRepo: {} as PromptDataRepos["coreMemoryBlockRepo"],
+      recentCognitionSlotRepo: {
+        async getSlotPayload() {
+          return undefined;
+        },
+      } as unknown as PromptDataRepos["recentCognitionSlotRepo"],
+      interactionRepo: {
+        async getMessageRecords() {
+          return [];
+        },
+      } as unknown as PromptDataRepos["interactionRepo"],
+      sharedBlockRepo: {} as PromptDataRepos["sharedBlockRepo"],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "what's happening",
+      makeViewer(),
+      repos,
+      retrievalService,
+      { sceneRetrieval: true },
+    );
+
+    const sceneAreaIdx = output.indexOf("[scene_area]");
+    const cognitionIdx = output.indexOf("[cognition]");
+    expect(sceneAreaIdx).toBeGreaterThanOrEqual(0);
+    expect(cognitionIdx).toBeGreaterThan(sceneAreaIdx);
+  });
+
+  it("sceneRetrieval=false omits [scene_area]/[scene_world] from rendered output", async () => {
+    const retrievalService = {
+      async generateTypedRetrieval(
+        _query: string,
+        _viewerContext: ViewerContext,
+        _dedupContext?: unknown,
+        _retrievalTemplate?: unknown,
+        _queryStrategy?: unknown,
+        _contestedCount?: unknown,
+        sceneRetrieval?: boolean,
+      ) {
+        return {
+          scene_area: sceneRetrieval
+            ? [{ factKey: "location:parlor", value: { lit: true }, sourceKind: "lore_seed" }]
+            : [],
+          scene_world: sceneRetrieval
+            ? [{ factKey: "status:storm", value: "incoming", sourceKind: "system_event" }]
+            : [],
+          cognition: [
+            {
+              source_ref: "assertion:1",
+              content: "the butler is nearby",
+              score: 1,
+              kind: "assertion",
+              basis: "first_hand",
+              stance: "accepted",
+              cognitionKey: "butler:nearby",
+            },
+          ],
+          narrative: [],
+          conflict_notes: [],
+          episode: [],
+        };
+      },
+    } as unknown as RetrievalService;
+
+    const repos: PromptDataRepos = {
+      coreMemoryBlockRepo: {} as PromptDataRepos["coreMemoryBlockRepo"],
+      recentCognitionSlotRepo: {
+        async getSlotPayload() {
+          return undefined;
+        },
+      } as unknown as PromptDataRepos["recentCognitionSlotRepo"],
+      interactionRepo: {
+        async getMessageRecords() {
+          return [];
+        },
+      } as unknown as PromptDataRepos["interactionRepo"],
+      sharedBlockRepo: {} as PromptDataRepos["sharedBlockRepo"],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "what's happening",
+      makeViewer(),
+      repos,
+      retrievalService,
+      { sceneRetrieval: false },
+    );
+
+    expect(output).not.toContain("[scene_area]");
+    expect(output).not.toContain("[scene_world]");
+    expect(output).toContain("[cognition]");
   });
 });
