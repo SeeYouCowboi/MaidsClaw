@@ -971,6 +971,9 @@ export async function executeThinkerPath(
 				schemaVersion: "turn_settlement_v5" as const,
 				cognitiveSketch: sketchText,
 				...(sketchSource ? { cognitiveSketchSource: sketchSource } : {}),
+				...(settlement.normalizedTurnInput
+					? { normalizedTurnInput: settlement.normalizedTurnInput }
+					: {}),
 			};
 
 			const talkerTurnVersion = i + 1;
@@ -1049,7 +1052,9 @@ export async function executeThinkerPath(
 						? `${op.record.kind}:${op.record.key}`
 						: `${op.target.kind}:${op.target.key}`;
 				const lastIndexByKey = new Map<string, number>();
-				allOps.forEach((op, idx) => lastIndexByKey.set(keyOf(op), idx));
+				allOps.forEach((op, idx) => {
+					lastIndexByKey.set(keyOf(op), idx);
+				});
 				const mergedOps = allOps.filter(
 					(op, idx) => lastIndexByKey.get(keyOf(op)) === idx,
 				);
@@ -1559,6 +1564,9 @@ function toProjectionCognitionOp(
 				? { provenance: op.assertionData.provenance }
 				: {}),
 			...(claimedGroundingRefs.length > 0 ? { claimedGroundingRefs } : {}),
+			...(op.assertionData.sceneFactBinding
+				? { sceneFactBinding: op.assertionData.sceneFactBinding }
+				: {}),
 		};
 
 		return {

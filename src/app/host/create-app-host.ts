@@ -62,7 +62,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			throw new Error("T7: pgFactory.getPool() unavailable for Thinker worker");
 		}
 
-		const thinkerWorker = createThinkerWorker({
+		const thinkerWorkerDeps = {
 			sql,
 			projectionManager: runtime.projectionManager,
 			interactionRepo: runtime.interactionRepo,
@@ -75,7 +75,15 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			assertionCanonicalization: runtime.assertionCanonicalizationBundle,
 			canonicalizationSimilarityThreshold:
 				runtime.talkerThinkerConfig?.canonicalizationSimilarityThreshold,
-		});
+			speakerNormalizationGate:
+				runtime.talkerThinkerConfig?.speakerNormalizationGate,
+			sceneFactWritePath: runtime.talkerThinkerConfig?.sceneFactWritePath,
+			sceneRetrieval: runtime.talkerThinkerConfig?.sceneRetrieval,
+			legacyAreaStateCompat:
+				runtime.talkerThinkerConfig?.legacyAreaStateCompat,
+		};
+
+		const thinkerWorker = createThinkerWorker(thinkerWorkerDeps);
 
 		await thinkerWorker({
 			payload: job.payload_json,

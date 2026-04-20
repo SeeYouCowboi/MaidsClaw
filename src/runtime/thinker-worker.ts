@@ -20,7 +20,10 @@ import {
 	resolveLocalRefs,
 	type SettledArtifacts,
 } from "../memory/cognition/relation-intent-resolver.js";
-import { TERMINAL_STANCES } from "../memory/cognition/belief-revision.js";
+import {
+	TERMINAL_STANCES,
+	validateSceneFactBindingForRevision,
+} from "../memory/cognition/belief-revision.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import type {
@@ -61,6 +64,7 @@ import {
 	type PrivateEpisodeArtifact,
 	type RelationIntent,
 } from "./rp-turn-contract.js";
+import type { NormalizedTurnInput } from "./speaker-normalization.js";
 import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
 
 export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
@@ -178,12 +182,117 @@ function hasOnlyClaimedCognitionRefs(
 	);
 }
 
+function hasValidSceneFactBindingForRevision(
+	binding: AssertionRecordV4["sceneFactBinding"],
+): boolean {
+	if (!binding) {
+		return false;
+	}
+
+	return validateSceneFactBindingForRevision({
+		scope: binding.scope,
+		factKey: binding.factKey,
+		...(typeof binding.areaId === "number" ? { areaId: binding.areaId } : {}),
+		expectedValue: binding.expectedValue,
+	});
+}
+
+function applyNormalizedSemanticGate(
+	ops: CognitionOp[],
+	normalizedTurnInput: NormalizedTurnInput | undefined,
+): CognitionOp[] {
+	const speechActs = normalizedTurnInput?.speechActs ?? [];
+	if (speechActs.length === 0) {
+		return ops;
+	}
+
+	const speechActSet = new Set(speechActs);
+	const hasQuestionLikeActs =
+		speechActSet.has("question") ||
+		speechActSet.has("hypothesis") ||
+		speechActSet.has("confusion_expression");
+	const hasNarratedAction = speechActSet.has("narrated_action");
+	const hasCorrectionAlone =
+		speechActSet.has("correction") && !hasNarratedAction;
+
+	if (!hasQuestionLikeActs && !hasNarratedAction && !hasCorrectionAlone) {
+		return ops;
+	}
+
+	const normalizedOps: CognitionOp[] = [];
+
+	for (const op of ops) {
+		if (op.op !== "upsert" || op.record.kind !== "assertion") {
+			normalizedOps.push(op);
+			continue;
+		}
+
+		const assertion = {
+			...(op.record as AssertionRecordV4),
+		};
+		const binding = assertion.sceneFactBinding;
+		const hasBinding = binding !== undefined && binding !== null;
+		const hasValidBinding = hasValidSceneFactBindingForRevision(binding);
+
+		if (hasBinding && !hasValidBinding) {
+			delete assertion.sceneFactBinding;
+		}
+
+		if (hasQuestionLikeActs || hasCorrectionAlone) {
+			assertion.basis = "inference";
+			assertion.stance = "tentative";
+			if (assertion.sceneFactBinding) {
+				delete assertion.sceneFactBinding;
+			}
+
+			normalizedOps.push({
+				...op,
+				record: assertion,
+			});
+			continue;
+		}
+
+		if (hasNarratedAction) {
+			if (hasValidBinding) {
+				normalizedOps.push({
+					...op,
+					record: assertion,
+				});
+				continue;
+			}
+
+			assertion.basis = "inference";
+			assertion.stance = "tentative";
+
+			normalizedOps.push({
+				...op,
+				record: assertion,
+			});
+			continue;
+		}
+
+		normalizedOps.push(op);
+	}
+
+	return normalizedOps;
+}
+
 function normalizeThinkerAssertionOpsBeforeProjection(
 	ops: CognitionOp[],
 	cognitiveSketchSource: TurnSettlementPayload["cognitiveSketchSource"] | undefined,
 	authoritativeSourceTurnVersion: number,
+	normalizedTurnInput: NormalizedTurnInput | undefined,
 ): CognitionOp[] {
-	return ops.map((op) => {
+	const speechActSet = new Set(normalizedTurnInput?.speechActs ?? []);
+	const hasQuestionLikeActs =
+		speechActSet.has("question") ||
+		speechActSet.has("hypothesis") ||
+		speechActSet.has("confusion_expression");
+	const hasNarratedAction = speechActSet.has("narrated_action");
+	const hasCorrectionAlone =
+		speechActSet.has("correction") && !hasNarratedAction;
+
+	const normalizedOps = ops.map((op) => {
 		if (op.op !== "upsert" || op.record.kind !== "assertion") {
 			return op;
 		}
@@ -197,15 +306,33 @@ function normalizeThinkerAssertionOpsBeforeProjection(
 			cognitiveSketchSource,
 		);
 		let basis = assertion.basis;
+		const hasSceneFactBinding =
+			assertion.sceneFactBinding !== undefined &&
+			assertion.sceneFactBinding !== null;
+		const hasValidSceneFactBinding = hasValidSceneFactBindingForRevision(
+			assertion.sceneFactBinding,
+		);
+		if (hasSceneFactBinding && !hasValidSceneFactBinding) {
+			delete assertion.sceneFactBinding;
+		}
+		const preserveNarratedActionFactualBelief =
+			hasNarratedAction &&
+			hasValidSceneFactBinding &&
+			!hasQuestionLikeActs &&
+			!hasCorrectionAlone;
 
 		if (
-			provenance === "talker_sketch_explicit" ||
-			provenance === "talker_sketch_auto"
+			!preserveNarratedActionFactualBelief &&
+			(provenance === "talker_sketch_explicit" ||
+				provenance === "talker_sketch_auto")
 		) {
 			basis = "belief";
 		}
 
-		if (provenance === "user_stated" || provenance === "explicit_settlement") {
+		if (
+			!preserveNarratedActionFactualBelief &&
+			(provenance === "user_stated" || provenance === "explicit_settlement")
+		) {
 			basis = capAssertionBasisAtInference(basis);
 		}
 
@@ -218,7 +345,23 @@ function normalizeThinkerAssertionOpsBeforeProjection(
 		}
 
 		let stance = assertion.stance;
+		if (hasSceneFactBinding && !hasValidSceneFactBinding) {
+			basis = "inference";
+			stance = "tentative";
+		}
+
 		if (
+			normalizedTurnInput &&
+			normalizedTurnInput.speechActs.length > 0 &&
+			provenance === "user_stated" &&
+			!hasValidSceneFactBinding
+		) {
+			basis = "inference";
+			stance = "tentative";
+		}
+
+		if (
+			!preserveNarratedActionFactualBelief &&
 			(provenance === "talker_sketch_explicit" ||
 				provenance === "talker_sketch_auto") &&
 			stance === "confirmed"
@@ -238,6 +381,8 @@ function normalizeThinkerAssertionOpsBeforeProjection(
 			record: assertion,
 		};
 	});
+
+	return applyNormalizedSemanticGate(normalizedOps, normalizedTurnInput);
 }
 
 type RecentCognitionEntry = {
@@ -1386,6 +1531,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				canonicalOutcome.privateCognition?.ops ?? [],
 				settlementPayload?.cognitiveSketchSource,
 				authoritativeSourceTurnVersion,
+				settlementPayload?.normalizedTurnInput,
 			);
 			const canonicalizedCognitionOps = await canonicalizeThinkerAssertionKeysBeforeProjection({
 				ops: cognitionOps,

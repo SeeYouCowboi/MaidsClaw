@@ -1,9 +1,25 @@
 import { MaidsClawError } from "../../core/errors.js";
+import { isValidSceneFactKey } from "../../runtime/rp-turn-contract.js";
 import type {
   AssertionBasis,
   AssertionProvenance,
   AssertionStance,
 } from "../../runtime/rp-turn-contract.js";
+
+export function validateSceneFactBindingForRevision(
+  binding: {
+    scope: string;
+    factKey: string;
+    areaId?: number;
+    expectedValue: unknown;
+  },
+): boolean {
+  if (binding.scope !== "area" && binding.scope !== "world") {
+    return false;
+  }
+
+  return isValidSceneFactKey(binding.factKey);
+}
 
 /**
  * Stances that cannot be transitioned out of.

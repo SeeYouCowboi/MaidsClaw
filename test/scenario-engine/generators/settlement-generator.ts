@@ -11,14 +11,15 @@ import type {
 } from "../dsl/story-types.js";
 
 export type GeneratedSettlement = {
-  beatId: string;
-  settlementId: string;
-  batchId: string;
-  sessionId: string;
-  agentId: string;
-  entityCreations: EntityCreation[];
-  aliasAdditions: AliasAddition[];
-  cognitionOps: CognitionOpSpec[];
+	beatId: string;
+	settlementId: string;
+	batchId: string;
+	sessionId: string;
+	agentId: string;
+	normalizedTurnInput?: import("../../../src/runtime/speaker-normalization.js").NormalizedTurnInput;
+	entityCreations: EntityCreation[];
+	aliasAdditions: AliasAddition[];
+	cognitionOps: CognitionOpSpec[];
   privateEpisodes: EpisodeCreation[];
   logicEdges: LogicEdgeCreation[];
   retractions: RetractionCreation[];
@@ -44,17 +45,23 @@ export type CognitionOpSpec = {
   objectPointerId?: string;
   holderPointerId?: string;
   entityPointerIds?: string[];
-  assertionData?: {
-    claim: string;
-    stance: string;
-    basis: string;
-    preContestedStance?: string;
-    confidence?: number;
-    conflictFactors?: string[];
-    sourceEpisodeId?: string;
-    provenance?: string;
-    claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
-  };
+	assertionData?: {
+		claim: string;
+		stance: string;
+		basis: string;
+		preContestedStance?: string;
+		confidence?: number;
+		conflictFactors?: string[];
+		sourceEpisodeId?: string;
+		provenance?: string;
+		claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
+		sceneFactBinding?: {
+			scope: "area" | "world";
+			factKey: string;
+			areaId?: number;
+			expectedValue: unknown;
+		};
+	};
   evaluationData?: {
     dimensions: { name: string; value: number }[];
   };
@@ -258,15 +265,16 @@ export function generateSettlements(story: Story): GeneratedSettlement[] {
 
     const recentSlotEntries = buildRecentSlotEntries(settlementId, beat.timestamp, cognitionOps);
 
-    return {
-      beatId: beat.id,
-      settlementId,
-      batchId: settlementId,
-      sessionId: SCENARIO_DEFAULT_SESSION_ID,
-      agentId: SCENARIO_DEFAULT_AGENT_ID,
-      entityCreations,
-      aliasAdditions,
-      cognitionOps,
+		return {
+			beatId: beat.id,
+			settlementId,
+			batchId: settlementId,
+			sessionId: SCENARIO_DEFAULT_SESSION_ID,
+			agentId: SCENARIO_DEFAULT_AGENT_ID,
+			normalizedTurnInput: beat.normalizedTurnInput,
+			entityCreations,
+			aliasAdditions,
+			cognitionOps,
       privateEpisodes,
       logicEdges,
       retractions,
@@ -291,18 +299,19 @@ function buildAssertionOps(
       subjectPointerId: assertion.holderId,
       holderPointerId: assertion.holderId,
       entityPointerIds: assertion.entityIds,
-      assertionData: {
-        claim: assertion.claim,
-        stance: assertion.stance,
-        basis: assertion.basis,
-        preContestedStance: assertion.preContestedStance,
-        confidence: assertion.confidence,
-        conflictFactors: assertion.conflictFactors,
-        sourceEpisodeId: assertion.sourceEpisodeId,
-        provenance: assertion.provenance,
-        claimedGroundingRefs: assertion.claimedGroundingRefs,
-      },
-    };
+		assertionData: {
+			claim: assertion.claim,
+			stance: assertion.stance,
+			basis: assertion.basis,
+			preContestedStance: assertion.preContestedStance,
+			confidence: assertion.confidence,
+			conflictFactors: assertion.conflictFactors,
+			sourceEpisodeId: assertion.sourceEpisodeId,
+			provenance: assertion.provenance,
+			claimedGroundingRefs: assertion.claimedGroundingRefs,
+			sceneFactBinding: assertion.sceneFactBinding,
+		},
+	};
 
     ops.push(op);
     cognitionKeyHistory.set(assertion.cognitionKey, {

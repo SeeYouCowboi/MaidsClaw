@@ -443,6 +443,12 @@ function makeAssertionUpsert(params: {
 	basis?: "first_hand" | "hearsay" | "inference" | "introspection" | "belief";
 	provenance?: string;
 	claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
+	sceneFactBinding?: {
+		scope: "area" | "world";
+		factKey: string;
+		areaId?: number;
+		expectedValue: unknown;
+	};
 }) {
 	return {
 		op: "upsert",
@@ -460,6 +466,9 @@ function makeAssertionUpsert(params: {
 			provenance: params.provenance ?? "user_stated",
 			claimedGroundingRefs:
 				params.claimedGroundingRefs ?? [{ kind: "user_message", ref: "request:canonical-1" }],
+			...(params.sceneFactBinding
+				? { sceneFactBinding: params.sceneFactBinding }
+				: {}),
 		},
 	} as const;
 }
@@ -2287,6 +2296,220 @@ describe.skipIf(skipPgTests)(
 					  AND cognition_key = ${key}
 				`;
 				expect(eventRows.length).toBe(4);
+			},
+			30_000,
+		);
+
+		it(
+			"question input does not upsert factual belief",
+			async () => {
+				const key = "test:normalized-gate:question-bound";
+				const settlementId = "stl:normalized-gate:question-bound:001";
+				const requestId = "normalized-gate:question-bound:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						normalizedTurnInput: {
+							raw: "你是在问地点吗？",
+							speechActs: ["question"],
+							candidateActions: [],
+							candidateClaims: [],
+							validations: [],
+							writeEligible: false,
+						},
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key,
+									claim: "The sword is in dungeon.",
+									entityRefs: ["entity:self", "entity:sword", "entity:dungeon"],
+									basis: "first_hand",
+									provenance: "user_stated",
+									sceneFactBinding: {
+										scope: "world",
+										factKey: "location:dungeon",
+										expectedValue: true,
+									},
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, stance, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+					LIMIT 1
+				`;
+				expect(rows).toHaveLength(1);
+				expect(rows[0].basis).toBe("inference");
+				expect(rows[0].stance).toBe("tentative");
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					sceneFactBinding?: unknown;
+				};
+				expect(record.sceneFactBinding).toBeUndefined();
+
+				const factualRows = await pool`
+					SELECT COUNT(*)::int AS count
+					FROM private_cognition_events
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+					  AND record_json->>'basis' IN ('first_hand', 'hearsay', 'introspection')
+				`;
+				expect(factualRows[0]?.count).toBe(0);
+			},
+			30_000,
+		);
+
+		it(
+			"narrated_action with valid sceneFactBinding projects as factual belief",
+			async () => {
+				const key = "test:normalized-gate:narrated-action-bound";
+				const settlementId = "stl:normalized-gate:narrated-action-bound:001";
+				const requestId = "normalized-gate:narrated-action-bound:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						cognitiveSketchSource: "explicit",
+						normalizedTurnInput: {
+							raw: "我把剑拿到了桌上。",
+							speechActs: ["narrated_action"],
+							candidateActions: [],
+							candidateClaims: [],
+							validations: [],
+							writeEligible: true,
+						},
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key,
+									claim: "The sword is in location:sword anchor.",
+									entityRefs: ["entity:self", "entity:sword"],
+									basis: "first_hand",
+									provenance: "user_stated",
+									sceneFactBinding: {
+										scope: "world",
+										factKey: "location:sword",
+										expectedValue: "table",
+									},
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, stance
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+					LIMIT 1
+				`;
+				expect(rows).toHaveLength(1);
+				expect(rows[0].basis).toBe("first_hand");
+				expect(rows[0].stance).toBe("accepted");
+			},
+			30_000,
+		);
+
+		it(
+			"illegal sceneFactBinding degrades to unbound inference",
+			async () => {
+				const key = "test:normalized-gate:narrated-action-invalid-binding";
+				const settlementId = "stl:normalized-gate:narrated-action-invalid-binding:001";
+				const requestId = "normalized-gate:narrated-action-invalid-binding:001";
+				const sessionId = await createSessionId(pool);
+
+				await runThinkerWorkerIntegration({
+					pool,
+					settlementId,
+					requestId,
+					sessionId,
+					settlementPayloadOverrides: {
+						normalizedTurnInput: {
+							raw: "我看起来很慌。",
+							speechActs: ["narrated_action"],
+							candidateActions: [],
+							candidateClaims: [],
+							validations: [],
+							writeEligible: true,
+						},
+					},
+					outcome: {
+						schemaVersion: "rp_turn_outcome_v5",
+						publicReply: "ok",
+						privateCognition: {
+							ops: [
+								makeAssertionUpsert({
+									key,
+									claim: "panic mood was observed",
+									entityRefs: ["entity:self", "entity:user"],
+									basis: "first_hand",
+									provenance: "user_stated",
+									sceneFactBinding: {
+										scope: "world",
+										factKey: "mood:panic",
+										expectedValue: true,
+									},
+								}),
+							],
+						},
+						privateEpisodes: [],
+						publications: [],
+						relationIntents: [],
+						conflictFactors: [],
+					},
+				});
+
+				const rows = await pool`
+					SELECT basis, stance, record_json
+					FROM private_cognition_current
+					WHERE agent_id = ${AGENT_ID}
+					  AND cognition_key = ${key}
+					LIMIT 1
+				`;
+				expect(rows).toHaveLength(1);
+				expect(rows[0].basis).toBe("inference");
+				expect(rows[0].stance).toBe("tentative");
+				const record = parseRowRecordJson(rows[0].record_json) as {
+					sceneFactBinding?: unknown;
+				};
+				expect(record.sceneFactBinding).toBeUndefined();
+
+				const sceneFactRows = await pool`
+					SELECT COUNT(*)::int AS count
+					FROM area_state_events
+					WHERE settlement_id = ${settlementId}
+				`;
+				expect(sceneFactRows[0]?.count).toBe(0);
 			},
 			30_000,
 		);

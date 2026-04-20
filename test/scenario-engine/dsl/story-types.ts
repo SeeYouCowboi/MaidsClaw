@@ -9,6 +9,7 @@ import type {
 	AssertionBasis,
 	AssertionStance,
 } from "../../src/runtime/rp-turn-contract.js";
+import type { NormalizedTurnInput } from "../../src/runtime/speaker-normalization.js";
 
 export type { AssertionStance, AssertionBasis };
 export type {
@@ -58,6 +59,7 @@ export type StoryBeat = {
 	locationId: string; // pointer_key ref
 	participantIds: string[]; // pointer_key refs
 	dialogueGuidance: string; // what LLM should discuss
+	normalizedTurnInput?: NormalizedTurnInput;
 	whoIsLying?: { characterId: string; about: string };
 	memoryEffects: MemoryEffect;
 	publicationDeclarations?: PublicationDeclaration[];
@@ -105,6 +107,12 @@ export type AssertionSpec = {
 	provenance?: string;
 	/** Optional claimed grounding refs — verified against actual DB refs after settlement. */
 	claimedGroundingRefs?: Array<{ kind: string; ref: string }>;
+	sceneFactBinding?: {
+		scope: "area" | "world";
+		factKey: string;
+		areaId?: number;
+		expectedValue: unknown;
+	};
 };
 
 export type EvaluationSpec = {

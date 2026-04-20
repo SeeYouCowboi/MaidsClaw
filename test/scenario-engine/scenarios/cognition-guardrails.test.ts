@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { skipPgTests } from "../../helpers/pg-test-utils.js";
-import { SCENARIO_DEFAULT_AGENT_ID } from "../constants.js";
+import { SCENARIO_DEFAULT_AGENT_ID, SCENARIO_ENGINE_BASE_TIME } from "../constants.js";
 import { runScenario, type ScenarioHandleExtended } from "../runner/orchestrator.js";
+import type { Story } from "../dsl/story-types.js";
 import {
   COGNITION_GUARDRAILS_COGNITION_ONLY_REF_KEYS,
   COGNITION_GUARDRAILS_CORRECTION_KEYS,
@@ -37,11 +38,231 @@ const EXPECTED_LOGIC_EDGES = EXPECTED_CHAINS * 3;
 // the cg:assertion:06 sketch+correction pair folds into a single event.
 const EXPECTED_BASE_EVENTS = 78;
 
+const semanticGateStory: Story = {
+  id: "cognition-guardrails-semantic-gate",
+  title: "Cognition guardrails semantic gate fixtures",
+  description:
+    "Minimal thinker-path fixtures for normalized speech-act gates with sceneFactBinding.",
+  language: "Chinese/中文",
+  characters: [
+    {
+      id: "detective_lin",
+      displayName: "林探长",
+      entityType: "person",
+      surfaceMotives: "验证语义门控行为",
+      hiddenCommitments: [],
+      initialEvaluations: [],
+      aliases: ["林漱雪"],
+    },
+  ],
+  locations: [
+    {
+      id: "lin_an_office",
+      displayName: "临安府审讯室",
+      entityType: "location",
+      visibilityScope: "area_visible",
+    },
+  ],
+  clues: [
+    {
+      id: "ledger_note",
+      displayName: "账册残页",
+      entityType: "item",
+      initialLocationId: "lin_an_office",
+      description: "语义门控测试线索",
+    },
+  ],
+  beats: [
+    {
+      id: "sg-t80-b1",
+      phase: "A",
+      round: 1,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 10_000,
+      locationId: "lin_an_office",
+      participantIds: ["detective_lin"],
+      dialogueGuidance: "T80 confusion/hypothesis/question gate should block factual binding writes.",
+      normalizedTurnInput: {
+        raw: "我有点糊涂，也许账册在这里？是不是这样？",
+        speechActs: ["confusion_expression", "hypothesis", "question"],
+        candidateActions: [],
+        candidateClaims: [],
+        validations: [],
+        writeEligible: false,
+      },
+      memoryEffects: {
+        episodes: [
+          {
+            id: "sg-t80-ep1",
+            category: "speech",
+            summary: "T80 语义门控：混合困惑/假设/疑问输入。",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 10_000,
+            locationId: "lin_an_office",
+          },
+        ],
+        assertions: [
+          {
+            cognitionKey: "sg:t80:bound",
+            holderId: "__self__",
+            claim: "账册残页位于审讯室。",
+            entityIds: ["ledger_note", "lin_an_office"],
+            stance: "accepted",
+            basis: "first_hand",
+            provenance: "user_stated",
+            sceneFactBinding: {
+              scope: "world",
+              factKey: "location:ledger_note",
+              expectedValue: "lin_an_office",
+            },
+          },
+        ],
+      },
+    },
+    {
+      id: "sg-correction-b1",
+      phase: "B",
+      round: 2,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 20_000,
+      locationId: "lin_an_office",
+      participantIds: ["detective_lin"],
+      dialogueGuidance: "Correction-only input should not upsert sceneFactBinding authority writes.",
+      normalizedTurnInput: {
+        raw: "更正：账册其实在这里。",
+        speechActs: ["correction"],
+        candidateActions: [],
+        candidateClaims: [],
+        validations: [],
+        writeEligible: true,
+      },
+      memoryEffects: {
+        episodes: [
+          {
+            id: "sg-correction-ep1",
+            category: "speech",
+            summary: "Correction-only 语义门控测试。",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 20_000,
+            locationId: "lin_an_office",
+          },
+        ],
+        assertions: [
+          {
+            cognitionKey: "sg:correction:bound",
+            holderId: "__self__",
+            claim: "更正后的位置断言。",
+            entityIds: ["ledger_note", "lin_an_office"],
+            stance: "accepted",
+            basis: "first_hand",
+            provenance: "user_stated",
+            sceneFactBinding: {
+              scope: "world",
+              factKey: "location:ledger_note",
+              expectedValue: "lin_an_office",
+            },
+          },
+        ],
+      },
+    },
+    {
+      id: "sg-t80-correction-confusion-b1",
+      phase: "C",
+      round: 3,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 30_000,
+      locationId: "lin_an_office",
+      participantIds: ["detective_lin"],
+      dialogueGuidance: "T80-style correction+confusion should never overwrite factual belief authority.",
+      normalizedTurnInput: {
+        raw: "更正……我其实有点糊涂，账册是不是在这里。",
+        speechActs: ["correction", "confusion_expression"],
+        candidateActions: [],
+        candidateClaims: [],
+        validations: [],
+        writeEligible: false,
+      },
+      memoryEffects: {
+        episodes: [
+          {
+            id: "sg-t80-correction-confusion-ep1",
+            category: "speech",
+            summary: "T80 风格 correction + confusion 混合输入。",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 30_000,
+            locationId: "lin_an_office",
+          },
+        ],
+        assertions: [
+          {
+            cognitionKey: "sg:t80:correction-confusion:bound",
+            holderId: "__self__",
+            claim: "账册残页位于审讯室。",
+            entityIds: ["ledger_note", "lin_an_office"],
+            stance: "accepted",
+            basis: "first_hand",
+            provenance: "user_stated",
+            sceneFactBinding: {
+              scope: "world",
+              factKey: "location:ledger_note",
+              expectedValue: "lin_an_office",
+            },
+          },
+        ],
+      },
+    },
+    {
+      id: "sg-hypothesis-user-stated-b1",
+      phase: "D",
+      round: 4,
+      timestamp: SCENARIO_ENGINE_BASE_TIME + 40_000,
+      locationId: "lin_an_office",
+      participantIds: ["detective_lin"],
+      dialogueGuidance: "Hypothesis + raw user_stated must be capped at inference/tentative.",
+      normalizedTurnInput: {
+        raw: "也许账册在我手里。",
+        speechActs: ["hypothesis"],
+        candidateActions: [],
+        candidateClaims: [],
+        validations: [],
+        writeEligible: false,
+      },
+      memoryEffects: {
+        episodes: [
+          {
+            id: "sg-hypothesis-user-stated-ep1",
+            category: "speech",
+            summary: "Hypothesis user_stated cap 测试。",
+            observerIds: ["detective_lin"],
+            timestamp: SCENARIO_ENGINE_BASE_TIME + 40_000,
+            locationId: "lin_an_office",
+          },
+        ],
+        assertions: [
+          {
+            cognitionKey: "sg:hypothesis:user-stated",
+            holderId: "__self__",
+            claim: "我持有账册残页。",
+            entityIds: ["ledger_note", "detective_lin"],
+            stance: "accepted",
+            basis: "first_hand",
+            provenance: "user_stated",
+          },
+        ],
+      },
+    },
+  ],
+  probes: [],
+};
+
 describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Thinker", () => {
   let handle: ScenarioHandleExtended;
+  let semanticGateHandle: ScenarioHandleExtended;
 
   beforeAll(async () => {
     handle = await runScenario(cognitionGuardrails, {
+      writePath: "thinker",
+      phase: "full",
+    });
+
+    semanticGateHandle = await runScenario(semanticGateStory, {
       writePath: "thinker",
       phase: "full",
     });
@@ -292,5 +513,131 @@ describe.skipIf(skipPgTests)("Cognition Guardrails — Long Run Thinker", () => 
       e.beatId.startsWith("recovery:"),
     );
     expect(recoveryErrors).toHaveLength(0);
+  });
+
+  it("T80 confusion input leaves factual belief unchanged", async () => {
+    const currentRows = await semanticGateHandle.infra.sql<Array<{ basis: string | null; stance: string | null; record_json: unknown }>>`
+      SELECT basis, stance, record_json
+      FROM private_cognition_current
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND cognition_key = 'sg:t80:bound'
+      LIMIT 1
+    `;
+    expect(currentRows).toHaveLength(1);
+    expect(currentRows[0]?.basis).toBe("inference");
+    expect(currentRows[0]?.stance).toBe("tentative");
+    const record = (typeof currentRows[0]?.record_json === "string"
+      ? JSON.parse(currentRows[0].record_json)
+      : currentRows[0]?.record_json) as { sceneFactBinding?: unknown };
+    expect(record.sceneFactBinding).toBeUndefined();
+
+    const factualRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM private_cognition_events
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-t80-b1'
+        AND record_json->>'basis' IN ('first_hand', 'hearsay', 'introspection')
+    `;
+    expect(factualRows[0]?.count).toBe(0);
+
+    const areaFactRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM area_state_events
+      WHERE settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-t80-b1'
+    `;
+    expect(areaFactRows[0]?.count).toBe(0);
+  });
+
+  it("correction alone does not upsert factual assertion", async () => {
+    const currentRows = await semanticGateHandle.infra.sql<Array<{ basis: string | null; stance: string | null; record_json: unknown }>>`
+      SELECT basis, stance, record_json
+      FROM private_cognition_current
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND cognition_key = 'sg:correction:bound'
+      LIMIT 1
+    `;
+    expect(currentRows).toHaveLength(1);
+    expect(currentRows[0]?.basis).toBe("inference");
+    expect(currentRows[0]?.stance).toBe("tentative");
+    const record = (typeof currentRows[0]?.record_json === "string"
+      ? JSON.parse(currentRows[0].record_json)
+      : currentRows[0]?.record_json) as { sceneFactBinding?: unknown };
+    expect(record.sceneFactBinding).toBeUndefined();
+
+    const eventRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM private_cognition_events
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-correction-b1'
+        AND cognition_key = 'sg:correction:bound'
+        AND record_json->>'basis' IN ('first_hand', 'hearsay', 'introspection')
+    `;
+    expect(eventRows[0]?.count).toBe(0);
+
+    const areaFactRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM area_state_events
+      WHERE settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-correction-b1'
+    `;
+    expect(areaFactRows[0]?.count).toBe(0);
+  });
+
+  it("T80-style correction+confusion input leaves factual belief unchanged", async () => {
+    const currentRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM private_cognition_current
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND cognition_key = 'sg:t80:correction-confusion:bound'
+    `;
+    expect(currentRows[0]?.count).toBe(1);
+
+    const inferenceRows = await semanticGateHandle.infra.sql<Array<{ basis: string | null; stance: string | null; record_json: unknown }>>`
+      SELECT basis, stance, record_json
+      FROM private_cognition_current
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND cognition_key = 'sg:t80:correction-confusion:bound'
+      LIMIT 1
+    `;
+    expect(inferenceRows).toHaveLength(1);
+    expect(inferenceRows[0]?.basis).toBe("inference");
+    expect(inferenceRows[0]?.stance).toBe("tentative");
+    const record = (typeof inferenceRows[0]?.record_json === "string"
+      ? JSON.parse(inferenceRows[0].record_json)
+      : inferenceRows[0]?.record_json) as { sceneFactBinding?: unknown };
+    expect(record.sceneFactBinding).toBeUndefined();
+
+    const areaFactRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM area_state_events
+      WHERE settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-t80-correction-confusion-b1'
+    `;
+    expect(areaFactRows[0]?.count).toBe(0);
+  });
+
+  it("hypothesis assertion with raw user_stated provenance is capped at inference/tentative", async () => {
+    const rows = await semanticGateHandle.infra.sql<Array<{ basis: string | null; stance: string | null; record_json: unknown }>>`
+      SELECT basis, stance, record_json
+      FROM private_cognition_current
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND cognition_key = 'sg:hypothesis:user-stated'
+      LIMIT 1
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.basis).toBe("inference");
+    expect(rows[0]?.stance).toBe("tentative");
+    const record = (typeof rows[0]?.record_json === "string"
+      ? JSON.parse(rows[0].record_json)
+      : rows[0]?.record_json) as { provenance?: string };
+    expect(record.provenance).toBe("user_stated");
+
+    const factualRows = await semanticGateHandle.infra.sql<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS count
+      FROM private_cognition_events
+      WHERE agent_id = ${SCENARIO_DEFAULT_AGENT_ID}
+        AND settlement_id = 'scenario_cognition-guardrails-semantic-gate_beat_sg-hypothesis-user-stated-b1'
+        AND cognition_key = 'sg:hypothesis:user-stated'
+        AND record_json->>'basis' IN ('first_hand', 'hearsay', 'introspection')
+    `;
+    expect(factualRows[0]?.count).toBe(0);
   });
 });

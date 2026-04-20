@@ -225,6 +225,18 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
     softBlockTimeoutMs: typeof tt.softBlockTimeoutMs === "number" ? tt.softBlockTimeoutMs : 3000,
     softBlockPollIntervalMs: typeof tt.softBlockPollIntervalMs === "number" ? tt.softBlockPollIntervalMs : 500,
+		speakerNormalizationGate:
+			typeof tt.speakerNormalizationGate === "boolean"
+				? tt.speakerNormalizationGate
+				: true,
+		sceneFactWritePath:
+			typeof tt.sceneFactWritePath === "boolean" ? tt.sceneFactWritePath : false,
+		sceneRetrieval:
+			typeof tt.sceneRetrieval === "boolean" ? tt.sceneRetrieval : false,
+		legacyAreaStateCompat:
+			typeof tt.legacyAreaStateCompat === "boolean"
+				? tt.legacyAreaStateCompat
+				: true,
 		...(typeof tt.globalConcurrencyCap === "number" && Number.isFinite(tt.globalConcurrencyCap)
 			? { globalConcurrencyCap: tt.globalConcurrencyCap }
 			: {}),
