@@ -11,11 +11,13 @@ import type {
 import type {
   CognitionSearchService,
   CognitionHit,
+  CognitionCurrentRow,
   CognitionSearchParams,
 } from "../../src/memory/cognition/cognition-search";
 import type { TimeSliceQuery } from "../../src/memory/time-slice-query";
 import type { MemoryHint } from "../../src/memory/types";
 import type { RetrievalService } from "../../src/memory/retrieval";
+import type { SceneSearchService } from "../../src/memory/scene/scene-search";
 
 /**
  * GAP-4 §1 — surface facets consumption tests.
@@ -202,14 +204,47 @@ function makeFacetRecordingCognition(): CognitionFacetCapture {
 function makeOrchestrator(
   narrative: NarrativeSearchService,
   cognition: CognitionSearchService,
+  extras?: {
+    currentProjectionReader?: {
+      getCurrent: (agentId: string, cognitionKey: string) => Promise<CognitionCurrentRow | null>;
+      getAllCurrent: (agentId: string) => Promise<CognitionCurrentRow[]>;
+      getAllCurrentByKind: (agentId: string, kind: "assertion" | "evaluation" | "commitment") => Promise<CognitionCurrentRow[]>;
+      getActiveCurrent: (agentId: string) => Promise<CognitionCurrentRow[]>;
+    } | null;
+    sceneSearchService?: SceneSearchService | null;
+  },
 ): RetrievalOrchestrator {
   return new RetrievalOrchestrator({
     narrativeService: narrative,
     cognitionService: cognition,
-    currentProjectionReader: null,
+    currentProjectionReader: extras?.currentProjectionReader ?? null,
+    sceneSearchService: extras?.sceneSearchService ?? null,
     episodeRepository: null,
     episodeSearchFn: null,
   });
+}
+
+function makeAssertionCurrentRow(
+  cognitionKey: string,
+  recordJson: string,
+  status: string = "active",
+): CognitionCurrentRow {
+  return {
+    id: 1,
+    agent_id: "agent_test",
+    cognition_key: cognitionKey,
+    kind: "assertion",
+    stance: "accepted",
+    basis: "belief",
+    status,
+    pre_contested_stance: null,
+    conflict_summary: null,
+    conflict_factor_refs_json: null,
+    summary_text: "summary",
+    record_json: recordJson,
+    source_event_id: 1,
+    updated_at: 1,
+  };
 }
 
 // ----- Flag stabilization -------------------------------------------------
@@ -432,6 +467,169 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
     expect(result.typed.cognition).toHaveLength(1);
     expect(result.typed.cognition[0].cognitionKey).toBe("active:key");
     expect(result.typed.cognition[0].content).toBe("active cognition only");
+  });
+
+  it("adds divergence notes from sceneFactBinding while preserving contested conflict notes", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    const contestedHit: CognitionHit = {
+      kind: "assertion",
+      basis: "first_hand",
+      stance: "contested",
+      cognitionKey: "ck:contested",
+      source_ref: "assertion:50" as unknown as string,
+      content: "contested claim from retrieval",
+      updated_at: 500,
+      provenance: "user_stated",
+      groundingVerificationLevel: "context_verified",
+      conflictEvidence: [{ targetRef: "assertion:51", strength: 0.9, sourceKind: "agent_op", sourceRef: "settlement:5" }],
+      conflictSummary: "conflict detected",
+      conflictFactorRefs: ["assertion:51" as unknown as string],
+    };
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        return [contestedHit];
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const boundRecordJson = JSON.stringify({
+      kind: "assertion",
+      key: "assertion:watch_location",
+      claim: "the watch is in the greenhouse",
+      sceneFactBinding: {
+        scope: "area",
+        factKey: "location:watch",
+        expectedValue: "greenhouse",
+      },
+    });
+    const freeTextRecordJson = JSON.stringify({
+      kind: "assertion",
+      key: "assertion:free_text",
+      claim: "I have a hunch",
+    });
+    const boundRow = makeAssertionCurrentRow("assertion:watch_location", boundRecordJson);
+    const freeTextRow = makeAssertionCurrentRow("assertion:free_text", freeTextRecordJson);
+
+    const currentProjectionReader = {
+      async getCurrent(): Promise<CognitionCurrentRow | null> {
+        return null;
+      },
+      async getAllCurrent(): Promise<CognitionCurrentRow[]> {
+        return [boundRow, freeTextRow];
+      },
+      async getAllCurrentByKind(): Promise<CognitionCurrentRow[]> {
+        return [boundRow, freeTextRow];
+      },
+      async getActiveCurrent(): Promise<CognitionCurrentRow[]> {
+        return [boundRow, freeTextRow];
+      },
+    };
+
+    const sceneSearchService = {
+      async getVisibleAreaFacts() {
+        return [{ factKey: "location:watch", value: "tea_room", sourceKind: "action_commitment" }];
+      },
+      async getVisibleWorldFacts() {
+        return [];
+      },
+    } as unknown as SceneSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service, {
+      currentProjectionReader,
+      sceneSearchService,
+    });
+    const result = await orchestrator.search("watch", makeViewer(), "rp_agent", {
+      override: {
+        sceneRetrieval: true,
+        conflictNotesBudget: 4,
+      },
+    });
+
+    const contestedNote = result.typed.conflict_notes.find((n) => n.source_ref.startsWith("conflict_note:"));
+    expect(contestedNote).toBeDefined();
+
+    const divergenceNote = result.typed.conflict_notes.find((n) => n.source_ref === "divergence_note:assertion:watch_location");
+    expect(divergenceNote).toBeDefined();
+    expect(divergenceNote?.content).toContain("location:watch");
+    expect(divergenceNote?.content).toContain("tea_room");
+    expect(divergenceNote?.content).toContain("greenhouse");
+    expect(result.typed.conflict_notes.some((n) => n.source_ref.includes("free_text"))).toBe(false);
+
+    // Divergence notes are read-only surfaces and do not mutate cognition rows.
+    expect(boundRow.record_json).toBe(boundRecordJson);
+    expect(freeTextRow.record_json).toBe(freeTextRecordJson);
+  });
+
+  it("does not emit divergence notes for world bindings when visible world facts are empty", async () => {
+    const narrative = makeFacetRecordingNarrative();
+    const cognitionCapture = makeFacetRecordingCognition();
+    cognitionCapture.service = {
+      async searchCognition(params: CognitionSearchParams): Promise<CognitionHit[]> {
+        cognitionCapture.lastParams = params;
+        cognitionCapture.callCount += 1;
+        return [];
+      },
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    const hiddenBindingRow = makeAssertionCurrentRow(
+      "assertion:hidden_world_status",
+      JSON.stringify({
+        kind: "assertion",
+        key: "assertion:hidden_world_status",
+        claim: "status:hidden_npc is alarmed",
+        sceneFactBinding: {
+          scope: "world",
+          factKey: "status:hidden_npc",
+          expectedValue: "alarmed",
+        },
+      }),
+    );
+
+    const currentProjectionReader = {
+      async getCurrent(): Promise<CognitionCurrentRow | null> {
+        return null;
+      },
+      async getAllCurrent(): Promise<CognitionCurrentRow[]> {
+        return [hiddenBindingRow];
+      },
+      async getAllCurrentByKind(): Promise<CognitionCurrentRow[]> {
+        return [hiddenBindingRow];
+      },
+      async getActiveCurrent(): Promise<CognitionCurrentRow[]> {
+        return [hiddenBindingRow];
+      },
+    };
+
+    const sceneSearchService = {
+      async getVisibleAreaFacts() {
+        return [];
+      },
+      async getVisibleWorldFacts() {
+        // system_only world facts are filtered out upstream and never visible here
+        return [];
+      },
+    } as unknown as SceneSearchService;
+
+    const orchestrator = makeOrchestrator(narrative.service, cognitionCapture.service, {
+      currentProjectionReader,
+      sceneSearchService,
+    });
+    const result = await orchestrator.search("hidden", makeViewer(), "rp_agent", {
+      override: {
+        sceneRetrieval: true,
+        conflictNotesBudget: 4,
+      },
+    });
+
+    expect(result.typed.conflict_notes.some((note) => note.source_ref.startsWith("divergence_note:"))).toBe(false);
   });
 
   it("weak labeled cognition remains below strong grounded entry in typed facets", async () => {

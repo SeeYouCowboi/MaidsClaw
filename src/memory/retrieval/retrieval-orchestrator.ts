@@ -76,6 +76,13 @@ type TypedConflictNoteSegment = TypedRetrievalSegment & {
   cognitionKey: string | null;
 };
 
+type SceneFactBindingIndexEntry = {
+  scope: string;
+  factKey: string;
+  areaId?: number;
+  expectedValue: unknown;
+};
+
 export type TypedSceneFactSegment = {
   factKey: string;
   value: unknown;
@@ -300,6 +307,47 @@ export class RetrievalOrchestrator {
           })
         : [];
 
+    // Build sceneFactBinding index from ALL active assertions (not just
+    // search-returned hits) so divergence notes can surface even when the
+    // assertion itself is not returned by FTS relevance.
+    const sceneBindingIndex: Map<string, SceneFactBindingIndexEntry> = new Map();
+    if (
+      template.conflictNotesEnabled
+      && effectiveConflictNotesBudget > 0
+      && this.currentProjectionReader != null
+      && (sceneAreaFacts.length > 0 || sceneWorldFacts.length > 0)
+    ) {
+      const allAssertions = await this.currentProjectionReader.getAllCurrentByKind(
+        viewerContext.viewer_agent_id,
+        "assertion",
+      );
+      for (const row of allAssertions) {
+        if (row.status === "retracted") {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(row.record_json) as Record<string, unknown>;
+          const binding = parsed.sceneFactBinding;
+          if (
+            binding
+            && typeof binding === "object"
+            && typeof (binding as Record<string, unknown>).scope === "string"
+            && typeof (binding as Record<string, unknown>).factKey === "string"
+          ) {
+            const b = binding as Record<string, unknown>;
+            sceneBindingIndex.set(row.cognition_key, {
+              scope: b.scope as string,
+              factKey: b.factKey as string,
+              areaId: typeof b.areaId === "number" ? b.areaId : undefined,
+              expectedValue: b.expectedValue,
+            });
+          }
+        } catch {
+          // skip unparseable rows
+        }
+      }
+    }
+
     const cognitionHits = this.filterCognitionHits(rawCognitionHits, recentCognitionKeys, seenText);
     const typed = this.buildTypedSurface(
       template,
@@ -313,6 +361,7 @@ export class RetrievalOrchestrator {
       recentCognitionKeys,
       effectiveEpisodeBudget,
       effectiveConflictNotesBudget,
+      sceneBindingIndex,
     );
 
     return {
@@ -362,6 +411,7 @@ export class RetrievalOrchestrator {
     recentCognitionKeys: Set<string>,
     effectiveEpisodeBudget: number,
     effectiveConflictNotesBudget: number,
+    sceneBindingIndex: Map<string, SceneFactBindingIndexEntry>,
   ): TypedRetrievalResult {
     const typed: TypedRetrievalResult = {
       scene_area: sceneAreaFacts,
@@ -485,6 +535,67 @@ export class RetrievalOrchestrator {
             score: hit.updated_at,
           });
         }
+      }
+
+      // Divergence notes: compare bound beliefs against visible scene facts.
+      for (const [cognitionKey, binding] of sceneBindingIndex) {
+        if (typed.conflict_notes.length >= effectiveConflictNotesBudget) {
+          break;
+        }
+        if (template.conflictNotesTokenBudget > 0 && conflictNotesTokens >= template.conflictNotesTokenBudget) {
+          break;
+        }
+
+        let sceneValue: unknown;
+        let found = false;
+        if (binding.scope === "area") {
+          const fact = sceneAreaFacts.find((f) => f.factKey === binding.factKey);
+          if (fact) {
+            sceneValue = fact.value;
+            found = true;
+          }
+        } else if (binding.scope === "world") {
+          const fact = sceneWorldFacts.find((f) => f.factKey === binding.factKey);
+          if (fact) {
+            sceneValue = fact.value;
+            found = true;
+          }
+        }
+
+        if (!found) {
+          continue;
+        }
+
+        const sceneStr = JSON.stringify(sceneValue);
+        const expectedStr = JSON.stringify(binding.expectedValue);
+        if (sceneStr === expectedStr) {
+          continue;
+        }
+
+        const content = `Scene fact ${binding.factKey}=${String(sceneValue)} differs from belief ${binding.factKey}=${String(binding.expectedValue)}`;
+        const normalized = this.normalizeText(content);
+        if (normalized.length === 0 || seenText.has(normalized) || allSurfacedTexts.has(normalized)) {
+          continue;
+        }
+
+        const tokenEstimate = estimateTokens(content);
+        if (
+          template.conflictNotesTokenBudget > 0
+          && conflictNotesTokens + tokenEstimate > template.conflictNotesTokenBudget
+        ) {
+          continue;
+        }
+
+        seenText.add(normalized);
+        allSurfacedTexts.add(normalized);
+        conflictNotesTokens += tokenEstimate;
+        typed.conflict_notes.push({
+          source_ref: `divergence_note:${cognitionKey}`,
+          from_source_ref: cognitionKey,
+          cognitionKey,
+          content,
+          score: 0,
+        });
       }
     }
 

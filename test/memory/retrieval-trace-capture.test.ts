@@ -250,4 +250,90 @@ describe("retrieval trace capture", () => {
     expect(typed.narrative).toHaveLength(1);
     expect(typed.narrative[0].content).toBe("n1");
   });
+
+  it("captures divergence notes in trace segments without mutating cognition payloads", async () => {
+    const assertionRow = {
+      cognition_key: "assertion:watch_location",
+      record_json: JSON.stringify({
+        kind: "assertion",
+        key: "assertion:watch_location",
+        sceneFactBinding: {
+          scope: "area",
+          factKey: "location:watch",
+          expectedValue: "greenhouse",
+        },
+      }),
+    };
+
+    const retrievalService = new RetrievalService({
+      retrievalRepo: {} as any,
+      embeddingService: {} as any,
+      narrativeSearch: {} as any,
+      cognitionSearch: {} as any,
+      orchestrator: {
+        search: async () => ({
+          typed: {
+            scene_area: [],
+            scene_world: [],
+            narrative: [],
+            cognition: [
+              {
+                source_ref: "assertion:watch_location",
+                content: "believes the watch is in greenhouse",
+                score: 1,
+                kind: "assertion",
+                basis: "belief",
+                stance: "accepted",
+                cognitionKey: "assertion:watch_location",
+              },
+            ],
+            conflict_notes: [
+              {
+                source_ref: "divergence_note:assertion:watch_location",
+                from_source_ref: "assertion:watch_location",
+                cognitionKey: "assertion:watch_location",
+                content: "Scene fact location:watch=tea_room differs from belief location:watch=greenhouse",
+                score: 0,
+              },
+            ],
+            episode: [],
+          },
+          narrativeHints: [],
+          cognitionHits: [],
+        }),
+      } as any,
+    });
+
+    let capture: any;
+    const typed = await retrievalService.generateTypedRetrieval(
+      "watch",
+      viewerContext,
+      undefined,
+      undefined,
+      "default_retrieval",
+      undefined,
+      undefined,
+      (c) => {
+        capture = c;
+      },
+    );
+
+    expect(capture.segment_count).toBe(2);
+    expect(capture.segments).toEqual([
+      {
+        source: "assertion:watch_location",
+        content: "believes the watch is in greenhouse",
+        score: 1,
+      },
+      {
+        source: "divergence_note:assertion:watch_location",
+        content: "Scene fact location:watch=tea_room differs from belief location:watch=greenhouse",
+        score: 0,
+      },
+    ]);
+    expect(typed.conflict_notes).toHaveLength(1);
+    expect(typed.conflict_notes[0].source_ref).toBe("divergence_note:assertion:watch_location");
+    // Trace capture must not mutate persisted cognition payloads.
+    expect(assertionRow.record_json).toContain("sceneFactBinding");
+  });
 });
