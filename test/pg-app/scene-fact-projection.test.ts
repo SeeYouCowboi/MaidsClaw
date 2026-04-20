@@ -260,6 +260,57 @@ describe.skipIf(skipPgTests)("scene-fact-projection", () => {
     });
   });
 
+  it("rejects deferred source kinds before persisting scene fact rows", async () => {
+    await withTestAppSchema(sql, async (pool) => {
+      await bootstrapAll(pool);
+      const repo = new PgAreaWorldProjectionRepo(pool);
+      const now = new Date("2026-04-20T14:30:00.000Z");
+
+      await expect(
+        repo.applyAreaFactCommit({
+          sessionId: "sess-deferred-guard",
+          areaId: 99,
+          factKey: "status:lever",
+          valueJson: { toggled: true },
+          sourceKind: "evidence_reveal",
+          exposureScope: "area_visible",
+          sourceSettlementId: "stl-deferred-a",
+          sourceAgentId: "agent-1",
+          validTime: now,
+          committedTime: now,
+        }),
+      ).rejects.toThrow("DEFERRED_SOURCE_KIND");
+
+      await expect(
+        repo.applyWorldFactCommit({
+          sessionId: "sess-deferred-guard",
+          factKey: "status:edict",
+          valueJson: { active: true },
+          sourceKind: "institutional_speech_act",
+          exposureScope: "world_public",
+          sourceSettlementId: "stl-deferred-w",
+          sourceAgentId: "agent-1",
+          validTime: now,
+          committedTime: now,
+        }),
+      ).rejects.toThrow("DEFERRED_SOURCE_KIND");
+
+      const areaRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_area_fact_events
+        WHERE session_id = 'sess-deferred-guard'
+      `;
+      const worldRows = await pool`
+        SELECT COUNT(*)::int AS c
+        FROM scene_world_fact_events
+        WHERE session_id = 'sess-deferred-guard'
+      `;
+
+      expect(areaRows[0].c).toBe(0);
+      expect(worldRows[0].c).toBe(0);
+    });
+  });
+
   it("keeps legacy area/world state truth tables present", async () => {
     await withTestAppSchema(sql, async (pool) => {
       await bootstrapAll(pool);

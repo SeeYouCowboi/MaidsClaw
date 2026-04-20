@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type postgres from "postgres";
 import { MaidsClawError } from "../../src/core/errors.js";
 import type {
   CanonicalRpTurnOutcome,
@@ -11,6 +12,7 @@ import {
   validateRpTurnOutcomeV5,
 } from "../../src/runtime/rp-turn-contract.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
+import { PgAreaWorldProjectionRepo } from "../../src/storage/domain-repos/pg/area-world-projection-repo.js";
 
 describe("normalizeRpTurnOutcome", () => {
   it("accepts canonical v5 payload and normalizes optional arrays", () => {
@@ -661,6 +663,127 @@ describe("actionCommitments", () => {
     const result = normalizeRpTurnOutcome(payload, { legacyAreaStateCompat: true });
     expect(result.publicReply).toBe("legacy payload");
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
+  });
+});
+
+describe("deferred source kind write-path guard", () => {
+  function makeRepoWithFailingSql() {
+    let sqlCalls = 0;
+    const sql = Object.assign(
+      (..._args: unknown[]) => {
+        sqlCalls += 1;
+        throw new Error("SQL_SHOULD_NOT_REACH_HERE");
+      },
+      { json: (value: unknown) => value },
+    ) as unknown as postgres.Sql;
+
+    return {
+      repo: new PgAreaWorldProjectionRepo(sql),
+      getSqlCalls: () => sqlCalls,
+    };
+  }
+
+  it("should reject evidence_reveal writes with DEFERRED_SOURCE_KIND error", async () => {
+    const { repo, getSqlCalls } = makeRepoWithFailingSql();
+
+    await expect(
+      repo.applyAreaFactCommit({
+        sessionId: "sess-deferred-1",
+        areaId: 1,
+        factKey: "status:gate",
+        valueJson: { open: false },
+        sourceKind: "evidence_reveal",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-deferred-1",
+        sourceAgentId: "agent-1",
+        validTime: new Date("2026-04-20T00:00:00.000Z"),
+        committedTime: new Date("2026-04-20T00:00:00.000Z"),
+      }),
+    ).rejects.toThrow("DEFERRED_SOURCE_KIND");
+
+    expect(getSqlCalls()).toBe(0);
+  });
+
+  it("should reject institutional_speech_act writes with DEFERRED_SOURCE_KIND error", async () => {
+    const { repo, getSqlCalls } = makeRepoWithFailingSql();
+
+    await expect(
+      repo.applyWorldFactCommit({
+        sessionId: "sess-deferred-2",
+        factKey: "status:council",
+        valueJson: { decree: "issued" },
+        sourceKind: "institutional_speech_act",
+        exposureScope: "world_public",
+        sourceSettlementId: "stl-deferred-2",
+        sourceAgentId: "agent-2",
+        validTime: new Date("2026-04-20T00:00:01.000Z"),
+        committedTime: new Date("2026-04-20T00:00:01.000Z"),
+      }),
+    ).rejects.toThrow("DEFERRED_SOURCE_KIND");
+
+    expect(getSqlCalls()).toBe(0);
+  });
+
+  it("should allow lore_seed writes", async () => {
+    const { repo, getSqlCalls } = makeRepoWithFailingSql();
+
+    await expect(
+      repo.applyWorldFactCommit({
+        sessionId: "sess-allowed-1",
+        factKey: "status:banner",
+        valueJson: { hanging: true },
+        sourceKind: "lore_seed",
+        exposureScope: "world_public",
+        sourceSettlementId: "stl-allowed-1",
+        sourceAgentId: null,
+        validTime: new Date("2026-04-20T00:00:02.000Z"),
+        committedTime: new Date("2026-04-20T00:00:02.000Z"),
+      }),
+    ).rejects.toThrow("SQL_SHOULD_NOT_REACH_HERE");
+
+    expect(getSqlCalls()).toBe(1);
+  });
+
+  it("should allow action_commitment writes", async () => {
+    const { repo, getSqlCalls } = makeRepoWithFailingSql();
+
+    await expect(
+      repo.applyAreaFactCommit({
+        sessionId: "sess-allowed-2",
+        areaId: 2,
+        factKey: "holder:key",
+        valueJson: { who: "alice" },
+        sourceKind: "action_commitment",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-allowed-2",
+        sourceAgentId: "agent-3",
+        validTime: new Date("2026-04-20T00:00:03.000Z"),
+        committedTime: new Date("2026-04-20T00:00:03.000Z"),
+      }),
+    ).rejects.toThrow("SQL_SHOULD_NOT_REACH_HERE");
+
+    expect(getSqlCalls()).toBe(1);
+  });
+
+  it("should allow system_event writes", async () => {
+    const { repo, getSqlCalls } = makeRepoWithFailingSql();
+
+    await expect(
+      repo.applyAreaFactCommit({
+        sessionId: "sess-allowed-3",
+        areaId: 3,
+        factKey: "status:lamp",
+        valueJson: { lit: true },
+        sourceKind: "system_event",
+        exposureScope: "area_visible",
+        sourceSettlementId: "stl-allowed-3",
+        sourceAgentId: null,
+        validTime: new Date("2026-04-20T00:00:04.000Z"),
+        committedTime: new Date("2026-04-20T00:00:04.000Z"),
+      }),
+    ).rejects.toThrow("SQL_SHOULD_NOT_REACH_HERE");
+
+    expect(getSqlCalls()).toBe(1);
   });
 });
 

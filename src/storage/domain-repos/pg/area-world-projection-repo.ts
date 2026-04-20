@@ -36,6 +36,17 @@ const SCENE_FACT_SOURCE_KINDS = [
 	"institutional_speech_act",
 ] as const;
 
+const PHASE_1_SCENE_FACT_SOURCE_KINDS = [
+	"lore_seed",
+	"action_commitment",
+	"system_event",
+] as const;
+
+const DEFERRED_SCENE_FACT_SOURCE_KINDS = [
+	"evidence_reveal",
+	"institutional_speech_act",
+] as const;
+
 const AREA_FACT_EXPOSURE_SCOPES = ["area_visible", "system_only"] as const;
 const WORLD_FACT_EXPOSURE_SCOPES = ["world_public", "system_only"] as const;
 
@@ -326,7 +337,7 @@ export class PgAreaWorldProjectionRepo implements AreaWorldProjectionRepo {
 		validTime: Date;
 		committedTime: Date;
 	}): Promise<{ eventId: bigint }> {
-		this.assertSceneFactSourceKind(params.sourceKind);
+		this.assertPhase1SceneFactSourceKind(params.sourceKind);
 		this.assertAreaFactExposureScope(params.exposureScope);
 
 		const valueJsonb = this.jsonb(params.valueJson);
@@ -423,7 +434,7 @@ export class PgAreaWorldProjectionRepo implements AreaWorldProjectionRepo {
 		validTime: Date;
 		committedTime: Date;
 	}): Promise<{ eventId: bigint }> {
-		this.assertSceneFactSourceKind(params.sourceKind);
+		this.assertPhase1SceneFactSourceKind(params.sourceKind);
 		this.assertWorldFactExposureScope(params.exposureScope);
 
 		const valueJsonb = this.jsonb(params.valueJson);
@@ -731,9 +742,28 @@ export class PgAreaWorldProjectionRepo implements AreaWorldProjectionRepo {
 		return `legacy:auto:${committedTime}`;
 	}
 
-	private assertSceneFactSourceKind(value: string): void {
-		if (SCENE_FACT_SOURCE_KINDS.includes(value as SceneFactSourceKind)) return;
-		throw new Error(`Invalid scene fact source kind: ${value}`);
+	private assertPhase1SceneFactSourceKind(value: string): void {
+		// Deferred kinds are representable in the type system but blocked from production writes in Phase 1.
+		// TODO(deferred): evidence_reveal and institutional_speech_act are reserved for future phases.
+		if (
+			DEFERRED_SCENE_FACT_SOURCE_KINDS.includes(
+				value as (typeof DEFERRED_SCENE_FACT_SOURCE_KINDS)[number],
+			)
+		) {
+			throw new Error(
+				`DEFERRED_SOURCE_KIND: ${value} is not supported in Phase 1 runtime. It is reserved for future phases.`,
+			);
+		}
+		if (!SCENE_FACT_SOURCE_KINDS.includes(value as SceneFactSourceKind)) {
+			throw new Error(`Invalid scene fact source kind: ${value}`);
+		}
+		if (
+			!PHASE_1_SCENE_FACT_SOURCE_KINDS.includes(
+				value as (typeof PHASE_1_SCENE_FACT_SOURCE_KINDS)[number],
+			)
+		) {
+			throw new Error(`Invalid scene fact source kind: ${value}`);
+		}
 	}
 
 	private assertAreaFactExposureScope(value: string): void {
