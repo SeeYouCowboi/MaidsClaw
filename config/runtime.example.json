@@ -17,9 +17,9 @@
     "softBlockTimeoutMs": 3000,
     "softBlockPollIntervalMs": 500,
     "speakerNormalizationGate": true,
-    "sceneFactWritePath": false,
-    "sceneRetrieval": false,
-    "legacyAreaStateCompat": true
+    "sceneFactWritePath": true,
+    "sceneRetrieval": true,
+    "legacyAreaStateCompat": false
   },
   "runtime": {
     "gateway": {

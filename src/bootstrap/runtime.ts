@@ -234,31 +234,17 @@ function describeTalkerThinkerRolloutFlags(
 function assertSupportedTalkerThinkerRolloutMatrix(
   flags: TalkerThinkerRolloutFlags,
 ): void {
-  const isAllowed =
-    // foundation
-    (flags.speakerNormalizationGate === true &&
-      flags.sceneFactWritePath === false &&
-      flags.sceneRetrieval === false &&
-      flags.legacyAreaStateCompat === true) ||
-    // writer-bake
-    (flags.speakerNormalizationGate === true &&
-      flags.sceneFactWritePath === true &&
-      flags.sceneRetrieval === false &&
-      flags.legacyAreaStateCompat === true) ||
-    // retrieval-bake
-    (flags.speakerNormalizationGate === true &&
-      flags.sceneFactWritePath === true &&
-      flags.sceneRetrieval === true &&
-      flags.legacyAreaStateCompat === true) ||
-    // final-candidate
-    (flags.speakerNormalizationGate === true &&
-      flags.sceneFactWritePath === true &&
-      flags.sceneRetrieval === true &&
-      flags.legacyAreaStateCompat === false);
-
-  if (!isAllowed) {
+  // Post-cleanup production bootstrap: only two matrices are valid.
+  // - Final default: (true, true, true, false)
+  // - Read-path rollback: (true, true, false, false) — sceneRetrieval can roll back independently
+  const isValidPostCleanupMatrix =
+    flags.speakerNormalizationGate === true &&
+    flags.sceneFactWritePath === true &&
+    (flags.sceneRetrieval === true || flags.sceneRetrieval === false) &&
+    flags.legacyAreaStateCompat === false;
+  if (!isValidPostCleanupMatrix) {
     throw new Error(
-      `[bootstrapRuntime] Unsupported talkerThinker rollout matrix during Tasks 1-11: (${describeTalkerThinkerRolloutFlags(flags)}). Allowed matrices: foundation=(speakerNormalizationGate=true,sceneFactWritePath=false,sceneRetrieval=false,legacyAreaStateCompat=true), writer-bake=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=false,legacyAreaStateCompat=true), retrieval-bake=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=true,legacyAreaStateCompat=true), final-candidate=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=true,legacyAreaStateCompat=false).`,
+      `[bootstrapRuntime] Unsupported talkerThinker rollout matrix after cleanup: (${describeTalkerThinkerRolloutFlags(flags)}). Allowed matrices: final-default=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=true,legacyAreaStateCompat=false), read-path-rollback=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=false,legacyAreaStateCompat=false).`,
     );
   }
 }
@@ -963,9 +949,9 @@ export function bootstrapRuntime(
       : {}),
     speakerNormalizationGate:
       talkerThinkerFromConfig?.speakerNormalizationGate ?? true,
-    sceneFactWritePath: talkerThinkerFromConfig?.sceneFactWritePath ?? false,
-    sceneRetrieval: talkerThinkerFromConfig?.sceneRetrieval ?? false,
-    legacyAreaStateCompat: talkerThinkerFromConfig?.legacyAreaStateCompat ?? true,
+    sceneFactWritePath: talkerThinkerFromConfig?.sceneFactWritePath ?? true,
+    sceneRetrieval: talkerThinkerFromConfig?.sceneRetrieval ?? true,
+    legacyAreaStateCompat: talkerThinkerFromConfig?.legacyAreaStateCompat ?? false,
   };
 
   assertSupportedTalkerThinkerRolloutMatrix({

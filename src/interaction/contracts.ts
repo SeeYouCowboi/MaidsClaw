@@ -113,7 +113,7 @@ export type TurnSettlementPayload = {
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
   actionCommitments?: ActionCommitment[];
-  areaStateArtifacts?: Array<{
+  areaStateArtifacts?: Array<{ // LEGACY_COMPAT: historical replay only
     key: string;
     value: unknown;
     surfacingClassification?: SurfacingClassification;

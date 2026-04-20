@@ -1477,9 +1477,9 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					role: "user",
 					content:
 						`[Thinker context] Cognitive sketches from Talker (batch):\n${sketchChainText}\n${sketchNote}\n` +
-						"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.\n" +
-						"IMPORTANT: For each privateEpisode, include the \"settlementId\" field matching the settlement of the turn it belongs to (shown in brackets above). " +
-						"This is required for correct per-turn episode attribution.",
+"Now generate full privateCognition, privateEpisodes, publications via submit_rp_turn.\n" +
+					"IMPORTANT: For each privateEpisode, include the \"settlementId\" field matching the settlement of the turn it belongs to (shown in brackets above). " +
+					"This is required for correct per-turn episode attribution.",
 				});
 			} else {
 				const requestId = payload.settlementId.replace(/^stl:/, "");
@@ -1500,7 +1500,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						role: "user",
 						content:
 							`[Thinker context] Cognitive sketch from Talker: ${cognitiveSketch}\n\n` +
-							"Now generate full privateCognition, privateEpisodes, publications, areaStateArtifacts via submit_rp_turn.",
+							"Now generate full privateCognition, privateEpisodes, publications via submit_rp_turn.",
 					});
 				}
 			}
@@ -1540,11 +1540,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const canonicalOutcome = normalizeRpTurnOutcome(
 				sanitizeThinkerOutcome(structuredClone(bufferedResult.outcome)),
 			);
-			const areaStateArtifacts = (
-				canonicalOutcome as CanonicalRpTurnOutcome & {
-					areaStateArtifacts?: SettlementProjectionParams["areaStateArtifacts"];
-				}
-			).areaStateArtifacts;
+
 			const sceneFactCommits: SceneFactCommit[] =
 				mapActionCommitmentsToSceneFactCommits(
 					canonicalOutcome.actionCommitments ?? [],
@@ -1675,7 +1671,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				cognitionOps: canonicalizedCognitionOps,
 				privateEpisodes: effectiveEpisodes,
 				publications: canonicalOutcome.publications ?? [],
-				areaStateArtifacts: areaStateArtifacts ?? [],
+				areaStateArtifacts: [],
 				sceneFactCommits,
 				sceneFactWritePath: deps.sceneFactWritePath ?? false,
 				recentCognitionSlotJson,
@@ -1703,7 +1699,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					),
 				};
 
-				// Commit effective settlement (carries cognitionOps, publications, areaStateArtifacts)
+				// Commit effective settlement (carries cognitionOps, publications)
 				const result = await deps.projectionManager.commitSettlement(
 					params,
 					repoOverrides,

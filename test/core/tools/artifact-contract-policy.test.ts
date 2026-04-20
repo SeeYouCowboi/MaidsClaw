@@ -87,7 +87,6 @@ describe("artifact-contract-policy", () => {
     expect(filtered).toContain("publications");
     expect(filtered).toContain("pinnedSummaryProposal");
     expect(filtered).toContain("actionCommitments");
-    expect(filtered).toContain("areaStateArtifacts");
     expect(filtered).not.toContain("privateCognition");
     expect(filtered).not.toContain("privateEpisodes");
     expect(filtered).not.toContain("relationIntents");
@@ -115,7 +114,7 @@ describe("artifact-contract-policy", () => {
   it("all submit_rp_turn contracts pass enforcement for append writes", () => {
     const contracts = getContracts();
 
-    expect(Object.keys(contracts)).toHaveLength(9);
+    expect(Object.keys(contracts)).toHaveLength(8);
     expect(() =>
       enforceArtifactContracts(contracts, {
         writingAgentId: "rp:alice",

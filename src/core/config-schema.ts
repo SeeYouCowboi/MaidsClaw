@@ -113,6 +113,10 @@ export type AuthConfigResult =
 export type RuntimeConfig = {
   memory?: MemoryConfig;
   lightweightLlm?: LightweightLlmConfig;
+  /**
+   * Talker/Thinker pipeline configuration.
+   * Production defaults: speakerNormalizationGate=true, sceneFactWritePath=true, sceneRetrieval=true, legacyAreaStateCompat=false
+   */
   talkerThinker?: {
     enabled: boolean;
     stalenessThreshold: number;

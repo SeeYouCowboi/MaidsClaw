@@ -1413,7 +1413,7 @@ export class TurnService {
 					cognitionOps: canonicalOutcome.privateCognition?.ops ?? [],
 					privateEpisodes: canonicalOutcome.privateEpisodes,
 					publications,
-					areaStateArtifacts: settlementPayload.areaStateArtifacts,
+					areaStateArtifacts: [],
 					sceneFactCommits: mergeSceneFactCommits([
 						...mapActionCommitmentsToSceneFactCommits(
 							canonicalOutcome.actionCommitments ?? [],
@@ -1785,9 +1785,6 @@ export class TurnService {
 		}
 		if (payload.pinnedSummaryProposal) {
 			presentPublicArtifactKinds.push("pinnedSummaryProposal");
-		}
-		if ((payload as Record<string, unknown>).areaStateArtifacts) {
-			presentPublicArtifactKinds.push("areaStateArtifacts");
 		}
 		if (payload.actionCommitments && payload.actionCommitments.length > 0) {
 			presentPublicArtifactKinds.push("actionCommitments");

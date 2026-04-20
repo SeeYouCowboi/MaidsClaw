@@ -444,7 +444,7 @@ export type SettlementProjectionParams = {
     newEntriesJson: string,
   ) => MaybePromise<void>;
   recentCognitionSlotJson: string;
-  areaStateArtifacts?: SettlementAreaStateArtifact[];
+  areaStateArtifacts?: SettlementAreaStateArtifact[]; // LEGACY_COMPAT: kept for type compatibility, ignored when legacyAreaStateCompat=false
   agentRole?: AgentRole;
   writeTemplateOverride?: WriteTemplate;
   artifactContracts?: Record<string, ArtifactContract>;
@@ -628,6 +628,7 @@ export class ProjectionManager {
     return Promise.resolve({ changedNodeRefs });
   }
 
+  // TODO(legacy-cleanup): remove in post-cutover cleanup
   private upsertAreaStateArtifacts(
     params: SettlementProjectionParams,
     now: number,

@@ -230,13 +230,13 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
 				? tt.speakerNormalizationGate
 				: true,
 		sceneFactWritePath:
-			typeof tt.sceneFactWritePath === "boolean" ? tt.sceneFactWritePath : false,
+			typeof tt.sceneFactWritePath === "boolean" ? tt.sceneFactWritePath : true,
 		sceneRetrieval:
-			typeof tt.sceneRetrieval === "boolean" ? tt.sceneRetrieval : false,
+			typeof tt.sceneRetrieval === "boolean" ? tt.sceneRetrieval : true,
 		legacyAreaStateCompat:
 			typeof tt.legacyAreaStateCompat === "boolean"
 				? tt.legacyAreaStateCompat
-				: true,
+				: false,
 		...(typeof tt.globalConcurrencyCap === "number" && Number.isFinite(tt.globalConcurrencyCap)
 			? { globalConcurrencyCap: tt.globalConcurrencyCap }
 			: {}),
