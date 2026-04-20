@@ -17,9 +17,23 @@ export const SURFACING_CLASSIFICATIONS = [
 
 export const AREA_STATE_SOURCE_TYPES = ["system", "gm", "simulation", "inferred_world"] as const;
 
+const SCENE_FACT_SOURCE_KINDS = [
+  "lore_seed",
+  "action_commitment",
+  "system_event",
+  "evidence_reveal",
+  "institutional_speech_act",
+] as const;
+
+const AREA_FACT_EXPOSURE_SCOPES = ["area_visible", "system_only"] as const;
+const WORLD_FACT_EXPOSURE_SCOPES = ["world_public", "system_only"] as const;
+
 export type SurfacingClassification = (typeof SURFACING_CLASSIFICATIONS)[number];
 export type AreaStateSourceType = (typeof AREA_STATE_SOURCE_TYPES)[number];
 export type ProjectionUpdateTrigger = "publication" | "materialization" | "promotion";
+export type SceneFactSourceKind = (typeof SCENE_FACT_SOURCE_KINDS)[number];
+export type AreaFactExposureScope = (typeof AREA_FACT_EXPOSURE_SCOPES)[number];
+export type WorldFactExposureScope = (typeof WORLD_FACT_EXPOSURE_SCOPES)[number];
 
 type AreaStateRow = {
   agent_id: string;
@@ -73,6 +87,35 @@ type WorldStateAsOfRow = {
   committed_time: number | null;
 };
 
+type AreaFactCurrentRow = {
+  sessionId: string;
+  areaId: number;
+  factKey: string;
+  valueJson: unknown;
+  sourceKind: SceneFactSourceKind;
+  exposureScope: AreaFactExposureScope;
+  sourceEventId: bigint;
+  sourceSettlementId: string | null;
+  sourceAgentId: string | null;
+  updatedAt: Date;
+  validTime: Date;
+  committedTime: Date;
+};
+
+type WorldFactCurrentRow = {
+  sessionId: string;
+  factKey: string;
+  valueJson: unknown;
+  sourceKind: SceneFactSourceKind;
+  exposureScope: WorldFactExposureScope;
+  sourceEventId: bigint;
+  sourceSettlementId: string | null;
+  sourceAgentId: string | null;
+  updatedAt: Date;
+  validTime: Date;
+  committedTime: Date;
+};
+
 export type UpsertAreaStateInput = {
   agentId: string;
   areaId: number;
@@ -98,7 +141,103 @@ export type UpsertWorldStateInput = {
 };
 
 export class AreaWorldProjectionRepo {
-  constructor(private readonly db: DbLike) {}
+  constructor(private readonly db: DbLike) {
+    this.bootstrapSceneFactTables();
+  }
+
+  private bootstrapSceneFactTables(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS scene_area_fact_events (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id            TEXT NOT NULL,
+        area_id               INTEGER NOT NULL,
+        fact_key              TEXT NOT NULL,
+        value_json            TEXT NOT NULL,
+        source_kind           TEXT NOT NULL
+                              CHECK (source_kind IN (
+                                'lore_seed', 'action_commitment', 'system_event',
+                                'evidence_reveal', 'institutional_speech_act'
+                              )),
+        exposure_scope        TEXT NOT NULL
+                              CHECK (exposure_scope IN ('area_visible', 'system_only')),
+        source_settlement_id  TEXT,
+        source_agent_id       TEXT,
+        valid_time            TEXT NOT NULL,
+        committed_time        TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scene_area_fact_events_session_area_key_committed
+        ON scene_area_fact_events(session_id, area_id, fact_key, committed_time DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS scene_area_fact_current (
+        session_id            TEXT NOT NULL,
+        area_id               INTEGER NOT NULL,
+        fact_key              TEXT NOT NULL,
+        source_event_id       INTEGER NOT NULL,
+        value_json            TEXT NOT NULL,
+        source_kind           TEXT NOT NULL
+                              CHECK (source_kind IN (
+                                'lore_seed', 'action_commitment', 'system_event',
+                                'evidence_reveal', 'institutional_speech_act'
+                              )),
+        exposure_scope        TEXT NOT NULL
+                              CHECK (exposure_scope IN ('area_visible', 'system_only')),
+        source_settlement_id  TEXT,
+        source_agent_id       TEXT,
+        updated_at            TEXT NOT NULL,
+        valid_time            TEXT NOT NULL,
+        committed_time        TEXT NOT NULL,
+        PRIMARY KEY (session_id, area_id, fact_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scene_area_fact_current_visibility
+        ON scene_area_fact_current(session_id, area_id, exposure_scope);
+
+      CREATE TABLE IF NOT EXISTS scene_world_fact_events (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id            TEXT NOT NULL,
+        fact_key              TEXT NOT NULL,
+        value_json            TEXT NOT NULL,
+        source_kind           TEXT NOT NULL
+                              CHECK (source_kind IN (
+                                'lore_seed', 'action_commitment', 'system_event',
+                                'evidence_reveal', 'institutional_speech_act'
+                              )),
+        exposure_scope        TEXT NOT NULL
+                              CHECK (exposure_scope IN ('world_public', 'system_only')),
+        source_settlement_id  TEXT,
+        source_agent_id       TEXT,
+        valid_time            TEXT NOT NULL,
+        committed_time        TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scene_world_fact_events_session_key_committed
+        ON scene_world_fact_events(session_id, fact_key, committed_time DESC, id DESC);
+
+      CREATE TABLE IF NOT EXISTS scene_world_fact_current (
+        session_id            TEXT NOT NULL,
+        fact_key              TEXT NOT NULL,
+        source_event_id       INTEGER NOT NULL,
+        value_json            TEXT NOT NULL,
+        source_kind           TEXT NOT NULL
+                              CHECK (source_kind IN (
+                                'lore_seed', 'action_commitment', 'system_event',
+                                'evidence_reveal', 'institutional_speech_act'
+                              )),
+        exposure_scope        TEXT NOT NULL
+                              CHECK (exposure_scope IN ('world_public', 'system_only')),
+        source_settlement_id  TEXT,
+        source_agent_id       TEXT,
+        updated_at            TEXT NOT NULL,
+        valid_time            TEXT NOT NULL,
+        committed_time        TEXT NOT NULL,
+        PRIMARY KEY (session_id, fact_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scene_world_fact_current_visibility
+        ON scene_world_fact_current(session_id, exposure_scope);
+    `);
+  }
 
   upsertAreaState(input: UpsertAreaStateInput): void {
     this.upsertAreaStateCurrent(input);
@@ -343,6 +482,302 @@ export class AreaWorldProjectionRepo {
       .get() as WorldNarrativeRow | null;
   }
 
+  async applyAreaFactCommit(params: {
+    sessionId: string;
+    areaId: number;
+    factKey: string;
+    valueJson: unknown;
+    sourceKind: SceneFactSourceKind;
+    exposureScope: AreaFactExposureScope;
+    sourceSettlementId: string | null;
+    sourceAgentId: string | null;
+    validTime: Date;
+    committedTime: Date;
+  }): Promise<{ eventId: bigint }> {
+    this.assertSceneFactSourceKind(params.sourceKind);
+    this.assertAreaFactExposureScope(params.exposureScope);
+
+    const valueJson = this.toJson(params.valueJson);
+    const validTime = this.toIsoString(params.validTime);
+    const committedTime = this.toIsoString(params.committedTime);
+    const inserted = this.db
+      .prepare(
+        `INSERT INTO scene_area_fact_events (
+           session_id,
+           area_id,
+           fact_key,
+           value_json,
+           source_kind,
+           exposure_scope,
+           source_settlement_id,
+           source_agent_id,
+           valid_time,
+           committed_time
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        params.sessionId,
+        params.areaId,
+        params.factKey,
+        valueJson,
+        params.sourceKind,
+        params.exposureScope,
+        params.sourceSettlementId,
+        params.sourceAgentId,
+        validTime,
+        committedTime,
+      );
+
+    const eventId = this.toBigInt(inserted.lastInsertRowid);
+
+    this.db
+      .prepare(
+        `INSERT INTO scene_area_fact_current (
+           session_id,
+           area_id,
+           fact_key,
+           source_event_id,
+           value_json,
+           source_kind,
+           exposure_scope,
+           source_settlement_id,
+           source_agent_id,
+           updated_at,
+           valid_time,
+           committed_time
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, area_id, fact_key)
+         DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           value_json = excluded.value_json,
+           source_kind = excluded.source_kind,
+           exposure_scope = excluded.exposure_scope,
+           source_settlement_id = excluded.source_settlement_id,
+           source_agent_id = excluded.source_agent_id,
+           updated_at = excluded.updated_at,
+           valid_time = excluded.valid_time,
+           committed_time = excluded.committed_time
+         WHERE
+           excluded.committed_time > scene_area_fact_current.committed_time
+           OR (
+             excluded.committed_time = scene_area_fact_current.committed_time
+             AND excluded.source_event_id > scene_area_fact_current.source_event_id
+           )`,
+      )
+      .run(
+        params.sessionId,
+        params.areaId,
+        params.factKey,
+        Number(eventId),
+        valueJson,
+        params.sourceKind,
+        params.exposureScope,
+        params.sourceSettlementId,
+        params.sourceAgentId,
+        committedTime,
+        validTime,
+        committedTime,
+      );
+
+    return { eventId };
+  }
+
+  async applyWorldFactCommit(params: {
+    sessionId: string;
+    factKey: string;
+    valueJson: unknown;
+    sourceKind: SceneFactSourceKind;
+    exposureScope: WorldFactExposureScope;
+    sourceSettlementId: string | null;
+    sourceAgentId: string | null;
+    validTime: Date;
+    committedTime: Date;
+  }): Promise<{ eventId: bigint }> {
+    this.assertSceneFactSourceKind(params.sourceKind);
+    this.assertWorldFactExposureScope(params.exposureScope);
+
+    const valueJson = this.toJson(params.valueJson);
+    const validTime = this.toIsoString(params.validTime);
+    const committedTime = this.toIsoString(params.committedTime);
+    const inserted = this.db
+      .prepare(
+        `INSERT INTO scene_world_fact_events (
+           session_id,
+           fact_key,
+           value_json,
+           source_kind,
+           exposure_scope,
+           source_settlement_id,
+           source_agent_id,
+           valid_time,
+           committed_time
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        params.sessionId,
+        params.factKey,
+        valueJson,
+        params.sourceKind,
+        params.exposureScope,
+        params.sourceSettlementId,
+        params.sourceAgentId,
+        validTime,
+        committedTime,
+      );
+
+    const eventId = this.toBigInt(inserted.lastInsertRowid);
+
+    this.db
+      .prepare(
+        `INSERT INTO scene_world_fact_current (
+           session_id,
+           fact_key,
+           source_event_id,
+           value_json,
+           source_kind,
+           exposure_scope,
+           source_settlement_id,
+           source_agent_id,
+           updated_at,
+           valid_time,
+           committed_time
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, fact_key)
+         DO UPDATE SET
+           source_event_id = excluded.source_event_id,
+           value_json = excluded.value_json,
+           source_kind = excluded.source_kind,
+           exposure_scope = excluded.exposure_scope,
+           source_settlement_id = excluded.source_settlement_id,
+           source_agent_id = excluded.source_agent_id,
+           updated_at = excluded.updated_at,
+           valid_time = excluded.valid_time,
+           committed_time = excluded.committed_time
+         WHERE
+           excluded.committed_time > scene_world_fact_current.committed_time
+           OR (
+             excluded.committed_time = scene_world_fact_current.committed_time
+             AND excluded.source_event_id > scene_world_fact_current.source_event_id
+           )`,
+      )
+      .run(
+        params.sessionId,
+        params.factKey,
+        Number(eventId),
+        valueJson,
+        params.sourceKind,
+        params.exposureScope,
+        params.sourceSettlementId,
+        params.sourceAgentId,
+        committedTime,
+        validTime,
+        committedTime,
+      );
+
+    return { eventId };
+  }
+
+  async getVisibleAreaFacts(params: {
+    sessionId: string;
+    areaId: number;
+    excludeSystemOnly?: boolean;
+  }): Promise<AreaFactCurrentRow[]> {
+    const rows = params.excludeSystemOnly
+      ? this.db
+          .prepare(
+            `SELECT
+               session_id,
+               area_id,
+               fact_key,
+               source_event_id,
+               value_json,
+               source_kind,
+               exposure_scope,
+               source_settlement_id,
+               source_agent_id,
+               updated_at,
+               valid_time,
+               committed_time
+             FROM scene_area_fact_current
+             WHERE session_id = ?
+               AND area_id = ?
+               AND exposure_scope <> 'system_only'
+             ORDER BY fact_key ASC`,
+          )
+          .all(params.sessionId, params.areaId)
+      : this.db
+          .prepare(
+            `SELECT
+               session_id,
+               area_id,
+               fact_key,
+               source_event_id,
+               value_json,
+               source_kind,
+               exposure_scope,
+               source_settlement_id,
+               source_agent_id,
+               updated_at,
+               valid_time,
+               committed_time
+             FROM scene_area_fact_current
+             WHERE session_id = ?
+               AND area_id = ?
+             ORDER BY fact_key ASC`,
+          )
+          .all(params.sessionId, params.areaId);
+
+    return rows.map((row) => this.mapAreaFactCurrentRow(row as Record<string, unknown>));
+  }
+
+  async getVisibleWorldFacts(params: {
+    sessionId: string;
+    excludeSystemOnly?: boolean;
+  }): Promise<WorldFactCurrentRow[]> {
+    const rows = params.excludeSystemOnly
+      ? this.db
+          .prepare(
+            `SELECT
+               session_id,
+               fact_key,
+               source_event_id,
+               value_json,
+               source_kind,
+               exposure_scope,
+               source_settlement_id,
+               source_agent_id,
+               updated_at,
+               valid_time,
+               committed_time
+             FROM scene_world_fact_current
+             WHERE session_id = ?
+               AND exposure_scope <> 'system_only'
+             ORDER BY fact_key ASC`,
+          )
+          .all(params.sessionId)
+      : this.db
+          .prepare(
+            `SELECT
+               session_id,
+               fact_key,
+               source_event_id,
+               value_json,
+               source_kind,
+               exposure_scope,
+               source_settlement_id,
+               source_agent_id,
+               updated_at,
+               valid_time,
+               committed_time
+             FROM scene_world_fact_current
+             WHERE session_id = ?
+             ORDER BY fact_key ASC`,
+          )
+          .all(params.sessionId);
+
+    return rows.map((row) => this.mapWorldFactCurrentRow(row as Record<string, unknown>));
+  }
+
   applyPublicationProjection(input: {
     trigger: ProjectionUpdateTrigger;
     targetScope: PublicationTargetScope;
@@ -450,6 +885,27 @@ export class AreaWorldProjectionRepo {
     return `legacy:auto:${committedTime}`;
   }
 
+  private assertSceneFactSourceKind(value: string): void {
+    if (SCENE_FACT_SOURCE_KINDS.includes(value as SceneFactSourceKind)) {
+      return;
+    }
+    throw new Error(`Invalid scene fact source kind: ${value}`);
+  }
+
+  private assertAreaFactExposureScope(value: string): void {
+    if (AREA_FACT_EXPOSURE_SCOPES.includes(value as AreaFactExposureScope)) {
+      return;
+    }
+    throw new Error(`Invalid area fact exposure scope: ${value}`);
+  }
+
+  private assertWorldFactExposureScope(value: string): void {
+    if (WORLD_FACT_EXPOSURE_SCOPES.includes(value as WorldFactExposureScope)) {
+      return;
+    }
+    throw new Error(`Invalid world fact exposure scope: ${value}`);
+  }
+
   private assertSurfacingClassification(value: string): void {
     if (SURFACING_CLASSIFICATIONS.includes(value as SurfacingClassification)) {
       return;
@@ -473,6 +929,75 @@ export class AreaWorldProjectionRepo {
   private assertTrigger(trigger: ProjectionUpdateTrigger, allowed: ProjectionUpdateTrigger[]): void {
     if (!allowed.includes(trigger)) {
       throw new Error(`Projection update trigger '${trigger}' is not allowed in this path`);
+    }
+  }
+
+  private toBigInt(value: unknown): bigint {
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number") return BigInt(value);
+    if (typeof value === "string" && value.length > 0) return BigInt(value);
+    throw new Error(`Unable to coerce value to bigint: ${String(value)}`);
+  }
+
+  private toIsoString(value: Date): string {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      throw new Error(`Invalid Date value: ${String(value)}`);
+    }
+    return value.toISOString();
+  }
+
+  private toDate(value: unknown): Date {
+    if (value instanceof Date) return value;
+    if (typeof value === "string" || typeof value === "number") {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    throw new Error(`Unable to coerce value to Date: ${String(value)}`);
+  }
+
+  private mapAreaFactCurrentRow(row: Record<string, unknown>): AreaFactCurrentRow {
+    return {
+      sessionId: row.session_id as string,
+      areaId: Number(row.area_id),
+      factKey: row.fact_key as string,
+      valueJson: this.parseJsonText(row.value_json),
+      sourceKind: row.source_kind as SceneFactSourceKind,
+      exposureScope: row.exposure_scope as AreaFactExposureScope,
+      sourceEventId: this.toBigInt(row.source_event_id),
+      sourceSettlementId:
+        row.source_settlement_id == null ? null : String(row.source_settlement_id),
+      sourceAgentId: row.source_agent_id == null ? null : String(row.source_agent_id),
+      updatedAt: this.toDate(row.updated_at),
+      validTime: this.toDate(row.valid_time),
+      committedTime: this.toDate(row.committed_time),
+    };
+  }
+
+  private mapWorldFactCurrentRow(row: Record<string, unknown>): WorldFactCurrentRow {
+    return {
+      sessionId: row.session_id as string,
+      factKey: row.fact_key as string,
+      valueJson: this.parseJsonText(row.value_json),
+      sourceKind: row.source_kind as SceneFactSourceKind,
+      exposureScope: row.exposure_scope as WorldFactExposureScope,
+      sourceEventId: this.toBigInt(row.source_event_id),
+      sourceSettlementId:
+        row.source_settlement_id == null ? null : String(row.source_settlement_id),
+      sourceAgentId: row.source_agent_id == null ? null : String(row.source_agent_id),
+      updatedAt: this.toDate(row.updated_at),
+      validTime: this.toDate(row.valid_time),
+      committedTime: this.toDate(row.committed_time),
+    };
+  }
+
+  private parseJsonText(value: unknown): unknown {
+    if (typeof value !== "string") {
+      return value;
+    }
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
     }
   }
 

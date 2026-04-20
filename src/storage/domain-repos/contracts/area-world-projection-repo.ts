@@ -52,6 +52,45 @@ export type WorldNarrativeRow = {
   updated_at: number;
 };
 
+export type SceneFactSourceKind =
+  | "lore_seed"
+  | "action_commitment"
+  | "system_event"
+  | "evidence_reveal"
+  | "institutional_speech_act";
+
+export type AreaFactExposureScope = "area_visible" | "system_only";
+export type WorldFactExposureScope = "world_public" | "system_only";
+
+export interface AreaFactCurrentRow {
+  sessionId: string;
+  areaId: number;
+  factKey: string;
+  valueJson: unknown;
+  sourceKind: SceneFactSourceKind;
+  exposureScope: AreaFactExposureScope;
+  sourceEventId: bigint;
+  sourceSettlementId: string | null;
+  sourceAgentId: string | null;
+  updatedAt: Date;
+  validTime: Date;
+  committedTime: Date;
+}
+
+export interface WorldFactCurrentRow {
+  sessionId: string;
+  factKey: string;
+  valueJson: unknown;
+  sourceKind: SceneFactSourceKind;
+  exposureScope: WorldFactExposureScope;
+  sourceEventId: bigint;
+  sourceSettlementId: string | null;
+  sourceAgentId: string | null;
+  updatedAt: Date;
+  validTime: Date;
+  committedTime: Date;
+}
+
 export interface AreaWorldProjectionRepo {
   upsertAreaState(input: UpsertAreaStateInput): Promise<void>;
   upsertAreaStateCurrent(input: UpsertAreaStateInput): Promise<void>;
@@ -76,6 +115,38 @@ export interface AreaWorldProjectionRepo {
   getWorldStateAsOf(key: string, asOfCommittedTime: number): Promise<WorldStateAsOfRow | null>;
   upsertWorldNarrativeCurrent(input: { summaryText: string; updatedAt?: number }): Promise<void>;
   getWorldNarrativeCurrent(): Promise<WorldNarrativeRow | null>;
+  applyAreaFactCommit(params: {
+    sessionId: string;
+    areaId: number;
+    factKey: string;
+    valueJson: unknown;
+    sourceKind: SceneFactSourceKind;
+    exposureScope: AreaFactExposureScope;
+    sourceSettlementId: string | null;
+    sourceAgentId: string | null;
+    validTime: Date;
+    committedTime: Date;
+  }): Promise<{ eventId: bigint }>;
+  applyWorldFactCommit(params: {
+    sessionId: string;
+    factKey: string;
+    valueJson: unknown;
+    sourceKind: SceneFactSourceKind;
+    exposureScope: WorldFactExposureScope;
+    sourceSettlementId: string | null;
+    sourceAgentId: string | null;
+    validTime: Date;
+    committedTime: Date;
+  }): Promise<{ eventId: bigint }>;
+  getVisibleAreaFacts(params: {
+    sessionId: string;
+    areaId: number;
+    excludeSystemOnly?: boolean;
+  }): Promise<AreaFactCurrentRow[]>;
+  getVisibleWorldFacts(params: {
+    sessionId: string;
+    excludeSystemOnly?: boolean;
+  }): Promise<WorldFactCurrentRow[]>;
   applyPublicationProjection(input: {
     trigger: ProjectionUpdateTrigger;
     targetScope: PublicationTargetScope;

@@ -59,6 +59,7 @@ export type LoreEntryDto = {
   priority: number;
   enabled: boolean;
   tags: string[];
+  sceneSeed?: unknown[];
 };
 
 function toDto(entry: LoreEntry): LoreEntryDto {
@@ -71,6 +72,7 @@ function toDto(entry: LoreEntry): LoreEntryDto {
     priority: entry.priority ?? 0,
     enabled: entry.enabled,
     tags: entry.tags ?? [],
+    ...(entry.sceneSeed !== undefined ? { sceneSeed: entry.sceneSeed } : {}),
   };
 }
 

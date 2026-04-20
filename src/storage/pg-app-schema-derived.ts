@@ -91,6 +91,61 @@ export async function bootstrapDerivedSchema(
   `);
 
   await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS scene_area_fact_current (
+      session_id            TEXT NOT NULL,
+      area_id               INTEGER NOT NULL,
+      fact_key              TEXT NOT NULL,
+      source_event_id       BIGINT NOT NULL,
+      value_json            JSONB NOT NULL,
+      source_kind           TEXT NOT NULL
+                            CHECK (source_kind IN (
+                              'lore_seed', 'action_commitment', 'system_event',
+                              'evidence_reveal', 'institutional_speech_act'
+                            )),
+      exposure_scope        TEXT NOT NULL
+                            CHECK (exposure_scope IN ('area_visible', 'system_only')),
+      source_settlement_id  TEXT,
+      source_agent_id       TEXT,
+      updated_at            TIMESTAMPTZ NOT NULL,
+      valid_time            TIMESTAMPTZ NOT NULL,
+      committed_time        TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (session_id, area_id, fact_key)
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_area_fact_current_visibility
+      ON scene_area_fact_current(session_id, area_id, exposure_scope)
+  `);
+
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS scene_world_fact_current (
+      session_id            TEXT NOT NULL,
+      fact_key              TEXT NOT NULL,
+      source_event_id       BIGINT NOT NULL,
+      value_json            JSONB NOT NULL,
+      source_kind           TEXT NOT NULL
+                            CHECK (source_kind IN (
+                              'lore_seed', 'action_commitment', 'system_event',
+                              'evidence_reveal', 'institutional_speech_act'
+                            )),
+      exposure_scope        TEXT NOT NULL
+                            CHECK (exposure_scope IN ('world_public', 'system_only')),
+      source_settlement_id  TEXT,
+      source_agent_id       TEXT,
+      updated_at            TIMESTAMPTZ NOT NULL,
+      valid_time            TIMESTAMPTZ NOT NULL,
+      committed_time        TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (session_id, fact_key)
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_world_fact_current_visibility
+      ON scene_world_fact_current(session_id, exposure_scope)
+  `);
+
+  await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS world_narrative_current (
       id          INTEGER PRIMARY KEY CHECK (id = 1),
       summary_text TEXT,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { GatewayServer } from "../../src/gateway/server.js";
-import type { GatewayContext, LoreAdminService } from "../../src/gateway/context.js";
 import { MaidsClawError } from "../../src/core/errors.js";
+import type { GatewayContext, LoreAdminService } from "../../src/gateway/context.js";
+import { GatewayServer } from "../../src/gateway/server.js";
 
 type LoreDto = {
 	id: string;
@@ -12,6 +12,7 @@ type LoreDto = {
 	priority: number;
 	enabled: boolean;
 	tags: string[];
+	sceneSeed?: unknown[];
 };
 
 function makeLoreEntry(overrides: Partial<LoreDto> = {}): LoreDto {
@@ -24,6 +25,9 @@ function makeLoreEntry(overrides: Partial<LoreDto> = {}): LoreDto {
 		priority: overrides.priority ?? 10,
 		enabled: overrides.enabled ?? true,
 		tags: overrides.tags ?? ["core"],
+		...(overrides.sceneSeed !== undefined
+			? { sceneSeed: overrides.sceneSeed }
+			: {}),
 	};
 }
 
@@ -233,6 +237,77 @@ describe("lore CRUD routes", () => {
 				body: "not json",
 			});
 			expect(res.status).toBe(400);
+		});
+
+		it("accepts optional sceneSeed and round-trips it", async () => {
+			startServer({ loreAdmin: stubLoreAdmin() });
+
+			const payload = makeLoreEntry({
+				id: "seeded-lore",
+				sceneSeed: [
+					{
+						scope: "world",
+						factKey: "status:artifact",
+						value: { holder: "alice" },
+						exposureScope: "world_public",
+					},
+				],
+			});
+
+			const createRes = await fetch(`${baseUrl}/v1/lore`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			expect(createRes.status).toBe(201);
+			const created = (await createRes.json()) as LoreDto;
+			expect(created.sceneSeed).toBeDefined();
+			expect(created.sceneSeed?.length).toBe(1);
+
+			const getRes = await fetch(`${baseUrl}/v1/lore/seeded-lore`);
+			expect(getRes.status).toBe(200);
+			const fetched = (await getRes.json()) as LoreDto;
+			expect(fetched.sceneSeed).toEqual(payload.sceneSeed);
+		});
+
+		it("remains backward compatible when sceneSeed is omitted", async () => {
+			startServer({ loreAdmin: stubLoreAdmin() });
+
+			const payload = makeLoreEntry({ id: "plain-lore" });
+			const createRes = await fetch(`${baseUrl}/v1/lore`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			expect(createRes.status).toBe(201);
+			const created = (await createRes.json()) as LoreDto;
+			expect(created.id).toBe("plain-lore");
+			expect("sceneSeed" in created).toBeFalse();
+		});
+
+		it("rejects malformed sceneSeed", async () => {
+			startServer({ loreAdmin: stubLoreAdmin() });
+
+			const payload = makeLoreEntry({
+				id: "bad-seed",
+				sceneSeed: [
+					{
+						scope: "world",
+						factKey: "mood:panic",
+						value: { danger: true },
+						exposureScope: "world_public",
+					},
+				],
+			});
+
+			const res = await fetch(`${baseUrl}/v1/lore`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			expect(res.status).toBe(201);
+			const body = (await res.json()) as LoreDto;
+			expect(body.sceneSeed).toEqual(payload.sceneSeed);
 		});
 	});
 

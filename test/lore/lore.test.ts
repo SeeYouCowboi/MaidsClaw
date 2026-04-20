@@ -1,13 +1,12 @@
-import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { validateLoreEntry } from "../../src/lore/entry-schema.js";
+import { type LoreEntry, validateLoreEntry } from "../../src/lore/entry-schema.js";
 import { loadLoreEntries } from "../../src/lore/loader.js";
 import { findMatchingEntries } from "../../src/lore/matcher.js";
 import { createLoreService } from "../../src/lore/service.js";
-import type { LoreEntry } from "../../src/lore/entry-schema.js";
 
 // ─── Fixtures ───────────────────────────────────────────────────────
 
@@ -110,11 +109,120 @@ describe("lore/entry-schema", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("validates world sceneSeed payload", () => {
+    const result = validateLoreEntry({
+      id: "seed-world",
+      title: "Seed World",
+      keywords: ["seed"],
+      content: "world seed",
+      scope: "world",
+      enabled: true,
+      sceneSeed: [
+        {
+          scope: "world",
+          factKey: "status:artifact",
+          value: { holder: "alice" },
+          exposureScope: "world_public",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("validates area sceneSeed payload", () => {
+    const result = validateLoreEntry({
+      id: "seed-area",
+      title: "Seed Area",
+      keywords: ["seed"],
+      content: "area seed",
+      scope: "area",
+      enabled: true,
+      sceneSeed: [
+        {
+          scope: "area",
+          areaPointerKey: "room:hall",
+          factKey: "location:artifact",
+          value: { where: "pedestal" },
+          exposureScope: "area_visible",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects sceneSeed with disallowed factKey pattern", () => {
+    const result = validateLoreEntry({
+      id: "seed-bad-key",
+      title: "Bad Key",
+      keywords: ["seed"],
+      content: "bad",
+      scope: "world",
+      enabled: true,
+      sceneSeed: [
+        {
+          scope: "world",
+          factKey: "mood:panic",
+          value: { v: 1 },
+          exposureScope: "world_public",
+        },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("sceneSeed");
+    }
+  });
+
+  it("rejects sceneSeed item missing exposureScope", () => {
+    const result = validateLoreEntry({
+      id: "seed-missing-exposure",
+      title: "Missing Exposure",
+      keywords: ["seed"],
+      content: "bad",
+      scope: "world",
+      enabled: true,
+      sceneSeed: [
+        {
+          scope: "world",
+          factKey: "status:artifact",
+          value: { v: 1 },
+        },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("sceneSeed");
+    }
+  });
+
+  it("rejects sceneSeed item with unknown scope", () => {
+    const result = validateLoreEntry({
+      id: "seed-unknown-scope",
+      title: "Unknown Scope",
+      keywords: ["seed"],
+      content: "bad",
+      scope: "world",
+      enabled: true,
+      sceneSeed: [
+        {
+          scope: "galaxy",
+          factKey: "status:artifact",
+          value: { v: 1 },
+          exposureScope: "world_public",
+        },
+      ],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("sceneSeed");
+    }
+  });
+
   it("rejects null", () => {
     const result = validateLoreEntry(null);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain("non-null object");
+      expect(result.reason).toContain("expected object");
     }
   });
 

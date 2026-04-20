@@ -491,6 +491,85 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   `);
 
   // ══════════════════════════════════════════════════════════════════
+  // Append-only ledgers: scene_area_fact_events
+  // ══════════════════════════════════════════════════════════════════
+
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS scene_area_fact_events (
+      id                    BIGSERIAL PRIMARY KEY,
+      session_id            TEXT NOT NULL,
+      area_id               INTEGER NOT NULL,
+      fact_key              TEXT NOT NULL,
+      value_json            JSONB NOT NULL,
+      source_kind           TEXT NOT NULL
+                            CHECK (source_kind IN (
+                              'lore_seed', 'action_commitment', 'system_event',
+                              'evidence_reveal', 'institutional_speech_act'
+                            )),
+      exposure_scope        TEXT NOT NULL
+                            CHECK (exposure_scope IN ('area_visible', 'system_only')),
+      source_settlement_id  TEXT,
+      source_agent_id       TEXT,
+      valid_time            TIMESTAMPTZ NOT NULL,
+      committed_time        TIMESTAMPTZ NOT NULL
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_area_fact_events_session_area_key_committed
+      ON scene_area_fact_events(session_id, area_id, fact_key, committed_time DESC, id DESC)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_area_fact_events_session
+      ON scene_area_fact_events(session_id, area_id, fact_key)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_area_fact_events_visibility
+      ON scene_area_fact_events(session_id, area_id, exposure_scope)
+  `);
+
+  // ══════════════════════════════════════════════════════════════════
+  // Append-only ledgers: scene_world_fact_events
+  // ══════════════════════════════════════════════════════════════════
+
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS scene_world_fact_events (
+      id                    BIGSERIAL PRIMARY KEY,
+      session_id            TEXT NOT NULL,
+      fact_key              TEXT NOT NULL,
+      value_json            JSONB NOT NULL,
+      source_kind           TEXT NOT NULL
+                            CHECK (source_kind IN (
+                              'lore_seed', 'action_commitment', 'system_event',
+                              'evidence_reveal', 'institutional_speech_act'
+                            )),
+      exposure_scope        TEXT NOT NULL
+                            CHECK (exposure_scope IN ('world_public', 'system_only')),
+      source_settlement_id  TEXT,
+      source_agent_id       TEXT,
+      valid_time            TIMESTAMPTZ NOT NULL,
+      committed_time        TIMESTAMPTZ NOT NULL
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_world_fact_events_session_key_committed
+      ON scene_world_fact_events(session_id, fact_key, committed_time DESC, id DESC)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_world_fact_events_session
+      ON scene_world_fact_events(session_id, fact_key)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_scene_world_fact_events_visibility
+      ON scene_world_fact_events(session_id, exposure_scope)
+  `);
+
+  // ══════════════════════════════════════════════════════════════════
   // Shared blocks family (6 tables — CASCADE FKs)
   // ══════════════════════════════════════════════════════════════════
 
@@ -591,6 +670,8 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
     "private_cognition_events",
     "area_state_events",
     "world_state_events",
+    "scene_area_fact_events",
+    "scene_world_fact_events",
   ] as const;
 
   for (const table of appendOnlyTables) {
