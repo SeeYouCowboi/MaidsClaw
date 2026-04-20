@@ -63,6 +63,7 @@ import type {
 } from "./rp-turn-contract.js";
 import { isValidSceneFactKey, normalizeRpTurnOutcome } from "./rp-turn-contract.js";
 import {
+	type CandidateAction,
 	type NormalizedTurnInput,
 	normalizeTurnInput,
 } from "./speaker-normalization.js";
@@ -574,6 +575,10 @@ export class TurnService {
 			cognitiveSketchSource = "explicit";
 		}
 		try {
+			const normalizedTurnInput =
+				this.talkerThinkerConfig.speakerNormalizationGate
+					? normalizeTurnInput(getLatestUserMessage(effectiveRequest.messages))
+					: undefined;
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
 				effectiveRequest.sessionId,
 				"rp_agent",
@@ -874,6 +879,10 @@ export class TurnService {
 			traceStore: request.traceStore ?? this.traceStore,
 		};
 		const rpTraceStore = effectiveRequest.traceStore;
+		const normalizedTurnInput =
+			this.talkerThinkerConfig.speakerNormalizationGate
+				? normalizeTurnInput(getLatestUserMessage(effectiveRequest.messages))
+				: undefined;
 
 		let bufferedResult: RpBufferedExecutionResult;
 		let viewerSnapshot: TurnSettlementPayload["viewerSnapshot"] | undefined;
@@ -1124,6 +1133,7 @@ export class TurnService {
 						slotEntries,
 						committedAt,
 						canonicalOutcome,
+						normalizedTurnInput,
 					},
 				);
 				changedNodeRefsForOrganize = projectionResult.changedNodeRefs;
@@ -1377,6 +1387,7 @@ export class TurnService {
 		slotEntries: RecentCognitionEntry[];
 		committedAt: number;
 		canonicalOutcome: CanonicalRpTurnOutcome;
+		normalizedTurnInput?: NormalizedTurnInput;
 	}): Promise<CommitSettlementResult> {
 		const {
 			repos,
@@ -1389,6 +1400,7 @@ export class TurnService {
 			slotEntries,
 			committedAt,
 			canonicalOutcome,
+			normalizedTurnInput,
 		} = params;
 
 		if (this.projectionManager) {
@@ -1402,9 +1414,14 @@ export class TurnService {
 					privateEpisodes: canonicalOutcome.privateEpisodes,
 					publications,
 					areaStateArtifacts: settlementPayload.areaStateArtifacts,
-					sceneFactCommits: mapActionCommitmentsToSceneFactCommits(
-						canonicalOutcome.actionCommitments ?? [],
-					),
+					sceneFactCommits: mergeSceneFactCommits([
+						...mapActionCommitmentsToSceneFactCommits(
+							canonicalOutcome.actionCommitments ?? [],
+						),
+						...mapCandidateActionsToSceneFactCommits(
+							normalizedTurnInput?.candidateActions ?? [],
+						),
+					]),
 					sceneFactWritePath:
 						this.talkerThinkerConfig.sceneFactWritePath ?? false,
 					viewerSnapshot: resolvedViewerSnapshot,
@@ -1996,6 +2013,121 @@ function mapActionCommitmentsToSceneFactCommits(
 		}
 	}
 	return commits;
+}
+
+export function mapCandidateActionsToSceneFactCommits(
+	candidateActions: CandidateAction[],
+): SceneFactCommit[] {
+	const committed = new Map<string, SceneFactCommit>();
+
+	for (const action of candidateActions) {
+		if (action.confidence !== "high") continue;
+
+		const target = action.target;
+		if (!target) continue;
+
+		if (action.actionFamily === "move") {
+			const dest = action.location;
+			if (!dest) continue;
+
+			const factKey = `location:${target}`;
+			if (!isValidSceneFactKey(factKey)) continue;
+
+			committed.set(factKey, {
+				scope: "area",
+				factKey,
+				value: dest,
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			});
+		} else if (action.actionFamily === "possession") {
+			const verb = action.verb.toLowerCase();
+			const holderKey = `holder:${target}`;
+			if (!isValidSceneFactKey(holderKey)) continue;
+
+			if (["hand", "show", "递给", "交给", "展示"].some((v) => verb.includes(v))) {
+				continue;
+			}
+
+			if (["take", "pick up", "hold", "拿起", "拿出"].some((v) => verb.includes(v))) {
+				committed.set(holderKey, {
+					scope: "area",
+					factKey: holderKey,
+					value: "user",
+					sourceKind: "action_commitment",
+					exposureScope: "area_visible",
+				});
+			} else if (["put", "放下"].some((v) => verb.includes(v))) {
+				committed.set(holderKey, {
+					scope: "area",
+					factKey: holderKey,
+					value: null,
+					sourceKind: "action_commitment",
+					exposureScope: "area_visible",
+				});
+
+				if (action.location) {
+					const locKey = `location:${target}`;
+					if (isValidSceneFactKey(locKey)) {
+						committed.set(locKey, {
+							scope: "area",
+							factKey: locKey,
+							value: action.location,
+							sourceKind: "action_commitment",
+							exposureScope: "area_visible",
+						});
+					}
+				}
+			}
+		} else if (action.actionFamily === "status_change") {
+			const verb = action.verb.toLowerCase();
+			const statusKey = `status:${target}`;
+			if (!isValidSceneFactKey(statusKey)) continue;
+
+			const verbValueMap: Record<string, string> = {
+				open: "open",
+				打开: "open",
+				close: "closed",
+				关上: "closed",
+				lock: "locked",
+				锁上: "locked",
+				unlock: "unlocked",
+				解锁: "unlocked",
+				light: "lit",
+				点亮: "lit",
+				extinguish: "dark",
+				熄灭: "dark",
+			};
+
+			let statusValue: string | undefined;
+			for (const [key, value] of Object.entries(verbValueMap)) {
+				if (verb.includes(key)) {
+					statusValue = value;
+					break;
+				}
+			}
+
+			if (!statusValue) continue;
+
+			committed.set(statusKey, {
+				scope: "area",
+				factKey: statusKey,
+				value: statusValue,
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			});
+		}
+	}
+
+	return Array.from(committed.values());
+}
+
+function mergeSceneFactCommits(commits: SceneFactCommit[]): SceneFactCommit[] {
+	const seen = new Map<string, SceneFactCommit>();
+	for (const commit of commits) {
+		seen.set(`${commit.scope}:${commit.factKey}`, commit);
+	}
+	return Array.from(seen.values());
 }
 
 function getLatestUserMessage(messages: ChatMessage[]): string {

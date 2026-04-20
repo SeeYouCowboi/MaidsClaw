@@ -10,8 +10,12 @@ import type {
 } from "../../src/core/models/chat-provider.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { InteractionRecord } from "../../src/interaction/contracts.js";
-import { TurnService } from "../../src/runtime/turn-service.js";
+import {
+	mapCandidateActionsToSceneFactCommits,
+	TurnService,
+} from "../../src/runtime/turn-service.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
+import type { CandidateAction } from "../../src/runtime/speaker-normalization.js";
 import { normalizeTurnInput } from "../../src/runtime/speaker-normalization.js";
 
 const SESSION_ID = "session:turn-normalization";
@@ -370,5 +374,184 @@ describe("TurnService speaker normalization integration", () => {
 			| undefined;
 
 		expect(payload?.normalizedTurnInput).toEqual(normalizeTurnInput(USER_TEXT));
+	});
+});
+
+describe("mapCandidateActionsToSceneFactCommits", () => {
+	it("take action → holder:<target>=user", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "take",
+				target: "pocket_watch",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+		]);
+
+		expect(commits).toEqual([
+			{
+				scope: "area",
+				factKey: "holder:pocket_watch",
+				value: "user",
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+		]);
+	});
+
+	it("put action with location → holder null + location", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "put",
+				target: "pocket_watch",
+				location: "tea_room",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+		]);
+
+		expect(commits).toEqual([
+			{
+				scope: "area",
+				factKey: "holder:pocket_watch",
+				value: null,
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+			{
+				scope: "area",
+				factKey: "location:pocket_watch",
+				value: "tea_room",
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+		]);
+	});
+
+	it("open action → status:<target>=open", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "open",
+				target: "cabinet_door",
+				confidence: "high",
+				actionFamily: "status_change",
+			},
+		]);
+
+		expect(commits).toEqual([
+			{
+				scope: "area",
+				factKey: "status:cabinet_door",
+				value: "open",
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+		]);
+	});
+
+	it("self-movement (no target) → no commit", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "go",
+				confidence: "high",
+				actionFamily: "move",
+			},
+		]);
+
+		expect(commits).toEqual([]);
+	});
+
+	it("hand/show actions → no commit (require explicit actionCommitments)", () => {
+		const handCommits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "hand",
+				target: "book",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+		]);
+
+		const showCommits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "show",
+				target: "book",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+		]);
+
+		expect(handCommits).toEqual([]);
+		expect(showCommits).toEqual([]);
+	});
+
+	it("move with target+location → location commit", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "move",
+				target: "pocket_watch",
+				location: "shelf",
+				confidence: "high",
+				actionFamily: "move",
+			},
+		]);
+
+		expect(commits).toEqual([
+			{
+				scope: "area",
+				factKey: "location:pocket_watch",
+				value: "shelf",
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+		]);
+	});
+
+	it("low-confidence → no commit", () => {
+		const commits = mapCandidateActionsToSceneFactCommits([
+			{
+				verb: "take",
+				target: "watch",
+				confidence: "low",
+				actionFamily: "possession",
+			},
+		]);
+
+		expect(commits).toEqual([]);
+	});
+
+	it("dedups by factKey with last-in-order wins", () => {
+		const actions: CandidateAction[] = [
+			{
+				verb: "take",
+				target: "watch",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+			{
+				verb: "put",
+				target: "watch",
+				location: "desk",
+				confidence: "high",
+				actionFamily: "possession",
+			},
+		];
+
+		const commits = mapCandidateActionsToSceneFactCommits(actions);
+		expect(commits).toEqual([
+			{
+				scope: "area",
+				factKey: "holder:watch",
+				value: null,
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+			{
+				scope: "area",
+				factKey: "location:watch",
+				value: "desk",
+				sourceKind: "action_commitment",
+				exposureScope: "area_visible",
+			},
+		]);
 	});
 });
