@@ -29,6 +29,7 @@ const SYSTEM_SLOTS = new Set<PromptSectionSlot>([
   PromptSectionSlot.WORLD_RULES,
   PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,
+  PromptSectionSlot.TURN_CONTEXT,
   PromptSectionSlot.TYPED_RETRIEVAL,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,

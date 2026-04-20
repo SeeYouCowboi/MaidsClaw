@@ -15,7 +15,11 @@
     "enabled": false,
     "stalenessThreshold": 2,
     "softBlockTimeoutMs": 3000,
-    "softBlockPollIntervalMs": 500
+    "softBlockPollIntervalMs": 500,
+    "speakerNormalizationGate": true,
+    "sceneFactWritePath": false,
+    "sceneRetrieval": false,
+    "legacyAreaStateCompat": true
   },
   "runtime": {
     "gateway": {

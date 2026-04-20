@@ -63,6 +63,7 @@ export interface AgentRunRequest {
 	sessionId: string;
 	requestId?: string;
 	messages: ChatMessage[];
+	contextText?: string;
 	delegationDepth?: number;
 	parentRunId?: string;
 	traceStore?: TraceStore;
@@ -856,6 +857,7 @@ export class AgentLoop {
 			viewerContext,
 			userMessage: getLatestUserMessage(request.messages),
 			conversationMessages: request.messages,
+			contextText: request.contextText,
 			budget: calculateTokenBudget(
 				this.profile,
 				DEFAULT_PROMPT_MAX_CONTEXT_TOKENS,

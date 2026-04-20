@@ -499,6 +499,171 @@ describe("normalizeRpTurnOutcome", () => {
   });
 });
 
+describe("actionCommitments", () => {
+  it("actionCommitments round-trip", () => {
+    const payload = {
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "Committed scene updates.",
+      actionCommitments: [
+        {
+          effect: "move",
+          summary: "Moved to tavern",
+          commits: [
+            {
+              scope: "area",
+              exposureScope: "area_visible",
+              factKey: "location:tavern",
+              value: { pointer: "tavern" },
+            },
+          ],
+        },
+        {
+          effect: "status_change",
+          summary: "Lantern is lit",
+          commits: [
+            {
+              scope: "world",
+              exposureScope: "world_public",
+              factKey: "status:lantern",
+              value: "lit",
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = normalizeRpTurnOutcome(payload);
+    expect(result.actionCommitments).toHaveLength(2);
+    expect(result.actionCommitments).toEqual(payload.actionCommitments);
+  });
+
+  it("malformed actionCommitments entries are filtered", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "Filtered.",
+      actionCommitments: [
+        {
+          effect: "move",
+          summary: "Valid",
+          commits: [],
+        },
+        {
+          effect: "teleport",
+          summary: "Invalid effect",
+          commits: [],
+        },
+      ],
+    });
+
+    expect(result.actionCommitments).toHaveLength(1);
+    expect(result.actionCommitments?.[0]?.effect).toBe("move");
+  });
+
+  it("sceneFactBinding with valid factKey is preserved", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "bind-valid",
+              holderId: { kind: "special", value: "self" },
+              claim: "I am at the tavern",
+              entityRefs: [{ kind: "pointer_key", value: "location:tavern" }],
+              stance: "accepted",
+              basis: "belief",
+              sceneFactBinding: {
+                scope: "area",
+                factKey: "location:tavern",
+                areaId: 7,
+                expectedValue: { pointer: "tavern" },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.sceneFactBinding).toEqual({
+      scope: "area",
+      factKey: "location:tavern",
+      areaId: 7,
+      expectedValue: { pointer: "tavern" },
+    });
+  });
+
+  it("sceneFactBinding with invalid factKey is dropped", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+      privateCognition: {
+        schemaVersion: "rp_private_cognition_v4",
+        ops: [
+          {
+            op: "upsert",
+            record: {
+              kind: "assertion",
+              key: "bind-invalid",
+              holderId: { kind: "special", value: "self" },
+              claim: "Panic is in the room",
+              entityRefs: [{ kind: "special", value: "user" }],
+              stance: "accepted",
+              basis: "belief",
+              sceneFactBinding: {
+                scope: "world",
+                factKey: "mood:panic",
+                expectedValue: true,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const op = result.privateCognition?.ops[0];
+    if (!op || op.op !== "upsert" || op.record.kind !== "assertion") {
+      throw new Error("expected assertion upsert");
+    }
+
+    expect(op.record.sceneFactBinding).toBeUndefined();
+    expect(op.record.stance).toBe("accepted");
+    expect(op.record.basis).toBe("belief");
+  });
+
+  it("legacyAreaStateCompat=false rejects areaStateArtifacts", () => {
+    const payload = {
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "legacy payload",
+      areaStateArtifacts: [{ key: "location:tavern", value: "x" }],
+    };
+
+    expect(() =>
+      normalizeRpTurnOutcome(payload, { legacyAreaStateCompat: false }),
+    ).toThrow("RP_TURN_OUTCOME_INVALID");
+  });
+
+  it("legacyAreaStateCompat=true allows legacy areaStateArtifacts", () => {
+    const payload = {
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "legacy payload",
+      areaStateArtifacts: [{ key: "location:tavern", value: "x" }],
+    };
+
+    const result = normalizeRpTurnOutcome(payload, { legacyAreaStateCompat: true });
+    expect(result.publicReply).toBe("legacy payload");
+    expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
+  });
+});
+
 describe("makeSubmitRpTurnTool", () => {
   const tool = makeSubmitRpTurnTool();
 

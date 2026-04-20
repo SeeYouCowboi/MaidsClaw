@@ -113,14 +113,18 @@ export type AuthConfigResult =
 export type RuntimeConfig = {
   memory?: MemoryConfig;
   lightweightLlm?: LightweightLlmConfig;
-	talkerThinker?: {
-	    enabled: boolean;
-	    stalenessThreshold: number;
-	    softBlockTimeoutMs: number;
-	    softBlockPollIntervalMs: number;
-	    globalConcurrencyCap?: number;
-	    canonicalizationSimilarityThreshold?: number;
-	  };
+  talkerThinker?: {
+    enabled: boolean;
+    stalenessThreshold: number;
+    softBlockTimeoutMs: number;
+    softBlockPollIntervalMs: number;
+    globalConcurrencyCap?: number;
+    canonicalizationSimilarityThreshold?: number;
+    speakerNormalizationGate?: boolean;
+    sceneFactWritePath?: boolean;
+    sceneRetrieval?: boolean;
+    legacyAreaStateCompat?: boolean;
+  };
   runtime?: {
     gateway?: {
       corsAllowedOrigins?: string[];

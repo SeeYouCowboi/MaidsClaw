@@ -217,6 +217,51 @@ function formatConfigErrors(
   return errors.map((error) => `${error.field}: ${error.message}`).join("; ");
 }
 
+type TalkerThinkerRolloutFlags = {
+  speakerNormalizationGate: boolean;
+  sceneFactWritePath: boolean;
+  sceneRetrieval: boolean;
+  legacyAreaStateCompat: boolean;
+};
+
+function describeTalkerThinkerRolloutFlags(
+  flags: TalkerThinkerRolloutFlags,
+): string {
+  return `speakerNormalizationGate=${flags.speakerNormalizationGate},sceneFactWritePath=${flags.sceneFactWritePath},sceneRetrieval=${flags.sceneRetrieval},legacyAreaStateCompat=${flags.legacyAreaStateCompat}`;
+}
+
+function assertSupportedTalkerThinkerRolloutMatrix(
+  flags: TalkerThinkerRolloutFlags,
+): void {
+  const isAllowed =
+    // foundation
+    (flags.speakerNormalizationGate === true &&
+      flags.sceneFactWritePath === false &&
+      flags.sceneRetrieval === false &&
+      flags.legacyAreaStateCompat === true) ||
+    // writer-bake
+    (flags.speakerNormalizationGate === true &&
+      flags.sceneFactWritePath === true &&
+      flags.sceneRetrieval === false &&
+      flags.legacyAreaStateCompat === true) ||
+    // retrieval-bake
+    (flags.speakerNormalizationGate === true &&
+      flags.sceneFactWritePath === true &&
+      flags.sceneRetrieval === true &&
+      flags.legacyAreaStateCompat === true) ||
+    // final-candidate
+    (flags.speakerNormalizationGate === true &&
+      flags.sceneFactWritePath === true &&
+      flags.sceneRetrieval === true &&
+      flags.legacyAreaStateCompat === false);
+
+  if (!isAllowed) {
+    throw new Error(
+      `[bootstrapRuntime] Unsupported talkerThinker rollout matrix during Tasks 1-11: (${describeTalkerThinkerRolloutFlags(flags)}). Allowed matrices: foundation=(speakerNormalizationGate=true,sceneFactWritePath=false,sceneRetrieval=false,legacyAreaStateCompat=true), writer-bake=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=false,legacyAreaStateCompat=true), retrieval-bake=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=true,legacyAreaStateCompat=true), final-candidate=(speakerNormalizationGate=true,sceneFactWritePath=true,sceneRetrieval=true,legacyAreaStateCompat=false).`,
+    );
+  }
+}
+
 function isSensitiveHeaderName(headerName: string): boolean {
   const normalized = headerName.replace(/[\s_-]/g, "").toLowerCase();
   return (
@@ -900,19 +945,41 @@ export function bootstrapRuntime(
   const thinkerGlobalConcurrencyCap =
     runtimeConfig.talkerThinker?.globalConcurrencyCap;
 
+  // Extract talkerThinker config with defaults.
+  // New rollout flags use omitted-key defaults for the Tasks 1-11 matrix.
+  const talkerThinkerFromConfig = runtimeConfig.talkerThinker;
+  const talkerThinkerConfig: RuntimeBootstrapResult["talkerThinkerConfig"] = {
+    enabled: talkerThinkerFromConfig?.enabled ?? false,
+    stalenessThreshold: talkerThinkerFromConfig?.stalenessThreshold ?? 2,
+    softBlockTimeoutMs: talkerThinkerFromConfig?.softBlockTimeoutMs ?? 3000,
+    softBlockPollIntervalMs: talkerThinkerFromConfig?.softBlockPollIntervalMs ?? 500,
+    ...(typeof talkerThinkerFromConfig?.canonicalizationSimilarityThreshold ===
+      "number"
+      ? {
+          canonicalizationSimilarityThreshold:
+            talkerThinkerFromConfig.canonicalizationSimilarityThreshold,
+        }
+      : {}),
+    speakerNormalizationGate:
+      talkerThinkerFromConfig?.speakerNormalizationGate ?? true,
+    sceneFactWritePath: talkerThinkerFromConfig?.sceneFactWritePath ?? false,
+    sceneRetrieval: talkerThinkerFromConfig?.sceneRetrieval ?? false,
+    legacyAreaStateCompat: talkerThinkerFromConfig?.legacyAreaStateCompat ?? true,
+  };
+
+  assertSupportedTalkerThinkerRolloutMatrix({
+    speakerNormalizationGate: talkerThinkerConfig.speakerNormalizationGate,
+    sceneFactWritePath: talkerThinkerConfig.sceneFactWritePath,
+    sceneRetrieval: talkerThinkerConfig.sceneRetrieval,
+    legacyAreaStateCompat: talkerThinkerConfig.legacyAreaStateCompat,
+  });
+
   const resolvedJobPersistence: JobPersistence =
     options.jobPersistence ??
     createJobPersistence("pg", {
       pgFactory,
     });
 
-  // Extract talkerThinker config with defaults
-  const talkerThinkerConfig = runtimeConfig.talkerThinker ?? {
-    enabled: false,
-    stalenessThreshold: 2,
-    softBlockTimeoutMs: 3000,
-    softBlockPollIntervalMs: 500,
-  };
   const runtimeConfigSnapshot: RuntimeConfig = {
     ...runtimeConfig,
     talkerThinker: {
@@ -920,6 +987,17 @@ export function bootstrapRuntime(
       stalenessThreshold: talkerThinkerConfig.stalenessThreshold,
       softBlockTimeoutMs: talkerThinkerConfig.softBlockTimeoutMs,
       softBlockPollIntervalMs: talkerThinkerConfig.softBlockPollIntervalMs,
+      speakerNormalizationGate: talkerThinkerConfig.speakerNormalizationGate,
+      sceneFactWritePath: talkerThinkerConfig.sceneFactWritePath,
+      sceneRetrieval: talkerThinkerConfig.sceneRetrieval,
+      legacyAreaStateCompat: talkerThinkerConfig.legacyAreaStateCompat,
+      ...(typeof talkerThinkerConfig.canonicalizationSimilarityThreshold ===
+      "number"
+        ? {
+            canonicalizationSimilarityThreshold:
+              talkerThinkerConfig.canonicalizationSimilarityThreshold,
+          }
+        : {}),
       ...(typeof thinkerGlobalConcurrencyCap === "number"
         ? { globalConcurrencyCap: thinkerGlobalConcurrencyCap }
         : {}),

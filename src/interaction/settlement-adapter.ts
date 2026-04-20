@@ -1,4 +1,5 @@
 import type {
+	ActionCommitment,
 	ConflictFactor,
 	PinnedSummaryProposal,
 	PrivateCognitionCommitV4,
@@ -23,8 +24,10 @@ export type NormalizedSettlementPayload = {
 	pinnedSummaryProposal?: PinnedSummaryProposal;
 	relationIntents: RelationIntent[];
 	conflictFactors: ConflictFactor[];
+	actionCommitments: ActionCommitment[];
 	cognitiveSketchSource?: TurnSettlementPayload["cognitiveSketchSource"];
 	correctionSuspected?: boolean;
+	normalizedTurnInput?: TurnSettlementPayload["normalizedTurnInput"];
 };
 
 export function detectSettlementVersion(
@@ -63,8 +66,14 @@ export function normalizeSettlementPayload(
 		conflictFactors: Array.isArray(payload.conflictFactors)
 			? payload.conflictFactors
 			: [],
+		actionCommitments: Array.isArray(payload.actionCommitments)
+			? payload.actionCommitments
+			: [],
 		...(payload.cognitiveSketchSource !== undefined ? { cognitiveSketchSource: payload.cognitiveSketchSource } : {}),
 		...(payload.correctionSuspected !== undefined ? { correctionSuspected: payload.correctionSuspected } : {}),
+		...(payload.normalizedTurnInput !== undefined
+			? { normalizedTurnInput: payload.normalizedTurnInput }
+			: {}),
 	};
 }
 

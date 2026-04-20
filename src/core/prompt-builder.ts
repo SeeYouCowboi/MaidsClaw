@@ -222,9 +222,7 @@ export class PromptBuilder {
 	async build(input: BuildPromptInput): Promise<BuildPromptOutput> {
 		const slotContent = new Map<PromptSectionSlot, string>();
 		const conversationContent = JSON.stringify(input.conversationMessages);
-		const loreQuery = input.contextText
-			? `${input.userMessage}\n${input.contextText}`
-			: input.userMessage;
+		const loreQuery = input.userMessage;
 
 		if (input.profile.role === "maiden") {
 			slotContent.set(
@@ -255,6 +253,12 @@ export class PromptBuilder {
 				PromptSectionSlot.RECENT_COGNITION,
 				await this.getRecentCognition(input.viewerContext),
 			);
+			if (input.isTalkerMode && input.contextText) {
+				slotContent.set(
+					PromptSectionSlot.TURN_CONTEXT,
+					this.getTurnContext(input.contextText),
+				);
+			}
 			slotContent.set(
 				PromptSectionSlot.TYPED_RETRIEVAL,
 				await this.getTypedRetrievalSurface(
@@ -465,6 +469,17 @@ export class PromptBuilder {
 			"",
 			raw,
 			"</your_prior_internal_notes>",
+		].join("\n");
+	}
+
+	private getTurnContext(contextText: string): string {
+		if (contextText.trim() === "") {
+			return "";
+		}
+		return [
+			"<normalized_turn_input>",
+			contextText,
+			"</normalized_turn_input>",
 		].join("\n");
 	}
 

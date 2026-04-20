@@ -124,6 +124,10 @@ export type RuntimeBootstrapResult = {
 		softBlockTimeoutMs: number;
 		softBlockPollIntervalMs: number;
 		canonicalizationSimilarityThreshold?: number;
+		speakerNormalizationGate: boolean;
+		sceneFactWritePath: boolean;
+		sceneRetrieval: boolean;
+		legacyAreaStateCompat: boolean;
 	};
 	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;

@@ -95,6 +95,12 @@ export type AssertionRecordV4 = CognitionRecordBase & {
   claimedGroundingRefs?: AssertionGroundingRef[];
   verifiedGroundingRefs?: AssertionGroundingRef[];
   groundingVerificationLevel?: AssertionVerificationLevel;
+  sceneFactBinding?: {
+    scope: "area" | "world";
+    factKey: string;
+    areaId?: number;
+    expectedValue: unknown;
+  };
 };
 
 export type EvaluationRecord = CognitionRecordBase & {
@@ -146,6 +152,30 @@ export type ConflictFactor = {
   note?: string;
 };
 
+export type ActionCommitmentEffect = "move" | "possession" | "status_change";
+
+export type AreaCommit = {
+  scope: "area";
+  exposureScope: "area_visible" | "system_only";
+  factKey: string;
+  value: unknown;
+};
+
+export type WorldCommit = {
+  scope: "world";
+  exposureScope: "world_public" | "system_only";
+  factKey: string;
+  value: unknown;
+};
+
+export type SceneCommit = AreaCommit | WorldCommit;
+
+export type ActionCommitment = {
+  effect: ActionCommitmentEffect;
+  summary: string;
+  commits: SceneCommit[];
+};
+
 export type PinnedSummaryProposal = {
   proposedText: string;
   rationale?: string;
@@ -187,6 +217,7 @@ export type RpTurnOutcomeSubmissionV5 = {
   pinnedSummaryProposal?: PinnedSummaryProposal;
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
+  actionCommitments?: ActionCommitment[];
 };
 
 export type CanonicalRpTurnOutcome = {
@@ -199,6 +230,7 @@ export type CanonicalRpTurnOutcome = {
   pinnedSummaryProposal?: PinnedSummaryProposal;
   relationIntents: RelationIntent[];
   conflictFactors: ConflictFactor[];
+  actionCommitments?: ActionCommitment[];
 };
 
 const V4_ASSERTION_STANCES: ReadonlySet<AssertionStance> = new Set([
@@ -243,6 +275,18 @@ const V4_ASSERTION_PROVENANCE: ReadonlySet<AssertionProvenance> = new Set([
   "legacy_unknown",
 ]);
 
+const SCENE_FACT_KEY_RE = /^(location|holder|status):[a-z0-9_-]+$/;
+
+const ACTION_COMMITMENT_EFFECTS: ReadonlySet<ActionCommitmentEffect> = new Set([
+  "move",
+  "possession",
+  "status_change",
+]);
+
+export function isValidSceneFactKey(factKey: string): boolean {
+  return SCENE_FACT_KEY_RE.test(factKey);
+}
+
 
 
 export type RpBufferedExecutionResult =
@@ -261,7 +305,10 @@ export function detectOutcomeVersion(raw: unknown): "v5" | "unknown" {
   return "unknown";
 }
 
-export function normalizeRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
+export function normalizeRpTurnOutcome(
+  raw: unknown,
+  opts?: { legacyAreaStateCompat?: boolean },
+): CanonicalRpTurnOutcome {
   if (raw === null || raw === undefined || typeof raw !== "object") {
     throw new Error("rp_turn_outcome must be a non-null object");
   }
@@ -283,14 +330,28 @@ export function normalizeRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
     );
   }
 
-  return normalizeV5Submission(obj);
+  return normalizeV5Submission(obj, opts);
 }
 
 export function validateRpTurnOutcome(raw: unknown): CanonicalRpTurnOutcome {
   return normalizeRpTurnOutcome(raw);
 }
 
-function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOutcome {
+function normalizeV5Submission(
+  obj: Record<string, unknown>,
+  opts?: { legacyAreaStateCompat?: boolean },
+): CanonicalRpTurnOutcome {
+  const legacyAreaStateCompat = opts?.legacyAreaStateCompat ?? true;
+  if (
+    !legacyAreaStateCompat
+    && Array.isArray(obj.areaStateArtifacts)
+    && obj.areaStateArtifacts.length > 0
+  ) {
+    throw new Error(
+      "RP_TURN_OUTCOME_INVALID: areaStateArtifacts is not allowed when legacyAreaStateCompat=false",
+    );
+  }
+
   const publicReply = obj.publicReply as string;
   const latentScratchpad = typeof obj.latentScratchpad === "string"
     ? obj.latentScratchpad
@@ -302,11 +363,13 @@ function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOut
   const pinnedSummaryProposal = normalizePinnedSummaryProposal(obj.pinnedSummaryProposal);
   const relationIntents = normalizeRelationIntents(obj.relationIntents);
   const conflictFactors = normalizeConflictFactors(obj.conflictFactors);
+  const actionCommitments = normalizeActionCommitments(obj.actionCommitments);
 
   const hasContent = publicReply !== ""
     || (privateCognition && privateCognition.ops.length > 0)
     || publications.length > 0
-    || privateEpisodes.length > 0;
+    || privateEpisodes.length > 0
+    || actionCommitments.length > 0;
 
   if (!hasContent) {
     throw new Error(
@@ -324,6 +387,7 @@ function normalizeV5Submission(obj: Record<string, unknown>): CanonicalRpTurnOut
     ...(pinnedSummaryProposal ? { pinnedSummaryProposal } : {}),
     relationIntents,
     conflictFactors,
+    ...(actionCommitments.length > 0 ? { actionCommitments } : {}),
   };
 }
 
@@ -600,6 +664,36 @@ function normalizeConflictFactors(raw: unknown): ConflictFactor[] {
   return factors;
 }
 
+function normalizeActionCommitments(raw: unknown): ActionCommitment[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const commitments: ActionCommitment[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    if (!ACTION_COMMITMENT_EFFECTS.has(candidate.effect as ActionCommitmentEffect)) {
+      continue;
+    }
+
+    commitments.push(cloneForNormalization(entry) as ActionCommitment);
+  }
+
+  return commitments;
+}
+
+function cloneForNormalization<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+}
+
 function normalizePrivateCommit(raw: unknown): PrivateCognitionCommitV4 | undefined {
   if (raw === undefined) {
     return undefined;
@@ -732,6 +826,8 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
   record.verifiedGroundingRefs = [];
   record.groundingVerificationLevel = "unverified";
 
+  record.sceneFactBinding = normalizeSceneFactBinding(record.sceneFactBinding);
+
   // Remove legacy proposition field after migration
   delete record.proposition;
 
@@ -760,6 +856,37 @@ function normalizeAssertionRecord(record: Record<string, unknown>): void {
       record.preContestedStance = "tentative";
     }
   }
+}
+
+function normalizeSceneFactBinding(
+  raw: unknown,
+): AssertionRecordV4["sceneFactBinding"] | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.scope !== "area" && candidate.scope !== "world") {
+    return undefined;
+  }
+
+  const factKey = typeof candidate.factKey === "string"
+    ? candidate.factKey.trim()
+    : "";
+  if (!isValidSceneFactKey(factKey)) {
+    return undefined;
+  }
+
+  if (!("expectedValue" in candidate)) {
+    return undefined;
+  }
+
+  return {
+    scope: candidate.scope,
+    factKey,
+    ...(typeof candidate.areaId === "number" ? { areaId: candidate.areaId } : {}),
+    expectedValue: candidate.expectedValue,
+  };
 }
 
 function normalizeAssertionGroundingRefs(raw: unknown): AssertionGroundingRef[] {

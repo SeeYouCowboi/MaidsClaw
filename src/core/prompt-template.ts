@@ -10,6 +10,7 @@ export enum PromptSectionSlot {
   WORLD_RULES = "world_rules",
   PINNED_SHARED = "pinned_shared",
   RECENT_COGNITION = "recent_cognition",
+  TURN_CONTEXT = "turn_context",
   /** Placeholder for typed retrieval content (T9 will fill). */
   TYPED_RETRIEVAL = "typed_retrieval",
   LORE_ENTRIES = "lore_entries",
@@ -26,6 +27,7 @@ export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.WORLD_RULES,
   PromptSectionSlot.PINNED_SHARED,
   PromptSectionSlot.RECENT_COGNITION,
+  PromptSectionSlot.TURN_CONTEXT,
   PromptSectionSlot.TYPED_RETRIEVAL,
   PromptSectionSlot.LORE_ENTRIES,
   PromptSectionSlot.OPERATIONAL_STATE,

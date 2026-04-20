@@ -3,6 +3,7 @@
 
 import type { ProjectionAppendix } from "../core/types.js";
 import type {
+  ActionCommitment,
   ConflictFactor,
   PinnedSummaryProposal,
   PrivateCognitionCommitV4,
@@ -10,6 +11,7 @@ import type {
   PublicationDeclaration,
   RelationIntent,
 } from "../runtime/rp-turn-contract.js";
+import type { NormalizedTurnInput } from "../runtime/speaker-normalization.js";
 
 type SurfacingClassification = "public_manifestation" | "latent_state_update" | "private_only";
 type AreaStateSourceType = "system" | "gm" | "simulation" | "inferred_world";
@@ -110,6 +112,7 @@ export type TurnSettlementPayload = {
   pinnedSummaryProposal?: PinnedSummaryProposal;
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
+  actionCommitments?: ActionCommitment[];
   areaStateArtifacts?: Array<{
     key: string;
     value: unknown;
@@ -133,6 +136,8 @@ export type TurnSettlementPayload = {
   /** Telemetry-only flag set when the latest user message opens with a common correction phrase. 
    *  Never gates thinker behavior. */
   correctionSuspected?: boolean;
+  /** Speaker-normalization result captured at Talker time for downstream projection/thinker paths. */
+  normalizedTurnInput?: NormalizedTurnInput;
 };
 
 export type AssistantMessagePayloadV3 = MessagePayload & {

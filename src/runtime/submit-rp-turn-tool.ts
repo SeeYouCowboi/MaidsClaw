@@ -38,6 +38,11 @@ export const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract>
     artifact_scope: "private",
     ledger_policy: "current_state",
   },
+  actionCommitments: {
+    authority_level: "agent",
+    artifact_scope: "session",
+    ledger_policy: "current_state",
+  },
   areaStateArtifacts: {
     authority_level: "agent",
     artifact_scope: "area",
@@ -189,6 +194,11 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
             },
             required: ["kind", "ref"],
           },
+        },
+        actionCommitments: {
+          type: "array",
+          description: "Structured scene-fact commitments from this agent turn. Each entry declares an effect type (move/possession/status_change), a summary, and explicit fact commits keyed by scope + factKey + value. Replaces the legacy areaStateArtifacts field for scene-write authority.",
+          items: { type: "object" },
         },
         cognitiveSketchSource: {
           type: "string",
