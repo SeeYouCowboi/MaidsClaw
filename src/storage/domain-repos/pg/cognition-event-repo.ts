@@ -5,10 +5,30 @@ import type {
 } from "../../../memory/cognition/cognition-event-repo.js";
 import type { CognitionEventRepo } from "../contracts/cognition-event-repo.js";
 
+// Mirror of the DB-level CHECK constraints on private_cognition_events. Runtime
+// values can drift from the TypeScript CognitionKind union via `as` casts or
+// malformed LLM output re-serialized into settlement payloads. Filtering here
+// turns what would be a batch-level SQL failure (taking down all sibling rows
+// in the same transaction) into a per-row skip with an explicit warn log.
+const VALID_COGNITION_KINDS = new Set(["assertion", "evaluation", "commitment"]);
+const VALID_COGNITION_OPS = new Set(["upsert", "retract"]);
+
 export class PgCognitionEventRepo implements CognitionEventRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
   async append(params: CognitionEventAppendParams): Promise<number | null> {
+    if (!VALID_COGNITION_KINDS.has(params.kind)) {
+      console.warn(
+        `[cognition-event-repo] skipping insert: invalid kind=${JSON.stringify(params.kind)} agent=${params.agentId} key=${params.cognitionKey} settlement=${params.settlementId}`,
+      );
+      return null;
+    }
+    if (!VALID_COGNITION_OPS.has(params.op)) {
+      console.warn(
+        `[cognition-event-repo] skipping insert: invalid op=${JSON.stringify(params.op)} agent=${params.agentId} key=${params.cognitionKey} settlement=${params.settlementId}`,
+      );
+      return null;
+    }
     const now = Date.now();
 
     const rows = await this.sql`

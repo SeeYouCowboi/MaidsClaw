@@ -227,6 +227,13 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
 
   async markThinkerProjecting(settlementId: string, agentId: string): Promise<void> {
     const now = Date.now();
+    // Stale `thinker_projecting` rows older than this threshold are treated as
+    // zombies (process crash / SIGKILL between tx commit and ledger mark in the
+    // worst case, which with the Fix-1 transactional claim should be rare). We
+    // re-claim them so they can be retried. 10 minutes comfortably exceeds the
+    // typical Thinker LLM + projection latency (< 60s).
+    const ZOMBIE_THRESHOLD_MS = 10 * 60 * 1000;
+    const staleBefore = now - ZOMBIE_THRESHOLD_MS;
 
     const updated = await this.sql`
       UPDATE settlement_processing_ledger
@@ -238,12 +245,15 @@ export class PgSettlementLedgerRepo implements SettlementLedgerRepo {
           error_message = NULL,
           updated_at    = ${now}
       WHERE settlement_id = ${settlementId}
-        AND status IN ('talker_committed', 'failed_retryable')
+        AND (
+          status IN ('talker_committed', 'failed_retryable')
+          OR (status = 'thinker_projecting' AND claimed_at < ${staleBefore})
+        )
     `;
 
     if (updated.count === 0) {
       throw new Error(
-        `markThinkerProjecting: no row with status talker_committed or failed_retryable for settlement ${settlementId}`,
+        `markThinkerProjecting: no row with claimable status for settlement ${settlementId}`,
       );
     }
   }

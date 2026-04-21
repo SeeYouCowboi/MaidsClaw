@@ -724,6 +724,12 @@ export class PgAreaWorldProjectionRepo implements AreaWorldProjectionRepo {
 	}
 
 	private jsonb(value: unknown) {
+		// Scene-fact semantics require preserving JSON null (e.g. holder:<item>
+		// = null meaning "no one holds it"). postgres.js's `sql.json(null)`
+		// produces SQL NULL, which violates value_json NOT NULL and silently
+		// drops the insert. Route through an explicit JSON-string → ::jsonb
+		// cast using parameter binding (safe, no injection) so the JSON null
+		// literal survives to the column.
 		if (typeof value === "string") {
 			try {
 				return this.sql.json(JSON.parse(value) as Record<string, never>);
@@ -731,7 +737,14 @@ export class PgAreaWorldProjectionRepo implements AreaWorldProjectionRepo {
 				return this.sql.json(value as never);
 			}
 		}
-		return this.sql.json((value ?? {}) as Record<string, never>);
+		if (value === null || value === undefined) {
+			// Static literal — no user input, no injection risk. Needed because
+			// postgres.js has no fragment-level API for emitting the bare JSON
+			// null literal; `sql.json(null)` → SQL NULL, and parameterized
+			// "null" strings cast to JSON "null" (string) rather than null.
+			return this.sql.unsafe("'null'::jsonb");
+		}
+		return this.sql.json(value as Record<string, never>);
 	}
 
 	private resolveSettlementId(

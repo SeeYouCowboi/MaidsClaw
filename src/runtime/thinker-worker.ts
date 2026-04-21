@@ -47,6 +47,7 @@ import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cog
 import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
 import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
+import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
 
 import {
 	type ActionCommitment,
@@ -1586,10 +1587,9 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				sanitizeThinkerOutcome(structuredClone(bufferedResult.outcome)),
 			);
 
-			const sceneFactCommits: SceneFactCommit[] =
-				mapActionCommitmentsToSceneFactCommits(
-					canonicalOutcome.actionCommitments ?? [],
-				);
+			// Scene-fact projection has moved to the Talker commit path
+			// (turn-service.writeSceneFactCommitsFromTalker). The Thinker no longer
+			// needs to aggregate batch-member actionCommitments for scene writes.
 			const relationIntents = canonicalOutcome.relationIntents ?? [];
 			const conflictFactors = canonicalOutcome.conflictFactors ?? [];
 
@@ -1621,83 +1621,21 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const recentCognitionSlotJson = JSON.stringify(slotEntries);
 
 			// --- Per-settlement episode grouping (batch mode) ---
-			let effectiveEpisodes = canonicalOutcome.privateEpisodes ?? [];
+			//
+			// Ledger claim + data writes + markApplied now all happen inside the projection
+			// transaction below. This replaces the previous pattern where markThinkerProjecting
+			// was called outside the tx (which caused zombie `thinker_projecting` rows whenever
+			// the tx rolled back). See root-cause plan for details.
 			const perMemberEpisodes = new Map<string, PrivateEpisodeArtifact[]>();
 			const projectedMembers = new Set<string>();
-
-			if (batchMode) {
-				const grouped = parseEpisodesBySettlement(
-					canonicalOutcome.privateEpisodes ?? [],
-					batchMemberSettlementIds,
-					effectiveSettlementId,
-				);
-
-				// Mark effective settlement as projecting (abort if fails)
-				try {
-					await deps.settlementLedger?.markThinkerProjecting(
+			const grouped = batchMode
+				? parseEpisodesBySettlement(
+						canonicalOutcome.privateEpisodes ?? [],
+						batchMemberSettlementIds,
 						effectiveSettlementId,
-						payload.agentId,
-					);
-					projectedMembers.add(effectiveSettlementId);
-				} catch (ledgerErr) {
-					console.error(
-						"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
-						ledgerErr,
-					);
-					return;
-				}
-
-				// Mark non-effective members as projecting; fall back on failure
-				for (const memberId of batchMemberSettlementIds) {
-					if (memberId === effectiveSettlementId) continue;
-					try {
-						await deps.settlementLedger?.markThinkerProjecting(
-							memberId,
-							payload.agentId,
-						);
-						projectedMembers.add(memberId);
-					} catch (ledgerErr) {
-						console.warn(
-							`[thinker_worker] markThinkerProjecting for batch member ${memberId} failed — episodes fall back to ${effectiveSettlementId}:`,
-							ledgerErr,
-						);
-						const fallback = grouped.get(memberId) ?? [];
-						if (fallback.length > 0) {
-							const effectiveGroup = grouped.get(effectiveSettlementId);
-							if (effectiveGroup) {
-								effectiveGroup.push(...fallback);
-							}
-							grouped.set(memberId, []);
-						}
-						try {
-							await deps.settlementLedger?.markReplayedNoop(memberId);
-						} catch { /* non-fatal */ }
-					}
-				}
-
-				effectiveEpisodes = grouped.get(effectiveSettlementId) ?? [];
-				for (const memberId of batchMemberSettlementIds) {
-					if (memberId !== effectiveSettlementId && projectedMembers.has(memberId)) {
-						const eps = grouped.get(memberId) ?? [];
-						if (eps.length > 0) perMemberEpisodes.set(memberId, eps);
-					}
-				}
-			} else {
-				// Single-turn mode: mark projecting as before
-				try {
-					await deps.settlementLedger?.markThinkerProjecting(
-						effectiveSettlementId,
-						payload.agentId,
-					);
-					projectedMembers.add(effectiveSettlementId);
-				} catch (ledgerErr) {
-					console.error(
-						"[thinker_worker] markThinkerProjecting failed — aborting to prevent duplicate projection:",
-						ledgerErr,
-					);
-					return;
-				}
-			}
+					)
+				: null;
+			let effectiveEpisodes = canonicalOutcome.privateEpisodes ?? [];
 
 			const viewerSnapshot = settlementPayload.viewerSnapshot
 				? {
@@ -1706,30 +1644,15 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					}
 				: undefined;
 
-			const params: SettlementProjectionParams = {
-				settlementId: effectiveSettlementId,
-				sessionId: payload.sessionId,
-				agentId: payload.agentId,
-				requestId: batchMode
-					? effectiveSettlementId.replace(/^stl:/, "")
-					: (payload.requestId ?? effectiveSettlementId.replace(/^stl:/, "")),
-				cognitionOps: canonicalizedCognitionOps,
-				privateEpisodes: effectiveEpisodes,
-				publications: canonicalOutcome.publications ?? [],
-				areaStateArtifacts: [],
-				sceneFactCommits,
-				sceneFactWritePath: deps.sceneFactWritePath ?? false,
-				recentCognitionSlotJson,
-				committedAt,
-				viewerSnapshot,
-			};
-
 			let changedNodeRefs: NodeRef[] = [];
+			let leaderClaimFailed = false;
+			try {
 			await deps.sql.begin(async (tx) => {
 				const txSql = tx as unknown as postgres.Sql;
 				const txEpisodeRepo = new PgEpisodeRepo(txSql);
 				const txCognitionProjectionRepo = new PgCognitionProjectionRepo(txSql);
 				const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
+				const txLedger = new PgSettlementLedgerRepo(txSql);
 				const repoOverrides = {
 					episodeRepo: txEpisodeRepo,
 					cognitionEventRepo: new PgCognitionEventRepo(txSql),
@@ -1744,6 +1667,67 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					),
 				};
 
+				// ──── Phase 1: Claim ledger state atomically with the projection ────
+				// Leader claim failure = another worker has it (or row is zombied <10min ago).
+				// We set a flag and throw so the tx rolls back; the outer handler treats
+				// this as "not my turn, try next wake-up" (no markFailed).
+				try {
+					await txLedger.markThinkerProjecting(effectiveSettlementId, payload.agentId);
+					projectedMembers.add(effectiveSettlementId);
+				} catch (claimErr) {
+					leaderClaimFailed = true;
+					throw claimErr;
+				}
+
+				// Non-leader members: soft-fail — skip this batch's handling of them
+				// and merge their episodes into the leader's group so they aren't lost.
+				if (batchMode && grouped) {
+					for (const memberId of batchMemberSettlementIds) {
+						if (memberId === effectiveSettlementId) continue;
+						try {
+							await txLedger.markThinkerProjecting(memberId, payload.agentId);
+							projectedMembers.add(memberId);
+						} catch {
+							const fallback = grouped.get(memberId) ?? [];
+							if (fallback.length > 0) {
+								const leaderGroup = grouped.get(effectiveSettlementId);
+								if (leaderGroup) leaderGroup.push(...fallback);
+								grouped.set(memberId, []);
+							}
+						}
+					}
+					effectiveEpisodes = grouped.get(effectiveSettlementId) ?? [];
+					for (const memberId of batchMemberSettlementIds) {
+						if (memberId !== effectiveSettlementId && projectedMembers.has(memberId)) {
+							const eps = grouped.get(memberId) ?? [];
+							if (eps.length > 0) perMemberEpisodes.set(memberId, eps);
+						}
+					}
+				}
+
+				// Build params inside the tx (after episode grouping is finalized).
+				const params: SettlementProjectionParams = {
+					settlementId: effectiveSettlementId,
+					sessionId: payload.sessionId,
+					agentId: payload.agentId,
+					requestId: batchMode
+						? effectiveSettlementId.replace(/^stl:/, "")
+						: (payload.requestId ?? effectiveSettlementId.replace(/^stl:/, "")),
+					cognitionOps: canonicalizedCognitionOps,
+					privateEpisodes: effectiveEpisodes,
+					publications: canonicalOutcome.publications ?? [],
+					areaStateArtifacts: [],
+					// Scene-fact writes live on the Talker commit path
+					// (turn-service.writeSceneFactCommitsFromTalker). Suppress here to
+					// avoid duplicate rows in the append-only scene_area_fact_events table.
+					sceneFactCommits: [],
+					sceneFactWritePath: deps.sceneFactWritePath ?? false,
+					recentCognitionSlotJson,
+					committedAt,
+					viewerSnapshot,
+				};
+
+				// ──── Phase 2: Data writes ────
 				// Commit effective settlement (carries cognitionOps, publications)
 				const result = await deps.projectionManager.commitSettlement(
 					params,
@@ -1901,18 +1885,23 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						);
 					}
 				}
-			});
 
-			// Mark all projected members as applied
-			for (const memberId of projectedMembers) {
-				try {
-					await deps.settlementLedger?.markApplied(memberId);
-				} catch (ledgerErr) {
-					console.warn(
-						`[thinker_worker] markApplied for ${memberId} failed (non-fatal):`,
-						ledgerErr,
-					);
+				// ──── Phase 3: Mark all projected members as applied (atomic with writes) ────
+				// Any failure here rolls back the entire projection — but markApplied is a
+				// simple UPDATE with no contention risk once we hold the row (set in Phase 1),
+				// so failure here is unexpected and the rollback is the correct response.
+				for (const memberId of projectedMembers) {
+					await txLedger.markApplied(memberId);
 				}
+			});
+			} catch (err) {
+				if (leaderClaimFailed) {
+					console.warn(
+						`[thinker_worker] leader claim for ${effectiveSettlementId} skipped (row already held or zombied < 10min ago) — will retry on next wake-up: ${err instanceof Error ? err.message : String(err)}`,
+					);
+					return;
+				}
+				throw err;
 			}
 			// [T9] CoreMemoryIndexUpdater conditional trigger (outside tx, LLM call)
 			const shouldUpdateIndex =

@@ -936,13 +936,18 @@ export class ProjectionManager {
 
     const committedTime = new Date(params.committedAt ?? Date.now());
 
+    // Sentinel for sessions without an explicitly-tracked current area. Scene facts
+    // written under this id share a single "session-root" bucket — the user can still
+    // move between areas later; until then, area-scoped commits would otherwise be
+    // silently dropped. 0 works because `area_id` has no FK constraint to entity_nodes.
+    const SESSION_ROOT_AREA_ID = 0;
+
     for (const commit of params.sceneFactCommits) {
       if (commit.scope === "area") {
         const areaId =
-          commit.areaId ?? params.viewerSnapshot?.currentLocationEntityId;
-        if (areaId === undefined) {
-          continue;
-        }
+          commit.areaId ??
+          params.viewerSnapshot?.currentLocationEntityId ??
+          SESSION_ROOT_AREA_ID;
         await areaWorldProjectionRepo.applyAreaFactCommit({
           sessionId: params.sessionId,
           areaId,

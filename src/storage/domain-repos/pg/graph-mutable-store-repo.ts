@@ -756,6 +756,22 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     settlementId: string;
     committedTime: number;
   }): Promise<number> {
+    // Runtime guard — the TypeScript Extract narrows the type at this callsite
+    // but upstream code may feed in values from structuredClone'd LLM output or
+    // `as` casts. Hitting the DB CHECK constraint would take down the whole
+    // settlement transaction; throwing here surfaces the bad row without
+    // corrupting the batch. Using throw rather than skip because this path
+    // returns a non-nullable id and callers use that id for downstream
+    // references; a skipped insert would dangle those references.
+    if (
+      params.kind !== "assertion" &&
+      params.kind !== "evaluation" &&
+      params.kind !== "commitment"
+    ) {
+      throw new Error(
+        `private_cognition_events: invalid kind=${JSON.stringify(params.kind)} key=${params.cognitionKey}`,
+      );
+    }
     const rows = await this.sql`
       INSERT INTO private_cognition_events (
         agent_id,

@@ -163,15 +163,46 @@ Example:
    - Before creating a new assertion key, mentally check: "does existingCognition already have a key for this topic?" If yes, upsert that key.
    - For evaluations: "trust/player" is the ONLY trust key for the player. Never create "trust/player_revised" etc.
    - For commitments: ONE constraint per rule. "constraint/maintain_distance" covers all distance rules — don't create "constraint/maintain_safe_distance", "constraint/maintain_tactical_distance", etc.
-8. COMMITMENT LIFECYCLE: Each turn, check if any active goal/intent/constraint has been fulfilled or is no longer relevant. If so, upsert it with status="fulfilled" or "abandoned". Do not let completed goals stay "active" forever.`;
+8. COMMITMENT LIFECYCLE: Each turn, check if any active goal/intent/constraint has been fulfilled or is no longer relevant. If so, upsert it with status="fulfilled" or "abandoned". Do not let completed goals stay "active" forever.
+
+---
+
+### 5. actionCommitments  (REQUIRED whenever the user narrates a physical action)
+
+The user's turn is pre-parsed into <normalized_turn_input> which contains speechActs, candidateActions, and a writeEligible flag. Emit actionCommitments ONLY when writeEligible is true AND speechActs contains "narrated_action".
+
+DO NOT emit actionCommitments when:
+- writeEligible is false
+- speechActs contains "question", "hypothesis", "confusion_expression", or "quoted_speech"
+- candidateActions is empty
+- the action is speculative, questioned, or inside quoted speech
+
+Format: array of { effect, summary, commits[] } where:
+- effect: "move" | "possession" | "status_change" (match candidateActions[0].actionFamily)
+- summary: one short sentence in the conversation language
+- commits: array of { scope, exposureScope, factKey, value }
+  - scope: "area" | "world". For per-item/per-object state use "area".
+  - exposureScope: "area_visible" (area) | "world_public" (world) | "system_only" (hidden)
+  - factKey regex: /^(location|holder|status):[a-z0-9_-]+$/
+    - holder:<item_id>   — value: null (put down) | "user" | "<agent_id>"
+    - status:<object_id> — value: "open"|"closed"|"locked"|"unlocked"|"lit"|"dark"
+    - location:<actor_or_item_id> — value: <area_id snake_case>
+  - The id MUST be lowercase English snake_case. Match entityRefs pointer_key values.
+
+Examples:
+- "我拿起金怀表"   → [{ effect: "possession", summary: "主人拿起金怀表", commits: [{ scope: "area", exposureScope: "area_visible", factKey: "holder:gold_pocket_watch", value: "user" }] }]
+- "我放下金怀表"   → [{ effect: "possession", summary: "主人放下金怀表", commits: [{ scope: "area", exposureScope: "area_visible", factKey: "holder:gold_pocket_watch", value: null }] }]
+- "我打开窗户"     → [{ effect: "status_change", summary: "主人打开窗户", commits: [{ scope: "area", exposureScope: "area_visible", factKey: "status:window", value: "open" }] }]
+- "我走进书房"     → [{ effect: "move", summary: "主人走进书房", commits: [{ scope: "area", exposureScope: "area_visible", factKey: "location:user", value: "study" }] }]`;
 
 // ---------------------------------------------------------------------------
 // Talker mode — lightweight instructions replacing the full cognition framework
 // ---------------------------------------------------------------------------
 const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
-Respond in character via the submit_rp_turn tool. You MUST populate BOTH fields as separate tool parameters:
+Respond in character via the submit_rp_turn tool. You MUST populate the following fields as separate tool parameters:
 - latentScratchpad: 1-3 sentences of internal reasoning, stance, intent (NOT visible to user)
 - publicReply: your in-character spoken/acted response (visible to user). This is the part the user actually sees.
+- actionCommitments: REQUIRED whenever <normalized_turn_input> contains a narrated action (see "Action Commitments" section below). Otherwise OMIT this field entirely.
 
 CRITICAL — voice & length:
 - Match the conversational warmth, register, and length defined by your persona above.
@@ -179,7 +210,76 @@ CRITICAL — voice & length:
 - Brevity is fine when the persona is naturally laconic OR when the user message itself is a one-line aside that needs only a one-line acknowledgment. Otherwise, write a full reply.
 
 IMPORTANT: latentScratchpad is a SEPARATE field in submit_rp_turn, NOT part of publicReply. Do NOT include scratchpad text inside publicReply.
-Only use these two fields. Do NOT include privateCognition, privateEpisodes, or publications.`;
+Do NOT include privateCognition, privateEpisodes, or publications — those fields belong to the Thinker. latentScratchpad + publicReply + (actionCommitments when applicable) are the only fields you should populate.
+
+---
+
+## Action Commitments (scene fact writes)
+
+The user's turn is pre-parsed into <normalized_turn_input> which contains:
+- speechActs: e.g. ["narrated_action"], ["question"], ["hypothesis", "narrated_action"]
+- candidateActions: structured action hints like [{ verb: "拿起", target: "金怀表", actionFamily: "possession", confidence: "high" }]
+- writeEligible: true iff the turn is an unambiguous narrated action that should mutate scene facts
+
+Emit actionCommitments ONLY when writeEligible is true AND speechActs contains "narrated_action" AND candidateActions is non-empty.
+
+DO NOT emit actionCommitments when:
+- writeEligible is false
+- speechActs contains "question", "hypothesis", "confusion_expression", or "quoted_speech"
+- candidateActions is empty
+- the action is speculative ("也许", "maybe"), questioned, or attributed to someone else's speech
+
+### Format
+
+actionCommitments is an ARRAY. Each entry has { effect, summary, commits[] } where:
+- effect: one of "move" | "possession" | "status_change" (match candidateActions[0].actionFamily)
+- summary: one short sentence in the conversation language describing what changed
+- commits: ARRAY of fact commits, each { scope, exposureScope, factKey, value }
+  - scope: "area" (room-scoped) or "world" (world-scoped). For per-item state use "area".
+  - exposureScope: "area_visible" (scope=area) or "world_public" (scope=world) for publicly-observable changes; "system_only" for hidden changes.
+  - factKey: MUST match regex /^(location|holder|status):[a-z0-9_-]+$/
+    - location:<item_id>   — where the item is located
+    - holder:<item_id>     — who holds the item (value: null | "user" | "<agent_snake_case>")
+    - status:<object_id>   — door/window/light state (value: "open"|"closed"|"locked"|"unlocked"|"lit"|"dark")
+  - value: the NEW state after this turn's action
+
+The item/object id in factKey MUST be lowercase English snake_case (canonical pointer), e.g. "gold_pocket_watch", "window", "library_door". Match the id used in privateEpisodes entityRefs when available.
+
+### Examples
+
+User: "我拿起金怀表。"  → candidateActions: [{verb:"拿起", target:"金怀表", actionFamily:"possession"}]
+→ actionCommitments: [{
+    effect: "possession",
+    summary: "主人拿起金怀表",
+    commits: [{ scope: "area", exposureScope: "area_visible", factKey: "holder:gold_pocket_watch", value: "user" }]
+  }]
+
+User: "我放下金怀表。"  → candidateActions: [{verb:"放下", target:"金怀表", actionFamily:"possession"}]
+→ actionCommitments: [{
+    effect: "possession",
+    summary: "主人放下金怀表",
+    commits: [{ scope: "area", exposureScope: "area_visible", factKey: "holder:gold_pocket_watch", value: null }]
+  }]
+
+User: "我打开窗户。"  → candidateActions: [{verb:"打开", target:"窗户", actionFamily:"status_change"}]
+→ actionCommitments: [{
+    effect: "status_change",
+    summary: "主人打开窗户",
+    commits: [{ scope: "area", exposureScope: "area_visible", factKey: "status:window", value: "open" }]
+  }]
+
+User: "我走进书房。"  → candidateActions: [{verb:"进入", target:"书房", actionFamily:"move"}]
+→ actionCommitments: [{
+    effect: "move",
+    summary: "主人走进书房",
+    commits: [{ scope: "area", exposureScope: "area_visible", factKey: "location:user", value: "study" }]
+  }]
+
+Counter-examples (do NOT emit actionCommitments):
+- "我是不是把表放下了？"     → speechActs: ["question"] — OMIT actionCommitments
+- "也许我应该放下金表。"     → speechActs: ["hypothesis"] — OMIT actionCommitments
+- "「我放下金表」这是我说过的吗？" → speechActs: ["quoted_speech", "question"] — OMIT
+- "我搞不清楚有没有拿起过。"  → speechActs: ["confusion_expression"] — OMIT`;
 
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;

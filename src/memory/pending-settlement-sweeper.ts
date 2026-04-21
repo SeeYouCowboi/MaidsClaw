@@ -109,6 +109,7 @@ export class PendingSettlementSweeper {
 				if (now - this.lastThinkerRecoverySweepAt >= thinkerIntervalMs) {
 					this.lastThinkerRecoverySweepAt = now;
 					await this.sweepThinkerJobs();
+					await this.logStaleThinkerProjecting();
 				}
 			}
 		} finally {
@@ -250,6 +251,48 @@ export class PendingSettlementSweeper {
 				lastError: `${error.code}: ${error.message}`,
 			});
 		}
+	}
+
+	/**
+	 * Observability: warn if any `thinker_projecting` rows are older than the
+	 * zombie threshold used by markThinkerProjecting's timeout claim (10 min).
+	 * This should normally be empty after Fix 1 (ledger claim inside projection tx).
+	 * Non-empty hits here indicate: (a) a worker process died mid-tx, or
+	 * (b) pg connection drop left a prepared-xact residue. The next thinker job
+	 * that picks up the settlement will re-claim it automatically (Fix 2); this
+	 * log is for alerting, not recovery.
+	 */
+	private async logStaleThinkerProjecting(): Promise<void> {
+		if (!this.thinkerDeps) {
+			return;
+		}
+		const { sql } = this.thinkerDeps;
+		const ZOMBIE_WARN_THRESHOLD_MS = 10 * 60_000;
+		const staleBefore = this.now() - ZOMBIE_WARN_THRESHOLD_MS;
+		const rows = await sql<
+			Array<{ settlement_id: string; claimed_at: string; claimed_by: string | null }>
+		>`
+			SELECT settlement_id, claimed_at, claimed_by
+			FROM settlement_processing_ledger
+			WHERE status = 'thinker_projecting'
+				AND claimed_at < ${staleBefore}
+			LIMIT 50
+		`;
+		if (rows.length === 0) {
+			return;
+		}
+		console.warn(
+			`[pending_settlement_sweeper] ${rows.length} stale thinker_projecting rows detected (will auto-recover on next claim). ` +
+				`Sample: ${rows
+					.slice(0, 5)
+					.map(
+						(r) =>
+							`${r.settlement_id}(claimed_by=${r.claimed_by ?? "?"}, age=${Math.round(
+								(this.now() - Number(r.claimed_at)) / 1000,
+							)}s)`,
+					)
+					.join(", ")}`,
+		);
 	}
 
 	private async sweepThinkerJobs(): Promise<void> {

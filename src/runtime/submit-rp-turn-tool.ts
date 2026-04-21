@@ -192,23 +192,36 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         },
         actionCommitments: {
           type: "array",
-          description: "Structured scene-fact commitments from this agent turn. Each entry declares an effect type (move/possession/status_change), a summary, and explicit fact commits keyed by scope + factKey + value. Replaces the legacy areaStateArtifacts field for scene-write authority.",
+          description:
+            "REQUIRED whenever the user's turn (see <normalized_turn_input> in the prompt) has speechActs containing \"narrated_action\" AND writeEligible is true. OMIT this field otherwise (questions/hypotheses/confusions/quoted_speech/pure dialogue do NOT produce commitments). " +
+            "Each entry logs one physical scene change. factKey MUST match /^(location|holder|status):[a-z0-9_-]+$/ with a lowercase English snake_case id. " +
+            "Examples — '我拿起金怀表' → [{effect:'possession', summary:'主人拿起金怀表', commits:[{scope:'area', exposureScope:'area_visible', factKey:'holder:gold_pocket_watch', value:'user'}]}]. " +
+            "'我放下金怀表' → [{effect:'possession', summary:'主人放下金怀表', commits:[{scope:'area', exposureScope:'area_visible', factKey:'holder:gold_pocket_watch', value:null}]}]. " +
+            "'我打开窗户' → [{effect:'status_change', summary:'主人打开窗户', commits:[{scope:'area', exposureScope:'area_visible', factKey:'status:window', value:'open'}]}]. " +
+            "'我走进书房' → [{effect:'move', summary:'主人走进书房', commits:[{scope:'area', exposureScope:'area_visible', factKey:'location:user', value:'study'}]}].",
           items: {
             type: "object",
             properties: {
               effect: {
                 type: "string",
                 enum: ["move", "possession", "status_change"],
+                description:
+                  "Match the actionFamily of the user's narrated action: 'move' for go/走/进入/离开, 'possession' for take/put/拿起/放下/递给, 'status_change' for open/close/lock/打开/关上/锁上.",
               },
-              summary: { type: "string" },
+              summary: {
+                type: "string",
+                description: "One short sentence in the conversation language describing what changed.",
+              },
               commits: {
                 type: "array",
+                description: "Fact commits applied to the scene. For possession: holder:<item>=user|null. For status_change: status:<object>=open|closed|locked|unlocked|lit|dark. For move: location:<actor>=<area>.",
                 items: {
                   type: "object",
                   properties: {
                     scope: {
                       type: "string",
                       enum: ["area", "world"],
+                      description: "'area' for per-room/per-object state (default), 'world' only for world-wide facts.",
                     },
                     exposureScope: {
                       type: "string",
@@ -217,9 +230,15 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
                         "world_public",
                         "system_only",
                       ],
+                      description: "'area_visible' for visible changes in a room (most common with scope=area); 'world_public' for scope=world; 'system_only' for hidden changes.",
                     },
-                    factKey: { type: "string" },
-                    value: {},
+                    factKey: {
+                      type: "string",
+                      description: "Pattern: /^(location|holder|status):[a-z0-9_-]+$/. The id after ':' must be lowercase English snake_case, matching entityRefs pointer_key when known (e.g. 'holder:gold_pocket_watch', 'status:window', 'location:user').",
+                    },
+                    value: {
+                      description: "The NEW state after the action. For holder:<item>: null (put down), 'user', or '<agent_id>'. For status:<object>: 'open'|'closed'|'locked'|'unlocked'|'lit'|'dark'. For location:<actor>: the destination area id in snake_case.",
+                    },
                   },
                   required: ["scope", "exposureScope", "factKey", "value"],
                 },

@@ -650,6 +650,15 @@ export class TurnService {
 				privateCognition: undefined,
 				privateEpisodes: undefined,
 				publications: undefined,
+				// Talker is authoritative for scene-fact writes because it sees the
+				// user's narrated_action directly. Persist actionCommitments here so
+				// the Thinker (which runs async and has no visibility into the original
+				// normalized_turn_input) does not silently drop them.
+				actionCommitments:
+					canonicalOutcome.actionCommitments &&
+					canonicalOutcome.actionCommitments.length > 0
+						? canonicalOutcome.actionCommitments
+						: undefined,
 				cognitiveSketch: effectiveSketch,
 				...(cognitiveSketchSource ? { cognitiveSketchSource } : {}),
 				...(correctionSuspected ? { correctionSuspected } : {}),
@@ -680,6 +689,25 @@ export class TurnService {
 					publicReply: effectivePublicReply,
 					userText: getLatestUserMessage(effectiveRequest.messages),
 				});
+
+				// Scene-fact projection runs synchronously on the Talker commit path.
+				// It is pure idempotent SQL (no LLM) so it does not belong behind the
+				// Thinker's async batch — if the Thinker falls behind, scene facts
+				// would otherwise be invisible to subsequent turns despite actionCommitments
+				// being persisted. The Thinker path suppresses scene-fact writes to avoid
+				// duplicate event rows (see thinker-worker.ts applyProjectionBatch).
+				if (this.talkerThinkerConfig.sceneFactWritePath) {
+					await this.writeSceneFactCommitsFromTalker({
+						repos,
+						sessionId: effectiveRequest.sessionId,
+						settlementId,
+						ownerAgentId,
+						requestId,
+						actionCommitments: canonicalOutcome.actionCommitments ?? [],
+						candidateActions: normalizedTurnInput?.candidateActions ?? [],
+						viewerSnapshot: resolvedViewerSnapshot,
+					});
+				}
 			});
 
 			settlementPayloadAfterCommit = settlementPayload;
@@ -1374,6 +1402,74 @@ export class TurnService {
 			correlatedTurnId: requestId,
 			committedAt: Date.now(),
 		});
+	}
+
+	private async writeSceneFactCommitsFromTalker(params: {
+		repos: SettlementRepos;
+		sessionId: string;
+		settlementId: string;
+		ownerAgentId: string;
+		requestId: string;
+		actionCommitments: ActionCommitment[];
+		candidateActions: CandidateAction[];
+		viewerSnapshot: TurnSettlementPayload["viewerSnapshot"];
+	}): Promise<void> {
+		const commits = mergeSceneFactCommits([
+			...mapActionCommitmentsToSceneFactCommits(params.actionCommitments),
+			...mapCandidateActionsToSceneFactCommits(params.candidateActions),
+		]);
+		if (commits.length === 0) return;
+
+		const committedTime = new Date();
+		// Sentinel for sessions without an explicitly-tracked current area
+		// (matches projection-manager.applySceneFactCommits). area_id has no FK
+		// to entity_nodes so 0 is a safe "session-root" bucket.
+		const SESSION_ROOT_AREA_ID = 0;
+
+		for (const commit of commits) {
+			try {
+				if (commit.scope === "area") {
+					const areaId =
+						commit.areaId ??
+						params.viewerSnapshot?.currentLocationEntityId ??
+						SESSION_ROOT_AREA_ID;
+					await params.repos.areaWorldProjectionRepo.applyAreaFactCommit({
+						sessionId: params.sessionId,
+						areaId,
+						factKey: commit.factKey,
+						valueJson: commit.value,
+						sourceKind: commit.sourceKind,
+						exposureScope:
+							commit.exposureScope as "area_visible" | "system_only",
+						sourceSettlementId: params.settlementId,
+						sourceAgentId: params.ownerAgentId,
+						validTime: committedTime,
+						committedTime,
+					});
+				} else {
+					await params.repos.areaWorldProjectionRepo.applyWorldFactCommit({
+						sessionId: params.sessionId,
+						factKey: commit.factKey,
+						valueJson: commit.value,
+						sourceKind: commit.sourceKind,
+						exposureScope:
+							commit.exposureScope as "world_public" | "system_only",
+						sourceSettlementId: params.settlementId,
+						sourceAgentId: params.ownerAgentId,
+						validTime: committedTime,
+						committedTime,
+					});
+				}
+			} catch (err) {
+				this.traceLog(
+					params.requestId,
+					"warn",
+					`scene_fact write failed (non-fatal): ${
+						err instanceof Error ? err.message : String(err)
+					} factKey=${commit.factKey}`,
+				);
+			}
+		}
 	}
 
 	private async commitSettlementProjectionWithRepos(params: {
