@@ -1,4 +1,7 @@
 /**
+ * @deprecated Superseded by `EntityJudgeSweeper` (LLM-judge pipeline).
+ * Kept for fallback experiments and historical baselines.
+ *
  * Entity reconciliation sweeper — Strategy B (embedding-based merge).
  *
  * Periodically (or on-demand) scans episode `entity_pointer_keys`, finds

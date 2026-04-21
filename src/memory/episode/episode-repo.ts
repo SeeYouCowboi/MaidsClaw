@@ -1,4 +1,5 @@
 import type { Db } from "../../storage/db-types.js";
+import type { RecentSessionEntity } from "../../storage/domain-repos/contracts/episode-repo.js";
 
 const VALID_CATEGORIES = new Set([
   "speech",
@@ -108,6 +109,14 @@ export class EpisodeRepository {
   }
 
   readRecentSessionEntityHints(_agentId: string, _sessionId: string, _limit: number): string[] {
+    return [];
+  }
+
+  readRecentSessionEntities(
+    _agentId: string,
+    _sessionId: string,
+    _limit: number,
+  ): RecentSessionEntity[] {
     return [];
   }
 

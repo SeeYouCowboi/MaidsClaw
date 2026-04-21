@@ -220,6 +220,11 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
   const tt = typeof obj.talkerThinker === "object" && obj.talkerThinker !== null && !Array.isArray(obj.talkerThinker)
     ? obj.talkerThinker as Record<string, unknown>
     : {};
+  const ec = typeof tt.entityCanonicalization === "object"
+    && tt.entityCanonicalization !== null
+    && !Array.isArray(tt.entityCanonicalization)
+    ? tt.entityCanonicalization as Record<string, unknown>
+    : {};
   runtime.talkerThinker = {
     enabled: typeof tt.enabled === "boolean" ? tt.enabled : false,
     stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
@@ -243,6 +248,28 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
 		...(typeof tt.canonicalizationSimilarityThreshold === "number" && Number.isFinite(tt.canonicalizationSimilarityThreshold)
 			? { canonicalizationSimilarityThreshold: tt.canonicalizationSimilarityThreshold }
 			: {}),
+    entityCanonicalization: {
+      knownEntitiesInjection:
+        typeof ec.knownEntitiesInjection === "boolean"
+          ? ec.knownEntitiesInjection
+          : true,
+      pointerKeyAliasRewrite:
+        typeof ec.pointerKeyAliasRewrite === "boolean"
+          ? ec.pointerKeyAliasRewrite
+          : true,
+      judgeModelId:
+        typeof ec.judgeModelId === "string" && ec.judgeModelId.trim().length > 0
+          ? ec.judgeModelId.trim()
+          : "minimax/MiniMax-M2.7",
+      judgeEnabled:
+        typeof ec.judgeEnabled === "boolean" ? ec.judgeEnabled : true,
+      judgeBatchIntervalMs:
+        typeof ec.judgeBatchIntervalMs === "number"
+        && Number.isFinite(ec.judgeBatchIntervalMs)
+        && ec.judgeBatchIntervalMs > 0
+          ? Math.floor(ec.judgeBatchIntervalMs)
+          : 30000,
+    },
 	};
 
   if (obj.runtime !== undefined) {

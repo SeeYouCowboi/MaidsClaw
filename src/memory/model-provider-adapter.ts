@@ -23,11 +23,20 @@ export class MemoryTaskModelProviderAdapter implements MemoryTaskModelProvider {
 
   get defaultEmbeddingModelId(): string { return this.embeddingModelId; }
 
-  async chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]> {
+  async chat(
+    messages: ChatMessage[],
+    tools: ChatToolDefinition[],
+    options?: { modelId?: string },
+  ): Promise<ToolCallResult[]> {
+    const modelId = options?.modelId ?? this.chatModelId;
+    const chatProvider =
+      modelId === this.chatModelId
+        ? this.chatProvider
+        : this.modelRegistry.resolveChat(modelId);
     const calls = new Map<string, { name: string; partialJson: string }>();
 
-    for await (const chunk of this.chatProvider.chatCompletion({
-      modelId: this.chatModelId,
+    for await (const chunk of chatProvider.chatCompletion({
+      modelId,
       messages,
       tools,
       toolChoice: { type: "any" },

@@ -32,6 +32,7 @@ const SYSTEM_SLOTS = new Set<PromptSectionSlot>([
   PromptSectionSlot.TURN_CONTEXT,
   PromptSectionSlot.TYPED_RETRIEVAL,
   PromptSectionSlot.LORE_ENTRIES,
+  PromptSectionSlot.KNOWN_ENTITIES,
   PromptSectionSlot.OPERATIONAL_STATE,
 ]);
 

@@ -39,6 +39,7 @@ import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
+import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
@@ -70,6 +71,11 @@ import {
 } from "./rp-turn-contract.js";
 import type { NormalizedTurnInput } from "./speaker-normalization.js";
 import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
+import type { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
+import {
+	canonicalizePointerKeysInCognitionOps,
+	canonicalizePointerKeysInEpisodes,
+} from "./canonicalize-pointer-keys.js";
 
 export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
 
@@ -982,6 +988,12 @@ export type ThinkerWorkerDeps = {
 	assertionCanonicalization?: AssertionCanonicalizationBundle;
 	canonicalizationSimilarityThreshold?: number;
 	sceneFactWritePath?: boolean;
+	aliasRepo?: Pick<AliasRepo, "resolveAlias" | "findEntityById">;
+	pointerKeyAliasRewrite?: boolean;
+	entityJudgeSweeper?: EntityJudgeSweeper;
+	entityJudgeEnabled?: boolean;
+	entityJudgeModelId?: string;
+	entityJudgeBatchIntervalMs?: number;
 };
 
 function mapActionCommitmentsToSceneFactCommits(
@@ -1278,6 +1290,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			"[thinker_worker] assertionCanonicalization bundle absent — canonicalization will be skipped",
 		);
 	}
+	const entityJudgeLastRunBySession = new Map<string, number>();
 	return async (job: { payload: unknown }): Promise<void> => {
 		// Handle both object payloads and legacy double-JSON-encoded string payloads
 		const rawPayload = job.payload;
@@ -1596,14 +1609,22 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const authoritativeSourceTurnVersion = batchMode
 				? effectiveHighestVersion
 				: payload.talkerTurnVersion;
-			const cognitionOps = normalizeThinkerAssertionOpsBeforeProjection(
+			const normalizedCognitionOps = normalizeThinkerAssertionOpsBeforeProjection(
 				canonicalOutcome.privateCognition?.ops ?? [],
 				settlementPayload?.cognitiveSketchSource,
 				authoritativeSourceTurnVersion,
 				settlementPayload?.normalizedTurnInput,
 			);
+			const pointerCanonicalizedCognitionOps =
+				deps.pointerKeyAliasRewrite === false
+					? normalizedCognitionOps
+					: await canonicalizePointerKeysInCognitionOps({
+							ops: normalizedCognitionOps,
+							agentId: payload.agentId,
+							aliasRepo: deps.aliasRepo,
+						});
 			const canonicalizedCognitionOps = await canonicalizeThinkerAssertionKeysBeforeProjection({
-				ops: cognitionOps,
+				ops: pointerCanonicalizedCognitionOps,
 				agentId: payload.agentId,
 				cognitionProjectionRepo:
 					deps.cognitionProjectionRepo ?? new PgCognitionProjectionRepo(deps.sql),
@@ -1611,6 +1632,14 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				canonicalizationSimilarityThreshold:
 					deps.canonicalizationSimilarityThreshold,
 			});
+			const canonicalizedPrivateEpisodes =
+				deps.pointerKeyAliasRewrite === false
+					? canonicalOutcome.privateEpisodes ?? []
+					: await canonicalizePointerKeysInEpisodes({
+							episodes: canonicalOutcome.privateEpisodes ?? [],
+							agentId: payload.agentId,
+							aliasRepo: deps.aliasRepo,
+						});
 			const committedAt = Date.now();
 			const slotEntries = buildCognitionSlotPayloadForThinker(
 				canonicalizedCognitionOps,
@@ -1630,12 +1659,12 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			const projectedMembers = new Set<string>();
 			const grouped = batchMode
 				? parseEpisodesBySettlement(
-						canonicalOutcome.privateEpisodes ?? [],
+						canonicalizedPrivateEpisodes,
 						batchMemberSettlementIds,
 						effectiveSettlementId,
 					)
 				: null;
-			let effectiveEpisodes = canonicalOutcome.privateEpisodes ?? [];
+			let effectiveEpisodes = canonicalizedPrivateEpisodes;
 
 			const viewerSnapshot = settlementPayload.viewerSnapshot
 				? {
@@ -1647,12 +1676,20 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 			let changedNodeRefs: NodeRef[] = [];
 			let leaderClaimFailed = false;
 			try {
-			await deps.sql.begin(async (tx) => {
+				await deps.sql.begin(async (tx) => {
 				const txSql = tx as unknown as postgres.Sql;
 				const txEpisodeRepo = new PgEpisodeRepo(txSql);
 				const txCognitionProjectionRepo = new PgCognitionProjectionRepo(txSql);
 				const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
-				const txLedger = new PgSettlementLedgerRepo(txSql);
+				const txLedger =
+					typeof txSql === "function"
+						? new PgSettlementLedgerRepo(txSql)
+						: deps.settlementLedger;
+				if (!txLedger) {
+					throw new Error(
+						"thinker worker requires settlementLedger when sql.begin does not provide tx sql",
+					);
+				}
 				const repoOverrides = {
 					episodeRepo: txEpisodeRepo,
 					cognitionEventRepo: new PgCognitionEventRepo(txSql),
@@ -1950,6 +1987,33 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						`settlementId=${effectiveSettlementId}, nodeCount=${changedNodeRefs.length}`,
 						enqueueErr,
 					);
+				}
+			}
+
+			const entityJudgeEnabled = deps.entityJudgeEnabled ?? true;
+			if (entityJudgeEnabled && deps.entityJudgeSweeper) {
+				const intervalMs = Math.max(
+					1000,
+					deps.entityJudgeBatchIntervalMs ?? 30000,
+				);
+				const judgeKey = `${payload.agentId}:${payload.sessionId}`;
+				const now = Date.now();
+				const lastRunAt = entityJudgeLastRunBySession.get(judgeKey) ?? 0;
+				if (now - lastRunAt >= intervalMs) {
+					entityJudgeLastRunBySession.set(judgeKey, now);
+					void deps.entityJudgeSweeper
+						.runSweep({
+							agentId: payload.agentId,
+							sessionId: payload.sessionId,
+							modelId: deps.entityJudgeModelId,
+							dryRun: false,
+						})
+						.catch((error) => {
+							console.warn(
+								"[thinker_worker] entity judge sweeper failed (non-fatal):",
+								error,
+							);
+						});
 				}
 			}
 		} catch (thinkerError: unknown) {

@@ -2678,7 +2678,7 @@ describe.skipIf(skipPgTests)(
 		});
 
 		it(
-			"actionCommitments area scope calls applyAreaFactCommit on projection repo",
+			"actionCommitments are ignored on thinker path (scene writes happen in talker commit path)",
 			async () => {
 				const settlementId = "stl:scene-fact:action-commitment:001";
 				const requestId = "scene-fact:action-commitment:001";
@@ -2771,7 +2771,7 @@ describe.skipIf(skipPgTests)(
 					},
 				});
 
-				expect(applyAreaFactCommitCalled).toBe(1);
+				expect(applyAreaFactCommitCalled).toBe(0);
 			},
 			30_000,
 		);

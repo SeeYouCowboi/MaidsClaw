@@ -3,7 +3,10 @@ import type {
   EpisodeAppendParams,
   EpisodeRow,
 } from "../../../memory/episode/episode-repo.js";
-import type { EpisodeRepo } from "../contracts/episode-repo.js";
+import type {
+  EpisodeRepo,
+  RecentSessionEntity,
+} from "../contracts/episode-repo.js";
 
 const VALID_CATEGORIES = new Set([
   "speech",
@@ -158,20 +161,69 @@ export class PgEpisodeRepo implements EpisodeRepo {
     sessionId: string,
     episodeLimit: number,
   ): Promise<string[]> {
+    const rows = await this.readRecentSessionEntities(
+      agentId,
+      sessionId,
+      episodeLimit,
+    );
+    return rows.map((row) => row.pointer_key);
+  }
+
+  async readRecentSessionEntities(
+    agentId: string,
+    sessionId: string,
+    episodeLimit: number,
+  ): Promise<RecentSessionEntity[]> {
     const rows = await this.sql`
-      SELECT DISTINCT key
-      FROM (
-        SELECT unnest(entity_pointer_keys) AS key
+      WITH recent_episodes AS (
+        SELECT id, created_at, entity_pointer_keys
         FROM private_episode_events
         WHERE agent_id = ${agentId}
           AND session_id = ${sessionId}
           AND array_length(entity_pointer_keys, 1) > 0
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ${episodeLimit}
-      ) sub
-      WHERE key IS NOT NULL AND key != ''
+      ),
+      exploded AS (
+        SELECT key, created_at
+        FROM recent_episodes
+        CROSS JOIN LATERAL unnest(entity_pointer_keys) AS key
+        WHERE key IS NOT NULL AND key != ''
+      ),
+      dedup AS (
+        SELECT key, MAX(created_at) AS latest_created_at
+        FROM exploded
+        GROUP BY key
+      ),
+      ordered AS (
+        SELECT key, latest_created_at
+        FROM dedup
+        ORDER BY latest_created_at DESC, key ASC
+      )
+      SELECT
+        ordered.key AS pointer_key,
+        entity.display_name,
+        entity.summary
+      FROM ordered
+      LEFT JOIN LATERAL (
+        SELECT display_name, summary
+        FROM entity_nodes
+        WHERE pointer_key = ordered.key
+          AND (
+            memory_scope = 'shared_public'
+            OR (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
+          )
+        ORDER BY CASE WHEN memory_scope = 'private_overlay' THEN 0 ELSE 1 END
+        LIMIT 1
+      ) entity ON TRUE
+      ORDER BY ordered.latest_created_at DESC, ordered.key ASC
     `;
-    return rows.map((r) => r.key as string);
+    return rows.map((row) => ({
+      pointer_key: row.pointer_key as string,
+      display_name:
+        row.display_name == null ? null : (row.display_name as string),
+      summary: row.summary == null ? null : (row.summary as string),
+    }));
   }
 }
 

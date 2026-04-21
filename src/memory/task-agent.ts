@@ -119,7 +119,11 @@ export type ChatMessage = {
 
 export type MemoryTaskModelProvider = {
   readonly defaultEmbeddingModelId: string;
-  chat(messages: ChatMessage[], tools: ChatToolDefinition[]): Promise<ToolCallResult[]>;
+  chat(
+    messages: ChatMessage[],
+    tools: ChatToolDefinition[],
+    options?: { modelId?: string },
+  ): Promise<ToolCallResult[]>;
   embed(texts: string[], purpose: "memory_index" | "narrative_search" | "query_expansion", modelId: string): Promise<Float32Array[]>;
 };
 

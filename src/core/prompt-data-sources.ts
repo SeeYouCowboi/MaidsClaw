@@ -9,6 +9,11 @@ export type TypedRetrievalSurfaceOptions = {
   personaEntityHints?: string[];
 };
 
+export type KnownEntityPromptOptions = {
+  maxItems?: number;
+  maxChars?: number;
+};
+
 export type PersonaDataSource = {
   getSystemPrompt(personaId: string): string | undefined;
 };
@@ -30,6 +35,10 @@ export type MemoryDataSource = {
     userMessage: string,
     viewerContext: ViewerContext,
     options?: TypedRetrievalSurfaceOptions,
+  ): string | Promise<string>;
+  getKnownEntitiesForWriting?(
+    viewerContext: ViewerContext,
+    options?: KnownEntityPromptOptions,
   ): string | Promise<string>;
 };
 

@@ -78,7 +78,7 @@ import { CoreMemoryService } from "../memory/core-memory.js";
 import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
-import { EntityReconciliationSweeper } from "../memory/entity-reconciliation-sweeper.js";
+import { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
 import { PgSearchRebuilder } from "../memory/search-rebuild-pg.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
@@ -935,6 +935,8 @@ export function bootstrapRuntime(
   // Extract talkerThinker config with defaults.
   // New rollout flags use omitted-key defaults for the Tasks 1-11 matrix.
   const talkerThinkerFromConfig = runtimeConfig.talkerThinker;
+  const entityCanonicalizationFromConfig =
+    talkerThinkerFromConfig?.entityCanonicalization;
   const talkerThinkerConfig: RuntimeBootstrapResult["talkerThinkerConfig"] = {
     enabled: talkerThinkerFromConfig?.enabled ?? false,
     stalenessThreshold: talkerThinkerFromConfig?.stalenessThreshold ?? 2,
@@ -952,6 +954,19 @@ export function bootstrapRuntime(
     sceneFactWritePath: talkerThinkerFromConfig?.sceneFactWritePath ?? true,
     sceneRetrieval: talkerThinkerFromConfig?.sceneRetrieval ?? true,
     legacyAreaStateCompat: talkerThinkerFromConfig?.legacyAreaStateCompat ?? false,
+    entityCanonicalization: {
+      knownEntitiesInjection:
+        entityCanonicalizationFromConfig?.knownEntitiesInjection ?? true,
+      pointerKeyAliasRewrite:
+        entityCanonicalizationFromConfig?.pointerKeyAliasRewrite ?? true,
+      judgeModelId:
+        entityCanonicalizationFromConfig?.judgeModelId?.trim().length
+          ? entityCanonicalizationFromConfig.judgeModelId.trim()
+          : "minimax/MiniMax-M2.7",
+      judgeEnabled: entityCanonicalizationFromConfig?.judgeEnabled ?? true,
+      judgeBatchIntervalMs:
+        entityCanonicalizationFromConfig?.judgeBatchIntervalMs ?? 30000,
+    },
   };
 
   assertSupportedTalkerThinkerRolloutMatrix({
@@ -978,6 +993,18 @@ export function bootstrapRuntime(
       sceneFactWritePath: talkerThinkerConfig.sceneFactWritePath,
       sceneRetrieval: talkerThinkerConfig.sceneRetrieval,
       legacyAreaStateCompat: talkerThinkerConfig.legacyAreaStateCompat,
+      entityCanonicalization: {
+        knownEntitiesInjection:
+          talkerThinkerConfig.entityCanonicalization.knownEntitiesInjection,
+        pointerKeyAliasRewrite:
+          talkerThinkerConfig.entityCanonicalization.pointerKeyAliasRewrite,
+        judgeModelId:
+          talkerThinkerConfig.entityCanonicalization.judgeModelId,
+        judgeEnabled:
+          talkerThinkerConfig.entityCanonicalization.judgeEnabled,
+        judgeBatchIntervalMs:
+          talkerThinkerConfig.entityCanonicalization.judgeBatchIntervalMs,
+      },
       ...(typeof talkerThinkerConfig.canonicalizationSimilarityThreshold ===
       "number"
         ? {
@@ -1517,9 +1544,13 @@ export function bootstrapRuntime(
   });
   // (memoryTaskModelProvider is constructed above, just before
   // RetrievalOrchestrator so that episodeEmbeddingFn can close over it.)
-  const entityReconciliation: EntityReconciliationSweeper | undefined =
+  const entityReconciliation: EntityJudgeSweeper | undefined =
     pgFactory && memoryTaskModelProvider
-      ? new EntityReconciliationSweeper(pgFactory, memoryTaskModelProvider)
+      ? new EntityJudgeSweeper(
+          pgFactory,
+          memoryTaskModelProvider,
+          pgAliasRepo,
+        )
       : undefined;
   // Constructed lazily in initializePgBackendForRuntime once the pg pool
   // actually exists — pgFactory.getPool() throws before .initialize().
@@ -1584,6 +1615,8 @@ export function bootstrapRuntime(
     lore: loreAdapter,
     memory: memoryAdapter,
     operational: operationalAdapter,
+    knownEntitiesInjectionEnabled:
+      talkerThinkerConfig.entityCanonicalization.knownEntitiesInjection,
   });
 
   const createRequestScopedPromptBuilder = (): PromptBuilder => {
@@ -1649,6 +1682,8 @@ export function bootstrapRuntime(
       lore: scopedLoreSource,
       memory: memoryAdapter,
       operational: operationalAdapter,
+      knownEntitiesInjectionEnabled:
+        talkerThinkerConfig.entityCanonicalization.knownEntitiesInjection,
     });
   };
   registerMemoryTools(
@@ -1883,6 +1918,7 @@ export function bootstrapRuntime(
     personaService,
     loreService,
     reloadPromptData,
+    aliasRepo: pgAliasRepo,
   };
 }
 

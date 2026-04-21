@@ -3,6 +3,12 @@ import type {
   EpisodeRow,
 } from "../../../memory/episode/episode-repo.js";
 
+export type RecentSessionEntity = {
+  pointer_key: string;
+  display_name: string | null;
+  summary: string | null;
+};
+
 export interface EpisodeRepo {
   append(params: EpisodeAppendParams & Record<string, unknown>): Promise<number>;
   readById(id: number): Promise<EpisodeRow | null>;
@@ -28,4 +34,14 @@ export interface EpisodeRepo {
     sessionId: string,
     episodeLimit: number,
   ): Promise<string[]>;
+  /**
+   * Returns recent distinct pointer keys in the session plus optional
+   * entity-node metadata when the pointer already exists in `entity_nodes`.
+   * Used by Thinker-side known-entity prompt injection.
+   */
+  readRecentSessionEntities?(
+    agentId: string,
+    sessionId: string,
+    episodeLimit: number,
+  ): Promise<RecentSessionEntity[]>;
 }

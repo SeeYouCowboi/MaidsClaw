@@ -14,6 +14,7 @@ export enum PromptSectionSlot {
   /** Placeholder for typed retrieval content (T9 will fill). */
   TYPED_RETRIEVAL = "typed_retrieval",
   LORE_ENTRIES = "lore_entries",
+  KNOWN_ENTITIES = "known_entities",
   OPERATIONAL_STATE = "operational_state",
   CONVERSATION = "conversation",
 }
@@ -30,6 +31,7 @@ export const SECTION_SLOT_ORDER: readonly PromptSectionSlot[] = [
   PromptSectionSlot.TURN_CONTEXT,
   PromptSectionSlot.TYPED_RETRIEVAL,
   PromptSectionSlot.LORE_ENTRIES,
+  PromptSectionSlot.KNOWN_ENTITIES,
   PromptSectionSlot.OPERATIONAL_STATE,
   PromptSectionSlot.CONVERSATION,
 ] as const;

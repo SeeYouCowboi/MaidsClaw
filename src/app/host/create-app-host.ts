@@ -75,6 +75,18 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			assertionCanonicalization: runtime.assertionCanonicalizationBundle,
 			canonicalizationSimilarityThreshold:
 				runtime.talkerThinkerConfig?.canonicalizationSimilarityThreshold,
+			aliasRepo: runtime.aliasRepo,
+			pointerKeyAliasRewrite:
+				runtime.talkerThinkerConfig?.entityCanonicalization
+					?.pointerKeyAliasRewrite,
+			entityJudgeSweeper: runtime.entityReconciliation,
+			entityJudgeEnabled:
+				runtime.talkerThinkerConfig?.entityCanonicalization?.judgeEnabled,
+			entityJudgeModelId:
+				runtime.talkerThinkerConfig?.entityCanonicalization?.judgeModelId,
+			entityJudgeBatchIntervalMs:
+				runtime.talkerThinkerConfig?.entityCanonicalization
+					?.judgeBatchIntervalMs,
 			speakerNormalizationGate:
 				runtime.talkerThinkerConfig?.speakerNormalizationGate,
 			sceneFactWritePath: runtime.talkerThinkerConfig?.sceneFactWritePath,

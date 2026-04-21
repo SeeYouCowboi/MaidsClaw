@@ -182,6 +182,7 @@ const RetrievalTracePromptSectionsSchema = z
     recent_cognition: z.string().optional(),
     typed_retrieval: z.string().optional(),
     lore_entries: z.string().optional(),
+    known_entities: z.string().optional(),
   })
   .strict();
 

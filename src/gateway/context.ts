@@ -245,7 +245,7 @@ export interface GatewayContext {
   cognitionRepo?: CognitionRepoService;
   cognitionEventRepo?: CognitionEventRepoService;
   graphReadRepo?: GraphReadRepoService;
-  entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
+  entityReconciliation?: import("../memory/entity-judge-sweeper.js").EntityJudgeSweeper;
   searchRebuilder?: import("../memory/search-rebuild-pg.js").PgSearchRebuilder;
   lightweightLlm?: LightweightLlmService;
 

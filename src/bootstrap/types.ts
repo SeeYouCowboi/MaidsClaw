@@ -24,6 +24,7 @@ import type {
 	PgBackendFactory,
 } from "../storage/backend-types.js";
 import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
 import type { CoreMemoryBlockRepo } from "../storage/domain-repos/contracts/core-memory-block-repo.js";
 import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
@@ -95,7 +96,7 @@ export type RuntimeBootstrapResult = {
 	createAgentLoop: (agentId: string) => AgentLoop | null;
 	turnService: TurnService;
 	memoryTaskAgent: MemoryTaskAgent | null;
-	entityReconciliation?: import("../memory/entity-reconciliation-sweeper.js").EntityReconciliationSweeper;
+	entityReconciliation?: import("../memory/entity-judge-sweeper.js").EntityJudgeSweeper;
 	searchRebuilder?: import("../memory/search-rebuild-pg.js").PgSearchRebuilder;
 	memoryPipelineReady: boolean;
 	memoryPipelineStatus: MemoryPipelineStatus;
@@ -128,6 +129,13 @@ export type RuntimeBootstrapResult = {
 		sceneFactWritePath: boolean;
 		sceneRetrieval: boolean;
 		legacyAreaStateCompat: boolean;
+    entityCanonicalization: {
+      knownEntitiesInjection: boolean;
+      pointerKeyAliasRewrite: boolean;
+      judgeModelId: string;
+      judgeEnabled: boolean;
+      judgeBatchIntervalMs: number;
+    };
 	};
 	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;
@@ -154,6 +162,7 @@ export type RuntimeBootstrapResult = {
 	personaService: PersonaService;
 	loreService: LoreService;
 	reloadPromptData: () => Promise<void>;
+  aliasRepo: AliasRepo;
 };
 
 export type PublicRuntimeBootstrapResult = Omit<

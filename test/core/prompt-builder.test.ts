@@ -76,6 +76,8 @@ function makeDataSources(): {
 				`<shared_block label="user">shared relationship facts</shared_block>`,
 			getRecentCognition: () => `\u2022 [assertion] Alice trusts Bob (accepted)\n\u2022 [evaluation] eval Bob [trust:8, warmth:7]`,
 			getTypedRetrievalSurface: async () => "",
+			getKnownEntitiesForWriting: async () =>
+				"<known_entities>\n- alice — maid\n</known_entities>",
 		},
 		operational: {
 			getExcerpt: (_keys: string[]) => ({
@@ -95,7 +97,7 @@ function getSectionContent(
 }
 
 describe("PromptBuilder", () => {
-	it("builds maiden prompt with world/lore/operational and without core-memory/memory-hints", async () => {
+	it("builds maiden prompt with world/lore/operational and without thinker-only sections", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -110,6 +112,7 @@ describe("PromptBuilder", () => {
 		const slots = output.sections.map((section) => section.slot);
 		expect(slots.includes(PromptSectionSlot.WORLD_RULES)).toBe(true);
 		expect(slots.includes(PromptSectionSlot.LORE_ENTRIES)).toBe(true);
+		expect(slots.includes(PromptSectionSlot.KNOWN_ENTITIES)).toBe(false);
 		expect(slots.includes(PromptSectionSlot.OPERATIONAL_STATE)).toBe(true);
 		const operational =
 			getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ??
@@ -152,6 +155,10 @@ describe("PromptBuilder", () => {
 		expect(pinnedShared).toContain("shared relationship facts");
 		expect(pinnedShared).not.toContain("<core_memory>");
 		expect(pinnedShared).not.toContain("privateEpisodes");
+
+		const knownEntities =
+			getSectionContent(output.sections, PromptSectionSlot.KNOWN_ENTITIES) ?? "";
+		expect(knownEntities).toContain("<known_entities>");
 	});
 
 	it("rp-agent keeps deterministic slot order", async () => {
@@ -191,6 +198,24 @@ describe("PromptBuilder", () => {
 
 		const slots = output.sections.map((section) => section.slot);
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(false);
+	});
+
+	it("does not inject KNOWN_ENTITIES in talker mode", async () => {
+		const dataSources = makeDataSources();
+		const builder = new PromptBuilder(dataSources);
+
+		const output = await builder.build({
+			profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+			viewerContext: BASE_VIEWER_CONTEXT,
+			userMessage: "hello",
+			conversationMessages: CONVERSATION,
+			budget: BASE_BUDGET,
+			isTalkerMode: true,
+			contextText: '{"writeEligible":false}',
+		});
+
+		const slots = output.sections.map((section) => section.slot);
+		expect(slots.includes(PromptSectionSlot.KNOWN_ENTITIES)).toBe(false);
 	});
 
 	it("builds task-agent prompt with lorebook disabled using only preamble and conversation", async () => {

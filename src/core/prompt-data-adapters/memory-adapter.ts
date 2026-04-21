@@ -1,6 +1,7 @@
 import type { RetrievalService } from "../../memory/retrieval.js";
 import {
   getAttachedSharedBlocksAsync,
+  getKnownEntitiesForWritingAsync,
   getPinnedBlocksAsync,
   getRecentCognitionAsync,
   getSharedBlocksAsync,
@@ -9,6 +10,7 @@ import {
 } from "../../memory/prompt-data.js";
 import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-repo.js";
 import type {
+  KnownEntityPromptOptions,
   MemoryDataSource,
   TypedRetrievalSurfaceOptions,
   ViewerContext,
@@ -75,6 +77,16 @@ export class MemoryAdapter implements MemoryDataSource {
       this.episodeRepo,
     );
     return appendGuidanceIfPresent(raw);
+  }
+
+  async getKnownEntitiesForWriting(
+    viewerContext: ViewerContext,
+    options?: KnownEntityPromptOptions,
+  ): Promise<string> {
+    return getKnownEntitiesForWritingAsync(viewerContext, this.episodeRepo, {
+      ...options,
+      personaEntityHints: this.personaEntityHints,
+    });
   }
 }
 

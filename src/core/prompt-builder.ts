@@ -34,9 +34,9 @@ Besides publicReply, populate the structured fields described below.
 All structured fields are invisible to the user — record your TRUE internal state, even when publicReply is evasive or misleading.
 
 LANGUAGE RULE (critical):
-- Canonical identifiers stay in English snake_case regardless of conversation language. This includes: every "key" field, every "pointer_key.value", assertion proposition "subject"/"object" values, evaluation "dimensions[].name", commitment "mode"/"status"/"stance", and all enum values. These are stable retrieval ids and MUST NOT be translated.
+- Canonical identifiers must reuse the exact existing ids from prior turns (especially every "pointer_key.value" and every cognition "key"). These ids may be English or non-English; DO NOT translate, paraphrase, or rewrite an existing id.
 - Free-text semantic fields MUST follow the conversation language (if the user writes in Chinese, write these in Chinese; if English, English). This covers: latentScratchpad, publicReply, episode "summary" and "privateNotes", publications "summary", assertion proposition "predicate", commitment "target.action", and evaluation "notes".
-- When in doubt: if the field is something a human would read to understand meaning, match the conversation language; if it is an identifier used for lookup, keep English snake_case.
+- When in doubt: if the field is something a human would read to understand meaning, match the conversation language; if it is an identifier used for lookup, keep the exact canonical id already in use.
 
 ---
 
@@ -65,9 +65,9 @@ Fields:
   - Bad: "player/corpse_claim", "player/corpse_contact_claim", "player/corpse_evasion" for the same fact
   - Good: one key "player/corpse_contact" with stance updated from "tentative" to "confirmed"
 - proposition: { subject, predicate, object }
-  - subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master" — ALWAYS English snake_case
+- subject: { kind: "pointer_key", value: "<entity_id>" }   e.g. "butler", "master" — MUST reuse existing pointer_key exactly
   - predicate: a verb phrase in the CONVERSATION LANGUAGE — e.g. "has_unexplained_meetings_with" in English RP, or "私下会见" / "怀疑与...有勾结" in Chinese RP. Reuse the same phrasing across turns so the key stays stable.
-  - object: { kind: "entity", ref: { kind: "pointer_key", value: "<entity_id>" } } — value ALWAYS English snake_case
+- object: { kind: "entity", ref: { kind: "pointer_key", value: "<entity_id>" } } — MUST reuse existing pointer_key exactly
 - stance: one of "hypothetical" | "tentative" | "accepted" | "confirmed" | "contested" | "rejected" | "abandoned"
   - hypothetical = pure speculation, tentative = suspected, accepted = believed true, confirmed = verified, contested = conflicting evidence
 - basis (optional): one of "first_hand" | "hearsay" | "inference" | "introspection" | "belief"
@@ -128,14 +128,14 @@ Scene-level events that happened this turn. Each entry:
 - privateNotes (optional): your private annotation about the significance
 - entityRefs (REQUIRED whenever a specific person/place/object matters): list every named participant, location, and notable item the episode is about. This is the retrieval anchor — when the user later asks "do you remember the silver pocket watch", episodes tagged with that item are the ones surfaced. Without entityRefs, recall falls back to fuzzy text matching and you will forget.
   - Each entry is { kind: "pointer_key", value: "<canonical_id_or_label>" } for normal entities, or { kind: "special", value: "self" | "user" | "current_location" } for the agent itself, the user, or the current room.
-  - Include BOTH the canonical English snake_case id when you know it (e.g. "item:silver_pocket_watch") AND the natural-language form the user would actually say (e.g. "银怀表"). It is fine to list the same entity twice this way; the duplication is what makes Chinese-language recall work.
+- Use ONE canonical pointer_key per entity. Do not duplicate the same entity with translated or paraphrased variants in the same episode.
   - Always tag the location: either as { kind: "special", value: "current_location" } or as a pointer_key like "location:tea_room".
   - Always tag any person who spoke or was referenced in this episode.
 
 Examples:
-{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑", entityRefs: [{ kind: "special", value: "user" }, { kind: "pointer_key", value: "person:butler" }, { kind: "pointer_key", value: "管家" }, { kind: "special", value: "current_location" }] }
+{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑", entityRefs: [{ kind: "special", value: "user" }, { kind: "pointer_key", value: "person:butler" }, { kind: "special", value: "current_location" }] }
 { category: "action", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项", entityRefs: [{ kind: "special", value: "self" }, { kind: "special", value: "user" }, { kind: "pointer_key", value: "topic:butler_accounting" }] }
-{ category: "state_change", summary: "主人在茶室递来一枚银怀表作为生日礼物", entityRefs: [{ kind: "special", value: "user" }, { kind: "special", value: "self" }, { kind: "pointer_key", value: "location:tea_room" }, { kind: "pointer_key", value: "茶室" }, { kind: "pointer_key", value: "item:silver_pocket_watch" }, { kind: "pointer_key", value: "银怀表" }] }
+{ category: "state_change", summary: "主人在茶室递来一枚银怀表作为生日礼物", entityRefs: [{ kind: "special", value: "user" }, { kind: "special", value: "self" }, { kind: "pointer_key", value: "location:tea_room" }, { kind: "pointer_key", value: "item:silver_pocket_watch" }] }
 
 ---
 
@@ -287,6 +287,7 @@ export type PromptBuilderDeps = {
 	memory?: MemoryDataSource;
 	operational?: OperationalDataSource;
 	logger?: Logger;
+	knownEntitiesInjectionEnabled?: boolean;
 };
 
 export type BuildPromptInput = {
@@ -310,6 +311,7 @@ export class PromptBuilder {
 	private readonly memory?: MemoryDataSource;
 	private readonly operational?: OperationalDataSource;
 	private readonly logger?: Logger;
+	private readonly knownEntitiesInjectionEnabled: boolean;
 
 	constructor(deps: PromptBuilderDeps) {
 		this.persona = deps.persona;
@@ -317,6 +319,8 @@ export class PromptBuilder {
 		this.memory = deps.memory;
 		this.operational = deps.operational;
 		this.logger = deps.logger;
+		this.knownEntitiesInjectionEnabled =
+			deps.knownEntitiesInjectionEnabled ?? true;
 	}
 
 	async build(input: BuildPromptInput): Promise<BuildPromptOutput> {
@@ -371,6 +375,12 @@ export class PromptBuilder {
 				PromptSectionSlot.LORE_ENTRIES,
 				this.getLoreEntries(loreQuery),
 			);
+			if (!input.isTalkerMode && this.knownEntitiesInjectionEnabled) {
+				slotContent.set(
+					PromptSectionSlot.KNOWN_ENTITIES,
+					await this.getKnownEntitiesForWriting(input.viewerContext),
+				);
+			}
 			slotContent.set(
 				PromptSectionSlot.OPERATIONAL_STATE,
 				input.isTalkerMode
@@ -570,6 +580,24 @@ export class PromptBuilder {
 			raw,
 			"</your_prior_internal_notes>",
 		].join("\n");
+	}
+
+	private async getKnownEntitiesForWriting(
+		viewerContext: ViewerContext,
+	): Promise<string> {
+		const memDs = this.getMemoryDataSource();
+		if (!memDs.getKnownEntitiesForWriting) {
+			return "";
+		}
+		const content = await this.readDataSource(
+			"memory.getKnownEntitiesForWriting",
+			() =>
+				memDs.getKnownEntitiesForWriting!(viewerContext, {
+					maxItems: 40,
+					maxChars: 800,
+				}),
+		);
+		return content?.trim() ?? "";
 	}
 
 	private getTurnContext(contextText: string): string {

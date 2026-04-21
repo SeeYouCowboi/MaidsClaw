@@ -128,6 +128,13 @@ export type RuntimeConfig = {
     sceneFactWritePath?: boolean;
     sceneRetrieval?: boolean;
     legacyAreaStateCompat?: boolean;
+    entityCanonicalization?: {
+      knownEntitiesInjection?: boolean;
+      pointerKeyAliasRewrite?: boolean;
+      judgeModelId?: string;
+      judgeEnabled?: boolean;
+      judgeBatchIntervalMs?: number;
+    };
   };
   runtime?: {
     gateway?: {

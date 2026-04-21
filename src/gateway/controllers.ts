@@ -791,6 +791,7 @@ export async function handleRequestRetrievalTrace(
       "recent_cognition",
       "typed_retrieval",
       "lore_entries",
+      "known_entities",
     ] as const;
     const promptSections: Record<string, string> = {};
     for (const slot of memorySlotKeys) {
@@ -3433,14 +3434,14 @@ export async function handleListGraphNodeEdges(
 const EntityReconciliationRequestSchema = z
   .object({
     dry_run: z.boolean().optional(),
-    merge_threshold: z.number().min(0).max(1).optional(),
-    borderline_threshold: z.number().min(0).max(1).optional(),
-    cluster_threshold: z.number().min(0).max(1).optional(),
-    max_new_keys: z.number().int().positive().max(2000).optional(),
+    agent_id: z.string().min(1).optional(),
+    session_id: z.string().min(1).optional(),
     since: z.number().int().nonnegative().optional(),
     model_id: z.string().min(1).optional(),
+    max_candidates_per_key: z.number().int().positive().max(30).optional(),
+    scope: z.enum(["shared_public", "private_overlay"]).optional(),
   })
-  .strict();
+  .passthrough();
 
 const SearchRebuildRequestSchema = z
   .object({
@@ -3544,15 +3545,25 @@ export async function handleRunEntityReconciliation(
       `Invalid request body: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const modelId = body.model_id ?? "bailian/text-embedding-v4";
+
+  const url = new URL(req.url);
+  const agentId = body.agent_id ?? url.searchParams.get("agent_id") ?? undefined;
+  if (!agentId) {
+    return badRequest("Missing required field: agent_id");
+  }
+
+  const sessionId =
+    body.session_id ?? url.searchParams.get("session_id") ?? undefined;
+
+  const modelId = body.model_id ?? "minimax/MiniMax-M2.7";
   try {
     const report = await sweeper.runSweep({
-      modelId,
+      modelId: modelId,
+      agentId,
+      ...(sessionId ? { sessionId } : {}),
       dryRun: body.dry_run ?? true,
-      mergeThreshold: body.merge_threshold,
-      borderlineThreshold: body.borderline_threshold,
-      clusterThreshold: body.cluster_threshold,
-      maxNewKeys: body.max_new_keys,
+      maxCandidatesPerKey: body.max_candidates_per_key,
+      scope: body.scope,
       since: body.since,
     });
     return jsonResponse(report);
