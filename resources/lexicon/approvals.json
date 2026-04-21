@@ -1,0 +1,28 @@
+{
+  "_comment": "Human curation gate. Every candidate produced by scripts/lexicon/expand-*.ts must appear in exactly one of {approved, rejected, ambiguous} below, per family. Candidates outside these lists cause `bun run lexicon:build` to exit non-zero, forcing manual triage. Phase-1 baseline = the 36 hardcoded lemmas from src/runtime/speaker-normalization.ts HARDCODED_FALLBACK.",
+  "version": 1,
+  "move": {
+    "approved": {
+      "en": ["go", "walk", "move", "return", "enter", "leave"],
+      "cn": ["去", "来到", "回到", "走到", "进入", "离开"]
+    },
+    "rejected": { "en": [], "cn": [] },
+    "ambiguous": { "en": [], "cn": [] }
+  },
+  "possession": {
+    "approved": {
+      "en": ["take", "pick up", "hold", "show", "hand", "put"],
+      "cn": ["拿起", "拿出", "展示", "递给", "交给", "放下"]
+    },
+    "rejected": { "en": [], "cn": [] },
+    "ambiguous": { "en": [], "cn": [] }
+  },
+  "status_change": {
+    "approved": {
+      "en": ["open", "close", "lock", "unlock", "light", "extinguish"],
+      "cn": ["打开", "关上", "锁上", "解锁", "点亮", "熄灭"]
+    },
+    "rejected": { "en": [], "cn": [] },
+    "ambiguous": { "en": [], "cn": [] }
+  }
+}

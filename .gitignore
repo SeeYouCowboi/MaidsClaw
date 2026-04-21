@@ -7,8 +7,12 @@ native/target/
 dist/
 
 # Data & runtime
-data/
+data/*
+!data/lexicon/
 .env
+
+# Lexicon build intermediates (final artifact in data/lexicon/ is committed)
+build/lexicon/
 config/auth.json
 
 # IDE & editor

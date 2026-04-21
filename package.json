@@ -16,7 +16,9 @@
     "cli": "bun run scripts/cli.ts",
     "test:acceptance:app-host": "bun test test/cli/acceptance.test.ts test/cli/debug-commands.test.ts test/app/app-host.test.ts test/app/session-close-flush.test.ts test/app/facade-contract.test.ts test/architecture/import-boundaries.test.ts",
     "test:pg:data-plane": "bun test --max-concurrency 8 --timeout 20000 test/pg-app/ test/jobs/ test/scripts/memory-verify-pg.test.ts test/migration/parity-verify.test.ts",
-    "test:acceptance:closeout": "bun run test:acceptance:app-host && bun run test:pg:data-plane"
+    "test:acceptance:closeout": "bun run test:acceptance:app-host && bun run test:pg:data-plane",
+    "lexicon:build": "bun run scripts/lexicon/build-lexicon.ts",
+    "lexicon:check": "bun run scripts/lexicon/verify.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.37",

@@ -1,0 +1,60 @@
+{
+  "_comment": "Phase-1 canonical action verbs. Lemmas per family + external-resource anchors. Used by scripts/lexicon/build-lexicon.ts to drive synonym expansion. To regenerate data/lexicon/action-lexicon.json, run `bun run lexicon:build`.",
+  "generatedAt": "2026-04-21T00:00:00.000Z",
+  "families": {
+    "move": {
+      "en": {
+        "lemmas": ["go", "walk", "move", "return", "enter", "leave"]
+      },
+      "cn": {
+        "tokens": ["去", "来到", "回到", "走到", "进入", "离开"]
+      },
+      "expansion": {
+        "wordnetSynsets": [
+          "go.v.01",
+          "travel.v.01",
+          "enter.v.01",
+          "exit.v.01",
+          "return.v.01"
+        ],
+        "cilinCodes": ["Hn01", "Hn02", "Hn03", "Hn04", "Hn05", "Hn06"]
+      }
+    },
+    "possession": {
+      "en": {
+        "lemmas": ["take", "pick up", "hold", "show", "hand", "put"]
+      },
+      "cn": {
+        "tokens": ["拿起", "拿出", "展示", "递给", "交给", "放下"]
+      },
+      "expansion": {
+        "wordnetSynsets": [
+          "take.v.04",
+          "pick_up.v.01",
+          "hold.v.02",
+          "give.v.03",
+          "show.v.04"
+        ],
+        "cilinCodes": ["Hi01", "Hi02", "Hi03", "Hi04", "Hi05", "Hi06"]
+      }
+    },
+    "status_change": {
+      "en": {
+        "lemmas": ["open", "close", "lock", "unlock", "light", "extinguish"]
+      },
+      "cn": {
+        "tokens": ["打开", "关上", "锁上", "解锁", "点亮", "熄灭"]
+      },
+      "expansion": {
+        "wordnetSynsets": [
+          "open.v.01",
+          "close.v.01",
+          "lock.v.01",
+          "light.v.01",
+          "extinguish.v.01"
+        ],
+        "cilinCodes": ["Hd11", "Hd12"]
+      }
+    }
+  }
+}

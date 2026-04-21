@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MaidsClaw Phase-1 Action Lexicon",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "sourceDigests", "families"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourceDigests": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "families": {
+      "type": "object",
+      "required": ["move", "possession", "status_change"],
+      "additionalProperties": false,
+      "properties": {
+        "move": { "$ref": "#/definitions/family" },
+        "possession": { "$ref": "#/definitions/family" },
+        "status_change": { "$ref": "#/definitions/family" }
+      }
+    }
+  },
+  "definitions": {
+    "family": {
+      "type": "object",
+      "required": ["en", "cn"],
+      "additionalProperties": false,
+      "properties": {
+        "en": {
+          "type": "object",
+          "required": ["lemmas", "inflections"],
+          "additionalProperties": false,
+          "properties": {
+            "lemmas": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z' -]*$",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "inflections": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "cn": {
+          "type": "object",
+          "required": ["tokens"],
+          "additionalProperties": false,
+          "properties": {
+            "tokens": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    }
+  }
+}
