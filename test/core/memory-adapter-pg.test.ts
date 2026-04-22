@@ -17,6 +17,8 @@ describe("MemoryAdapter", () => {
 		} as unknown as PromptDataRepos["recentCognitionSlotRepo"],
 		interactionRepo: {
 			getMessageRecords: async () => [],
+			getBySession: async () => [],
+			getMaxIndex: async () => undefined,
 		} as unknown as PromptDataRepos["interactionRepo"],
 		sharedBlockRepo: {
 			getAttachedBlockIds: async () => [],
@@ -92,6 +94,27 @@ describe("MemoryAdapter", () => {
 		);
 		expect(typeof result).toBe("string");
 	});
+
+	it("runs prompt-time entity sync before retrieval and known-entity rendering", async () => {
+		const sweepCalls: string[] = [];
+		const adapter = new MemoryAdapter(
+			stubRepos,
+			stubRetrievalService,
+			undefined,
+			undefined,
+			{
+				runSweep: async ({ agentId, sessionId }) => {
+					sweepCalls.push(`${agentId}:${sessionId}`);
+					return { skipped_due_lock: false };
+				},
+			},
+		);
+
+		await adapter.getTypedRetrievalSurface("test message", stubViewerContext);
+		await adapter.getKnownEntitiesForWriting(stubViewerContext);
+
+		expect(sweepCalls).toEqual(["test-agent:test-session"]);
+	});
 });
 
 describe("MemoryAdapter — weak-memory interpretation guidance", () => {
@@ -113,6 +136,8 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 			} as unknown as PromptDataRepos["recentCognitionSlotRepo"],
 			interactionRepo: {
 				getMessageRecords: async () => [],
+				getBySession: async () => [],
+				getMaxIndex: async () => undefined,
 			} as unknown as PromptDataRepos["interactionRepo"],
 			sharedBlockRepo: {
 				getAttachedBlockIds: async () => [],

@@ -25,6 +25,10 @@ type AliasRow = {
   canonical_id: number | string;
 };
 
+function normalizeLookupText(raw: string): string {
+  return raw.normalize("NFKC").trim();
+}
+
 export class PgRetrievalReadRepo implements RetrievalReadRepo {
   private readonly visibilityPolicy = new VisibilityPolicy();
 
@@ -186,12 +190,18 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     pointerKey: string,
     viewerAgentId: string,
   ): Promise<EntityNode | null> {
+    const lookup = normalizeLookupText(pointerKey);
+    if (lookup.length === 0) {
+      return null;
+    }
+
     const privateRows = await this.sql<postgres.Row[]>`
       SELECT *
       FROM entity_nodes
-      WHERE pointer_key = ${pointerKey}
+      WHERE (pointer_key = ${lookup} OR LOWER(pointer_key) = LOWER(${lookup}))
         AND memory_scope = 'private_overlay'
         AND owner_agent_id = ${viewerAgentId}
+      ORDER BY CASE WHEN pointer_key = ${lookup} THEN 0 ELSE 1 END
       LIMIT 1
     `;
     if (privateRows.length > 0) {
@@ -201,8 +211,9 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     const sharedRows = await this.sql<postgres.Row[]>`
       SELECT *
       FROM entity_nodes
-      WHERE pointer_key = ${pointerKey}
+      WHERE (pointer_key = ${lookup} OR LOWER(pointer_key) = LOWER(${lookup}))
         AND memory_scope = 'shared_public'
+      ORDER BY CASE WHEN pointer_key = ${lookup} THEN 0 ELSE 1 END
       LIMIT 1
     `;
     if (sharedRows.length > 0) {
@@ -212,9 +223,11 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     const aliasRows = await this.sql<AliasRow[]>`
       SELECT canonical_id
       FROM entity_aliases
-      WHERE alias = ${pointerKey}
+      WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
         AND (owner_agent_id = ${viewerAgentId} OR owner_agent_id IS NULL)
-      ORDER BY CASE WHEN owner_agent_id = ${viewerAgentId} THEN 0 ELSE 1 END
+      ORDER BY
+        CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END,
+        CASE WHEN owner_agent_id = ${viewerAgentId} THEN 0 ELSE 1 END
       LIMIT 1
     `;
     if (aliasRows.length === 0) {

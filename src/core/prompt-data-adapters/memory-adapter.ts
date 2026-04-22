@@ -16,6 +16,16 @@ import type {
   ViewerContext,
 } from "../prompt-data-sources.js";
 
+type EntityReconciliationRunner = {
+  runSweep(input: {
+    agentId: string;
+    sessionId?: string;
+    dryRun?: boolean;
+    maxCandidatesPerKey?: number;
+    scope?: "shared_public" | "private_overlay";
+  }): Promise<{ skipped_due_lock: boolean }>;
+};
+
 export const WEAK_MEMORY_INTERPRETATION_GUIDANCE = [
   "Cognition entries may be prefixed with [basis=X provenance=Y verification=Z].",
   "Treat the entry as low-confidence, fragmentary memory when verification is unverified, or when basis is belief or unknown, or when basis is inference and verification is not strong_verified.",
@@ -26,12 +36,15 @@ export const WEAK_MEMORY_INTERPRETATION_GUIDANCE = [
 ].join("\n");
 
 export class MemoryAdapter implements MemoryDataSource {
+  private readonly entitySyncInflight = new Map<string, Promise<void>>();
+  private readonly entitySyncLastAttemptAt = new Map<string, number>();
+
   constructor(
     private readonly repos: PromptDataRepos,
     private readonly retrievalService?: RetrievalService,
     private readonly episodeRepo?: EpisodeRepo,
-    private readonly personaEntityHints?: string[],
     private readonly sceneRetrieval?: boolean,
+    private readonly entityReconciliation?: EntityReconciliationRunner,
   ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
@@ -43,7 +56,11 @@ export class MemoryAdapter implements MemoryDataSource {
   }
 
   async getRecentCognition(viewerContext: ViewerContext): Promise<string> {
-    const raw = await getRecentCognitionAsync(viewerContext.viewer_agent_id, viewerContext.session_id, this.repos);
+    const raw = await getRecentCognitionAsync(
+      viewerContext,
+      this.repos,
+      this.episodeRepo,
+    );
     return appendGuidanceIfPresent(raw);
   }
 
@@ -59,14 +76,10 @@ export class MemoryAdapter implements MemoryDataSource {
     if (!this.retrievalService) {
       return "";
     }
-    // Merge caller-provided persona hints with constructor-level hints
+    await this.ensureRecentEntitiesSynced(viewerContext);
     const mergedOptions: TypedRetrievalSurfaceOptions = {
       ...options,
       sceneRetrieval: options?.sceneRetrieval ?? this.sceneRetrieval,
-      personaEntityHints: mergeHints(
-        this.personaEntityHints,
-        options?.personaEntityHints,
-      ),
     };
     const raw = await getTypedRetrievalSurfaceAsync(
       userMessage,
@@ -83,25 +96,57 @@ export class MemoryAdapter implements MemoryDataSource {
     viewerContext: ViewerContext,
     options?: KnownEntityPromptOptions,
   ): Promise<string> {
-    return getKnownEntitiesForWritingAsync(viewerContext, this.episodeRepo, {
-      ...options,
-      personaEntityHints: this.personaEntityHints,
-    });
+    await this.ensureRecentEntitiesSynced(viewerContext);
+    return getKnownEntitiesForWritingAsync(
+      viewerContext,
+      this.repos,
+      this.episodeRepo,
+      options,
+    );
+  }
+
+  private async ensureRecentEntitiesSynced(
+    viewerContext: ViewerContext,
+  ): Promise<void> {
+    if (!this.entityReconciliation) {
+      return;
+    }
+
+    const key = `${viewerContext.viewer_agent_id}:${viewerContext.session_id}`;
+    const inflight = this.entitySyncInflight.get(key);
+    if (inflight) {
+      await inflight;
+      return;
+    }
+
+    const now = Date.now();
+    const lastAttemptAt = this.entitySyncLastAttemptAt.get(key);
+    if (lastAttemptAt !== undefined && now - lastAttemptAt < 1500) {
+      return;
+    }
+    this.entitySyncLastAttemptAt.set(key, now);
+
+    const run = (async () => {
+      try {
+        await this.entityReconciliation?.runSweep({
+          agentId: viewerContext.viewer_agent_id,
+          sessionId: viewerContext.session_id,
+          dryRun: false,
+          maxCandidatesPerKey: 6,
+          scope: "private_overlay",
+        });
+      } catch {
+        // Prompt building should degrade gracefully when entity sync fails.
+      } finally {
+        this.entitySyncInflight.delete(key);
+      }
+    })();
+    this.entitySyncInflight.set(key, run);
+    await run;
   }
 }
 
 function appendGuidanceIfPresent(content: string): string {
   if (!content || content.trim().length === 0) return content;
   return `${content}\n\n${WEAK_MEMORY_INTERPRETATION_GUIDANCE}`;
-}
-
-function mergeHints(
-  a: string[] | undefined,
-  b: string[] | undefined,
-): string[] | undefined {
-  if (!a && !b) return undefined;
-  const set = new Set<string>();
-  if (a) for (const h of a) set.add(h);
-  if (b) for (const h of b) set.add(h);
-  return set.size > 0 ? [...set] : undefined;
 }

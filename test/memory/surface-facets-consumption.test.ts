@@ -795,6 +795,12 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
         async getMessageRecords() {
           return [];
         },
+        async getBySession() {
+          return [];
+        },
+        async getMaxIndex() {
+          return undefined;
+        },
       } as unknown as PromptDataRepos["interactionRepo"],
       sharedBlockRepo: {} as PromptDataRepos["sharedBlockRepo"],
     };
@@ -859,6 +865,12 @@ describe("RetrievalOrchestrator surface facets consumption (GAP-4 §1)", () => {
       interactionRepo: {
         async getMessageRecords() {
           return [];
+        },
+        async getBySession() {
+          return [];
+        },
+        async getMaxIndex() {
+          return undefined;
         },
       } as unknown as PromptDataRepos["interactionRepo"],
       sharedBlockRepo: {} as PromptDataRepos["sharedBlockRepo"],

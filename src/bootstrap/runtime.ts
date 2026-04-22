@@ -1595,21 +1595,12 @@ export function bootstrapRuntime(
     })();
   }
 
-  // Extract character names from all persona cards so the retrieval query
-  // router can resolve indirect references (e.g. "花房那边的人" → Alice)
-  // even when the character hasn't appeared in recent episode entity_pointer_keys.
-  const personaEntityHints: string[] = [];
-  for (const [, card] of personaService.getSnapshot().cards) {
-    if (card.name && card.name.trim().length > 0) {
-      personaEntityHints.push(card.name.trim());
-    }
-  }
   const memoryAdapter = new MemoryAdapter(
     promptDataRepos,
     retrievalService,
     episodeRepo,
-    personaEntityHints,
     talkerThinkerConfig.sceneRetrieval,
+    entityReconciliation,
   );
   const promptBuilder = new PromptBuilder({
     persona: personaAdapter,

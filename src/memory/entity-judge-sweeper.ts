@@ -8,6 +8,11 @@ import type {
   ToolCallResult,
 } from "./task-agent.js";
 import { makeNodeRef } from "./schema.js";
+import {
+  canonicalizeEntityMentionPointer,
+  normalizeEntityMentionSurface,
+  normalizeEntityMentions,
+} from "./entity-mentions.js";
 
 export type PgFactoryLike = {
   getPool(): postgres.Sql;
@@ -60,6 +65,11 @@ type CandidateEntity = {
   lexical_score: number;
 };
 
+type CandidateEntityMention = {
+  pointerKey: string;
+  surfaceForms: string[];
+};
+
 type ParsedJudgeResult = {
   decision: "match" | "new";
   selectedIndex?: number;
@@ -108,7 +118,7 @@ const DEFAULT_MAX_CANDIDATES_PER_KEY = 10;
 const DEFAULT_JUDGE_MODEL_ID = "minimax/MiniMax-M2.7";
 
 function normalizePointer(value: string): string {
-  return value.normalize("NFC").trim();
+  return canonicalizeEntityMentionPointer(value);
 }
 
 function isIgnorablePointerKey(value: string): boolean {
@@ -122,6 +132,35 @@ function isIgnorablePointerKey(value: string): boolean {
     return true;
   }
   return false;
+}
+
+function appendCandidateMention(
+  bucket: Map<string, Set<string>>,
+  surface: string,
+): void {
+  const normalizedSurface = normalizeEntityMentionSurface(surface);
+  if (!normalizedSurface) {
+    return;
+  }
+  const pointerKey = normalizePointer(normalizedSurface);
+  if (pointerKey.length === 0 || isIgnorablePointerKey(pointerKey)) {
+    return;
+  }
+  const surfaceForms = bucket.get(pointerKey) ?? new Set<string>();
+  surfaceForms.add(normalizedSurface);
+  bucket.set(pointerKey, surfaceForms);
+}
+
+function pickPreferredDisplayName(
+  pointerKey: string,
+  surfaceForms: readonly string[],
+): string {
+  for (const surface of surfaceForms) {
+    if (surface !== pointerKey) {
+      return surface;
+    }
+  }
+  return pointerKey;
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -265,14 +304,17 @@ function buildJudgeMessages(params: {
 async function createRuntimeEntity(params: {
   sql: postgres.Sql;
   pointerKey: string;
+  displayName?: string;
   agentId: string;
   scope: "shared_public" | "private_overlay";
   summary: string | null;
 }): Promise<number | null> {
   const now = Date.now();
   const pointerKey = normalizePointer(params.pointerKey);
-  const displayName = pointerKey;
+  const displayName =
+    params.displayName?.normalize("NFC").trim().slice(0, 120) || pointerKey;
   const summary = params.summary?.trim().slice(0, 240) ?? null;
+  const summaryProvided = summary !== null;
 
   if (params.scope === "private_overlay") {
     const rows = await params.sql<{ id: number | string }[]>`
@@ -292,6 +334,16 @@ async function createRuntimeEntity(params: {
       ON CONFLICT (owner_agent_id, pointer_key)
       WHERE memory_scope = 'private_overlay'
       DO UPDATE SET
+        display_name = CASE
+          WHEN entity_nodes.display_name IS NULL OR entity_nodes.display_name = entity_nodes.pointer_key
+            THEN EXCLUDED.display_name
+          ELSE entity_nodes.display_name
+        END,
+        summary = CASE
+          WHEN ${summaryProvided} AND (entity_nodes.summary IS NULL OR BTRIM(entity_nodes.summary) = '')
+            THEN EXCLUDED.summary
+          ELSE entity_nodes.summary
+        END,
         updated_at = EXCLUDED.updated_at
       RETURNING id
     `;
@@ -318,6 +370,16 @@ async function createRuntimeEntity(params: {
     ON CONFLICT (pointer_key)
     WHERE memory_scope = 'shared_public'
     DO UPDATE SET
+      display_name = CASE
+        WHEN entity_nodes.display_name IS NULL OR entity_nodes.display_name = entity_nodes.pointer_key
+          THEN EXCLUDED.display_name
+        ELSE entity_nodes.display_name
+      END,
+      summary = CASE
+        WHEN ${summaryProvided} AND (entity_nodes.summary IS NULL OR BTRIM(entity_nodes.summary) = '')
+          THEN EXCLUDED.summary
+        ELSE entity_nodes.summary
+      END,
       updated_at = EXCLUDED.updated_at
     RETURNING id
   `;
@@ -380,7 +442,7 @@ export class EntityJudgeSweeper {
             cognition_key ILIKE ${`%${pointerKey}%`}
             OR cognition_key ILIKE ${`%${lowerPK}%`}
           )
-          AND cognition_key ~* '(knowledge_gap|identity_unknown|uncertain_existence|identity_ambiguity|clarify_.*_identity|verify_.*_identity)'
+          AND cognition_key ~* '(knowledge_gap|identity_unknown|uncertain_existence|identity_ambiguity|clarify_.*_identity|verify_.*_identity|no_knowledge(?:_of)?)'
           AND NOT EXISTS (
             SELECT 1 FROM private_cognition_events r
             WHERE r.agent_id = private_cognition_events.agent_id
@@ -412,6 +474,34 @@ export class EntityJudgeSweeper {
       console.warn(
         `[entity-judge] retract failed for ${pointerKey}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  private async createSurfaceAliases(
+    canonicalId: number,
+    surfaceForms: readonly string[],
+    canonicalPointerKey?: string,
+    ownerAgentId?: string,
+  ): Promise<void> {
+    for (const surface of surfaceForms) {
+      if (surface.trim().length === 0) {
+        continue;
+      }
+      if (canonicalPointerKey && surface === canonicalPointerKey) {
+        continue;
+      }
+      try {
+        await this.aliasRepo.createAlias(
+          canonicalId,
+          surface,
+          "surface_mention",
+          ownerAgentId,
+        );
+      } catch (err) {
+        console.warn(
+          `[entity-judge] alias create failed for ${surface} -> ${canonicalId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
@@ -453,6 +543,17 @@ export class EntityJudgeSweeper {
     }
   }
 
+  private async finalizeResolvedEntity(
+    sql: postgres.Sql,
+    agentId: string,
+    pointerKey: string,
+    entityId: number,
+    summary: string | null,
+  ): Promise<void> {
+    await this.embedRuntimeEntity(entityId, pointerKey, summary);
+    await this.retractIdentityGapCommitments(sql, agentId, pointerKey, entityId);
+  }
+
   async runSweep(opts: EntityJudgeSweepOptions): Promise<EntityJudgeReport> {
     const startedAt = Date.now();
     const dryRun = opts.dryRun ?? true;
@@ -489,32 +590,29 @@ export class EntityJudgeSweeper {
       const sql = this.pgFactory.getPool();
       const effectiveSince = opts.since ?? this.sinceCursor.get(lockKey);
 
-      const discoveredPointerKeys = await this.collectCandidatePointerKeys({
+      const discoveredPointerMentions = await this.collectCandidatePointerKeys({
         sql,
         agentId: opts.agentId,
         sessionId: opts.sessionId,
         since: effectiveSince,
       });
 
-      const allCandidateKeys = [
-        ...new Set(
-          discoveredPointerKeys
-            .map((key) => normalizePointer(key))
-            .filter((key) => !isIgnorablePointerKey(key)),
-        ),
-      ];
-
-      const unresolvedKeys = await this.filterExistingPointerKeys({
+      const unresolvedMentions = await this.filterExistingPointerKeys({
         sql,
         agentId: opts.agentId,
-        pointerKeys: allCandidateKeys,
+        mentions: discoveredPointerMentions,
       });
 
       const decisions: EntityJudgeDecision[] = [];
       let matched = 0;
       let created = 0;
 
-      for (const pointerKey of unresolvedKeys) {
+      for (const mention of unresolvedMentions) {
+        const pointerKey = mention.pointerKey;
+        const displayName = pickPreferredDisplayName(
+          pointerKey,
+          mention.surfaceForms,
+        );
         const contextSummary = await this.readRecentContextSummary({
           sql,
           agentId: opts.agentId,
@@ -534,6 +632,7 @@ export class EntityJudgeSweeper {
             createdEntityId = await createRuntimeEntity({
               sql,
               pointerKey,
+              displayName,
               agentId: opts.agentId,
               scope,
               summary: contextSummary,
@@ -541,8 +640,21 @@ export class EntityJudgeSweeper {
           }
           if (createdEntityId != null) {
             created += 1;
-            await this.embedRuntimeEntity(createdEntityId, pointerKey, contextSummary);
-            await this.retractIdentityGapCommitments(sql, opts.agentId, pointerKey, createdEntityId);
+            const aliasOwnerAgentId =
+              scope === "private_overlay" ? opts.agentId : undefined;
+            await this.createSurfaceAliases(
+              createdEntityId,
+              mention.surfaceForms,
+              pointerKey,
+              aliasOwnerAgentId,
+            );
+            await this.finalizeResolvedEntity(
+              sql,
+              opts.agentId,
+              pointerKey,
+              createdEntityId,
+              contextSummary,
+            );
           }
           decisions.push({
             pointer_key: pointerKey,
@@ -571,11 +683,17 @@ export class EntityJudgeSweeper {
           const aliasOwnerAgentId =
             scope === "private_overlay" ? opts.agentId : undefined;
           if (!dryRun) {
-            await this.aliasRepo.createAlias(
+            await this.createSurfaceAliases(
               selected.id,
-              pointerKey,
-              "llm_judged",
+              mention.surfaceForms,
+              selected.pointer_key,
               aliasOwnerAgentId,
+            );
+            await this.retractIdentityGapCommitments(
+              sql,
+              opts.agentId,
+              pointerKey,
+              selected.id,
             );
           }
           matched += 1;
@@ -603,6 +721,7 @@ export class EntityJudgeSweeper {
           createdEntityId = await createRuntimeEntity({
             sql,
             pointerKey,
+            displayName,
             agentId: opts.agentId,
             scope,
             summary: entitySummary,
@@ -610,8 +729,21 @@ export class EntityJudgeSweeper {
         }
         if (createdEntityId != null) {
           created += 1;
-          await this.embedRuntimeEntity(createdEntityId, pointerKey, entitySummary);
-          await this.retractIdentityGapCommitments(sql, opts.agentId, pointerKey, createdEntityId);
+          const aliasOwnerAgentId =
+            scope === "private_overlay" ? opts.agentId : undefined;
+          await this.createSurfaceAliases(
+            createdEntityId,
+            mention.surfaceForms,
+            pointerKey,
+            aliasOwnerAgentId,
+          );
+          await this.finalizeResolvedEntity(
+            sql,
+            opts.agentId,
+            pointerKey,
+            createdEntityId,
+            entitySummary,
+          );
         }
         decisions.push({
           pointer_key: pointerKey,
@@ -638,7 +770,7 @@ export class EntityJudgeSweeper {
         scope,
         ...(effectiveSince !== undefined ? { since: effectiveSince } : {}),
         max_candidates_per_key: maxCandidatesPerKey,
-        candidate_keys: unresolvedKeys.length,
+        candidate_keys: unresolvedMentions.length,
         judged: decisions.length,
         matched,
         created,
@@ -655,9 +787,9 @@ export class EntityJudgeSweeper {
     agentId: string;
     sessionId?: string;
     since?: number;
-  }): Promise<string[]> {
+  }): Promise<CandidateEntityMention[]> {
     const { sql, agentId, sessionId, since } = params;
-    const keys: string[] = [];
+    const keys = new Map<string, Set<string>>();
 
     const episodeRows =
       sessionId && since !== undefined
@@ -685,13 +817,13 @@ export class EntityJudgeSweeper {
             : await sql<{ key: string }[]>`
                 SELECT DISTINCT unnest(entity_pointer_keys) AS key
                 FROM private_episode_events
-                WHERE agent_id = ${agentId}
-              `;
-    keys.push(
-      ...episodeRows
-        .map((row) => row.key)
-        .filter((value): value is string => typeof value === "string"),
-    );
+              WHERE agent_id = ${agentId}
+            `;
+    for (const row of episodeRows) {
+      if (typeof row.key === "string") {
+        appendCandidateMention(keys, row.key);
+      }
+    }
 
     const cognitionRows = await this.readCognitionCurrentRecords({
       sql,
@@ -700,10 +832,54 @@ export class EntityJudgeSweeper {
       since,
     });
     for (const row of cognitionRows) {
-      keys.push(...extractPointerKeysFromRecordJson(row.record_json));
+      for (const key of extractPointerKeysFromRecordJson(row.record_json)) {
+        appendCandidateMention(keys, key);
+      }
     }
 
-    return keys;
+    const settlementRows = await this.readSettlementMentionRows({
+      sql,
+      agentId,
+      sessionId,
+      since,
+    });
+    for (const row of settlementRows) {
+      let payload = row.payload;
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload) as unknown;
+        } catch {
+          continue;
+        }
+      }
+      if (!payload || typeof payload !== "object") {
+        continue;
+      }
+      const settlementPayload = payload as {
+        ownerAgentId?: unknown;
+        entityMentions?: unknown;
+      };
+      if (settlementPayload.ownerAgentId !== agentId) {
+        continue;
+      }
+
+      let entityMentions: string[];
+      try {
+        entityMentions = normalizeEntityMentions(settlementPayload.entityMentions, {
+          fieldName: "entityMentions",
+        });
+      } catch {
+        continue;
+      }
+      for (const mention of entityMentions) {
+        appendCandidateMention(keys, mention);
+      }
+    }
+
+    return [...keys.entries()].map(([pointerKey, surfaceForms]) => ({
+      pointerKey,
+      surfaceForms: [...surfaceForms],
+    }));
   }
 
   private async readCognitionCurrentRecords(params: {
@@ -763,26 +939,66 @@ export class EntityJudgeSweeper {
     `;
   }
 
+  private async readSettlementMentionRows(params: {
+    sql: postgres.Sql;
+    agentId: string;
+    sessionId?: string;
+    since?: number;
+  }): Promise<Array<{ payload: unknown }>> {
+    const { sql, sessionId, since } = params;
+    if (sessionId && since !== undefined) {
+      return sql<{ payload: unknown }[]>`
+        SELECT payload
+        FROM interaction_records
+        WHERE session_id = ${sessionId}
+          AND record_type = 'turn_settlement'
+          AND committed_at >= ${since}
+      `;
+    }
+    if (sessionId) {
+      return sql<{ payload: unknown }[]>`
+        SELECT payload
+        FROM interaction_records
+        WHERE session_id = ${sessionId}
+          AND record_type = 'turn_settlement'
+      `;
+    }
+    if (since !== undefined) {
+      return sql<{ payload: unknown }[]>`
+        SELECT payload
+        FROM interaction_records
+        WHERE record_type = 'turn_settlement'
+          AND committed_at >= ${since}
+      `;
+    }
+    return sql<{ payload: unknown }[]>`
+      SELECT payload
+      FROM interaction_records
+      WHERE record_type = 'turn_settlement'
+    `;
+  }
+
   private async filterExistingPointerKeys(params: {
     sql: postgres.Sql;
     agentId: string;
-    pointerKeys: string[];
-  }): Promise<string[]> {
-    const { sql, agentId, pointerKeys } = params;
-    if (pointerKeys.length === 0) {
+    mentions: CandidateEntityMention[];
+  }): Promise<CandidateEntityMention[]> {
+    const { sql, agentId, mentions } = params;
+    if (mentions.length === 0) {
       return [];
     }
+    const pointerKeys = mentions.map((mention) => mention.pointerKey);
     const rows = await sql<{ pointer_key: string }[]>`
-      SELECT pointer_key
+      SELECT LOWER(pointer_key) AS pointer_key
       FROM entity_nodes
-      WHERE pointer_key = ANY(${pointerKeys})
+      WHERE LOWER(pointer_key) = ANY(${pointerKeys})
         AND (
           memory_scope = 'shared_public'
           OR (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
         )
     `;
     const existing = new Set(rows.map((row) => row.pointer_key));
-    return pointerKeys.filter((key) => !existing.has(key));
+    return mentions.filter((mention) => !existing.has(mention.pointerKey));
   }
 
   private async readRecentContextSummary(params: {

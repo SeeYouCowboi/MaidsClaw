@@ -200,7 +200,7 @@ describe("PromptBuilder", () => {
 		expect(slots.includes(PromptSectionSlot.RECENT_COGNITION)).toBe(false);
 	});
 
-	it("does not inject KNOWN_ENTITIES in talker mode", async () => {
+	it("injects KNOWN_ENTITIES in talker mode", async () => {
 		const dataSources = makeDataSources();
 		const builder = new PromptBuilder(dataSources);
 
@@ -215,7 +215,39 @@ describe("PromptBuilder", () => {
 		});
 
 		const slots = output.sections.map((section) => section.slot);
-		expect(slots.includes(PromptSectionSlot.KNOWN_ENTITIES)).toBe(false);
+		expect(slots.includes(PromptSectionSlot.KNOWN_ENTITIES)).toBe(true);
+		const knownEntities =
+			getSectionContent(output.sections, PromptSectionSlot.KNOWN_ENTITIES) ?? "";
+		expect(knownEntities).toContain("<known_entities>");
+		expect(knownEntities).toContain("alice");
+	});
+
+	it("softens prior assistant confusion about names that are now in known_entities", async () => {
+		const dataSources = makeDataSources();
+		const builder = new PromptBuilder(dataSources);
+		const conversation: ChatMessage[] = [
+			{ role: "user", content: "对了，Alice今天起得早吗？" },
+			{
+				role: "assistant",
+				content: "Alice……主人，这位是？我好像没听过这个名字，能告诉我多一些吗？",
+			},
+			{ role: "user", content: "她最近是不是总往花房那边跑？" },
+		];
+
+		const output = await builder.build({
+			profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+			viewerContext: BASE_VIEWER_CONTEXT,
+			userMessage: "她最近是不是总往花房那边跑？",
+			conversationMessages: conversation,
+			budget: BASE_BUDGET,
+			isTalkerMode: true,
+			contextText: '{"writeEligible":false}',
+		});
+
+		const conversationContent =
+			getSectionContent(output.sections, PromptSectionSlot.CONVERSATION) ?? "";
+		expect(conversationContent).toContain("Alice……主人，这位的具体身份我还不太确定");
+		expect(conversationContent).not.toContain("我好像没听过这个名字");
 	});
 
 	it("builds task-agent prompt with lorebook disabled using only preamble and conversation", async () => {

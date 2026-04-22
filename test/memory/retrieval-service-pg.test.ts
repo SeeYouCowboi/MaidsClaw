@@ -6,6 +6,8 @@ import { EmbeddingService } from "../../src/memory/embeddings.js";
 import { RetrievalOrchestrator, type RetrievalDedupContext, type RetrievalQueryStrategy, type RetrievalResult, type TypedRetrievalResult } from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import type { RetrievalTemplate } from "../../src/memory/contracts/retrieval-template.js";
 import type { AgentRole } from "../../src/agents/profile.js";
+import type { QueryPlan, QueryPlanBuilder } from "../../src/memory/query-plan-types.js";
+import type { QueryRoute, QueryRouter } from "../../src/memory/query-routing-types.js";
 import type { ITransactionBatcher } from "../../src/memory/transaction-batcher.js";
 import type { EmbeddingRepo } from "../../src/storage/domain-repos/contracts/embedding-repo.js";
 import type { RetrievalReadRepo } from "../../src/storage/domain-repos/contracts/retrieval-read-repo.js";
@@ -465,6 +467,135 @@ describe("RetrievalService (PG-native, unit)", () => {
       queryStrategy: "deep_explain",
       contestedCount: 2,
     });
+  });
+
+  it("expands location-linked people through graph memory before building the query plan", async () => {
+    const route: QueryRoute = {
+      originalQuery: "花房那边的人今天来过吗？",
+      normalizedQuery: "花房那边的人今天来过吗？",
+      intents: [],
+      primaryIntent: "event",
+      routeConfidence: 0.7,
+      resolvedEntityIds: [50],
+      entityHints: ["花房"],
+      relationPairs: [],
+      timeConstraint: null,
+      timeSignals: ["今天"],
+      locationHints: [],
+      asksWhy: false,
+      asksChange: false,
+      asksComparison: false,
+      signals: {
+        needsEpisode: 1,
+        needsConflict: 0,
+        needsTimeline: 0,
+        needsRelationship: 0,
+        needsCognition: 0,
+        needsEntityFocus: 1,
+      },
+      rationale: "test route",
+      matchedRules: [],
+      classifierVersion: "test-v1",
+    };
+    let capturedRoute: QueryRoute | null = null;
+    const queryRouter: QueryRouter = {
+      route: async () => route,
+    };
+    const queryPlanBuilder: QueryPlanBuilder = {
+      build: ({ route }) => {
+        capturedRoute = route;
+        return {
+          route,
+          surfacePlans: {
+            narrative: {
+              baseQuery: route.normalizedQuery,
+              entityFilters: [...route.resolvedEntityIds],
+              timeWindow: null,
+              weight: 0.5,
+              enabledByRole: true,
+            },
+            cognition: {
+              baseQuery: route.normalizedQuery,
+              entityFilters: [...route.resolvedEntityIds],
+              timeWindow: null,
+              weight: 0.2,
+              enabledByRole: true,
+            },
+            episode: {
+              baseQuery: route.normalizedQuery,
+              entityFilters: [...route.resolvedEntityIds],
+              timeWindow: null,
+              weight: 1,
+              enabledByRole: true,
+            },
+            conflictNotes: {
+              baseQuery: route.normalizedQuery,
+              entityFilters: [...route.resolvedEntityIds],
+              timeWindow: null,
+              weight: 0,
+              enabledByRole: true,
+            },
+          },
+          graphPlan: {
+            primaryIntent: "event",
+            secondaryIntents: [],
+            timeSlice: null,
+            seedBias: {
+              entity: 0.5,
+              event: 0.5,
+              episode: 1,
+              assertion: 0,
+              evaluation: 0,
+              commitment: 0,
+            },
+            edgeBias: {},
+          },
+          builderVersion: "test-plan-v1",
+          rationale: "test plan",
+          matchedRules: [],
+        } satisfies QueryPlan;
+      },
+    };
+    retrievalRepo.entityResult = {
+      entity: {
+        ...makeEntity(50, "花房"),
+        entity_type: "location",
+      },
+      facts: [],
+      events: [
+        {
+          ...makeEvent(801),
+          participants: JSON.stringify(["entity:77"]),
+        },
+      ],
+      episodes: [],
+    };
+
+    const routedService = new RetrievalService({
+      retrievalRepo,
+      narrativeSearch: new NarrativeSearchService(narrativeRepo),
+      cognitionSearch: new CognitionSearchService(
+        new StubCognitionSearchRepo(),
+        new StubRelationReadRepo(),
+        new StubCognitionProjectionRepo(),
+      ),
+      embeddingService: new EmbeddingService(new StubEmbeddingRepo(), new StubTransactionBatcher()),
+      orchestrator,
+      queryRouter,
+      queryPlanBuilder,
+    });
+
+    await routedService.generateTypedRetrieval("花房那边的人今天来过吗？", viewerContext);
+
+    expect(capturedRoute).not.toBeNull();
+    expect(capturedRoute!.resolvedEntityIds).toEqual([50, 77]);
+    expect(capturedRoute!.matchedRules).toContain("graph_related_entity_expand:1");
+    expect(retrievalRepo.readByEntityCalls).toEqual([
+      {
+        pointerKey: "花房",
+        viewerContext,
+      },
+    ]);
   });
 
   it("resolveRedirect delegates to retrievalRepo", async () => {

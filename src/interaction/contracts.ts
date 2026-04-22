@@ -106,6 +106,8 @@ export type TurnSettlementPayload = {
     currentLocationEntityId?: number;
   };
   schemaVersion?: "turn_settlement_v3" | "turn_settlement_v4" | "turn_settlement_v5";
+  /** Explicitly named people/places/items surfaced by Talker for prompt-time entity sync. */
+  entityMentions?: string[];
   privateCognition?: PrivateCognitionCommitV4;
   privateEpisodes?: PrivateEpisodeArtifact[];
   publications?: PublicationDeclaration[];

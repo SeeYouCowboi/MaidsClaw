@@ -2,9 +2,11 @@
  * CJK-aware fuzzy search utilities for PostgreSQL.
  *
  * pg_trgm is ineffective for CJK text (trigrams operate on UTF-8 bytes,
- * producing near-zero similarity scores). This module provides bigram/unigram
- * decomposition and coverage-based scoring for Chinese text search.
+ * producing near-zero similarity scores). This module provides jieba-backed
+ * token decomposition and coverage-based scoring for Chinese text search.
  */
+
+import { segmentCjk } from "../../../memory/cjk-segmenter.js";
 
 // CJK Unified Ideographs + Extension A + Compatibility Ideographs
 const CJK_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
@@ -25,9 +27,9 @@ export function isCjkQuery(text: string): boolean {
 export type CjkDecomposition = {
   /** Original query text */
   original: string;
-  /** Character bigrams preserving adjacency order */
+  /** High-information multi-character terms, preferably from jieba segmentation */
   bigrams: string[];
-  /** Individual characters (excluding stopwords) */
+  /** Individual fallback characters and Latin tokens */
   unigrams: string[];
   /** Maximum possible score for normalization */
   maxScore: number;
@@ -41,29 +43,42 @@ export type CjkDecomposition = {
 const LATIN_TOKEN_RE = /[a-zA-Z][a-zA-Z0-9]+/g;
 
 /**
- * Decompose a mixed CJK + Latin string into weighted bigrams and unigrams.
+ * Decompose a mixed CJK + Latin string into weighted terms and unigrams.
  *
  * For query "储藏室":
- * - bigrams: ["储藏", "藏室"]  (weight=3 each)
+ * - bigrams: ["储藏室"]  (weight=3 each)
  * - unigrams: ["储", "藏", "室"]  (weight=1 each, stopwords excluded)
  * - exact match weight: 5
- * - maxScore: 5 + 2*3 + 3*1 = 14
+ * - maxScore: 5 + 1*3 + 3*1 = 11
  *
  * For query "Alice有时候比管家还麻烦":
- * - bigrams: ["有时", "时候", "候比", "比管", "管家", "家还", "还麻", "麻烦"]
+ * - bigrams: ["有时候", "管家", "麻烦"]
  * - unigrams: ["有", "时", "候", "管", "家", "还", "麻", "烦", "alice"]
- *   (CJK stopwords excluded; "比" is a stopword so it's dropped; "Alice"
+ *   (CJK stopwords excluded; "比" is a stopword so it's dropped; "Alice" is
  *    preserved as a lower-cased Latin unigram)
  */
 export function decomposeCjk(query: string): CjkDecomposition {
   const chars = Array.from(query).filter((ch) => CJK_CHAR_RE.test(ch));
-
   const bigrams: string[] = [];
-  for (let i = 0; i < chars.length - 1; i++) {
-    bigrams.push(chars[i] + chars[i + 1]);
+  const seenBigrams = new Set<string>();
+  const pushBigram = (token: string): void => {
+    const trimmed = token.trim();
+    if (trimmed.length < 2) return;
+    if (!containsCjk(trimmed)) return;
+    if (isAllStopwordToken(trimmed)) return;
+    if (seenBigrams.has(trimmed)) return;
+    seenBigrams.add(trimmed);
+    bigrams.push(trimmed);
+  };
+
+  const segmented = segmentCjk(query);
+  if (segmented !== null) {
+    for (const token of segmented) {
+      pushBigram(token);
+    }
   }
 
-  const unigrams: string[] = chars.filter((ch) => !CJK_STOPWORDS.has(ch));
+  const unigrams = chars.filter((ch) => !CJK_STOPWORDS.has(ch));
 
   // Also extract Latin word tokens (length >= 2) so mixed-script queries
   // don't silently lose their most informative ASCII terms (proper names,
@@ -82,6 +97,15 @@ export function decomposeCjk(query: string): CjkDecomposition {
   const maxScore = WEIGHT_EXACT + bigrams.length * WEIGHT_BIGRAM + unigrams.length * WEIGHT_UNIGRAM;
 
   return { original: query, bigrams, unigrams, maxScore };
+}
+
+function containsCjk(text: string): boolean {
+  return CJK_CHAR_RE.test(text);
+}
+
+function isAllStopwordToken(token: string): boolean {
+  const chars = Array.from(token).filter((ch) => CJK_CHAR_RE.test(ch));
+  return chars.length > 0 && chars.every((ch) => CJK_STOPWORDS.has(ch));
 }
 
 /**
@@ -152,14 +176,14 @@ export function buildCjkScoreSql(
 const CJK_PREFILTER_PATTERN_CAP = 20;
 
 /**
- * Build a SQL WHERE condition that matches any CJK gram.
+ * Build a SQL WHERE condition that matches any CJK term.
  *
- * Pre-P2-A: used only the first 3 unigrams, which for long queries meant
- * dropping high-information bigrams like `管家`/`茶室`/`怀表` from the
- * pre-filter entirely and seeding with whatever 3 common characters happened
- * to come first after stopword removal. Now:
+ * The pre-filter prefers jieba-backed multi-character terms such as
+ * `管家`/`茶室`/`怀表`, then falls back to unigrams for shorter or less
+ * segmentable queries. This keeps the SQL candidate set narrow without
+ * relying on the old sliding character-bigram path.
  *
- *  - Prefer bigrams (higher information density per gram) when available
+ *  - Prefer multi-character terms (higher information density per token)
  *  - Fall back to unigrams for very short (single-char) queries
  *  - Cap total patterns at CJK_PREFILTER_PATTERN_CAP
  */

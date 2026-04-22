@@ -1,4 +1,4 @@
-import { bootstrapRuntime } from "../../src/bootstrap/runtime.js";
+import { bootstrapRuntime, initializePgBackendForRuntime } from "../../src/bootstrap/runtime.js";
 import { MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE } from "../../src/agents/presets.js";
 import { DefaultModelServiceRegistry } from "../../src/core/models/registry.js";
 import type { Chunk } from "../../src/core/chunk.js";
@@ -15,6 +15,10 @@ import type { MemoryTaskAgent } from "../../src/memory/task-agent.js";
 import type { AppUserFacade } from "../../src/app/host/types.js";
 import { executeUserTurn } from "../../src/app/turn/user-turn-service.js";
 import { chunkToObservationEvent } from "../../src/gateway/controllers.js";
+import {
+  installResolvedPgAppUrl,
+  skipPgTests,
+} from "../helpers/pg-app-test-utils.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +117,9 @@ function validateEventFields(
 let server: GatewayServer;
 let sessionService: SessionService;
 let baseUrl: string;
+const itWithSkip = it as typeof it & {
+  skipIf(condition: boolean): typeof it;
+};
 
 beforeAll(() => {
   sessionService = new SessionService();
@@ -242,6 +249,75 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     expect(doneData.total_tokens).toBe(10);
   });
 
+  it("flushes status before the first observation arrives", async () => {
+    const localSessionService = new SessionService();
+    const localServer = new GatewayServer({
+      port: 0,
+      host: "localhost",
+      userFacade: buildTestUserFacade({
+        sessionService: localSessionService,
+        turnService: {
+          async *runUserTurn(): AsyncGenerator<Chunk> {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            yield { type: "text_delta", text: "delayed" };
+            yield {
+              type: "message_end",
+              stopReason: "end_turn",
+              inputTokens: 0,
+              outputTokens: 1,
+            };
+          },
+        },
+      }),
+    });
+    localServer.start();
+
+    try {
+      const localBaseUrl = `http://localhost:${localServer.getPort()}`;
+      const createRes = await fetch(`${localBaseUrl}/v1/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "maid:main" }),
+      });
+      const { session_id } = (await createRes.json()) as { session_id: string };
+
+      const res = await Promise.race([
+        fetch(`${localBaseUrl}/v1/sessions/${session_id}/turns:stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agent_id: "maid:main",
+            request_id: "req-delayed-first-observation",
+            user_message: { id: "msg-delayed", text: "Hello" },
+          }),
+        }),
+        new Promise<Response>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out waiting for SSE headers")), 100),
+        ),
+      ]);
+
+      expect(res.status).toBe(200);
+      const reader = res.body?.getReader();
+      expect(reader).toBeDefined();
+
+      const firstRead = await Promise.race([
+        reader!.read(),
+        new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out waiting for status chunk")), 100),
+        ),
+      ]);
+
+      expect(firstRead.done).toBe(false);
+      const firstChunk = new TextDecoder().decode(firstRead.value);
+      expect(firstChunk).toContain('"type":"status"');
+      expect(firstChunk).toContain('"message":"processing"');
+
+      await reader!.cancel();
+    } finally {
+      localServer.stop();
+    }
+  });
+
   it("preserves request_id across all events", async () => {
     const createRes = await fetch(`${baseUrl}/v1/sessions`, {
       method: "POST",
@@ -306,10 +382,11 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     expect(res.headers.get("Content-Type")).toBe("text/event-stream");
 
     const events = parseSseEvents(await res.text());
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe("error");
+    expect(events.length).toBe(2);
+    expect(events[0].type).toBe("status");
+    expect(events[1].type).toBe("error");
 
-    const errData = events[0].data as { code: string; message: string; retriable: boolean };
+    const errData = events[1].data as { code: string; message: string; retriable: boolean };
     expect(errData.code).toBe("SESSION_NOT_FOUND");
     expect(errData.retriable).toBe(false);
   });
@@ -339,10 +416,11 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     });
 
     const events = parseSseEvents(await res.text());
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe("error");
+    expect(events.length).toBe(2);
+    expect(events[0].type).toBe("status");
+    expect(events[1].type).toBe("error");
 
-    const errData = events[0].data as { code: string };
+    const errData = events[1].data as { code: string };
     expect(errData.code).toBe("SESSION_CLOSED");
   });
 
@@ -365,10 +443,11 @@ describe("POST /v1/sessions/{id}/turns:stream", () => {
     });
 
     const events = parseSseEvents(await res.text());
-    expect(events.length).toBe(1);
-    expect(events[0].type).toBe("error");
+    expect(events.length).toBe(2);
+    expect(events[0].type).toBe("status");
+    expect(events[1].type).toBe("error");
 
-    const errData = events[0].data as { code: string; retriable: boolean; message: string };
+    const errData = events[1].data as { code: string; retriable: boolean; message: string };
     expect(errData.code).toBe("AGENT_OWNERSHIP_MISMATCH");
     expect(errData.retriable).toBe(false);
     expect(errData.message.includes("owned by agent")).toBe(true);
@@ -626,9 +705,10 @@ describe("POST /v1/sessions/{id}/recover", () => {
       });
 
       const events = parseSseEvents(await res.text());
-      expect(events.length).toBe(1);
-      expect(events[0].type).toBe("error");
-      const errData = events[0].data as { code: string; retriable: boolean };
+      expect(events.length).toBe(2);
+      expect(events[0].type).toBe("status");
+      expect(events[1].type).toBe("error");
+      const errData = events[1].data as { code: string; retriable: boolean };
       expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
       expect(errData.retriable).toBe(false);
     } finally {
@@ -1053,7 +1133,7 @@ describe("Real TurnService-backed gateway path", () => {
     }
   });
 
-  it("real-path RP session emits status, full delta, then done", async () => {
+  itWithSkip.skipIf(skipPgTests)("real-path RP session emits status, full delta, then done", async () => {
     const chunkRef: { value: Chunk[] } = {
       value: [
         { type: "tool_use_start", id: "call_1", name: "submit_rp_turn" },
@@ -1069,7 +1149,9 @@ describe("Real TurnService-backed gateway path", () => {
     const modelRegistry = new DefaultModelServiceRegistry({
       chatPrefixes: [{ prefix: "anthropic", provider: makeMockProvider(chunkRef) }],
     });
+    const restorePgAppUrl = installResolvedPgAppUrl();
 		const runtime = bootstrapRuntime({ modelRegistry, agentProfiles: [MAIDEN_PROFILE, RP_AGENT_PROFILE, TASK_AGENT_PROFILE] });
+    await initializePgBackendForRuntime(runtime);
     const srv = new GatewayServer({
           port: 0,
           host: "localhost",
@@ -1110,6 +1192,7 @@ describe("Real TurnService-backed gateway path", () => {
     } finally {
       srv.stop();
       runtime.shutdown();
+      restorePgAppUrl();
     }
   });
 
@@ -1263,9 +1346,8 @@ describe("Real TurnService-backed gateway path", () => {
         }),
       });
       const events2 = parseSseEvents(await res2.text());
-      expect(events2.length).toBe(1);
-      expect(events2[0].type).toBe("error");
-      const errData = events2[0].data as { code: string; retriable: boolean };
+      expect(events2.map((event) => event.type)).toEqual(["status", "error"]);
+      const errData = events2[1].data as { code: string; retriable: boolean };
       expect(errData.code).toBe("SESSION_RECOVERY_REQUIRED");
       expect(errData.retriable).toBe(false);
     } finally {

@@ -10,6 +10,11 @@ import type {
   KnownEntityPromptOptions,
   TypedRetrievalSurfaceOptions,
 } from "../core/prompt-data-sources.js";
+import type { TurnSettlementPayload } from "../interaction/contracts.js";
+import {
+  canonicalizeEntityMentionPointer,
+  normalizeEntityMentions,
+} from "./entity-mentions.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
@@ -104,7 +109,10 @@ type RecentCognitionEntry = {
   sourceTurnVersion?: number;
 };
 
-export function formatRecentCognitionFromPayload(slotPayload: string | undefined): string {
+export function formatRecentCognitionFromPayload(
+  slotPayload: string | undefined,
+  knownEntityHints?: string[],
+): string {
   if (!slotPayload) {
     return "";
   }
@@ -114,18 +122,27 @@ export function formatRecentCognitionFromPayload(slotPayload: string | undefined
     if (!Array.isArray(parsed)) {
       return "";
     }
-    return formatRecentCognitionEntries(parsed as RecentCognitionEntry[]);
+    return formatRecentCognitionEntries(
+      parsed as RecentCognitionEntry[],
+      knownEntityHints,
+    );
   } catch {
     return "";
   }
 }
 
-function formatRecentCognitionEntries(entries: RecentCognitionEntry[]): string {
+function formatRecentCognitionEntries(
+  entries: RecentCognitionEntry[],
+  knownEntityHints?: string[],
+): string {
   if (!Array.isArray(entries) || entries.length === 0) {
     return "";
   }
 
-  const activeEntries = entries.filter((e) => e.status !== "retracted");
+  const activeEntries = filterContradictoryRecentCognitionEntries(
+    entries.filter((e) => e.status !== "retracted"),
+    knownEntityHints,
+  );
   if (activeEntries.length === 0) {
     return "";
   }
@@ -177,6 +194,54 @@ function formatRecentCognitionEntries(entries: RecentCognitionEntry[]): string {
       return `• [${entry.kind}:${entry.key}] ${prefix}${entry.summary}`;
     })
     .join("\n");
+}
+
+const UNKNOWN_ENTITY_COGNITION_KEY_PATTERN =
+  /(knowledge_gap|identity_unknown|uncertain_existence|identity_ambiguity|clarify_.*_identity|verify_.*_identity|no_knowledge(?:_of)?)/i;
+
+function filterContradictoryRecentCognitionEntries(
+  entries: RecentCognitionEntry[],
+  knownEntityHints?: string[],
+): RecentCognitionEntry[] {
+  const knownForms = buildKnownEntityForms(knownEntityHints);
+  if (knownForms.size === 0) {
+    return entries;
+  }
+
+  return entries.filter((entry) => {
+    if (!isUnknownEntityCognitionEntry(entry)) {
+      return true;
+    }
+    return !recentCognitionEntryMentionsKnownEntity(entry, knownForms);
+  });
+}
+
+function isUnknownEntityCognitionEntry(entry: RecentCognitionEntry): boolean {
+  return (
+    UNKNOWN_ENTITY_COGNITION_KEY_PATTERN.test(entry.key) ||
+    matchesUnknownEntityConfusion(entry.summary)
+  );
+}
+
+function recentCognitionEntryMentionsKnownEntity(
+  entry: RecentCognitionEntry,
+  knownForms: Set<string>,
+): boolean {
+  if (mentionsKnownEntity(entry.summary, knownForms)) {
+    return true;
+  }
+
+  const keyParts = entry.key
+    .split(/[/:]/)
+    .map((part) => trimText(part))
+    .filter((part): part is string => Boolean(part));
+  for (const part of keyParts) {
+    const canonical = canonicalizeEntityMentionPointer(part) ?? part;
+    if (knownForms.has(part) || knownForms.has(canonical)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -295,6 +360,84 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
   return parts.join("\n").trim();
 }
 
+const UNKNOWN_ENTITY_CONFUSION_PATTERNS: RegExp[] = [
+  /没(?:有)?印象/u,
+  /没听过/u,
+  /不认识/u,
+  /无此人信息/u,
+  /还没接触过/u,
+  /不知道(?:这位|这个人|是谁)?/u,
+  /\bnever heard of\b/i,
+  /\bno impression\b/i,
+  /\bnot familiar with\b/i,
+  /\b(?:do not|don't|didn't)\s+(?:know|recognize|remember)\b/i,
+];
+
+function filterContradictoryEntityConfusionSegments(
+  result: TypedRetrievalResult,
+  knownEntityHints?: string[],
+): TypedRetrievalResult {
+  const knownForms = buildKnownEntityForms(knownEntityHints);
+  if (knownForms.size === 0) {
+    return result;
+  }
+
+  const shouldKeep = (content: string): boolean => {
+    if (!matchesUnknownEntityConfusion(content)) {
+      return true;
+    }
+    return !mentionsKnownEntity(content, knownForms);
+  };
+
+  return {
+    ...result,
+    narrative: result.narrative.filter((hit) => shouldKeep(hit.content)),
+    episode: result.episode.filter((hit) => shouldKeep(hit.content)),
+  };
+}
+
+function buildKnownEntityForms(knownEntityHints?: string[]): Set<string> {
+  const forms = new Set<string>();
+  for (const hint of knownEntityHints ?? []) {
+    const trimmed = trimText(hint);
+    if (!trimmed) {
+      continue;
+    }
+    forms.add(trimmed);
+    const canonical = canonicalizeEntityMentionPointer(trimmed);
+    if (canonical) {
+      forms.add(canonical);
+    }
+  }
+  return forms;
+}
+
+function matchesUnknownEntityConfusion(content: string): boolean {
+  return UNKNOWN_ENTITY_CONFUSION_PATTERNS.some((pattern) =>
+    pattern.test(content),
+  );
+}
+
+function mentionsKnownEntity(content: string, knownForms: Set<string>): boolean {
+  for (const form of knownForms) {
+    if (/[A-Za-z]/.test(form)) {
+      const escaped = escapeRegExp(form);
+      if (new RegExp(`\\b${escaped}\\b`, "i").test(content)) {
+        return true;
+      }
+      continue;
+    }
+    if (content.includes(form)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 type CoreMemoryRenderableBlock = {
   label: CoreMemoryLabel;
   chars_current: number;
@@ -330,9 +473,46 @@ export async function getSharedBlocksAsync(agentId: string, repos: PromptDataRep
   return renderCoreMemoryBlocks(shared, "shared_block");
 }
 
-export async function getRecentCognitionAsync(agentId: string, sessionId: string, repos: PromptDataRepos): Promise<string> {
-  const payload = await repos.recentCognitionSlotRepo.getSlotPayload(sessionId, agentId);
-  return formatRecentCognitionFromPayload(payload);
+export async function getRecentCognitionAsync(
+  viewerContext: ViewerContext,
+  repos: PromptDataRepos,
+  episodeRepo?: EpisodeRepo,
+): Promise<string> {
+  const payload = await repos.recentCognitionSlotRepo.getSlotPayload(
+    viewerContext.session_id,
+    viewerContext.viewer_agent_id,
+  );
+  let recentEntityHints: string[] | undefined;
+
+  if (episodeRepo?.readRecentSessionEntityHints) {
+    try {
+      recentEntityHints = await episodeRepo.readRecentSessionEntityHints(
+        viewerContext.viewer_agent_id,
+        viewerContext.session_id,
+        20,
+      );
+    } catch {
+      recentEntityHints = undefined;
+    }
+  }
+
+  const settlementEntityMentions = await readRecentSettlementEntityMentions(
+    viewerContext,
+    repos,
+    20,
+  );
+  if (settlementEntityMentions.length > 0) {
+    const merged = new Set(recentEntityHints ?? []);
+    for (const entity of settlementEntityMentions) {
+      merged.add(entity.pointer_key);
+      if (entity.display_name) {
+        merged.add(entity.display_name);
+      }
+    }
+    recentEntityHints = [...merged];
+  }
+
+  return formatRecentCognitionFromPayload(payload, recentEntityHints);
 }
 
 export async function getAttachedSharedBlocksAsync(agentId: string, repos: PromptDataRepos): Promise<string> {
@@ -358,6 +538,86 @@ export async function getAttachedSharedBlocksAsync(agentId: string, repos: Promp
   }
 
   return renderedBlocks.join("\n");
+}
+
+async function readRecentSettlementEntityMentions(
+  viewerContext: ViewerContext,
+  repos: PromptDataRepos,
+  settlementLimit = 20,
+): Promise<RecentSessionEntity[]> {
+  if (
+    typeof repos.interactionRepo.getMaxIndex !== "function" ||
+    typeof repos.interactionRepo.getBySession !== "function"
+  ) {
+    return [];
+  }
+
+  const maxIndex = await repos.interactionRepo.getMaxIndex(
+    viewerContext.session_id,
+  );
+  if (maxIndex === undefined) {
+    return [];
+  }
+
+  const records = await repos.interactionRepo.getBySession(
+    viewerContext.session_id,
+    { fromIndex: Math.max(0, maxIndex - settlementLimit * 6) },
+  );
+  const recentSettlements = records
+    .filter((record) => record.recordType === "turn_settlement")
+    .slice(-settlementLimit)
+    .reverse();
+
+  const merged = new Map<string, RecentSessionEntity>();
+  for (const record of recentSettlements) {
+    const payload = record.payload as Partial<TurnSettlementPayload>;
+    if (
+      typeof payload.ownerAgentId === "string" &&
+      payload.ownerAgentId.length > 0 &&
+      payload.ownerAgentId !== viewerContext.viewer_agent_id
+    ) {
+      continue;
+    }
+
+    let entityMentions: string[];
+    try {
+      entityMentions = normalizeEntityMentions(payload.entityMentions, {
+        fieldName: "entityMentions",
+      });
+    } catch {
+      continue;
+    }
+
+    for (const mention of entityMentions) {
+      const pointerKey = canonicalizeEntityMentionPointer(mention);
+      if (!pointerKey || merged.has(pointerKey)) {
+        continue;
+      }
+      merged.set(pointerKey, {
+        pointer_key: pointerKey,
+        display_name: mention !== pointerKey ? mention : null,
+        summary: null,
+      });
+    }
+  }
+
+  return [...merged.values()];
+}
+
+type RankedRecentSessionEntity = RecentSessionEntity & {
+  sourcePriority: number;
+  recencyRank: number;
+};
+
+function rankRecentSessionEntities(
+  rows: RecentSessionEntity[],
+  sourcePriority: number,
+): RankedRecentSessionEntity[] {
+  return rows.map((row, index) => ({
+    ...row,
+    sourcePriority,
+    recencyRank: index,
+  }));
 }
 
 export async function getTypedRetrievalSurfaceAsync(
@@ -402,6 +662,11 @@ export async function getTypedRetrievalSurfaceAsync(
       return typeof p.content === "string" ? p.content : "";
     })
     .filter((text) => text.trim().length > 0);
+  const settlementEntityMentions = await readRecentSettlementEntityMentions(
+    viewerContext,
+    repos,
+    20,
+  );
 
   let recentEntityHints: string[] | undefined;
   if (episodeRepo) {
@@ -416,14 +681,13 @@ export async function getTypedRetrievalSurfaceAsync(
     }
   }
 
-  // Merge persona-derived entity names (character names from card registry) so
-  // the query router's cross-turn fallback can resolve references like
-  // "花房那边的人" → Alice even when Alice hasn't been mentioned recently in
-  // episode entity_pointer_keys.
-  if (options?.personaEntityHints && options.personaEntityHints.length > 0) {
+  if (settlementEntityMentions.length > 0) {
     const merged = new Set(recentEntityHints ?? []);
-    for (const hint of options.personaEntityHints) {
-      merged.add(hint);
+    for (const entity of settlementEntityMentions) {
+      merged.add(entity.pointer_key);
+      if (entity.display_name) {
+        merged.add(entity.display_name);
+      }
     }
     recentEntityHints = [...merged];
   }
@@ -435,7 +699,12 @@ export async function getTypedRetrievalSurfaceAsync(
     recentEntityHints,
   }, undefined, "default_retrieval", undefined, options?.sceneRetrieval, options?.onRetrievalTraceCapture);
 
-  return renderTypedRetrieval(typed);
+  const filtered = filterContradictoryEntityConfusionSegments(
+    typed,
+    recentEntityHints,
+  );
+
+  return renderTypedRetrieval(filtered);
 }
 
 function trimText(value: string | null | undefined): string | null {
@@ -447,39 +716,66 @@ function trimText(value: string | null | undefined): string | null {
 }
 
 function mergeKnownEntityCandidates(params: {
-  recent: RecentSessionEntity[];
-  personaEntityHints?: string[];
+  recent: RankedRecentSessionEntity[];
 }): RecentSessionEntity[] {
-  const merged = new Map<string, RecentSessionEntity>();
+  const merged = new Map<string, RankedRecentSessionEntity>();
   for (const row of params.recent) {
     const pointerKey = trimText(row.pointer_key);
     if (!pointerKey) {
       continue;
     }
-    if (!merged.has(pointerKey)) {
+    const nextDisplayName = trimText(row.display_name);
+    const nextSummary = trimText(row.summary);
+    const existing = merged.get(pointerKey);
+    if (!existing) {
       merged.set(pointerKey, {
         pointer_key: pointerKey,
-        display_name: trimText(row.display_name),
-        summary: trimText(row.summary),
+        display_name: nextDisplayName,
+        summary: nextSummary,
+        sourcePriority: row.sourcePriority,
+        recencyRank: row.recencyRank,
       });
+      continue;
     }
+
+    const samePriority = row.sourcePriority === existing.sourcePriority;
+    const isFresher = samePriority && row.recencyRank < existing.recencyRank;
+    const shouldPreferRow = row.sourcePriority > existing.sourcePriority || isFresher;
+
+    merged.set(pointerKey, {
+      pointer_key: pointerKey,
+      display_name:
+        nextDisplayName && (shouldPreferRow || !trimText(existing.display_name))
+          ? nextDisplayName
+          : trimText(existing.display_name),
+      summary:
+        nextSummary && (shouldPreferRow || !trimText(existing.summary))
+          ? nextSummary
+          : trimText(existing.summary),
+      sourcePriority: shouldPreferRow
+        ? row.sourcePriority
+        : existing.sourcePriority,
+      recencyRank: shouldPreferRow
+        ? row.recencyRank
+        : existing.recencyRank,
+    });
   }
 
-  if (params.personaEntityHints) {
-    for (const hint of params.personaEntityHints) {
-      const pointerKey = trimText(hint);
-      if (!pointerKey || merged.has(pointerKey)) {
-        continue;
+  return [...merged.values()]
+    .sort((a, b) => {
+      if (b.sourcePriority !== a.sourcePriority) {
+        return b.sourcePriority - a.sourcePriority;
       }
-      merged.set(pointerKey, {
-        pointer_key: pointerKey,
-        display_name: pointerKey,
-        summary: null,
-      });
-    }
-  }
-
-  return [...merged.values()];
+      if (a.recencyRank !== b.recencyRank) {
+        return a.recencyRank - b.recencyRank;
+      }
+      return a.pointer_key.localeCompare(b.pointer_key);
+    })
+    .map(({ pointer_key, display_name, summary }) => ({
+      pointer_key,
+      display_name,
+      summary,
+    }));
 }
 
 function renderKnownEntitiesBlock(
@@ -525,6 +821,7 @@ function renderKnownEntitiesBlock(
   return [
     "<known_entities>",
     "(Use these existing pointer_key values exactly; do not translate or rewrite them. Create a new pointer_key only for genuinely new concepts.)",
+    "(Names listed here are already established in session or world memory. Do NOT say you have never heard of them. If only their identity, role, or relationship is unclear, ask for that clarification without denying name familiarity.)",
     "",
     ...lines,
     "</known_entities>",
@@ -533,8 +830,9 @@ function renderKnownEntitiesBlock(
 
 export async function getKnownEntitiesForWritingAsync(
   viewerContext: ViewerContext,
+  repos: PromptDataRepos,
   episodeRepo?: EpisodeRepo,
-  options?: KnownEntityPromptOptions & { personaEntityHints?: string[] },
+  options?: KnownEntityPromptOptions,
 ): Promise<string> {
   let recentEntities: RecentSessionEntity[] = [];
 
@@ -565,9 +863,17 @@ export async function getKnownEntitiesForWritingAsync(
     }
   }
 
+  const settlementEntities = await readRecentSettlementEntityMentions(
+    viewerContext,
+    repos,
+    20,
+  );
+
   const merged = mergeKnownEntityCandidates({
-    recent: recentEntities,
-    personaEntityHints: options?.personaEntityHints,
+    recent: [
+      ...rankRecentSessionEntities(settlementEntities, 3),
+      ...rankRecentSessionEntities(recentEntities, 2),
+    ],
   });
   return renderKnownEntitiesBlock(merged, options);
 }

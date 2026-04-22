@@ -32,10 +32,12 @@ import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-
 import type { CoreMemoryService } from "../memory/core-memory.js";
 import { materializePublications } from "../memory/materialization.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
+import { normalizeEntityMentions } from "../memory/entity-mentions.js";
 import type {
 	CommitSettlementResult,
 	ProjectionManager,
 } from "../memory/projection/projection-manager.js";
+import { tokenizeQuery } from "../memory/query-tokenizer.js";
 import type { GraphStorageService } from "../memory/storage.js";
 import type {
 	MemoryFlushRequest,
@@ -575,9 +577,10 @@ export class TurnService {
 			cognitiveSketchSource = "explicit";
 		}
 		try {
+			const latestUserText = getLatestUserMessage(effectiveRequest.messages);
 			const normalizedTurnInput =
 				this.talkerThinkerConfig.speakerNormalizationGate
-					? normalizeTurnInput(getLatestUserMessage(effectiveRequest.messages))
+					? normalizeTurnInput(latestUserText)
 					: undefined;
 			const resolvedViewerSnapshot = await this.resolveViewerSnapshot(
 				effectiveRequest.sessionId,
@@ -602,7 +605,7 @@ export class TurnService {
 					.replace(/[（(].*?[）)]/g, "")
 					.trim();
 				if (replyText.length > 0) {
-					const userText = getLatestUserMessage(effectiveRequest.messages);
+					const userText = latestUserText;
 					const userTag =
 						userText.length > 0
 							? `[user-stated] ${userText.length <= 120 ? userText : `${userText.substring(0, 120)}…`}\n`
@@ -638,6 +641,14 @@ export class TurnService {
 				}
 			}
 
+			const effectiveEntityMentions = normalizeEntityMentions(
+				[
+					...(canonicalOutcome.entityMentions ?? []),
+					...deriveFallbackEntityMentions(latestUserText),
+				],
+				{ fieldName: "entityMentions" },
+			);
+
 			const settlementPayload: TurnSettlementPayload = {
 				settlementId,
 				requestId,
@@ -647,6 +658,10 @@ export class TurnService {
 				hasPublicReply,
 				viewerSnapshot: resolvedViewerSnapshot,
 				schemaVersion: "turn_settlement_v5",
+				entityMentions:
+					effectiveEntityMentions.length > 0
+						? effectiveEntityMentions
+						: undefined,
 				privateCognition: undefined,
 				privateEpisodes: undefined,
 				publications: undefined,
@@ -1095,6 +1110,11 @@ export class TurnService {
 				hasPublicReply,
 				viewerSnapshot: resolvedViewerSnapshot,
 				schemaVersion: "turn_settlement_v5",
+				entityMentions:
+					canonicalOutcome.entityMentions &&
+					canonicalOutcome.entityMentions.length > 0
+						? canonicalOutcome.entityMentions
+						: undefined,
 				privateCognition: hasPrivateOps
 					? canonicalOutcome.privateCognition
 					: undefined,
@@ -2246,6 +2266,80 @@ function getLatestUserMessage(messages: ChatMessage[]): string {
 	}
 
 	return "";
+}
+
+const FALLBACK_ENTITY_MENTION_STOPWORDS = new Set([
+	"主人",
+	"这位",
+	"那位",
+	"这个",
+	"那个",
+	"这里",
+	"那里",
+	"今天",
+	"最近",
+	"是不是",
+	"什么",
+	"为什么",
+	"怎么",
+	"如何",
+	"时候",
+	"事情",
+	"一下",
+	"有点",
+	"那边",
+	"这边",
+	"一个",
+	"一些",
+	"可以",
+	"应该",
+	"觉得",
+	"真的",
+	"总是",
+	"总往",
+	"起来",
+	"告诉",
+	"多一些",
+	"花园",
+]);
+
+function deriveFallbackEntityMentions(userText: string): string[] {
+	if (!userText.trim()) {
+		return [];
+	}
+
+	const mentions: string[] = [];
+	const seen = new Set<string>();
+	const addMention = (value: string) => {
+		const trimmed = value.trim();
+		if (!trimmed || seen.has(trimmed)) {
+			return;
+		}
+		seen.add(trimmed);
+		mentions.push(trimmed);
+	};
+
+	for (const match of userText.matchAll(/\b[A-Z][A-Za-z0-9_-]{1,}\b/g)) {
+		addMention(match[0]);
+	}
+
+	for (const token of tokenizeQuery(userText)) {
+		if (token.length < 2 || token.length > 8) {
+			continue;
+		}
+		if (/^[a-z0-9_@:-]+$/.test(token)) {
+			continue;
+		}
+		if (FALLBACK_ENTITY_MENTION_STOPWORDS.has(token)) {
+			continue;
+		}
+		if (/^[\p{P}\p{S}\s]+$/u.test(token)) {
+			continue;
+		}
+		addMention(token);
+	}
+
+	return mentions;
 }
 
 /**

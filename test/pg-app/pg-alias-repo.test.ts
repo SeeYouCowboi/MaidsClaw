@@ -174,6 +174,38 @@ describe.skipIf(skipPgTests)("PgAliasRepo", () => {
       });
     });
 
+    it("resolves aliases case-insensitively when exact lookup misses", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        await sql`
+          INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id)
+          VALUES (210, 'Alice', 'nickname', NULL)
+        `;
+
+        const result = await repo.resolveAlias("alice");
+        expect(result).toBe(210);
+      });
+    });
+
+    it("resolves entity pointer_key case-insensitively when no alias exists", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        const rows = await sql`
+          INSERT INTO entity_nodes (pointer_key, memory_scope, owner_agent_id, created_at, updated_at)
+          VALUES ('Eveline', 'shared_public', NULL, 1, 1)
+          RETURNING id
+        `;
+        const entityId = Number(rows[0].id);
+
+        const result = await repo.resolveAlias("eveline");
+        expect(result).toBe(entityId);
+      });
+    });
+
     it("returns null when alias not found anywhere", async () => {
       await withTestAppSchema(pool, async (sql) => {
         await bootstrapAliasSchema(sql);

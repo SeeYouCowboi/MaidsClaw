@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { formatRecentCognitionFromPayload, getTypedRetrievalSurfaceAsync, type PromptDataRepos } from "../../src/memory/prompt-data.js";
+import {
+  formatRecentCognitionFromPayload,
+  getKnownEntitiesForWritingAsync,
+  getTypedRetrievalSurfaceAsync,
+  type PromptDataRepos,
+} from "../../src/memory/prompt-data.js";
 import { RetrievalService } from "../../src/memory/retrieval.js";
 import { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import { CognitionSearchService } from "../../src/memory/cognition/cognition-search.js";
@@ -78,6 +83,7 @@ class StubRecentCognitionSlotRepo implements RecentCognitionSlotRepo {
 
 class StubInteractionRepo implements InteractionRepo {
   messageRecords: InteractionRecord[] = [];
+  sessionRecords: InteractionRecord[] = [];
 
   async commit(): Promise<void> {
     return;
@@ -108,7 +114,7 @@ class StubInteractionRepo implements InteractionRepo {
   }
 
   async getBySession(): Promise<InteractionRecord[]> {
-    return [];
+    return this.sessionRecords;
   }
 
   async getByRange(): Promise<InteractionRecord[]> {
@@ -132,7 +138,9 @@ class StubInteractionRepo implements InteractionRepo {
   }
 
   async getMaxIndex(): Promise<number | undefined> {
-    return undefined;
+    return this.sessionRecords.length > 0
+      ? this.sessionRecords[this.sessionRecords.length - 1]?.recordIndex
+      : undefined;
   }
 
   async getPendingSettlementJobState(): Promise<{
@@ -588,6 +596,184 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
     expect(idxNarrative).toBeGreaterThan(idxConflict);
     expect(idxEpisode).toBeGreaterThan(idxNarrative);
   });
+
+  it("merges recent settlement entity mentions into retrieval entity hints", async () => {
+    interactionRepo.sessionRecords = [
+      {
+        sessionId: "session-1",
+        recordId: "settlement-1",
+        recordIndex: 12,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "settlement-1",
+          requestId: "request-1",
+          sessionId: "session-1",
+          ownerAgentId: "agent-1",
+          publicReply: "Alice刚才去过花房。",
+          hasPublicReply: true,
+          viewerSnapshot: {
+            selfPointerKey: "mei",
+            userPointerKey: "user",
+          },
+          entityMentions: ["Alice", "花房"],
+        } satisfies TurnSettlementPayload,
+        committedAt: 1000,
+      },
+    ];
+
+    await getTypedRetrievalSurfaceAsync(
+      "她后来又去花房了吗？",
+      viewerContext,
+      repos,
+      retrievalService,
+    );
+
+    expect(retrievalService.calls).toHaveLength(1);
+    expect(
+      retrievalService.calls[0].dedupContext?.recentEntityHints,
+    ).toEqual(expect.arrayContaining(["alice", "Alice", "花房"]));
+  });
+
+  it("filters stale unknown-entity episode hints once a settlement mention has established the name", async () => {
+    interactionRepo.sessionRecords = [
+      {
+        sessionId: "session-1",
+        recordId: "settlement-1",
+        recordIndex: 12,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "settlement-1",
+          requestId: "request-1",
+          sessionId: "session-1",
+          ownerAgentId: "agent-1",
+          publicReply: "Alice刚才来过。",
+          hasPublicReply: true,
+          viewerSnapshot: {
+            selfPointerKey: "mei",
+            userPointerKey: "user",
+          },
+          entityMentions: ["Alice"],
+        } satisfies TurnSettlementPayload,
+        committedAt: 1000,
+      },
+    ];
+    retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [],
+      cognition: [],
+      narrative: [],
+      conflict_notes: [],
+      episode: [
+        {
+          source_ref: "episode:unknown-alice",
+          content: "主人持续将Alice视为庄园内活跃人物，但我仍无此人信息",
+          score: 10,
+          doc_type: "episode_observation",
+          scope: "private",
+        },
+        {
+          source_ref: "episode:known-alice",
+          content: "Alice今天在花房忙了一阵子",
+          score: 9,
+          doc_type: "episode_event",
+          scope: "private",
+        },
+      ],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "Alice今天在吗？",
+      viewerContext,
+      repos,
+      retrievalService,
+    );
+
+    expect(output).not.toContain("我仍无此人信息");
+    expect(output).toContain("Alice今天在花房忙了一阵子");
+  });
+
+  it("surfaces settlement-only entity mentions in known_entities before episode projection", async () => {
+    interactionRepo.sessionRecords = [
+      {
+        sessionId: "session-1",
+        recordId: "settlement-2",
+        recordIndex: 14,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "settlement-2",
+          requestId: "request-2",
+          sessionId: "session-1",
+          ownerAgentId: "agent-1",
+          publicReply: "Alice来找过你。",
+          hasPublicReply: true,
+          viewerSnapshot: {
+            selfPointerKey: "mei",
+            userPointerKey: "user",
+          },
+          entityMentions: ["Alice"],
+        } satisfies TurnSettlementPayload,
+        committedAt: 1200,
+      },
+    ];
+
+    const output = await getKnownEntitiesForWritingAsync(
+      viewerContext,
+      repos,
+    );
+
+    expect(output).toContain("<known_entities>");
+    expect(output).toContain("Do NOT say you have never heard of them");
+    expect(output).toContain("- alice — Alice");
+  });
+
+  it("updates known_entities with fresher settlement display names while retaining richer episode summaries", async () => {
+    interactionRepo.sessionRecords = [
+      {
+        sessionId: "session-1",
+        recordId: "settlement-3",
+        recordIndex: 20,
+        actorType: "rp_agent",
+        recordType: "turn_settlement",
+        payload: {
+          settlementId: "settlement-3",
+          requestId: "request-3",
+          sessionId: "session-1",
+          ownerAgentId: "agent-1",
+          publicReply: "Alice又去了花房。",
+          hasPublicReply: true,
+          viewerSnapshot: {
+            selfPointerKey: "mei",
+            userPointerKey: "user",
+          },
+          entityMentions: ["Alice"],
+        } satisfies TurnSettlementPayload,
+        committedAt: 1300,
+      },
+    ];
+
+    const episodeRepo = {
+      async readRecentSessionEntities() {
+        return [
+          {
+            pointer_key: "alice",
+            display_name: null,
+            summary: "最近常往花房去的人物",
+          },
+        ];
+      },
+    };
+
+    const output = await getKnownEntitiesForWritingAsync(
+      viewerContext,
+      repos,
+      episodeRepo as never,
+    );
+
+    expect(output).toContain("- alice — Alice；最近常往花房去的人物");
+  });
 });
 
 describe("formatRecentCognitionFromPayload — retracted and version-winner (unit)", () => {
@@ -889,6 +1075,30 @@ describe("formatRecentCognitionFromPayload — additional regression guards", ()
     const output = formatRecentCognitionFromPayload(payload);
     expect(output).toContain("corrected-v7");
     expect(output).not.toContain("late-v2");
+  });
+
+  it("filters identity-unknown cognition notes once the entity is already established", () => {
+    const payload = JSON.stringify([
+      entry({
+        key: "alice/identity_unknown",
+        summary: "[alice] 身份不明，尚未确认",
+        basis: "inference",
+        provenance: "talker_sketch_explicit",
+        groundingVerificationLevel: "unverified",
+      }),
+      entry({
+        key: "tea/preference",
+        summary: "[user] 偏好红茶",
+        basis: "belief",
+        provenance: "talker_sketch_explicit",
+        groundingVerificationLevel: "unverified",
+      }),
+    ]);
+
+    const output = formatRecentCognitionFromPayload(payload, ["alice", "Alice"]);
+    expect(output).not.toContain("alice/identity_unknown");
+    expect(output).not.toContain("身份不明");
+    expect(output).toContain("tea/preference");
   });
 });
 

@@ -76,6 +76,14 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
           type: "string",
           description: "Durable cognitive sketch. Stored in settlement for Thinker processing when Talker/Thinker split is active. Always populated even in sync mode.",
         },
+        entityMentions: {
+          type: "array",
+          description:
+            "Optional list of explicitly named people, places, or notable items mentioned in this turn. Preserve the surface form from the conversation (e.g. 'Alice', '花房', '银怀表'). Omit pronouns and omit self/user/current room placeholders.",
+          items: {
+            type: "string",
+          },
+        },
         privateCognition: {
           type: "object",
           description: "Private cognition state mutations (V5 canonical name)",

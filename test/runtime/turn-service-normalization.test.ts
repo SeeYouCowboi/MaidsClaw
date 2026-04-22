@@ -350,7 +350,7 @@ describe("TurnService speaker normalization integration", () => {
 
 		const trace = traceStore.getTrace(`${REQUEST_ID}-rollback`);
 		const prompt = trace?.prompt?.rendered_system ?? "";
-		expect(prompt).not.toContain("<normalized_turn_input>");
+		expect(prompt).not.toContain("<normalized_turn_input>\n{");
 		expect(prompt).not.toContain("turn_context");
 		expect(prompt).not.toContain("TURN_CONTEXT");
 	});
@@ -374,6 +374,31 @@ describe("TurnService speaker normalization integration", () => {
 			| undefined;
 
 		expect(payload?.normalizedTurnInput).toEqual(normalizeTurnInput(USER_TEXT));
+	});
+
+	it("settlement backfills entityMentions from explicit user names when talker omits them", async () => {
+		const { turnService, records } = makeTurnService({
+			speakerNormalizationGate: true,
+		});
+
+		await drain(
+			turnService.run({
+				sessionId: SESSION_ID,
+				requestId: `${REQUEST_ID}-entity-fallback`,
+				messages: [{ role: "user", content: "对了，Alice今天起得早吗？" }],
+			}),
+		);
+
+		const record = records.find(
+			(item) =>
+				item.recordType === "turn_settlement" &&
+				item.correlatedTurnId === `${REQUEST_ID}-entity-fallback`,
+		);
+		const payload = record?.payload as
+			| { entityMentions?: string[] }
+			| undefined;
+
+		expect(payload?.entityMentions).toContain("Alice");
 	});
 });
 

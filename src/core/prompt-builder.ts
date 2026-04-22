@@ -48,14 +48,26 @@ This is trace-only and never shown to the user.
 
 ---
 
-### 2. privateCognition  (use whenever your beliefs, attitudes, or goals change)
+### 2. entityMentions  (use whenever the turn explicitly names people / places / notable items)
+
+Optional but strongly recommended whenever the user or your reply explicitly names someone/somewhere/something worth remembering.
+
+Rules:
+- Preserve the surface form from the conversation, e.g. ["Alice"], ["花房"], ["银怀表"]
+- Include only concrete named entities or highly salient objects, not pronouns or vague descriptions
+- Omit self / user / current_location placeholders
+- Deduplicate obvious repeats within the same turn
+
+---
+
+### 3. privateCognition  (use whenever your beliefs, attitudes, or goals change)
 
 A structured record of durable internal-state mutations.
 Wrap in: { schemaVersion: "rp_private_cognition_v4", ops: [ ...ops ] }
 
 Each op is either { op: "upsert", record: {...} } or { op: "retract", target: { kind, key } }.
 
-#### 2a. assertion — a belief about the world
+#### 3a. assertion — a belief about the world
 
 Fields:
 - kind: "assertion"
@@ -81,7 +93,7 @@ Examples (note how key/subject/object stay English while predicate follows conve
 English RP: { op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "has_unexplained_meetings_with", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
 Chinese RP: { op: "upsert", record: { kind: "assertion", key: "butler/secret_meetings", proposition: { subject: { kind: "pointer_key", value: "butler" }, predicate: "私下会见", object: { kind: "entity", ref: { kind: "pointer_key", value: "hale" } } }, stance: "tentative", basis: "inference" } }
 
-#### 2b. evaluation — how you rate / feel about an entity
+#### 3b. evaluation — how you rate / feel about an entity
 
 Fields:
 - kind: "evaluation"
@@ -96,7 +108,7 @@ Fields:
 Example:
 { op: "upsert", record: { kind: "evaluation", key: "trust/master", target: { kind: "pointer_key", value: "master" }, dimensions: [{ name: "emotional_dependence", value: 8 }, { name: "information_autonomy", value: 3 }], emotionTags: ["protective", "anxious"], notes: "主人开始追问，我需要提高警惕" } }
 
-#### 2c. commitment — a goal, plan, intent, constraint, or avoidance
+#### 3c. commitment — a goal, plan, intent, constraint, or avoidance
 
 Fields:
 - kind: "commitment"
@@ -113,13 +125,13 @@ Examples (note how key/mode/status stay English while target.action follows conv
 English RP: { op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "prevent master from confronting butler before evidence is complete" }, status: "active", priority: 9, horizon: "near" } }
 Chinese RP: { op: "upsert", record: { kind: "commitment", key: "goal/protect_master", mode: "goal", target: { action: "在证据齐全前阻止主人与管家正面对质" }, status: "active", priority: 9, horizon: "near" } }
 
-#### 2d. retract — remove a previous cognition entry
+#### 3d. retract — remove a previous cognition entry
 
 { op: "retract", target: { kind: "assertion", key: "butler/secret_meetings" } }
 
 ---
 
-### 3. privateEpisodes  (use every turn — log 1-3 events)
+### 4. privateEpisodes  (use every turn — log 1-3 events)
 
 Scene-level events that happened this turn. Each entry:
 - category: one of "speech" | "action" | "observation" | "state_change"
@@ -139,7 +151,7 @@ Examples:
 
 ---
 
-### 4. publications  (only when making a declarative public statement)
+### 5. publications  (only when making a declarative public statement)
 
 Declare something you said or did that should be part of the public scene record.
 - kind: one of "spoken" | "written" | "visual"
@@ -167,7 +179,7 @@ Example:
 
 ---
 
-### 5. actionCommitments  (REQUIRED whenever the user narrates a physical action)
+### 6. actionCommitments  (REQUIRED whenever the user narrates a physical action)
 
 The user's turn is pre-parsed into <normalized_turn_input> which contains speechActs, candidateActions, and a writeEligible flag. Emit actionCommitments ONLY when writeEligible is true AND speechActs contains "narrated_action".
 
@@ -202,15 +214,17 @@ const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
 Respond in character via the submit_rp_turn tool. You MUST populate the following fields as separate tool parameters:
 - latentScratchpad: 1-3 sentences of internal reasoning, stance, intent (NOT visible to user)
 - publicReply: your in-character spoken/acted response (visible to user). This is the part the user actually sees.
+- entityMentions: when this turn explicitly names people, places, or notable items worth remembering, include their surface names as a short string array. Omit pronouns and self/user/current room placeholders.
 - actionCommitments: REQUIRED whenever <normalized_turn_input> contains a narrated action (see "Action Commitments" section below). Otherwise OMIT this field entirely.
 
 CRITICAL — voice & length:
 - Match the conversational warmth, register, and length defined by your persona above.
 - The fact that prior cognition notes are present in the prompt does not mean you should sound clipped, defensive, or task-mode. Sound exactly the way the persona description says you sound, every turn.
 - Brevity is fine when the persona is naturally laconic OR when the user message itself is a one-line aside that needs only a one-line acknowledgment. Otherwise, write a full reply.
+- If a name appears in <known_entities>, treat that name as already established memory even if earlier conversation contains tentative confusion. Do NOT repeat "没听过/没印象/不认识" for that name; only ask about missing role, identity, or relationship details.
 
 IMPORTANT: latentScratchpad is a SEPARATE field in submit_rp_turn, NOT part of publicReply. Do NOT include scratchpad text inside publicReply.
-Do NOT include privateCognition, privateEpisodes, or publications — those fields belong to the Thinker. latentScratchpad + publicReply + (actionCommitments when applicable) are the only fields you should populate.
+Do NOT include privateCognition, privateEpisodes, or publications — those fields belong to the Thinker. In Talker mode, populate only latentScratchpad, publicReply, entityMentions when applicable, and actionCommitments when applicable.
 
 ---
 
@@ -281,6 +295,19 @@ Counter-examples (do NOT emit actionCommitments):
 - "「我放下金表」这是我说过的吗？" → speechActs: ["quoted_speech", "question"] — OMIT
 - "我搞不清楚有没有拿起过。"  → speechActs: ["confusion_expression"] — OMIT`;
 
+const UNKNOWN_ENTITY_CONFUSION_PATTERNS: RegExp[] = [
+	/没(?:有)?印象/u,
+	/没听过/u,
+	/不认识/u,
+	/无此人信息/u,
+	/还没接触过/u,
+	/不知道(?:这位|这个人|是谁)?/u,
+	/\bnever heard of\b/i,
+	/\bno impression\b/i,
+	/\bnot familiar with\b/i,
+	/\b(?:do not|don't|didn't)\s+(?:know|recognize|remember)\b/i,
+];
+
 export type PromptBuilderDeps = {
 	persona?: PersonaDataSource;
 	lore?: LoreDataSource;
@@ -325,8 +352,8 @@ export class PromptBuilder {
 
 	async build(input: BuildPromptInput): Promise<BuildPromptOutput> {
 		const slotContent = new Map<PromptSectionSlot, string>();
-		const conversationContent = JSON.stringify(input.conversationMessages);
 		const loreQuery = input.userMessage;
+		let knownEntitiesContent = "";
 
 		if (input.profile.role === "maiden") {
 			slotContent.set(
@@ -375,10 +402,13 @@ export class PromptBuilder {
 				PromptSectionSlot.LORE_ENTRIES,
 				this.getLoreEntries(loreQuery),
 			);
-			if (!input.isTalkerMode && this.knownEntitiesInjectionEnabled) {
+			if (this.knownEntitiesInjectionEnabled) {
+				knownEntitiesContent = await this.getKnownEntitiesForWriting(
+					input.viewerContext,
+				);
 				slotContent.set(
 					PromptSectionSlot.KNOWN_ENTITIES,
-					await this.getKnownEntitiesForWriting(input.viewerContext),
+					knownEntitiesContent,
 				);
 			}
 			slotContent.set(
@@ -404,6 +434,12 @@ export class PromptBuilder {
 			}
 		}
 
+		const conversationContent = JSON.stringify(
+			sanitizeConversationMessagesForKnownEntities(
+				input.conversationMessages,
+				knownEntitiesContent,
+			),
+		);
 		slotContent.set(PromptSectionSlot.CONVERSATION, conversationContent);
 
 		const sections: PromptSection[] = [];
@@ -682,4 +718,94 @@ export class PromptBuilder {
 		}
 		return this.operational;
 	}
+}
+
+function sanitizeConversationMessagesForKnownEntities(
+	messages: ChatMessage[],
+	knownEntitiesContent: string,
+): ChatMessage[] {
+	const knownForms = extractKnownEntityForms(knownEntitiesContent);
+	if (knownForms.size === 0) {
+		return messages;
+	}
+	return messages.map((message) => {
+		if (message.role !== "assistant") {
+			return message;
+		}
+		if (typeof message.content !== "string") {
+			return message;
+		}
+		if (!matchesUnknownEntityConfusion(message.content)) {
+			return message;
+		}
+		if (!mentionsKnownEntity(message.content, knownForms)) {
+			return message;
+		}
+		return {
+			...message,
+			content: softenUnknownEntityConfusion(message.content),
+		};
+	});
+}
+
+function extractKnownEntityForms(knownEntitiesContent: string): Set<string> {
+	const forms = new Set<string>();
+	for (const rawLine of knownEntitiesContent.split("\n")) {
+		const line = rawLine.trim();
+		if (!line.startsWith("- ")) {
+			continue;
+		}
+		const body = line.slice(2);
+		const [pointerPart, detailPart] = body.split(" — ", 2);
+		const pointer = pointerPart.trim();
+		if (pointer.length > 0) {
+			forms.add(pointer);
+		}
+		if (detailPart) {
+			const displayName = detailPart.split("；", 1)[0]?.trim();
+			if (displayName) {
+				forms.add(displayName);
+			}
+		}
+	}
+	return forms;
+}
+
+function matchesUnknownEntityConfusion(content: string): boolean {
+	return UNKNOWN_ENTITY_CONFUSION_PATTERNS.some((pattern) =>
+		pattern.test(content),
+	);
+}
+
+function mentionsKnownEntity(content: string, knownForms: Set<string>): boolean {
+	for (const form of knownForms) {
+		if (/[A-Za-z]/.test(form)) {
+			const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			if (new RegExp(`\\b${escaped}\\b`, "i").test(content)) {
+				return true;
+			}
+			continue;
+		}
+		if (content.includes(form)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function softenUnknownEntityConfusion(content: string): string {
+	let rewritten = content;
+	rewritten = rewritten.replace(
+		/Alice……主人，这位是？我好像没听过这个名字，能告诉我多一些吗？/u,
+		"Alice……主人，这位的具体身份我还不太确定，能告诉我多一些吗？",
+	);
+	rewritten = rewritten.replace(
+		/这位是……？我好像没听过这个名字，能告诉我多一些吗？/u,
+		"这位的具体身份我还不太确定，能告诉我多一些吗？",
+	);
+	rewritten = rewritten.replace(/我好像没听过这个名字/u, "我还不太确定这位的身份");
+	rewritten = rewritten.replace(/我确实没什么印象/u, "我还不太确定这位的身份");
+	rewritten = rewritten.replace(/不认识/u, "还不清楚具体身份");
+	rewritten = rewritten.replace(/没(?:有)?印象/u, "还不太确定具体身份");
+	return rewritten;
 }

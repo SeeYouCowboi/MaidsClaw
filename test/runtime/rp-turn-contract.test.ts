@@ -30,6 +30,16 @@ describe("normalizeRpTurnOutcome", () => {
     expect(result.conflictFactors).toEqual([]);
   });
 
+  it("normalizes entityMentions by trimming, deduping, and preserving surface form", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "hello",
+      entityMentions: [" Alice ", "alice", "花房", "  "],
+    });
+
+    expect(result.entityMentions).toEqual(["Alice", "花房"]);
+  });
+
   it("accepts empty publicReply when private artifacts are present", () => {
     const result = normalizeRpTurnOutcome({
       schemaVersion: "rp_turn_outcome_v5",
@@ -111,6 +121,16 @@ describe("normalizeRpTurnOutcome", () => {
     });
     expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
     expect(result.publicReply).toBe("canonical");
+  });
+
+  it("rejects non-array entityMentions", () => {
+    expect(() =>
+      normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "ok",
+        entityMentions: "Alice",
+      }),
+    ).toThrow("entityMentions must be an array");
   });
 
   it("preserves valid claimedGroundingRefs across all supported kinds", () => {

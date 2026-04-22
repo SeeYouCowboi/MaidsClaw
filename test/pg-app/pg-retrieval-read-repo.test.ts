@@ -263,6 +263,38 @@ describe.skipIf(skipPgTests)("PgRetrievalReadRepo", () => {
     });
   });
 
+  it("resolveEntityByPointer falls back to case-insensitive pointer and alias matches", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const repo = new PgRetrievalReadRepo(sql);
+      const now = Date.now();
+
+      const rows = await sql<{ id: number | string; pointer_key: string }[]>`
+        INSERT INTO entity_nodes (
+          pointer_key, display_name, entity_type, memory_scope, owner_agent_id, canonical_entity_id, summary, created_at, updated_at
+        ) VALUES
+          (${"Eveline"}, ${"Eveline"}, ${"person"}, ${"shared_public"}, ${null}, ${null}, ${null}, ${now}, ${now}),
+          (${"Alice"}, ${"Alice"}, ${"person"}, ${"private_overlay"}, ${"agent-a"}, ${null}, ${null}, ${now}, ${now})
+        RETURNING id, pointer_key
+      `;
+      const sharedId = Number(rows.find((r) => r.pointer_key === "Eveline")?.id);
+      const privateId = Number(rows.find((r) => r.pointer_key === "Alice")?.id);
+
+      await sql`
+        INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id)
+        VALUES (${privateId}, ${"Lady Alice"}, ${"nickname"}, ${"agent-a"})
+      `;
+
+      const directShared = await repo.resolveEntityByPointer("eveline", "agent-b");
+      const directPrivate = await repo.resolveEntityByPointer("alice", "agent-a");
+      const aliasPrivate = await repo.resolveEntityByPointer("lady alice", "agent-a");
+
+      expect(directShared?.id).toBe(sharedId);
+      expect(directPrivate?.id).toBe(privateId);
+      expect(aliasPrivate?.id).toBe(privateId);
+    });
+  });
+
   it("countNodeEmbeddings returns current embedding row count", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);

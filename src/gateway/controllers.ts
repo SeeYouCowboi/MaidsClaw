@@ -431,62 +431,14 @@ export async function handleTurnStream(
   }
 
   const requestId = parsed.request_id ?? crypto.randomUUID();
+  const requestedAgentId = parsed.agent_id;
   const userText = parsed.user_message?.text ?? "";
 
   const client = turnClient(ctx);
   if (client instanceof Response) {
     return client;
   }
-
-  let observationStream: AsyncIterable<ObservationEvent>;
-  try {
-    observationStream = client.streamTurn({
-      sessionId,
-      agentId: parsed.agent_id,
-      text: userText,
-      requestId,
-    });
-  } catch (error) {
-    const mappedCode = mapTurnValidationErrorCode(error);
-    const message = isMaidsClawError(error)
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    const retriable = isMaidsClawError(error) ? error.retriable : false;
-
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(resolvedSessionId, requestId, "error", {
-        code: mappedCode,
-        message,
-        retriable,
-      });
-    }
-    return createSseStream(resolvedSessionId, requestId, errorStream());
-  }
-
-  const observationIterator = observationStream[Symbol.asyncIterator]();
-  let firstObservation: IteratorResult<ObservationEvent>;
-  try {
-    firstObservation = await observationIterator.next();
-  } catch (error) {
-    const mappedCode = mapTurnValidationErrorCode(error);
-    const message = isMaidsClawError(error)
-      ? error.message
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    const retriable = isMaidsClawError(error) ? error.retriable : false;
-
-    async function* errorStream(): AsyncGenerator<GatewayEvent> {
-      yield makeEvent(resolvedSessionId, requestId, "error", {
-        code: mappedCode,
-        message,
-        retriable,
-      });
-    }
-    return createSseStream(resolvedSessionId, requestId, errorStream());
-  }
+  const activeTurnClient = client;
 
   async function* agentStream(): AsyncGenerator<GatewayEvent> {
     yield makeEvent(resolvedSessionId, requestId, "status", {
@@ -512,22 +464,17 @@ export async function handleTurnStream(
     };
 
     try {
-      if (!firstObservation.done) {
-        const firstEvent = handleObservation(firstObservation.value);
+      const observationStream = activeTurnClient.streamTurn({
+        sessionId: resolvedSessionId,
+        agentId: requestedAgentId,
+        text: userText,
+        requestId,
+      });
+
+      for await (const observation of observationStream) {
+        const firstEvent = handleObservation(observation);
         if (firstEvent) {
           yield firstEvent;
-        }
-      }
-
-      while (true) {
-        const nextObservation = await observationIterator.next();
-        if (nextObservation.done) {
-          break;
-        }
-
-        const event = handleObservation(nextObservation.value);
-        if (event) {
-          yield event;
         }
       }
     } catch (error) {

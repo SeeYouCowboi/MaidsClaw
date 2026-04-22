@@ -3,6 +3,7 @@ import type {
   SceneFactSourceKind,
   WorldFactExposureScope,
 } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+import { normalizeEntityMentions } from "../memory/entity-mentions.js";
 
 export type CognitionEntityRef =
   | { kind: "pointer_key"; value: string }
@@ -226,6 +227,7 @@ export type RpTurnOutcomeSubmissionV5 = {
   schemaVersion: "rp_turn_outcome_v5";
   publicReply: string;
   latentScratchpad?: string;
+  entityMentions?: string[];
   privateCognition?: PrivateCognitionCommitV4;
   privateEpisodes?: PrivateEpisodeArtifact[];
   publications?: PublicationDeclaration[];
@@ -239,6 +241,7 @@ export type CanonicalRpTurnOutcome = {
   schemaVersion: "rp_turn_outcome_v5";
   publicReply: string;
   latentScratchpad?: string;
+  entityMentions?: string[];
   privateCognition?: PrivateCognitionCommitV4;
   privateEpisodes: PrivateEpisodeArtifact[];
   publications: PublicationDeclaration[];
@@ -449,6 +452,9 @@ function normalizeV5Submission(
   const relationIntents = normalizeRelationIntents(obj.relationIntents);
   const conflictFactors = normalizeConflictFactors(obj.conflictFactors);
   const actionCommitments = normalizeActionCommitments(obj.actionCommitments);
+  const entityMentions = normalizeEntityMentions(obj.entityMentions, {
+    fieldName: "entityMentions",
+  });
 
   const hasContent = publicReply !== ""
     || (privateCognition && privateCognition.ops.length > 0)
@@ -466,6 +472,7 @@ function normalizeV5Submission(
     schemaVersion: "rp_turn_outcome_v5",
     publicReply,
     ...(latentScratchpad !== undefined ? { latentScratchpad } : {}),
+    ...(entityMentions.length > 0 ? { entityMentions } : {}),
     ...(privateCognition ? { privateCognition } : {}),
     privateEpisodes,
     publications,
@@ -545,6 +552,10 @@ export function validateRpTurnOutcomeV5(payload: unknown): RpTurnOutcomeSubmissi
     for (const ep of obj.privateEpisodes) {
       if (!ep || typeof ep !== "object") throw new Error("privateEpisode must be an object");
     }
+  }
+
+  if (obj.entityMentions !== undefined && !Array.isArray(obj.entityMentions)) {
+    throw new Error("entityMentions must be an array when present");
   }
 
   return obj as unknown as RpTurnOutcomeSubmissionV5;

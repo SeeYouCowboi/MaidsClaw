@@ -15,7 +15,7 @@ import type {
 } from "./retrieval/retrieval-orchestrator.js";
 import type { EpisodeRow } from "./episode/episode-repo.js";
 import type { QueryPlan, QueryPlanBuilder } from "./query-plan-types.js";
-import type { QueryRouter } from "./query-routing-types.js";
+import type { QueryRoute, QueryRouter } from "./query-routing-types.js";
 import type {
   EntityNode,
   EventNode,
@@ -35,6 +35,9 @@ type SearchResult = {
   scope: "private" | "area" | "world";
   score: number;
 };
+
+const RELATED_ENTITY_REFERENCE_PATTERN =
+  /(?:那边的人|这边的人|哪边的人|哪位|这位|那位|哪个人|这人|那人|谁|who|person|someone)/i;
 
 type EntityReadResult = {
   entity: EntityNode | null;
@@ -357,8 +360,12 @@ export class RetrievalService {
         currentAreaId: viewerContext.current_area_id ?? null,
         recentEntityHints,
       });
-      return this.queryPlanBuilder.build({
+      const expandedRoute = await this.expandResolvedEntitiesViaGraph(
         route,
+        viewerContext,
+      );
+      return this.queryPlanBuilder.build({
+        route: expandedRoute,
         role: viewerContext.viewer_role,
       });
     } catch (err) {
@@ -368,6 +375,121 @@ export class RetrievalService {
       });
       return undefined;
     }
+  }
+
+  private async expandResolvedEntitiesViaGraph(
+    route: QueryRoute,
+    viewerContext: ViewerContext,
+  ): Promise<QueryRoute> {
+    if (!RELATED_ENTITY_REFERENCE_PATTERN.test(route.originalQuery)) {
+      return route;
+    }
+    if (route.resolvedEntityIds.length === 0 || route.entityHints.length === 0) {
+      return route;
+    }
+
+    const expandedIds = [...route.resolvedEntityIds];
+    const seenIds = new Set(expandedIds);
+    let added = 0;
+
+    for (const hint of route.entityHints.slice(0, 3)) {
+      const graphContext = await this.retrievalRepo.readByEntity(
+        hint,
+        viewerContext,
+      );
+      const anchor = graphContext.entity;
+      if (!anchor) {
+        continue;
+      }
+      const relatedIds = await this.collectRelatedEntityIdsFromGraphContext(
+        graphContext,
+        anchor.id,
+        viewerContext,
+      );
+      for (const relatedId of relatedIds) {
+        if (seenIds.has(relatedId)) {
+          continue;
+        }
+        seenIds.add(relatedId);
+        expandedIds.push(relatedId);
+        added += 1;
+        if (expandedIds.length >= 4) {
+          break;
+        }
+      }
+      if (expandedIds.length >= 4) {
+        break;
+      }
+    }
+
+    if (added === 0) {
+      return route;
+    }
+
+    return {
+      ...route,
+      resolvedEntityIds: expandedIds,
+      matchedRules: [...route.matchedRules, `graph_related_entity_expand:${added}`],
+      rationale: `${route.rationale}; graph_related_entity_expand=${added}`,
+    };
+  }
+
+  private async collectRelatedEntityIdsFromGraphContext(
+    context: EntityReadResult,
+    anchorEntityId: number,
+    viewerContext: ViewerContext,
+  ): Promise<number[]> {
+    const relatedIds = new Set<number>();
+
+    for (const fact of context.facts) {
+      if (
+        fact.source_entity_id === anchorEntityId &&
+        fact.target_entity_id !== anchorEntityId
+      ) {
+        relatedIds.add(fact.target_entity_id);
+      }
+      if (
+        fact.target_entity_id === anchorEntityId &&
+        fact.source_entity_id !== anchorEntityId
+      ) {
+        relatedIds.add(fact.source_entity_id);
+      }
+    }
+
+    for (const event of context.events) {
+      if (
+        event.primary_actor_entity_id != null &&
+        event.primary_actor_entity_id !== anchorEntityId
+      ) {
+        relatedIds.add(event.primary_actor_entity_id);
+      }
+      for (const participantId of extractParticipantEntityIds(event.participants)) {
+        if (participantId !== anchorEntityId) {
+          relatedIds.add(participantId);
+        }
+      }
+    }
+
+    const pointerKeys = new Set<string>();
+    for (const episode of context.episodes) {
+      for (const pointerKey of episode.entity_pointer_keys) {
+        if (pointerKey.length > 0) {
+          pointerKeys.add(pointerKey);
+        }
+      }
+    }
+
+    for (const pointerKey of pointerKeys) {
+      const entity = await this.retrievalRepo.resolveEntityByPointer(
+        pointerKey,
+        viewerContext.viewer_agent_id,
+      );
+      if (entity && entity.id !== anchorEntityId) {
+        relatedIds.add(entity.id);
+      }
+    }
+
+    return [...relatedIds];
   }
 
   async localizeSeedsHybrid(
@@ -508,5 +630,34 @@ export class RetrievalService {
       return "private";
     }
     return "world";
+  }
+}
+
+function extractParticipantEntityIds(participantsJson: string | null): number[] {
+  if (!participantsJson) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(participantsJson) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const ids: number[] = [];
+    for (const entry of parsed) {
+      if (typeof entry !== "string") {
+        continue;
+      }
+      const match = entry.match(/^entity:(\d+)$/);
+      if (!match) {
+        continue;
+      }
+      const entityId = Number(match[1]);
+      if (Number.isInteger(entityId) && entityId > 0) {
+        ids.push(entityId);
+      }
+    }
+    return ids;
+  } catch {
+    return [];
   }
 }

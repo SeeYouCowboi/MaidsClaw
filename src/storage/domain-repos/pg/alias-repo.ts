@@ -2,15 +2,26 @@ import type postgres from "postgres";
 import type { EntityAlias } from "../../../memory/types.js";
 import type { AliasRepo } from "../contracts/alias-repo.js";
 
+function normalizeLookupText(raw: string): string {
+  return raw.normalize("NFKC").trim();
+}
+
 export class PgAliasRepo implements AliasRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
   async resolveAlias(alias: string, ownerAgentId?: string): Promise<number | null> {
+    const lookup = normalizeLookupText(alias);
+    if (lookup.length === 0) {
+      return null;
+    }
+
     if (ownerAgentId) {
       const agentAlias = await this.sql<{ canonical_id: number }[]>`
         SELECT canonical_id
         FROM entity_aliases
-        WHERE alias = ${alias} AND owner_agent_id = ${ownerAgentId}
+        WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+          AND owner_agent_id = ${ownerAgentId}
+        ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END
         LIMIT 1
       `;
       if (agentAlias.length > 0) {
@@ -21,7 +32,9 @@ export class PgAliasRepo implements AliasRepo {
     const sharedAlias = await this.sql<{ canonical_id: number }[]>`
       SELECT canonical_id
       FROM entity_aliases
-      WHERE alias = ${alias} AND owner_agent_id IS NULL
+      WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+        AND owner_agent_id IS NULL
+      ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END
       LIMIT 1
     `;
     if (sharedAlias.length > 0) {
@@ -32,9 +45,10 @@ export class PgAliasRepo implements AliasRepo {
       const privateEntity = await this.sql<{ id: number }[]>`
         SELECT id
         FROM entity_nodes
-        WHERE pointer_key = ${alias}
+        WHERE (pointer_key = ${lookup} OR LOWER(pointer_key) = LOWER(${lookup}))
           AND memory_scope = 'private_overlay'
           AND owner_agent_id = ${ownerAgentId}
+        ORDER BY CASE WHEN pointer_key = ${lookup} THEN 0 ELSE 1 END
         LIMIT 1
       `;
       if (privateEntity.length > 0) {
@@ -45,8 +59,9 @@ export class PgAliasRepo implements AliasRepo {
     const publicEntity = await this.sql<{ id: number }[]>`
       SELECT id
       FROM entity_nodes
-      WHERE pointer_key = ${alias}
+      WHERE (pointer_key = ${lookup} OR LOWER(pointer_key) = LOWER(${lookup}))
         AND memory_scope = 'shared_public'
+      ORDER BY CASE WHEN pointer_key = ${lookup} THEN 0 ELSE 1 END
       LIMIT 1
     `;
     if (publicEntity.length > 0) {

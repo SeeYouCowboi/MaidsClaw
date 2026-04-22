@@ -18,6 +18,7 @@ export type NormalizedSettlementPayload = {
 	hasPublicReply: boolean;
 	viewerSnapshot: TurnSettlementPayload["viewerSnapshot"];
 	schemaVersion: "turn_settlement_v5";
+	entityMentions: string[];
 	privateCognition?: PrivateCognitionCommitV4;
 	privateEpisodes: PrivateEpisodeArtifact[];
 	publications: PublicationDeclaration[];
@@ -52,6 +53,9 @@ export function normalizeSettlementPayload(
 		hasPublicReply: payload.hasPublicReply,
 		viewerSnapshot: payload.viewerSnapshot,
 		schemaVersion: "turn_settlement_v5",
+		entityMentions: Array.isArray(payload.entityMentions)
+			? payload.entityMentions
+			: [],
 		...(privateCognition ? { privateCognition } : {}),
 		privateEpisodes: Array.isArray(payload.privateEpisodes)
 			? payload.privateEpisodes
