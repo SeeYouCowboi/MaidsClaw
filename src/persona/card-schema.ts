@@ -17,6 +17,13 @@ export type CharacterCard = {
   hiddenTasks?: string[];
   /** Internal persona description — motivations and constraints the character conceals. */
   privatePersona?: string;
+  /**
+   * Controls whether this persona is pre-seeded into the shared_public entity graph
+   * at bootstrap. Default = pre-seeded (existing behavior).
+   * "introduced-via-conversation" = NOT pre-seeded; the persona becomes a test case
+   * for whether the system can introduce the entity organically through dialogue.
+   */
+  worldPresence?: "introduced-via-conversation";
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,6 +89,10 @@ export function isCharacterCard(value: unknown): value is CharacterCard {
   }
 
   if (value.privatePersona !== undefined && typeof value.privatePersona !== "string") {
+    return false;
+  }
+
+  if (value.worldPresence !== undefined && value.worldPresence !== "introduced-via-conversation") {
     return false;
   }
 

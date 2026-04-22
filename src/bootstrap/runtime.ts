@@ -1550,6 +1550,7 @@ export function bootstrapRuntime(
           pgFactory,
           memoryTaskModelProvider,
           pgAliasRepo,
+          embeddingRepo,
         )
       : undefined;
   // Constructed lazily in initializePgBackendForRuntime once the pg pool

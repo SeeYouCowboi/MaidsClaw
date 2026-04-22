@@ -1,11 +1,13 @@
 import type postgres from "postgres";
 import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
+import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
 import type {
   ChatMessage,
   ChatToolDefinition,
   MemoryTaskModelProvider,
   ToolCallResult,
 } from "./task-agent.js";
+import { makeNodeRef } from "./schema.js";
 
 export type PgFactoryLike = {
   getPool(): postgres.Sql;
@@ -63,6 +65,10 @@ type ParsedJudgeResult = {
   selectedIndex?: number;
   confidence?: number;
   rationale?: string;
+  /** Entity-centric description for 'new' decisions — describes who/what the
+   * entity IS, not the agent's state of knowing. Used as the entity summary
+   * and as part of the embedding text. */
+  entityDescription?: string;
 };
 
 const JUDGE_TOOL: ChatToolDefinition = {
@@ -87,6 +93,11 @@ const JUDGE_TOOL: ChatToolDefinition = {
       },
       rationale: {
         type: "string",
+      },
+      entity_description: {
+        type: "string",
+        description:
+          "For decision='new' only. 1-2 short sentences describing who/what this entity IS based on the context evidence. Write from a neutral third-person perspective about the entity itself — NOT about the agent's state of knowing or confusion. Follow the conversation language (Chinese if context is Chinese). Example GOOD: 'Alice: 主人多次提及的人物；据主人所述曾在茶室与其交谈；身份待确认。' Example BAD: '我不记得这个人，主人反复提及但我没有印象。'",
       },
     },
     required: ["decision"],
@@ -197,11 +208,13 @@ function parseJudgeCall(
         : undefined;
     const confidence = asFiniteNumber(call.arguments.confidence);
     const rationale = asString(call.arguments.rationale);
+    const entityDescription = asString(call.arguments.entity_description);
     return {
       decision,
       selectedIndex,
       confidence,
       rationale,
+      entityDescription,
     };
   }
 
@@ -232,12 +245,15 @@ function buildJudgeMessages(params: {
   lines.push(
     "Reply via tool: decision='match' with selectedIndex, or decision='new' when none match.",
   );
+  lines.push(
+    "When decision='new', ALSO provide entity_description: 1-2 short sentences describing who/what this entity IS based on the context evidence. Write from a neutral third-person perspective about the entity itself — NOT about the agent's state of knowing or confusion. Match the conversation language.",
+  );
 
   return [
     {
       role: "system",
       content:
-        "You judge entity reference canonicalization. Choose exactly one existing entity index when it matches, otherwise choose new.",
+        "You judge entity reference canonicalization. Choose exactly one existing entity index when it matches, otherwise choose new and supply a neutral entity_description.",
     },
     {
       role: "user",
@@ -317,12 +333,125 @@ export class EntityJudgeSweeper {
 
   constructor(
     private readonly pgFactory: PgFactoryLike,
-    private readonly modelProvider: Pick<MemoryTaskModelProvider, "chat">,
+    private readonly modelProvider: Pick<
+      MemoryTaskModelProvider,
+      "chat" | "embed" | "defaultEmbeddingModelId"
+    >,
     private readonly aliasRepo: Pick<
       AliasRepo,
       "createAlias" | "findEntityById"
     >,
+    private readonly embeddingRepo?: EmbeddingRepo,
   ) {}
+
+  /**
+   * Embed a newly-created runtime entity so it becomes semantically searchable.
+   * Runtime-created entities (via the entity judge "new" decision) previously
+   * skipped embedding and the Talker's retrieval layer could not surface them
+   * — the character would keep treating referenced names as unknown even after
+   * the entity_nodes row existed. We now embed on creation.
+   */
+  /**
+   * Retract any "knowledge gap"-style commitments/assertions about a
+   * pointer_key once it has been resolved to a concrete entity. Without this
+   * step, cognitions like `knowledge_gap/alice`, `intent/clarify_alice_identity`,
+   * `alice/uncertain_existence` linger forever and keep pulling the agent
+   * back toward denial of the entity's existence.
+   *
+   * Matches only uncertainty-flavored keys (gap/unknown/ambiguity/clarify/verify)
+   * that ALSO reference the pointer_key substring, so factual assertions like
+   * `butler/alice_connection` or `constraint/conceal_alice_from_butler` are
+   * preserved.
+   */
+  private async retractIdentityGapCommitments(
+    sql: postgres.Sql,
+    agentId: string,
+    pointerKey: string,
+    entityId: number,
+  ): Promise<void> {
+    const lowerPK = pointerKey.toLowerCase();
+    try {
+      const rows = await sql<{ cognition_key: string; kind: string }[]>`
+        SELECT DISTINCT cognition_key, kind
+        FROM private_cognition_events
+        WHERE agent_id = ${agentId}
+          AND op = 'upsert'
+          AND (
+            cognition_key ILIKE ${`%${pointerKey}%`}
+            OR cognition_key ILIKE ${`%${lowerPK}%`}
+          )
+          AND cognition_key ~* '(knowledge_gap|identity_unknown|uncertain_existence|identity_ambiguity|clarify_.*_identity|verify_.*_identity)'
+          AND NOT EXISTS (
+            SELECT 1 FROM private_cognition_events r
+            WHERE r.agent_id = private_cognition_events.agent_id
+              AND r.cognition_key = private_cognition_events.cognition_key
+              AND r.op = 'retract'
+          )
+      `;
+      if (rows.length === 0) return;
+      const now = Date.now();
+      const settlementId = `entity-judge-retract:${entityId}:${now}`;
+      for (const r of rows) {
+        const recordJson = JSON.stringify({
+          key: r.cognition_key,
+          kind: r.kind,
+          reason: `resolved by entity ${pointerKey} (id=${entityId})`,
+        });
+        await sql`
+          INSERT INTO private_cognition_events
+            (agent_id, cognition_key, kind, op, record_json, settlement_id, committed_time, created_at)
+          VALUES
+            (${agentId}, ${r.cognition_key}, ${r.kind}, 'retract',
+             ${recordJson}::jsonb, ${settlementId}, ${now}, ${now})
+        `;
+      }
+      console.log(
+        `[entity-judge] retracted ${rows.length} identity-gap cognitions for ${pointerKey} (id=${entityId}): ${rows.map((r) => r.cognition_key).join(", ")}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[entity-judge] retract failed for ${pointerKey}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async embedRuntimeEntity(
+    entityId: number,
+    pointerKey: string,
+    summary: string | null,
+  ): Promise<void> {
+    if (!this.embeddingRepo) return;
+    try {
+      const modelId = this.modelProvider.defaultEmbeddingModelId;
+      if (!modelId) return;
+      // Use pointer_key + summary to give the embedding semantic context
+      // beyond just the raw identifier. Falls back to bare pointer_key when
+      // summary is absent.
+      const trimmedSummary = summary?.trim();
+      const embedText =
+        trimmedSummary && trimmedSummary.length > 0
+          ? `${pointerKey}: ${trimmedSummary}`
+          : pointerKey;
+      const vectors = await this.modelProvider.embed(
+        [embedText],
+        "memory_index",
+        modelId,
+      );
+      const vector = vectors[0];
+      if (!vector || vector.length === 0) return;
+      await this.embeddingRepo.upsert(
+        makeNodeRef("entity", entityId),
+        "entity",
+        "primary",
+        modelId,
+        vector,
+      );
+    } catch (err) {
+      console.warn(
+        `[entity-judge] failed to embed new entity ${pointerKey} (id=${entityId}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   async runSweep(opts: EntityJudgeSweepOptions): Promise<EntityJudgeReport> {
     const startedAt = Date.now();
@@ -412,6 +541,8 @@ export class EntityJudgeSweeper {
           }
           if (createdEntityId != null) {
             created += 1;
+            await this.embedRuntimeEntity(createdEntityId, pointerKey, contextSummary);
+            await this.retractIdentityGapCommitments(sql, opts.agentId, pointerKey, createdEntityId);
           }
           decisions.push({
             pointer_key: pointerKey,
@@ -461,6 +592,12 @@ export class EntityJudgeSweeper {
           continue;
         }
 
+        // Prefer the LLM-generated entity_description (entity-centric) over
+        // the raw episode contextSummary (agent-POV). The description is
+        // stored as the entity summary AND used as embedding text so future
+        // semantic retrievals surface a neutral description of what/who the
+        // entity IS rather than a record of the agent's confusion.
+        const entitySummary = parsed.entityDescription ?? contextSummary;
         let createdEntityId: number | null = null;
         if (!dryRun) {
           createdEntityId = await createRuntimeEntity({
@@ -468,11 +605,13 @@ export class EntityJudgeSweeper {
             pointerKey,
             agentId: opts.agentId,
             scope,
-            summary: contextSummary,
+            summary: entitySummary,
           });
         }
         if (createdEntityId != null) {
           created += 1;
+          await this.embedRuntimeEntity(createdEntityId, pointerKey, entitySummary);
+          await this.retractIdentityGapCommitments(sql, opts.agentId, pointerKey, createdEntityId);
         }
         decisions.push({
           pointer_key: pointerKey,

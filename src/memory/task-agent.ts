@@ -885,6 +885,35 @@ export class MemoryTaskAgent {
         pointerToEntityId.set(pointerKey, entityId);
         created.entityIds.push(entityId);
         created.changedNodeRefs.push(makeNodeRef("entity", entityId));
+
+        // Generate an embedding so the Talker's semantic retrieval can surface
+        // this entity in future turns. Without this, entities introduced via
+        // this tool remain unsearchable.
+        try {
+          const embedText = `${displayName} (${entityType})`;
+          const modelId = this.modelProvider.defaultEmbeddingModelId;
+          const vectors = await this.modelProvider.embed(
+            [embedText],
+            "memory_index",
+            modelId,
+          );
+          const vector = vectors[0];
+          if (vector && vector.length > 0) {
+            await this.embeddings.batchStoreEmbeddings([
+              {
+                nodeRef: makeNodeRef("entity", entityId),
+                nodeKind: "entity",
+                viewType: "primary",
+                modelId,
+                embedding: vector,
+              },
+            ]);
+          }
+        } catch (err) {
+          console.warn(
+            `[create_entity] failed to embed ${pointerKey} (id=${entityId}): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         continue;
       }
 

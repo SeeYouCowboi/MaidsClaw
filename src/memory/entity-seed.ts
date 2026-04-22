@@ -24,7 +24,7 @@ interface WorldEntitySeed {
 const STATIC_WORLD_ENTITIES: WorldEntitySeed[] = [
   { pointerKey: "茶室", displayName: "茶室", entityType: "location", summary: "庄园内靠窗的茶室，光线柔和，主人常在此饮茶" },
   { pointerKey: "温室", displayName: "温室", entityType: "location", summary: "庄园温室，湿气较重，花木茂盛" },
-  { pointerKey: "花房", displayName: "花房", entityType: "location", summary: "庄园花房，Alice常在此处出没" },
+  { pointerKey: "花房", displayName: "花房", entityType: "location", summary: "庄园花房，湿润温暖，园丁偶尔打理" },
   { pointerKey: "书房", displayName: "书房", entityType: "location", summary: "庄园书房，午后安静，台灯偏暗" },
   { pointerKey: "管家", displayName: "管家", entityType: "character", summary: "庄园管家，负责库房清单和账目管理，爱打听消息" },
   { pointerKey: "梅姨", displayName: "梅姨", entityType: "character", summary: "庄园厨娘，手艺好，嘴碎，与管家走得近" },
@@ -43,6 +43,11 @@ export async function seedWorldEntities(
   for (const [, card] of personaService.getSnapshot().cards) {
     const name = card.name?.trim();
     if (!name) continue;
+    // Personas marked as "introduced-via-conversation" are NOT pre-seeded into the
+    // shared_public graph. They must be created organically during dialogue via the
+    // explicit settlement support phase (create_entity tool). Used for testing the
+    // system's ability to introduce new entities through conversation.
+    if (card.worldPresence === "introduced-via-conversation") continue;
     // Skip if already covered by static seeds
     if (seeds.some((s) => s.pointerKey === name)) continue;
 
