@@ -209,8 +209,65 @@ Initiate rollback if any of the following occur after cutover:
 - `cross-agent-leakage` golden case returns non-zero results.
 - Any truth-plane table has fewer rows than the backup snapshot.
 - pg_search BM25 index corruption is detected (index returns errors or crashes the connection).
+- pg_search boot failure (extension/index init fails during startup migration/bootstrap).
+- Restore smoke verification fails after rollback rehearsal.
+- Dashboard contract drift against retrieval trace contract is detected.
+- Benchmark gate breach: `cross_agent_leakage_count > 0` or `p95_ms > 300`.
 
-### Rollback procedure
+### Rollback
+
+#### Step 1 — Snapshot cutover point tag (`pre-pg-search-cutover`)
+
+Before final cutover, create (or verify) the local rollback anchor tag:
+
+```bash
+git tag -a pre-pg-search-cutover -m "Pre pg_search cutover rollback anchor"
+```
+
+If the tag already exists, verify it points at the intended commit:
+
+```bash
+git show --no-patch pre-pg-search-cutover
+```
+
+#### Step 2 — Restore truth-plane backup artifact
+
+Primary rollback artifact path:
+
+```
+.local-backups/retrieval-cutover/truth-backup.sql
+```
+
+Restore commands:
+
+```bash
+docker exec "maidsclaw-app-pg" psql -U maidsclaw -d postgres \
+  -c "DROP DATABASE IF EXISTS maidsclaw_app"
+docker exec "maidsclaw-app-pg" psql -U maidsclaw -d postgres \
+  -c "CREATE DATABASE maidsclaw_app WITH OWNER maidsclaw"
+```
+
+On Windows (PowerShell):
+
+```powershell
+Get-Content ".local-backups\retrieval-cutover\truth-backup.sql" |
+  docker exec -i "maidsclaw-app-pg" psql -U maidsclaw -d maidsclaw_app
+```
+
+#### Step 3 — Revert container image to pre-ParadeDB
+
+Revert `docker-compose.pg.yml` to the pre-ParadeDB image from the rollback anchor:
+
+```bash
+git checkout pre-pg-search-cutover -- docker-compose.pg.yml
+docker compose -f docker-compose.pg.yml up -d maidsclaw-app-pg
+```
+
+#### Step 4 — Run restore-smoke verification
+
+Run Section 2 (Restore Smoke Procedure) end-to-end and block release unless it passes.
+
+### Legacy rollback procedure (expanded)
 
 1. Stop the application server.
 2. Drop the database or restore from backup.
@@ -231,6 +288,13 @@ Initiate rollback if any of the following occur after cutover:
 
 3. Rebuild derived tables (section 3 above).
 4. Re-run gate criteria from section 4 before re-attempting cutover.
+
+### Additional rollback triggers from Phase 4 plan
+
+- Golden set critical case failure (any `expected_top_ref` miss within `recall_k`).
+- Cross-agent leakage count > 0.
+- Benchmark `p95_ms > 300`.
+- Dashboard contract drift.
 
 ---
 
