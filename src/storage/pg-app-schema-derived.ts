@@ -278,6 +278,11 @@ export async function bootstrapDerivedSchema(
       ON search_docs_episode USING GIN (content gin_trgm_ops)
   `);
 
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_episode_entity_pointer_keys
+      ON search_docs_episode USING GIN (entity_pointer_keys)
+  `);
+
   if (!opts.skipVector) {
     await sql.unsafe(`
       CREATE TABLE IF NOT EXISTS node_embeddings (

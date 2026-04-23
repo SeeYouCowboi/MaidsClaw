@@ -231,6 +231,16 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       ON entity_aliases(alias, owner_agent_id)
   `);
 
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup_owner
+      ON entity_aliases (LOWER(alias), owner_agent_id)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_entity_nodes_pointer_lookup_scope
+      ON entity_nodes (LOWER(pointer_key), memory_scope, owner_agent_id)
+  `);
+
   // ══════════════════════════════════════════════════════════════════
   // Graph nodes: pointer_redirects
   // ══════════════════════════════════════════════════════════════════
@@ -367,6 +377,11 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS idx_private_episode_events_agent
       ON private_episode_events(agent_id, created_at DESC)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_private_episode_events_entity_pointer_keys
+      ON private_episode_events USING GIN (entity_pointer_keys)
   `);
 
   await sql.unsafe(`
