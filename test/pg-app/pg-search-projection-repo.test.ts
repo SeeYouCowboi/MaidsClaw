@@ -3,6 +3,8 @@ import type postgres from "postgres";
 import type { NodeRef } from "../../src/memory/types.js";
 import { PgSearchProjectionRepo } from "../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
+import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
+import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
   createTestPgAppPool,
   ensureTestPgAppDb,
@@ -13,6 +15,12 @@ import { skipPgTests } from "../helpers/pg-test-utils.js";
 
 describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
   let pool: postgres.Sql;
+
+  async function bootstrapAll(sql: postgres.Sql): Promise<void> {
+    await bootstrapTruthSchema(sql);
+    await bootstrapOpsSchema(sql);
+    await bootstrapDerivedSchema(sql);
+  }
 
   beforeAll(async () => {
     await ensureTestPgAppDb();
@@ -25,7 +33,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("upsertPrivateDoc + searchPrivate finds keyword for agent", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertPrivateDoc({
@@ -50,7 +58,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("upsertAreaDoc + searchArea filters by location_entity_id", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertAreaDoc({
@@ -73,7 +81,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("deleteWorldDoc removes document from search results", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertWorldDoc({
@@ -92,7 +100,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("rebuildForScope('private', agentId) clears only that agent's docs", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertPrivateDoc({
@@ -118,7 +126,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("updateCognitionSearchDocStanceBySourceRef updates only stance column", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       const docId = await repo.upsertCognitionDoc({
@@ -151,7 +159,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("updateCognitionSearchDocStanceBySourceRef does not affect other agents", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertCognitionDoc({
@@ -185,7 +193,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
 
   it("upsert populates BM25 helper columns (content_search_text, content_ngram_text, alias_text)", async () => {
     await withTestAppSchema(pool, async (sql) => {
-      await bootstrapDerivedSchema(sql);
+      await bootstrapAll(sql);
       const repo = new PgSearchProjectionRepo(sql);
 
       await repo.upsertAreaDoc({
@@ -246,7 +254,7 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
         FROM search_docs_episode WHERE source_ref = 'episode:1' AND agent_id = 'agent-a'
       `;
       expect(episodeRow[0].alias_text).toContain("entity:librarian");
-      expect(episodeRow[0].content_search_text).toContain("librarian");
+      expect(episodeRow[0].content_search_text).toContain("Met the librarian");
 
       const cognitionRow = await sql<{
         content_search_text: string;

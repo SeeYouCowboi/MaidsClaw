@@ -9,10 +9,8 @@ import type {
   CognitionSearchQueryOptions,
   CognitionSearchRepo,
 } from "../contracts/cognition-search-repo.js";
-import { isCjkQuery, decomposeCjk, buildCjkScoreSql, buildCjkWhereSql } from "./cjk-search-utils.js";
 import {
   PgSearchLexicalBackend,
-  isPgSearchUnsupportedError,
 } from "./pg-search-backend.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key:";
@@ -101,127 +99,18 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
     const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
     const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
 
-    try {
-      const lexicalBackend = new PgSearchLexicalBackend(this.sql);
-      let hits = (await lexicalBackend.searchCognition({
-        query: trimmedQuery,
-        agentId,
-        limit,
-        minScore,
-        kind: options.kind,
-        stance: options.stance,
-        basis: options.basis,
-        activeOnly: options.activeOnly,
-        asOfCommittedTime: options.timeWindow?.asOfCommittedTime,
-      }))
-        .filter((row) => toNumber(row.score) >= minScore)
-        .map((row) => this.mapSearchRow(row));
-
-      if (options.activeOnly) {
-        hits = await this.filterActiveCommitments(hits, agentId);
-      }
-
-      if (options.kind === "commitment") {
-        return this.sortCommitments(hits, agentId);
-      }
-
-      return hits;
-    } catch (error) {
-      if (!isPgSearchUnsupportedError(error)) {
-        throw error;
-      }
-    }
-
-    const normalizedQuery = trimmedQuery.toLowerCase();
-    const pattern = `%${trimmedQuery}%`;
-    const isCjk = isCjkQuery(trimmedQuery);
-
-    const params: Array<string | number> = [agentId];
-    let next = 2;
-
-    let scoreExpr: string;
-    let matchExpr: string;
-
-    if (isCjk) {
-      const decomp = decomposeCjk(trimmedQuery);
-      const [scoreSql, scoreParams, nextIdx1] = buildCjkScoreSql("d.content", decomp, next);
-      params.push(...scoreParams);
-      next = nextIdx1;
-
-      const [whereSql, whereParams, nextIdx2] = buildCjkWhereSql("d.content", decomp, next);
-      params.push(...whereParams);
-      next = nextIdx2;
-
-      scoreExpr = scoreSql;
-      matchExpr = whereSql;
-    } else {
-      params.push(normalizedQuery, pattern, minScore);
-      const qIdx = next++;
-      const pIdx = next++;
-      const msIdx = next++;
-      scoreExpr = `GREATEST(similarity(lower(d.content), $${qIdx}), word_similarity(lower(d.content), $${qIdx}), CASE WHEN lower(d.content) ILIKE $${pIdx} THEN $${msIdx}::real ELSE 0 END)`;
-      matchExpr = `(lower(d.content) % $${qIdx} OR lower(d.content) ILIKE $${pIdx} OR similarity(lower(d.content), $${qIdx}) >= $${msIdx} OR word_similarity(lower(d.content), $${qIdx}) >= $${msIdx})`;
-    }
-
-    const conditions: string[] = [
-      "d.agent_id = $1",
-      matchExpr,
-    ];
-
-    if (options.kind) {
-      conditions.push(`d.kind = $${next}`);
-      params.push(options.kind);
-      next += 1;
-    }
-    if (options.stance) {
-      conditions.push(`d.stance = $${next}`);
-      params.push(options.stance);
-      next += 1;
-    }
-    if (options.basis) {
-      conditions.push(`d.basis = $${next}`);
-      params.push(options.basis);
-      next += 1;
-    }
-    if (options.activeOnly) {
-      conditions.push("(d.stance IS NULL OR d.stance NOT IN ('rejected', 'abandoned'))");
-    }
-    // GAP-4 §1: timeWindow filter via updated_at. asOfValidTime is unused
-    // at the search-doc layer (cognition rows don't carry valid time).
-    if (options.timeWindow?.asOfCommittedTime != null) {
-      conditions.push(`d.updated_at <= $${next}`);
-      params.push(options.timeWindow.asOfCommittedTime);
-      next += 1;
-    }
-    // GAP-4 §1: entityIds is wired through the contract for the future
-    // schema migration that adds an entity column to search_docs_cognition.
-    // The current schema has no entity column, so a non-empty entityIds
-    // list would silently match nothing if we tried to filter on it. We
-    // intentionally do not push a condition here — the orchestrator
-    // unit test verifies the parameter is forwarded; PG-side enforcement
-    // is the follow-up's responsibility.
-
-    params.push(minScore, limit);
-    const minScoreParam = next++;
-    const limitParam = next;
-
-    const rows = await this.sql.unsafe(
-      `SELECT d.source_ref,
-              d.kind,
-              d.basis,
-              d.stance,
-              d.content,
-              d.updated_at,
-              ${scoreExpr} AS score
-       FROM search_docs_cognition d
-       WHERE ${conditions.join(" AND ")}
-         AND ${scoreExpr} >= $${minScoreParam}
-       ORDER BY score DESC, d.updated_at DESC
-       LIMIT $${limitParam}`,
-      params,
-    ) as (SearchRow & { score: number | string })[];
-
-    let hits = rows
+    const lexicalBackend = new PgSearchLexicalBackend(this.sql);
+    let hits = (await lexicalBackend.searchCognition({
+      query: trimmedQuery,
+      agentId,
+      limit,
+      minScore,
+      kind: options.kind,
+      stance: options.stance,
+      basis: options.basis,
+      activeOnly: options.activeOnly,
+      asOfCommittedTime: options.timeWindow?.asOfCommittedTime,
+    }))
       .filter((row) => toNumber(row.score) >= minScore)
       .map((row) => this.mapSearchRow(row));
 

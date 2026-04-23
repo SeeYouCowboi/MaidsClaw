@@ -127,7 +127,7 @@ describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
     });
   });
 
-  test("PgSearchProjectionRepo can query rebuilt docs via pg_trgm", async () => {
+  test("PgSearchProjectionRepo can query rebuilt docs after cutover", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapAllSchemas(sql);
       await seedTestData(sql);

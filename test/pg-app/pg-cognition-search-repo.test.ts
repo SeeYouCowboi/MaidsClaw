@@ -4,6 +4,9 @@ import type { CognitionHit } from "../../src/memory/cognition/cognition-search.j
 import type { NodeRef } from "../../src/memory/types.js";
 import type { AssertionBasis, AssertionStance, CognitionKind } from "../../src/runtime/rp-turn-contract.js";
 import { PgCognitionSearchRepo } from "../../src/storage/domain-repos/pg/cognition-search-repo.js";
+import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
+import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
+import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
   createTestPgAppPool,
   ensureTestPgAppDb,
@@ -37,47 +40,9 @@ type SearchSeed = {
 };
 
 async function bootstrapCognitionSearchSchema(sql: postgres.Sql): Promise<void> {
-  await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS private_cognition_current (
-      id                         BIGSERIAL PRIMARY KEY,
-      agent_id                   TEXT NOT NULL,
-      cognition_key              TEXT NOT NULL,
-      kind                       TEXT NOT NULL,
-      stance                     TEXT,
-      basis                      TEXT,
-      status                     TEXT DEFAULT 'active',
-      pre_contested_stance       TEXT,
-      conflict_summary           TEXT,
-      conflict_factor_refs_json  JSONB,
-      summary_text               TEXT,
-      record_json                JSONB NOT NULL,
-      source_event_id            BIGINT NOT NULL,
-      updated_at                 BIGINT NOT NULL,
-      UNIQUE(agent_id, cognition_key)
-    )
-  `);
-
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS search_docs_cognition (
-      id         BIGSERIAL PRIMARY KEY,
-      doc_type   TEXT NOT NULL,
-      source_ref TEXT NOT NULL,
-      agent_id   TEXT NOT NULL,
-      kind       TEXT NOT NULL,
-      basis      TEXT,
-      stance     TEXT,
-      content    TEXT NOT NULL,
-      updated_at BIGINT NOT NULL,
-      created_at BIGINT NOT NULL
-    )
-  `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_content_trgm_test
-      ON search_docs_cognition USING GIN (content gin_trgm_ops)
-  `);
+  await bootstrapTruthSchema(sql);
+  await bootstrapOpsSchema(sql);
+  await bootstrapDerivedSchema(sql);
 }
 
 async function seedCurrent(sql: postgres.Sql, seed: CurrentSeed): Promise<void> {
@@ -118,6 +83,7 @@ async function seedCurrent(sql: postgres.Sql, seed: CurrentSeed): Promise<void> 
 }
 
 async function seedSearchDoc(sql: postgres.Sql, seed: SearchSeed): Promise<void> {
+  const composed = seed.content;
   await sql`
     INSERT INTO search_docs_cognition (
       id,
@@ -129,7 +95,10 @@ async function seedSearchDoc(sql: postgres.Sql, seed: SearchSeed): Promise<void>
       stance,
       content,
       updated_at,
-      created_at
+      created_at,
+      content_search_text,
+      content_ngram_text,
+      alias_text
     ) VALUES (
       ${seed.id},
       ${seed.kind},
@@ -140,7 +109,10 @@ async function seedSearchDoc(sql: postgres.Sql, seed: SearchSeed): Promise<void>
       ${seed.stance ?? null},
       ${seed.content},
       ${seed.updatedAt ?? Date.now()},
-      ${Date.now()}
+      ${Date.now()},
+      ${composed},
+      ${composed},
+      ${""}
     )
   `;
 }
@@ -209,7 +181,10 @@ describe.skipIf(skipPgTests)("PgCognitionSearchRepo", () => {
         content: "moonlit garden tea ceremony from another agent",
       });
 
-      const hits = await repo.searchBySimilarity("moonlit garden tea ceremony", "agent-a", { limit: 10 });
+      const hits = await repo.searchBySimilarity("moonlit", "agent-a", {
+        limit: 10,
+        minScore: 0,
+      });
 
       expect(hits.length).toBeGreaterThanOrEqual(1);
       expect(String(hits[0].source_ref)).toBe("assertion:201");

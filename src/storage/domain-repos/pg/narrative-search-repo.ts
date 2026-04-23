@@ -6,12 +6,6 @@ import type {
 	NarrativeSearchRepo,
 } from "../contracts/narrative-search-repo.js";
 import {
-	type CjkDecomposition,
-	decomposeCjk,
-	isCjkQuery,
-} from "./cjk-search-utils.js";
-import {
-	isPgSearchUnsupportedError,
 	PgSearchLexicalBackend,
 } from "./pg-search-backend.js";
 
@@ -36,7 +30,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
 	>;
 
 	constructor(
-		private readonly sql: postgres.Sql,
+		sql: postgres.Sql,
 		lexicalBackend?: Pick<
 			PgSearchLexicalBackend,
 			"searchArea" | "searchWorld" | "searchEpisode"
@@ -71,39 +65,7 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
 				: undefined;
 		const asOfCommittedTime = query.timeWindow?.asOfCommittedTime;
 
-		try {
-			return await this.searchWithPgSearch(
-				trimmed,
-				viewerContext,
-				includeArea,
-				includeWorld,
-				includeEpisode,
-				limit,
-				minScore,
-				entityIds,
-				asOfCommittedTime,
-			);
-		} catch (error) {
-			if (!isPgSearchUnsupportedError(error)) {
-				throw error;
-			}
-		}
-
-		if (isCjkQuery(trimmed)) {
-			return this.searchCjk(
-				trimmed,
-				viewerContext,
-				includeArea,
-				includeWorld,
-				includeEpisode,
-				limit,
-				minScore,
-				entityIds,
-				asOfCommittedTime,
-			);
-		}
-
-		return this.searchLatin(
+		return this.searchWithPgSearch(
 			trimmed,
 			viewerContext,
 			includeArea,
@@ -202,195 +164,6 @@ export class PgNarrativeSearchRepo implements NarrativeSearchRepo {
 		// Candidate scores are weighted RRF values and intentionally not on the
 		// same numeric scale as pg_trgm similarity, so we avoid re-filtering here.
 		return this.dedup(results, limit, 0);
-	}
-
-	private async searchCjk(
-		trimmed: string,
-		viewerContext: ViewerContext,
-		includeArea: boolean,
-		includeWorld: boolean,
-		includeEpisode: boolean,
-		limit: number,
-		minScore: number,
-		entityIds: number[] | undefined,
-		asOfCommittedTime: number | undefined,
-	): Promise<NarrativeSearchHit[]> {
-		const decomp = decomposeCjk(trimmed);
-		const results: NarrativeSearchHit[] = [];
-
-		// Build ILIKE patterns for WHERE and scoring.
-		// Uses tagged templates (not sql.unsafe) to preserve search_path in bun test.
-		const exactPattern = `%${decomp.original}%`;
-		const bigramPatterns = decomp.bigrams.map((bg) => `%${bg}%`);
-		const unigramPatterns = decomp.unigrams.map((ug) => `%${ug}%`);
-
-		// P2-A: prefer bigrams over the first 3 unigrams — they carry far
-		// more information per pattern. Falls back to unigrams for single-char
-		// queries. Capped so the ILIKE ANY expression stays bounded.
-		const CJK_NARRATIVE_PATTERN_CAP = 20;
-		const filterPatterns: string[] = [exactPattern];
-		const grams = bigramPatterns.length > 0 ? bigramPatterns : unigramPatterns;
-		for (const p of grams) {
-			if (filterPatterns.length >= CJK_NARRATIVE_PATTERN_CAP) break;
-			filterPatterns.push(p);
-		}
-
-		if (includeArea && viewerContext.current_area_id != null) {
-			// GAP-4 §1: extra entity_ids filter — search_docs_area only stores
-			// location_entity_id, so we narrow by that column. Plan-supplied
-			// entityIds are interpreted as "the location must be one of these".
-			const areaRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
-        FROM search_docs_area d
-        WHERE d.location_entity_id = ${viewerContext.current_area_id}
-          AND lower(d.content) ILIKE ANY(${filterPatterns})
-          ${entityIds ? this.sql`AND d.location_entity_id = ANY(${entityIds})` : this.sql``}
-          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
-        LIMIT ${limit * 2}
-      `;
-			results.push(...areaRows.map((row) => this.mapRow(row, "area")));
-		}
-
-		if (includeWorld) {
-			// GAP-4 §1: search_docs_world has no entity column. entityIds is
-			// wired through the contract but cannot be honored here without a
-			// schema migration; document the gap and proceed without filter.
-			const worldRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
-        FROM search_docs_world d
-        WHERE lower(d.content) ILIKE ANY(${filterPatterns})
-          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
-        LIMIT ${limit * 2}
-      `;
-			results.push(...worldRows.map((row) => this.mapRow(row, "world")));
-		}
-
-		// P2-B: private episode projection, strictly agent-scoped. Cross-agent
-		// read is not permitted at this layer — the agent_id gate is mandatory.
-		if (includeEpisode) {
-			const agentId = viewerContext.viewer_agent_id;
-			const episodeRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref, d.doc_type, d.content, 0::real AS score
-        FROM search_docs_episode d
-        WHERE d.agent_id = ${agentId}
-          AND lower(d.content) ILIKE ANY(${filterPatterns})
-          ${asOfCommittedTime != null ? this.sql`AND d.committed_at <= ${asOfCommittedTime}` : this.sql``}
-        LIMIT ${limit * 2}
-      `;
-			results.push(...episodeRows.map((row) => this.mapRow(row, "episode")));
-		}
-
-		// Compute CJK bigram scores in application code
-		for (const hit of results) {
-			hit.score = this.computeCjkScore(hit.content, decomp);
-		}
-
-		return this.dedup(results, limit, minScore);
-	}
-
-	private computeCjkScore(content: string, decomp: CjkDecomposition): number {
-		const lower = content.toLowerCase();
-		let raw = 0;
-		if (lower.includes(decomp.original.toLowerCase())) raw += 5;
-		for (const bg of decomp.bigrams) {
-			if (lower.includes(bg)) raw += 3;
-		}
-		for (const ug of decomp.unigrams) {
-			if (lower.includes(ug)) raw += 1;
-		}
-		return decomp.maxScore > 0 ? raw / decomp.maxScore : 0;
-	}
-
-	private async searchLatin(
-		trimmed: string,
-		viewerContext: ViewerContext,
-		includeArea: boolean,
-		includeWorld: boolean,
-		includeEpisode: boolean,
-		limit: number,
-		minScore: number,
-		entityIds: number[] | undefined,
-		asOfCommittedTime: number | undefined,
-	): Promise<NarrativeSearchHit[]> {
-		const normalizedQuery = trimmed.toLowerCase();
-		const pattern = `%${trimmed}%`;
-		const results: NarrativeSearchHit[] = [];
-
-		if (includeArea && viewerContext.current_area_id != null) {
-			const areaRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref,
-               d.doc_type,
-               d.content,
-               GREATEST(
-                 similarity(lower(d.content), ${normalizedQuery}),
-                 word_similarity(lower(d.content), ${normalizedQuery}),
-                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${minScore}::real ELSE 0::real END
-               ) AS score
-        FROM search_docs_area d
-        WHERE d.location_entity_id = ${viewerContext.current_area_id}
-          AND (
-            lower(d.content) % ${normalizedQuery}
-            OR lower(d.content) ILIKE ${pattern}
-            OR word_similarity(lower(d.content), ${normalizedQuery}) >= ${minScore}
-          )
-          ${entityIds ? this.sql`AND d.location_entity_id = ANY(${entityIds})` : this.sql``}
-          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
-        ORDER BY score DESC, d.created_at DESC
-        LIMIT ${limit}
-      `;
-			results.push(...areaRows.map((row) => this.mapRow(row, "area")));
-		}
-
-		if (includeWorld) {
-			const worldRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref,
-               d.doc_type,
-               d.content,
-               GREATEST(
-                 similarity(lower(d.content), ${normalizedQuery}),
-                 word_similarity(lower(d.content), ${normalizedQuery}),
-                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${minScore}::real ELSE 0::real END
-               ) AS score
-        FROM search_docs_world d
-        WHERE (
-          lower(d.content) % ${normalizedQuery}
-          OR lower(d.content) ILIKE ${pattern}
-          OR word_similarity(lower(d.content), ${normalizedQuery}) >= ${minScore}
-        )
-          ${asOfCommittedTime != null ? this.sql`AND d.created_at <= ${asOfCommittedTime}` : this.sql``}
-        ORDER BY score DESC, d.created_at DESC
-        LIMIT ${limit}
-      `;
-			results.push(...worldRows.map((row) => this.mapRow(row, "world")));
-		}
-
-		// P2-B: private episode projection, strictly agent-scoped.
-		if (includeEpisode) {
-			const agentId = viewerContext.viewer_agent_id;
-			const episodeRows = await this.sql<PgNarrativeSearchRow[]>`
-        SELECT d.source_ref,
-               d.doc_type,
-               d.content,
-               GREATEST(
-                 similarity(lower(d.content), ${normalizedQuery}),
-                 word_similarity(lower(d.content), ${normalizedQuery}),
-                 CASE WHEN lower(d.content) ILIKE ${pattern} THEN ${minScore}::real ELSE 0::real END
-               ) AS score
-        FROM search_docs_episode d
-        WHERE d.agent_id = ${agentId}
-          AND (
-            lower(d.content) % ${normalizedQuery}
-            OR lower(d.content) ILIKE ${pattern}
-            OR word_similarity(lower(d.content), ${normalizedQuery}) >= ${minScore}
-          )
-          ${asOfCommittedTime != null ? this.sql`AND d.committed_at <= ${asOfCommittedTime}` : this.sql``}
-        ORDER BY score DESC, d.committed_at DESC
-        LIMIT ${limit}
-      `;
-			results.push(...episodeRows.map((row) => this.mapRow(row, "episode")));
-		}
-
-		return this.dedup(results, limit, minScore);
 	}
 
 	private dedup(

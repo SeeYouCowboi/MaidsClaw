@@ -91,17 +91,15 @@ describe.skipIf(skipParadeDbTests)("paradedb-bm25-schema", () => {
     }
   });
 
-  it("trigram indexes still exist alongside BM25 indexes", async () => {
-    const rows = await sql<{ indexname: string }[]>`
+	it("search_docs trigram indexes are removed after cutover", async () => {
+		const rows = await sql<{ indexname: string }[]>`
       SELECT indexname
       FROM pg_indexes
       WHERE schemaname = ${schemaName}
-        AND indexname LIKE '%_content_trgm'
+        AND indexname LIKE 'idx_search_docs%trgm%'
     `;
-    const names = rows.map((r) => r.indexname);
-    expect(names).toContain("idx_search_docs_area_content_trgm");
-    expect(names).toContain("idx_search_docs_world_content_trgm");
-  });
+		expect(rows.length).toBe(0);
+	});
 
   it("BM25 indexes use bm25 access method", async () => {
     const rows = await sql<{ indexname: string; amname: string }[]>`

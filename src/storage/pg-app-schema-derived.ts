@@ -175,11 +175,7 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_private_agent
       ON search_docs_private(agent_id)
   `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_private_content_trgm
-      ON search_docs_private USING GIN (content gin_trgm_ops)
-  `);
+  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_private_content_trgm`);
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_area (
@@ -196,11 +192,7 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_area_location
       ON search_docs_area(location_entity_id)
   `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_area_content_trgm
-      ON search_docs_area USING GIN (content gin_trgm_ops)
-  `);
+  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_area_content_trgm`);
 
   await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
@@ -226,11 +218,7 @@ export async function bootstrapDerivedSchema(
       created_at BIGINT NOT NULL
     )
   `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_world_content_trgm
-      ON search_docs_world USING GIN (content gin_trgm_ops)
-  `);
+  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_world_content_trgm`);
 
   await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
@@ -274,11 +262,7 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_agent_updated
       ON search_docs_cognition(agent_id, updated_at DESC)
   `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_content_trgm
-      ON search_docs_cognition USING GIN (content gin_trgm_ops)
-  `);
+  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_cognition_content_trgm`);
 
   await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
@@ -324,11 +308,7 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_episode_agent
       ON search_docs_episode(agent_id)
   `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_episode_trgm
-      ON search_docs_episode USING GIN (content gin_trgm_ops)
-  `);
+  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_episode_trgm`);
 
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS idx_search_docs_episode_entity_pointer_keys

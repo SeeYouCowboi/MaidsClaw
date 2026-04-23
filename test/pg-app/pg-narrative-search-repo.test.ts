@@ -260,7 +260,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 			);
 
 			const viewer = makeViewerContext({ current_area_id: 42 });
-			const hits = await repo.searchNarrative({ text: "garden" }, viewer);
+			const hits = await repo.searchNarrative({ text: "garden", minScore: 0 }, viewer);
 
 			expect(hits.length).toBeGreaterThanOrEqual(2);
 			const sourceRefs = hits.map((h) => String(h.sourceRef));
@@ -293,7 +293,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 
 			const viewer = makeViewerContext({ current_area_id: undefined });
 			const hits = await repo.searchNarrative(
-				{ text: "festival lights" },
+				{ text: "festival lights", minScore: 0 },
 				viewer,
 			);
 
@@ -328,7 +328,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 			);
 
 			const viewer = makeViewerContext({ current_area_id: 42 });
-			const hits = await repo.searchNarrative({ text: "ceremony" }, viewer);
+			const hits = await repo.searchNarrative({ text: "ceremony", minScore: 0 }, viewer);
 
 			const event20Hits = hits.filter(
 				(h) => String(h.sourceRef) === "event:20",
@@ -401,7 +401,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 			);
 
 			const viewer = makeViewerContext({ current_area_id: undefined });
-			const hits = await repo.searchNarrative({ text: "cooking" }, viewer);
+			const hits = await repo.searchNarrative({ text: "cooking", minScore: 0 }, viewer);
 
 			const scopes = new Set(hits.map((h) => h.scope));
 			expect(scopes.has("area")).toBe(false);
@@ -458,7 +458,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 
 			const viewer = makeViewerContext();
 			const hits = await repo.searchNarrative(
-				{ text: "moonlit garden tea ceremony" },
+				{ text: "moonlit garden tea ceremony", minScore: 0 },
 				viewer,
 			);
 
@@ -509,7 +509,7 @@ describe.skipIf(skipPgTests)("PgNarrativeSearchRepo", () => {
 
 			const viewer = makeViewerContext();
 			const hits = await repo.searchNarrative(
-				{ text: "chrysanthemum" },
+				{ text: "chrysanthemum", minScore: 0 },
 				viewer,
 			);
 			expect(hits.length).toBeGreaterThanOrEqual(1);

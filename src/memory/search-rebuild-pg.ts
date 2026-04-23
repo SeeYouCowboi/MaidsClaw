@@ -7,7 +7,7 @@
  *   - search_docs_world:     event_nodes (world_public) + entity_nodes (shared_public) + fact_edges
  *   - search_docs_cognition: private_cognition_current
  *
- * No FTS sidecar sync needed — pg_trgm GIN indexes auto-update on insert.
+ * No FTS sidecar sync needed — BM25 helper columns are materialized on insert.
  */
 
 import type postgres from "postgres";
@@ -182,19 +182,15 @@ export class PgSearchRebuilder {
     const rows = await this.buildEpisodeSearchAuthorityRows(agentId);
 
     for (const row of rows) {
-      const contentWithEntities =
-        row.entityPointerKeys.length > 0
-          ? `${row.content} | entities: ${row.entityPointerKeys.join(" ")}`
-          : row.content;
       const aliasText = row.entityPointerKeys.join(" ");
-      const composed = composeSearchText(contentWithEntities, aliasText);
+      const composed = composeSearchText(row.content, aliasText);
       await this.sql`
         INSERT INTO search_docs_episode
           (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys,
-           content_search_text, content_ngram_text, alias_text)
+            content_search_text, content_ngram_text, alias_text)
         VALUES
           ('episode', ${row.sourceRef}, ${row.agentId}, ${row.category},
-           ${contentWithEntities}, ${row.committedAt}, ${now}, ${row.entityPointerKeys},
+           ${row.content}, ${row.committedAt}, ${now}, ${row.entityPointerKeys},
            ${composed}, ${composed}, ${aliasText})
       `;
     }

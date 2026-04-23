@@ -1,16 +1,12 @@
 import type postgres from "postgres";
 import type { NodeRef } from "../../../memory/types.js";
-import { isCjkQuery, decomposeCjk, type CjkDecomposition } from "./cjk-search-utils.js";
-import {
-  PgSearchLexicalBackend,
-  isPgSearchUnsupportedError,
-} from "./pg-search-backend.js";
 import type {
   SearchProjectionRepo,
   SearchProjectionScope,
   UpsertCognitionDocParams,
   UpsertEpisodeDocParams,
 } from "../contracts/search-projection-repo.js";
+import { PgSearchLexicalBackend } from "./pg-search-backend.js";
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
 
@@ -84,6 +80,15 @@ function toNumber(value: string | number | undefined): number {
     return 0;
   }
   return typeof value === "number" ? value : Number(value);
+}
+
+function parseSourceRefId(sourceRef: string): number {
+  const parts = sourceRef.split(":");
+  if (parts.length < 2) {
+    return 0;
+  }
+  const numeric = Number(parts[parts.length - 1]);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function getDocTypeFromRef(sourceRef: NodeRef): string {
@@ -463,13 +468,27 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     createdAt: number;
     score: number;
   }>> {
-    const pattern = `%${query}%`;
+    const normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery.length < 2) {
+      return [];
+    }
+
     const rows = await this.sql<PrivateDocRow[]>`
       SELECT id, doc_type, source_ref, agent_id, content, created_at,
-             similarity(content, ${query}) AS score
+             CASE
+               WHEN lower(content) = ${normalizedQuery} THEN 1::real
+               WHEN strpos(lower(content), ${normalizedQuery}) > 0 THEN LEAST(
+                 0.99::real,
+                 GREATEST(
+                   0.2::real,
+                   ${normalizedQuery.length}::real / GREATEST(length(content), 1)::real
+                 )
+               )
+               ELSE 0::real
+             END AS score
       FROM search_docs_private
       WHERE agent_id = ${agentId}
-        AND (content % ${query} OR content ILIKE ${pattern})
+        AND strpos(lower(content), ${normalizedQuery}) > 0
       ORDER BY score DESC, created_at DESC
       LIMIT ${limit}
     `;
@@ -498,16 +517,12 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     createdAt: number;
     score: number;
   }>> {
-    const pattern = `%${query}%`;
-    const rows = await this.sql<AreaDocRow[]>`
-      SELECT id, doc_type, source_ref, location_entity_id, content, created_at,
-             similarity(content, ${query}) AS score
-      FROM search_docs_area
-      WHERE location_entity_id = ${locationEntityId}
-        AND (content % ${query} OR content ILIKE ${pattern})
-      ORDER BY score DESC, created_at DESC
-      LIMIT ${limit}
-    `;
+    const backend = new PgSearchLexicalBackend(this.sql);
+    const rows = await backend.searchArea({
+      query,
+      locationEntityId,
+      limit,
+    });
 
     return rows.map((row) => ({
       id: toNumber(row.id),
@@ -531,15 +546,8 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     createdAt: number;
     score: number;
   }>> {
-    const pattern = `%${query}%`;
-    const rows = await this.sql<WorldDocRow[]>`
-      SELECT id, doc_type, source_ref, content, created_at,
-             similarity(content, ${query}) AS score
-      FROM search_docs_world
-      WHERE content % ${query} OR content ILIKE ${pattern}
-      ORDER BY score DESC, created_at DESC
-      LIMIT ${limit}
-    `;
+    const backend = new PgSearchLexicalBackend(this.sql);
+    const rows = await backend.searchWorld({ query, limit });
 
     return rows.map((row) => ({
       id: toNumber(row.id),
@@ -568,28 +576,24 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     createdAt: number;
     score: number;
   }>> {
-    const pattern = `%${query}%`;
-    const rows = await this.sql<CognitionDocRow[]>`
-      SELECT id, doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at,
-             similarity(content, ${query}) AS score
-      FROM search_docs_cognition
-      WHERE agent_id = ${agentId}
-        AND (content % ${query} OR content ILIKE ${pattern})
-      ORDER BY score DESC, updated_at DESC
-      LIMIT ${limit}
-    `;
+    const backend = new PgSearchLexicalBackend(this.sql);
+    const rows = await backend.searchCognition({
+      query,
+      agentId,
+      limit,
+    });
 
     return rows.map((row) => ({
-      id: toNumber(row.id),
-      docType: row.doc_type,
+      id: parseSourceRefId(row.source_ref),
+      docType: row.kind,
       sourceRef: row.source_ref,
-      agentId: row.agent_id,
+      agentId,
       kind: row.kind,
       basis: row.basis,
       stance: row.stance,
       content: row.content,
       updatedAt: toNumber(row.updated_at),
-      createdAt: toNumber(row.created_at),
+      createdAt: toNumber(row.updated_at),
       score: toNumber(row.score),
     }));
   }
@@ -597,15 +601,8 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   async upsertEpisodeDoc(params: UpsertEpisodeDocParams): Promise<number> {
     const now = params.createdAt ?? Date.now();
     const entityPointerKeys = params.entityPointerKeys ?? [];
-    // Append entity keys onto content so trigram/CJK ngram matching surfaces
-    // them too, in addition to the typed entity_pointer_keys column.
-    const contentWithEntities =
-      entityPointerKeys.length > 0
-        ? `${params.content} | entities: ${entityPointerKeys.join(" ")}`
-        : params.content;
-
     const aliasSource = params.aliasText ?? entityPointerKeys.join(" ");
-    const texts = buildSearchTexts(contentWithEntities, aliasSource);
+    const texts = buildSearchTexts(params.content, aliasSource);
 
     const existing = await this.sql<{ id: string | number; content: string; category: string }[]>`
       SELECT id, content, category
@@ -619,21 +616,21 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       const inserted = await this.sql<{ id: string | number }[]>`
         INSERT INTO search_docs_episode
           (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys,
-           content_search_text, content_ngram_text, alias_text)
+            content_search_text, content_ngram_text, alias_text)
         VALUES
           ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category},
-           ${contentWithEntities}, ${params.committedAt}, ${now}, ${entityPointerKeys},
-           ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
+            ${params.content}, ${params.committedAt}, ${now}, ${entityPointerKeys},
+            ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
         RETURNING id
       `;
       return toNumber(inserted[0]?.id);
     }
 
     const row = existing[0];
-    if (row.content !== contentWithEntities || row.category !== params.category) {
+    if (row.content !== params.content || row.category !== params.category) {
       await this.sql`
         UPDATE search_docs_episode
-        SET content = ${contentWithEntities},
+        SET content = ${params.content},
             category = ${params.category},
             committed_at = ${params.committedAt},
             entity_pointer_keys = ${entityPointerKeys},
@@ -672,52 +669,12 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
 
-    try {
-      const backend = new PgSearchLexicalBackend(this.sql);
-      const rows = await backend.searchEpisode({
-        query: trimmed,
-        agentId,
-        limit,
-      });
-      return rows.map((row) => ({
-        id: toNumber(row.id),
-        sourceRef: row.source_ref,
-        agentId: row.agent_id,
-        category: row.category,
-        content: row.content,
-        committedAt: toNumber(row.committed_at),
-        createdAt: toNumber(row.created_at),
-        score: toNumber(row.score),
-      }));
-    } catch (error) {
-      if (!isPgSearchUnsupportedError(error)) {
-        throw error;
-      }
-    }
-
-    if (isCjkQuery(trimmed)) {
-      return this.searchEpisodeCjk(trimmed, agentId, limit);
-    }
-
-    const pattern = `%${trimmed}%`;
-    const rows = await this.sql<{
-      id: string | number;
-      source_ref: string;
-      agent_id: string;
-      category: string;
-      content: string;
-      committed_at: string | number;
-      created_at: string | number;
-      score?: string | number;
-    }[]>`
-      SELECT id, source_ref, agent_id, category, content, committed_at, created_at,
-             similarity(content, ${trimmed}) AS score
-      FROM search_docs_episode
-      WHERE agent_id = ${agentId}
-        AND (content % ${trimmed} OR content ILIKE ${pattern})
-      ORDER BY score DESC, committed_at DESC
-      LIMIT ${limit}
-    `;
+    const backend = new PgSearchLexicalBackend(this.sql);
+    const rows = await backend.searchEpisode({
+      query: trimmed,
+      agentId,
+      limit,
+    });
 
     return rows.map((row) => ({
       id: toNumber(row.id),
@@ -729,79 +686,5 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       createdAt: toNumber(row.created_at),
       score: toNumber(row.score),
     }));
-  }
-
-  private async searchEpisodeCjk(
-    query: string,
-    agentId: string,
-    limit: number,
-  ): Promise<Array<{
-    id: number;
-    sourceRef: string;
-    agentId: string;
-    category: string;
-    content: string;
-    committedAt: number;
-    createdAt: number;
-    score: number;
-  }>> {
-    const decomp = decomposeCjk(query);
-    // P2-A: prefer high-information bigrams (`管家`/`茶室`/`怀表`) as the
-    // pre-filter. Falls back to unigrams for single-char queries. Capped
-    // at 20 patterns to keep the ILIKE ANY expression bounded. Mirrors
-    // buildCjkWhereSql in cjk-search-utils.ts for the cognition path.
-    const CJK_EPISODE_PATTERN_CAP = 20;
-    const filterPatterns: string[] = [`%${decomp.original}%`];
-    const grams =
-      decomp.bigrams.length > 0 ? decomp.bigrams : decomp.unigrams;
-    for (const g of grams) {
-      if (filterPatterns.length >= CJK_EPISODE_PATTERN_CAP) break;
-      filterPatterns.push(`%${g}%`);
-    }
-
-    const rows = await this.sql<{
-      id: string | number;
-      source_ref: string;
-      agent_id: string;
-      category: string;
-      content: string;
-      committed_at: string | number;
-      created_at: string | number;
-    }[]>`
-      SELECT id, source_ref, agent_id, category, content,
-             committed_at, created_at
-      FROM search_docs_episode
-      WHERE agent_id = ${agentId}
-        AND lower(content) ILIKE ANY(${filterPatterns})
-      ORDER BY committed_at DESC
-      LIMIT ${limit * 2}
-    `;
-
-    return rows
-      .map((row) => ({
-        id: toNumber(row.id),
-        sourceRef: row.source_ref,
-        agentId: row.agent_id,
-        category: row.category,
-        content: row.content,
-        committedAt: toNumber(row.committed_at),
-        createdAt: toNumber(row.created_at),
-        score: this.computeEpisodeCjkScore(row.content, decomp),
-      }))
-      .sort((a, b) => b.score - a.score || b.committedAt - a.committedAt)
-      .slice(0, limit);
-  }
-
-  private computeEpisodeCjkScore(content: string, decomp: CjkDecomposition): number {
-    const lower = content.toLowerCase();
-    let raw = 0;
-    if (lower.includes(decomp.original.toLowerCase())) raw += 5;
-    for (const bg of decomp.bigrams) {
-      if (lower.includes(bg)) raw += 3;
-    }
-    for (const ug of decomp.unigrams) {
-      if (lower.includes(ug)) raw += 1;
-    }
-    return decomp.maxScore > 0 ? raw / decomp.maxScore : 0;
   }
 }

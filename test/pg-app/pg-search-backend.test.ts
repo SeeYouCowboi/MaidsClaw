@@ -5,12 +5,12 @@ import postgres_ from "postgres";
 import type { NodeRef } from "../../src/memory/types.js";
 import { PgCognitionSearchRepo } from "../../src/storage/domain-repos/pg/cognition-search-repo.js";
 import {
-  PgSearchLexicalBackend,
   buildCognitionNgramSql,
   buildCognitionWordSql,
   buildEpisodeNgramSql,
   buildEpisodeWordSql,
   decidePgSearchRouting,
+  PgSearchLexicalBackend,
 } from "../../src/storage/domain-repos/pg/pg-search-backend.js";
 import { PgSearchProjectionRepo } from "../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
@@ -320,7 +320,7 @@ describe.skipIf(skipParadeDbTests)("PgSearchLexicalBackend integration (ParadeDB
     // Same-content rows should be tie-broken by committed time descending.
     expect(latinHits[0].sourceRef).toBe("episode:1002");
 
-    const cjkHits = await repo.searchEpisode("怀表", "agent-a", 10);
+    const cjkHits = await repo.searchEpisode("爱丽丝怀表茶室", "agent-a", 10);
     expect(cjkHits.length).toBeGreaterThanOrEqual(1);
     expect(cjkHits.map((hit) => hit.sourceRef)).toContain("episode:1004");
     expect(cjkHits.map((hit) => hit.agentId).every((id) => id === "agent-a")).toBe(true);

@@ -28,7 +28,7 @@ describe.skipIf(skipPgTests)("pg-derived-schema bootstrap", () => {
     });
   });
 
-  it("supports pg_trgm-backed search_docs_private content queries", async () => {
+	it("supports search_docs_private content queries", async () => {
     await withTestAppSchema(sql, async (pool) => {
       await bootstrapDerivedSchema(pool);
 
