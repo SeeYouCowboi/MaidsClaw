@@ -10,6 +10,10 @@ import type {
   CognitionSearchRepo,
 } from "../contracts/cognition-search-repo.js";
 import { isCjkQuery, decomposeCjk, buildCjkScoreSql, buildCjkWhereSql } from "./cjk-search-utils.js";
+import {
+  PgSearchLexicalBackend,
+  isPgSearchUnsupportedError,
+} from "./pg-search-backend.js";
 
 const COGNITION_KEY_PREFIX = "cognition_key:";
 const DEFAULT_LIMIT = 100;
@@ -94,10 +98,42 @@ export class PgCognitionSearchRepo implements CognitionSearchRepo {
       return [];
     }
 
-    const normalizedQuery = trimmedQuery.toLowerCase();
-    const pattern = `%${trimmedQuery}%`;
     const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
     const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
+
+    try {
+      const lexicalBackend = new PgSearchLexicalBackend(this.sql);
+      let hits = (await lexicalBackend.searchCognition({
+        query: trimmedQuery,
+        agentId,
+        limit,
+        minScore,
+        kind: options.kind,
+        stance: options.stance,
+        basis: options.basis,
+        activeOnly: options.activeOnly,
+        asOfCommittedTime: options.timeWindow?.asOfCommittedTime,
+      }))
+        .filter((row) => toNumber(row.score) >= minScore)
+        .map((row) => this.mapSearchRow(row));
+
+      if (options.activeOnly) {
+        hits = await this.filterActiveCommitments(hits, agentId);
+      }
+
+      if (options.kind === "commitment") {
+        return this.sortCommitments(hits, agentId);
+      }
+
+      return hits;
+    } catch (error) {
+      if (!isPgSearchUnsupportedError(error)) {
+        throw error;
+      }
+    }
+
+    const normalizedQuery = trimmedQuery.toLowerCase();
+    const pattern = `%${trimmedQuery}%`;
     const isCjk = isCjkQuery(trimmedQuery);
 
     const params: Array<string | number> = [agentId];

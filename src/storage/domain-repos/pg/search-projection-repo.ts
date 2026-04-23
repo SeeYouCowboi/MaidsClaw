@@ -1,6 +1,10 @@
 import type postgres from "postgres";
 import type { NodeRef } from "../../../memory/types.js";
 import { isCjkQuery, decomposeCjk, type CjkDecomposition } from "./cjk-search-utils.js";
+import {
+  PgSearchLexicalBackend,
+  isPgSearchUnsupportedError,
+} from "./pg-search-backend.js";
 import type {
   SearchProjectionRepo,
   SearchProjectionScope,
@@ -667,6 +671,29 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   }>> {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
+
+    try {
+      const backend = new PgSearchLexicalBackend(this.sql);
+      const rows = await backend.searchEpisode({
+        query: trimmed,
+        agentId,
+        limit,
+      });
+      return rows.map((row) => ({
+        id: toNumber(row.id),
+        sourceRef: row.source_ref,
+        agentId: row.agent_id,
+        category: row.category,
+        content: row.content,
+        committedAt: toNumber(row.committed_at),
+        createdAt: toNumber(row.created_at),
+        score: toNumber(row.score),
+      }));
+    } catch (error) {
+      if (!isPgSearchUnsupportedError(error)) {
+        throw error;
+      }
+    }
 
     if (isCjkQuery(trimmed)) {
       return this.searchEpisodeCjk(trimmed, agentId, limit);
