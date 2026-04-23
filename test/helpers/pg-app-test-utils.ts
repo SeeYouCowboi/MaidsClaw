@@ -107,6 +107,20 @@ export function resolvePgAppAdminUrl(
   }
 }
 
+export function resolvePgParadeDbTestUrl(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env.PARADEDB_TEST_URL ?? "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app";
+}
+
+export function computeSkipParadeDbTests(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return false;
+}
+
+export const skipParadeDbTests = computeSkipParadeDbTests();
+
 export function installResolvedPgAppUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): () => void {

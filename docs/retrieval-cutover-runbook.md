@@ -6,6 +6,18 @@ Container: `maidsclaw-app-pg`. Database: `maidsclaw_app`. User: `maidsclaw`.
 
 ---
 
+## 0. Version Capture
+
+Run after the ParadeDB image is up to record exact extension versions in commit evidence:
+
+```bash
+docker exec "maidsclaw-app-pg" psql -U maidsclaw -d maidsclaw_app -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_search','vector','pg_trgm');"
+```
+
+Expected: three rows (`pg_search`, `vector`, `pg_trgm`) each with a non-empty `extversion`.
+
+---
+
 ## 1. Pre-Cutover Backup
 
 ### 1a. Create the backup directory

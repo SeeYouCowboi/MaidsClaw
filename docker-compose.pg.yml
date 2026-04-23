@@ -1,6 +1,6 @@
 services:
   app-pg:
-    image: pgvector/pgvector:pg16
+    image: paradedb/paradedb:0.23.0-pg17
     container_name: maidsclaw-app-pg
     restart: unless-stopped
     ports:

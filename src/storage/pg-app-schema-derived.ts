@@ -12,6 +12,7 @@ export async function bootstrapDerivedSchema(
   }
 
   await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+  await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_search`);
   if (!opts.skipVector) {
     await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
   }
