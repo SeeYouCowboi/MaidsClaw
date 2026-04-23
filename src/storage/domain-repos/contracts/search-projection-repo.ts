@@ -10,6 +10,7 @@ export type UpsertEpisodeDocParams = {
   committedAt: number;
   createdAt?: number;
   entityPointerKeys?: string[];
+  aliasText?: string;
 };
 
 export type UpsertCognitionDocParams = {
@@ -21,6 +22,7 @@ export type UpsertCognitionDocParams = {
   content: string;
   updatedAt?: number;
   createdAt?: number;
+  aliasText?: string;
 };
 
 export interface SearchProjectionRepo {
@@ -30,6 +32,7 @@ export interface SearchProjectionRepo {
     content: string,
     agentId?: string,
     locationEntityId?: number,
+    aliasText?: string,
   ): Promise<number>;
   removeSearchDoc(scope: "private" | "area" | "world", sourceRef: NodeRef): Promise<void>;
   rebuildForScope(scope: SearchProjectionScope, agentId?: string): Promise<void>;

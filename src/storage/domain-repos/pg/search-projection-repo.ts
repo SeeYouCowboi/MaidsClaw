@@ -65,12 +65,14 @@ type UpsertAreaDocParams = {
   content: string;
   locationEntityId: number;
   createdAt?: number;
+  aliasText?: string;
 };
 
 type UpsertWorldDocParams = {
   sourceRef: NodeRef;
   content: string;
   createdAt?: number;
+  aliasText?: string;
 };
 
 function toNumber(value: string | number | undefined): number {
@@ -85,6 +87,15 @@ function getDocTypeFromRef(sourceRef: NodeRef): string {
   return kind || "node";
 }
 
+function buildSearchTexts(
+  content: string,
+  aliasText: string | undefined,
+): { searchText: string; ngramText: string; aliasText: string } {
+  const alias = (aliasText ?? "").trim();
+  const composed = alias.length > 0 ? `${content} | aliases: ${alias}` : content;
+  return { searchText: composed, ngramText: composed, aliasText: alias };
+}
+
 export class PgSearchProjectionRepo implements SearchProjectionRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
@@ -94,6 +105,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     content: string,
     agentId?: string,
     locationEntityId?: number,
+    aliasText?: string,
   ): Promise<number> {
     if (scope === "private") {
       if (!agentId) {
@@ -106,10 +118,10 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       if (locationEntityId === undefined) {
         throw new Error("locationEntityId is required for area search docs");
       }
-      return this.upsertAreaDoc({ sourceRef, content, locationEntityId });
+      return this.upsertAreaDoc({ sourceRef, content, locationEntityId, aliasText });
     }
 
-    return this.upsertWorldDoc({ sourceRef, content });
+    return this.upsertWorldDoc({ sourceRef, content, aliasText });
   }
 
   async removeSearchDoc(scope: "private" | "area" | "world", sourceRef: NodeRef): Promise<void> {
@@ -218,6 +230,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   async upsertAreaDoc(params: UpsertAreaDocParams): Promise<number> {
     const now = params.createdAt ?? Date.now();
     const docType = getDocTypeFromRef(params.sourceRef);
+    const texts = buildSearchTexts(params.content, params.aliasText);
 
     const existing = await this.sql<AreaDocRow[]>`
       SELECT id, doc_type, location_entity_id, content
@@ -228,8 +241,12 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
 
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
-        INSERT INTO search_docs_area (doc_type, source_ref, location_entity_id, content, created_at)
-        VALUES (${docType}, ${params.sourceRef}, ${params.locationEntityId}, ${params.content}, ${now})
+        INSERT INTO search_docs_area
+          (doc_type, source_ref, location_entity_id, content, created_at,
+           content_search_text, content_ngram_text, alias_text)
+        VALUES
+          (${docType}, ${params.sourceRef}, ${params.locationEntityId}, ${params.content}, ${now},
+           ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
         RETURNING id
       `;
       return toNumber(inserted[0]?.id);
@@ -245,7 +262,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
         UPDATE search_docs_area
         SET doc_type = ${docType},
             location_entity_id = ${params.locationEntityId},
-            content = ${params.content}
+            content = ${params.content},
+            content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
+        WHERE id = ${row.id}
+      `;
+    } else {
+      await this.sql`
+        UPDATE search_docs_area
+        SET content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
         WHERE id = ${row.id}
       `;
     }
@@ -256,6 +284,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   async upsertWorldDoc(params: UpsertWorldDocParams): Promise<number> {
     const now = params.createdAt ?? Date.now();
     const docType = getDocTypeFromRef(params.sourceRef);
+    const texts = buildSearchTexts(params.content, params.aliasText);
 
     const existing = await this.sql<WorldDocRow[]>`
       SELECT id, doc_type, content
@@ -266,8 +295,12 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
 
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
-        INSERT INTO search_docs_world (doc_type, source_ref, content, created_at)
-        VALUES (${docType}, ${params.sourceRef}, ${params.content}, ${now})
+        INSERT INTO search_docs_world
+          (doc_type, source_ref, content, created_at,
+           content_search_text, content_ngram_text, alias_text)
+        VALUES
+          (${docType}, ${params.sourceRef}, ${params.content}, ${now},
+           ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
         RETURNING id
       `;
       return toNumber(inserted[0]?.id);
@@ -278,7 +311,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       await this.sql`
         UPDATE search_docs_world
         SET doc_type = ${docType},
-            content = ${params.content}
+            content = ${params.content},
+            content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
+        WHERE id = ${row.id}
+      `;
+    } else {
+      await this.sql`
+        UPDATE search_docs_world
+        SET content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
         WHERE id = ${row.id}
       `;
     }
@@ -289,6 +333,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   async upsertCognitionDoc(params: UpsertCognitionDocParams): Promise<number> {
     const now = Date.now();
     const docType = getDocTypeFromRef(params.sourceRef);
+    const texts = buildSearchTexts(params.content, params.aliasText);
 
     const existing = await this.sql<CognitionDocRow[]>`
       SELECT id, doc_type, kind, basis, stance, content
@@ -301,7 +346,8 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
         INSERT INTO search_docs_cognition
-          (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at)
+          (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at,
+           content_search_text, content_ngram_text, alias_text)
         VALUES
           (
             ${docType},
@@ -312,7 +358,10 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
             ${params.stance ?? null},
             ${params.content},
             ${params.updatedAt ?? now},
-            ${params.createdAt ?? now}
+            ${params.createdAt ?? now},
+            ${texts.searchText},
+            ${texts.ngramText},
+            ${texts.aliasText}
           )
         RETURNING id
       `;
@@ -334,7 +383,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
             basis = ${params.basis ?? null},
             stance = ${params.stance ?? null},
             content = ${params.content},
-            updated_at = ${params.updatedAt ?? now}
+            updated_at = ${params.updatedAt ?? now},
+            content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
+        WHERE id = ${row.id}
+      `;
+    } else {
+      await this.sql`
+        UPDATE search_docs_cognition
+        SET content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
         WHERE id = ${row.id}
       `;
     }
@@ -540,6 +600,9 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
         ? `${params.content} | entities: ${entityPointerKeys.join(" ")}`
         : params.content;
 
+    const aliasSource = params.aliasText ?? entityPointerKeys.join(" ");
+    const texts = buildSearchTexts(contentWithEntities, aliasSource);
+
     const existing = await this.sql<{ id: string | number; content: string; category: string }[]>`
       SELECT id, content, category
       FROM search_docs_episode
@@ -551,10 +614,12 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
         INSERT INTO search_docs_episode
-          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys)
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys,
+           content_search_text, content_ngram_text, alias_text)
         VALUES
           ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category},
-           ${contentWithEntities}, ${params.committedAt}, ${now}, ${entityPointerKeys})
+           ${contentWithEntities}, ${params.committedAt}, ${now}, ${entityPointerKeys},
+           ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
         RETURNING id
       `;
       return toNumber(inserted[0]?.id);
@@ -567,7 +632,18 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
         SET content = ${contentWithEntities},
             category = ${params.category},
             committed_at = ${params.committedAt},
-            entity_pointer_keys = ${entityPointerKeys}
+            entity_pointer_keys = ${entityPointerKeys},
+            content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
+        WHERE id = ${row.id}
+      `;
+    } else {
+      await this.sql`
+        UPDATE search_docs_episode
+        SET content_search_text = ${texts.searchText},
+            content_ngram_text = ${texts.ngramText},
+            alias_text = ${texts.aliasText}
         WHERE id = ${row.id}
       `;
     }

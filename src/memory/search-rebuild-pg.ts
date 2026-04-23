@@ -76,11 +76,18 @@ export class PgSearchRebuilder {
 
     const now = Date.now();
     const rows = await this.buildAreaSearchAuthorityRows();
+    const aliasMap = await this.loadSharedEntityAliasMap();
 
     for (const row of rows) {
+      const aliasText = aliasMap.get(row.canonicalEntityId) ?? "";
+      const composed = composeSearchText(row.content, aliasText);
       await this.sql`
-        INSERT INTO search_docs_area (doc_type, source_ref, location_entity_id, content, created_at)
-        VALUES ('event', ${row.sourceRef}, ${row.locationEntityId}, ${row.content}, ${now})
+        INSERT INTO search_docs_area
+          (doc_type, source_ref, location_entity_id, content, created_at,
+           content_search_text, content_ngram_text, alias_text)
+        VALUES
+          ('event', ${row.sourceRef}, ${row.locationEntityId}, ${row.content}, ${now},
+           ${composed}, ${composed}, ${aliasText})
       `;
     }
   }
@@ -90,11 +97,21 @@ export class PgSearchRebuilder {
 
     const now = Date.now();
     const rows = await this.buildWorldSearchAuthorityRows();
+    const aliasMap = await this.loadSharedEntityAliasMap();
 
     for (const row of rows) {
+      const aliasText =
+        row.canonicalEntityId !== null
+          ? (aliasMap.get(row.canonicalEntityId) ?? "")
+          : "";
+      const composed = composeSearchText(row.content, aliasText);
       await this.sql`
-        INSERT INTO search_docs_world (doc_type, source_ref, content, created_at)
-        VALUES (${row.docType}, ${row.sourceRef}, ${row.content}, ${now})
+        INSERT INTO search_docs_world
+          (doc_type, source_ref, content, created_at,
+           content_search_text, content_ngram_text, alias_text)
+        VALUES
+          (${row.docType}, ${row.sourceRef}, ${row.content}, ${now},
+           ${composed}, ${composed}, ${aliasText})
       `;
     }
   }
@@ -133,13 +150,16 @@ export class PgSearchRebuilder {
     const rows = await this.buildCognitionSearchAuthorityRows(agentId);
 
     for (const row of rows) {
+      const composed = composeSearchText(row.content, "");
       await this.sql`
         INSERT INTO search_docs_cognition
-          (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at)
+          (doc_type, source_ref, agent_id, kind, basis, stance, content, updated_at, created_at,
+           content_search_text, content_ngram_text, alias_text)
         VALUES
           (${row.docType}, ${row.sourceRef}, ${row.agentId}, ${row.kind},
            ${row.basis ?? null}, ${row.stance ?? null}, ${row.content},
-           ${row.updatedAt}, ${now})
+           ${row.updatedAt}, ${now},
+           ${composed}, ${composed}, ${""})
       `;
     }
   }
@@ -166,12 +186,16 @@ export class PgSearchRebuilder {
         row.entityPointerKeys.length > 0
           ? `${row.content} | entities: ${row.entityPointerKeys.join(" ")}`
           : row.content;
+      const aliasText = row.entityPointerKeys.join(" ");
+      const composed = composeSearchText(contentWithEntities, aliasText);
       await this.sql`
         INSERT INTO search_docs_episode
-          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys)
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys,
+           content_search_text, content_ngram_text, alias_text)
         VALUES
           ('episode', ${row.sourceRef}, ${row.agentId}, ${row.category},
-           ${contentWithEntities}, ${row.committedAt}, ${now}, ${row.entityPointerKeys})
+           ${contentWithEntities}, ${row.committedAt}, ${now}, ${row.entityPointerKeys},
+           ${composed}, ${composed}, ${aliasText})
       `;
     }
   }
@@ -376,6 +400,7 @@ export class PgSearchRebuilder {
       docType: string;
       sourceRef: string;
       locationEntityId: number;
+      canonicalEntityId: number;
       content: string;
     }>
   > {
@@ -396,6 +421,7 @@ export class PgSearchRebuilder {
       docType: "event",
       sourceRef: `event:${Number(event.id)}`,
       locationEntityId: Number(event.location_entity_id),
+      canonicalEntityId: Number(event.location_entity_id),
       content: event.summary,
     }));
   }
@@ -404,10 +430,16 @@ export class PgSearchRebuilder {
     Array<{
       docType: string;
       sourceRef: string;
+      canonicalEntityId: number | null;
       content: string;
     }>
   > {
-    const result: Array<{ docType: string; sourceRef: string; content: string }> = [];
+    const result: Array<{
+      docType: string;
+      sourceRef: string;
+      canonicalEntityId: number | null;
+      content: string;
+    }> = [];
 
     const events = await this.sql<
       {
@@ -425,6 +457,7 @@ export class PgSearchRebuilder {
       result.push({
         docType: "event",
         sourceRef: `event:${Number(event.id)}`,
+        canonicalEntityId: null,
         content: event.summary,
       });
     }
@@ -446,6 +479,7 @@ export class PgSearchRebuilder {
       result.push({
         docType: "entity",
         sourceRef: `entity:${Number(entity.id)}`,
+        canonicalEntityId: Number(entity.id),
         content: [entity.display_name, entity.summary].filter(Boolean).join(" "),
       });
     }
@@ -467,11 +501,33 @@ export class PgSearchRebuilder {
       result.push({
         docType: "fact",
         sourceRef: `fact:${Number(fact.id)}`,
+        canonicalEntityId: null,
         content: `${Number(fact.source_entity_id)} ${fact.predicate} ${Number(fact.target_entity_id)}`,
       });
     }
 
     return result;
+  }
+
+  private async loadSharedEntityAliasMap(): Promise<Map<number, string>> {
+    const rows = await this.sql<{ canonical_id: string | number; alias: string }[]>`
+      SELECT canonical_id, alias
+      FROM entity_aliases
+      WHERE owner_agent_id IS NULL
+      ORDER BY canonical_id ASC, id ASC
+    `;
+    const map = new Map<number, string[]>();
+    for (const r of rows) {
+      const id = Number(r.canonical_id);
+      const arr = map.get(id) ?? [];
+      arr.push(r.alias);
+      map.set(id, arr);
+    }
+    const out = new Map<number, string>();
+    for (const [k, v] of map) {
+      out.set(k, v.join(" "));
+    }
+    return out;
   }
 
   private async buildCognitionSearchAuthorityRows(
@@ -518,6 +574,11 @@ export class PgSearchRebuilder {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+function composeSearchText(content: string, aliasText: string): string {
+  const alias = aliasText.trim();
+  return alias.length > 0 ? `${content} | aliases: ${alias}` : content;
+}
 
 function safeParseJsonb(value: Record<string, unknown> | string | null): Record<string, unknown> {
   if (!value) return {};

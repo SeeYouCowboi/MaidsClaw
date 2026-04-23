@@ -12,7 +12,13 @@ export async function bootstrapDerivedSchema(
   }
 
   await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-  await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_search`);
+  // pg_search may not be installed in non-ParadeDB environments (e.g. local PG18 dev).
+  // Bootstrap should not hard-fail — BM25 index creation later is also try-catch wrapped.
+  try {
+    await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_search`);
+  } catch {
+    // pg_search binary not installed — BM25 indexes will be skipped.
+  }
   if (!opts.skipVector) {
     await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
   }
@@ -196,6 +202,21 @@ export async function bootstrapDerivedSchema(
       ON search_docs_area USING GIN (content gin_trgm_ops)
   `);
 
+  await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS alias_text TEXT`);
+
+  try {
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS idx_search_docs_area_bm25
+        ON search_docs_area
+        USING bm25 (id, content_search_text, content_ngram_text, alias_text)
+        WITH (key_field='id')
+    `);
+  } catch {
+    // pg_search not available — skip BM25 index creation.
+  }
+
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_world (
       id         BIGSERIAL PRIMARY KEY,
@@ -210,6 +231,21 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_world_content_trgm
       ON search_docs_world USING GIN (content gin_trgm_ops)
   `);
+
+  await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS alias_text TEXT`);
+
+  try {
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS idx_search_docs_world_bm25
+        ON search_docs_world
+        USING bm25 (id, content_search_text, content_ngram_text, alias_text)
+        WITH (key_field='id')
+    `);
+  } catch {
+    // pg_search not available — skip BM25 index creation.
+  }
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_cognition (
@@ -243,6 +279,21 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_content_trgm
       ON search_docs_cognition USING GIN (content gin_trgm_ops)
   `);
+
+  await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS alias_text TEXT`);
+
+  try {
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_bm25
+        ON search_docs_cognition
+        USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, kind)
+        WITH (key_field='id')
+    `);
+  } catch {
+    // pg_search not available — skip BM25 index creation.
+  }
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_episode (
@@ -283,6 +334,21 @@ export async function bootstrapDerivedSchema(
     CREATE INDEX IF NOT EXISTS idx_search_docs_episode_entity_pointer_keys
       ON search_docs_episode USING GIN (entity_pointer_keys)
   `);
+
+  await sql.unsafe(`ALTER TABLE search_docs_episode ADD COLUMN IF NOT EXISTS content_search_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_episode ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
+  await sql.unsafe(`ALTER TABLE search_docs_episode ADD COLUMN IF NOT EXISTS alias_text TEXT`);
+
+  try {
+    await sql.unsafe(`
+      CREATE INDEX IF NOT EXISTS idx_search_docs_episode_bm25
+        ON search_docs_episode
+        USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, category)
+        WITH (key_field='id')
+    `);
+  } catch {
+    // pg_search not available — skip BM25 index creation.
+  }
 
   if (!opts.skipVector) {
     await sql.unsafe(`
