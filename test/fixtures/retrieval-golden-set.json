@@ -1,0 +1,89 @@
+{
+  "version": "1",
+  "description": "Retrieval golden set for pre/post cutover regression check. Queries are run against the live retrieval stack. All expected_top_ref values must appear within recall_k results.",
+  "metrics": ["recall@5", "recall@10", "MRR", "cross_agent_leakage_count", "exact_alias_hit_rate"],
+  "cases": [
+    {
+      "id": "zh-person-alias",
+      "description": "Chinese query using a person alias (怀表 = pocket watch); expects the first episode where Alice mentions the watch in the tea room",
+      "query": "她第一次提到怀表时在哪？",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-watch-tea-room",
+      "recall_k": 10,
+      "tags": ["zh", "alias", "person", "cjk"]
+    },
+    {
+      "id": "zh-location-window",
+      "description": "Chinese query referencing a location detail (茶室靠窗 = tea room window seat); expects the follow-up episode",
+      "query": "茶室靠窗那件事后来怎么样？",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:tea-room-window-followup",
+      "recall_k": 10,
+      "tags": ["zh", "location", "cjk"]
+    },
+    {
+      "id": "zh-object-pronoun",
+      "description": "Chinese pronoun query for a silver object; expects the episode confirming the silver watch is still in place",
+      "query": "那个银色的东西还在原处吗？",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:silver-watch-still-there",
+      "recall_k": 10,
+      "tags": ["zh", "pronoun", "object", "cjk"]
+    },
+    {
+      "id": "en-proper-name",
+      "description": "English query using a proper name and object; expects the episode where Alice talks about the silver watch",
+      "query": "What did Alice say about the silver watch?",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-watch-chat",
+      "recall_k": 5,
+      "tags": ["en", "proper_name", "object"]
+    },
+    {
+      "id": "mixed-cn-en",
+      "description": "Mixed Chinese/English query; expects the same tea room episode as zh-person-alias",
+      "query": "Alice 说的那块表",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-watch-tea-room",
+      "recall_k": 10,
+      "tags": ["mixed", "zh", "en", "cjk"]
+    },
+    {
+      "id": "pointer-key-exact",
+      "description": "Exact pointer key lookup; must return the episode without relying on lexical fuzzy match",
+      "query": "watch-silver-alice",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-watch-tea-room",
+      "recall_k": 5,
+      "tags": ["pointer_key", "exact"]
+    },
+    {
+      "id": "alias-exact",
+      "description": "Exact alias lookup for 怀表; must hit the canonical entity and surface the associated episode",
+      "query": "怀表",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-watch-tea-room",
+      "recall_k": 5,
+      "tags": ["alias", "exact", "cjk"]
+    },
+    {
+      "id": "cross-agent-leakage",
+      "description": "Agent-B querying for 怀表 must return zero results that originated from agent-A's private memory",
+      "query": "怀表",
+      "scope": "episode",
+      "agent_scope": "agent-b",
+      "expected_top_ref": null,
+      "expected_result_count": 0,
+      "recall_k": 10,
+      "tags": ["cross_agent", "leakage", "security", "cjk"],
+      "notes": "Pass condition: zero results from agent-a scope. Agent-b may have its own episodes about 怀表, but must not see agent-a's episodes."
+    }
+  ]
+}
