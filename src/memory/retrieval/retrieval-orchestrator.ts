@@ -10,6 +10,8 @@ import type { EpisodeRepo } from "../../storage/domain-repos/contracts/episode-r
 import type { QueryPlan } from "../query-plan-types.js";
 import { tokenizeQuery } from "../query-tokenizer.js";
 import { allocateBudget } from "./budget-allocator.js";
+import { mergeSignalCandidates } from "./candidate-merge.js";
+import type { SignalCandidate } from "./search-backend-contract.js";
 import type {
   SceneAreaFact,
   SceneSearchService,
@@ -41,6 +43,29 @@ type EpisodeEmbeddingSearchFn = (
   limit: number,
 ) => Promise<EpisodeSearchHit[]>;
 
+type ExactEpisodeSignal = "alias_exact" | "pointer_exact";
+
+type ExactEpisodeHit = {
+  sourceRef: string;
+  signal: ExactEpisodeSignal;
+  scoreHint: number;
+};
+
+type ExactRecallProviderLike = {
+  recallExact(
+    surfaces: string[],
+    viewer: { agentId: string },
+    limit: number,
+  ): Promise<Array<{
+    sourceRef: string;
+    surface: string;
+    scoreHint: number;
+    reason: string;
+  }>>;
+};
+
+export type RetrievalOrchestratorExactRecallProvider = ExactRecallProviderLike;
+
 type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
@@ -49,6 +74,7 @@ type RetrievalOrchestratorDeps = {
   episodeRepository?: EpisodeRepo | null;
   episodeSearchFn?: EpisodeSearchFn | null;
   episodeEmbeddingFn?: EpisodeEmbeddingSearchFn | null;
+  exactRecallProvider?: ExactRecallProviderLike | null;
 };
 
 type TypedRetrievalSegment = {
@@ -166,6 +192,7 @@ export class RetrievalOrchestrator {
   private readonly episodeRepository: EpisodeRepo | null;
   private readonly episodeSearchFn: EpisodeSearchFn | null;
   private readonly episodeEmbeddingFn: EpisodeEmbeddingSearchFn | null;
+  private readonly exactRecallProvider: ExactRecallProviderLike | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
@@ -175,6 +202,7 @@ export class RetrievalOrchestrator {
     this.episodeRepository = deps.episodeRepository ?? null;
     this.episodeSearchFn = deps.episodeSearchFn ?? null;
     this.episodeEmbeddingFn = deps.episodeEmbeddingFn ?? null;
+    this.exactRecallProvider = deps.exactRecallProvider ?? null;
   }
 
   async search(
@@ -688,14 +716,34 @@ export class RetrievalOrchestrator {
       effectiveEpisodeBudget + 4,
     );
 
-    // Run lexical FTS and embedding recall in parallel when both are available.
+    // Run exact recall first, then lexical FTS + embedding recall in parallel.
     // Each signal is independently recoverable — if one throws we still have
-    // the other. RRF-merge the two rankings into a single hint list so queries
+    // the others. Weighted RRF-merge all rankings into a single hint list so queries
     // that only match semantically (e.g. "那个银色的东西" → 银怀表) can
     // surface episodes even when the CJK ILIKE pre-filter misses them.
+    let exactHits: ExactEpisodeHit[] = [];
     let ftsHits: EpisodeSearchHit[] = [];
     let embeddingHits: EpisodeSearchHit[] = [];
     if (trimmedQuery.length > 0) {
+      if (this.exactRecallProvider) {
+        try {
+          const exactCandidates = await this.exactRecallProvider.recallExact(
+            [trimmedQuery],
+            { agentId: viewerContext.viewer_agent_id },
+            fetchLimit,
+          );
+          exactHits = exactCandidates
+            .filter((candidate) => candidate.surface === "episode")
+            .map((candidate) => ({
+              sourceRef: candidate.sourceRef,
+              signal: candidate.reason === "alias_exact" ? "alias_exact" : "pointer_exact",
+              scoreHint: candidate.scoreHint,
+            }));
+        } catch (err) {
+          console.warn("[retrieval] exact recall failed (non-fatal):", err);
+        }
+      }
+
       const [ftsResult, embResult] = await Promise.allSettled([
         this.episodeSearchFn
           ? this.episodeSearchFn(
@@ -716,8 +764,14 @@ export class RetrievalOrchestrator {
       if (embResult.status === "fulfilled") embeddingHits = embResult.value;
     }
 
-    if (ftsHits.length > 0 || embeddingHits.length > 0) {
-      return this.rrfMergeEpisodeHits(ftsHits, embeddingHits, effectiveEpisodeBudget);
+    if (exactHits.length > 0 || ftsHits.length > 0 || embeddingHits.length > 0) {
+      return this.rrfMergeEpisodeHits(
+        ftsHits,
+        embeddingHits,
+        effectiveEpisodeBudget,
+        exactHits,
+        viewerContext.viewer_agent_id,
+      );
     }
 
     // Fallback: direct scan via episodeRepository (no lexical or embedding match)
@@ -838,43 +892,105 @@ export class RetrievalOrchestrator {
    * naturally boosted to the top. Matches the `NarrativeSearchService.rrfMerge`
    * pattern (RRF_K = 60).
    */
-  private rrfMergeEpisodeHits(
+  private async rrfMergeEpisodeHits(
     ftsHits: EpisodeSearchHit[],
     embeddingHits: EpisodeSearchHit[],
     effectiveEpisodeBudget: number,
-  ): TypedNarrativeSegment[] {
-    const RRF_K = 60;
-    const merged = new Map<
+    exactHits: ExactEpisodeHit[] = [],
+    viewerAgentId?: string,
+  ): Promise<TypedNarrativeSegment[]> {
+    const candidates: SignalCandidate[] = [];
+    const episodeMeta = new Map<
       string,
-      { hit: EpisodeSearchHit; score: number }
+      { content?: string; category?: string }
     >();
 
     for (const [rank, hit] of ftsHits.entries()) {
-      const key = hit.sourceRef;
-      const entry = merged.get(key) ?? { hit, score: 0 };
-      entry.score += 1 / (RRF_K + rank + 1);
-      merged.set(key, entry);
+      candidates.push({
+        sourceRef: hit.sourceRef,
+        signal: "bm25_en",
+        rank,
+        content: hit.content,
+      });
+      episodeMeta.set(hit.sourceRef, {
+        content: hit.content,
+        category: hit.category,
+      });
     }
     for (const [rank, hit] of embeddingHits.entries()) {
-      const key = hit.sourceRef;
-      const existing = merged.get(key);
-      if (existing) {
-        existing.score += 1 / (RRF_K + rank + 1);
-      } else {
-        merged.set(key, { hit, score: 1 / (RRF_K + rank + 1) });
+      candidates.push({
+        sourceRef: hit.sourceRef,
+        signal: "embedding",
+        rank,
+        content: hit.content,
+      });
+      if (!episodeMeta.has(hit.sourceRef)) {
+        episodeMeta.set(hit.sourceRef, {
+          content: hit.content,
+          category: hit.category,
+        });
+      }
+    }
+    for (const hit of exactHits) {
+      candidates.push({
+        sourceRef: hit.sourceRef,
+        signal: hit.signal,
+        rank: 0,
+        scoreHint: hit.scoreHint,
+      });
+    }
+
+    const merged = mergeSignalCandidates(candidates);
+    if (merged.length === 0) {
+      return [];
+    }
+
+    if (this.episodeRepository && viewerAgentId) {
+      const missingIds = new Set<number>();
+      for (const candidate of merged) {
+        if (episodeMeta.has(candidate.sourceRef)) {
+          continue;
+        }
+        const [kind, idRaw] = candidate.sourceRef.split(":");
+        if (kind !== "episode") {
+          continue;
+        }
+        const id = Number(idRaw);
+        if (Number.isInteger(id) && id > 0) {
+          missingIds.add(id);
+        }
+      }
+      if (missingIds.size > 0) {
+        const rows = await this.episodeRepository.readByIds(
+          viewerAgentId,
+          Array.from(missingIds),
+        );
+        for (const row of rows) {
+          episodeMeta.set(`episode:${row.id}`, {
+            content: row.summary,
+            category: row.category,
+          });
+        }
       }
     }
 
-    return Array.from(merged.values())
-      .sort((a, b) => b.score - a.score)
-      .slice(0, effectiveEpisodeBudget)
-      .map(({ hit, score }) => ({
-        source_ref: hit.sourceRef,
-        content: hit.content,
-        score,
-        doc_type: `episode_${hit.category}`,
-        scope: "private" as const,
-      }));
+    const segments: TypedNarrativeSegment[] = [];
+    for (const candidate of merged) {
+      const meta = episodeMeta.get(candidate.sourceRef);
+      const content = meta?.content ?? candidate.content;
+      if (!content || content.trim().length === 0) {
+        continue;
+      }
+      segments.push({
+        source_ref: candidate.sourceRef,
+        content,
+        score: candidate.score,
+        doc_type: `episode_${meta?.category ?? "event"}`,
+        scope: "private",
+      });
+    }
+
+    return segments.slice(0, effectiveEpisodeBudget);
   }
 
   /**

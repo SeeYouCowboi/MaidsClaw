@@ -120,6 +120,7 @@ import { PgCognitionSearchRepo } from "../storage/domain-repos/pg/cognition-sear
 import { PgCoreMemoryBlockRepo } from "../storage/domain-repos/pg/core-memory-block-repo.js";
 import { PgEmbeddingRepo } from "../storage/domain-repos/pg/embedding-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
+import { PgExactRecallProvider } from "../storage/domain-repos/pg/exact-recall-provider.js";
 import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
 import { PgGraphReadQueryRepo } from "../storage/domain-repos/pg/graph-read-query-repo.js";
 import { PgInteractionRepo } from "../storage/domain-repos/pg/interaction-repo.js";
@@ -1304,6 +1305,9 @@ export function bootstrapRuntime(
     () => new PgRelationWriteRepo(resolvePgPool()),
   );
   const pgAliasRepo = createLazyPgRepo(() => new PgAliasRepo(resolvePgPool()));
+  const exactRecallProvider = createLazyPgRepo(
+    () => new PgExactRecallProvider(resolvePgPool()),
+  );
   const pgGraphReadQueryRepo = createLazyPgRepo(
     () => new PgGraphReadQueryRepo(resolvePgPool()),
   );
@@ -1455,6 +1459,7 @@ export function bootstrapRuntime(
     sceneSearchService,
     currentProjectionReader,
     episodeRepository: episodeRepo,
+    exactRecallProvider,
     episodeSearchFn: async (query, agentId, limit) =>
       searchProjectionRepo.searchEpisode(query, agentId, limit),
     episodeEmbeddingFn:
@@ -1555,7 +1560,7 @@ export function bootstrapRuntime(
       : undefined;
   // Constructed lazily in initializePgBackendForRuntime once the pg pool
   // actually exists — pgFactory.getPool() throws before .initialize().
-  let searchRebuilder: PgSearchRebuilder | undefined = undefined;
+  let searchRebuilder: PgSearchRebuilder | undefined;
   // queryRouter + queryPlanBuilder are created above, shared with RetrievalService.
   const graphNavigator = new GraphNavigator(
     pgGraphReadQueryRepo,
