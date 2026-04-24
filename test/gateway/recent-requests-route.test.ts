@@ -52,7 +52,7 @@ describe("GET /v1/agents/{agent_id}/recent-requests", () => {
     const server = new GatewayServer({
       port: 0,
       host: "localhost",
-      context: context as any,
+      context: context as unknown as ConstructorParameters<typeof GatewayServer>[0]["context"],
     });
     server.start();
     servers.push(server);
@@ -164,8 +164,8 @@ describe("GET /v1/agents/{agent_id}/recent-requests", () => {
     expect(body.items).toHaveLength(5);
   });
 
-  it("clamps limit to 50 maximum", async () => {
-    const traces: TraceSummary[] = Array.from({ length: 60 }, (_, i) =>
+  it("clamps limit to 500 maximum", async () => {
+    const traces: TraceSummary[] = Array.from({ length: 600 }, (_, i) =>
       makeSummary({
         request_id: `req-${i}`,
         agent_id: "rp:agent-a",
@@ -177,15 +177,15 @@ describe("GET /v1/agents/{agent_id}/recent-requests", () => {
     });
 
     const res = await fetch(
-      `${baseUrl}/v1/agents/rp:agent-a/recent-requests?limit=100`,
+      `${baseUrl}/v1/agents/rp:agent-a/recent-requests?limit=1000`,
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: RecentRequestItem[] };
-    expect(body.items).toHaveLength(50);
+    expect(body.items).toHaveLength(500);
   });
 
-  it("defaults to limit=20 when no param given", async () => {
-    const traces: TraceSummary[] = Array.from({ length: 30 }, (_, i) =>
+  it("defaults to limit=500 when no param given", async () => {
+    const traces: TraceSummary[] = Array.from({ length: 600 }, (_, i) =>
       makeSummary({
         request_id: `req-${i}`,
         agent_id: "rp:agent-a",
@@ -199,7 +199,7 @@ describe("GET /v1/agents/{agent_id}/recent-requests", () => {
     const res = await fetch(`${baseUrl}/v1/agents/rp:agent-a/recent-requests`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: RecentRequestItem[] };
-    expect(body.items).toHaveLength(20);
+    expect(body.items).toHaveLength(500);
   });
 
   it("returns 200 with empty items when traceStore is unavailable", async () => {

@@ -63,8 +63,11 @@ async function handleServerStart(
     );
   }
 
-  // Parse --debug-capture (stub for now — trace capture is T15)
+  // Trace capture defaults to ON so Retrieval Trace panels have data by default.
+  // Keep --debug-capture as a harmless explicit opt-in alias for older callers.
   const debugCapture = args.flags["debug-capture"] === true;
+  const traceCaptureEnabled =
+    debugCapture || process.env.MAIDSCLAW_TRACE_CAPTURE !== "off";
 
   const { createAppHost } = await import("../../app/host/index.js");
 
@@ -75,7 +78,7 @@ async function handleServerStart(
       cwd: ctx.cwd,
       ...(port !== undefined ? { port } : {}),
       ...(host !== undefined ? { host } : {}),
-      traceCaptureEnabled: debugCapture,
+      traceCaptureEnabled,
     });
   } catch (err) {
     throw new CliError(

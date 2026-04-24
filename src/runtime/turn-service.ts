@@ -33,6 +33,7 @@ import type { CoreMemoryService } from "../memory/core-memory.js";
 import { materializePublications } from "../memory/materialization.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import { normalizeEntityMentions } from "../memory/entity-mentions.js";
+import { segmentCjk } from "../memory/cjk-segmenter.js";
 import type {
 	CommitSettlementResult,
 	ProjectionManager,
@@ -1509,7 +1510,6 @@ export class TurnService {
 			repos,
 			effectiveRequest,
 			settlementId,
-			settlementPayload,
 			resolvedViewerSnapshot,
 			ownerAgentId,
 			publications,
@@ -2323,7 +2323,8 @@ function deriveFallbackEntityMentions(userText: string): string[] {
 		addMention(match[0]);
 	}
 
-	for (const token of tokenizeQuery(userText)) {
+	const cjkTokens = segmentCjk(userText);
+	for (const token of cjkTokens ?? extractLegacyCjkRuns(userText)) {
 		if (token.length < 2 || token.length > 8) {
 			continue;
 		}
@@ -2340,6 +2341,25 @@ function deriveFallbackEntityMentions(userText: string): string[] {
 	}
 
 	return mentions;
+}
+
+function extractLegacyCjkRuns(text: string): string[] {
+	const runs: string[] = [];
+	let current = "";
+	for (const ch of text) {
+		if (/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(ch)) {
+			current += ch;
+			continue;
+		}
+		if (current.length >= 2) {
+			runs.push(current);
+		}
+		current = "";
+	}
+	if (current.length >= 2) {
+		runs.push(current);
+	}
+	return runs;
 }
 
 /**
