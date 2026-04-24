@@ -1,8 +1,11 @@
 # Retrieval Cutover Runbook
 
-Migration: pg_trgm ILIKE baseline to ParadeDB `pg_search` BM25 + alias exact + embedding hybrid.
+Migration: legacy `pg_trgm` / `ILIKE` search-doc backend to ParadeDB `pg_search` BM25 + alias exact + embedding hybrid.
 
 Container: `maidsclaw-app-pg`. Database: `maidsclaw_app`. User: `maidsclaw`.
+Pinned image today: `paradedb/paradedb:0.23.0-pg17` from `docker-compose.pg.yml`.
+
+Scope note: `search_docs_private` has been retired; private retrieval now routes through the typed cognition / episode surfaces rather than a mixed private search-doc table.
 
 ---
 
@@ -14,7 +17,7 @@ Run after the ParadeDB image is up to record exact extension versions in commit 
 docker exec "maidsclaw-app-pg" psql -U maidsclaw -d maidsclaw_app -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_search','vector','pg_trgm');"
 ```
 
-Expected: three rows (`pg_search`, `vector`, `pg_trgm`) each with a non-empty `extversion`.
+Expected: `pg_search` and `vector` must be present with non-empty `extversion`. `pg_trgm` may still be present because non-search-doc helper logic can continue to use trigram similarity after the search-doc cutover.
 
 ---
 

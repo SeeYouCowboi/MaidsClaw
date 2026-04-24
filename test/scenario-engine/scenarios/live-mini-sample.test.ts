@@ -27,7 +27,7 @@ describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Live Pa
       phase: "full",
     });
 
-    // Generate embeddings and enable RRF hybrid search (pg_trgm + embedding)
+    // Generate embeddings and enable RRF hybrid search (lexical BM25 + embedding)
     const embedResult = await generateEmbeddings(handle.infra);
     console.log(`[Embeddings] generated=${embedResult.embeddingsGenerated} errors=${embedResult.errors.length} elapsed=${embedResult.elapsedMs.toFixed(0)}ms`);
     configureEmbeddingSearch(handle.infra);

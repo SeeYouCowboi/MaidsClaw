@@ -45,7 +45,6 @@ const SEQUENCE_RESET_CANDIDATE_TABLES = [
   "node_embeddings",
   "semantic_edges",
   "node_scores",
-  "search_docs_private",
   "search_docs_area",
   "search_docs_world",
   "search_docs_cognition",

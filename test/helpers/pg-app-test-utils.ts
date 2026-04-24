@@ -7,7 +7,9 @@ import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.
 import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
 
 const DEFAULT_HOST_PORT = "127.0.0.1:55433";
-const DEFAULT_TEST_DB = "maidsclaw_app_test";
+const DEFAULT_TEST_DB = "maidsclaw_app";
+const LEGACY_JOBS_TEST_URL =
+  "postgres://maidsclaw:maidsclaw@127.0.0.1:55432/maidsclaw_jobs_test";
 const INT8_OID = 20;
 const MAX_PG_IDENTIFIER_LENGTH = 63;
 const BENIGN_TEST_NOTICE_CODES = new Set([
@@ -43,7 +45,10 @@ function deriveInvocationSchemaName(baseSchemaName: string): string {
 export function computeSkipPgTests(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return !env.PG_TEST_URL && !env.PG_APP_TEST_URL;
+  return !env.PG_TEST_URL &&
+    !env.PG_APP_TEST_URL &&
+    !env.PG_APP_URL &&
+    !env.PARADEDB_TEST_URL;
 }
 
 export const skipPgTests = computeSkipPgTests();
@@ -63,16 +68,31 @@ export function deriveAppTestUrlFromPgTestUrl(
   }
 }
 
+function isLegacyJobsTestUrl(url: string | undefined): boolean {
+  return url?.trim() === LEGACY_JOBS_TEST_URL;
+}
+
 export function resolvePgAppTestUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const url = env.PG_APP_TEST_URL;
-  if (url) {
-    return url;
+  const explicitTestUrl = env.PG_APP_TEST_URL?.trim();
+  if (explicitTestUrl) {
+    return explicitTestUrl;
   }
-  const pgTestUrl = env.PG_TEST_URL;
-  if (pgTestUrl) {
-    const derived = deriveAppTestUrlFromPgTestUrl(pgTestUrl);
+
+  const paradeDbUrl = env.PARADEDB_TEST_URL?.trim();
+  if (paradeDbUrl) {
+    return paradeDbUrl;
+  }
+
+  const appUrl = env.PG_APP_URL?.trim();
+  if (appUrl) {
+    return appUrl;
+  }
+
+  const pgTestUrl = env.PG_TEST_URL?.trim();
+  if (pgTestUrl && !isLegacyJobsTestUrl(pgTestUrl)) {
+    const derived = deriveAppTestUrlFromPgTestUrl(pgTestUrl, DEFAULT_TEST_DB);
     if (derived) {
       return derived;
     }
@@ -106,20 +126,6 @@ export function resolvePgAppAdminUrl(
     return testUrl.replace(/\/[^/]+$/, "/postgres");
   }
 }
-
-export function resolvePgParadeDbTestUrl(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return env.PARADEDB_TEST_URL ?? "postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app";
-}
-
-export function computeSkipParadeDbTests(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return false;
-}
-
-export const skipParadeDbTests = computeSkipParadeDbTests();
 
 export function installResolvedPgAppUrl(
   env: NodeJS.ProcessEnv = process.env,

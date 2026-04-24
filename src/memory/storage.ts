@@ -106,7 +106,7 @@ type UpsertExplicitAssertionInput = {
 type UpsertExplicitEvaluationInput = UpsertEvaluationParams;
 type UpsertExplicitCommitmentInput = UpsertCommitmentParams;
 
-type SearchScope = "private" | "area" | "world";
+type SearchScope = "area" | "world";
 type SameEpisodeEvent = { id: number; session_id: string; topic_id: number | null; timestamp: number };
 
 export type GraphStorageDomainRepoRegistry = {

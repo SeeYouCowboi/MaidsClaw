@@ -111,7 +111,7 @@ describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
     const baseNow = 1_700_010_100_000;
     const firstSearch = {
       ...buildSearchRebuildEnqueueInput({
-        scope: "private",
+        scope: "cognition",
         targetAgentId: "agent-cap-a",
         triggerSource: "manual_cli",
         triggerReason: "full_rebuild",
@@ -121,7 +121,7 @@ describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
     };
     const secondSearch = {
       ...buildSearchRebuildEnqueueInput({
-        scope: "private",
+        scope: "cognition",
         targetAgentId: "agent-cap-b",
         triggerSource: "manual_cli",
         triggerReason: "fts_repair",
@@ -189,7 +189,7 @@ describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
     const baseNow = 1_700_010_200_000;
     const runningSearch = {
       ...buildSearchRebuildEnqueueInput({
-        scope: "private",
+        scope: "cognition",
         targetAgentId: "agent-running",
         triggerSource: "scheduled_maintenance",
         triggerReason: "full_rebuild",
@@ -208,7 +208,7 @@ describe.skipIf(skipPgTests)("pg claimNext lease/concurrency", () => {
 
     const blockedHeadSearch = {
       ...buildSearchRebuildEnqueueInput({
-        scope: "private",
+        scope: "cognition",
         targetAgentId: "agent-blocked-head",
         triggerSource: "manual_cli",
         triggerReason: "fts_repair",

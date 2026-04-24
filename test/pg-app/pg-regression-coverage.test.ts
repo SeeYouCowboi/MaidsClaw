@@ -42,12 +42,12 @@ describe.skipIf(skipPgTests)("combined schema bootstrap idempotency", () => {
           AND table_name IN (
             'settlement_processing_ledger',
             'sessions',
-            'search_docs_private'
+            'search_docs_episode'
           )
         ORDER BY table_name
       `;
       expect(tables.map((r) => r.table_name)).toEqual([
-        "search_docs_private",
+        "search_docs_episode",
         "sessions",
         "settlement_processing_ledger",
       ]);

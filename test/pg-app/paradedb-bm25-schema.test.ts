@@ -6,8 +6,8 @@ import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
-  resolvePgParadeDbTestUrl,
-  skipParadeDbTests,
+  resolvePgAppTestUrl,
+  skipPgTests,
 } from "../helpers/pg-app-test-utils.js";
 
 const TABLES = [
@@ -24,12 +24,12 @@ const EXPECTED_BM25_INDEXES = [
   "idx_search_docs_world_bm25",
 ] as const;
 
-describe.skipIf(skipParadeDbTests)("paradedb-bm25-schema", () => {
+describe.skipIf(skipPgTests)("pg-search-bm25-schema", () => {
   let sql: postgres.Sql;
   let schemaName: string;
 
   beforeAll(async () => {
-    sql = postgres_(resolvePgParadeDbTestUrl(), {
+    sql = postgres_(resolvePgAppTestUrl(), {
       max: 2,
       connect_timeout: 10,
       onnotice() {},
@@ -66,17 +66,6 @@ describe.skipIf(skipParadeDbTests)("paradedb-bm25-schema", () => {
       expect(cols).toContain("content_ngram_text");
       expect(cols).toContain("content_search_text");
     }
-  });
-
-  it("private search_docs table does not have BM25 helper columns", async () => {
-    const rows = await sql<{ column_name: string }[]>`
-      SELECT column_name
-      FROM information_schema.columns
-      WHERE table_schema = ${schemaName}
-        AND table_name = 'search_docs_private'
-        AND column_name IN ('content_search_text', 'content_ngram_text', 'alias_text')
-    `;
-    expect(rows.length).toBe(0);
   });
 
   it("each table has exactly one BM25 index with the expected name", async () => {

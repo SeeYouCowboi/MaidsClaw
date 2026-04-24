@@ -2,7 +2,6 @@
  * PG search rebuild: rebuilds `search_docs_*` from canonical authority sources via DELETE+INSERT.
  *
  * Authority sources:
- *   - search_docs_private:   entity_nodes (private_overlay) + private_cognition_current (active)
  *   - search_docs_area:      event_nodes (area_visible)
  *   - search_docs_world:     event_nodes (world_public) + entity_nodes (shared_public) + fact_edges
  *   - search_docs_cognition: private_cognition_current
@@ -15,7 +14,7 @@ import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projec
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
 
-export type PgSearchRebuildScope = "private" | "area" | "world" | "cognition" | "episode" | "all";
+export type PgSearchRebuildScope = "area" | "world" | "cognition" | "episode" | "all";
 
 export type PgSearchRebuildPayload = {
   agentId: string;
@@ -33,7 +32,6 @@ export class PgSearchRebuilder {
     const { scope, agentId } = payload;
 
     if (scope === "all") {
-      await this.rebuildPrivate(agentId);
       await this.rebuildArea();
       await this.rebuildWorld();
       await this.rebuildCognition(agentId);
@@ -42,9 +40,6 @@ export class PgSearchRebuilder {
     }
 
     switch (scope) {
-      case "private":
-        await this.rebuildPrivate(agentId);
-        break;
       case "area":
         await this.rebuildArea();
         break;
@@ -58,17 +53,6 @@ export class PgSearchRebuilder {
         await this.rebuildEpisode(agentId);
         break;
     }
-  }
-
-  async rebuildPrivate(agentId: string): Promise<void> {
-    if (agentId === ALL_AGENTS_SENTINEL) {
-      const agentIds = await this.listPrivateSearchAuthorityAgentIds();
-      for (const id of agentIds) {
-        await this.rebuildPrivateForAgent(id);
-      }
-      return;
-    }
-    await this.rebuildPrivateForAgent(agentId);
   }
 
   async rebuildArea(): Promise<void> {
@@ -125,22 +109,6 @@ export class PgSearchRebuilder {
       return;
     }
     await this.rebuildCognitionForAgent(agentId);
-  }
-
-  // ── Private helpers ──────────────────────────────────────────────────
-
-  private async rebuildPrivateForAgent(agentId: string): Promise<void> {
-    await this.repo.rebuildForScope("private", agentId);
-
-    const now = Date.now();
-    const rows = await this.buildPrivateSearchAuthorityRows(agentId);
-
-    for (const row of rows) {
-      await this.sql`
-        INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at)
-        VALUES (${row.docType}, ${row.sourceRef}, ${row.agentId}, ${row.content}, ${now})
-      `;
-    }
   }
 
   private async rebuildCognitionForAgent(agentId: string): Promise<void> {
@@ -246,23 +214,6 @@ export class PgSearchRebuilder {
     }));
   }
 
-  private async listPrivateSearchAuthorityAgentIds(): Promise<string[]> {
-    const rows = await this.sql<{ agent_id: string }[]>`
-      SELECT DISTINCT agent_id
-      FROM (
-        SELECT agent_id AS agent_id
-        FROM private_cognition_current
-        UNION
-        SELECT owner_agent_id AS agent_id
-        FROM entity_nodes
-        WHERE memory_scope = 'private_overlay'
-      ) AS sub
-      WHERE agent_id IS NOT NULL
-      ORDER BY agent_id ASC
-    `;
-    return rows.map((r) => r.agent_id);
-  }
-
   private async listCognitionSearchAuthorityAgentIds(): Promise<string[]> {
     const rows = await this.sql<{ agent_id: string }[]>`
       SELECT DISTINCT agent_id
@@ -270,125 +221,6 @@ export class PgSearchRebuilder {
       ORDER BY agent_id ASC
     `;
     return rows.map((r) => r.agent_id);
-  }
-
-  private async buildPrivateSearchAuthorityRows(
-    agentId: string,
-  ): Promise<
-    Array<{
-      docType: string;
-      sourceRef: string;
-      agentId: string;
-      content: string;
-    }>
-  > {
-    const result: Array<{
-      docType: string;
-      sourceRef: string;
-      agentId: string;
-      content: string;
-    }> = [];
-
-    const entities = await this.sql<
-      {
-        id: string | number;
-        display_name: string;
-        summary: string | null;
-      }[]
-    >`
-      SELECT id, display_name, summary
-      FROM entity_nodes
-      WHERE memory_scope = 'private_overlay' AND owner_agent_id = ${agentId}
-      ORDER BY id ASC
-    `;
-
-    for (const entity of entities) {
-      result.push({
-        docType: "entity",
-        sourceRef: `entity:${Number(entity.id)}`,
-        agentId,
-        content: [entity.display_name, entity.summary].filter(Boolean).join(" "),
-      });
-    }
-
-    const evalCommit = await this.sql<
-      {
-        id: string | number;
-        kind: string;
-        summary_text: string | null;
-        record_json: Record<string, unknown> | string | null;
-      }[]
-    >`
-      SELECT id, kind, summary_text, record_json
-      FROM private_cognition_current
-      WHERE agent_id = ${agentId}
-        AND kind IN ('evaluation', 'commitment')
-        AND status != 'retracted'
-      ORDER BY id ASC
-    `;
-
-    for (const row of evalCommit) {
-      const record = safeParseJsonb(row.record_json);
-      const privateNotes = typeof record.private_notes === "string" ? record.private_notes : "";
-      result.push({
-        docType: row.kind,
-        sourceRef: `${row.kind}:${Number(row.id)}`,
-        agentId,
-        content: [privateNotes, row.summary_text].filter(Boolean).join(" "),
-      });
-    }
-
-    const assertions = await this.sql<
-      {
-        id: string | number;
-        summary_text: string | null;
-        record_json: Record<string, unknown> | string | null;
-      }[]
-    >`
-      SELECT id, summary_text, record_json
-      FROM private_cognition_current
-      WHERE agent_id = ${agentId}
-        AND kind = 'assertion'
-        AND (stance IS NULL OR stance NOT IN ('rejected', 'abandoned'))
-      ORDER BY id ASC
-    `;
-
-    for (const row of assertions) {
-      const record = safeParseJsonb(row.record_json);
-      const provenance = typeof record.provenance === "string" ? record.provenance : "";
-      result.push({
-        docType: "assertion",
-        sourceRef: `assertion:${Number(row.id)}`,
-        agentId,
-        content: [row.summary_text, provenance].filter(Boolean).join(" "),
-      });
-    }
-
-    // Episode privateNotes → private search scope (split-path)
-    const episodesWithNotes = await this.sql<
-      {
-        id: string | number;
-        private_notes: string;
-      }[]
-    >`
-      SELECT id, private_notes
-      FROM private_episode_events
-      WHERE agent_id = ${agentId}
-        AND private_notes IS NOT NULL
-        AND private_notes != ''
-      ORDER BY id ASC
-    `;
-
-    for (const row of episodesWithNotes) {
-      result.push({
-        docType: "episode_note",
-        sourceRef: `episode:${Number(row.id)}`,
-        agentId,
-        content: row.private_notes,
-      });
-    }
-
-    return result;
   }
 
   private async buildAreaSearchAuthorityRows(): Promise<
@@ -574,15 +406,4 @@ export class PgSearchRebuilder {
 function composeSearchText(content: string, aliasText: string): string {
   const alias = aliasText.trim();
   return alias.length > 0 ? `${content} | aliases: ${alias}` : content;
-}
-
-function safeParseJsonb(value: Record<string, unknown> | string | null): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === "object") return value;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
 }

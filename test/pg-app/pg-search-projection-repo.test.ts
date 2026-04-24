@@ -31,31 +31,6 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
     await teardownAppPool(pool);
   });
 
-  it("upsertPrivateDoc + searchPrivate finds keyword for agent", async () => {
-    await withTestAppSchema(pool, async (sql) => {
-      await bootstrapAll(sql);
-      const repo = new PgSearchProjectionRepo(sql);
-
-      await repo.upsertPrivateDoc({
-        sourceRef: "assertion:1" as NodeRef,
-        agentId: "agent-a",
-        content: "Tea ceremony notes about moonlit garden",
-      });
-      await repo.upsertPrivateDoc({
-        sourceRef: "assertion:2" as NodeRef,
-        agentId: "agent-b",
-        content: "Completely unrelated private notes",
-      });
-
-      const hits = await repo.searchPrivate("moonlit", "agent-a", 10);
-      expect(hits.length).toBe(1);
-      expect(hits[0].sourceRef).toBe("assertion:1");
-      expect(hits[0].agentId).toBe("agent-a");
-      expect(hits[0].content).toContain("moonlit garden");
-      expect(hits[0].score).toBeGreaterThan(0);
-    });
-  });
-
   it("upsertAreaDoc + searchArea filters by location_entity_id", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapAll(sql);
@@ -95,32 +70,6 @@ describe.skipIf(skipPgTests)("PgSearchProjectionRepo", () => {
       await repo.deleteWorldDoc("event:200" as NodeRef);
       const after = await repo.searchWorld("aurora", 10);
       expect(after.length).toBe(0);
-    });
-  });
-
-  it("rebuildForScope('private', agentId) clears only that agent's docs", async () => {
-    await withTestAppSchema(pool, async (sql) => {
-      await bootstrapAll(sql);
-      const repo = new PgSearchProjectionRepo(sql);
-
-      await repo.upsertPrivateDoc({
-        sourceRef: "assertion:10" as NodeRef,
-        agentId: "agent-a",
-        content: "shared keyword for rebuild test",
-      });
-      await repo.upsertPrivateDoc({
-        sourceRef: "assertion:11" as NodeRef,
-        agentId: "agent-b",
-        content: "shared keyword for rebuild test",
-      });
-
-      await repo.rebuildForScope("private", "agent-a");
-
-      const hitsA = await repo.searchPrivate("shared keyword", "agent-a", 10);
-      const hitsB = await repo.searchPrivate("shared keyword", "agent-b", 10);
-      expect(hitsA.length).toBe(0);
-      expect(hitsB.length).toBe(1);
-      expect(hitsB[0].sourceRef).toBe("assertion:11");
     });
   });
 

@@ -25,13 +25,6 @@ async function bootstrapAllSchemas(sql: postgres.Sql): Promise<void> {
 
 async function seedTestData(sql: postgres.Sql): Promise<void> {
   await sql`
-    INSERT INTO entity_nodes
-      (pointer_key, display_name, entity_type, memory_scope, owner_agent_id, summary, created_at, updated_at)
-    VALUES
-      ('alice', 'Alice', 'person', 'private_overlay', 'agent-1', 'A helpful maid', ${Date.now()}, ${Date.now()})
-  `;
-
-  await sql`
     INSERT INTO event_nodes
       (session_id, summary, timestamp, created_at, visibility_scope, location_entity_id, event_category, promotion_class, event_origin)
     VALUES
@@ -80,30 +73,28 @@ describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
       const rebuilder = new PgSearchRebuilder(sql);
       await rebuilder.rebuild({ agentId: "agent-1", scope: "all" });
 
-      const privateRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_private`;
       const areaRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_area`;
       const worldRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_world`;
       const cognitionRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_cognition`;
 
-      expect(privateRows[0].count).toBeGreaterThan(0);
       expect(areaRows[0].count).toBeGreaterThan(0);
       expect(worldRows[0].count).toBeGreaterThan(0);
       expect(cognitionRows[0].count).toBeGreaterThan(0);
     });
   });
 
-  test("rebuild with scope='private' only populates search_docs_private", async () => {
+  test("rebuild with scope='cognition' only populates search_docs_cognition", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapAllSchemas(sql);
       await seedTestData(sql);
 
       const rebuilder = new PgSearchRebuilder(sql);
-      await rebuilder.rebuild({ agentId: "agent-1", scope: "private" });
+      await rebuilder.rebuild({ agentId: "agent-1", scope: "cognition" });
 
-      const privateRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_private`;
+      const cognitionRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_cognition`;
       const areaRows = await sql`SELECT COUNT(*)::int as count FROM search_docs_area`;
 
-      expect(privateRows[0].count).toBeGreaterThan(0);
+      expect(cognitionRows[0].count).toBeGreaterThan(0);
       expect(areaRows[0].count).toBe(0);
     });
   });
@@ -127,7 +118,7 @@ describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
     });
   });
 
-  test("PgSearchProjectionRepo can query rebuilt docs after cutover", async () => {
+  test("PgSearchProjectionRepo can query rebuilt cognition docs after cutover", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapAllSchemas(sql);
       await seedTestData(sql);
@@ -136,9 +127,9 @@ describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
       await rebuilder.rebuild({ agentId: "agent-1", scope: "all" });
 
       const repo = new PgSearchProjectionRepo(sql);
-      const results = await repo.searchPrivate("Alice", "agent-1", 10);
+      const results = await repo.searchCognition("positive", "agent-1", 10);
       expect(results.length).toBeGreaterThan(0);
-      expect(results[0].content).toContain("Alice");
+      expect(results[0].content).toContain("positive");
     });
   });
 
@@ -147,7 +138,7 @@ describeWithSkipIf.skipIf(skipPgTests)("search-rebuild-pg (script)", () => {
       await bootstrapAllSchemas(sql);
 
       const rebuilder = new PgSearchRebuilder(sql);
-      const scopes: PgSearchRebuildScope[] = ["private", "area", "world", "cognition", "all"];
+      const scopes: PgSearchRebuildScope[] = ["area", "world", "cognition", "episode", "all"];
       for (const scope of scopes) {
         await rebuilder.rebuild({ agentId: "agent-1", scope });
       }

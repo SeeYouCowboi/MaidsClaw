@@ -98,7 +98,7 @@ describe.skipIf(skipPgTests)("pg enqueue", () => {
 
 	describe("search.rebuild same job_key retry does not trigger family coalescing", () => {
 		const input = buildSearchRebuildEnqueueInput({
-			scope: "private",
+			scope: "cognition",
 			targetAgentId: "agent-rebuild-1",
 			triggerSource: "fts_sync_failure",
 			triggerReason: "fts_repair",

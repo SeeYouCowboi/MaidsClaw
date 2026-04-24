@@ -171,7 +171,7 @@ describe.skipIf(skipPgTests)("pg fencing mutations", () => {
     const baseNow = 1_700_020_200_000;
     const enqueueInput = {
       ...buildSearchRebuildEnqueueInput({
-        scope: "private",
+        scope: "cognition",
         targetAgentId: "agent-rerun",
         triggerSource: "manual_cli",
         triggerReason: "full_rebuild",

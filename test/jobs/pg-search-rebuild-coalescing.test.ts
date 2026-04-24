@@ -31,16 +31,16 @@ function parseFamilyState(value: FamilyState | string): FamilyState {
 }
 
 function buildInput(args: {
-  scope?: "private" | "cognition" | "area" | "world";
+  scope?: "cognition" | "area" | "world";
   targetAgentId?: string | null;
   triggerSource?: string;
   triggerReason?: string;
   requestedAt?: number;
   nowMs?: number;
 }) {
-  const scope = args.scope ?? "private";
+  const scope = args.scope ?? "cognition";
   const input =
-    scope === "private" || scope === "cognition"
+    scope === "cognition"
       ? buildSearchRebuildEnqueueInput({
           scope,
           targetAgentId: args.targetAgentId ?? "agent-001",

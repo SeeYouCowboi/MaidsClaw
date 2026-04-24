@@ -2682,8 +2682,8 @@ export async function handleListRecentRequests(
 
   const limitParam = extractOptionalQueryParam(url, "limit");
   const limit = limitParam
-    ? Math.min(Math.max(Number(limitParam) || 20, 1), 50)
-    : 20;
+    ? Math.min(Math.max(Number(limitParam) || 500, 1), 500)
+    : 500;
 
   if (!ctx.traceStore) {
     return jsonResponse({ items: [] });
@@ -3141,7 +3141,6 @@ export async function handleCognitionKeyHistory(
     const items = rows.map((row) => {
       const record = asUnknownRecord(row);
       const id = numberField(record, "id");
-      const eventKind = stringField(record, "kind");
       const committedTime = numberField(
         record,
         "committed_time",
@@ -3393,7 +3392,7 @@ const EntityReconciliationRequestSchema = z
 const SearchRebuildRequestSchema = z
   .object({
     scope: z
-      .enum(["private", "area", "world", "cognition", "episode", "all"])
+      .enum(["area", "world", "cognition", "episode", "all"])
       .optional(),
     agent_id: z.string().min(1).optional(),
   })
@@ -3403,7 +3402,7 @@ const SearchRebuildRequestSchema = z
  * POST /v1/admin/search-rebuild
  *
  * One-shot rebuild of the search projection tables (`search_docs_*`) from the
- * canonical authority sources. Body: `{ scope?: "private"|"area"|"world"|
+ * canonical authority sources. Body: `{ scope?: "area"|"world"|
  * "cognition"|"episode"|"all", agent_id?: string }`. Defaults to
  * `scope: "episode"` and `agent_id: "_all_agents"`.
  *
@@ -3443,7 +3442,7 @@ export async function handleRunSearchRebuild(
   const url = new URL(req.url);
   const scope = (url.searchParams.get("scope") ??
     body.scope ??
-    "episode") as "private" | "area" | "world" | "cognition" | "episode" | "all";
+    "episode") as "area" | "world" | "cognition" | "episode" | "all";
   const agentId =
     url.searchParams.get("agent_id") ?? body.agent_id ?? "_all_agents";
 

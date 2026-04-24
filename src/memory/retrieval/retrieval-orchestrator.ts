@@ -886,7 +886,7 @@ export class RetrievalOrchestrator {
 
   /**
    * Reciprocal Rank Fusion over two independent episode ranking signals:
-   * pg_trgm/CJK bigram lexical hits (`ftsHits`) and embedding cosineSearch
+   * BM25 lexical hits (`ftsHits`) and embedding cosineSearch
    * neighbors (`embeddingHits`). Produces a single ordered segment list of
    * length `effectiveEpisodeBudget`, with hits present in both signals
    * naturally boosted to the top. Matches the `NarrativeSearchService.rrfMerge`

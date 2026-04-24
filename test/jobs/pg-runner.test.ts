@@ -112,7 +112,7 @@ describe.skipIf(skipPgTests)("PgJobRunner", () => {
 		const baseNow = 1_700_020_100_000;
 		const enqueueInput = {
 			...buildSearchRebuildEnqueueInput({
-				scope: "private" as const,
+				scope: "cognition" as const,
 				targetAgentId: "agent-rebuild",
 				triggerSource: "manual_cli",
 				triggerReason: "full_rebuild",

@@ -277,13 +277,7 @@ export class GraphOrganizer {
       return;
     }
 
-    if (material.scope === "private" && material.removeExisting) {
-      await this.storage.async.removeSearchDoc("private", nodeRef);
-      return;
-    }
-
     if (material.scope === "private") {
-      await this.storage.async.syncSearchDoc("private", nodeRef, material.content, material.agentId);
       return;
     }
 

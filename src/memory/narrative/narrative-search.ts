@@ -37,7 +37,7 @@ export type EmbeddingFallbackConfig = {
   embeddingRepo: EmbeddingRepo;
   modelProvider: Pick<MemoryTaskModelProvider, "embed">;
   embeddingModelId: string;
-  /** Minimum number of pg_trgm hits before skipping embedding fallback (default: 1) */
+  /** Minimum number of lexical BM25 hits before skipping embedding fallback (default: 1) */
   minTextHits?: number;
 };
 
@@ -55,7 +55,7 @@ export type EmbeddingFallbackConfig = {
  * need a new enum value.
  *
  * When an optional `embeddingFallback` is configured, the service will
- * fall back to embedding cosine similarity when pg_trgm text search
+ * fall back to embedding cosine similarity when lexical BM25 search
  * returns fewer than `minTextHits` results.
  */
 export class NarrativeSearchService {
@@ -90,7 +90,7 @@ export class NarrativeSearchService {
       return textResults;
     }
 
-    // Hybrid search: RRF (Reciprocal Rank Fusion) of pg_trgm + embedding results
+    // Hybrid search: RRF (Reciprocal Rank Fusion) of lexical BM25 + embedding results
     return this.rrfMerge(query, textResults);
   }
 
@@ -117,7 +117,7 @@ export class NarrativeSearchService {
   // ── Private helpers ──────────────────────────────────────────────────
 
   /**
-   * Reciprocal Rank Fusion: merge text (pg_trgm) and embedding (cosine)
+   * Reciprocal Rank Fusion: merge lexical BM25 and embedding (cosine)
    * results using RRF scoring: score(d) = Σ 1/(k + rank_i(d))
    *
    * Both retrieval signals contribute; a document that scores well in

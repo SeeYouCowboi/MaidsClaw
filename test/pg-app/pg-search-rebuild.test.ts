@@ -121,85 +121,6 @@ describe.skipIf(skipPgTests)("PgSearchRebuilder", () => {
     return Number(rows[0]!.id);
   }
 
-  it("rebuildPrivate populates search docs from entity_nodes + cognition", async () => {
-    await withTestAppSchema(pool, async (sql) => {
-      await bootstrapSchemas(sql);
-      const rebuilder = new PgSearchRebuilder(sql);
-      const repo = new PgSearchProjectionRepo(sql);
-
-      await insertEntityNode(sql, {
-        pointerKey: "maid:sakura",
-        displayName: "Sakura",
-        memoryScope: "private_overlay",
-        ownerAgentId: "agent-a",
-        summary: "Head maid of the eastern wing",
-      });
-
-      await insertCognition(sql, {
-        agentId: "agent-a",
-        cognitionKey: "eval:trust",
-        kind: "evaluation",
-        summaryText: "Master seems trustworthy based on recent interactions",
-        recordJson: { private_notes: "Personal observation about trust" },
-      });
-
-      await insertCognition(sql, {
-        agentId: "agent-a",
-        cognitionKey: "assert:loyalty",
-        kind: "assertion",
-        summaryText: "Loyalty is paramount in service",
-        stance: "accepted",
-        basis: "first_hand",
-        recordJson: { provenance: "Maid handbook chapter 3" },
-      });
-
-      await rebuilder.rebuildPrivate("agent-a");
-
-      const hits = await repo.searchPrivate("Sakura", "agent-a", 10);
-      expect(hits.length).toBeGreaterThanOrEqual(1);
-      expect(hits.some((h) => h.sourceRef.startsWith("entity:"))).toBe(true);
-
-      const trustHits = await repo.searchPrivate("trustworthy", "agent-a", 10);
-      expect(trustHits.length).toBeGreaterThanOrEqual(1);
-
-      const loyaltyHits = await repo.searchPrivate("loyalty", "agent-a", 10);
-      expect(loyaltyHits.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  it("rebuildPrivate scopes to agent — does not leak across agents", async () => {
-    await withTestAppSchema(pool, async (sql) => {
-      await bootstrapSchemas(sql);
-      const rebuilder = new PgSearchRebuilder(sql);
-      const repo = new PgSearchProjectionRepo(sql);
-
-      await insertEntityNode(sql, {
-        pointerKey: "maid:private-a",
-        displayName: "Secret maid knowledge alpha",
-        memoryScope: "private_overlay",
-        ownerAgentId: "agent-a",
-        summary: "Alpha private knowledge about ceremonies",
-      });
-
-      await insertEntityNode(sql, {
-        pointerKey: "maid:private-b",
-        displayName: "Secret maid knowledge beta",
-        memoryScope: "private_overlay",
-        ownerAgentId: "agent-b",
-        summary: "Beta private knowledge about gardens",
-      });
-
-      await rebuilder.rebuildPrivate("agent-a");
-      await rebuilder.rebuildPrivate("agent-b");
-
-      const hitsA = await repo.searchPrivate("ceremonies", "agent-a", 10);
-      expect(hitsA.length).toBeGreaterThanOrEqual(1);
-
-      const hitsB = await repo.searchPrivate("ceremonies", "agent-b", 10);
-      expect(hitsB.length).toBe(0);
-    });
-  });
-
   it("rebuildArea populates from area_visible event_nodes", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapSchemas(sql);
@@ -327,14 +248,6 @@ describe.skipIf(skipPgTests)("PgSearchRebuilder", () => {
         summary: "Central preparation area",
       });
 
-      await insertEntityNode(sql, {
-        pointerKey: "maid:yuki",
-        displayName: "Yuki",
-        memoryScope: "private_overlay",
-        ownerAgentId: "agent-d",
-        summary: "Kitchen specialist maid",
-      });
-
       await insertEventNode(sql, {
         summary: "Dinner preparations commenced in the kitchen",
         visibilityScope: "area_visible",
@@ -356,9 +269,6 @@ describe.skipIf(skipPgTests)("PgSearchRebuilder", () => {
       });
 
       await rebuilder.rebuild({ scope: "all", agentId: "agent-d" });
-
-      const privateHits = await repo.searchPrivate("Yuki", "agent-d", 10);
-      expect(privateHits.length).toBeGreaterThanOrEqual(1);
 
       const areaHits = await repo.searchArea("dinner", locId, 10);
       expect(areaHits.length).toBeGreaterThanOrEqual(1);
@@ -401,60 +311,4 @@ describe.skipIf(skipPgTests)("PgSearchRebuilder", () => {
     });
   });
 
-  it("rebuildPrivate excludes retracted cognition and rejected assertions", async () => {
-    await withTestAppSchema(pool, async (sql) => {
-      await bootstrapSchemas(sql);
-      const rebuilder = new PgSearchRebuilder(sql);
-      const repo = new PgSearchProjectionRepo(sql);
-
-      await insertCognition(sql, {
-        agentId: "agent-e",
-        cognitionKey: "eval:retracted",
-        kind: "evaluation",
-        summaryText: "This evaluation was retracted and should not appear",
-        status: "retracted",
-      });
-
-      await insertCognition(sql, {
-        agentId: "agent-e",
-        cognitionKey: "assert:rejected",
-        kind: "assertion",
-        summaryText: "This rejected assertion should not appear",
-        stance: "rejected",
-        basis: "hearsay",
-      });
-
-      await insertCognition(sql, {
-        agentId: "agent-e",
-        cognitionKey: "assert:abandoned",
-        kind: "assertion",
-        summaryText: "This abandoned assertion should not appear either",
-        stance: "abandoned",
-        basis: "inference",
-      });
-
-      await insertCognition(sql, {
-        agentId: "agent-e",
-        cognitionKey: "assert:valid",
-        kind: "assertion",
-        summaryText: "This accepted assertion should appear in results",
-        stance: "accepted",
-        basis: "first_hand",
-      });
-
-      await rebuilder.rebuildPrivate("agent-e");
-
-      const retractedHits = await repo.searchPrivate("retracted", "agent-e", 10);
-      expect(retractedHits.length).toBe(0);
-
-      const rejectedHits = await repo.searchPrivate("rejected assertion", "agent-e", 10);
-      expect(rejectedHits.length).toBe(0);
-
-      const abandonedHits = await repo.searchPrivate("abandoned assertion", "agent-e", 10);
-      expect(abandonedHits.length).toBe(0);
-
-      const validHits = await repo.searchPrivate("accepted assertion", "agent-e", 10);
-      expect(validHits.length).toBe(1);
-    });
-  });
 });

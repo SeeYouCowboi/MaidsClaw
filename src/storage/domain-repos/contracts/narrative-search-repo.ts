@@ -52,8 +52,8 @@ export interface NarrativeSearchRepo {
    * Executes full-text search across the caller's visible narrative surfaces.
    *
    * Default behavior (pre-P2-B): searches `search_docs_area` +
-   * `search_docs_world` only. Never reads `search_docs_private` or
-   * `search_docs_cognition` (those go through the cognition layer).
+   * `search_docs_world` only. Never reads `search_docs_cognition`
+   * (that goes through the cognition layer).
    *
    * P2-B extension: when `query.includeEpisode === true`, also reads
    * `search_docs_episode` gated by `viewerContext.viewer_agent_id`.

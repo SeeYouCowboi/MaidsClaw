@@ -396,7 +396,7 @@ export async function cleanupAllSchemas(sql: postgres.Sql): Promise<void> {
 }
 
 /**
- * Enable RRF hybrid search (pg_trgm + embedding) on the scenario services.
+ * Enable RRF hybrid search (lexical BM25 + embedding) on the scenario services.
  * Call AFTER embeddings have been generated via `generateEmbeddings()`.
  */
 export function configureEmbeddingSearch(infra: ScenarioInfra): void {

@@ -255,17 +255,30 @@ export function isPgSearchUnsupportedError(error: unknown): boolean {
 	);
 }
 
-function mergeRankedRows<T extends { source_ref: string; content: string }>(
+function sortRowsForRrfRank<T extends { score: number }>(
+	rows: T[],
+	tieBreak: (left: T, right: T) => number,
+): T[] {
+	return [...rows].sort(
+		(left, right) => right.score - left.score || tieBreak(left, right),
+	);
+}
+
+function mergeRankedRows<
+	T extends { source_ref: string; content: string; score: number },
+>(
 	primaryRows: T[],
 	primarySignal: RetrievalSignal,
 	ngramRows: T[],
 	limit: number,
 	tieBreak: (left: T, right: T) => number,
 ): Array<T & { score: number }> {
+	const rankedPrimaryRows = sortRowsForRrfRank(primaryRows, tieBreak);
+	const rankedNgramRows = sortRowsForRrfRank(ngramRows, tieBreak);
 	const rowBySourceRef = new Map<string, T>();
 	const candidates: SignalCandidate[] = [];
 
-	for (const [rank, row] of primaryRows.entries()) {
+	for (const [rank, row] of rankedPrimaryRows.entries()) {
 		rowBySourceRef.set(row.source_ref, row);
 		candidates.push({
 			sourceRef: row.source_ref,
@@ -275,7 +288,7 @@ function mergeRankedRows<T extends { source_ref: string; content: string }>(
 		});
 	}
 
-	for (const [rank, row] of ngramRows.entries()) {
+	for (const [rank, row] of rankedNgramRows.entries()) {
 		if (!rowBySourceRef.has(row.source_ref)) {
 			rowBySourceRef.set(row.source_ref, row);
 		}
@@ -363,7 +376,7 @@ export function buildCognitionWordSql(
                   pdb.score(id) AS score
            FROM search_docs_cognition
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, updated_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -424,7 +437,7 @@ export function buildCognitionNgramSql(
                   pdb.score(id) AS score
            FROM search_docs_cognition
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, updated_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -476,7 +489,7 @@ export function buildEpisodeWordSql(
                   pdb.score(id) AS score
            FROM search_docs_episode
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, committed_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -524,7 +537,7 @@ export function buildEpisodeNgramSql(
                   pdb.score(id) AS score
            FROM search_docs_episode
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, committed_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -574,7 +587,7 @@ export function buildAreaWordSql(
                   pdb.score(id) AS score
            FROM search_docs_area
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, created_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -620,7 +633,7 @@ export function buildAreaNgramSql(
                   pdb.score(id) AS score
            FROM search_docs_area
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, created_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -663,7 +676,7 @@ export function buildWorldWordSql(
                   pdb.score(id) AS score
            FROM search_docs_world
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, created_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};
@@ -702,7 +715,7 @@ export function buildWorldNgramSql(
                   pdb.score(id) AS score
            FROM search_docs_world
            WHERE ${conditions.join(" AND ")}
-           ORDER BY score DESC, created_at DESC
+           ORDER BY score DESC
            LIMIT $${nextParam}`,
 		params,
 	};

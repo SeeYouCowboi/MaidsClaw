@@ -208,7 +208,7 @@ class MockSearchProjectionRepo implements SearchProjectionRepo {
   public nextId = 1;
 
   async syncSearchDoc(
-    _scope: "private" | "area" | "world",
+    _scope: "area" | "world",
     _sourceRef: NodeRef,
     _content: string,
     _agentId?: string,
@@ -217,7 +217,7 @@ class MockSearchProjectionRepo implements SearchProjectionRepo {
     return 0;
   }
 
-  async removeSearchDoc(_scope: "private" | "area" | "world", _sourceRef: NodeRef): Promise<void> {}
+  async removeSearchDoc(_scope: "area" | "world", _sourceRef: NodeRef): Promise<void> {}
 
   async rebuildForScope(_scope: SearchProjectionScope, _agentId?: string): Promise<void> {}
 

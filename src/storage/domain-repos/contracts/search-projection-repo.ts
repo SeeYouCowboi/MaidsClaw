@@ -1,6 +1,6 @@
 import type { NodeRef } from "../../../memory/types.js";
 
-export type SearchProjectionScope = "private" | "area" | "world" | "cognition" | "episode";
+export type SearchProjectionScope = "area" | "world" | "cognition" | "episode";
 
 export type UpsertEpisodeDocParams = {
   sourceRef: string;
@@ -27,14 +27,14 @@ export type UpsertCognitionDocParams = {
 
 export interface SearchProjectionRepo {
   syncSearchDoc(
-    scope: "private" | "area" | "world",
+    scope: "area" | "world",
     sourceRef: NodeRef,
     content: string,
     agentId?: string,
     locationEntityId?: number,
     aliasText?: string,
   ): Promise<number>;
-  removeSearchDoc(scope: "private" | "area" | "world", sourceRef: NodeRef): Promise<void>;
+  removeSearchDoc(scope: "area" | "world", sourceRef: NodeRef): Promise<void>;
   rebuildForScope(scope: SearchProjectionScope, agentId?: string): Promise<void>;
   upsertCognitionDoc(params: UpsertCognitionDocParams): Promise<number>;
   upsertEpisodeDoc(params: UpsertEpisodeDocParams): Promise<number>;

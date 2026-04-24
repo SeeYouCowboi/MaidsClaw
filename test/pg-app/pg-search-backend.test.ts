@@ -17,8 +17,8 @@ import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
-  resolvePgParadeDbTestUrl,
-  skipParadeDbTests,
+  resolvePgAppTestUrl,
+  skipPgTests,
 } from "../helpers/pg-app-test-utils.js";
 
 const BASE_TS = 1_760_000_000_000;
@@ -202,6 +202,8 @@ describe("PgSearchLexicalBackend SQL builder", () => {
     expect(built.text).toContain("basis = $5");
     expect(built.text).toContain("updated_at <= $6");
     expect(built.text).toContain("pdb.score(id) >= $7");
+    expect(built.text).toContain("ORDER BY score DESC");
+    expect(built.text).not.toContain("updated_at DESC");
     expect(built.params).toEqual([
       "agent-a",
       "moonlight tea",
@@ -230,6 +232,8 @@ describe("PgSearchLexicalBackend SQL builder", () => {
     expect(built.text).toContain("category = $3");
     expect(built.text).toContain("committed_at <= $4");
     expect(built.text).toContain("pdb.score(id) >= $5");
+    expect(built.text).toContain("ORDER BY score DESC");
+    expect(built.text).not.toContain("committed_at DESC");
     expect(built.params).toEqual(["agent-a", "Alice怀表", "observation", 999, 0.1, 5]);
   });
 
@@ -279,12 +283,12 @@ describe("PgSearchLexicalBackend SQL builder", () => {
   });
 });
 
-describe.skipIf(skipParadeDbTests)("PgSearchLexicalBackend integration (ParadeDB)", () => {
+describe.skipIf(skipPgTests)("PgSearchLexicalBackend integration (pg_search)", () => {
   let sql: postgres.Sql;
   let schemaName: string;
 
   beforeAll(async () => {
-    sql = postgres_(resolvePgParadeDbTestUrl(), {
+    sql = postgres_(resolvePgAppTestUrl(), {
       max: 2,
       connect_timeout: 10,
       onnotice() {},

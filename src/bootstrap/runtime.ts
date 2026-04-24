@@ -1402,8 +1402,8 @@ export function bootstrapRuntime(
 	// which already handles common Chinese proper nouns. Shared aliases that
 	// are NOT in the default dict (e.g. fictional names) may fail to segment
 	// as a single token during this cold window — acceptable for v1 since the
-	// tokenizer still produces usable tokens via either jieba's fallback or
-	// the legacy bigram path. Failures log once; the rest of bootstrap
+	// tokenizer still produces usable tokens via jieba fallback plus the
+	// downstream pg_search ngram rescue path. Failures log once; the rest of bootstrap
 	// continues with an un-synced segmenter.
 	//
 	// `segmenterReady` is exposed on RuntimeBootstrapResult so callers that

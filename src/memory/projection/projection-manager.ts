@@ -82,14 +82,6 @@ type ProjectionSearchProjectionRepo = {
     now: number;
     entityPointerKeys: string[];
   }) => MaybePromise<number | undefined>;
-  /** Writes episode privateNotes into the private search scope (split-path). */
-  upsertPrivateEpisodeNoteDoc?: (params: {
-    episodeId: number;
-    agentId: string;
-    content: string;
-    committedAt: number;
-    now: number;
-  }) => MaybePromise<void>;
 };
 
 type ProjectionAreaWorldProjectionRepo = {
@@ -183,16 +175,6 @@ function resolveSearchProjectionRepo(
         return Promise.resolve(result).then(() => undefined);
       }
     },
-    upsertPrivateEpisodeNoteDoc: "syncSearchDoc" in repo
-      ? async (params) => {
-          await (repo as SearchProjectionRepo).syncSearchDoc(
-            "private",
-            `episode:${params.episodeId}` as NodeRef,
-            params.content,
-            params.agentId,
-          );
-        }
-      : undefined,
   };
 }
 
@@ -713,23 +695,8 @@ export class ProjectionManager {
           entityPointerKeys,
         });
 
-        // Split-path: write privateNotes into private search scope
-        const privateNoteResult =
-          episode.privateNotes && searchProjectionRepo.upsertPrivateEpisodeNoteDoc
-            ? searchProjectionRepo.upsertPrivateEpisodeNoteDoc({
-                episodeId,
-                agentId: params.agentId,
-                content: episode.privateNotes,
-                committedAt: now,
-                now,
-              })
-            : undefined;
-
-        if (isPromiseLike(searchResult) || isPromiseLike(privateNoteResult)) {
-          return Promise.all([
-            isPromiseLike(searchResult) ? searchResult : undefined,
-            isPromiseLike(privateNoteResult) ? privateNoteResult : undefined,
-          ]).then(() => {
+        if (isPromiseLike(searchResult)) {
+          return Promise.resolve(searchResult).then(() => {
             changedNodeRefs.push(toEpisodeNodeRef(episodeId));
           });
         }

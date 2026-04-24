@@ -120,7 +120,7 @@ describe.skipIf(skipPgTests)("memory.organize", () => {
 describe.skipIf(skipPgTests)("search.rebuild", () => {
   it("job_key starts with search.rebuild: and contains :req:", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -134,7 +134,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("has job_family_key set matching the family fragment (without req: part)", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -142,7 +142,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
     const input = buildSearchRebuildEnqueueInput(params);
 
-    expect(input.job_family_key).toBe("search.rebuild:private:agent_123");
+    expect(input.job_family_key).toBe("search.rebuild:cognition:agent_123");
   });
 
   it("job_family_key for area scope uses scope only", () => {
@@ -186,7 +186,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("has concurrency_key as search.rebuild:global", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -199,7 +199,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("two calls with same params produce DIFFERENT job_key values (request-instance uniqueness)", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -227,7 +227,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("throws when given targetAgentId: _all_agents as input", () => {
     const params = {
-      scope: "private" as const,
+      scope: "cognition" as const,
       targetAgentId: "_all_agents",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -240,7 +240,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("uses correct job_type and execution_class", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -254,7 +254,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("uses max_attempts from JOB_MAX_ATTEMPTS (value: 3)", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -268,7 +268,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
 
   it("payload includes version, scope, targetAgentId, triggerSource, triggerReason", () => {
     const params: SearchRebuildJobParams = {
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent_123",
       triggerSource: "manual_cli",
       triggerReason: "fts_repair",
@@ -279,7 +279,7 @@ describe.skipIf(skipPgTests)("search.rebuild", () => {
     const payload = input.payload_json;
 
     expect(payload.version).toBe(1);
-    expect(payload.scope).toBe("private");
+    expect(payload.scope).toBe("cognition");
     expect(payload.targetAgentId).toBe("agent_123");
     expect(payload.triggerSource).toBe("manual_cli");
     expect(payload.triggerReason).toBe("fts_repair");

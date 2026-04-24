@@ -10,16 +10,6 @@ import { PgSearchLexicalBackend } from "./pg-search-backend.js";
 
 const ALL_AGENTS_SENTINEL = "_all_agents";
 
-type PrivateDocRow = {
-  id: string | number;
-  doc_type: string;
-  source_ref: string;
-  agent_id: string;
-  content: string;
-  created_at: string | number;
-  score?: string | number;
-};
-
 type AreaDocRow = {
   id: string | number;
   doc_type: string;
@@ -51,13 +41,6 @@ type CognitionDocRow = {
   updated_at: string | number;
   created_at: string | number;
   score?: string | number;
-};
-
-type UpsertPrivateDocParams = {
-  sourceRef: NodeRef;
-  content: string;
-  agentId: string;
-  createdAt?: number;
 };
 
 type UpsertAreaDocParams = {
@@ -109,20 +92,13 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   constructor(private readonly sql: postgres.Sql) {}
 
   async syncSearchDoc(
-    scope: "private" | "area" | "world",
+    scope: "area" | "world",
     sourceRef: NodeRef,
     content: string,
     agentId?: string,
     locationEntityId?: number,
     aliasText?: string,
   ): Promise<number> {
-    if (scope === "private") {
-      if (!agentId) {
-        throw new Error("agentId is required for private search docs");
-      }
-      return this.upsertPrivateDoc({ sourceRef, content, agentId });
-    }
-
     if (scope === "area") {
       if (locationEntityId === undefined) {
         throw new Error("locationEntityId is required for area search docs");
@@ -133,15 +109,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     return this.upsertWorldDoc({ sourceRef, content, aliasText });
   }
 
-  async removeSearchDoc(scope: "private" | "area" | "world", sourceRef: NodeRef): Promise<void> {
-    if (scope === "private") {
-      await this.sql`
-        DELETE FROM search_docs_private
-        WHERE source_ref = ${sourceRef}
-      `;
-      return;
-    }
-
+  async removeSearchDoc(scope: "area" | "world", sourceRef: NodeRef): Promise<void> {
     if (scope === "area") {
       await this.sql`
         DELETE FROM search_docs_area
@@ -157,18 +125,6 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
   }
 
   async rebuildForScope(scope: SearchProjectionScope, agentId = ALL_AGENTS_SENTINEL): Promise<void> {
-    if (scope === "private") {
-      if (agentId === ALL_AGENTS_SENTINEL) {
-        await this.sql`DELETE FROM search_docs_private`;
-      } else {
-        await this.sql`
-          DELETE FROM search_docs_private
-          WHERE agent_id = ${agentId}
-        `;
-      }
-      return;
-    }
-
     if (scope === "area") {
       await this.sql`DELETE FROM search_docs_area`;
       return;
@@ -200,40 +156,6 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       DELETE FROM search_docs_cognition
       WHERE agent_id = ${agentId}
     `;
-  }
-
-  async upsertPrivateDoc(params: UpsertPrivateDocParams): Promise<number> {
-    const now = params.createdAt ?? Date.now();
-    const docType = getDocTypeFromRef(params.sourceRef);
-
-    const existing = await this.sql<PrivateDocRow[]>`
-      SELECT id, doc_type, content
-      FROM search_docs_private
-      WHERE source_ref = ${params.sourceRef}
-        AND agent_id = ${params.agentId}
-      LIMIT 1
-    `;
-
-    if (existing.length === 0) {
-      const inserted = await this.sql<{ id: string | number }[]>`
-        INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at)
-        VALUES (${docType}, ${params.sourceRef}, ${params.agentId}, ${params.content}, ${now})
-        RETURNING id
-      `;
-      return toNumber(inserted[0]?.id);
-    }
-
-    const row = existing[0];
-    if (row.doc_type !== docType || row.content !== params.content) {
-      await this.sql`
-        UPDATE search_docs_private
-        SET doc_type = ${docType},
-            content = ${params.content}
-        WHERE id = ${row.id}
-      `;
-    }
-
-    return toNumber(row.id);
   }
 
   async upsertAreaDoc(params: UpsertAreaDocParams): Promise<number> {
@@ -424,14 +346,6 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     `;
   }
 
-  async deletePrivateDoc(sourceRef: NodeRef, agentId: string): Promise<void> {
-    await this.sql`
-      DELETE FROM search_docs_private
-      WHERE source_ref = ${sourceRef}
-        AND agent_id = ${agentId}
-    `;
-  }
-
   async deleteAreaDoc(sourceRef: NodeRef, locationEntityId: number): Promise<void> {
     await this.sql`
       DELETE FROM search_docs_area
@@ -453,55 +367,6 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       WHERE source_ref = ${sourceRef}
         AND agent_id = ${agentId}
     `;
-  }
-
-  async searchPrivate(
-    query: string,
-    agentId: string,
-    limit = 20,
-  ): Promise<Array<{
-    id: number;
-    docType: string;
-    sourceRef: string;
-    agentId: string;
-    content: string;
-    createdAt: number;
-    score: number;
-  }>> {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (normalizedQuery.length < 2) {
-      return [];
-    }
-
-    const rows = await this.sql<PrivateDocRow[]>`
-      SELECT id, doc_type, source_ref, agent_id, content, created_at,
-             CASE
-               WHEN lower(content) = ${normalizedQuery} THEN 1::real
-               WHEN strpos(lower(content), ${normalizedQuery}) > 0 THEN LEAST(
-                 0.99::real,
-                 GREATEST(
-                   0.2::real,
-                   ${normalizedQuery.length}::real / GREATEST(length(content), 1)::real
-                 )
-               )
-               ELSE 0::real
-             END AS score
-      FROM search_docs_private
-      WHERE agent_id = ${agentId}
-        AND strpos(lower(content), ${normalizedQuery}) > 0
-      ORDER BY score DESC, created_at DESC
-      LIMIT ${limit}
-    `;
-
-    return rows.map((row) => ({
-      id: toNumber(row.id),
-      docType: row.doc_type,
-      sourceRef: row.source_ref,
-      agentId: row.agent_id,
-      content: row.content,
-      createdAt: toNumber(row.created_at),
-      score: toNumber(row.score),
-    }));
   }
 
   async searchArea(

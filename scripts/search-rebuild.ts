@@ -17,7 +17,7 @@ const { values } = parseArgs({
 });
 
 if (!values.agent) {
-	console.error("Usage: bun run scripts/search-rebuild.ts --agent <agentId> [--scope all|private|area|world|cognition|episode] [--pg-url <url>]");
+	console.error("Usage: bun run scripts/search-rebuild.ts --agent <agentId> [--scope all|area|world|cognition|episode] [--pg-url <url>]");
 	process.exit(1);
 }
 
@@ -30,14 +30,13 @@ if (!pgUrl) {
 const scope = (values.scope ?? "all") as PgSearchRebuildScope;
 const allowedScopes = new Set<PgSearchRebuildScope>([
 	"all",
-	"private",
 	"area",
 	"world",
 	"cognition",
 	"episode",
 ]);
 if (!allowedScopes.has(scope)) {
-	console.error(`Invalid --scope: ${String(values.scope)}. Allowed: all|private|area|world|cognition|episode`);
+	console.error(`Invalid --scope: ${String(values.scope)}. Allowed: all|area|world|cognition|episode`);
 	process.exit(1);
 }
 

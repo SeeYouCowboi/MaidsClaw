@@ -302,7 +302,9 @@ describe.skipIf(skipPgTests)("PgSettlementLedgerRepo", () => {
         caught = e;
       }
       expect(caught).not.toBeNull();
-      expect(caught!.message).toMatch(/no row with status talker_committed or failed_retryable/);
+      expect(caught!.message).toMatch(
+        /markThinkerProjecting: no row with claimable status/,
+      );
 
       expect(await repo.rawStatus(sid)).toBe("pending");
     });

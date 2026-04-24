@@ -35,7 +35,7 @@ export type SearchRebuildTriggerReason =
 
 export type SearchRebuildJobParams =
   | {
-      scope: "private" | "cognition";
+      scope: "cognition";
       targetAgentId: string;
       triggerSource: SearchRebuildTriggerSource;
       triggerReason: SearchRebuildTriggerReason;
@@ -97,7 +97,7 @@ export function buildSearchRebuildEnqueueInput(
 
   if (rawScope === "all") {
     throw new Error(
-      'Invalid search.rebuild scope: "all" is not allowed. Use "private", "cognition", "area", or "world".',
+      'Invalid search.rebuild scope: "all" is not allowed. Use "cognition", "area", or "world".',
     );
   }
 
@@ -108,7 +108,7 @@ export function buildSearchRebuildEnqueueInput(
   }
 
   let familyFragment: string;
-  if (params.scope === "private" || params.scope === "cognition") {
+  if (params.scope === "cognition") {
     familyFragment = `${params.scope}:${params.targetAgentId}`;
   } else {
     familyFragment = params.scope;
@@ -120,7 +120,7 @@ export function buildSearchRebuildEnqueueInput(
   const jobFamilyKey = `search.rebuild:${familyFragment}`;
 
   const payload: DurableSearchRebuildPayload =
-    params.scope === "private" || params.scope === "cognition"
+    params.scope === "cognition"
       ? {
           version: 1,
           scope: params.scope,

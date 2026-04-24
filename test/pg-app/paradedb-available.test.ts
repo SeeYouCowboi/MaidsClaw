@@ -2,15 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
 import postgres_ from "postgres";
 import {
-  resolvePgParadeDbTestUrl,
-  skipParadeDbTests,
+  resolvePgAppTestUrl,
+  skipPgTests,
 } from "../helpers/pg-app-test-utils.js";
 
-describe.skipIf(skipParadeDbTests)("paradedb-available", () => {
+describe.skipIf(skipPgTests)("pg-search-available", () => {
   let sql: postgres.Sql;
 
   beforeAll(async () => {
-    sql = postgres_(resolvePgParadeDbTestUrl(), {
+    sql = postgres_(resolvePgAppTestUrl(), {
       max: 2,
       connect_timeout: 10,
     });

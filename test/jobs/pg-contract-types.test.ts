@@ -49,7 +49,7 @@ describe.skipIf(skipPgTests)("pg durable contract types", () => {
   it("accepts valid durable search.rebuild payload shape", () => {
     const payload: unknown = {
       version: 1,
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "agent-1",
       triggerSource: "manual_cli",
       triggerReason: "full_rebuild",
@@ -75,7 +75,7 @@ describe.skipIf(skipPgTests)("pg durable contract types", () => {
   it("rejects targetAgentId=_all_agents durable search.rebuild payload", () => {
     const payload: unknown = {
       version: 1,
-      scope: "private",
+      scope: "cognition",
       targetAgentId: "_all_agents",
       triggerSource: "manual_cli",
       triggerReason: "full_rebuild",

@@ -28,25 +28,6 @@ describe.skipIf(skipPgTests)("pg-derived-schema bootstrap", () => {
     });
   });
 
-	it("supports search_docs_private content queries", async () => {
-    await withTestAppSchema(sql, async (pool) => {
-      await bootstrapDerivedSchema(pool);
-
-      const now = Date.now();
-      await pool`
-        INSERT INTO search_docs_private (doc_type, source_ref, agent_id, content, created_at)
-        VALUES ('assertion', 'ref-1', 'agent-1', 'hello world from projection search', ${now})
-      `;
-
-      const rows = await pool`
-        SELECT id
-        FROM search_docs_private
-        WHERE content ILIKE '%hello%'
-      `;
-      expect(rows.length).toBe(1);
-    });
-  });
-
   it("stores and reads vector embeddings in node_embeddings", async () => {
     await withTestAppSchema(sql, async (pool) => {
       await bootstrapDerivedSchema(pool, { embeddingDim: 1536 });

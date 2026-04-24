@@ -82,7 +82,6 @@ export const EXPORT_SURFACES: readonly ExportSurfaceConfig[] = [
   { name: "node_scores" },
 
   // Search docs (may not exist in all databases)
-  { name: "search_docs_private" },
   { name: "search_docs_area" },
   { name: "search_docs_world" },
   { name: "search_docs_cognition" },

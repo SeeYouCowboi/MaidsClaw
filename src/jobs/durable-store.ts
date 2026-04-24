@@ -4,7 +4,7 @@ export type PgJobStatus = "pending" | "running" | "succeeded" | "failed_terminal
 
 export const PG_JOB_ACTIVE_STATUSES: readonly PgJobStatus[] = ["pending", "running"];
 
-export const DURABLE_SEARCH_REBUILD_SCOPES = ["private", "area", "world", "cognition"] as const;
+export const DURABLE_SEARCH_REBUILD_SCOPES = ["area", "world", "cognition"] as const;
 
 export type DurableSearchRebuildScope = (typeof DURABLE_SEARCH_REBUILD_SCOPES)[number];
 
@@ -29,7 +29,7 @@ export type SearchRebuildTriggerReason =
 export type DurableSearchRebuildPayload =
   | {
       version: 1;
-      scope: "private" | "cognition";
+      scope: "cognition";
       targetAgentId: string;
       triggerSource: SearchRebuildTriggerSource;
       triggerReason: SearchRebuildTriggerReason;
@@ -360,7 +360,7 @@ export function isDurableSearchRebuildPayload(value: unknown): value is DurableS
     return false;
   }
 
-  if (payload.scope === "private" || payload.scope === "cognition") {
+  if (payload.scope === "cognition") {
     return typeof payload.targetAgentId === "string" && payload.targetAgentId.length > 0;
   }
 

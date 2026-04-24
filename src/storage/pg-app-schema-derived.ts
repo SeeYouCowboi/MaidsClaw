@@ -2,6 +2,10 @@ import type postgres from "postgres";
 
 const DEFAULT_EMBEDDING_DIM = 1536;
 
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function bootstrapDerivedSchema(
   sql: postgres.Sql,
   opts: { embeddingDim?: number; skipVector?: boolean } = {},
@@ -12,12 +16,13 @@ export async function bootstrapDerivedSchema(
   }
 
   await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-  // pg_search may not be installed in non-ParadeDB environments (e.g. local PG18 dev).
-  // Bootstrap should not hard-fail — BM25 index creation later is also try-catch wrapped.
   try {
     await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS pg_search`);
-  } catch {
-    // pg_search binary not installed — BM25 indexes will be skipped.
+  } catch (error) {
+    throw new Error(
+      `pg_search extension is required for derived schema bootstrap. ` +
+        `Point tests and runtime at the ParadeDB app database. Cause: ${formatErrorMessage(error)}`,
+    );
   }
   if (!opts.skipVector) {
     await sql.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
@@ -160,22 +165,7 @@ export async function bootstrapDerivedSchema(
     )
   `);
 
-  await sql.unsafe(`
-    CREATE TABLE IF NOT EXISTS search_docs_private (
-      id         BIGSERIAL PRIMARY KEY,
-      doc_type   TEXT NOT NULL,
-      source_ref TEXT NOT NULL,
-      agent_id   TEXT NOT NULL,
-      content    TEXT NOT NULL,
-      created_at BIGINT NOT NULL
-    )
-  `);
-
-  await sql.unsafe(`
-    CREATE INDEX IF NOT EXISTS idx_search_docs_private_agent
-      ON search_docs_private(agent_id)
-  `);
-  await sql.unsafe(`DROP INDEX IF EXISTS idx_search_docs_private_content_trgm`);
+  await sql.unsafe(`DROP TABLE IF EXISTS search_docs_private`);
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_area (
@@ -198,16 +188,12 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_area ADD COLUMN IF NOT EXISTS alias_text TEXT`);
 
-  try {
-    await sql.unsafe(`
-      CREATE INDEX IF NOT EXISTS idx_search_docs_area_bm25
-        ON search_docs_area
-        USING bm25 (id, content_search_text, content_ngram_text, alias_text)
-        WITH (key_field='id')
-    `);
-  } catch {
-    // pg_search not available — skip BM25 index creation.
-  }
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_area_bm25
+      ON search_docs_area
+      USING bm25 (id, content_search_text, content_ngram_text, alias_text)
+      WITH (key_field='id')
+  `);
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_world (
@@ -224,16 +210,12 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_world ADD COLUMN IF NOT EXISTS alias_text TEXT`);
 
-  try {
-    await sql.unsafe(`
-      CREATE INDEX IF NOT EXISTS idx_search_docs_world_bm25
-        ON search_docs_world
-        USING bm25 (id, content_search_text, content_ngram_text, alias_text)
-        WITH (key_field='id')
-    `);
-  } catch {
-    // pg_search not available — skip BM25 index creation.
-  }
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_world_bm25
+      ON search_docs_world
+      USING bm25 (id, content_search_text, content_ngram_text, alias_text)
+      WITH (key_field='id')
+  `);
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_cognition (
@@ -268,16 +250,12 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_cognition ADD COLUMN IF NOT EXISTS alias_text TEXT`);
 
-  try {
-    await sql.unsafe(`
-      CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_bm25
-        ON search_docs_cognition
-        USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, kind)
-        WITH (key_field='id')
-    `);
-  } catch {
-    // pg_search not available — skip BM25 index creation.
-  }
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_cognition_bm25
+      ON search_docs_cognition
+      USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, kind)
+      WITH (key_field='id')
+  `);
 
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS search_docs_episode (
@@ -319,16 +297,12 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`ALTER TABLE search_docs_episode ADD COLUMN IF NOT EXISTS content_ngram_text TEXT`);
   await sql.unsafe(`ALTER TABLE search_docs_episode ADD COLUMN IF NOT EXISTS alias_text TEXT`);
 
-  try {
-    await sql.unsafe(`
-      CREATE INDEX IF NOT EXISTS idx_search_docs_episode_bm25
-        ON search_docs_episode
-        USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, category)
-        WITH (key_field='id')
-    `);
-  } catch {
-    // pg_search not available — skip BM25 index creation.
-  }
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_search_docs_episode_bm25
+      ON search_docs_episode
+      USING bm25 (id, content_search_text, content_ngram_text, alias_text, agent_id, category)
+      WITH (key_field='id')
+  `);
 
   if (!opts.skipVector) {
     await sql.unsafe(`
