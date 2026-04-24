@@ -167,8 +167,17 @@ export class GraphOrganizer {
       return "semantic_similar";
     }
 
-    if (sourceKind !== targetKind && similarity >= 0.78 && this.isCuratedBridgePair(sourceKind, targetKind)) {
-      if (this.hasStructuralOverlap(sourceContent, targetContent)) {
+    // Cross-kind bridge (entity ↔ episode/cognition/fact/etc).
+    // Thresholds (relaxed from original 0.78, which produced 0 bridges at scale):
+    //   - similarity >= 0.60 because entity embeddings come from short content
+    //     (display_name + 1-line summary) and naturally have lower cross-type
+    //     similarity than same-kind pairs. Empirically even a best-matching pair
+    //     (episode mentioning "银怀表/茶室" vs entity "silver_pocket_watch")
+    //     scored only 0.651 at real session scale.
+    //   - 1 shared structural token (vs 2 for same-kind) because entity content
+    //     is often a single keyword.
+    if (sourceKind !== targetKind && similarity >= 0.6 && this.isCuratedBridgePair(sourceKind, targetKind)) {
+      if (this.hasStructuralOverlap(sourceContent, targetContent, 1)) {
         return "entity_bridge";
       }
     }
@@ -209,7 +218,11 @@ export class GraphOrganizer {
     return allowed.has(key);
   }
 
-  private hasStructuralOverlap(sourceContent: string, targetContent: string): boolean {
+  private hasStructuralOverlap(
+    sourceContent: string,
+    targetContent: string,
+    minOverlap = 2,
+  ): boolean {
     const sourceTokens = new Set(tokenizeQuery(sourceContent.toLowerCase()));
     const targetTokens = new Set(tokenizeQuery(targetContent.toLowerCase()));
     let overlap = 0;
@@ -217,7 +230,7 @@ export class GraphOrganizer {
       if (targetTokens.has(token)) {
         overlap += 1;
       }
-      if (overlap >= 2) {
+      if (overlap >= minOverlap) {
         return true;
       }
     }

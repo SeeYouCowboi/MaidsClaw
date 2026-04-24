@@ -236,6 +236,9 @@ export class GatewayServer {
 		this.server = Bun.serve({
 			port: this.options.port,
 			hostname: bindHost,
+			// Long-running SSE streams (RP turns, Kimi/bailian) routinely have
+			// inter-token gaps > Bun's 10s default. 255 = max, disables idle kill.
+			idleTimeout: 255,
 			fetch: async (req: Request): Promise<Response> => {
 				const requestStartedAt = Date.now();
 				const url = new URL(req.url);
