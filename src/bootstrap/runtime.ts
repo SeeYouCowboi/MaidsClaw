@@ -78,6 +78,7 @@ import { parseGraphNodeRef } from "../memory/contracts/graph-node-ref.js";
 import { CoreMemoryService } from "../memory/core-memory.js";
 import { EmbeddingService } from "../memory/embeddings.js";
 import { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
+import { buildCoreEntityPointerKeys } from "../memory/entity-seed.js";
 import { MemoryTaskModelProviderAdapter } from "../memory/model-provider-adapter.js";
 import { NarrativeSearchService } from "../memory/narrative/narrative-search.js";
 import { GraphNavigator } from "../memory/navigator.js";
@@ -1624,12 +1625,18 @@ export function bootstrapRuntime(
 		})();
 	}
 
+	// Core entity pointer keys — seeded world anchors + persona character names.
+	// Built lazily so persona-card edits at runtime are picked up on the next
+	// known_entities render without restarting.
+	const coreEntityKeysProvider = (): ReadonlySet<string> =>
+		buildCoreEntityPointerKeys(personaService);
 	const memoryAdapter = new MemoryAdapter(
 		promptDataRepos,
 		retrievalService,
 		episodeRepo,
 		talkerThinkerConfig.sceneRetrieval,
 		entityReconciliation,
+		coreEntityKeysProvider,
 	);
 	const promptBuilder = new PromptBuilder({
 		persona: personaAdapter,

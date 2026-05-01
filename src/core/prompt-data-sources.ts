@@ -9,6 +9,16 @@ export type TypedRetrievalSurfaceOptions = {
 export type KnownEntityPromptOptions = {
   maxItems?: number;
   maxChars?: number;
+  /**
+   * Pointer keys (canonicalized form) that should be ranked above
+   * recency-only candidates when present in the merged set.
+   *
+   * Source is typically the seeded shared_public catalog (world locations
+   * + persona character names). The boost is rank-only — it does not
+   * inject missing entities into the candidate set, so an entity that has
+   * never been mentioned this session still won't appear here.
+   */
+  corePointerKeys?: ReadonlySet<string>;
 };
 
 export type PersonaDataSource = {

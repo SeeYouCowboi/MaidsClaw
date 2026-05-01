@@ -715,10 +715,32 @@ function trimText(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Synthetic boost applied to candidates whose canonical pointer key is in
+// the caller-provided `corePointerKeys` set. Picked far above any natural
+// sourcePriority value (settlement=3, episode=2) so seeded world anchors
+// (Alice, 管家, 茶室, …) cannot be evicted by recency-only competitors.
+const CORE_ENTITY_PRIORITY_BOOST = 100;
+
+function corePriorityFor(
+  pointerKey: string,
+  corePointerKeys: ReadonlySet<string> | undefined,
+): number {
+  if (!corePointerKeys || corePointerKeys.size === 0) return 0;
+  if (corePointerKeys.has(pointerKey)) return CORE_ENTITY_PRIORITY_BOOST;
+  const canonical = canonicalizeEntityMentionPointer(pointerKey);
+  if (canonical && corePointerKeys.has(canonical)) {
+    return CORE_ENTITY_PRIORITY_BOOST;
+  }
+  return 0;
+}
+
 function mergeKnownEntityCandidates(params: {
   recent: RankedRecentSessionEntity[];
+  corePointerKeys?: ReadonlySet<string>;
 }): RecentSessionEntity[] {
   const merged = new Map<string, RankedRecentSessionEntity>();
+  const applyCoreBoost = (pointerKey: string, basePriority: number): number =>
+    basePriority + corePriorityFor(pointerKey, params.corePointerKeys);
   for (const row of params.recent) {
     const pointerKey = trimText(row.pointer_key);
     if (!pointerKey) {
@@ -732,15 +754,21 @@ function mergeKnownEntityCandidates(params: {
         pointer_key: pointerKey,
         display_name: nextDisplayName,
         summary: nextSummary,
-        sourcePriority: row.sourcePriority,
+        sourcePriority: applyCoreBoost(pointerKey, row.sourcePriority),
         recencyRank: row.recencyRank,
       });
       continue;
     }
 
-    const samePriority = row.sourcePriority === existing.sourcePriority;
+    // Existing.sourcePriority is already boosted (applied at first insertion).
+    // Boost row's incoming priority too so the comparison is symmetrical;
+    // otherwise a duplicate core-entity row (raw=3) would always lose to its
+    // own already-boosted entry (boosted=103) and recency would never update.
+    const incomingPriority = applyCoreBoost(pointerKey, row.sourcePriority);
+    const samePriority = incomingPriority === existing.sourcePriority;
     const isFresher = samePriority && row.recencyRank < existing.recencyRank;
-    const shouldPreferRow = row.sourcePriority > existing.sourcePriority || isFresher;
+    const shouldPreferRow =
+      incomingPriority > existing.sourcePriority || isFresher;
 
     merged.set(pointerKey, {
       pointer_key: pointerKey,
@@ -753,7 +781,7 @@ function mergeKnownEntityCandidates(params: {
           ? nextSummary
           : trimText(existing.summary),
       sourcePriority: shouldPreferRow
-        ? row.sourcePriority
+        ? incomingPriority
         : existing.sourcePriority,
       recencyRank: shouldPreferRow
         ? row.recencyRank
@@ -874,9 +902,17 @@ export async function getKnownEntitiesForWritingAsync(
       ...rankRecentSessionEntities(settlementEntities, 3),
       ...rankRecentSessionEntities(recentEntities, 2),
     ],
+    corePointerKeys: options?.corePointerKeys,
   });
   return renderKnownEntitiesBlock(merged, options);
 }
+
+// Exported solely for direct unit testing of the known_entities ranking.
+// Public callers should go through getKnownEntitiesForWritingAsync.
+export const __knownEntitiesTestInternals__ = {
+  mergeKnownEntityCandidates,
+  rankRecentSessionEntities,
+};
 
 function parseRecentCognitionPayload(slotPayload: string | undefined): RecentCognitionEntry[] {
   if (!slotPayload) {

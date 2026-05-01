@@ -21,7 +21,7 @@ interface WorldEntitySeed {
  * Hardcoded location / object seeds that cannot be derived from persona cards.
  * These correspond to the world described in the persona `world` fields.
  */
-const STATIC_WORLD_ENTITIES: WorldEntitySeed[] = [
+export const STATIC_WORLD_ENTITIES: WorldEntitySeed[] = [
   { pointerKey: "茶室", displayName: "茶室", entityType: "location", summary: "庄园内靠窗的茶室，光线柔和，主人常在此饮茶" },
   { pointerKey: "温室", displayName: "温室", entityType: "location", summary: "庄园温室，湿气较重，花木茂盛" },
   { pointerKey: "花房", displayName: "花房", entityType: "location", summary: "庄园花房，湿润温暖，园丁偶尔打理" },
@@ -113,4 +113,28 @@ export async function seedWorldEntities(
   }
 
   return { seeded, embedded };
+}
+
+/**
+ * Pointer-key set for "core" entities — the seeded shared_public anchors
+ * (static world locations + persona character names) that should never be
+ * evicted from the known_entities prompt slot by recency-only ranking.
+ *
+ * Built from the same sources as `seedWorldEntities`, so the two stay in
+ * lockstep without a runtime DB lookup.
+ */
+export function buildCoreEntityPointerKeys(
+  personaService: PersonaService,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const seed of STATIC_WORLD_ENTITIES) {
+    keys.add(seed.pointerKey.toLowerCase());
+  }
+  for (const [, card] of personaService.getSnapshot().cards) {
+    const name = card.name?.trim();
+    if (!name) continue;
+    if (card.worldPresence === "introduced-via-conversation") continue;
+    keys.add(name.toLowerCase());
+  }
+  return keys;
 }

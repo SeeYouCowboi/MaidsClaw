@@ -45,6 +45,13 @@ export class MemoryAdapter implements MemoryDataSource {
     private readonly episodeRepo?: EpisodeRepo,
     private readonly sceneRetrieval?: boolean,
     private readonly entityReconciliation?: EntityReconciliationRunner,
+    /**
+     * Returns the canonicalized pointer-key set for "core" entities (seeded
+     * world anchors + persona character names). Wrapped in a getter so the
+     * caller can rebuild the set when persona cards change without rewiring
+     * the adapter.
+     */
+    private readonly coreEntityKeysProvider?: () => ReadonlySet<string>,
   ) {}
 
   async getPinnedBlocks(agentId: string): Promise<string> {
@@ -97,11 +104,17 @@ export class MemoryAdapter implements MemoryDataSource {
     options?: KnownEntityPromptOptions,
   ): Promise<string> {
     this.scheduleRecentEntitiesSync(viewerContext);
+    const corePointerKeys =
+      options?.corePointerKeys ?? this.coreEntityKeysProvider?.();
+    const mergedOptions: KnownEntityPromptOptions = {
+      ...options,
+      ...(corePointerKeys ? { corePointerKeys } : {}),
+    };
     return getKnownEntitiesForWritingAsync(
       viewerContext,
       this.repos,
       this.episodeRepo,
-      options,
+      mergedOptions,
     );
   }
 
