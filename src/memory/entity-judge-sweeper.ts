@@ -117,6 +117,17 @@ const JUDGE_TOOL: ChatToolDefinition = {
 
 const DEFAULT_MAX_CANDIDATES_PER_KEY = 10;
 const DEFAULT_JUDGE_MODEL_ID = "minimax/MiniMax-M2.7";
+// Upper bound on how many CJK pointer keys per sweep get a semantic
+// candidate lookup. Each call costs one slot in the embedding model's
+// per-second/per-minute quota. Sweeps run frequently and share the
+// MemoryTaskModelProvider with the talker/thinker — a runaway here will
+// starve their retrieval embeddings and trigger talker/thinker soft-block
+// (observed once already: thinker fell behind v33 → talker rejected new
+// commits at T70 with "Timed out waiting for user message commit"). When
+// more than this many CJK keys are unresolved in one sweep, the overflow
+// rolls to the next sweep — every sweep makes progress, no key is
+// permanently skipped.
+const MAX_SEMANTIC_BATCH_PER_SWEEP = 32;
 
 function normalizePointer(value: string): string {
   return canonicalizeEntityMentionPointer(value);
@@ -604,6 +615,18 @@ export class EntityJudgeSweeper {
         mentions: discoveredPointerMentions,
       });
 
+      // ── Batch-embed all CJK pointer keys in a single call ──────────────
+      // Previously readCandidateEntities did one embed HTTP call per CJK key
+      // inline. With ~30 unresolved keys per sweep that translated to ~30
+      // embedding round-trips contending with the talker/thinker pool — see
+      // the MAX_SEMANTIC_BATCH_PER_SWEEP comment for the failure mode. We
+      // now collect all CJK candidates up front, embed them in one batched
+      // request, and pass the resulting vectors into readCandidateEntities
+      // via a per-sweep cache.
+      const precomputedEmbeddings = await this.batchEmbedCjkPointerKeys(
+        unresolvedMentions,
+      );
+
       const decisions: EntityJudgeDecision[] = [];
       let matched = 0;
       let created = 0;
@@ -625,6 +648,7 @@ export class EntityJudgeSweeper {
           agentId: opts.agentId,
           pointerKey,
           maxCandidatesPerKey,
+          precomputedEmbedding: precomputedEmbeddings.get(pointerKey),
         });
 
         if (candidates.length === 0) {
@@ -1034,13 +1058,67 @@ export class EntityJudgeSweeper {
     return summary && summary.length > 0 ? summary : null;
   }
 
+  /**
+   * Batch-embed all CJK-containing unresolved pointer keys in a single
+   * embedding HTTP call. Trims to MAX_SEMANTIC_BATCH_PER_SWEEP so a single
+   * sweep cannot starve the talker/thinker embedding quota; overflow keys
+   * fall through to the next sweep cycle. Returns an empty map if the
+   * embedding repo or model id are unavailable, in which case
+   * readCandidateEntities will simply skip the semantic supplement (and
+   * the LLM judge falls back to trigram-only candidates for that key).
+   */
+  private async batchEmbedCjkPointerKeys(
+    mentions: readonly CandidateEntityMention[],
+  ): Promise<Map<string, Float32Array>> {
+    const out = new Map<string, Float32Array>();
+    if (!this.embeddingRepo) return out;
+    const modelId = this.modelProvider.defaultEmbeddingModelId;
+    if (!modelId) return out;
+
+    const cjkKeys: string[] = [];
+    for (const m of mentions) {
+      if (cjkKeys.length >= MAX_SEMANTIC_BATCH_PER_SWEEP) break;
+      if (containsCjk(m.pointerKey)) cjkKeys.push(m.pointerKey);
+    }
+    if (cjkKeys.length === 0) return out;
+
+    try {
+      const vectors = await this.modelProvider.embed(
+        cjkKeys,
+        "memory_index",
+        modelId,
+      );
+      for (let i = 0; i < cjkKeys.length; i++) {
+        const v = vectors[i];
+        if (v && v.length > 0) {
+          out.set(cjkKeys[i], v);
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[entity-judge] batch embed failed (${cjkKeys.length} keys): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return out;
+  }
+
   private async readCandidateEntities(params: {
     sql: postgres.Sql;
     agentId: string;
     pointerKey: string;
     maxCandidatesPerKey: number;
+    /**
+     * Pre-computed embedding for `pointerKey`, produced once per sweep by
+     * batchEmbedCjkPointerKeys. When provided, the semantic supplement
+     * skips its own per-key embed HTTP call and goes straight to the
+     * pgvector cosine search. When absent (Latin key, or CJK key beyond
+     * the per-sweep batch budget), the semantic supplement is skipped
+     * entirely — candidates fall back to trigram only and the next sweep
+     * gets another chance to include this key in its batch.
+     */
+    precomputedEmbedding?: Float32Array;
   }): Promise<CandidateEntity[]> {
-    const { sql, agentId, pointerKey, maxCandidatesPerKey } = params;
+    const { sql, agentId, pointerKey, maxCandidatesPerKey, precomputedEmbedding } = params;
 
     // Trigram-based candidate search. This handles intra-language matching
     // well (silver_watch ↔ item:silver_pocket_watch, 银怀表 ↔ 怀表) but
@@ -1099,17 +1177,12 @@ export class EntityJudgeSweeper {
       this.embeddingRepo !== undefined &&
       (containsCjk(pointerKey) || topLexicalScore < 0.3);
 
-    if (needsSemantic && this.embeddingRepo) {
+    if (needsSemantic && this.embeddingRepo && precomputedEmbedding) {
       try {
         const modelId = this.modelProvider.defaultEmbeddingModelId;
-        if (modelId) {
-          const vectors = await this.modelProvider.embed(
-            [pointerKey],
-            "memory_index",
-            modelId,
-          );
-          const queryVec = vectors[0];
-          if (queryVec && queryVec.length > 0) {
+        if (modelId && precomputedEmbedding.length > 0) {
+          const queryVec = precomputedEmbedding;
+          {
             const semanticHits = await this.embeddingRepo.cosineSearch(
               queryVec,
               {
