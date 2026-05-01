@@ -317,6 +317,24 @@ export async function createAppHost(
 			process.env.PG_APP_URL = options.pgUrl;
 		}
 		await initializePgBackendForRuntime(runtime);
+		// Seed the world entity catalog now that the pg pool is initialized.
+		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+		// as a startup error rather than silently leaving shared_public empty.
+		try {
+			const seedResult = await runtime.runWorldEntitySeed();
+			if (seedResult.skipped) {
+				console.warn(
+					`[create-app-host] world entity seed SKIPPED (${seedResult.reason ?? "unknown"}) — entity canonicalization will be degraded`,
+				);
+			}
+		} catch (err) {
+			// Re-throw — startup should not silently continue with a broken
+			// canonical pool; the operator needs to know.
+			console.error(
+				`[create-app-host] world entity seed failed; aborting startup`,
+			);
+			throw err;
+		}
 	}
 
 	const healthChecks = Object.fromEntries(

@@ -1603,27 +1603,85 @@ export function bootstrapRuntime(
 	// Seed world entities (characters + locations) into entity_nodes and generate
 	// their embeddings. This is idempotent and enables the embedding-linker's
 	// entity_bridge pass to create cross-type semantic edges.
-	if (memoryTaskModelProvider && effectiveOrganizerEmbeddingModelId) {
-		void (async () => {
-			try {
-				const { seedWorldEntities } = await import("../memory/entity-seed.js");
-				const result = await seedWorldEntities(
-					graphStoreRepo,
-					embeddingRepo,
-					memoryTaskModelProvider,
-					effectiveOrganizerEmbeddingModelId,
-					personaService,
-				);
-				if (result.seeded > 0) {
+	//
+	// IMPORTANT: this MUST run AFTER initializePgBackendForRuntime — graphStoreRepo
+	// upserts go through pgFactory.getPool() which throws "not initialized" before
+	// the pg pool is wired. Previously this code lived inline as a fire-and-forget
+	// IIFE and the resulting "pool not initialized" error was swallowed by its
+	// catch block, leaving shared_public empty and every dialogue-emitted pointer
+	// key turning into a private_overlay duplicate. The seed is now a deferred
+	// callable invoked from create-app-host.ts after the pg pool is ready.
+	const runWorldEntitySeed = async (): Promise<{
+		seeded: number;
+		embedded: number;
+		skipped: boolean;
+		reason?: string;
+	}> => {
+		if (!memoryTaskModelProvider) {
+			const reason = "memoryTaskModelProvider is undefined";
+			console.error(`[bootstrap][seed] SKIPPED: ${reason}`);
+			return { seeded: 0, embedded: 0, skipped: true, reason };
+		}
+		if (!effectiveOrganizerEmbeddingModelId) {
+			const reason = "effectiveOrganizerEmbeddingModelId is empty";
+			console.error(`[bootstrap][seed] SKIPPED: ${reason}`);
+			return { seeded: 0, embedded: 0, skipped: true, reason };
+		}
+		console.log(
+			`[bootstrap][seed] starting (model=${effectiveOrganizerEmbeddingModelId})`,
+		);
+		try {
+			const { seedWorldEntities } = await import("../memory/entity-seed.js");
+			const result = await seedWorldEntities(
+				graphStoreRepo,
+				embeddingRepo,
+				memoryTaskModelProvider,
+				effectiveOrganizerEmbeddingModelId,
+				personaService,
+			);
+			console.log(
+				`[bootstrap][seed] seedWorldEntities returned: seeded=${result.seeded} embedded=${result.embedded}`,
+			);
+			// Hard health check: if shared_public is still empty after seed, the
+			// upserts didn't actually land. Fail loud so callers can decide whether
+			// to abort startup or continue with degraded canonicalization.
+			if (pgFactory) {
+				try {
+					const pool = pgFactory.getPool();
+					const rows = await pool<{ count: string | number }[]>`
+						SELECT COUNT(*)::int AS count
+						FROM entity_nodes
+						WHERE memory_scope = 'shared_public'
+					`;
+					const sharedCount = Number(rows[0]?.count ?? 0);
+					if (sharedCount === 0) {
+						const err = new Error(
+							"[bootstrap][seed] HEALTH CHECK FAILED: shared_public is 0 after seed — entity canonicalization will not work",
+						);
+						console.error(err.stack ?? err.message);
+						throw err;
+					}
 					console.log(
-						`[bootstrap] Seeded ${result.seeded} world entities, embedded ${result.embedded}`,
+						`[bootstrap][seed] health check OK — shared_public=${sharedCount}`,
 					);
+				} catch (healthErr) {
+					console.error(
+						`[bootstrap][seed] health check error: ${healthErr instanceof Error ? (healthErr.stack ?? healthErr.message) : String(healthErr)}`,
+					);
+					throw healthErr;
 				}
-			} catch (err) {
-				console.warn("[bootstrap] Entity seed failed (non-fatal):", err);
 			}
-		})();
-	}
+			return {
+				seeded: result.seeded,
+				embedded: result.embedded,
+				skipped: false,
+			};
+		} catch (err) {
+			const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
+			console.error(`[bootstrap][seed] FAILED:\n${stack}`);
+			throw err;
+		}
+	};
 
 	// Core entity pointer keys — seeded world anchors + persona character names.
 	// Built lazily so persona-card edits at runtime are picked up on the next
@@ -1933,6 +1991,7 @@ export function bootstrapRuntime(
 		talkerThinkerConfig,
 		maidenDecisionLog,
 		shutdown,
+		runWorldEntitySeed,
 		segmenterReady,
 		providerCatalogService,
 		runtimeCwd,

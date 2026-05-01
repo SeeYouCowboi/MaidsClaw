@@ -8,6 +8,7 @@ import type {
   ToolCallResult,
 } from "./task-agent.js";
 import { makeNodeRef } from "./schema.js";
+import { containsCjk } from "./cjk-segmenter.js";
 import {
   canonicalizeEntityMentionPointer,
   normalizeEntityMentionSurface,
@@ -1040,7 +1041,14 @@ export class EntityJudgeSweeper {
     maxCandidatesPerKey: number;
   }): Promise<CandidateEntity[]> {
     const { sql, agentId, pointerKey, maxCandidatesPerKey } = params;
-    const rows = await sql<{
+
+    // Trigram-based candidate search. This handles intra-language matching
+    // well (silver_watch ↔ item:silver_pocket_watch, 银怀表 ↔ 怀表) but
+    // produces zero similarity between Chinese and Latin surfaces because
+    // pg_trgm shares no n-grams across scripts. We over-fetch a bit so we
+    // have headroom to merge with semantic results.
+    const lexicalLimit = Math.max(maxCandidatesPerKey, 10);
+    const lexicalRows = await sql<{
       id: number | string;
       pointer_key: string;
       display_name: string;
@@ -1063,14 +1071,113 @@ export class EntityJudgeSweeper {
           OR (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
         )
       ORDER BY lexical_score DESC, updated_at DESC, id DESC
-      LIMIT ${maxCandidatesPerKey}
+      LIMIT ${lexicalLimit}
     `;
-    return rows.map((row) => ({
-      id: Number(row.id),
-      pointer_key: row.pointer_key,
-      display_name: row.display_name,
-      summary: row.summary,
-      lexical_score: Number(row.lexical_score),
-    }));
+
+    const merged = new Map<number, CandidateEntity>();
+    for (const row of lexicalRows) {
+      const id = Number(row.id);
+      merged.set(id, {
+        id,
+        pointer_key: row.pointer_key,
+        display_name: row.display_name,
+        summary: row.summary,
+        lexical_score: Number(row.lexical_score),
+      });
+    }
+
+    // Semantic supplement via multilingual embeddings. We trigger this when
+    // trigram is structurally blind to the query (CJK input) or when its top
+    // candidate is weak — both signals that the right canonical might exist
+    // but is hidden behind a script/language gap. The LLM judge still makes
+    // the final match/new call; this pass only changes which candidates it
+    // gets to see.
+    const topLexicalScore = lexicalRows.length > 0
+      ? Number(lexicalRows[0].lexical_score)
+      : 0;
+    const needsSemantic =
+      this.embeddingRepo !== undefined &&
+      (containsCjk(pointerKey) || topLexicalScore < 0.3);
+
+    if (needsSemantic && this.embeddingRepo) {
+      try {
+        const modelId = this.modelProvider.defaultEmbeddingModelId;
+        if (modelId) {
+          const vectors = await this.modelProvider.embed(
+            [pointerKey],
+            "memory_index",
+            modelId,
+          );
+          const queryVec = vectors[0];
+          if (queryVec && queryVec.length > 0) {
+            const semanticHits = await this.embeddingRepo.cosineSearch(
+              queryVec,
+              {
+                nodeKind: "entity",
+                agentId,
+                modelId,
+                limit: lexicalLimit,
+              },
+            );
+            const semanticScoreById = new Map<number, number>();
+            for (const hit of semanticHits) {
+              const m = /^entity:(\d+)$/.exec(hit.nodeRef);
+              if (!m) continue;
+              semanticScoreById.set(Number(m[1]), hit.similarity);
+            }
+            const entityIds = [...semanticScoreById.keys()];
+            if (entityIds.length > 0) {
+              // Re-apply visibility scope at the join because cosineSearch
+              // does not filter entity rows by owner_agent_id (entity kind
+              // is treated as public-by-default in node_embeddings, but
+              // private_overlay entity_nodes belong to a specific agent).
+              const semanticRows = await sql<{
+                id: number | string;
+                pointer_key: string;
+                display_name: string;
+                summary: string | null;
+              }[]>`
+                SELECT id, pointer_key, display_name, summary
+                FROM entity_nodes
+                WHERE id = ANY(${entityIds})
+                  AND (
+                    memory_scope = 'shared_public'
+                    OR (memory_scope = 'private_overlay' AND owner_agent_id = ${agentId})
+                  )
+              `;
+              for (const row of semanticRows) {
+                const id = Number(row.id);
+                const semScore = semanticScoreById.get(id) ?? 0;
+                const existing = merged.get(id);
+                if (existing) {
+                  // Keep the candidate; promote its score so it sorts to
+                  // the top when the semantic signal is stronger.
+                  merged.set(id, {
+                    ...existing,
+                    lexical_score: Math.max(existing.lexical_score, semScore),
+                  });
+                } else {
+                  merged.set(id, {
+                    id,
+                    pointer_key: row.pointer_key,
+                    display_name: row.display_name,
+                    summary: row.summary,
+                    lexical_score: semScore,
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[entity-judge] semantic candidate fallback failed for "${pointerKey}": ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return [...merged.values()]
+      .sort((a, b) => b.lexical_score - a.lexical_score)
+      .slice(0, maxCandidatesPerKey);
   }
 }

@@ -140,6 +140,27 @@ export type RuntimeBootstrapResult = {
 	maidenDecisionLog: MaidenDecisionLog;
 	shutdown: () => void;
 	/**
+	 * Seeds the static world entity catalog (shared_public locations + persona
+	 * character names) into entity_nodes and generates their embeddings. Must
+	 * be invoked AFTER the pg backend is initialized — calling before
+	 * `initializePgBackendForRuntime` will throw because the upserts go through
+	 * the pg pool. Returns a status describing whether the seed actually ran;
+	 * callers should treat a `skipped: true` return as a degraded mode and
+	 * propagate the `reason` to their startup health endpoint.
+	 *
+	 * The function performs an inline health check after seeding and rejects if
+	 * `shared_public` is still empty — that condition means entity
+	 * canonicalization will silently fall back to creating private duplicates,
+	 * which is what the project memory `project_maidsclaw_bugs.md` flagged as
+	 * the root cause of the 0-canonical-entity issue.
+	 */
+	runWorldEntitySeed: () => Promise<{
+		seeded: number;
+		embedded: number;
+		skipped: boolean;
+		reason?: string;
+	}>;
+	/**
 	 * Resolves once the CJK segmenter has finished loading shared aliases into
 	 * its user dictionary. Bootstrap fires the load asynchronously and does
 	 * NOT block on it (queries arriving in the cold window degrade gracefully
