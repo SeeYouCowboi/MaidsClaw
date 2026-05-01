@@ -4,6 +4,7 @@
  * Uses `createAppHost({ role: "server" })` for full lifecycle management.
  */
 
+import { resolveTraceCaptureEnabled } from "../../app/diagnostics/trace-capture-config.js";
 import { registerCommand } from "../parser.js";
 import type { ParsedArgs } from "../parser.js";
 import type { CliContext } from "../context.js";
@@ -66,8 +67,7 @@ async function handleServerStart(
   // Trace capture defaults to ON so Retrieval Trace panels have data by default.
   // Keep --debug-capture as a harmless explicit opt-in alias for older callers.
   const debugCapture = args.flags["debug-capture"] === true;
-  const traceCaptureEnabled =
-    debugCapture || process.env.MAIDSCLAW_TRACE_CAPTURE !== "off";
+  const traceCaptureEnabled = debugCapture || resolveTraceCaptureEnabled();
 
   const { createAppHost } = await import("../../app/host/index.js");
 

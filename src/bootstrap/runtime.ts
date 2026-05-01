@@ -9,7 +9,7 @@ import {
 import type { AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadFileAgents } from "../app/config/agents/agent-loader.js";
-import { TraceStore } from "../app/diagnostics/trace-store.js";
+import { buildTraceStore } from "../app/diagnostics/trace-capture-config.js";
 import { AgentLoop, type AgentRunRequest } from "../core/agent-loop.js";
 import type { Chunk } from "../core/chunk.js";
 import {
@@ -1125,11 +1125,11 @@ export function bootstrapRuntime(
 	});
 
 	const dataDir = resolveDataDir(options, runtimeCwd);
-	const traceStore =
-		options.traceStore ??
-		(options.traceCaptureEnabled
-			? new TraceStore(join(dataDir, "debug", "traces"))
-			: undefined);
+	const traceStore = buildTraceStore({
+		traceStore: options.traceStore,
+		traceCaptureEnabled: options.traceCaptureEnabled,
+		dataDir,
+	});
 	const storagePaths = resolveStoragePaths({ dataDir });
 	const configPersonasPath = join(runtimeCwd, "config", "personas.json");
 	const configLorePath = join(runtimeCwd, "config", "lore.json");

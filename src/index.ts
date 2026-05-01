@@ -1,3 +1,4 @@
+import { resolveTraceCaptureEnabled } from "./app/diagnostics/trace-capture-config.js";
 import { createAppHost } from "./app/host/index.js";
 import { startWithPortCheck } from "./utils/port-check.js";
 
@@ -13,7 +14,7 @@ async function main(): Promise<void> {
     requireAllProviders: false,
     // Enable per-request trace capture so the dashboard's Retrieval Trace
     // panel has data to show. Disable by setting MAIDSCLAW_TRACE_CAPTURE=off.
-    traceCaptureEnabled: process.env.MAIDSCLAW_TRACE_CAPTURE !== "off",
+    traceCaptureEnabled: resolveTraceCaptureEnabled(),
   });
 
   const port = parseInt(process.env.MAIDSCLAW_PORT ?? "3000", 10);

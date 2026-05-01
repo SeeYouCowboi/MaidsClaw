@@ -95,8 +95,9 @@ describe("MemoryAdapter", () => {
 		expect(typeof result).toBe("string");
 	});
 
-	it("runs prompt-time entity sync before retrieval and known-entity rendering", async () => {
+	it("schedules prompt-time entity sync without blocking retrieval or known-entity rendering", async () => {
 		const sweepCalls: string[] = [];
+		let releaseSweep: (() => void) | undefined;
 		const adapter = new MemoryAdapter(
 			stubRepos,
 			stubRetrievalService,
@@ -105,15 +106,26 @@ describe("MemoryAdapter", () => {
 			{
 				runSweep: async ({ agentId, sessionId }) => {
 					sweepCalls.push(`${agentId}:${sessionId}`);
+					await new Promise<void>((resolve) => {
+						releaseSweep = resolve;
+					});
 					return { skipped_due_lock: false };
 				},
 			},
 		);
 
-		await adapter.getTypedRetrievalSurface("test message", stubViewerContext);
+		const retrievalResult = await Promise.race([
+			adapter.getTypedRetrievalSurface("test message", stubViewerContext),
+			new Promise<"timeout">((resolve) =>
+				setTimeout(() => resolve("timeout"), 20),
+			),
+		]);
+		expect(retrievalResult).not.toBe("timeout");
+
 		await adapter.getKnownEntitiesForWriting(stubViewerContext);
 
 		expect(sweepCalls).toEqual(["test-agent:test-session"]);
+		releaseSweep?.();
 	});
 });
 

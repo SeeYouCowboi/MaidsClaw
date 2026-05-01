@@ -76,7 +76,7 @@ export class MemoryAdapter implements MemoryDataSource {
     if (!this.retrievalService) {
       return "";
     }
-    await this.ensureRecentEntitiesSynced(viewerContext);
+    this.scheduleRecentEntitiesSync(viewerContext);
     const mergedOptions: TypedRetrievalSurfaceOptions = {
       ...options,
       sceneRetrieval: options?.sceneRetrieval ?? this.sceneRetrieval,
@@ -96,7 +96,7 @@ export class MemoryAdapter implements MemoryDataSource {
     viewerContext: ViewerContext,
     options?: KnownEntityPromptOptions,
   ): Promise<string> {
-    await this.ensureRecentEntitiesSynced(viewerContext);
+    this.scheduleRecentEntitiesSync(viewerContext);
     return getKnownEntitiesForWritingAsync(
       viewerContext,
       this.repos,
@@ -105,9 +105,9 @@ export class MemoryAdapter implements MemoryDataSource {
     );
   }
 
-  private async ensureRecentEntitiesSynced(
+  private scheduleRecentEntitiesSync(
     viewerContext: ViewerContext,
-  ): Promise<void> {
+  ): void {
     if (!this.entityReconciliation) {
       return;
     }
@@ -115,7 +115,6 @@ export class MemoryAdapter implements MemoryDataSource {
     const key = `${viewerContext.viewer_agent_id}:${viewerContext.session_id}`;
     const inflight = this.entitySyncInflight.get(key);
     if (inflight) {
-      await inflight;
       return;
     }
 
@@ -128,6 +127,9 @@ export class MemoryAdapter implements MemoryDataSource {
 
     const run = (async () => {
       try {
+        // Entity reconciliation can call LLMs/embeddings. It must not sit on
+        // the prompt-build critical path; retrieval can use the current index
+        // and pick up canonicalization on a later turn.
         await this.entityReconciliation?.runSweep({
           agentId: viewerContext.viewer_agent_id,
           sessionId: viewerContext.session_id,
@@ -138,11 +140,12 @@ export class MemoryAdapter implements MemoryDataSource {
       } catch {
         // Prompt building should degrade gracefully when entity sync fails.
       } finally {
+        this.entitySyncLastAttemptAt.set(key, Date.now());
         this.entitySyncInflight.delete(key);
       }
     })();
     this.entitySyncInflight.set(key, run);
-    await run;
+    void run;
   }
 }
 
