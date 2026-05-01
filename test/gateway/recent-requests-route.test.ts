@@ -210,4 +210,75 @@ describe("GET /v1/agents/{agent_id}/recent-requests", () => {
     const body = (await res.json()) as { items: RecentRequestItem[] };
     expect(body.items).toEqual([]);
   });
+
+  it("filters by session_id when query param is provided", async () => {
+    const traces: TraceSummary[] = [
+      makeSummary({
+        request_id: "req-s1-a",
+        agent_id: "rp:agent-a",
+        session_id: "sess-1",
+        captured_at: 1000,
+      }),
+      makeSummary({
+        request_id: "req-s2",
+        agent_id: "rp:agent-a",
+        session_id: "sess-2",
+        captured_at: 2000,
+      }),
+      makeSummary({
+        request_id: "req-s1-b",
+        agent_id: "rp:agent-a",
+        session_id: "sess-1",
+        captured_at: 3000,
+      }),
+    ];
+    const baseUrl = startServer({
+      traceStore: {
+        listTraces: (sid?: string): TraceSummary[] =>
+          sid ? traces.filter((t) => t.session_id === sid) : traces,
+      },
+    });
+
+    const filteredRes = await fetch(
+      `${baseUrl}/v1/agents/rp:agent-a/recent-requests?session_id=sess-1`,
+    );
+    expect(filteredRes.status).toBe(200);
+    const filteredBody = (await filteredRes.json()) as {
+      items: RecentRequestItem[];
+    };
+    expect(filteredBody.items).toHaveLength(2);
+    expect(filteredBody.items.every((i) => i.session_id === "sess-1")).toBe(
+      true,
+    );
+    expect(filteredBody.items.map((i) => i.request_id).sort()).toEqual([
+      "req-s1-a",
+      "req-s1-b",
+    ]);
+
+    const allRes = await fetch(
+      `${baseUrl}/v1/agents/rp:agent-a/recent-requests`,
+    );
+    expect(allRes.status).toBe(200);
+    const allBody = (await allRes.json()) as { items: RecentRequestItem[] };
+    expect(allBody.items).toHaveLength(3);
+  });
+
+  it("passes session_id arg to traceStore.listTraces (not post-filtered in controller)", async () => {
+    const calls: Array<string | undefined> = [];
+    const baseUrl = startServer({
+      traceStore: {
+        listTraces: (sid?: string): TraceSummary[] => {
+          calls.push(sid);
+          return [];
+        },
+      },
+    });
+
+    await fetch(
+      `${baseUrl}/v1/agents/rp:agent-a/recent-requests?session_id=sess-7`,
+    );
+    await fetch(`${baseUrl}/v1/agents/rp:agent-a/recent-requests`);
+
+    expect(calls).toEqual(["sess-7", undefined]);
+  });
 });

@@ -2681,6 +2681,7 @@ export async function handleListRecentRequests(
   }
 
   const limitParam = extractOptionalQueryParam(url, "limit");
+  const sessionIdParam = extractOptionalQueryParam(url, "session_id");
   const limit = limitParam
     ? Math.min(Math.max(Number(limitParam) || 500, 1), 500)
     : 500;
@@ -2689,7 +2690,7 @@ export async function handleListRecentRequests(
     return jsonResponse({ items: [] });
   }
 
-  const allTraces = ctx.traceStore.listTraces();
+  const allTraces = ctx.traceStore.listTraces(sessionIdParam ?? undefined);
 
   const filtered = allTraces
     .filter((t) => t.agent_id === agentId)
