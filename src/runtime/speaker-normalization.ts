@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+	ACTION_LEXICON,
+	type ActionFamily,
+	type ActionLexicon,
+	type ActionLexiconFamily,
+} from "../memory/action-lexicon.js";
 
 export type SpeechAct =
 	| "assertion"
@@ -40,127 +43,6 @@ export type NormalizedTurnInput = {
 	validations: NormalizedTurnInputValidation[];
 	writeEligible: boolean;
 };
-
-type ActionFamily = CandidateAction["actionFamily"];
-
-type ActionLexiconFamily = {
-	en: {
-		lemmas: string[];
-		inflections: Record<string, string[]>;
-	};
-	cn: {
-		tokens: string[];
-	};
-};
-
-type ActionLexicon = {
-	schemaVersion: number;
-	generatedAt?: string;
-	sourceDigests?: Record<string, string>;
-	families: Record<ActionFamily, ActionLexiconFamily>;
-};
-
-const HARDCODED_FALLBACK: ActionLexicon = {
-	schemaVersion: 1,
-	generatedAt: "2026-04-21T00:00:00.000Z",
-	sourceDigests: { fallback: "inline-hardcoded" },
-	families: {
-		move: {
-			en: {
-				lemmas: ["go", "walk", "move", "return", "enter", "leave"],
-				inflections: {
-					go: ["goes", "went", "gone", "going"],
-					walk: ["walks", "walked", "walking"],
-					move: ["moves", "moved", "moving"],
-					return: ["returns", "returned", "returning"],
-					enter: ["enters", "entered", "entering"],
-					leave: ["leaves", "left", "leaving"],
-				},
-			},
-			cn: { tokens: ["去", "来到", "回到", "走到", "进入", "离开"] },
-		},
-		possession: {
-			en: {
-				lemmas: ["take", "pick up", "hold", "show", "hand", "put"],
-				inflections: {
-					take: ["takes", "took", "taken", "taking"],
-					"pick up": ["picks up", "picked up", "picking up"],
-					hold: ["holds", "held", "holding"],
-					show: ["shows", "showed", "shown", "showing"],
-					hand: ["hands", "handed", "handing"],
-					put: ["puts", "putting"],
-				},
-			},
-			cn: { tokens: ["拿起", "拿出", "展示", "递给", "交给", "放下"] },
-		},
-		status_change: {
-			en: {
-				lemmas: ["open", "close", "lock", "unlock", "light", "extinguish"],
-				inflections: {
-					open: ["opens", "opened", "opening"],
-					close: ["closes", "closed", "closing"],
-					lock: ["locks", "locked", "locking"],
-					unlock: ["unlocks", "unlocked", "unlocking"],
-					light: ["lights", "lit", "lighted", "lighting"],
-					extinguish: ["extinguishes", "extinguished", "extinguishing"],
-				},
-			},
-			cn: { tokens: ["打开", "关上", "锁上", "解锁", "点亮", "熄灭"] },
-		},
-	},
-};
-
-function resolveLexiconPath(): string {
-	const here = dirname(fileURLToPath(import.meta.url));
-	return resolve(here, "..", "..", "data", "lexicon", "action-lexicon.json");
-}
-
-function isValidLexicon(value: unknown): value is ActionLexicon {
-	if (!value || typeof value !== "object") return false;
-	const root = value as Record<string, unknown>;
-	if (root.schemaVersion !== 1) return false;
-	const families = root.families as Record<string, unknown> | undefined;
-	if (!families) return false;
-	for (const family of ["move", "possession", "status_change"] as const) {
-		const entry = families[family] as
-			| { en?: { lemmas?: unknown; inflections?: unknown }; cn?: { tokens?: unknown } }
-			| undefined;
-		if (
-			!entry ||
-			!Array.isArray(entry.en?.lemmas) ||
-			typeof entry.en?.inflections !== "object" ||
-			entry.en.inflections === null ||
-			!Array.isArray(entry.cn?.tokens)
-		) {
-			return false;
-		}
-	}
-	return true;
-}
-
-function loadActionLexicon(): ActionLexicon {
-	if (process.env.MAIDSCLAW_EXPANDED_LEXICON === "off") {
-		return HARDCODED_FALLBACK;
-	}
-	try {
-		const raw = readFileSync(resolveLexiconPath(), "utf-8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (!isValidLexicon(parsed)) {
-			console.warn("[speaker-normalization] lexicon_load_failed", {
-				reason: "schema_mismatch",
-			});
-			return HARDCODED_FALLBACK;
-		}
-		return parsed;
-	} catch (error) {
-		console.warn("[speaker-normalization] lexicon_load_failed", {
-			reason: (error as Error).message,
-		});
-		return HARDCODED_FALLBACK;
-	}
-}
-
-const ACTION_LEXICON: ActionLexicon = loadActionLexicon();
 
 type MatchEntry = {
 	surface: string;

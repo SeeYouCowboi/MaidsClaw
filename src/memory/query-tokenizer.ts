@@ -1,25 +1,37 @@
 /**
- * Mixed Latin + CJK query token extractor.
+ * Layered query tokenizer.
  *
- * Latin tokens are split on non-alphanumeric boundaries (preserving @, -, :).
- * CJK runs are segmented via @node-rs/jieba when available, producing real
- * word tokens (e.g. "爱丽丝离开了" → ["爱丽丝", "离开"]). When jieba is
- * disabled or unavailable, the tokenizer falls back to the legacy bigram
- * scheme: full run + sliding bigrams with stopword-only pair filtering.
+ * Two layers are exposed:
  *
- * The jieba path is strictly better for all downstream consumers (entity
- * resolution, word overlap detection, episode row scoring) so it is
- * preferred by default. Override via MAIDSCLAW_CJK_SEGMENTER=off.
+ *   tokenizeSurface(text)  — Latin words + jieba CJK words. No bigrams.
+ *                            Use this when you only want real lexical
+ *                            content (entity alias resolution, simple
+ *                            token counting that should ignore sub-word
+ *                            fragments).
+ *
+ *   tokenizeAnalyzer(text) — surface tokens + bridge bigrams when jieba
+ *                            is available; full CJK runs + sliding
+ *                            bigrams as a legacy fallback when the
+ *                            segmenter is disabled. Use this for
+ *                            word-overlap scoring and BM25-style
+ *                            relevance signals that benefit from
+ *                            sub-word fragments.
+ *
+ *   tokenizeQuery(text)    — historical alias of tokenizeAnalyzer kept
+ *                            so existing callers (graph-organizer,
+ *                            retrieval-orchestrator, pg-search-backend
+ *                            routing decision, anti-drift) and tests
+ *                            keep working.
+ *
+ * Override jieba via MAIDSCLAW_CJK_SEGMENTER=off (forces fallback path).
  */
 
 import { segmentCjk } from "./cjk-segmenter.js";
 
-// CJK Unified Ideographs + Extension A + Compatibility Ideographs
-const CJK_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
+const CJK_CHAR_RE = /[一-鿿㐀-䶿豈-﫿]/;
 
 const NOISE_TOKEN_RE = /^[\s\p{P}]+$/u;
 
-// Common Chinese function words that provide minimal search value
 const CJK_STOPWORDS = new Set([
   "的", "了", "是", "在", "和", "也", "就", "都",
   "有", "着", "把", "被", "让", "给", "从", "到",
@@ -28,85 +40,121 @@ const CJK_STOPWORDS = new Set([
   "这", "那", "什", "么", "个", "们", "不", "没",
 ]);
 
-export function tokenizeQuery(text: string): string[] {
-  const tokens: string[] = [];
-  // Split on Latin token boundaries, preserving CJK segments
-  for (const segment of text.split(/([a-zA-Z0-9_@:-]+)/)) {
+const LATIN_CHUNK_RE = /^[a-zA-Z0-9_@:-]+$/;
+const LATIN_SPLIT_RE = /([a-zA-Z0-9_@:-]+)/;
+
+function* iterateChunks(text: string): Iterable<string> {
+  for (const segment of text.split(LATIN_SPLIT_RE)) {
     const trimmed = segment.trim();
-    if (!trimmed) continue;
+    if (trimmed) yield trimmed;
+  }
+}
 
-    if (/^[a-zA-Z0-9_@:-]+$/.test(trimmed)) {
-      // Latin token — keep as-is if length > 1
-      if (trimmed.length > 1) tokens.push(trimmed);
+function emitLatin(tokens: string[], chunk: string): void {
+  if (chunk.length > 1) tokens.push(chunk);
+}
+
+function emitJiebaWords(tokens: string[], jiebaSegments: string[]): void {
+  for (const seg of jiebaSegments) {
+    if (seg.length >= 2 && !NOISE_TOKEN_RE.test(seg)) tokens.push(seg);
+  }
+}
+
+function emitBridgeBigrams(tokens: string[], jiebaSegments: string[]): void {
+  for (let i = 0; i < jiebaSegments.length; i++) {
+    const seg = jiebaSegments[i];
+    if (seg.length !== 1 || !CJK_CHAR_RE.test(seg)) continue;
+    if (CJK_STOPWORDS.has(seg) || NOISE_TOKEN_RE.test(seg)) continue;
+    if (i + 1 < jiebaSegments.length) {
+      const next = jiebaSegments[i + 1];
+      const nextFirst = [...next][0];
+      if (nextFirst && CJK_CHAR_RE.test(nextFirst)) {
+        tokens.push(seg + nextFirst);
+      }
+    }
+    if (i > 0) {
+      const prev = jiebaSegments[i - 1];
+      const prevChars = [...prev];
+      const prevLast = prevChars[prevChars.length - 1];
+      if (prevLast && CJK_CHAR_RE.test(prevLast)) {
+        tokens.push(prevLast + seg);
+      }
+    }
+  }
+}
+
+function extractCjkRuns(chunk: string): string[] {
+  const runs: string[] = [];
+  let run = "";
+  for (const ch of chunk) {
+    if (CJK_CHAR_RE.test(ch)) {
+      run += ch;
+    } else if (run) {
+      runs.push(run);
+      run = "";
+    }
+  }
+  if (run) runs.push(run);
+  return runs;
+}
+
+function emitFallbackRuns(tokens: string[], chunk: string): void {
+  for (const run of extractCjkRuns(chunk)) {
+    if (run.length >= 2) tokens.push(run);
+  }
+}
+
+function emitFallbackSlidingBigrams(tokens: string[], chunk: string): void {
+  for (const run of extractCjkRuns(chunk)) {
+    const chars = [...run];
+    for (let i = 0; i < chars.length - 1; i++) {
+      const a = chars[i];
+      const b = chars[i + 1];
+      if (!CJK_STOPWORDS.has(a) || !CJK_STOPWORDS.has(b)) {
+        tokens.push(a + b);
+      }
+    }
+  }
+}
+
+export function tokenizeSurface(text: string): string[] {
+  const tokens: string[] = [];
+  for (const chunk of iterateChunks(text)) {
+    if (LATIN_CHUNK_RE.test(chunk)) {
+      emitLatin(tokens, chunk);
     } else {
-      // CJK branch: try jieba first, fall back to bigrams if unavailable.
-      const jiebaSegments = segmentCjk(trimmed);
+      const jiebaSegments = segmentCjk(chunk);
       if (jiebaSegments !== null) {
-        for (const seg of jiebaSegments) {
-          // len >= 2 matches the bigram path's minimum token width; also
-          // strip punctuation/whitespace-only tokens jieba may emit.
-          if (seg.length >= 2 && !NOISE_TOKEN_RE.test(seg)) {
-            tokens.push(seg);
-          }
-        }
-        // Bridge bigrams: recover single-char CJK modifiers that jieba
-        // emits as standalone tokens (filtered above by len >= 2). Pair
-        // each non-stopword single char with adjacent segment characters
-        // so "银怀表" produces "银怀" alongside "怀表", making the query
-        // distinguishable from bare "怀表".
-        for (let i = 0; i < jiebaSegments.length; i++) {
-          const seg = jiebaSegments[i];
-          if (seg.length !== 1 || !CJK_CHAR_RE.test(seg)) continue;
-          if (CJK_STOPWORDS.has(seg) || NOISE_TOKEN_RE.test(seg)) continue;
-          // Forward bigram: this char + first char of next segment
-          if (i + 1 < jiebaSegments.length) {
-            const next = jiebaSegments[i + 1];
-            const nextFirst = [...next][0];
-            if (nextFirst && CJK_CHAR_RE.test(nextFirst)) {
-              tokens.push(seg + nextFirst);
-            }
-          }
-          // Backward bigram: last char of previous segment + this char
-          if (i > 0) {
-            const prev = jiebaSegments[i - 1];
-            const prevChars = [...prev];
-            const prevLast = prevChars[prevChars.length - 1];
-            if (prevLast && CJK_CHAR_RE.test(prevLast)) {
-              tokens.push(prevLast + seg);
-            }
-          }
-        }
+        emitJiebaWords(tokens, jiebaSegments);
       } else {
-        // Legacy fallback: full run + sliding bigrams.
-        const cjkRuns: string[] = [];
-        let run = "";
-        for (const ch of trimmed) {
-          if (CJK_CHAR_RE.test(ch)) {
-            run += ch;
-          } else if (run) {
-            cjkRuns.push(run);
-            run = "";
-          }
-        }
-        if (run) cjkRuns.push(run);
-
-        for (const cjkStr of cjkRuns) {
-          if (cjkStr.length >= 2) tokens.push(cjkStr);
-          const chars = Array.from(cjkStr);
-          for (let i = 0; i < chars.length - 1; i++) {
-            const bg = chars[i] + chars[i + 1];
-            if (!CJK_STOPWORDS.has(chars[i]) || !CJK_STOPWORDS.has(chars[i + 1])) {
-              tokens.push(bg);
-            }
-          }
-        }
+        emitFallbackRuns(tokens, chunk);
       }
     }
   }
   return [...new Set(tokens)];
 }
 
-/** Check whether text contains any CJK characters. */
+export function tokenizeAnalyzer(text: string): string[] {
+  const tokens: string[] = [];
+  for (const chunk of iterateChunks(text)) {
+    if (LATIN_CHUNK_RE.test(chunk)) {
+      emitLatin(tokens, chunk);
+    } else {
+      const jiebaSegments = segmentCjk(chunk);
+      if (jiebaSegments !== null) {
+        emitJiebaWords(tokens, jiebaSegments);
+        emitBridgeBigrams(tokens, jiebaSegments);
+      } else {
+        emitFallbackRuns(tokens, chunk);
+        emitFallbackSlidingBigrams(tokens, chunk);
+      }
+    }
+  }
+  return [...new Set(tokens)];
+}
+
+export const tokenizeQuery = tokenizeAnalyzer;
+
 export function containsCjk(text: string): boolean {
   return CJK_CHAR_RE.test(text);
 }

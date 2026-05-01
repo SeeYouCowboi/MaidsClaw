@@ -15,7 +15,7 @@
 import { createLogger } from "../core/logger.js";
 import type { AliasService } from "./alias.js";
 import { segmentCjkWithSpans, type CjkSpan } from "./cjk-segmenter.js";
-import { tokenizeQuery } from "./query-tokenizer.js";
+import { tokenizeSurface } from "./query-tokenizer.js";
 
 const logger = createLogger({ name: "memory.query-router", level: "debug" });
 import {
@@ -223,7 +223,8 @@ export class RuleBasedQueryRouter implements QueryRouter {
     const matchedRules: string[] = [];
 
     // === Entity resolution ===
-    const tokens = tokenizeQuery(originalQuery);
+    // Surface tokens only — bridge bigrams shouldn't influence alias matching.
+    const tokens = tokenizeSurface(originalQuery);
     const resolvedEntityIds: number[] = [];
     const entityHints: string[] = [];
     const seenEntityIds = new Set<number>();

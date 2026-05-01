@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { tokenizeQuery, containsCjk } from "../../src/memory/query-tokenizer";
+import {
+  containsCjk,
+  tokenizeAnalyzer,
+  tokenizeQuery,
+  tokenizeSurface,
+} from "../../src/memory/query-tokenizer";
 
 // Default test environment uses the jieba-backed path. The `MAIDSCLAW_CJK_SEGMENTER=off`
 // fallback is exercised by test/memory/query-tokenizer-fallback.test.ts via a
@@ -140,6 +145,43 @@ describe("tokenizeQuery — edge cases", () => {
     expect(tokens).not.toContain("，");
     expect(tokens).not.toContain("。");
     expect(tokens).toContain("爱丽丝");
+  });
+});
+
+describe("tokenizeSurface — no bigrams", () => {
+  it("returns Latin words and jieba CJK words only", () => {
+    const tokens = tokenizeSurface("Alice去了储藏室");
+    expect(tokens).toContain("Alice");
+    expect(tokens).toContain("储藏室");
+  });
+
+  it("does NOT generate bridge bigrams that tokenizeAnalyzer would", () => {
+    // "好的" → jieba ["好", "的"] → analyzer creates "好的" bigram, surface
+    // emits nothing because both segments are length-1 (filtered out).
+    expect(tokenizeSurface("好的")).toEqual([]);
+    expect(tokenizeAnalyzer("好的")).toEqual(["好的"]);
+  });
+
+  it("counts fewer tokens than tokenizeAnalyzer when bigrams would be added", () => {
+    const surfaceCount = tokenizeSurface("银怀表").length;
+    const analyzerCount = tokenizeAnalyzer("银怀表").length;
+    expect(analyzerCount).toBeGreaterThan(surfaceCount);
+  });
+
+  it("returns empty for stopword-only CJK input", () => {
+    expect(tokenizeSurface("的了是在")).toEqual([]);
+  });
+
+  it("preserves @ mention semantics", () => {
+    const tokens = tokenizeSurface("@Alice 你好");
+    expect(tokens).toContain("@Alice");
+  });
+});
+
+describe("tokenizeAnalyzer — equivalent to tokenizeQuery", () => {
+  it("produces the same output as tokenizeQuery (legacy alias)", () => {
+    const text = "爱丽丝在储藏室找到银怀表";
+    expect(tokenizeAnalyzer(text)).toEqual(tokenizeQuery(text));
   });
 });
 

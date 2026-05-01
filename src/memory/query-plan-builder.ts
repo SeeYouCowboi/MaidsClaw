@@ -11,7 +11,9 @@
  */
 
 import type { AgentRole } from "../agents/profile.js";
+import { expandQuerySynonyms } from "./action-lexicon.js";
 import { getDefaultTemplate } from "./contracts/retrieval-template.js";
+import { tokenizeSurface } from "./query-tokenizer.js";
 import type {
   CognitionFacets,
   GraphPlan,
@@ -150,14 +152,15 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
   }
 
   /**
-   * Deterministic query rewrite: prepend entity hints and intent type
-   * keywords in front of the normalized query. Returns `undefined` if the
-   * rewrite would be identical to the input (nothing to add).
+   * Deterministic query rewrite: prepend entity hints, intent type keywords,
+   * and action-family synonyms in front of the normalized query. Returns
+   * `undefined` if the rewrite would be identical to the input.
    *
-   * Token ordering: [intent types] + [entity hints] + [normalizedQuery].
-   * Duplicates are removed so a repeated mention doesn't dominate the
-   * rewritten string. This is intentionally NOT called an "expansion" —
-   * it's a prefix enrichment, not a synonym rewrite.
+   * Token ordering: [intent types] + [entity hints] + [synonyms] + [normalizedQuery].
+   * Synonyms come from the query-time action lexicon (action-lexicon.ts) —
+   * for example, a query containing "去" picks up "走到" / "来到" / "进入"
+   * so a search for one verb still matches documents written with any
+   * sibling lemma in the same family.
    */
   private buildRewrittenQuery(route: QueryRoute): string | undefined {
     const parts: string[] = [];
@@ -174,7 +177,6 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
     };
 
     // Intent types as keyword markers (e.g. "why", "timeline", "conflict").
-    // Low cardinality (≤ QueryType count); dedup guard prevents repeats.
     for (const intent of route.intents) {
       push(intent.type);
     }
@@ -182,6 +184,14 @@ export class DeterministicQueryPlanBuilder implements QueryPlanBuilder {
     // Entity hints — the tokens the user typed that resolved to known entities
     for (const hint of route.entityHints) {
       push(hint);
+    }
+
+    // Action-family synonyms — surface tokens from the query that belong to
+    // a known action family contribute their sibling surfaces. Surface-only
+    // tokenization is used so bridge bigrams don't pollute the lexicon match.
+    const querySurfaceTokens = tokenizeSurface(route.normalizedQuery);
+    for (const synonym of expandQuerySynonyms(querySurfaceTokens)) {
+      push(synonym);
     }
 
     if (parts.length === 0) {

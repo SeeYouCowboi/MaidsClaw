@@ -39,6 +39,45 @@ type SearchResult = {
 const RELATED_ENTITY_REFERENCE_PATTERN =
   /(?:那边的人|这边的人|哪边的人|哪位|这位|那位|哪个人|这人|那人|谁|who|person|someone)/i;
 
+const MAX_ANCHOR_POOL_SIZE = 3;
+
+/**
+ * Builds the anchor candidate pool for graph-based reference expansion.
+ * Current-turn hints take priority; prior-turn hints fill any remaining
+ * slots as a phase-1 fallback for pronominal/locative references whose
+ * anchor was established in a previous turn.
+ *
+ * Returns `{ anchors, priorTurnAnchorsUsed }` so callers can attribute
+ * the expansion in trace/rationale.
+ */
+export function buildAnchorPool(
+  currentTurnHints: ReadonlyArray<string>,
+  priorTurnHints: ReadonlyArray<string>,
+): { anchors: string[]; priorTurnAnchorsUsed: number } {
+  const anchors: string[] = [];
+  const seen = new Set<string>();
+  const push = (hint: string): boolean => {
+    if (anchors.length >= MAX_ANCHOR_POOL_SIZE) return false;
+    const key = hint.toLowerCase().trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    anchors.push(hint);
+    return true;
+  };
+  for (const hint of currentTurnHints) push(hint);
+  let priorTurnAnchorsUsed = 0;
+  for (const hint of priorTurnHints) {
+    if (push(hint)) priorTurnAnchorsUsed += 1;
+  }
+  return { anchors, priorTurnAnchorsUsed };
+}
+
+/** Exported only so tests can verify the pattern coverage without
+ *  reaching into the private RetrievalService instance. */
+export function matchesRelatedEntityReferencePattern(text: string): boolean {
+  return RELATED_ENTITY_REFERENCE_PATTERN.test(text);
+}
+
 type EntityReadResult = {
   entity: EntityNode | null;
   facts: FactEdge[];
@@ -363,6 +402,7 @@ export class RetrievalService {
       const expandedRoute = await this.expandResolvedEntitiesViaGraph(
         route,
         viewerContext,
+        recentEntityHints,
       );
       return this.queryPlanBuilder.build({
         route: expandedRoute,
@@ -380,11 +420,22 @@ export class RetrievalService {
   private async expandResolvedEntitiesViaGraph(
     route: QueryRoute,
     viewerContext: ViewerContext,
+    recentEntityHints: string[] = [],
   ): Promise<QueryRoute> {
     if (!RELATED_ENTITY_REFERENCE_PATTERN.test(route.originalQuery)) {
       return route;
     }
-    if (route.resolvedEntityIds.length === 0 || route.entityHints.length === 0) {
+
+    // Anchor pool: current-turn entityHints first (highest signal), then
+    // prior-turn entities as a phase-1 fallback so a pronominal/locative
+    // query whose anchor was set in a previous turn ("那边的人" two turns
+    // after "Alice 进了花房") can still expand against the right anchor.
+    const { anchors: anchorPool, priorTurnAnchorsUsed } = buildAnchorPool(
+      route.entityHints,
+      recentEntityHints,
+    );
+
+    if (anchorPool.length === 0) {
       return route;
     }
 
@@ -392,7 +443,7 @@ export class RetrievalService {
     const seenIds = new Set(expandedIds);
     let added = 0;
 
-    for (const hint of route.entityHints.slice(0, 3)) {
+    for (const hint of anchorPool) {
       const graphContext = await this.retrievalRepo.readByEntity(
         hint,
         viewerContext,
@@ -400,6 +451,13 @@ export class RetrievalService {
       const anchor = graphContext.entity;
       if (!anchor) {
         continue;
+      }
+      // The anchor itself must be in resolvedEntityIds for downstream
+      // surface scoring — current-turn hints already are, prior-turn
+      // hints might not be, so add defensively.
+      if (!seenIds.has(anchor.id)) {
+        seenIds.add(anchor.id);
+        expandedIds.push(anchor.id);
       }
       const relatedIds = await this.collectRelatedEntityIdsFromGraphContext(
         graphContext,
@@ -422,15 +480,25 @@ export class RetrievalService {
       }
     }
 
-    if (added === 0) {
+    if (added === 0 && expandedIds.length === route.resolvedEntityIds.length) {
       return route;
     }
 
+    const matchedRules = [
+      ...route.matchedRules,
+      `graph_related_entity_expand:${added}`,
+    ];
+    if (priorTurnAnchorsUsed > 0) {
+      matchedRules.push(`prior_turn_anchor_fallback:${priorTurnAnchorsUsed}`);
+    }
     return {
       ...route,
       resolvedEntityIds: expandedIds,
-      matchedRules: [...route.matchedRules, `graph_related_entity_expand:${added}`],
-      rationale: `${route.rationale}; graph_related_entity_expand=${added}`,
+      matchedRules,
+      rationale:
+        priorTurnAnchorsUsed > 0
+          ? `${route.rationale}; graph_related_entity_expand=${added}; prior_turn_anchors=${priorTurnAnchorsUsed}`
+          : `${route.rationale}; graph_related_entity_expand=${added}`,
     };
   }
 

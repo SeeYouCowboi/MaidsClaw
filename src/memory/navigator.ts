@@ -6,7 +6,7 @@ import type {
 import { createLogger } from "../core/logger.js";
 import type { AliasService } from "./alias.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
-import { tokenizeQuery } from "./query-tokenizer.js";
+import { tokenizeSurface } from "./query-tokenizer.js";
 
 const logger = createLogger({ name: "memory.navigator", level: "debug" });
 import {
@@ -690,7 +690,8 @@ export class GraphNavigator {
     mode?: ExploreMode,
   ): Promise<QueryAnalysis> {
     const normalized = query.trim().toLowerCase();
-    const tokens = tokenizeQuery(query);
+    // Surface tokens only — bridge bigrams shouldn't influence alias matching.
+    const tokens = tokenizeSurface(query);
 
     const resolvedEntityIds = new Set<number>();
     const entityHints = new Set<string>();
