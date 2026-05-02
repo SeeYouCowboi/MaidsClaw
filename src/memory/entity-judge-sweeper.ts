@@ -32,7 +32,7 @@ export type EntityJudgeSweepOptions = {
 
 export type EntityJudgeDecision = {
   pointer_key: string;
-  decision: "match" | "new";
+  decision: "match" | "new" | "reject";
   canonical_id?: number;
   canonical_pointer_key?: string;
   created_entity_id?: number;
@@ -54,6 +54,7 @@ export type EntityJudgeReport = {
   judged: number;
   matched: number;
   created: number;
+  rejected: number;
   skipped_due_lock: boolean;
   decisions: EntityJudgeDecision[];
 };
@@ -72,7 +73,7 @@ type CandidateEntityMention = {
 };
 
 type ParsedJudgeResult = {
-  decision: "match" | "new";
+  decision: "match" | "new" | "reject";
   selectedIndex?: number;
   confidence?: number;
   rationale?: string;
@@ -85,13 +86,13 @@ type ParsedJudgeResult = {
 const JUDGE_TOOL: ChatToolDefinition = {
   name: "judge_entity_match",
   description:
-    "Decide whether a candidate pointer_key refers to one listed entity or should be created as a new entity.",
+    "Decide whether a candidate pointer_key refers to one listed entity, should be created as a new entity, or should be rejected as noise.",
   inputSchema: {
     type: "object",
     properties: {
       decision: {
         type: "string",
-        enum: ["match", "new"],
+        enum: ["match", "new", "reject"],
       },
       selectedIndex: {
         type: "integer",
@@ -243,7 +244,7 @@ function parseJudgeCall(
     }
     const rawDecision = call.arguments.decision;
     const decision =
-      rawDecision === "match" || rawDecision === "new"
+      rawDecision === "match" || rawDecision === "new" || rawDecision === "reject"
         ? rawDecision
         : undefined;
     if (!decision) {
@@ -278,13 +279,32 @@ function buildJudgeMessages(params: {
   candidates: CandidateEntity[];
 }): ChatMessage[] {
   const lines: string[] = [];
-  lines.push(
-    `Candidate pointer_key: "${params.pointerKey}"`,
-  );
+  lines.push(`Candidate pointer_key: "${params.pointerKey}"`);
   if (params.contextSummary) {
     lines.push(`Recent context: "${params.contextSummary}"`);
   }
   lines.push("");
+
+  if (params.candidates.length === 0) {
+    lines.push("No existing entities found.");
+    lines.push("");
+    lines.push("Reply via tool:");
+    lines.push(
+      "- decision='new' if this is a real named person, place, or notable object worth tracking in long-term memory. ALSO provide entity_description: 1-2 short sentences about who/what this entity IS, neutral third-person, in the conversation language.",
+    );
+    lines.push(
+      "- decision='reject' if this is a common word, grammatical particle, pronoun, verb, generic noun, vague description, or otherwise not a genuine named entity.",
+    );
+    return [
+      {
+        role: "system",
+        content:
+          "You are an entity quality gate. Decide if a pointer key represents a real named entity worth tracking in long-term memory. Be strict: reject noise words, particles, verbs, pronouns, and vague descriptions.",
+      },
+      { role: "user", content: lines.join("\n") },
+    ];
+  }
+
   lines.push("Known entities:");
   params.candidates.forEach((candidate, index) => {
     const summary = candidate.summary ? ` — ${candidate.summary}` : "";
@@ -293,18 +313,22 @@ function buildJudgeMessages(params: {
     );
   });
   lines.push("");
+  lines.push("Reply via tool:");
   lines.push(
-    "Reply via tool: decision='match' with selectedIndex, or decision='new' when none match.",
+    "- decision='match' with selectedIndex when the pointer key refers to a listed entity.",
   );
   lines.push(
-    "When decision='new', ALSO provide entity_description: 1-2 short sentences describing who/what this entity IS based on the context evidence. Write from a neutral third-person perspective about the entity itself — NOT about the agent's state of knowing or confusion. Match the conversation language.",
+    "- decision='new' when none match and it is a real named entity. ALSO provide entity_description: 1-2 short sentences about who/what this entity IS, neutral third-person, in the conversation language.",
+  );
+  lines.push(
+    "- decision='reject' if this is a common word, particle, pronoun, verb, or not a genuine named entity.",
   );
 
   return [
     {
       role: "system",
       content:
-        "You judge entity reference canonicalization. Choose exactly one existing entity index when it matches, otherwise choose new and supply a neutral entity_description.",
+        "You judge entity reference canonicalization. Choose exactly one existing entity index when it matches, create new with description when it is a real new entity, or reject noise.",
     },
     {
       role: "user",
@@ -592,6 +616,7 @@ export class EntityJudgeSweeper {
         judged: 0,
         matched: 0,
         created: 0,
+        rejected: 0,
         skipped_due_lock: true,
         decisions: [],
       };
@@ -630,6 +655,7 @@ export class EntityJudgeSweeper {
       const decisions: EntityJudgeDecision[] = [];
       let matched = 0;
       let created = 0;
+      let rejected = 0;
 
       for (const mention of unresolvedMentions) {
         const pointerKey = mention.pointerKey;
@@ -652,6 +678,24 @@ export class EntityJudgeSweeper {
         });
 
         if (candidates.length === 0) {
+          const zeroCalls = await this.modelProvider.chat(
+            buildJudgeMessages({ pointerKey, contextSummary, candidates }),
+            [JUDGE_TOOL],
+            { modelId },
+          );
+          const zeroParsed = parseJudgeCall(zeroCalls, 0);
+
+          if (zeroParsed.decision === "reject") {
+            rejected += 1;
+            decisions.push({
+              pointer_key: pointerKey,
+              decision: "reject",
+              ...(zeroParsed.rationale ? { rationale: zeroParsed.rationale } : {}),
+            });
+            continue;
+          }
+
+          const entitySummary = zeroParsed.entityDescription ?? contextSummary;
           let createdEntityId: number | null = null;
           if (!dryRun) {
             createdEntityId = await createRuntimeEntity({
@@ -660,7 +704,7 @@ export class EntityJudgeSweeper {
               displayName,
               agentId: opts.agentId,
               scope,
-              summary: contextSummary,
+              summary: entitySummary,
             });
           }
           if (createdEntityId != null) {
@@ -678,16 +722,14 @@ export class EntityJudgeSweeper {
               opts.agentId,
               pointerKey,
               createdEntityId,
-              contextSummary,
+              entitySummary,
             );
           }
           decisions.push({
             pointer_key: pointerKey,
             decision: "new",
-            ...(createdEntityId != null
-              ? { created_entity_id: createdEntityId }
-              : {}),
-            rationale: "no candidate entities available",
+            ...(createdEntityId != null ? { created_entity_id: createdEntityId } : {}),
+            ...(zeroParsed.rationale ? { rationale: zeroParsed.rationale } : {}),
           });
           continue;
         }
@@ -730,6 +772,17 @@ export class EntityJudgeSweeper {
             ...(parsed.confidence !== undefined
               ? { confidence: parsed.confidence }
               : {}),
+            ...(parsed.rationale ? { rationale: parsed.rationale } : {}),
+          });
+          continue;
+        }
+
+        if (parsed.decision === "reject") {
+          rejected += 1;
+          decisions.push({
+            pointer_key: pointerKey,
+            decision: "reject",
+            ...(parsed.confidence !== undefined ? { confidence: parsed.confidence } : {}),
             ...(parsed.rationale ? { rationale: parsed.rationale } : {}),
           });
           continue;
@@ -799,6 +852,7 @@ export class EntityJudgeSweeper {
         judged: decisions.length,
         matched,
         created,
+        rejected,
         skipped_due_lock: false,
         decisions,
       };

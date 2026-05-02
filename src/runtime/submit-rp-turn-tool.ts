@@ -79,7 +79,7 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         entityMentions: {
           type: "array",
           description:
-            "Optional list of explicitly named people, places, or notable items mentioned in this turn. Preserve the surface form from the conversation (e.g. 'Alice', '花房', '银怀表'). Omit pronouns and omit self/user/current room placeholders.",
+            "Optional list of explicitly named people, places, or notable items mentioned in this turn. Use typed pointer key format: 'char:Name' for characters, 'loc:Place' for locations, 'item:Object' for notable items (e.g. 'char:Alice', 'loc:花房', 'item:银怀表'). Omit pronouns and omit self/user/current room placeholders.",
           items: {
             type: "string",
           },

@@ -53,7 +53,8 @@ This is trace-only and never shown to the user.
 Optional but strongly recommended whenever the user or your reply explicitly names someone/somewhere/something worth remembering.
 
 Rules:
-- Preserve the surface form from the conversation, e.g. ["Alice"], ["花房"], ["银怀表"]
+- Use typed pointer key format: "char:Name" for characters, "loc:Place" for locations, "item:Object" for notable items
+- Examples: ["char:Alice"], ["loc:花房"], ["item:银怀表"]
 - Include only concrete named entities or highly salient objects, not pronouns or vague descriptions
 - Omit self / user / current_location placeholders
 - Deduplicate obvious repeats within the same turn
