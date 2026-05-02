@@ -162,6 +162,13 @@ export class AgentLoop {
 			const assistantToolBlockIndices = new Map<string, number>();
 			let assistantText = "";
 			let sawMessageEnd = false;
+			// Provider-private reasoning accumulator. Bound onto the assistant
+			// message's providerMetadata only when this turn produced tool calls
+			// (DeepSeek requires the echo on continuation; pure-text turns drop it).
+			// The chunk is *consumed* here, not yielded, so it never reaches
+			// downstream normalizers — the redaction firewall in chunk.ts is
+			// kept honest by removing the only path that could leak it.
+			let hiddenReasoningText = "";
 
 			try {
 				const completionRequest = this.buildCompletionRequest(
@@ -172,6 +179,13 @@ export class AgentLoop {
 				for await (const chunk of provider.chatCompletion(
 					completionRequest,
 				)) {
+					if (chunk.type === "hidden_reasoning_delta") {
+						if (chunk.format === "openai_reasoning_content") {
+							hiddenReasoningText += chunk.text;
+						}
+						continue;
+					}
+
 					if (chunk.type === "text_delta") {
 						assistantText += chunk.text;
 						appendTextBlock(assistantBlocks, chunk);
@@ -298,6 +312,14 @@ export class AgentLoop {
 				assistantText,
 			);
 			if (assistantMessage) {
+				if (hiddenReasoningText && normalizedToolCalls.length > 0) {
+					assistantMessage.providerMetadata = {
+						hiddenReasoning: {
+							format: "openai_reasoning_content",
+							text: hiddenReasoningText,
+						},
+					};
+				}
 				workingMessages.push(assistantMessage);
 				if (sawMessageEnd) {
 					this.projectionSink.onProjectionEligible(
@@ -471,6 +493,7 @@ export class AgentLoop {
 			const assistantBlocks: ContentBlock[] = [];
 			const assistantToolBlockIndices = new Map<string, number>();
 			let assistantText = "";
+			let hiddenReasoningText = ""; // see runStreaming for the contract
 			const modelCallStart = Date.now();
 
 			try {
@@ -496,6 +519,13 @@ export class AgentLoop {
 							timestamp: Date.now(),
 						});
 						return { error: chunk.message };
+					}
+
+					if (chunk.type === "hidden_reasoning_delta") {
+						if (chunk.format === "openai_reasoning_content") {
+							hiddenReasoningText += chunk.text;
+						}
+						continue;
 					}
 
 					if (chunk.type === "text_delta") {
@@ -608,6 +638,14 @@ export class AgentLoop {
 				assistantText,
 			);
 			if (assistantMessage) {
+				if (hiddenReasoningText && normalizedToolCalls.length > 0) {
+					assistantMessage.providerMetadata = {
+						hiddenReasoning: {
+							format: "openai_reasoning_content",
+							text: hiddenReasoningText,
+						},
+					};
+				}
 				workingMessages.push(assistantMessage);
 			}
 

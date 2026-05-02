@@ -34,6 +34,10 @@ type OpenAIChatChunkPayload = {
     delta?: {
       content?: string;
       tool_calls?: OpenAIChatDeltaToolCall[];
+      // DeepSeek (and other thinking-capable OpenAI-compatible providers)
+      // surface their hidden reasoning stream alongside `content`. The field
+      // is provider-specific and intentionally not part of the OpenAI spec.
+      reasoning_content?: string;
     };
     finish_reason?: string | null;
   }>;
@@ -180,6 +184,15 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       const content = choice.delta?.content;
       if (content) {
         yield { type: "text_delta", text: content };
+      }
+
+      const reasoning = choice.delta?.reasoning_content;
+      if (reasoning) {
+        yield {
+          type: "hidden_reasoning_delta",
+          text: reasoning,
+          format: "openai_reasoning_content",
+        };
       }
 
         for (const toolCall of choice.delta?.tool_calls ?? []) {
@@ -345,11 +358,21 @@ function normalizePathPrefix(pathPrefix: string | undefined): string {
 }
 
 function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
+  // Hidden reasoning echo (DeepSeek `reasoning_content`). Only attached to
+  // prior-turn assistant messages. The provider serializer is the *only*
+  // place this field should be read from `ChatMessage.providerMetadata`.
+  const reasoningEcho =
+    message.role === "assistant" &&
+    message.providerMetadata?.hiddenReasoning?.format === "openai_reasoning_content"
+      ? message.providerMetadata.hiddenReasoning.text
+      : undefined;
+
   if (typeof message.content === "string") {
     return {
       role: message.role === "tool" ? "tool" : message.role,
       content: message.content,
       tool_call_id: message.toolCallId,
+      ...(reasoningEcho !== undefined ? { reasoning_content: reasoningEcho } : {}),
     };
   }
 
@@ -372,6 +395,7 @@ function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
       role: "assistant",
       content: textContent || null,
       tool_calls: toolCalls,
+      ...(reasoningEcho !== undefined ? { reasoning_content: reasoningEcho } : {}),
     };
   }
 
@@ -379,6 +403,7 @@ function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
     role: message.role === "tool" ? "tool" : message.role,
     content: toOpenAIContentBlocks(message.content),
     tool_call_id: message.toolCallId,
+    ...(reasoningEcho !== undefined ? { reasoning_content: reasoningEcho } : {}),
   };
 }
 

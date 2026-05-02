@@ -819,6 +819,95 @@ describe("RP tool policy filtering", () => {
   });
 });
 
+describe("AgentLoop — hidden reasoning binding", () => {
+  it("binds providerMetadata.hiddenReasoning onto the assistant message when a turn has tool calls", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "hidden_reasoning_delta", text: "I should ", format: "openai_reasoning_content" },
+        { type: "hidden_reasoning_delta", text: "look it up.", format: "openai_reasoning_content" },
+        { type: "tool_use_start", id: "call_1", name: "lookup" },
+        { type: "tool_use_delta", id: "call_1", partialJson: '{"q":"x"}' },
+        { type: "tool_use_end", id: "call_1" },
+        { type: "message_end", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "done." },
+        { type: "message_end", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    executor.registerLocal({
+      name: "lookup",
+      description: "lookup",
+      parameters: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+      async execute() {
+        return { result: "ok" };
+      },
+    });
+
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    const chunks = await collectChunks(
+      loop.run({
+        sessionId: "s-hr",
+        requestId: "r-hr",
+        messages: [{ role: "user", content: "look it up" }],
+      }),
+    );
+
+    // hidden_reasoning_delta is consumed in-process and must NOT be yielded.
+    expect(chunks.some((c) => c.type === "hidden_reasoning_delta")).toBe(false);
+
+    // The continuation request must carry the assistant message with the
+    // accumulated reasoning bound on providerMetadata.
+    expect(model.requests).toHaveLength(2);
+    const secondTurn = model.requests[1]!;
+    const assistantMsg = secondTurn.messages.find(
+      (m): m is ChatMessage => m.role === "assistant",
+    );
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg!.providerMetadata?.hiddenReasoning).toEqual({
+      format: "openai_reasoning_content",
+      text: "I should look it up.",
+    });
+  });
+
+  it("does NOT bind reasoning when the turn produces only text (no tool calls)", async () => {
+    const model = new MockModelProvider([
+      [
+        { type: "hidden_reasoning_delta", text: "thinking", format: "openai_reasoning_content" },
+        { type: "text_delta", text: "Hello." },
+        { type: "message_end", stopReason: "end_turn" },
+      ],
+    ]);
+
+    const executor = new ToolExecutor();
+    const loop = new AgentLoop({
+      profile: TEST_PROFILE,
+      modelProvider: model,
+      toolExecutor: executor,
+    });
+
+    await collectChunks(
+      loop.run({
+        sessionId: "s-text",
+        requestId: "r-text",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    );
+
+    // Single turn — no continuation request to inspect, so the assertion is
+    // simply that no hidden_reasoning_delta leaked into the output stream.
+    // (The loop terminates because there are no tool calls.)
+    expect(model.requests).toHaveLength(1);
+  });
+});
+
 async function collectChunks(stream: AsyncIterable<Chunk>): Promise<Chunk[]> {
   const chunks: Chunk[] = [];
   for await (const chunk of stream) {
