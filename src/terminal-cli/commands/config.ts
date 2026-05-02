@@ -235,17 +235,18 @@ async function handleConfigValidate(
     }
   }
 
-  // 3. Required env var checks: at least one of ANTHROPIC_API_KEY or OPENAI_API_KEY
+  // 3. Required env var checks: at least one supported chat provider key
   const hasAnthropic = isEnvVarSet("ANTHROPIC_API_KEY");
   const hasOpenAI = isEnvVarSet("OPENAI_API_KEY");
   const hasMoonshot = isEnvVarSet("MOONSHOT_API_KEY");
+  const hasDeepSeek = isEnvVarSet("DEEPSEEK_API_KEY");
   const hasBailian = isEnvVarSet("BAILIAN_API_KEY");
 
-  if (!hasAnthropic && !hasOpenAI && !hasMoonshot) {
+  if (!hasAnthropic && !hasOpenAI && !hasMoonshot && !hasDeepSeek) {
     diagnostics.push({
       code: "config.missing_required_env",
       message:
-        "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, or MOONSHOT_API_KEY must be set",
+        "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, or DEEPSEEK_API_KEY must be set",
       locator: ".env",
     });
   }
@@ -315,7 +316,8 @@ async function handleConfigDoctor(
     const hasAnyApiKey =
         isEnvVarSet("ANTHROPIC_API_KEY") ||
         isEnvVarSet("OPENAI_API_KEY") ||
-        isEnvVarSet("MOONSHOT_API_KEY");
+        isEnvVarSet("MOONSHOT_API_KEY") ||
+        isEnvVarSet("DEEPSEEK_API_KEY");
 
   let memoryPipelineStatus: MemoryPipelineStatus = "chat_model_unavailable";
   let bootstrapError: Error | undefined;
@@ -355,7 +357,7 @@ async function handleConfigDoctor(
   } else if (!hasAnyApiKey) {
     status = "blocked";
     primaryCause = "missing_api_key";
-    fix = ".env: ANTHROPIC_API_KEY, OPENAI_API_KEY, or MOONSHOT_API_KEY";
+    fix = ".env: ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, or DEEPSEEK_API_KEY";
   } else if (agentGraphResult.parseFailureLocator) {
     status = "blocked";
     primaryCause = "config_load_failed";
@@ -580,7 +582,9 @@ function getNormalizedMemoryModelIds(
 function hasResolvedPrimaryProviderCredential(auth: AuthConfig): boolean {
   return (
     resolveProviderCredential("anthropic", auth) !== null ||
-    resolveProviderCredential("openai", auth) !== null
+    resolveProviderCredential("openai", auth) !== null ||
+    resolveProviderCredential("moonshot", auth) !== null ||
+    resolveProviderCredential("deepseek", auth) !== null
   );
 }
 
@@ -657,7 +661,7 @@ function getChatModelFix(
   hasPrimaryProviderCredential: boolean,
 ): string {
   if (!hasPrimaryProviderCredential) {
-    return ".env: ANTHROPIC_API_KEY or OPENAI_API_KEY";
+    return ".env: ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, or DEEPSEEK_API_KEY";
   }
   if (!migrationChatModelId) {
     return "config/runtime.json: memory.migrationChatModelId";

@@ -37,8 +37,10 @@ const providerSchema = z.object({
 	defaultEmbeddingModelId: z.string().min(1).optional(),
 	models: z.array(modelSchema).min(1, "provider.models must contain at least one model"),
 	warningMessage: z.string().min(1).optional(),
+	openAiPathPrefix: z.string().optional(),
 	supportsStreamingUsage: z.boolean().optional(),
 	extraHeaders: z.record(z.string(), z.string()).optional(),
+	supportsThinkingControl: z.boolean().optional(),
 	disableToolChoiceRequired: z.boolean().optional(),
 	embeddingDimensions: z.number().int().positive().optional(),
 });

@@ -15,6 +15,7 @@ describe("provider bootstrap catalog service", () => {
 		delete process.env.BAILIAN_API_KEY;
 		delete process.env.KIMI_CODING_API_KEY;
 		delete process.env.MOONSHOT_API_KEY;
+		delete process.env.DEEPSEEK_API_KEY;
 		delete process.env.MINIMAX_API_KEY;
 		delete process.env.OPENAI_CODEX_OAUTH_TOKEN;
 		delete process.env.ANTHROPIC_SETUP_TOKEN;

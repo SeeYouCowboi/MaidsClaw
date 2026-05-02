@@ -15,6 +15,7 @@ describe("Auth config loading", () => {
     mkdirSync(tmpDir, { recursive: true });
     // Clear relevant env vars
     delete process.env.MOONSHOT_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
     delete process.env.MINIMAX_API_KEY;
     delete process.env.OPENAI_CODEX_OAUTH_TOKEN;
     delete process.env.ANTHROPIC_SETUP_TOKEN;

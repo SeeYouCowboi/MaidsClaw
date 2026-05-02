@@ -35,6 +35,8 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       logger: context.logger as ConstructorParameters<typeof OpenAIProvider>[0]["logger"],
       supportsStreamingUsage: entry.supportsStreamingUsage,
       extraHeaders: entry.extraHeaders,
+      pathPrefix: entry.openAiPathPrefix,
+      supportsThinkingControl: entry.supportsThinkingControl,
       disableToolChoiceRequired: entry.disableToolChoiceRequired,
       embeddingDimensions: entry.embeddingDimensions,
     });
@@ -127,6 +129,13 @@ function resolveBootstrapCredential(providerId: string, auth: AuthConfig | undef
     const apiKey = process.env.MOONSHOT_API_KEY;
     if (apiKey && apiKey.trim() !== "") {
       return { type: "api-key", provider: "moonshot", apiKey };
+    }
+  }
+
+  if (providerId === "deepseek") {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (apiKey && apiKey.trim() !== "") {
+      return { type: "api-key", provider: "deepseek", apiKey };
     }
   }
 

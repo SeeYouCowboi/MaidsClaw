@@ -49,6 +49,7 @@ describe("docs and config smoke tests", () => {
   test(".env.example contains Tier B and Tier C commented examples", async () => {
     const envExample = await Bun.file(resolve(root, ".env.example")).text();
     expect(envExample.includes("MOONSHOT_API_KEY")).toBe(true);
+    expect(envExample.includes("DEEPSEEK_API_KEY")).toBe(true);
     expect(envExample.includes("MINIMAX_API_KEY")).toBe(true);
     expect(envExample.includes("OPENAI_CODEX_OAUTH_TOKEN")).toBe(true);
     expect(envExample.includes("ANTHROPIC_SETUP_TOKEN")).toBe(true);

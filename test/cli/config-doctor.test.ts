@@ -76,6 +76,7 @@ async function runDoctor(tmpRoot: string): Promise<ConfigDoctorResponse> {
 let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
 let savedMoonshotKey: string | undefined;
+let savedDeepSeekKey: string | undefined;
 let savedBailianKey: string | undefined;
 
 const originalPgInit = PgBackendFactory.prototype.initialize;
@@ -91,6 +92,7 @@ describe("config doctor", () => {
     savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
     savedOpenAIKey = process.env.OPENAI_API_KEY;
     savedMoonshotKey = process.env.MOONSHOT_API_KEY;
+    savedDeepSeekKey = process.env.DEEPSEEK_API_KEY;
     savedBailianKey = process.env.BAILIAN_API_KEY;
   });
 
@@ -115,6 +117,12 @@ describe("config doctor", () => {
       delete process.env.MOONSHOT_API_KEY;
     }
 
+    if (savedDeepSeekKey !== undefined) {
+      process.env.DEEPSEEK_API_KEY = savedDeepSeekKey;
+    } else {
+      delete process.env.DEEPSEEK_API_KEY;
+    }
+
     if (savedBailianKey !== undefined) {
       process.env.BAILIAN_API_KEY = savedBailianKey;
     } else {
@@ -127,6 +135,7 @@ describe("config doctor", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.MOONSHOT_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
     delete process.env.BAILIAN_API_KEY;
 
     writeConfigJson(tmpRoot, "runtime.json", {

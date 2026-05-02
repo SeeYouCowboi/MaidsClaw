@@ -246,6 +246,44 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
       },
     ],
   },
+  {
+    id: "deepseek",
+    displayName: "DeepSeek",
+    transportFamily: "openai-compatible",
+    apiKind: "openai",
+    riskTier: "compatible",
+    baseUrl: "https://api.deepseek.com",
+    openAiPathPrefix: "",
+    authModes: ["api-key"],
+    supportsThinkingControl: true,
+    supportsStreamingUsage: true,
+    selectionPolicy: {
+      enabledByDefault: true,
+      eligibleForAutoFallback: false,
+      isAutoDefault: false,
+    },
+    defaultChatModelId: "deepseek-v4-flash",
+    models: [
+      {
+        id: "deepseek-v4-flash",
+        displayName: "DeepSeek V4 Flash",
+        contextWindow: 1_000_000,
+        maxOutputTokens: 384_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsEmbedding: false,
+      },
+      {
+        id: "deepseek-v4-pro",
+        displayName: "DeepSeek V4 Pro",
+        contextWindow: 1_000_000,
+        maxOutputTokens: 384_000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsEmbedding: false,
+      },
+    ],
+  },
 
   // ── Experimental providers ────────────────────────────────────────
   {
@@ -322,6 +360,7 @@ export const BUILT_IN_PROVIDER_IDS = [
   "kimi-coding",
   "moonshot",
   "minimax",
+  "deepseek",
   "openai-chatgpt-codex-oauth",
   "anthropic-claude-pro-max-oauth",
 ] as const;

@@ -14,6 +14,8 @@ type OpenAIChatProviderOptions = {
   logger?: Logger;
   supportsStreamingUsage?: boolean;
   extraHeaders?: Record<string, string>;
+  pathPrefix?: string;
+  supportsThinkingControl?: boolean;
   disableToolChoiceRequired?: boolean;
   embeddingDimensions?: number;
 };
@@ -53,12 +55,14 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
   private readonly fetchImpl: FetchFn;
   private readonly logger?: Logger;
   private readonly defaultEmbeddingModel: string;
+  private readonly pathPrefix: string;
 
   constructor(private readonly options: OpenAIChatProviderOptions) {
     this.baseUrl = options.baseUrl ?? "https://api.openai.com";
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.logger = options.logger;
     this.defaultEmbeddingModel = options.defaultEmbeddingModel ?? "text-embedding-3-small";
+    this.pathPrefix = normalizePathPrefix(options.pathPrefix);
   }
 
   async *chatCompletion(request: ChatCompletionRequest): AsyncIterable<Chunk> {
@@ -72,7 +76,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       payloadBytes: payloadJson.length,
     });
 
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
+    const response = await this.fetchImpl(`${this.baseUrl}${this.pathPrefix}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -237,7 +241,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       ? modelId.slice(modelId.indexOf("/") + 1)
       : modelId;
 
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/embeddings`, {
+    const response = await this.fetchImpl(`${this.baseUrl}${this.pathPrefix}/embeddings`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -278,10 +282,11 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       ? request.modelId.slice(request.modelId.indexOf("/") + 1)
       : request.modelId;
 
-    // When disableThinking is requested on a thinking-capable provider
-    // (identified by disableToolChoiceRequired), we can safely send
-    // tool_choice: "required" because non-thinking mode supports it.
-    const thinkingDisabled = request.disableThinking && this.options.disableToolChoiceRequired;
+    // Some thinking-capable OpenAI-compatible providers support
+    // thinking:{type:"disabled"} for low-latency calls.
+    const thinkingDisabled =
+      request.disableThinking &&
+      (this.options.disableToolChoiceRequired || this.options.supportsThinkingControl);
 
     // Map provider-agnostic toolChoice to OpenAI's tool_choice format
     let toolChoice: string | Record<string, unknown> | undefined;
@@ -289,7 +294,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       if (request.toolChoice.type === "auto") {
         toolChoice = "auto";
       } else if (request.toolChoice.type === "any") {
-        // With thinking disabled, "required" is supported even on Moonshot/Kimi
+        // With thinking disabled, "required" is supported even on Moonshot/Kimi.
         const forceAuto = this.options.disableToolChoiceRequired && !thinkingDisabled;
         toolChoice = forceAuto ? "auto" : "required";
       } else if (request.toolChoice.type === "tool") {
@@ -314,8 +319,8 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       tool_choice: toolChoice,
     };
 
-    // Kimi K2.5: disable thinking for structured extraction tasks
-    // Only add this param for providers that have thinking capability
+    // Thinking-capable providers (Kimi K2.5, DeepSeek V4) can skip reasoning
+    // for low-latency Talker/structured extraction requests.
     if (thinkingDisabled) {
       result.thinking = { type: "disabled" };
     }
@@ -326,6 +331,17 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
 
     return result;
   }
+}
+
+function normalizePathPrefix(pathPrefix: string | undefined): string {
+  if (pathPrefix === undefined) {
+    return "/v1";
+  }
+  const trimmed = pathPrefix.trim();
+  if (trimmed === "" || trimmed === "/") {
+    return "";
+  }
+  return trimmed.startsWith("/") ? trimmed.replace(/\/+$/, "") : `/${trimmed.replace(/\/+$/, "")}`;
 }
 
 function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {

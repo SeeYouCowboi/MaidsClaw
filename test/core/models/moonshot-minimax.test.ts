@@ -42,6 +42,7 @@ beforeEach(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.KIMI_CODING_API_KEY;
   delete process.env.MOONSHOT_API_KEY;
+  delete process.env.DEEPSEEK_API_KEY;
   delete process.env.MINIMAX_API_KEY;
 });
 
@@ -189,6 +190,56 @@ describe("Moonshot (Metered API) via OpenAI-compatible transport", () => {
   });
 });
 
+describe("DeepSeek via OpenAI-compatible transport", () => {
+  it("resolves deepseek/deepseek-v4-flash and uses the official non-v1 chat path", async () => {
+    const fetchCalls: string[] = [];
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push(String(input));
+      capturedBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse([
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+        "data: [DONE]\n\n",
+      ]);
+    }) as typeof fetch;
+
+    const registry = bootstrapRegistry({
+      auth: {
+        credentials: [{ provider: "deepseek", type: "api-key", apiKey: "sk-deepseek-test" }],
+      },
+      fetchImpl: mockFetch,
+    });
+
+    const provider = registry.resolveChat("deepseek/deepseek-v4-flash");
+    expect(provider instanceof OpenAIProvider).toBe(true);
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "deepseek/deepseek-v4-flash",
+        messages: [{ role: "user", content: "ping" }],
+        disableThinking: true,
+      }),
+    );
+
+    expect(fetchCalls).toEqual(["https://api.deepseek.com/chat/completions"]);
+    expect(capturedBodies[0]?.model).toBe("deepseek-v4-flash");
+    expect(capturedBodies[0]?.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("resolves deepseek/deepseek-v4-pro to an OpenAIProvider via bootstrapRegistry", () => {
+    const registry = bootstrapRegistry({
+      auth: {
+        credentials: [{ provider: "deepseek", type: "api-key", apiKey: "sk-deepseek-test" }],
+      },
+      fetchImpl: (async () => sseResponse([])) as typeof fetch,
+    });
+
+    const provider = registry.resolveChat("deepseek/deepseek-v4-pro");
+    expect(provider instanceof OpenAIProvider).toBe(true);
+  });
+});
+
 describe("Streaming chunk normalization (Moonshot Metered)", () => {
   it("emits text_delta chunks from SSE stream", async () => {
     const mockFetch = (async (_input: RequestInfo | URL) => {
@@ -327,6 +378,17 @@ describe("Env var credential resolution", () => {
     expect(credential!.type).toBe("api-key");
     expect(credential!.provider).toBe("moonshot");
     expect((credential as { apiKey: string }).apiKey).toBe("sk-env-moonshot");
+  });
+
+  it("resolveProviderCredential picks up DEEPSEEK_API_KEY from env", () => {
+    process.env.DEEPSEEK_API_KEY = "sk-env-deepseek";
+
+    const credential = resolveProviderCredential("deepseek", { credentials: [] });
+
+    expect(credential).toBeDefined();
+    expect(credential!.type).toBe("api-key");
+    expect(credential!.provider).toBe("deepseek");
+    expect((credential as { apiKey: string }).apiKey).toBe("sk-env-deepseek");
   });
 
   it("resolveProviderCredential picks up MINIMAX_API_KEY from env", () => {

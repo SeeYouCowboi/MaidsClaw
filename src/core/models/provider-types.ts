@@ -65,8 +65,10 @@ export type ProviderCatalogEntry = {
   defaultEmbeddingModelId?: string; // default model ref for embedding
   models: ModelCatalogEntry[];
   warningMessage?: string; // shown on instantiation for experimental providers
+  openAiPathPrefix?: string; // path prefix for OpenAI-compatible APIs; defaults to "/v1"
   supportsStreamingUsage?: boolean; // true if provider supports stream_options.include_usage
   extraHeaders?: Record<string, string>; // additional HTTP headers sent with every request
+  supportsThinkingControl?: boolean; // true if provider accepts thinking: { type: enabled|disabled }
   disableToolChoiceRequired?: boolean; // true if provider rejects tool_choice:"required" (e.g. thinking-enabled models like Kimi K2.5)
   embeddingDimensions?: number; // explicit dimensions param for embedding requests (e.g. Bailian needs 1536 to match OpenAI output size)
 };

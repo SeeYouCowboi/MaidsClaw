@@ -115,6 +115,7 @@ async function runValidate(
 let savedAnthropicKey: string | undefined;
 let savedOpenAIKey: string | undefined;
 let savedMoonshotKey: string | undefined;
+let savedDeepSeekKey: string | undefined;
 let savedBailianKey: string | undefined;
 
 // ── Test suite ──────────────────────────────────────────────────────
@@ -127,6 +128,7 @@ describe("config validate", () => {
     savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
     savedOpenAIKey = process.env.OPENAI_API_KEY;
     savedMoonshotKey = process.env.MOONSHOT_API_KEY;
+    savedDeepSeekKey = process.env.DEEPSEEK_API_KEY;
     savedBailianKey = process.env.BAILIAN_API_KEY;
     process.env.ANTHROPIC_API_KEY = "sk-test-key";
   });
@@ -148,6 +150,11 @@ describe("config validate", () => {
       process.env.MOONSHOT_API_KEY = savedMoonshotKey;
     } else {
       delete process.env.MOONSHOT_API_KEY;
+    }
+    if (savedDeepSeekKey !== undefined) {
+      process.env.DEEPSEEK_API_KEY = savedDeepSeekKey;
+    } else {
+      delete process.env.DEEPSEEK_API_KEY;
     }
     if (savedBailianKey !== undefined) {
       process.env.BAILIAN_API_KEY = savedBailianKey;
@@ -221,6 +228,7 @@ describe("config validate", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.MOONSHOT_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
     delete process.env.BAILIAN_API_KEY;
 
     const result = await runValidate(tmpRoot);
@@ -239,6 +247,23 @@ describe("config validate", () => {
 
     delete process.env.ANTHROPIC_API_KEY;
     process.env.OPENAI_API_KEY = "sk-openai-test";
+
+    const result = await runValidate(tmpRoot);
+
+    const envDiags = result.data!.diagnostics.filter(
+      (d) => d.code === "config.missing_required_env",
+    );
+    expect(envDiags).toHaveLength(0);
+  });
+
+  it("having DEEPSEEK_API_KEY alone satisfies env check", async () => {
+    const tmpRoot = createTempDir();
+    writeValidConfig(tmpRoot);
+
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.MOONSHOT_API_KEY;
+    process.env.DEEPSEEK_API_KEY = "sk-deepseek-test";
 
     const result = await runValidate(tmpRoot);
 
@@ -431,6 +456,7 @@ describe("config validate", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.MOONSHOT_API_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
     delete process.env.BAILIAN_API_KEY;
 
     // Write malformed agents.json

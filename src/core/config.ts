@@ -372,6 +372,7 @@ const PROVIDER_ENV_MAP: Record<string, { envVar: string; credType: "api-key" | "
   "bailian": { envVar: "BAILIAN_API_KEY", credType: "api-key" },
   "kimi-coding": { envVar: "KIMI_CODING_API_KEY", credType: "api-key" },
   "moonshot": { envVar: "MOONSHOT_API_KEY", credType: "api-key" },
+  "deepseek": { envVar: "DEEPSEEK_API_KEY", credType: "api-key" },
   "minimax": { envVar: "MINIMAX_API_KEY", credType: "api-key" },
   "openai-chatgpt-codex-oauth": { envVar: "OPENAI_CODEX_OAUTH_TOKEN", credType: "oauth-token" },
   "anthropic-claude-pro-max-oauth": { envVar: "ANTHROPIC_SETUP_TOKEN", credType: "setup-token" },

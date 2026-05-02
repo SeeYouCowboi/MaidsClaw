@@ -244,8 +244,8 @@ MaidsClaw groups model providers into three tiers:
 **Tier A (Stable)**: `anthropic`, `openai`
 Official API keys via `.env`. These are the default providers and fully supported.
 
-**Tier B (Compatible)**: `moonshot`, `minimax`
-OpenAI-compatible providers. Set credentials in `config/auth.json` (preferred) or via env vars (`MOONSHOT_API_KEY`, `MINIMAX_API_KEY`). Not auto-selected by default; configure them explicitly via `config/providers.json`.
+**Tier B (Compatible)**: `moonshot`, `minimax`, `deepseek`
+OpenAI/Anthropic-compatible providers. Set credentials in `config/auth.json` (preferred) or via env vars (`MOONSHOT_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`). Not auto-selected by default; configure them explicitly via `config/agents.json`.
 
 **Tier C (Experimental)**: `OpenAI ChatGPT Codex OAuth`, `Anthropic Claude Pro/Max OAuth`
 Manual token import via `config/auth.json`. Enabled when credentials are present, but never auto-selected and never used as silent failover. Using these may violate provider terms of service.
@@ -258,7 +258,7 @@ Optional provider overrides live in `config/providers.json`. Copy the example to
 cp config/providers.example.json config/providers.json
 ```
 
-The example includes Moonshot/Kimi and MiniMax entries. You can also define custom OpenAI-compatible endpoints here.
+The example includes Moonshot/Kimi and MiniMax entries. DeepSeek V4 is built in; you can also define custom OpenAI-compatible endpoints here.
 
 ### Auth Configuration
 

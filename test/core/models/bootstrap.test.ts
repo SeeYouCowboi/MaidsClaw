@@ -27,6 +27,7 @@ const originalEnv = { ...process.env };
 beforeEach(() => {
   delete process.env.OPENAI_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.DEEPSEEK_API_KEY;
 });
 
 afterEach(() => {
@@ -173,13 +174,15 @@ describe("bootstrapRegistry", () => {
     expect(fetchCalls[0]).toContain("/v1/chat/completions");
   });
 
-  it("falls back to OPENAI_API_KEY and ANTHROPIC_API_KEY without auth config", () => {
+  it("falls back to provider API key env vars without auth config", () => {
     process.env.OPENAI_API_KEY = "env-openai-key";
     process.env.ANTHROPIC_API_KEY = "env-anthropic-key";
+    process.env.DEEPSEEK_API_KEY = "env-deepseek-key";
 
     const registry = bootstrapRegistry();
     expect(registry.resolveChat("openai/gpt-4o") instanceof OpenAIProvider).toBe(true);
     expect(registry.resolveChat("anthropic/claude-3-5-sonnet-20241022") instanceof AnthropicChatProvider).toBe(true);
+    expect(registry.resolveChat("deepseek/deepseek-v4-flash") instanceof OpenAIProvider).toBe(true);
   });
 });
 
