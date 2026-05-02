@@ -368,6 +368,38 @@ describe("OpenAIProvider — thinking-control fallback decision table", () => {
     expect(body.tool_choice).toBe("required");
   });
 
+  it("downgrades tool_choice='any' to 'auto' when disableToolChoiceRequired is set, even with thinking disabled", async () => {
+    // Regression guard: when a provider explicitly opts out of tool_choice='required'
+    // (Moonshot/Kimi, DeepSeek), forceToolUse:'any' must surface as 'auto' so the
+    // model has a free path to one-shot submit_rp_turn or emit plain text. The
+    // earlier `&& !thinkingDisabled` gate let thinking-off requests sneak back to
+    // 'required', which on a buffered RP loop with read-only tools turned into
+    // a runaway tool-call loop (see agent-loop.ts:489).
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        disableThinkingForToolCalls: true,
+        disableToolChoiceRequired: true,
+      },
+      { tools: [lookupTool], toolChoice: { type: "any" } },
+    );
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body.tool_choice).toBe("auto");
+  });
+
+  it("downgrades tool_choice='any' to 'auto' when disableToolChoiceRequired is set and thinking is on", async () => {
+    // Symmetric guard for the thinking-on case (e.g. plain Moonshot/Kimi without
+    // any thinking-control plumbing).
+    const body = await captureRequestForOpts(
+      {
+        disableToolChoiceRequired: true,
+      },
+      { tools: [lookupTool], toolChoice: { type: "any" } },
+    );
+    expect(body.thinking).toBeUndefined();
+    expect(body.tool_choice).toBe("auto");
+  });
+
   it("does NOT emit thinking:disabled when provider has no thinking-control capability", async () => {
     const body = await captureRequestForOpts(
       {

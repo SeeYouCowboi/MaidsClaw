@@ -718,6 +718,62 @@ describe("AgentLoop.runBuffered", () => {
 
 		expect(result).toEqual({ error: "RP turn ended without submit_rp_turn" });
 	});
+
+	it("aborts with step-cap error when model loops on non-submit tools without converging", async () => {
+		// Regression guard for the runaway-tool-loop bug observed on DeepSeek-V4
+		// with thinking disabled and tool_choice='required': the model substituted
+		// repeated read-only tool calls for internal reasoning and never reached
+		// submit_rp_turn, blowing past 154 iterations before the upstream 180s
+		// commit budget tripped. The MAX_AGENT_STEPS cap (12) ensures we abort
+		// cleanly so the talker retry loop can re-attempt with a fresh prompt.
+		const explorationTurn = (id: string): Chunk[] => [
+			{ type: "tool_use_start", id, name: "explore" },
+			{ type: "tool_use_delta", id, partialJson: '{"q":"more"}' },
+			{ type: "tool_use_end", id },
+			{ type: "message_end", stopReason: "tool_use" },
+		];
+		// 13 consecutive non-submit turns — one more than the cap allows.
+		const responses: Chunk[][] = [];
+		for (let i = 0; i < 13; i += 1) {
+			responses.push(explorationTurn(`call_${i + 1}`));
+		}
+		const model = new MockModelProvider(responses);
+
+		const executor = new ToolExecutor();
+		const exploreTool: ToolDefinition = {
+			name: "explore",
+			description: "Read-only exploration tool",
+			parameters: { type: "object", properties: { q: { type: "string" } } },
+			effectClass: "read_only",
+			async execute() {
+				return { result: "more context" };
+			},
+		};
+		executor.registerLocal(exploreTool);
+
+		const loop = new AgentLoop({
+			profile: {
+				...rpProfile(["explore", "submit_rp_turn"]),
+			},
+			modelProvider: model,
+			toolExecutor: executor,
+		});
+
+		const result = await loop.runBuffered({
+			sessionId: "session-rp-runaway",
+			requestId: "request-rp-runaway",
+			messages: [{ role: "user", content: "explore something" }],
+		});
+
+		expect("error" in result).toBe(true);
+		if ("error" in result) {
+			expect(result.error).toContain("12");
+			expect(result.error).toContain("submit_rp_turn");
+		}
+		// 12 LLM calls allowed; the 13th iteration trips the cap before issuing
+		// another model request.
+		expect(model.requests.length).toBe(12);
+	});
 });
 
 describe("RunContext", () => {

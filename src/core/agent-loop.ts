@@ -47,6 +47,20 @@ type PendingToolCall = {
 	argumentsJson: string;
 };
 
+/**
+ * Hard cap on consecutive LLM rounds within a single agent-loop run.
+ * The loops only exit when the model voluntarily stops calling tools (or calls
+ * `submit_rp_turn` in buffered mode). With `tool_choice: "required"` plus a
+ * read-only buffered tool surface, a misbehaving model can substitute external
+ * exploration (read calls) for internal reasoning and never reach the
+ * canonical exit — observed on DeepSeek-V4 with thinking disabled, where one
+ * stalled turn ran 154 tool-call iterations before the upstream 180s commit
+ * budget tripped. The cap is independent of the `tool_choice` decision table:
+ * even after that fix lands, a future model + provider combination could
+ * regress, so we keep this fuse in place.
+ */
+const MAX_AGENT_STEPS = 12;
+
 export interface AgentLoopOptions {
 	profile: AgentProfile;
 	modelProvider: ChatModelProvider;
@@ -156,6 +170,24 @@ export class AgentLoop {
 
 		while (true) {
 			turnIndex += 1;
+			if (turnIndex > MAX_AGENT_STEPS) {
+				loopLogger?.warn("Agent loop hit MAX_AGENT_STEPS — aborting", {
+					cap: MAX_AGENT_STEPS,
+					conversationMessages: workingMessages.length,
+				});
+				request.traceStore?.addLogEntry(requestId, {
+					level: "error",
+					message: `agent_loop streaming: step cap ${MAX_AGENT_STEPS} reached, aborting`,
+					timestamp: Date.now(),
+				});
+				yield {
+					type: "error",
+					code: "AGENT_LOOP_STEP_CAP_EXCEEDED",
+					message: `Agent loop exceeded ${MAX_AGENT_STEPS} consecutive tool-call rounds without producing a final response`,
+					retriable: false,
+				};
+				return;
+			}
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];
@@ -488,6 +520,20 @@ export class AgentLoop {
 
 		while (true) {
 			turnIndex += 1;
+			if (turnIndex > MAX_AGENT_STEPS) {
+				loopLogger?.warn("Buffered agent loop hit MAX_AGENT_STEPS — aborting", {
+					cap: MAX_AGENT_STEPS,
+					conversationMessages: workingMessages.length,
+				});
+				request.traceStore?.addLogEntry(requestId, {
+					level: "error",
+					message: `agent_loop buffered: step cap ${MAX_AGENT_STEPS} reached without submit_rp_turn, aborting (talker retry will re-attempt)`,
+					timestamp: Date.now(),
+				});
+				return {
+					error: `Agent loop exceeded ${MAX_AGENT_STEPS} consecutive tool-call rounds without calling submit_rp_turn`,
+				};
+			}
 			const pendingToolCalls = new Map<string, PendingToolCall>();
 			const completedToolCalls: PendingToolCall[] = [];
 			const assistantBlocks: ContentBlock[] = [];

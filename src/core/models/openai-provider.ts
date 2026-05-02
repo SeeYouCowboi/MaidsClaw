@@ -338,8 +338,19 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       if (request.toolChoice.type === "auto") {
         toolChoice = "auto";
       } else if (request.toolChoice.type === "any") {
-        // With thinking disabled, "required" is supported even on Moonshot/Kimi.
-        const forceAuto = this.options.disableToolChoiceRequired && !thinkingDisabled;
+        // Honour `disableToolChoiceRequired` unconditionally. Earlier this gate
+        // was lifted when thinking was disabled (the assumption being that a
+        // non-thinking model would deterministically pick the right tool, so
+        // "required" was safe). In practice, on a buffered RP loop with a
+        // sizeable read-only tool surface, "required" + thinking-off lets the
+        // model substitute "external exploration" via repeated read tool
+        // calls for internal reasoning — never reaching `submit_rp_turn` and
+        // running away inside `agent-loop.ts:489`. Honouring the provider's
+        // explicit opt-out (set on Moonshot/Kimi and now DeepSeek) lets
+        // `tool_choice: "auto"` give the model a fallback path to one-shot
+        // the canonical tool or emit plain text (which the buffered loop
+        // already wraps via `assistantText.length > 0` exit at line 673).
+        const forceAuto = this.options.disableToolChoiceRequired === true;
         toolChoice = forceAuto ? "auto" : "required";
       } else if (request.toolChoice.type === "tool") {
         toolChoice = { type: "function", function: { name: request.toolChoice.name } };
