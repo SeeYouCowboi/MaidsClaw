@@ -21,22 +21,6 @@ type OpenAIChatProviderOptions = {
   requiresReasoningEchoForToolCalls?: boolean;
   disableThinkingForToolCalls?: boolean;
   embeddingDimensions?: number;
-  /**
-   * Idle timeout: aborts the request when no bytes have arrived from the
-   * server for this many ms (covering both the initial connect/headers
-   * phase and the body stream phase). Each successful body-stream read —
-   * including SSE keep-alive comments that do not surface as events —
-   * resets the timer. This matches DeepSeek's documented behaviour
-   * (https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit) of
-   * holding the connection open with periodic keep-alive lines during
-   * peak load.
-   *
-   * Defaults to 30s. Combined with the 3-attempt retry loop in
-   * runRpTalkerTurn (1s + 2s + 4s back-off), worst-case wall-clock is
-   * ~97s, well inside the 180s gateway-serialised user-message-commit
-   * budget. Set to 0 to disable.
-   */
-  requestIdleTimeoutMs?: number;
 };
 
 type OpenAIChatDeltaToolCall = {
@@ -99,66 +83,15 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       payloadBytes: payloadJson.length,
     });
 
-    const idleTimeoutMs = this.options.requestIdleTimeoutMs ?? 30_000;
-    const abortController = new AbortController();
-    let lastActivity = Date.now();
-    const resetIdle = (): void => {
-      lastActivity = Date.now();
-    };
-    const watchdogHandle =
-      idleTimeoutMs > 0
-        ? setInterval(() => {
-            if (Date.now() - lastActivity > idleTimeoutMs) {
-              abortController.abort();
-            }
-          }, 1_000)
-        : undefined;
-    try {
-      yield* this.streamChatCompletion(
-        request,
-        payloadJson,
-        abortController.signal,
-        idleTimeoutMs,
-        resetIdle,
-      );
-    } finally {
-      if (watchdogHandle !== undefined) {
-        clearInterval(watchdogHandle);
-      }
-    }
-  }
-
-  private async *streamChatCompletion(
-    request: ChatCompletionRequest,
-    payloadJson: string,
-    signal: AbortSignal,
-    idleTimeoutMs: number,
-    onActivity: () => void,
-  ): AsyncIterable<Chunk> {
-    let response: Response;
-    try {
-      response = await this.fetchImpl(`${this.baseUrl}${this.pathPrefix}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.options.apiKey}`,
-          ...this.options.extraHeaders,
-        },
-        body: payloadJson,
-        signal,
-      });
-      onActivity();
-    } catch (error) {
-      if (signal.aborted) {
-        throw new MaidsClawError({
-          code: "MODEL_API_TIMEOUT",
-          message: `OpenAI chat request idle for >${idleTimeoutMs}ms during connect/headers`,
-          retriable: true,
-          details: { idleTimeoutMs, phase: "connect" },
-        });
-      }
-      throw error;
-    }
+    const response = await this.fetchImpl(`${this.baseUrl}${this.pathPrefix}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.options.apiKey}`,
+        ...this.options.extraHeaders,
+      },
+      body: payloadJson,
+    });
 
     if (!response.ok) {
       let errorBody: string | undefined;
@@ -169,9 +102,9 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       }
 
       const parsedError = parseErrorBody(errorBody);
-      const msgRoles = request.messages
-        .map((m) => `${m.role}${m.toolCallId ? `(tcid:${m.toolCallId})` : ""}`)
-        .join(", ");
+      const msgRoles = (payload.messages as Array<{ role?: string; tool_call_id?: string }>)
+        ?.map((m) => `${m.role}${m.tool_call_id ? `(tcid:${m.tool_call_id})` : ""}`)
+        ?.join(", ");
       this.logger?.error("Model API error", undefined, {
         status: response.status,
         errorType: parsedError?.type,
@@ -210,29 +143,7 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
     let emittedMessageEnd = false;
     let usageInputTokens: number | undefined;
     let usageOutputTokens: number | undefined;
-    const sseIterator = (async function* (
-      body: ReadableStream<Uint8Array>,
-      signalRef: AbortSignal,
-      idleMs: number,
-      heartbeat: () => void,
-    ): AsyncIterable<SseEvent> {
-      try {
-        for await (const event of parseSseEvents(body, heartbeat)) {
-          yield event;
-        }
-      } catch (error) {
-        if (signalRef.aborted) {
-          throw new MaidsClawError({
-            code: "MODEL_API_TIMEOUT",
-            message: `OpenAI chat stream idle for >${idleMs}ms`,
-            retriable: true,
-            details: { idleTimeoutMs: idleMs, phase: "stream" },
-          });
-        }
-        throw error;
-      }
-    })(response.body, signal, idleTimeoutMs, onActivity);
-    for await (const event of sseIterator) {
+    for await (const event of parseSseEvents(response.body)) {
       if (!event.data) {
         continue;
       }
@@ -564,10 +475,7 @@ type SseEvent = {
   data?: string;
 };
 
-async function* parseSseEvents(
-  stream: ReadableStream<Uint8Array>,
-  onRead?: () => void,
-): AsyncIterable<SseEvent> {
+async function* parseSseEvents(stream: ReadableStream<Uint8Array>): AsyncIterable<SseEvent> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -577,11 +485,6 @@ async function* parseSseEvents(
     if (done) {
       break;
     }
-    // Reset the idle timer on every byte arrival, including SSE keep-alive
-    // comments that parseSingleSseEvent filters out before yielding. Without
-    // this, DeepSeek's peak-load keep-alive lines (':\n\n') would be dropped
-    // and the watchdog would trip even though the connection is alive.
-    onRead?.();
 
     buffer += decoder.decode(value, { stream: true });
     let boundary = buffer.indexOf("\n\n");
