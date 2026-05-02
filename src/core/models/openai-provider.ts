@@ -82,6 +82,12 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       maxTokens: payload.max_tokens,
       payloadBytes: payloadJson.length,
     });
+    // ── Diagnosis: forced stdout print of every OpenAI-compatible call
+    // (Talker DeepSeek + others) so volume / fan-out is visible without
+    // depending on logger configuration.
+    console.log(
+      `[llm-call] transport=openai model=${payload.model} messages=${(payload.messages as unknown[])?.length ?? 0} tools=${(payload.tools as unknown[])?.length ?? 0} thinking=${(payload as { thinking?: { type?: string } }).thinking?.type ?? "default"} payloadBytes=${payloadJson.length} maxTokens=${payload.max_tokens ?? "n/a"}`,
+    );
 
     const response = await this.fetchImpl(`${this.baseUrl}${this.pathPrefix}/chat/completions`, {
       method: "POST",

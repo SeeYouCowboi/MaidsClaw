@@ -93,6 +93,12 @@ export class AnthropicChatProvider implements ChatModelProvider {
 
   async *chatCompletion(request: ChatCompletionRequest): AsyncIterable<Chunk> {
     const payload = this.toRequestPayload(request);
+    const payloadJson = JSON.stringify(payload);
+    // ── Diagnosis: forced stdout print of every Anthropic-compatible call
+    // (MiniMax + native Anthropic) so we can correlate fan-out volume.
+    console.log(
+      `[llm-call] transport=anthropic model=${(payload as { model?: string }).model} messages=${((payload as { messages?: unknown[] }).messages ?? []).length} tools=${((payload as { tools?: unknown[] }).tools ?? []).length} thinking=${(payload as { thinking?: { type?: string } }).thinking?.type ?? "default"} payloadBytes=${payloadJson.length} maxTokens=${(payload as { max_tokens?: number }).max_tokens ?? "n/a"}`,
+    );
     const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
@@ -100,7 +106,7 @@ export class AnthropicChatProvider implements ChatModelProvider {
         "x-api-key": this.options.apiKey,
         "anthropic-version": ANTHROPIC_VERSION,
       },
-      body: JSON.stringify(payload),
+      body: payloadJson,
     });
 
     if (!response.ok) {
