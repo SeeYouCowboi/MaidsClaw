@@ -6,6 +6,29 @@ import type { InteractionRecord, TurnSettlementPayload } from "./contracts.js";
 import { normalizeSettlementPayload } from "./settlement-adapter.js";
 
 /**
+ * Defensive depth for hidden reasoning continuation metadata.
+ *
+ * `MessagePayload` does not declare a `providerMetadata` field today, so
+ * any such field on a message-typed record would be a contract violation.
+ * However, runtime payloads are typed `unknown`, and a future change might
+ * leak `ChatMessage.providerMetadata` into the interaction log via a copy
+ * shortcut. Strip it here so external consumers (transcript endpoint,
+ * settlement viewer, scenario reports) never observe it.
+ */
+function stripProviderMetadataFromPayload(payload: unknown): unknown {
+	if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+		return payload;
+	}
+	if (!("providerMetadata" in (payload as Record<string, unknown>))) {
+		return payload;
+	}
+	const { providerMetadata: _omit, ...rest } = payload as Record<string, unknown> & {
+		providerMetadata?: unknown;
+	};
+	return rest;
+}
+
+/**
  * Redacts sensitive fields from interaction records for external/debug/export use.
  *
  * For turn_settlement records:
@@ -21,9 +44,10 @@ import { normalizeSettlementPayload } from "./settlement-adapter.js";
 export function redactInteractionRecord(
 	record: InteractionRecord,
 ): InteractionRecord {
-	// Non-settlement records pass through unchanged (but still return a copy)
+	// Non-settlement records pass through unchanged (but still return a copy
+	// and strip any leaked providerMetadata defensively).
 	if (record.recordType !== "turn_settlement") {
-		return { ...record };
+		return { ...record, payload: stripProviderMetadataFromPayload(record.payload) };
 	}
 
 	const payload = record.payload as TurnSettlementPayload;

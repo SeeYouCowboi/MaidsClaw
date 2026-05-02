@@ -122,6 +122,13 @@ function chunkToGatewayEvent(
 
 export function chunkToObservationEvent(chunk: Chunk): ObservationEvent | null {
   switch (chunk.type) {
+    case "hidden_reasoning_delta":
+      // Redaction firewall: hidden reasoning is a provider-private continuation
+      // signal. It must never reach the gateway SSE stream, the local-turn-client
+      // public_chunks buffer, the trace store, the transcript endpoint, or any
+      // log surface. Returning `null` drops it at the conversion boundary;
+      // AgentLoop consumes the chunk in-process before this point.
+      return null;
     case "text_delta":
       return { type: "text_delta", text: chunk.text };
     case "tool_use_start":

@@ -703,3 +703,75 @@ describe("redactInteractionRecord — V5 artifact fields", () => {
     expect(payload.pinnedSummaryProposal).toBeUndefined();
   });
 });
+
+describe("redactInteractionRecord — providerMetadata defensive strip", () => {
+  it("removes providerMetadata from message records even though it is not a declared field", () => {
+    // Simulate a contract-violating leak where providerMetadata sneaks into a
+    // message payload (e.g. via a future spread shortcut that copies a
+    // ChatMessage straight into the interaction log).
+    const leakySecret = "REASONING-MUST-NEVER-LEAK-9d2f";
+    const record: InteractionRecord = {
+      sessionId: "sess-leak",
+      recordId: "msg-leak",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "message",
+      payload: {
+        role: "assistant",
+        content: "public reply",
+        providerMetadata: {
+          hiddenReasoning: {
+            format: "openai_reasoning_content",
+            text: leakySecret,
+            providerId: "deepseek",
+          },
+        },
+      } as unknown,
+      committedAt: 1234,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    const payload = redacted.payload as Record<string, unknown>;
+
+    expect(payload.providerMetadata).toBeUndefined();
+    expect(payload.role).toBe("assistant");
+    expect(payload.content).toBe("public reply");
+    expect(JSON.stringify(redacted)).not.toContain(leakySecret);
+  });
+
+  it("passes through non-message records without providerMetadata untouched", () => {
+    const record: InteractionRecord = {
+      sessionId: "sess-status",
+      recordId: "stat-1",
+      recordIndex: 0,
+      actorType: "system",
+      recordType: "status",
+      payload: { event: "session_started" },
+      committedAt: 1000,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    expect(redacted.payload).toEqual({ event: "session_started" });
+  });
+
+  it("does not mutate the input record", () => {
+    const original = {
+      role: "assistant" as const,
+      content: "x",
+      providerMetadata: { hiddenReasoning: { format: "openai_reasoning_content", text: "t" } },
+    };
+    const record: InteractionRecord = {
+      sessionId: "sess-immut",
+      recordId: "msg-immut",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "message",
+      payload: original as unknown,
+      committedAt: 1,
+    };
+
+    redactInteractionRecord(record);
+
+    expect((original as unknown as Record<string, unknown>).providerMetadata).toBeDefined();
+  });
+});

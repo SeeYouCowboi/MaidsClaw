@@ -70,5 +70,9 @@ export type ProviderCatalogEntry = {
   extraHeaders?: Record<string, string>; // additional HTTP headers sent with every request
   supportsThinkingControl?: boolean; // true if provider accepts thinking: { type: enabled|disabled }
   disableToolChoiceRequired?: boolean; // true if provider rejects tool_choice:"required" (e.g. thinking-enabled models like Kimi K2.5)
+  // ── Hidden reasoning continuation (DeepSeek `reasoning_content`, Anthropic `thinking` blocks) ──
+  supportsHiddenReasoningMetadata?: boolean; // true if provider stream emits and request-body accepts hidden reasoning echo
+  requiresReasoningEchoForToolCalls?: boolean; // true if provider rejects tool continuation without prior-turn reasoning echo (e.g. DeepSeek thinking + tools)
+  disableThinkingForToolCalls?: boolean; // true if AgentLoop should force thinking:disabled when invoking with tools (fallback when echo not implemented)
   embeddingDimensions?: number; // explicit dimensions param for embedding requests (e.g. Bailian needs 1536 to match OpenAI output size)
 };

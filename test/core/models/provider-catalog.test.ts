@@ -8,9 +8,9 @@ import {
 import type { ProviderCatalogEntry } from "../../../src/core/models/provider-types.js";
 
 describe("Provider catalog", () => {
-  it("contains all 8 required built-in provider IDs", () => {
-    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(8);
-    expect(BUILT_IN_PROVIDERS).toHaveLength(8);
+  it("contains all 9 required built-in provider IDs", () => {
+    expect(BUILT_IN_PROVIDER_IDS).toHaveLength(9);
+    expect(BUILT_IN_PROVIDERS).toHaveLength(9);
 
     const expectedIds = [
       "anthropic",
@@ -19,6 +19,7 @@ describe("Provider catalog", () => {
       "kimi-coding",
       "moonshot",
       "minimax",
+      "deepseek",
       "openai-chatgpt-codex-oauth",
       "anthropic-claude-pro-max-oauth",
     ];
@@ -99,7 +100,7 @@ describe("Provider catalog", () => {
     expect(openai!.baseUrl).toBe("https://my-proxy.example.com");
     // Other built-in providers should still be present
     expect(merged.find((p) => p.id === "anthropic")).toBeDefined();
-    expect(merged).toHaveLength(8);
+    expect(merged).toHaveLength(9);
   });
 
   it("mergeProviderOverrides adds new user-defined provider not in built-in list", () => {
@@ -134,7 +135,7 @@ describe("Provider catalog", () => {
 
     expect(local).toBeDefined();
     expect(local!.displayName).toBe("My Local LLM");
-    expect(merged).toHaveLength(9); // 8 built-in + 1 custom
+    expect(merged).toHaveLength(10); // 9 built-in + 1 custom
   });
 
   it("kimi-coding baseUrl is https://api.kimi.com/coding", () => {

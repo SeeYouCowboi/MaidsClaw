@@ -42,6 +42,9 @@ const providerSchema = z.object({
 	extraHeaders: z.record(z.string(), z.string()).optional(),
 	supportsThinkingControl: z.boolean().optional(),
 	disableToolChoiceRequired: z.boolean().optional(),
+	supportsHiddenReasoningMetadata: z.boolean().optional(),
+	requiresReasoningEchoForToolCalls: z.boolean().optional(),
+	disableThinkingForToolCalls: z.boolean().optional(),
 	embeddingDimensions: z.number().int().positive().optional(),
 });
 

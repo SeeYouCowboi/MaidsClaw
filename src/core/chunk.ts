@@ -52,6 +52,29 @@ export type ErrorChunk = {
   retriable: boolean;
 };
 
+/**
+ * Hidden reasoning delta chunk — provider-emitted thinking/reasoning tokens
+ * that the model wants the *provider* to see again on tool continuation,
+ * but that MUST NOT reach the user, transcript, settlement, or persisted
+ * traces.
+ *
+ * This type intentionally does NOT have a counterpart in
+ * `app/contracts/execution.ts::ObservationEvent`. The conversion boundary
+ * `chunkToObservationEvent` in `gateway/controllers.ts` returns `null` for
+ * this case, which means hidden reasoning is dropped before it reaches
+ * the gateway SSE stream, the local-turn-client public_chunks buffer, or
+ * the trace store. AgentLoop consumes it in-process and binds the
+ * accumulated text onto the next assistant message's
+ * `providerMetadata.hiddenReasoning`, where the provider serializer can
+ * echo it back on the next request.
+ */
+export type HiddenReasoningDeltaChunk = {
+  type: "hidden_reasoning_delta";
+  text: string;
+  format: "openai_reasoning_content" | "anthropic_thinking";
+  providerId?: string;
+};
+
 /** Union of all chunk types */
 export type Chunk =
   | TextDeltaChunk
@@ -60,7 +83,8 @@ export type Chunk =
   | ToolUseEndChunk
   | ToolExecutionResultChunk
   | MessageEndChunk
-  | ErrorChunk;
+  | ErrorChunk
+  | HiddenReasoningDeltaChunk;
 
 // Type guards
 export function isTextDeltaChunk(c: Chunk): c is TextDeltaChunk {
@@ -89,6 +113,10 @@ export function isErrorChunk(c: Chunk): c is ErrorChunk {
 
 export function isToolExecutionResultChunk(c: Chunk): c is ToolExecutionResultChunk {
   return c.type === "tool_execution_result";
+}
+
+export function isHiddenReasoningDeltaChunk(c: Chunk): c is HiddenReasoningDeltaChunk {
+  return c.type === "hidden_reasoning_delta";
 }
 
 /** Helper type to accumulate tool-use argument chunks into a complete call */
