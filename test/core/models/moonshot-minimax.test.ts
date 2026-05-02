@@ -321,6 +321,65 @@ describe("MiniMax via Anthropic-compatible transport", () => {
     expect(thrown instanceof MaidsClawError).toBe(true);
     expect((thrown as MaidsClawError).code).toBe("MODEL_NOT_CONFIGURED");
   });
+
+  it("emits thinking:{type:'disabled'} when disableThinking is set (MiniMax thinking-mode escape)", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return sseResponse([
+        `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`,
+        `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "ok" } })}\n\n`,
+        `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+      ]);
+    }) as typeof fetch;
+
+    const registry = bootstrapRegistry({
+      auth: { credentials: [{ provider: "minimax", type: "api-key", apiKey: "sk" }] },
+      fetchImpl: mockFetch,
+    });
+    const provider = registry.resolveChat("minimax/MiniMax-M2.7-highspeed");
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "minimax/MiniMax-M2.7-highspeed",
+        messages: [{ role: "user", content: "ping" }],
+        disableThinking: true,
+      }),
+    );
+
+    expect(capturedBody?.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("does NOT emit thinking:{type:'disabled'} on a vanilla Anthropic provider (no capability flag)", async () => {
+    let capturedBody: Record<string, unknown> | undefined;
+    const mockFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return sseResponse([
+        `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: {} } })}\n\n`,
+        `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+      ]);
+    }) as typeof fetch;
+
+    // Construct AnthropicChatProvider directly without supportsThinkingControl
+    // — this mirrors vanilla anthropic provider config which must not send
+    // `thinking:{type:"disabled"}` (Claude rejects that form).
+    const provider = new AnthropicChatProvider({
+      apiKey: "sk-test",
+      baseUrl: "https://api.anthropic.com",
+      fetchImpl: mockFetch,
+      // supportsThinkingControl intentionally omitted
+    });
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "claude-3-5-sonnet-20241022",
+        messages: [{ role: "user", content: "ping" }],
+        disableThinking: true,
+      }),
+    );
+
+    expect(capturedBody?.thinking).toBeUndefined();
+  });
 });
 
 describe("Streaming chunk normalization (Kimi for Coding)", () => {

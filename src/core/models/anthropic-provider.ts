@@ -69,6 +69,15 @@ export type AnthropicChatProviderOptions = {
   baseUrl?: string;
   fetchImpl?: FetchFn;
   logger?: Logger;
+  /**
+   * Whether the provider's Anthropic-compatible endpoint accepts
+   * `thinking: { type: "disabled" }` to suppress hidden reasoning. True
+   * for MiniMax (M2.x thinking models). Vanilla Anthropic Claude does
+   * NOT accept this field — extended thinking is opt-in via
+   * `thinking: { type: "enabled", budget_tokens: ... }`, and there is no
+   * "disabled" form. Leave unset for Claude.
+   */
+  supportsThinkingControl?: boolean;
 };
 
 export class AnthropicChatProvider implements ChatModelProvider {
@@ -213,6 +222,13 @@ export class AnthropicChatProvider implements ChatModelProvider {
       }
     }
 
+    // Honour `disableThinking` for providers that accept the explicit
+    // `thinking: { type: "disabled" }` form (e.g. MiniMax). For vanilla
+    // Anthropic Claude, the absence of this field already means thinking
+    // is off, so we never emit it without the capability flag.
+    const thinkingDisabled =
+      request.disableThinking === true && this.options.supportsThinkingControl === true;
+
     return {
       model: bareModelId,
       max_tokens: request.maxTokens ?? 1024,
@@ -221,6 +237,7 @@ export class AnthropicChatProvider implements ChatModelProvider {
       system: typeof systemPrompt === "string" ? systemPrompt : undefined,
       tools: request.tools?.map((tool) => this.toAnthropicTool(tool)),
       tool_choice: toolChoice,
+      ...(thinkingDisabled ? { thinking: { type: "disabled" } } : {}),
       messages: request.messages
         .filter((message) => message.role !== "system")
         .map((message) => this.toAnthropicMessage(message)),

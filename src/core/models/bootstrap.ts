@@ -51,6 +51,7 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       baseUrl: entry.baseUrl,
       fetchImpl: context.fetchImpl,
       logger: context.logger as ConstructorParameters<typeof AnthropicChatProvider>[0]["logger"],
+      supportsThinkingControl: entry.supportsThinkingControl,
     });
     return { chatProvider: provider };
   },

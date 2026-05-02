@@ -201,6 +201,12 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
     riskTier: "compatible",
     baseUrl: "https://api.minimaxi.com/anthropic",
     authModes: ["api-key"],
+    // MiniMax M2.x are thinking models on an Anthropic-compatible
+    // endpoint; structured/talker calls would otherwise burn their
+    // entire output budget on hidden reasoning and return empty text.
+    // The Anthropic provider honours `disableThinking` only when this
+    // capability is set.
+    supportsThinkingControl: true,
     selectionPolicy: {
       enabledByDefault: true,
       eligibleForAutoFallback: false,
