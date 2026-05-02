@@ -17,6 +17,9 @@ type OpenAIChatProviderOptions = {
   pathPrefix?: string;
   supportsThinkingControl?: boolean;
   disableToolChoiceRequired?: boolean;
+  supportsHiddenReasoningMetadata?: boolean;
+  requiresReasoningEchoForToolCalls?: boolean;
+  disableThinkingForToolCalls?: boolean;
   embeddingDimensions?: number;
 };
 
@@ -295,10 +298,32 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       ? request.modelId.slice(request.modelId.indexOf("/") + 1)
       : request.modelId;
 
+    // ── Thinking-control fallback decision table ──────────────────────
     // Some thinking-capable OpenAI-compatible providers support
-    // thinking:{type:"disabled"} for low-latency calls.
+    // thinking:{type:"disabled"} for low-latency calls. We additionally
+    // auto-disable thinking when the provider would reject a tool
+    // continuation without an echo of the prior turn's reasoning, and
+    // we don't yet have echo plumbing wired for that provider.
+    const hasTools = (request.tools?.length ?? 0) > 0;
+    const echoRequiredButUnavailable =
+      hasTools &&
+      this.options.requiresReasoningEchoForToolCalls === true &&
+      this.options.supportsHiddenReasoningMetadata !== true;
+    const explicitDisableForTools =
+      hasTools && this.options.disableThinkingForToolCalls === true;
+    const autoDisableThinking = echoRequiredButUnavailable || explicitDisableForTools;
+
+    if (autoDisableThinking) {
+      this.logger?.warn("Auto-disabling thinking for tool-call request", {
+        reason: echoRequiredButUnavailable
+          ? "echo_required_but_unavailable"
+          : "disable_thinking_for_tool_calls",
+        toolCount: request.tools?.length ?? 0,
+      });
+    }
+
     const thinkingDisabled =
-      request.disableThinking &&
+      (request.disableThinking || autoDisableThinking) &&
       (this.options.disableToolChoiceRequired || this.options.supportsThinkingControl);
 
     // Map provider-agnostic toolChoice to OpenAI's tool_choice format

@@ -38,6 +38,9 @@ const TRANSPORT_FACTORIES: Record<TransportFamily, ProviderFactory> = {
       pathPrefix: entry.openAiPathPrefix,
       supportsThinkingControl: entry.supportsThinkingControl,
       disableToolChoiceRequired: entry.disableToolChoiceRequired,
+      supportsHiddenReasoningMetadata: entry.supportsHiddenReasoningMetadata,
+      requiresReasoningEchoForToolCalls: entry.requiresReasoningEchoForToolCalls,
+      disableThinkingForToolCalls: entry.disableThinkingForToolCalls,
       embeddingDimensions: entry.embeddingDimensions,
     });
     return { chatProvider: provider, embeddingProvider: provider };

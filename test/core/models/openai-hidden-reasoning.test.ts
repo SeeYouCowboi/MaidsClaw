@@ -252,3 +252,138 @@ describe("OpenAIProvider — hidden reasoning request echo", () => {
     expect("reasoning_content" in messages[1]!).toBe(false);
   });
 });
+
+describe("OpenAIProvider — thinking-control fallback decision table", () => {
+  type ProviderOpts = ConstructorParameters<typeof OpenAIProvider>[0];
+
+  async function captureRequestForOpts(
+    opts: Omit<ProviderOpts, "apiKey" | "fetchImpl">,
+    requestPatch: { tools?: { name: string; inputSchema: Record<string, unknown> }[]; toolChoice?: { type: "auto" | "any" | "tool"; name?: string }; disableThinking?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
+    let captured: Record<string, unknown> | undefined;
+    const provider = new OpenAIProvider({
+      apiKey: "sk-test",
+      baseUrl: "https://example.test",
+      pathPrefix: "",
+      ...opts,
+      fetchImpl: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        captured = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return sseResponse([
+          `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ]);
+      }) as typeof fetch,
+    });
+
+    await collectChunks(
+      provider.chatCompletion({
+        modelId: "deepseek-v4-flash",
+        messages: [{ role: "user", content: "hi" }],
+        tools: requestPatch.tools,
+        toolChoice: requestPatch.toolChoice as
+          | { type: "auto" }
+          | { type: "any" }
+          | { type: "tool"; name: string }
+          | undefined,
+        disableThinking: requestPatch.disableThinking,
+      }),
+    );
+
+    if (!captured) throw new Error("fetch was not invoked");
+    return captured;
+  }
+
+  const lookupTool = {
+    name: "lookup",
+    inputSchema: { type: "object", properties: {} } as Record<string, unknown>,
+  };
+
+  it("auto-disables thinking when echo is required but unavailable AND tools are present", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        requiresReasoningEchoForToolCalls: true,
+        // supportsHiddenReasoningMetadata intentionally absent
+      },
+      { tools: [lookupTool] },
+    );
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("does NOT auto-disable thinking when echo is required AND echo plumbing is available", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        requiresReasoningEchoForToolCalls: true,
+        supportsHiddenReasoningMetadata: true,
+      },
+      { tools: [lookupTool] },
+    );
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("does NOT auto-disable thinking when no tools are present (echo only matters for continuations)", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        requiresReasoningEchoForToolCalls: true,
+      },
+      { tools: undefined },
+    );
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("auto-disables thinking when disableThinkingForToolCalls is true AND tools are present", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        disableThinkingForToolCalls: true,
+      },
+      { tools: [lookupTool] },
+    );
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("does NOT auto-disable when disableThinkingForToolCalls is true but there are no tools", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        disableThinkingForToolCalls: true,
+      },
+      {},
+    );
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("preserves tool_choice='required' once thinking has been auto-disabled (no over-downgrade)", async () => {
+    const body = await captureRequestForOpts(
+      {
+        supportsThinkingControl: true,
+        requiresReasoningEchoForToolCalls: true,
+      },
+      { tools: [lookupTool], toolChoice: { type: "any" } },
+    );
+    // thinking gone → required is supported
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(body.tool_choice).toBe("required");
+  });
+
+  it("does NOT emit thinking:disabled when provider has no thinking-control capability", async () => {
+    const body = await captureRequestForOpts(
+      {
+        // no supportsThinkingControl, no disableToolChoiceRequired
+        requiresReasoningEchoForToolCalls: true,
+      },
+      { tools: [lookupTool] },
+    );
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("explicit request.disableThinking still takes effect on capable providers (regression)", async () => {
+    const body = await captureRequestForOpts(
+      { supportsThinkingControl: true },
+      { disableThinking: true },
+    );
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+});

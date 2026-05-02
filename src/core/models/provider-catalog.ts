@@ -256,6 +256,13 @@ export const BUILT_IN_PROVIDERS: ReadonlyArray<ProviderCatalogEntry> = [
     openAiPathPrefix: "",
     authModes: ["api-key"],
     supportsThinkingControl: true,
+    // DeepSeek V4 thinking-mode tool calls require the prior turn's
+    // reasoning to be echoed back as `reasoning_content` (handled by
+    // OpenAIProvider serializer). Both flags must be set together so
+    // the fallback decision table keeps thinking enabled rather than
+    // silently downgrading.
+    supportsHiddenReasoningMetadata: true,
+    requiresReasoningEchoForToolCalls: true,
     supportsStreamingUsage: true,
     selectionPolicy: {
       enabledByDefault: true,
