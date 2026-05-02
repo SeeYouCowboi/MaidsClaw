@@ -373,6 +373,21 @@ export class TurnService {
 		};
 		const rpTraceStore = effectiveRequest.traceStore;
 
+		// ── Timing instrumentation (live-test diagnosis) ──
+		// Logs each phase boundary inside the per-session locked region so we can
+		// see which step of the synchronous talker pipeline is the wall-clock
+		// dominator on long-context turns.
+		const turnStart = Date.now();
+		let phaseStart = turnStart;
+		const phaseLog = (phase: string): void => {
+			const now = Date.now();
+			console.log(
+				`[turn-timing] req=${requestId} phase=${phase} phase_ms=${now - phaseStart} total_ms=${now - turnStart}`,
+			);
+			phaseStart = now;
+		};
+		phaseLog("rp_talker_turn_start");
+
 		let settlementPayloadAfterCommit: TurnSettlementPayload | undefined;
 
 		const ownerAgentIdForGap =
@@ -432,6 +447,8 @@ export class TurnService {
 			}
 		}
 
+		phaseLog("after_soft_block");
+
 		// ── Talker retry loop ─────────────────────────────────────────────
 		// Wraps runBuffered → normalize → empty-check in up to TALKER_MAX_ATTEMPTS
 		// attempts with exponential backoff. Retries are invisible to SSE —
@@ -487,6 +504,8 @@ export class TurnService {
 			const backoffMs = 1000 * 2 ** (attempt - 1);
 			await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
 		}
+
+		phaseLog("after_talker_retry_loop");
 
 		if (!canonicalOutcome) {
 			const errorChunk = {
@@ -690,6 +709,7 @@ export class TurnService {
 				usedStaleState,
 			};
 
+			phaseLog("before_settlement_uow");
 			await this.settlementUnitOfWork.run(async (repos) => {
 				const versionResult =
 					await repos.recentCognitionSlotRepo.upsertRecentCognitionSlot(
@@ -733,6 +753,7 @@ export class TurnService {
 				}
 			});
 
+			phaseLog("after_settlement_uow");
 			settlementPayloadAfterCommit = settlementPayload;
 
 			try {
@@ -785,6 +806,8 @@ export class TurnService {
 			);
 		}
 
+		phaseLog("after_mark_talker_committed");
+
 		if (this.jobPersistence && talkerTurnVersion !== undefined) {
 			const thinkerJobEntry = {
 				id: `thinker:${effectiveRequest.sessionId}:${settlementId}`,
@@ -813,6 +836,8 @@ export class TurnService {
 			}
 		}
 
+		phaseLog("after_thinker_enqueue");
+
 		if (hasPublicReply) {
 			const textChunk: Chunk = {
 				type: "text_delta",
@@ -829,6 +854,7 @@ export class TurnService {
 		yield messageEndChunk;
 
 		rpTraceStore?.finalizeTrace(requestId);
+		phaseLog("rp_talker_turn_end");
 	}
 
 	/**

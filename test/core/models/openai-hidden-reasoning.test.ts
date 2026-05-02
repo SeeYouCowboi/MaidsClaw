@@ -387,3 +387,138 @@ describe("OpenAIProvider — thinking-control fallback decision table", () => {
     expect(body.thinking).toEqual({ type: "disabled" });
   });
 });
+
+describe("OpenAIProvider — idle timeout watchdog", () => {
+  it("aborts a hanging fetch after requestIdleTimeoutMs and throws retriable MODEL_API_TIMEOUT", async () => {
+    const provider = new OpenAIProvider({
+      apiKey: "sk-test",
+      baseUrl: "https://example.test",
+      pathPrefix: "",
+      // Idle timeout 1.5s — watchdog ticks every 1s, so 1500-2000ms is the
+      // earliest the abort can fire.
+      requestIdleTimeoutMs: 1_500,
+      // Hang forever unless abort signal fires.
+      fetchImpl: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        });
+      }) as typeof fetch,
+    });
+
+    let caught: unknown;
+    try {
+      await collectChunks(
+        provider.chatCompletion({
+          modelId: "deepseek-v4-flash",
+          messages: [{ role: "user", content: "ping" }],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeDefined();
+    expect((caught as { code: string }).code).toBe("MODEL_API_TIMEOUT");
+    expect((caught as { retriable: boolean }).retriable).toBe(true);
+  }, 10_000);
+
+  it("aborts a stalled body stream after requestIdleTimeoutMs", async () => {
+    const provider = new OpenAIProvider({
+      apiKey: "sk-test",
+      baseUrl: "https://example.test",
+      pathPrefix: "",
+      requestIdleTimeoutMs: 1_500,
+      fetchImpl: ((_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => {
+              controller.error(new Error("aborted"));
+            });
+          },
+        });
+        return Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+
+    let caught: unknown;
+    try {
+      await collectChunks(
+        provider.chatCompletion({
+          modelId: "deepseek-v4-flash",
+          messages: [{ role: "user", content: "ping" }],
+        }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeDefined();
+    expect((caught as { code: string }).code).toBe("MODEL_API_TIMEOUT");
+    expect((caught as { retriable: boolean }).retriable).toBe(true);
+    expect((caught as { details: { phase: string } }).details.phase).toBe("stream");
+  }, 10_000);
+
+  it("does NOT abort when the body keeps sending SSE keep-alive bytes (DeepSeek peak-load behaviour)", async () => {
+    // Simulates DeepSeek's documented behaviour: under peak load, the server
+    // holds the connection open with periodic keep-alive comments (`:\n\n`)
+    // that parseSingleSseEvent filters out. The watchdog must reset on these
+    // raw byte arrivals, not on yielded events.
+    const encoder = new TextEncoder();
+    const provider = new OpenAIProvider({
+      apiKey: "sk-test",
+      baseUrl: "https://example.test",
+      pathPrefix: "",
+      requestIdleTimeoutMs: 1_500, // would trip in 1.5s of silence
+      fetchImpl: (() => {
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            // Send 4 keep-alive comments at 700ms intervals (total 2.8s,
+            // longer than the idle timeout — without onRead reset this
+            // would abort).
+            for (let i = 0; i < 4; i++) {
+              controller.enqueue(encoder.encode(": keep-alive\n\n"));
+              await new Promise((r) => setTimeout(r, 700));
+            }
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`,
+              ),
+            );
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        );
+      }) as typeof fetch,
+    });
+
+    const chunks = await collectChunks(
+      provider.chatCompletion({
+        modelId: "deepseek-v4-flash",
+        messages: [{ role: "user", content: "ping" }],
+      }),
+    );
+
+    expect(chunks.some((c) => c.type === "text_delta" && c.text === "ok")).toBe(true);
+    expect(chunks.some((c) => c.type === "message_end")).toBe(true);
+  }, 10_000);
+});
