@@ -13,7 +13,9 @@ export type AgentFileEntry = {
 	lifecycle?: AgentLifecycle;
 	userFacing?: boolean;
 	outputMode?: OutputMode;
+	/** @deprecated Use thinkerModelId and talkerModelId. */
 	modelId?: string;
+	talkerThinkerEnabled?: boolean;
 	talkerModelId?: string;
 	thinkerModelId?: string;
 	personaId?: string;

@@ -40,7 +40,9 @@ type RoleDefaults = Pick<
 	| "maxDelegationDepth"
 	| "lorebookEnabled"
 	| "narrativeContextEnabled"
-	| "modelId"
+	| "talkerThinkerEnabled"
+	| "talkerModelId"
+	| "thinkerModelId"
 	| "toolPermissions"
 >;
 
@@ -49,7 +51,8 @@ const ROLE_DEFAULTS: Record<AgentRole, RoleDefaults> = {
 		lifecycle: "persistent",
 		userFacing: true,
 		outputMode: "freeform",
-		modelId: "anthropic/claude-3-5-sonnet-20241022",
+		talkerThinkerEnabled: false,
+		thinkerModelId: "anthropic/claude-3-5-sonnet-20241022",
 		maxOutputTokens: 8192,
 		toolPermissions: [],
 		maxDelegationDepth: 3,
@@ -60,7 +63,9 @@ const ROLE_DEFAULTS: Record<AgentRole, RoleDefaults> = {
 		lifecycle: "persistent",
 		userFacing: true,
 		outputMode: "freeform",
-		modelId: "anthropic/claude-3-5-sonnet-20241022",
+		talkerThinkerEnabled: false,
+		talkerModelId: "anthropic/claude-3-5-sonnet-20241022",
+		thinkerModelId: "anthropic/claude-3-5-sonnet-20241022",
 		maxOutputTokens: 4096,
 		toolPermissions: [],
 		maxDelegationDepth: 1,
@@ -71,7 +76,8 @@ const ROLE_DEFAULTS: Record<AgentRole, RoleDefaults> = {
 		lifecycle: "ephemeral",
 		userFacing: false,
 		outputMode: "structured",
-		modelId: "anthropic/claude-3-5-haiku-20241022",
+		talkerThinkerEnabled: false,
+		thinkerModelId: "anthropic/claude-3-5-haiku-20241022",
 		maxOutputTokens: 2048,
 		toolPermissions: [],
 		maxDelegationDepth: 0,
@@ -168,15 +174,15 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 		? entry.toolPermissions.map((toolName) => ({ toolName, allowed: true }))
 		: [...defaults.toolPermissions];
 
-	const modelId = entry.modelId
+	const legacyModelId = entry.modelId
 		? normalizeModelRef(entry.modelId)
-		: defaults.modelId;
+		: undefined;
 	const talkerModelId = entry.talkerModelId
 		? normalizeModelRef(entry.talkerModelId)
-		: undefined;
+		: defaults.talkerModelId;
 	const thinkerModelId = entry.thinkerModelId
 		? normalizeModelRef(entry.thinkerModelId)
-		: undefined;
+		: (legacyModelId ?? defaults.thinkerModelId);
 
 	return {
 		id: entry.id,
@@ -184,7 +190,10 @@ function toAgentProfile(entry: AgentFileEntry): AgentProfile {
 		lifecycle: entry.lifecycle ?? defaults.lifecycle,
 		userFacing: entry.userFacing ?? defaults.userFacing,
 		outputMode: entry.outputMode ?? defaults.outputMode,
-		modelId,
+		talkerThinkerEnabled:
+			role === "rp_agent"
+				? (entry.talkerThinkerEnabled ?? defaults.talkerThinkerEnabled)
+				: false,
 		talkerModelId,
 		thinkerModelId,
 		maxOutputTokens: entry.maxOutputTokens ?? defaults.maxOutputTokens,

@@ -6,7 +6,7 @@ import {
 	PRESET_PROFILES,
 	TASK_AGENT_PROFILE,
 } from "../agents/presets.js";
-import type { AgentProfile } from "../agents/profile.js";
+import { getThinkerModelId, type AgentProfile } from "../agents/profile.js";
 import { AgentRegistry } from "../agents/registry.js";
 import { loadFileAgents } from "../app/config/agents/agent-loader.js";
 import { buildTraceStore } from "../app/diagnostics/trace-capture-config.js";
@@ -199,7 +199,7 @@ function buildHealthChecks(
 	};
 
 	try {
-		options.modelRegistry.resolveChat(options.healthCheckAgentProfile.modelId);
+		options.modelRegistry.resolveChat(getThinkerModelId(options.healthCheckAgentProfile));
 		healthChecks.models = "ok";
 	} catch {
 		healthChecks.models = "degraded";
@@ -939,6 +939,13 @@ export function bootstrapRuntime(
 	}
 	const authConfig = authConfigResult.auth;
 	const providerOverrides = loadProviderOverrides({ cwd: runtimeCwd });
+	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
+	const talkerThinkerEnabled = agentRegistry
+		.getAll()
+		.some(
+			(profile) =>
+				profile.role === "rp_agent" && profile.talkerThinkerEnabled === true,
+		);
 	const thinkerGlobalConcurrencyCap =
 		runtimeConfig.talkerThinker?.globalConcurrencyCap;
 
@@ -948,7 +955,7 @@ export function bootstrapRuntime(
 	const entityCanonicalizationFromConfig =
 		talkerThinkerFromConfig?.entityCanonicalization;
 	const talkerThinkerConfig: RuntimeBootstrapResult["talkerThinkerConfig"] = {
-		enabled: talkerThinkerFromConfig?.enabled ?? false,
+		enabled: talkerThinkerEnabled,
 		stalenessThreshold: talkerThinkerFromConfig?.stalenessThreshold ?? 2,
 		softBlockTimeoutMs: talkerThinkerFromConfig?.softBlockTimeoutMs ?? 3000,
 		softBlockPollIntervalMs:
@@ -1046,7 +1053,6 @@ export function bootstrapRuntime(
 	const sessionService =
 		options.sessionService ?? new SessionService({ pgRepo: pgSessionRepo });
 	const blackboard = options.blackboard ?? new Blackboard();
-	const agentRegistry = buildAgentRegistry(options, runtimeCwd);
 	const modelRegistry =
 		options.modelRegistry ??
 		bootstrapRegistry({
@@ -1072,7 +1078,7 @@ export function bootstrapRuntime(
 		createLazyPgRepo(() => new PgSharedBlockRepo(resolvePgPool()));
 
 	const memoryMigrationModelId =
-		options.memoryMigrationModelId ?? TASK_AGENT_PROFILE.modelId;
+		options.memoryMigrationModelId ?? getThinkerModelId(TASK_AGENT_PROFILE);
 	const memoryEmbeddingModelId = options.memoryEmbeddingModelId;
 	const effectiveOrganizerEmbeddingModelId =
 		options.memoryOrganizerEmbeddingModelId ?? memoryEmbeddingModelId;
@@ -1190,10 +1196,11 @@ export function bootstrapRuntime(
 		}
 
 		try {
-			const modelProvider = modelRegistry.resolveChat(profile.modelId);
+			const modelProvider = modelRegistry.resolveChat(getThinkerModelId(profile));
 			return new AgentLoop({
 				profile,
 				modelProvider,
+				modelResolver: (modelId) => modelRegistry.resolveChat(modelId),
 				toolExecutor,
 				promptBuilder: overrides?.promptBuilder ?? promptBuilder,
 				promptRenderer,
@@ -1896,6 +1903,7 @@ export function bootstrapRuntime(
 		maidenDecisionLog,
 		coreMemoryService,
 		personaService,
+		agentRegistry,
 	);
 
 	const pendingFlushRepo = createLazyPgRepo(

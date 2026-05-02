@@ -177,13 +177,13 @@ describe("loadFileAgents", () => {
 		expect(result.diagnostics).toHaveLength(0);
 	});
 
-	it("loads valid agents and normalizes modelId", () => {
+	it("loads valid agents and normalizes thinkerModelId", () => {
 		const tmpRoot = createTempDir();
 		const filePath = writeAgents(tmpRoot, [
 			{
 				id: "rp:test",
 				role: "rp_agent",
-				modelId: "claude-3-5-sonnet-20241022",
+				thinkerModelId: "claude-3-5-sonnet-20241022",
 				personaId: "alice",
 			},
 		]);
@@ -191,8 +191,8 @@ describe("loadFileAgents", () => {
 		const result = loadFileAgents(filePath);
 		expect(result.agents).toHaveLength(1);
 		expect(result.diagnostics).toHaveLength(0);
-		// modelId should be normalized with anthropic/ prefix
-		expect(result.agents[0]!.modelId).toBe(
+		// thinkerModelId should be normalized with anthropic/ prefix
+		expect(result.agents[0]!.thinkerModelId).toBe(
 			"anthropic/claude-3-5-sonnet-20241022",
 		);
 	});

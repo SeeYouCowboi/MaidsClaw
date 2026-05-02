@@ -399,7 +399,8 @@ describe("agent commands", () => {
 
 			const envelope = parseJsonOutput(raw);
 			const agent = (envelope.data as { agent: AgentFileEntry }).agent;
-			expect(agent.modelId).toBe("claude-opus-4-5");
+			expect(agent.talkerModelId).toBe("claude-opus-4-5");
+			expect(agent.thinkerModelId).toBe("claude-opus-4-5");
 		});
 	});
 

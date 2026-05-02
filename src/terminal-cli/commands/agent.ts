@@ -86,7 +86,9 @@ function entryToRow(entry: AgentFileEntry, source: string) {
 	return {
 		agent_id: entry.id,
 		role: entry.role,
-		model_id: entry.modelId ?? "(default)",
+		talker_thinker_enabled: entry.role === "rp_agent" && entry.talkerThinkerEnabled === true,
+		talker_model_id: entry.talkerModelId ?? "",
+		thinker_model_id: entry.thinkerModelId ?? entry.modelId ?? "(default)",
 		persona_id: entry.personaId ?? "",
 		enabled: entry.enabled !== false,
 		source,
@@ -125,11 +127,13 @@ async function handleAgentList(
 				requireAllProviders: false,
 			});
 
-			const agents = await host.admin.listRuntimeAgents() as Array<{ id: string; role: string; modelId?: string; personaId?: string }>;
+			const agents = await host.admin.listRuntimeAgents() as Array<{ id: string; role: string; talkerThinkerEnabled?: boolean; talkerModelId?: string; thinkerModelId?: string; modelId?: string; personaId?: string }>;
 			const rows = agents.map((a) => ({
 				agent_id: a.id,
 				role: a.role,
-				model_id: a.modelId ?? "(default)",
+				talker_thinker_enabled: a.role === "rp_agent" && a.talkerThinkerEnabled === true,
+				talker_model_id: a.talkerModelId ?? "",
+				thinker_model_id: a.thinkerModelId ?? a.modelId ?? "(default)",
 				persona_id: a.personaId ?? "",
 				enabled: true, // runtime agents are always enabled
 				source: "runtime",
@@ -147,7 +151,7 @@ async function handleAgentList(
 				} else {
 					writeText(
 						formatTable(
-							["agent_id", "role", "model_id", "persona_id", "enabled", "source"],
+							["agent_id", "role", "talker_thinker_enabled", "talker_model_id", "thinker_model_id", "persona_id", "enabled", "source"],
 							rows,
 						),
 					);
@@ -174,12 +178,12 @@ async function handleAgentList(
 		if (rows.length === 0) {
 			writeText("No agents found in config/agents.json.");
 		} else {
-			writeText(
-				formatTable(
-					["agent_id", "role", "model_id", "persona_id", "enabled", "source"],
-					rows,
-				),
-			);
+				writeText(
+					formatTable(
+						["agent_id", "role", "talker_thinker_enabled", "talker_model_id", "thinker_model_id", "persona_id", "enabled", "source"],
+						rows,
+					),
+				);
 		}
 	}
 }
@@ -328,7 +332,11 @@ function formatAgentDetail(data: Record<string, unknown>, source: string): strin
 	lines.push(`Agent: ${data.id}`);
 	lines.push(`  Role:      ${data.role}`);
 	lines.push(`  Source:    ${source}`);
-	lines.push(`  Model:     ${data.modelId ?? "(default)"}`);
+	lines.push(`  Talker/Thinker: ${data.talkerThinkerEnabled === true}`);
+	if (data.talkerModelId) {
+		lines.push(`  Talker Model:   ${data.talkerModelId}`);
+	}
+	lines.push(`  Thinker Model:  ${data.thinkerModelId ?? data.modelId ?? "(default)"}`);
 	lines.push(`  Enabled:   ${data.enabled !== false}`);
 	if (data.personaId) {
 		lines.push(`  Persona:   ${data.personaId}`);
@@ -407,7 +415,9 @@ async function handleAgentCreateRp(
 		id: agentId,
 		role: "rp_agent",
 		personaId,
-		modelId: modelId ?? "claude-3-5-sonnet-20241022",
+		talkerThinkerEnabled: true,
+		talkerModelId: modelId ?? "claude-3-5-sonnet-20241022",
+		thinkerModelId: modelId ?? "claude-3-5-sonnet-20241022",
 		enabled: true,
 		lifecycle: "persistent",
 		userFacing: true,
@@ -471,7 +481,7 @@ async function handleAgentCreateTask(
 	const newEntry: AgentFileEntry = {
 		id: agentId,
 		role: "task_agent",
-		modelId: modelId ?? "claude-3-5-haiku-20241022",
+		thinkerModelId: modelId ?? "claude-3-5-haiku-20241022",
 		enabled: true,
 		lifecycle: "ephemeral",
 		userFacing: false,

@@ -226,7 +226,6 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
     ? tt.entityCanonicalization as Record<string, unknown>
     : {};
   runtime.talkerThinker = {
-    enabled: typeof tt.enabled === "boolean" ? tt.enabled : false,
     stalenessThreshold: typeof tt.stalenessThreshold === "number" ? tt.stalenessThreshold : 2,
     softBlockTimeoutMs: typeof tt.softBlockTimeoutMs === "number" ? tt.softBlockTimeoutMs : 3000,
     softBlockPollIntervalMs: typeof tt.softBlockPollIntervalMs === "number" ? tt.softBlockPollIntervalMs : 500,

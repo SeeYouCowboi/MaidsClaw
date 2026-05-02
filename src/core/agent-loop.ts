@@ -1,4 +1,8 @@
-import type { AgentProfile } from "../agents/profile.js";
+import {
+	getTalkerModelId,
+	getThinkerModelId,
+	type AgentProfile,
+} from "../agents/profile.js";
 import type { TraceStore } from "../app/diagnostics/trace-store.js";
 import {
 	type CanonicalRpTurnOutcome,
@@ -46,6 +50,7 @@ type PendingToolCall = {
 export interface AgentLoopOptions {
 	profile: AgentProfile;
 	modelProvider: ChatModelProvider;
+	modelResolver?: (modelId: string) => ChatModelProvider;
 	toolExecutor: ToolExecutor;
 	promptBuilder?: PromptBuilder;
 	promptRenderer?: PromptRenderer;
@@ -73,6 +78,7 @@ export interface AgentRunRequest {
 export class AgentLoop {
 	private readonly profile: AgentProfile;
 	private readonly modelProvider: ChatModelProvider;
+	private readonly modelResolver?: AgentLoopOptions["modelResolver"];
 	private readonly toolExecutor: ToolExecutor;
 	private readonly promptBuilder?: PromptBuilder;
 	private readonly promptRenderer?: PromptRenderer;
@@ -84,6 +90,7 @@ export class AgentLoop {
 	constructor(options: AgentLoopOptions) {
 		this.profile = options.profile;
 		this.modelProvider = options.modelProvider;
+		this.modelResolver = options.modelResolver;
 		this.toolExecutor = options.toolExecutor;
 		this.promptBuilder = options.promptBuilder;
 		this.promptRenderer = options.promptRenderer;
@@ -161,7 +168,8 @@ export class AgentLoop {
 					workingMessages,
 					systemPrompt,
 				);
-				for await (const chunk of this.modelProvider.chatCompletion(
+				const provider = this.resolveModelProvider(completionRequest.modelId);
+				for await (const chunk of provider.chatCompletion(
 					completionRequest,
 				)) {
 					if (chunk.type === "text_delta") {
@@ -472,7 +480,8 @@ export class AgentLoop {
 					bufferedToolExecutor,
 					{ forceToolUse: true, isTalkerMode: request.isTalkerMode },
 				);
-				for await (const chunk of this.modelProvider.chatCompletion(
+				const provider = this.resolveModelProvider(completionRequest.modelId);
+				for await (const chunk of provider.chatCompletion(
 					completionRequest,
 				)) {
 					if (chunk.type === "error") {
@@ -768,7 +777,8 @@ export class AgentLoop {
 			const pendingCalls = new Map<string, PendingToolCall>();
 			const completed: PendingToolCall[] = [];
 
-			for await (const chunk of this.modelProvider.chatCompletion(retryRequest)) {
+			const provider = this.resolveModelProvider(retryRequest.modelId);
+			for await (const chunk of provider.chatCompletion(retryRequest)) {
 				if (chunk.type === "tool_use_start") {
 					pendingCalls.set(chunk.id, { id: chunk.id, name: chunk.name, argumentsJson: "" });
 				} else if (chunk.type === "tool_use_delta") {
@@ -932,8 +942,8 @@ export class AgentLoop {
 		// and leave thinking enabled so cognition/episode extraction is high quality.
 		const isTalkerMode = options?.isTalkerMode === true;
 		const modelId = isTalkerMode
-			? (this.profile.talkerModelId ?? this.profile.modelId)
-			: (this.profile.thinkerModelId ?? this.profile.modelId);
+			? getTalkerModelId(this.profile)
+			: getThinkerModelId(this.profile);
 
 		return {
 			modelId,
@@ -948,6 +958,10 @@ export class AgentLoop {
 			})),
 			disableThinking: isTalkerMode,
 		};
+	}
+
+	private resolveModelProvider(modelId: string): ChatModelProvider {
+		return this.modelResolver?.(modelId) ?? this.modelProvider;
 	}
 
 	private createBufferedToolExecutor(): ToolExecutor {

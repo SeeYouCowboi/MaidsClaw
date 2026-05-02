@@ -1,5 +1,6 @@
 import type { MaidenDecisionLog } from "../agents/maiden/decision-log.js";
 import type { AgentProfile } from "../agents/profile.js";
+import type { AgentRegistry } from "../agents/registry.js";
 import type { ObservationEvent } from "../app/contracts/execution.js";
 import type { RedactedSettlement } from "../app/contracts/inspect.js";
 import type { LogEntry } from "../app/contracts/trace.js";
@@ -131,6 +132,7 @@ export class TurnService {
 		private readonly maidenDecisionLog: MaidenDecisionLog | null = null,
 		private readonly coreMemoryService: CoreMemoryService | null = null,
 		private readonly personaService: PersonaService | null = null,
+		private readonly agentRegistry?: AgentRegistry,
 	) {}
 
 	setSettlementUnitOfWork(uow: SettlementUnitOfWork): void {
@@ -147,8 +149,11 @@ export class TurnService {
 		const OVERLAP_TURNS = 8;
 		const MIN_WINDOW_MESSAGES = OVERLAP_TURNS * 2;
 		let conversationWindowSize: number | undefined; // undefined = no limit (full history)
+		const talkerThinkerEnabled = await this.isTalkerThinkerEnabledForSession(
+			params.sessionId,
+		);
 
-		if (this.settlementUnitOfWork && this.talkerThinkerConfig.enabled) {
+		if (this.settlementUnitOfWork && talkerThinkerEnabled) {
 			try {
 				const ownerAgentId =
 					(await this.resolveQueueOwnerAgentId(params.sessionId)) ?? "";
@@ -272,8 +277,10 @@ export class TurnService {
 		await this.recordMaidenDecision(effectiveRequest, assistantActorType);
 
 		if (assistantActorType === "rp_agent") {
+			const talkerThinkerEnabled =
+				await this.isTalkerThinkerEnabledForSession(effectiveRequest.sessionId);
 			await this.bootstrapRpCoreMemory(effectiveRequest.sessionId);
-			if (this.talkerThinkerConfig.enabled) {
+			if (talkerThinkerEnabled) {
 				yield* this.runRpTalkerTurn(effectiveRequest, turnRangeStart);
 			} else {
 				yield* this.runRpBufferedTurn(effectiveRequest, turnRangeStart);
@@ -1791,6 +1798,20 @@ export class TurnService {
 			return "task_agent";
 		}
 		return "rp_agent";
+	}
+
+	private async isTalkerThinkerEnabledForSession(
+		sessionId: string,
+	): Promise<boolean> {
+		if (!this.agentRegistry) {
+			return this.talkerThinkerConfig.enabled;
+		}
+		const agentId = await this.resolveQueueOwnerAgentId(sessionId);
+		if (!agentId) {
+			return false;
+		}
+		const profile = this.agentRegistry.get(agentId);
+		return profile?.role === "rp_agent" && profile.talkerThinkerEnabled === true;
 	}
 
 	private async bootstrapRpCoreMemory(sessionId: string): Promise<void> {

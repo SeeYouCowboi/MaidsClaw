@@ -114,11 +114,13 @@ export type RuntimeConfig = {
   memory?: MemoryConfig;
   lightweightLlm?: LightweightLlmConfig;
   /**
-   * Talker/Thinker pipeline configuration.
+   * Talker/Thinker pipeline tuning. Per-agent enablement and Talker/Thinker
+   * model selection live in config/agents.json.
    * Production defaults: speakerNormalizationGate=true, sceneFactWritePath=true, sceneRetrieval=true, legacyAreaStateCompat=false
    */
   talkerThinker?: {
-    enabled: boolean;
+    /** Computed in runtime snapshots from agent profiles; ignored in runtime.json. */
+    enabled?: boolean;
     stalenessThreshold: number;
     softBlockTimeoutMs: number;
     softBlockPollIntervalMs: number;

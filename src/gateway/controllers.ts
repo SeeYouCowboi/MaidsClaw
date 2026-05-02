@@ -2032,7 +2032,10 @@ type AgentProfileLike = {
   lifecycle: string;
   userFacing: boolean;
   outputMode: string;
-  modelId: string;
+  talkerThinkerEnabled?: boolean;
+  talkerModelId?: string;
+  thinkerModelId?: string;
+  modelId?: string;
   personaId?: string;
   maxOutputTokens?: number;
   toolPermissions: Array<{ toolName: string; allowed: boolean }>;
@@ -2079,7 +2082,12 @@ function projectAgent(
     lifecycle: agent.lifecycle,
     user_facing: agent.userFacing,
     output_mode: agent.outputMode,
-    model_id: agent.modelId,
+    talker_thinker_enabled:
+      agent.role === "rp_agent" && agent.talkerThinkerEnabled === true,
+    ...(agent.talkerModelId !== undefined
+      ? { talker_model_id: agent.talkerModelId }
+      : {}),
+    thinker_model_id: agent.thinkerModelId ?? agent.modelId ?? "",
     tool_permissions: agent.toolPermissions.map((tp) => ({
       tool_name: tp.toolName,
       allowed: tp.allowed,
