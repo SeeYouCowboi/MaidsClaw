@@ -2563,7 +2563,14 @@ export class GraphNavigator {
       return { agent_id: record.ownerAgentId };
     }
     if (record.kind === "fact") {
-      return record.active ? { id: 1 } : null;
+      return record.active
+        ? {
+          owner_agent_id: record.ownerAgentId,
+          source_kind: record.sourceKind,
+          fact_text: record.factText,
+          predicate: record.predicate,
+        }
+        : null;
     }
     return null;
   }

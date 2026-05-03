@@ -1,0 +1,47 @@
+Task 8 — UnifiedEdgeReadRepo Contract + PG Reader MVP
+Date: 2026-05-03
+
+Implemented files
+- src/storage/domain-repos/contracts/unified-edge-read-repo.ts (NEW)
+- src/storage/domain-repos/pg/unified-edge-read-repo.ts (NEW)
+- src/storage/domain-repos/pg/retrieval-read-repo.ts
+- src/memory/visibility-policy.ts
+- src/storage/domain-repos/contracts/graph-read-query-repo.ts
+- src/storage/domain-repos/pg/graph-read-query-repo.ts
+- src/storage/domain-repos/contracts/index.ts
+- src/bootstrap/runtime.ts
+- src/memory/navigator.ts
+- src/memory/projection/projection-manager.ts
+
+Tests added/updated
+- test/pg-app/pg-unified-edge-read-repo.test.ts (NEW)
+- test/pg-app/pg-retrieval-read-repo.test.ts
+- src/memory/visibility-policy.test.ts
+- test/memory/visibility-policy.test.ts
+
+Behavioral evidence
+- Unified reader normalizes all 4 edge tables into UnifiedEdgeRecord.
+- worldStateOf(entity) filters out:
+  - source_kind = 'migration'
+  - fact_text IS NULL
+  - predicates: explicit_assertion / explicit_evaluation / explicit_commitment
+- worldStateOf and fact edge reads enforce owner visibility:
+  - owner_agent_id IS NULL OR owner_agent_id = viewerAgentId
+- t_invalid sentinel normalization:
+  - PG_MAX_BIGINT (including rounded int8 number parse) emits tInvalid = null.
+- retrieval readers now owner-filter fact rows in:
+  - readByEntity
+  - readByFactIds
+- VisibilityPolicy.isFactVisible now accepts optional metadata and is backward-compatible when metadata omitted.
+
+Verification commands and results
+1) bun run build
+   - exit 0
+
+2) bun test "src/memory/visibility-policy.test.ts" "test/memory/visibility-policy.test.ts" "test/pg-app/pg-retrieval-read-repo.test.ts" "test/pg-app/pg-unified-edge-read-repo.test.ts"
+   - 49 pass
+   - 0 fail
+
+Notes
+- PG tests continue to use describe.skipIf(skipPgTests), so they skip cleanly without PG env.
+- semantic_edges coverage in unified-edge tests bootstraps both truth and derived schemas.

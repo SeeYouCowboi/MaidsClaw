@@ -93,6 +93,10 @@ export type GraphNodeVisibilityRecord =
     nodeRef: NodeRef;
     kind: "fact";
     active: boolean;
+    ownerAgentId: string | null;
+    sourceKind: string | null;
+    factText: string | null;
+    predicate: string;
   }
   | {
     nodeRef: NodeRef;

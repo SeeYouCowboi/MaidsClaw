@@ -55,6 +55,7 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
       FROM fact_edges
       WHERE (source_entity_id = ${entity.id} OR target_entity_id = ${entity.id})
         AND t_invalid = ${PG_MAX_BIGINT}
+        AND (owner_agent_id IS NULL OR owner_agent_id = ${viewerContext.viewer_agent_id})
     `;
 
     const eventVisibilityPredicate =
@@ -144,7 +145,7 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
 
   async readByFactIds(
     ids: number[],
-    _viewerContext: ViewerContext,
+    viewerContext: ViewerContext,
   ): Promise<FactEdge[]> {
     const uniqueIds = Array.from(new Set(ids));
     if (uniqueIds.length === 0) {
@@ -156,6 +157,7 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
       FROM fact_edges
       WHERE id IN ${this.sql(uniqueIds)}
         AND t_invalid = ${PG_MAX_BIGINT}
+        AND (owner_agent_id IS NULL OR owner_agent_id = ${viewerContext.viewer_agent_id})
     `;
 
     return rows.map(normalizeFactRow);

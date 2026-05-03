@@ -834,8 +834,12 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
     if (factIds.length > 0) {
       const rows = await this.sql<{
         id: number | string;
+        owner_agent_id: string | null;
+        source_kind: string | null;
+        fact_text: string | null;
+        predicate: string;
       }[]>`
-        SELECT id
+        SELECT id, owner_agent_id, source_kind, fact_text, predicate
         FROM fact_edges
         WHERE id IN ${this.sql(factIds)}
           AND t_invalid = ${PG_MAX_BIGINT}
@@ -845,6 +849,10 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
           nodeRef: `fact:${Number(row.id)}` as NodeRef,
           kind: "fact",
           active: true,
+          ownerAgentId: row.owner_agent_id,
+          sourceKind: row.source_kind,
+          factText: row.fact_text,
+          predicate: row.predicate,
         });
       }
     }
@@ -1085,7 +1093,14 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
       return { agent_id: record.agentId };
     }
     if (record.kind === "fact") {
-      return record.active ? { id: 1 } : null;
+      return record.active
+        ? {
+          owner_agent_id: record.ownerAgentId,
+          source_kind: record.sourceKind,
+          fact_text: record.factText,
+          predicate: record.predicate,
+        }
+        : null;
     }
     return null;
   }

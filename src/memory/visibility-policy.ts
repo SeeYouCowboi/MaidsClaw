@@ -1,6 +1,19 @@
 import type { ViewerContext } from "./types.js";
 import { AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
 
+const INTERNAL_COGNITION_FACT_PREDICATES = new Set([
+  "explicit_assertion",
+  "explicit_evaluation",
+  "explicit_commitment",
+]);
+
+type FactVisibilityMeta = {
+  owner_agent_id?: string | null;
+  source_kind?: string | null;
+  fact_text?: string | null;
+  predicate?: string | null;
+};
+
 /**
  * Unified visibility policy for the memory graph.
  *
@@ -43,8 +56,38 @@ export class VisibilityPolicy {
     return false;
   }
 
-  isFactVisible(_viewerContext: ViewerContext): boolean {
-    // All fact_edges are world_public stable facts — always visible.
+  isFactVisible(
+    viewerContext: ViewerContext,
+    factMeta?: FactVisibilityMeta,
+  ): boolean {
+    // Backward-compatible behavior for legacy callsites that don't pass metadata.
+    if (!factMeta) {
+      return true;
+    }
+
+    const ownerAgentId = typeof factMeta.owner_agent_id === "string"
+      ? factMeta.owner_agent_id
+      : null;
+
+    // Shared and legacy rows (no owner) remain visible.
+    if (!ownerAgentId) {
+      return true;
+    }
+
+    // Owner-scoped rows are private to owner.
+    if (ownerAgentId !== viewerContext.viewer_agent_id) {
+      return false;
+    }
+
+    // Internal cognition predicates remain owner-private when owner exists.
+    // Reaching this line implies viewer is owner, so these stay visible here.
+    const predicate = typeof factMeta.predicate === "string"
+      ? factMeta.predicate
+      : null;
+    if (predicate && INTERNAL_COGNITION_FACT_PREDICATES.has(predicate)) {
+      return true;
+    }
+
     return true;
   }
 
@@ -110,7 +153,11 @@ export class VisibilityPolicy {
       return this.isEntityVisible(viewerContext, entity) ? "visible" : "hidden";
     }
     if (kind === "fact") {
-      return this.isFactVisible(viewerContext) ? "visible" : "hidden";
+      const factMeta = data as FactVisibilityMeta;
+      if (typeof factMeta.owner_agent_id === "string" && factMeta.owner_agent_id.length > 0) {
+        return this.isFactVisible(viewerContext, factMeta) ? "visible" : "private";
+      }
+      return this.isFactVisible(viewerContext, factMeta) ? "visible" : "hidden";
     }
     if (kind === "episode") {
       return this.isPrivateNodeVisible(viewerContext, data as { agent_id: string }) ? "visible" : "private";

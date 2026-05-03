@@ -140,6 +140,7 @@ import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-rep
 import { PgSessionRepo } from "../storage/domain-repos/pg/session-repo.js";
 import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
 import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { resolveStoragePaths } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
 import type { SettlementUnitOfWork } from "../storage/unit-of-work.js";
@@ -1348,6 +1349,9 @@ export function bootstrapRuntime(
 	const settlementLedgerRepo = createLazyPgRepo(
 		() => new PgSettlementLedgerRepo(resolvePgPool()),
 	);
+	const unresolvedOpsRepo = createLazyPgRepo(
+		() => new PgUnresolvedWorldStateOpsRepo(resolvePgPool()),
+	);
 	const resolveAreaPointerKeyForSessionSeed = async (
 		areaPointerKey: string,
 		agentId: string,
@@ -1827,6 +1831,7 @@ export function bootstrapRuntime(
 				{
 					sqlFactory: () => resolvePgPool(),
 					graphMutableStoreRepo: graphStoreRepo,
+					unresolvedOpsRepo,
 					graphReadQueryRepo: pgGraphReadQueryRepo,
 					episodeRepo,
 					promotionQueryRepo,
@@ -1862,6 +1867,8 @@ export function bootstrapRuntime(
 							readPublicationsBySettlement: (settlementId) =>
 								episodeRepo.readPublicationsBySettlement(settlementId),
 						},
+						graphStoreRepo,
+						unresolvedOpsRepo,
 					},
 				},
 				graphStorageService,
@@ -2330,7 +2337,14 @@ function graphVisibilityNodeData(
 		return { agent_id: record.ownerAgentId };
 	}
 	if (record.kind === "fact") {
-		return record.active ? { id: 1 } : null;
+		return record.active
+			? {
+				owner_agent_id: record.ownerAgentId,
+				source_kind: record.sourceKind,
+				fact_text: record.factText,
+				predicate: record.predicate,
+			}
+			: null;
 	}
 	return null;
 }

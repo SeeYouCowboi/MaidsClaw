@@ -68,11 +68,22 @@ describe.skipIf(skipPgTests)("PgRetrievalReadRepo", () => {
       const targetEntityId = Number(targetRows[0].id);
 
       await sql`
-        INSERT INTO fact_edges (source_entity_id, target_entity_id, predicate, t_valid, t_invalid, t_created, t_expired, source_event_id)
+        INSERT INTO fact_edges (
+          source_entity_id,
+          target_entity_id,
+          predicate,
+          owner_agent_id,
+          t_valid,
+          t_invalid,
+          t_created,
+          t_expired,
+          source_event_id
+        )
         VALUES
-          (${privateEntityId}, ${targetEntityId}, ${"knows"}, ${1000}, ${PG_MAX_BIGINT}, ${1000}, ${PG_MAX_BIGINT}, ${null}),
-          (${targetEntityId}, ${privateEntityId}, ${"met"}, ${1001}, ${PG_MAX_BIGINT}, ${1001}, ${PG_MAX_BIGINT}, ${null}),
-          (${privateEntityId}, ${targetEntityId}, ${"expired"}, ${1002}, ${1003}, ${1002}, ${1003}, ${null})
+          (${privateEntityId}, ${targetEntityId}, ${"knows"}, ${null}, ${1000}, ${PG_MAX_BIGINT}, ${1000}, ${PG_MAX_BIGINT}, ${null}),
+          (${targetEntityId}, ${privateEntityId}, ${"met"}, ${"agent-a"}, ${1001}, ${PG_MAX_BIGINT}, ${1001}, ${PG_MAX_BIGINT}, ${null}),
+          (${privateEntityId}, ${targetEntityId}, ${"other-owner-private"}, ${"agent-b"}, ${1002}, ${PG_MAX_BIGINT}, ${1002}, ${PG_MAX_BIGINT}, ${null}),
+          (${privateEntityId}, ${targetEntityId}, ${"expired"}, ${null}, ${1003}, ${1004}, ${1003}, ${1004}, ${null})
       `;
 
       await sql`
@@ -168,10 +179,22 @@ describe.skipIf(skipPgTests)("PgRetrievalReadRepo", () => {
       `;
 
       const factRows = await sql<{ id: number | string }[]>`
-        INSERT INTO fact_edges (source_entity_id, target_entity_id, predicate, t_valid, t_invalid, t_created, t_expired, source_event_id)
+        INSERT INTO fact_edges (
+          source_entity_id,
+          target_entity_id,
+          predicate,
+          owner_agent_id,
+          t_valid,
+          t_invalid,
+          t_created,
+          t_expired,
+          source_event_id
+        )
         VALUES
-          (${1}, ${2}, ${"active"}, ${1000}, ${PG_MAX_BIGINT}, ${1000}, ${PG_MAX_BIGINT}, ${null}),
-          (${1}, ${3}, ${"expired"}, ${1001}, ${1002}, ${1001}, ${1002}, ${null})
+          (${1}, ${2}, ${"active-shared"}, ${null}, ${1000}, ${PG_MAX_BIGINT}, ${1000}, ${PG_MAX_BIGINT}, ${null}),
+          (${1}, ${3}, ${"active-owned"}, ${"agent-a"}, ${1001}, ${PG_MAX_BIGINT}, ${1001}, ${PG_MAX_BIGINT}, ${null}),
+          (${1}, ${4}, ${"active-other-owner"}, ${"agent-b"}, ${1002}, ${PG_MAX_BIGINT}, ${1002}, ${PG_MAX_BIGINT}, ${null}),
+          (${1}, ${5}, ${"expired"}, ${null}, ${1003}, ${1004}, ${1003}, ${1004}, ${null})
         RETURNING id
       `;
 
@@ -186,8 +209,8 @@ describe.skipIf(skipPgTests)("PgRetrievalReadRepo", () => {
         factRows.map((row: { id: number | string }) => Number(row.id)),
         viewer(),
       );
-      expect(facts.length).toBe(1);
-      expect(facts[0].predicate).toBe("active");
+      expect(facts.length).toBe(2);
+      expect(new Set(facts.map((f) => f.predicate))).toEqual(new Set(["active-shared", "active-owned"]));
       expect(await repo.readByFactIds([], viewer())).toEqual([]);
     });
   });

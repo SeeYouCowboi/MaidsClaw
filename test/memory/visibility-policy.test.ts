@@ -63,4 +63,32 @@ describe("VisibilityPolicy", () => {
       expect(policy.getNodeDisposition(viewer, "episode:42", nodeData)).toBe("private");
     });
   });
+
+  describe("fact visibility owner scope", () => {
+    it("keeps legacy behavior when fact metadata is omitted", () => {
+      const viewer = makeViewer("agent-owner");
+      expect(policy.isFactVisible(viewer)).toBe(true);
+    });
+
+    it("shows shared fact rows to all viewers", () => {
+      const viewer = makeViewer("agent-other");
+      expect(policy.isFactVisible(viewer, { owner_agent_id: null, predicate: "knows" })).toBe(true);
+    });
+
+    it("shows owner-private fact rows only to owner", () => {
+      const ownerViewer = makeViewer("agent-owner");
+      const otherViewer = makeViewer("agent-other");
+
+      expect(policy.isFactVisible(ownerViewer, { owner_agent_id: "agent-owner", predicate: "likes" })).toBe(true);
+      expect(policy.isFactVisible(otherViewer, { owner_agent_id: "agent-owner", predicate: "likes" })).toBe(false);
+    });
+
+    it("marks owner-private fact disposition as private for non-owner", () => {
+      const viewer = makeViewer("agent-other");
+      expect(policy.getNodeDisposition(viewer, "fact:10", {
+        owner_agent_id: "agent-owner",
+        predicate: "explicit_assertion",
+      })).toBe("private");
+    });
+  });
 });
