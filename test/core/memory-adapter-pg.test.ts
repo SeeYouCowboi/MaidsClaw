@@ -7,6 +7,30 @@ import {
 import type { PromptDataRepos } from "../../src/memory/prompt-data.js";
 import type { RetrievalService } from "../../src/memory/retrieval.js";
 
+const OPTIONAL_WORLD_STATE_REPOS = {
+	aliasRepo: {
+		resolveAlias: async () => null,
+		resolveAliases: async (aliases: string[]) =>
+			new Map(aliases.map((a) => [a, null])),
+		createAlias: async () => 1,
+		getAliasesForEntity: async () => [],
+		findEntityById: async () => null,
+		findEntityByPointerKey: async () => null,
+		listSharedAliasStrings: async () => [],
+		listPrivateAliasStrings: async () => [],
+	} as unknown as NonNullable<PromptDataRepos["aliasRepo"]>,
+	unifiedEdgeReadRepo: {
+		edgesFrom: async () => [],
+		edgesTo: async () => [],
+		edgesAround: async () => [],
+		worldStateOf: async () => [],
+		cognitiveContextOf: async () => [],
+		narrativeChainOf: async () => [],
+		semanticNeighborsOf: async () => [],
+		evidencePathTo: async () => [],
+	} as unknown as NonNullable<PromptDataRepos["unifiedEdgeReadRepo"]>,
+};
+
 describe("MemoryAdapter", () => {
 	const stubRepos: PromptDataRepos = {
 		coreMemoryBlockRepo: {
@@ -23,6 +47,7 @@ describe("MemoryAdapter", () => {
 		sharedBlockRepo: {
 			getAttachedBlockIds: async () => [],
 		} as unknown as PromptDataRepos["sharedBlockRepo"],
+		...OPTIONAL_WORLD_STATE_REPOS,
 	};
 
 	const stubRetrievalService: RetrievalService = {
@@ -34,6 +59,7 @@ describe("MemoryAdapter", () => {
 			conflict_notes: [],
 			episode: [],
 		}),
+		resolveEntityByPointer: async () => null,
 	} as unknown as RetrievalService;
 
 	const stubViewerContext: ViewerContext = {
@@ -154,6 +180,7 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 			sharedBlockRepo: {
 				getAttachedBlockIds: async () => [],
 			} as unknown as PromptDataRepos["sharedBlockRepo"],
+			...OPTIONAL_WORLD_STATE_REPOS,
 		};
 	}
 
@@ -255,6 +282,7 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 				conflict_notes: [],
 				episode: [],
 			}),
+			resolveEntityByPointer: async () => null,
 		} as unknown as RetrievalService;
 
 		const repos = makeReposWithCognition(undefined);
@@ -278,6 +306,7 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 				conflict_notes: [],
 				episode: [],
 			}),
+			resolveEntityByPointer: async () => null,
 		} as unknown as RetrievalService;
 
 		const repos = makeReposWithCognition(undefined);
@@ -313,6 +342,7 @@ describe("MemoryAdapter — weak-memory interpretation guidance", () => {
 				conflict_notes: [],
 				episode: [],
 			}),
+			resolveEntityByPointer: async () => null,
 		} as unknown as RetrievalService;
 
 		const repos = makeReposWithCognition(undefined);

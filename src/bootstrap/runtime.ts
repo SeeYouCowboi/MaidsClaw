@@ -140,6 +140,7 @@ import { PgSemanticEdgeRepo } from "../storage/domain-repos/pg/semantic-edge-rep
 import { PgSessionRepo } from "../storage/domain-repos/pg/session-repo.js";
 import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
 import { PgSharedBlockRepo } from "../storage/domain-repos/pg/shared-block-repo.js";
+import { PgUnifiedEdgeReadRepo } from "../storage/domain-repos/pg/unified-edge-read-repo.js";
 import { PgUnresolvedWorldStateOpsRepo } from "../storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { resolveStoragePaths } from "../storage/paths.js";
 import { PgSettlementUnitOfWork } from "../storage/pg-settlement-uow.js";
@@ -1352,6 +1353,9 @@ export function bootstrapRuntime(
 	const unresolvedOpsRepo = createLazyPgRepo(
 		() => new PgUnresolvedWorldStateOpsRepo(resolvePgPool()),
 	);
+	const unifiedEdgeReadRepo = createLazyPgRepo(
+		() => new PgUnifiedEdgeReadRepo(resolvePgPool()),
+	);
 	const resolveAreaPointerKeyForSessionSeed = async (
 		areaPointerKey: string,
 		agentId: string,
@@ -1697,6 +1701,8 @@ export function bootstrapRuntime(
 	// Core entity pointer keys — seeded world anchors + persona character names.
 	// Built lazily so persona-card edits at runtime are picked up on the next
 	// known_entities render without restarting.
+	promptDataRepos.aliasRepo = pgAliasRepo;
+	promptDataRepos.unifiedEdgeReadRepo = unifiedEdgeReadRepo;
 	const coreEntityKeysProvider = (): ReadonlySet<string> =>
 		buildCoreEntityPointerKeys(personaService);
 	const memoryAdapter = new MemoryAdapter(

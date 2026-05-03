@@ -227,7 +227,7 @@ Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds
 - subject / object: { kind: "pointer_key" | "special", value: <id> }. Use pointer_key values that already appear in <known_entities>; use "special" for self/user/current_location.
 - predicate: short free-form natural-language phrase in the conversation language (e.g. "wears", "trusts", "knows_about", "is_allied_with"). Do NOT pick from a closed vocabulary.
 - factText: one human-readable sentence in the conversation language stating the fact as currently true.
-- contradictedFactEdgeIds: numeric ids of prior fact-edges this assertion invalidates. Source these ONLY from ids already present in the prompt context — never invent ids. If you have no such ids, OMIT this field; do NOT guess.
+- contradictedFactEdgeIds: numeric ids of prior fact-edges this assertion invalidates. Source these ONLY from visible ids in the [world_state] retrieval block (id=...). Never invent ids. If you have no such ids, OMIT this field; do NOT guess.
 - visibility: "private_overlay" (default, agent-private RP fact) or "shared_public" (consensus-visible). Default to "private_overlay" unless this is an explicitly public, witnessed event.
 
 MVP semantics — assert-only:
@@ -253,7 +253,7 @@ Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds
 - subject / object: { kind: "pointer_key" | "special", value: <id> } — pointer_key from <known_entities>, or "special" for self/user/current_location.
 - predicate: short free-form natural-language phrase (e.g. "wears", "trusts"). Not a closed vocabulary.
 - factText: one sentence in the conversation language.
-- contradictedFactEdgeIds: numeric ids of prior facts this invalidates. Use ONLY ids already present in the prompt context; never invent ids. Omit if none.
+- contradictedFactEdgeIds: numeric ids of prior facts this invalidates. Use ONLY visible ids from [world_state] (id=...); never invent ids. Omit if none.
 - visibility: "private_overlay" (default) or "shared_public".
 
 Assert-only: there is no retract. Express invalidation via contradictedFactEdgeIds.`;
@@ -607,22 +607,25 @@ export class PromptBuilder {
 		const parts: string[] = [];
 
 		if (memDs.getPinnedBlocks) {
+			const getPinnedBlocks = memDs.getPinnedBlocks;
 			const pinned = await this.readDataSource("memory.getPinnedBlocks", () =>
-				memDs.getPinnedBlocks!(agentId),
+				getPinnedBlocks(agentId),
 			);
 			if (pinned) parts.push(pinned);
 		}
 
 		if (memDs.getSharedBlocks) {
+			const getSharedBlocks = memDs.getSharedBlocks;
 			const shared = await this.readDataSource("memory.getSharedBlocks", () =>
-				memDs.getSharedBlocks!(agentId),
+				getSharedBlocks(agentId),
 			);
 			if (shared) parts.push(shared);
 		}
 
 		if (memDs.getAttachedSharedBlocks) {
+			const getAttachedSharedBlocks = memDs.getAttachedSharedBlocks;
 			const attached = await this.readDataSource("memory.getAttachedSharedBlocks", () =>
-				memDs.getAttachedSharedBlocks!(agentId),
+				getAttachedSharedBlocks(agentId),
 			);
 			if (attached) parts.push(attached);
 		}
@@ -636,14 +639,15 @@ export class PromptBuilder {
 		onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void,
 	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
-		if (!memDs.getTypedRetrievalSurface) {
+		const getTypedRetrievalSurface = memDs.getTypedRetrievalSurface;
+		if (!getTypedRetrievalSurface) {
 			return "";
 		}
 
 		const result = this.readDataSource(
 			"memory.getTypedRetrievalSurface",
 			() =>
-				memDs.getTypedRetrievalSurface!(userMessage, viewerContext, {
+				getTypedRetrievalSurface(userMessage, viewerContext, {
 					onRetrievalTraceCapture,
 				}),
 		);
@@ -684,13 +688,14 @@ export class PromptBuilder {
 		viewerContext: ViewerContext,
 	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
-		if (!memDs.getKnownEntitiesForWriting) {
+		const getKnownEntitiesForWriting = memDs.getKnownEntitiesForWriting;
+		if (!getKnownEntitiesForWriting) {
 			return "";
 		}
 		const content = await this.readDataSource(
 			"memory.getKnownEntitiesForWriting",
 			() =>
-				memDs.getKnownEntitiesForWriting!(viewerContext, {
+				getKnownEntitiesForWriting(viewerContext, {
 					maxItems: 40,
 					maxChars: 800,
 				}),

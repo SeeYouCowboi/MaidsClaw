@@ -88,6 +88,8 @@ export class MemoryAdapter implements MemoryDataSource {
       ...options,
       sceneRetrieval: options?.sceneRetrieval ?? this.sceneRetrieval,
     };
+    // world_state retrieval is resolved inside getTypedRetrievalSurfaceAsync
+    // via PromptDataRepos.unifiedEdgeReadRepo + aliasRepo when enabled.
     const raw = await getTypedRetrievalSurfaceAsync(
       userMessage,
       viewerContext,

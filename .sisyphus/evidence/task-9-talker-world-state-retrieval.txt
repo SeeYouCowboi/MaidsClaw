@@ -1,0 +1,34 @@
+Task: Task 9 — Inject Active World-State Facts into Talker Typed Retrieval
+Date: 2026-05-03
+
+Summary of verification:
+
+1) Targeted tests
+Command:
+  bun test "test/memory/prompt-data-pg.test.ts" "test/core/prompt-builder.test.ts" "test/core/memory-adapter-pg.test.ts" "test/memory/retrieval-trace-capture.test.ts"
+Result:
+  72 pass
+  0 fail
+  191 expect() calls
+
+2) Build
+Command:
+  bun run build
+Result:
+  tsc -p tsconfig.build.json --noEmit
+  exit 0
+
+3) Changed-file diagnostics
+Method:
+  lsp_diagnostics on all changed source/test files (warning level)
+Result:
+  No diagnostics found on changed files.
+
+Functional evidence captured:
+- Added [world_state] block rendering with lines in format:
+  - id=<edgeId> | <sourcePointer> <predicate> <targetPointer> | <factText>
+- Added tests covering:
+  - world_state appears and is separate from scene_world
+  - legacy/internal rows excluded (migration/null fact_text/explicit_* predicates)
+  - world_state omitted when no relevant entities resolve
+- Updated Talker instructions to source contradictedFactEdgeIds from visible [world_state] ids.

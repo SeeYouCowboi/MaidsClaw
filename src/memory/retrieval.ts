@@ -325,6 +325,7 @@ export class RetrievalService {
           segment_count:
             typed.scene_area.length +
             typed.scene_world.length +
+            (typed.world_state?.length ?? 0) +
             typed.narrative.length +
             typed.cognition.length +
             typed.conflict_notes.length +
@@ -337,6 +338,10 @@ export class RetrievalService {
             ...typed.scene_world.map((segment) => ({
               source: `scene_world:${segment.factKey}`,
               content: JSON.stringify(segment.value),
+            })),
+            ...(typed.world_state ?? []).map((segment) => ({
+              source: `world_state:${String(segment.id)}`,
+              content: segment.factText,
             })),
             ...typed.narrative.map((segment) => ({
               source: String(segment.source_ref),

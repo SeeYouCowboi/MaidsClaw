@@ -17,6 +17,8 @@ import type { CoreMemoryBlockRepo } from "../../src/storage/domain-repos/contrac
 import type { RecentCognitionSlotRepo } from "../../src/storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { InteractionRepo, InteractionTransactionContext } from "../../src/storage/domain-repos/contracts/interaction-repo.js";
 import type { SharedBlockRepo, SharedBlockAttachment } from "../../src/storage/domain-repos/contracts/shared-block-repo.js";
+import type { AliasRepo } from "../../src/storage/domain-repos/contracts/alias-repo.js";
+import type { UnifiedEdgeReadRepo, UnifiedEdgeRecord } from "../../src/storage/domain-repos/contracts/unified-edge-read-repo.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../../src/interaction/contracts.js";
 import type { SharedBlock, SharedBlockSection } from "../../src/memory/shared-blocks/shared-block-repo.js";
 import type { EmbeddingRepo } from "../../src/storage/domain-repos/contracts/embedding-repo.js";
@@ -250,6 +252,85 @@ class StubSharedBlockRepo implements SharedBlockRepo {
   }
 }
 
+class StubAliasRepo implements AliasRepo {
+  resolveMap = new Map<string, number | null>();
+  entitiesById = new Map<number, { id: number; pointer_key: string; memory_scope: string; owner_agent_id: string | null }>();
+
+  async resolveAlias(alias: string): Promise<number | null> {
+    return this.resolveMap.get(alias) ?? null;
+  }
+
+  async resolveAliases(aliases: string[]): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    for (const alias of aliases) {
+      out.set(alias, this.resolveMap.get(alias) ?? null);
+    }
+    return out;
+  }
+
+  async createAlias(): Promise<number> {
+    return 1;
+  }
+
+  async getAliasesForEntity() {
+    return [];
+  }
+
+  async findEntityById(id: number): Promise<{ id: number; pointer_key: string; memory_scope: string; owner_agent_id: string | null } | null> {
+    return this.entitiesById.get(id) ?? null;
+  }
+
+  async findEntityByPointerKey(): Promise<{ id: number; pointer_key: string; memory_scope: string; owner_agent_id: string | null } | null> {
+    return null;
+  }
+
+  async listSharedAliasStrings(): Promise<string[]> {
+    return [];
+  }
+
+  async listPrivateAliasStrings(): Promise<string[]> {
+    return [];
+  }
+}
+
+class StubUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
+  worldStateByEntityRef = new Map<string, UnifiedEdgeRecord[]>();
+  worldStateCalls: Array<{ entityRef: string; opts?: { viewerAgentId?: string } }> = [];
+
+  async edgesFrom(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async edgesTo(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async edgesAround(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async worldStateOf(entityRef: string, opts?: { viewerAgentId?: string }): Promise<UnifiedEdgeRecord[]> {
+    this.worldStateCalls.push({ entityRef, opts });
+    return this.worldStateByEntityRef.get(entityRef) ?? [];
+  }
+
+  async cognitiveContextOf(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async narrativeChainOf(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async semanticNeighborsOf(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+
+  async evidencePathTo(): Promise<UnifiedEdgeRecord[]> {
+    return [];
+  }
+}
+
 class StubEmbeddingRepo implements EmbeddingRepo {
   async upsert(): Promise<void> {
     return;
@@ -429,6 +510,8 @@ class StubRetrievalService extends RetrievalService {
 describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
   let recentCognitionSlotRepo: StubRecentCognitionSlotRepo;
   let interactionRepo: StubInteractionRepo;
+  let aliasRepo: StubAliasRepo;
+  let unifiedEdgeReadRepo: StubUnifiedEdgeReadRepo;
   let repos: PromptDataRepos;
   let retrievalService: StubRetrievalService;
 
@@ -442,12 +525,16 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
   beforeEach(() => {
     recentCognitionSlotRepo = new StubRecentCognitionSlotRepo();
     interactionRepo = new StubInteractionRepo();
+    aliasRepo = new StubAliasRepo();
+    unifiedEdgeReadRepo = new StubUnifiedEdgeReadRepo();
 
     repos = {
       coreMemoryBlockRepo: new StubCoreMemoryBlockRepo(),
       recentCognitionSlotRepo,
       interactionRepo,
       sharedBlockRepo: new StubSharedBlockRepo(),
+      aliasRepo,
+      unifiedEdgeReadRepo,
     };
 
     retrievalService = new StubRetrievalService();
@@ -595,6 +682,172 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
     expect(idxConflict).toBeGreaterThan(idxCognition);
     expect(idxNarrative).toBeGreaterThan(idxConflict);
     expect(idxEpisode).toBeGreaterThan(idxNarrative);
+  });
+
+  it("renders [world_state] separately from [scene_world] with visible fact ids", async () => {
+    retrievalService.nextResult = {
+      scene_area: [
+        { factKey: "location:parlor", value: { lit: true }, sourceKind: "lore_seed" },
+      ],
+      scene_world: [
+        { factKey: "status:storm", value: "incoming", sourceKind: "system_event" },
+      ],
+      cognition: [],
+      conflict_notes: [],
+      narrative: [],
+      episode: [],
+    };
+    aliasRepo.resolveMap.set("怀表", 101);
+    aliasRepo.entitiesById.set(7, {
+      id: 7,
+      pointer_key: "item:silver_pocket_watch",
+      memory_scope: "shared_public",
+      owner_agent_id: null,
+    });
+    aliasRepo.entitiesById.set(9, {
+      id: 9,
+      pointer_key: "loc:tea_room",
+      memory_scope: "shared_public",
+      owner_agent_id: null,
+    });
+    unifiedEdgeReadRepo.worldStateByEntityRef.set("entity:101", [
+      {
+        id: 42,
+        table: "fact_edges",
+        sourceRef: "entity:7",
+        targetRef: "entity:9",
+        edgeKind: "放在",
+        layer: "world_state",
+        truthBearing: true,
+        heuristicOnly: false,
+        lifecycle: "supersedable",
+        factText: "银怀表放在茶室",
+        sourceKind: "settlement",
+      },
+    ]);
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "银怀表现在在哪里？",
+      viewerContext,
+      repos,
+      retrievalService,
+    );
+
+    const idxSceneWorld = output.indexOf("[scene_world]");
+    const idxWorldState = output.indexOf("[world_state]");
+    expect(idxSceneWorld).toBeGreaterThanOrEqual(0);
+    expect(idxWorldState).toBeGreaterThan(idxSceneWorld);
+    expect(output).toContain("- id=42 | item:silver_pocket_watch 放在 loc:tea_room | 银怀表放在茶室");
+  });
+
+  it("excludes legacy/internal world_state rows (migration/null fact/predicate denylist)", async () => {
+    retrievalService.nextResult = emptyTypedResult();
+    aliasRepo.resolveMap.set("怀表", 101);
+    aliasRepo.entitiesById.set(7, {
+      id: 7,
+      pointer_key: "item:silver_pocket_watch",
+      memory_scope: "shared_public",
+      owner_agent_id: null,
+    });
+    aliasRepo.entitiesById.set(9, {
+      id: 9,
+      pointer_key: "loc:tea_room",
+      memory_scope: "shared_public",
+      owner_agent_id: null,
+    });
+    unifiedEdgeReadRepo.worldStateByEntityRef.set("entity:101", [
+      {
+        id: 1,
+        table: "fact_edges",
+        sourceRef: "entity:7",
+        targetRef: "entity:9",
+        edgeKind: "放在",
+        layer: "world_state",
+        truthBearing: true,
+        heuristicOnly: false,
+        lifecycle: "supersedable",
+        factText: "银怀表放在茶室",
+        sourceKind: "settlement",
+      },
+      {
+        id: 2,
+        table: "fact_edges",
+        sourceRef: "entity:7",
+        targetRef: "entity:9",
+        edgeKind: "放在",
+        layer: "world_state",
+        truthBearing: true,
+        heuristicOnly: false,
+        lifecycle: "supersedable",
+        factText: "迁移历史",
+        sourceKind: "migration",
+      },
+      {
+        id: 3,
+        table: "fact_edges",
+        sourceRef: "entity:7",
+        targetRef: "entity:9",
+        edgeKind: "explicit_assertion",
+        layer: "world_state",
+        truthBearing: true,
+        heuristicOnly: false,
+        lifecycle: "supersedable",
+        factText: "内部断言",
+        sourceKind: "settlement",
+      },
+      {
+        id: 4,
+        table: "fact_edges",
+        sourceRef: "entity:7",
+        targetRef: "entity:9",
+        edgeKind: "放在",
+        layer: "world_state",
+        truthBearing: true,
+        heuristicOnly: false,
+        lifecycle: "supersedable",
+        factText: null,
+        sourceKind: "settlement",
+      },
+    ]);
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "银怀表现在在哪里？",
+      viewerContext,
+      repos,
+      retrievalService,
+    );
+
+    expect(output).toContain("[world_state]");
+    expect(output).toContain("id=1");
+    expect(output).not.toContain("id=2");
+    expect(output).not.toContain("id=3");
+    expect(output).not.toContain("id=4");
+    expect(output).not.toContain("迁移历史");
+    expect(output).not.toContain("内部断言");
+  });
+
+  it("omits [world_state] when no current-turn entities resolve", async () => {
+    retrievalService.nextResult = {
+      scene_area: [],
+      scene_world: [
+        { factKey: "status:storm", value: "incoming", sourceKind: "system_event" },
+      ],
+      cognition: [],
+      conflict_notes: [],
+      narrative: [],
+      episode: [],
+    };
+
+    const output = await getTypedRetrievalSurfaceAsync(
+      "现在外面如何？",
+      viewerContext,
+      repos,
+      retrievalService,
+    );
+
+    expect(output).toContain("[scene_world]");
+    expect(output).not.toContain("[world_state]");
+    expect(unifiedEdgeReadRepo.worldStateCalls).toHaveLength(0);
   });
 
   it("merges recent settlement entity mentions into retrieval entity hints", async () => {
@@ -883,15 +1136,15 @@ describe("getTypedRetrievalSurfaceAsync — retracted dedup exclusion (unit)", (
     const dedupCtx = retrievalService.calls[0].dedupContext;
     expect(dedupCtx).toBeDefined();
 
-    const keys = dedupCtx!.recentCognitionKeys;
+    const keys = dedupCtx?.recentCognitionKeys;
     expect(keys).toBeDefined();
-    expect(keys!.has("visible_key")).toBe(true);
-    expect(keys!.has("retracted_key")).toBe(false);
+    expect(keys?.has("visible_key")).toBe(true);
+    expect(keys?.has("retracted_key")).toBe(false);
 
-    const texts = dedupCtx!.recentCognitionTexts;
+    const texts = dedupCtx?.recentCognitionTexts;
     expect(texts).toBeDefined();
-    expect(texts!.some((t: string) => t.includes("visible text"))).toBe(true);
-    expect(texts!.some((t: string) => t.includes("(retracted)"))).toBe(false);
+    expect(texts?.some((t: string) => t.includes("visible text"))).toBe(true);
+    expect(texts?.some((t: string) => t.includes("(retracted)"))).toBe(false);
   });
 
   it("entries with empty summary are excluded from dedup seeding", async () => {
@@ -908,8 +1161,8 @@ describe("getTypedRetrievalSurfaceAsync — retracted dedup exclusion (unit)", (
     );
 
     const dedupCtx = retrievalService.calls[0].dedupContext;
-    expect(dedupCtx!.recentCognitionKeys!.has("good_key")).toBe(true);
-    expect(dedupCtx!.recentCognitionKeys!.has("empty_key")).toBe(false);
+    expect(dedupCtx?.recentCognitionKeys?.has("good_key")).toBe(true);
+    expect(dedupCtx?.recentCognitionKeys?.has("empty_key")).toBe(false);
   });
 });
 

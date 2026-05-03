@@ -115,9 +115,20 @@ export type TypedSceneFactSegment = {
   sourceKind: string;
 };
 
+export type WorldStateEdgeRecord = {
+  id: number | string;
+  sourceRef: string;
+  sourcePointer: string;
+  predicate: string;
+  targetRef: string;
+  targetPointer: string;
+  factText: string;
+};
+
 export type TypedRetrievalResult = {
   scene_area: TypedSceneFactSegment[];
   scene_world: TypedSceneFactSegment[];
+  world_state?: WorldStateEdgeRecord[];
   cognition: TypedCognitionSegment[];
   narrative: TypedNarrativeSegment[];
   conflict_notes: TypedConflictNoteSegment[];

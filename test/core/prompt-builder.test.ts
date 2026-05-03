@@ -403,6 +403,8 @@ describe("PromptBuilder", () => {
 			expect(op).toContain("worldStateOps");
 			expect(op).toContain("World State Ops");
 			expect(op).toMatch(/- worldStateOps: OPTIONAL/);
+			expect(op).toContain("[world_state]");
+			expect(op).toContain("id=...");
 		});
 
 		it("omits worldStateOps from Talker instructions when flag is '0'", async () => {

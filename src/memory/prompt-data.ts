@@ -4,8 +4,16 @@ import type { InteractionRepo } from "../storage/domain-repos/contracts/interact
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { RecentSessionEntity } from "../storage/domain-repos/contracts/episode-repo.js";
 import type { SharedBlockRepo as SharedBlockRepoContract } from "../storage/domain-repos/contracts/shared-block-repo.js";
+import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
+import type {
+  UnifiedEdgeReadRepo,
+  UnifiedEdgeRecord,
+} from "../storage/domain-repos/contracts/unified-edge-read-repo.js";
 import type { RetrievalService } from "./retrieval";
-import type { TypedRetrievalResult } from "./retrieval/retrieval-orchestrator.js";
+import type {
+  TypedRetrievalResult,
+  WorldStateEdgeRecord,
+} from "./retrieval/retrieval-orchestrator.js";
 import type {
   KnownEntityPromptOptions,
   TypedRetrievalSurfaceOptions,
@@ -15,6 +23,7 @@ import {
   canonicalizeEntityMentionPointer,
   normalizeEntityMentions,
 } from "./entity-mentions.js";
+import { tokenizeSurface } from "./query-tokenizer.js";
 
 import type { CoreMemoryLabel, NavigatorResult, ViewerContext } from "./types";
 
@@ -23,7 +32,15 @@ export type PromptDataRepos = {
   recentCognitionSlotRepo: RecentCognitionSlotRepo;
   interactionRepo: InteractionRepo;
   sharedBlockRepo: SharedBlockRepoContract;
+  aliasRepo?: AliasRepo;
+  unifiedEdgeReadRepo?: UnifiedEdgeReadRepo;
 };
+
+const EXCLUDED_WORLD_STATE_PREDICATES = new Set([
+  "explicit_assertion",
+  "explicit_evaluation",
+  "explicit_commitment",
+]);
 
 const PINNED_LABELS: CoreMemoryLabel[] = ["pinned_summary", "persona"];
 /**
@@ -305,6 +322,183 @@ export function formatContestedEntry(entry: RecentCognitionEntry): string {
   return `• [${entry.kind}:${entry.key}] [CONTESTED: was ${preStance}] ${entry.summary}${riskNote}`;
 }
 
+function isWorldStateOpsEnabled(): boolean {
+  return process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0";
+}
+
+function shouldSurfaceWorldStateEdge(edge: UnifiedEdgeRecord): edge is UnifiedEdgeRecord & { factText: string } {
+  if (edge.table !== "fact_edges") {
+    return false;
+  }
+  if (edge.sourceKind === "migration") {
+    return false;
+  }
+  if (EXCLUDED_WORLD_STATE_PREDICATES.has(edge.edgeKind)) {
+    return false;
+  }
+  const factText = trimText(edge.factText);
+  return factText !== null;
+}
+
+function parseEntityIdFromNodeRef(nodeRef: string): number | null {
+  const [kind, idRaw] = nodeRef.split(":");
+  if (kind !== "entity") {
+    return null;
+  }
+  const id = Number(idRaw);
+  if (!Number.isInteger(id) || id <= 0) {
+    return null;
+  }
+  return id;
+}
+
+async function resolvePointerForNodeRef(
+  nodeRef: string,
+  repos: PromptDataRepos,
+  pointerCache: Map<number, string | null>,
+): Promise<string> {
+  const entityId = parseEntityIdFromNodeRef(nodeRef);
+  if (entityId === null || !repos.aliasRepo) {
+    return nodeRef;
+  }
+
+  if (pointerCache.has(entityId)) {
+    return pointerCache.get(entityId) ?? nodeRef;
+  }
+
+  const resolved = await repos.aliasRepo.findEntityById(entityId);
+  const pointer = trimText(resolved?.pointer_key) ?? null;
+  pointerCache.set(entityId, pointer);
+  return pointer ?? nodeRef;
+}
+
+function extractCurrentTurnEntityMentionCandidates(userMessage: string): string[] {
+  const candidates = new Set<string>();
+  for (const token of tokenizeSurface(userMessage)) {
+    const trimmed = trimText(token);
+    if (!trimmed || trimmed.length < 2) {
+      continue;
+    }
+    candidates.add(trimmed);
+    if (trimmed.startsWith("@") && trimmed.length > 2) {
+      candidates.add(trimmed.slice(1));
+    }
+  }
+  return [...candidates];
+}
+
+async function resolveCurrentTurnEntityRefs(
+  userMessage: string,
+  viewerContext: ViewerContext,
+  repos: PromptDataRepos,
+  retrievalService: RetrievalService,
+): Promise<string[]> {
+  const mentionCandidates = extractCurrentTurnEntityMentionCandidates(userMessage);
+  if (mentionCandidates.length === 0) {
+    return [];
+  }
+
+  const resolvedIds = new Set<number>();
+  let aliasResolved = new Map<string, number | null>();
+  if (repos.aliasRepo) {
+    aliasResolved = await repos.aliasRepo.resolveAliases(
+      mentionCandidates,
+      viewerContext.viewer_agent_id,
+    );
+    for (const id of aliasResolved.values()) {
+      if (typeof id === "number" && Number.isInteger(id) && id > 0) {
+        resolvedIds.add(id);
+      }
+    }
+  }
+
+  for (const mention of mentionCandidates) {
+    const preResolved = aliasResolved.get(mention);
+    if (typeof preResolved === "number" && Number.isInteger(preResolved) && preResolved > 0) {
+      continue;
+    }
+    const entity = await retrievalService.resolveEntityByPointer(
+      mention,
+      viewerContext.viewer_agent_id,
+    );
+    if (entity?.id && Number.isInteger(entity.id) && entity.id > 0) {
+      resolvedIds.add(entity.id);
+    }
+    if (resolvedIds.size >= 8) {
+      break;
+    }
+  }
+
+  return [...resolvedIds].map((id) => `entity:${id}`);
+}
+
+async function getWorldStateForCurrentTurnEntities(
+  userMessage: string,
+  viewerContext: ViewerContext,
+  repos: PromptDataRepos,
+  retrievalService: RetrievalService,
+): Promise<WorldStateEdgeRecord[]> {
+  if (!isWorldStateOpsEnabled()) {
+    return [];
+  }
+  const unifiedEdgeReadRepo = repos.unifiedEdgeReadRepo;
+  if (!unifiedEdgeReadRepo) {
+    return [];
+  }
+
+  const entityRefs = await resolveCurrentTurnEntityRefs(
+    userMessage,
+    viewerContext,
+    repos,
+    retrievalService,
+  );
+  if (entityRefs.length === 0) {
+    return [];
+  }
+
+  const edgeRows = await Promise.all(
+    entityRefs.map((entityRef) =>
+      unifiedEdgeReadRepo.worldStateOf(entityRef, {
+        viewerAgentId: viewerContext.viewer_agent_id,
+      })
+    ),
+  );
+
+  const dedup = new Map<string, UnifiedEdgeRecord>();
+  for (const row of edgeRows.flat()) {
+    if (!shouldSurfaceWorldStateEdge(row)) {
+      continue;
+    }
+    const key = `${row.table}:${String(row.id)}`;
+    if (!dedup.has(key)) {
+      dedup.set(key, row);
+    }
+  }
+
+  if (dedup.size === 0) {
+    return [];
+  }
+
+  const pointerCache = new Map<number, string | null>();
+  const records: WorldStateEdgeRecord[] = [];
+  for (const row of dedup.values()) {
+    const [sourcePointer, targetPointer] = await Promise.all([
+      resolvePointerForNodeRef(row.sourceRef, repos, pointerCache),
+      resolvePointerForNodeRef(row.targetRef, repos, pointerCache),
+    ]);
+    records.push({
+      id: row.id,
+      sourceRef: row.sourceRef,
+      sourcePointer,
+      predicate: row.edgeKind,
+      targetRef: row.targetRef,
+      targetPointer,
+      factText: trimText(row.factText) ?? "",
+    });
+  }
+  return records;
+}
+
 function renderTypedRetrieval(result: TypedRetrievalResult): string {
   const parts: string[] = [];
 
@@ -320,6 +514,16 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
     parts.push("[scene_world]");
     for (const fact of result.scene_world) {
       parts.push(`? [${fact.factKey}] ${JSON.stringify(fact.value)}`);
+    }
+  }
+
+  if ((result.world_state?.length ?? 0) > 0) {
+    if (parts.length > 0) parts.push("");
+    parts.push("[world_state]");
+    for (const edge of result.world_state ?? []) {
+      parts.push(
+        `- id=${String(edge.id)} | ${edge.sourcePointer} ${edge.predicate} ${edge.targetPointer} | ${edge.factText}`,
+      );
     }
   }
 
@@ -698,6 +902,13 @@ export async function getTypedRetrievalSurfaceAsync(
     conversationTexts,
     recentEntityHints,
   }, undefined, "default_retrieval", undefined, options?.sceneRetrieval, options?.onRetrievalTraceCapture);
+
+  typed.world_state = await getWorldStateForCurrentTurnEntities(
+    userMessage,
+    viewerContext,
+    repos,
+    retrieval,
+  );
 
   const filtered = filterContradictoryEntityConfusionSegments(
     typed,
