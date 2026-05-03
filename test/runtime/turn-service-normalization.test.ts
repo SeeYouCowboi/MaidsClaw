@@ -650,3 +650,106 @@ describe("mapCandidateActionsToSceneFactCommits", () => {
 		]);
 	});
 });
+
+describe("normalizeSettlementPayload — backward compatibility for v3/v4/v5 and old payloads", () => {
+	const BASE_PAYLOAD = {
+		settlementId: "set-1",
+		requestId: "req-1",
+		sessionId: "sess-1",
+		ownerAgentId: "agent-1",
+		publicReply: "hi",
+		hasPublicReply: true,
+		viewerSnapshot: {
+			selfPointerKey: "char:Alice",
+			userPointerKey: "user",
+		},
+	} as const;
+
+	it("normalizes a v3 payload (no schemaVersion, no worldStateOps) to v5 with empty arrays", async () => {
+		const { normalizeSettlementPayload, detectSettlementVersion } = await import(
+			"../../src/interaction/settlement-adapter.js"
+		);
+		const payload = { ...BASE_PAYLOAD };
+		expect(detectSettlementVersion(payload)).toBe("v3");
+
+		const result = normalizeSettlementPayload(payload);
+		expect(result.schemaVersion).toBe("turn_settlement_v5");
+		expect(result.worldStateOps).toEqual([]);
+		expect(result.entityMentions).toEqual([]);
+		expect(result.privateEpisodes).toEqual([]);
+		expect(result.publications).toEqual([]);
+		expect(result.relationIntents).toEqual([]);
+		expect(result.conflictFactors).toEqual([]);
+		expect(result.actionCommitments).toEqual([]);
+		expect(result.privateCognition).toBeUndefined();
+		expect(result.pinnedSummaryProposal).toBeUndefined();
+	});
+
+	it("normalizes a v4 payload (privateCognition present, no worldStateOps) to v5", async () => {
+		const { normalizeSettlementPayload, detectSettlementVersion } = await import(
+			"../../src/interaction/settlement-adapter.js"
+		);
+		const payload = {
+			...BASE_PAYLOAD,
+			schemaVersion: "turn_settlement_v4" as const,
+			privateCognition: {
+				schemaVersion: "rp_private_cognition_v4" as const,
+				ops: [],
+			},
+		};
+		expect(detectSettlementVersion(payload)).toBe("v4");
+
+		const result = normalizeSettlementPayload(payload);
+		expect(result.schemaVersion).toBe("turn_settlement_v5");
+		expect(result.privateCognition?.schemaVersion).toBe("rp_private_cognition_v4");
+		expect(result.worldStateOps).toEqual([]);
+	});
+
+	it("preserves worldStateOps array passthrough on v5 payloads", async () => {
+		const { normalizeSettlementPayload, detectSettlementVersion } = await import(
+			"../../src/interaction/settlement-adapter.js"
+		);
+		const op = {
+			subject: { kind: "pointer_key" as const, value: "char:Alice" },
+			predicate: "trusts",
+			object: { kind: "pointer_key" as const, value: "char:Bob" },
+			factText: "Alice trusts Bob",
+		};
+		const payload = {
+			...BASE_PAYLOAD,
+			schemaVersion: "turn_settlement_v5" as const,
+			worldStateOps: [op],
+		};
+		expect(detectSettlementVersion(payload)).toBe("v5");
+
+		const result = normalizeSettlementPayload(payload);
+		expect(result.worldStateOps).toEqual([op]);
+	});
+
+	it("coerces non-array worldStateOps to [] (defensive normalization)", async () => {
+		const { normalizeSettlementPayload } = await import(
+			"../../src/interaction/settlement-adapter.js"
+		);
+		const payload = {
+			...BASE_PAYLOAD,
+			worldStateOps: undefined,
+		};
+		const result = normalizeSettlementPayload(payload);
+		expect(result.worldStateOps).toEqual([]);
+	});
+
+	it("passes through optional fields (cognitiveSketchSource, correctionSuspected, pinnedSummaryProposal)", async () => {
+		const { normalizeSettlementPayload } = await import(
+			"../../src/interaction/settlement-adapter.js"
+		);
+		const result = normalizeSettlementPayload({
+			...BASE_PAYLOAD,
+			cognitiveSketchSource: "explicit",
+			correctionSuspected: true,
+			pinnedSummaryProposal: { proposedText: "pinned" },
+		});
+		expect(result.cognitiveSketchSource).toBe("explicit");
+		expect(result.correctionSuspected).toBe(true);
+		expect(result.pinnedSummaryProposal).toEqual({ proposedText: "pinned" });
+	});
+});

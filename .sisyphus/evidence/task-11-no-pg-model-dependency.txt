@@ -1,0 +1,30 @@
+task-11 no-PG / no-model dependency verification
+
+Files added/modified in task 11:
+  test/runtime/rp-turn-contract.test.ts
+  test/runtime/turn-service-normalization.test.ts
+  test/memory/relation-contract.test.ts
+  test/core/prompt-builder.test.ts
+  test/memory/visibility-policy.test.ts
+  test/memory/world-state-ops-applier.test.ts (NEW)
+
+Forbidden imports check (postgres / pg / real model providers):
+[FAIL] test/runtime/rp-turn-contract.test.ts
+
+test\runtime\rp-turn-contract.test.ts:2:import type postgres from "postgres";
+
+
+[OK]   test/runtime/turn-service-normalization.test.ts
+[OK]   test/memory/relation-contract.test.ts
+[OK]   test/core/prompt-builder.test.ts
+[OK]   test/memory/visibility-policy.test.ts
+[OK]   test/memory/world-state-ops-applier.test.ts
+
+Note on rp-turn-contract.test.ts:
+  The 'import type postgres from "postgres"' is a TYPE-ONLY import
+  (erased at compile/runtime) and is pre-existing from commit 4ec6689f
+  (2026-04-21), introduced before task-11. No runtime PG/postgres connection
+  is created by any of the 6 target test files. Confirmed by full test run
+  succeeding (149/149 pass) without PG_TEST_URL set or any DB available.
+
+Verdict: PASS — no live PG, no live model providers.

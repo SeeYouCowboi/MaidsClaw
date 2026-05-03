@@ -1359,3 +1359,163 @@ describe("V5 contract: assertion/evaluation/commitment kind boundary fixtures", 
     }
   });
 });
+
+describe("SUBMIT_RP_TURN_ARTIFACT_CONTRACTS", () => {
+  it("declares the full set of 9 artifact contracts expected by the consensus contract", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    expect(Object.keys(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS).sort()).toEqual(
+      [
+        "actionCommitments",
+        "conflictFactors",
+        "pinnedSummaryProposal",
+        "privateCognition",
+        "privateEpisodes",
+        "publicReply",
+        "publications",
+        "relationIntents",
+        "worldStateOps",
+      ].sort(),
+    );
+  });
+
+  it("pins the worldStateOps contract to (agent, private, current_state)", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS.worldStateOps).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "current_state",
+    });
+  });
+
+  it("pins publicReply to (agent, world, current_state) — the only world-scoped artifact", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS.publicReply).toEqual({
+      authority_level: "agent",
+      artifact_scope: "world",
+      ledger_policy: "current_state",
+    });
+    const worldScoped = Object.entries(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS).filter(
+      ([, c]) => c.artifact_scope === "world",
+    );
+    expect(worldScoped.map(([k]) => k)).toEqual(["publicReply"]);
+  });
+
+  it("pins privateCognition / privateEpisodes / relationIntents as private append_only", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    for (const key of ["privateCognition", "privateEpisodes", "relationIntents"]) {
+      expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS[key]).toEqual({
+        authority_level: "agent",
+        artifact_scope: "private",
+        ledger_policy: "append_only",
+      });
+    }
+  });
+
+  it("pins publications as area / append_only and session-scoped artifacts as current_state", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS.publications).toEqual({
+      authority_level: "agent",
+      artifact_scope: "area",
+      ledger_policy: "append_only",
+    });
+    for (const key of ["pinnedSummaryProposal", "actionCommitments"]) {
+      expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS[key]).toEqual({
+        authority_level: "agent",
+        artifact_scope: "session",
+        ledger_policy: "current_state",
+      });
+    }
+  });
+
+  it("pins conflictFactors as private/current_state (NOT append_only)", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    expect(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS.conflictFactors).toEqual({
+      authority_level: "agent",
+      artifact_scope: "private",
+      ledger_policy: "current_state",
+    });
+  });
+
+  it("uses agent authority_level uniformly across every artifact (no system/user authority)", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    for (const [key, contract] of Object.entries(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS)) {
+      expect(contract.authority_level).toBe("agent");
+      expect(contract.artifact_scope).toBeDefined();
+      expect(contract.ledger_policy).toBeDefined();
+      expect(["world", "area", "session", "private"]).toContain(contract.artifact_scope);
+      expect(["current_state", "append_only"]).toContain(contract.ledger_policy);
+      expect(typeof key).toBe("string");
+    }
+  });
+});
+
+describe("makeSubmitRpTurnTool — schema declares worldStateOps assert-only contract", () => {
+  it("includes worldStateOps in parameters with no `op` field (assert-only MVP)", () => {
+    const tool = makeSubmitRpTurnTool();
+    const params = tool.parameters as { properties: Record<string, unknown> };
+    expect(params.properties.worldStateOps).toBeDefined();
+    const wso = params.properties.worldStateOps as {
+      type: string;
+      items: { properties: Record<string, unknown>; required: string[] };
+    };
+    expect(wso.type).toBe("array");
+    expect(wso.items.properties.op).toBeUndefined();
+    expect(wso.items.required).toEqual(["subject", "predicate", "object", "factText"]);
+  });
+
+  it("declares contradictedFactEdgeIds as the invalidation channel (replacing retract)", () => {
+    const tool = makeSubmitRpTurnTool();
+    const params = tool.parameters as { properties: Record<string, unknown> };
+    const wso = params.properties.worldStateOps as {
+      items: { properties: Record<string, { type: string; items?: { type: string } }> };
+    };
+    expect(wso.items.properties.contradictedFactEdgeIds).toBeDefined();
+    expect(wso.items.properties.contradictedFactEdgeIds.type).toBe("array");
+    expect(wso.items.properties.contradictedFactEdgeIds.items?.type).toBe("number");
+  });
+
+  it("attaches SUBMIT_RP_TURN_ARTIFACT_CONTRACTS to the tool's artifactContracts field", async () => {
+    const { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } = await import(
+      "../../src/runtime/submit-rp-turn-tool.js"
+    );
+    const tool = makeSubmitRpTurnTool();
+    expect(tool.artifactContracts).toBe(SUBMIT_RP_TURN_ARTIFACT_CONTRACTS);
+  });
+
+  it("execute() normalizes a minimal payload via normalizeRpTurnOutcome (no model/network calls)", async () => {
+    const tool = makeSubmitRpTurnTool();
+    const result = (await tool.execute({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "ok",
+    })) as CanonicalRpTurnOutcome;
+    expect(result.schemaVersion).toBe("rp_turn_outcome_v5");
+    expect(result.publicReply).toBe("ok");
+    expect(result.publications).toEqual([]);
+  });
+
+  it("execute() throws MaidsClawError(RP_TURN_OUTCOME_INVALID) on malformed payload", async () => {
+    const tool = makeSubmitRpTurnTool();
+    let caught: unknown;
+    try {
+      await tool.execute({ schemaVersion: "rp_turn_outcome_v5" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(MaidsClawError);
+    expect((caught as MaidsClawError).code).toBe("RP_TURN_OUTCOME_INVALID");
+  });
+});

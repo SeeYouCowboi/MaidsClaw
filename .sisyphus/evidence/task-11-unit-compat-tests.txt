@@ -1,0 +1,7 @@
+task-11 unit compatibility tests: 149/149 pass across 6 target files
+timestamp: 2026-05-03T14:03:58Z
+
+ 149 pass
+ 0 fail
+ 814 expect() calls
+Ran 149 tests across 6 files. [293.00ms]

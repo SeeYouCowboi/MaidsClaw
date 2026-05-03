@@ -13,8 +13,10 @@ import {
   RESOLUTION_CHAIN_TYPES,
 } from "../../src/memory/contracts/relation-contract.js";
 import {
+  CONSENSUS_EDGE_LAYERS,
   LOGIC_EDGE_TYPES,
   MEMORY_RELATION_TYPES,
+  NAVIGATOR_EDGE_LAYERS,
   SEMANTIC_EDGE_TYPES,
 } from "../../src/memory/types.js";
 
@@ -112,5 +114,74 @@ describe("relation-contract centralization", () => {
       CONSENSUS_EDGE_SEMANTICS_MATRIX.conflict_or_update.layer,
     ]);
     expect(contradictionLayers.size).toBe(3);
+  });
+
+  it("isKnownRelationType / getRelationContract / isResolutionChainType behave on edge cases", () => {
+    expect(isKnownRelationType("supports")).toBe(true);
+    expect(isKnownRelationType("causal")).toBe(true);
+    expect(isKnownRelationType("__nope__")).toBe(false);
+    expect(isKnownRelationType("")).toBe(false);
+
+    const causal = getRelationContract("causal");
+    expect(causal?.layer).toBe("narrative");
+    expect(causal?.truth_bearing).toBe(true);
+
+    expect(isResolutionChainType("conflicts_with")).toBe(true);
+    expect(isResolutionChainType("resolved_by")).toBe(true);
+    expect(isResolutionChainType("downgraded_by")).toBe(true);
+    expect(isResolutionChainType("supports")).toBe(false);
+    expect(isResolutionChainType("causal")).toBe(false);
+  });
+
+  it("only the four expected entries declare cardinality_per_source, with locked values", () => {
+    const declared: Record<string, number> = {};
+    for (const [key, semantics] of Object.entries(CONSENSUS_EDGE_SEMANTICS_MATRIX)) {
+      if (semantics.cardinality_per_source !== undefined) {
+        declared[key] = semantics.cardinality_per_source;
+      }
+    }
+    expect(declared).toEqual({
+      temporal_prev: 1,
+      temporal_next: 1,
+      semantic_similar: 4,
+      conflict_or_update: 2,
+      entity_bridge: 2,
+    });
+  });
+
+  it("EmbeddingLinker semantic-edge cardinalities match RelationContract.cardinality_per_source", async () => {
+    const source = await Bun.file("src/memory/embedding-linker.ts").text();
+    const semSim = EDGE_SEMANTICS_BY_TABLE.semantic_edges.semantic_similar.cardinality_per_source;
+    const conflict = EDGE_SEMANTICS_BY_TABLE.semantic_edges.conflict_or_update.cardinality_per_source;
+    const bridge = EDGE_SEMANTICS_BY_TABLE.semantic_edges.entity_bridge.cardinality_per_source;
+    expect(semSim).toBe(4);
+    expect(conflict).toBe(2);
+    expect(bridge).toBe(2);
+
+    expect(source).toContain(`similarCount >= ${semSim}`);
+    expect(source).toContain(`conflictCount >= ${conflict}`);
+    expect(source).toContain(`bridgeCount >= ${bridge}`);
+  });
+
+  it("legacy NavigatorEdgeLayer values stay distinct from consensus EdgeLayer values", () => {
+    expect(NAVIGATOR_EDGE_LAYERS).toEqual(["state", "symbolic", "heuristic"]);
+    expect(CONSENSUS_EDGE_LAYERS).toEqual(["narrative", "cognitive", "latent", "world_state"]);
+    const overlap = NAVIGATOR_EDGE_LAYERS.filter((l) =>
+      (CONSENSUS_EDGE_LAYERS as readonly string[]).includes(l),
+    );
+    expect(overlap).toEqual([]);
+  });
+
+  it("every contract.layer is a consensus EdgeLayer (never a NavigatorEdgeLayer)", () => {
+    const consensusSet = new Set<string>(CONSENSUS_EDGE_LAYERS);
+    const navigatorSet = new Set<string>(NAVIGATOR_EDGE_LAYERS);
+    for (const [, contract] of Object.entries(RELATION_CONTRACTS)) {
+      expect(consensusSet.has(contract.layer)).toBe(true);
+      expect(navigatorSet.has(contract.layer)).toBe(false);
+    }
+    for (const semantics of Object.values(CONSENSUS_EDGE_SEMANTICS_MATRIX)) {
+      expect(consensusSet.has(semantics.layer)).toBe(true);
+      expect(navigatorSet.has(semantics.layer)).toBe(false);
+    }
   });
 });

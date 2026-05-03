@@ -90,5 +90,92 @@ describe("VisibilityPolicy", () => {
         predicate: "explicit_assertion",
       })).toBe("private");
     });
+
+    it("shows owner-private internal cognition fact (explicit_assertion) to owner", () => {
+      const viewer = makeViewer("agent-owner");
+      for (const predicate of [
+        "explicit_assertion",
+        "explicit_evaluation",
+        "explicit_commitment",
+      ]) {
+        expect(policy.isFactVisible(viewer, { owner_agent_id: "agent-owner", predicate })).toBe(true);
+        expect(policy.getNodeDisposition(viewer, "fact:7", {
+          owner_agent_id: "agent-owner",
+          predicate,
+        })).toBe("visible");
+      }
+    });
+
+    it("hides owner-private internal cognition fact from non-owner viewer", () => {
+      const otherViewer = makeViewer("agent-other");
+      for (const predicate of [
+        "explicit_assertion",
+        "explicit_evaluation",
+        "explicit_commitment",
+      ]) {
+        expect(policy.isFactVisible(otherViewer, { owner_agent_id: "agent-owner", predicate })).toBe(false);
+        expect(policy.getNodeDisposition(otherViewer, "fact:7", {
+          owner_agent_id: "agent-owner",
+          predicate,
+        })).toBe("private");
+      }
+    });
+
+    it("treats empty-string owner_agent_id as legacy/shared (visible)", () => {
+      const viewer = makeViewer("agent-other");
+      expect(policy.isFactVisible(viewer, { owner_agent_id: "", predicate: "any" })).toBe(true);
+      expect(policy.getNodeDisposition(viewer, "fact:8", {
+        owner_agent_id: "",
+        predicate: "any",
+      })).toBe("visible");
+    });
+
+    it("treats undefined owner_agent_id as shared (visible)", () => {
+      const viewer = makeViewer("agent-other");
+      expect(policy.isFactVisible(viewer, { predicate: "knows" })).toBe(true);
+    });
+
+    it("dispatches fact:* nodeRef through isFactVisible via getNodeDisposition", () => {
+      const ownerViewer = makeViewer("agent-owner");
+      expect(policy.getNodeDisposition(ownerViewer, "fact:99", {
+        owner_agent_id: "agent-owner",
+        predicate: "knows",
+      })).toBe("visible");
+      expect(policy.getNodeDisposition(ownerViewer, "fact:99", {
+        predicate: "knows",
+      })).toBe("visible");
+    });
+  });
+
+  describe("assertion / evaluation / commitment private node visibility", () => {
+    it("is visible only to the owning agent", () => {
+      const owner = makeViewer("agent-owner");
+      const other = makeViewer("agent-other");
+      for (const kind of ["assertion", "evaluation", "commitment"]) {
+        expect(policy.isNodeVisible(owner, `${kind}:1`, { agent_id: "agent-owner" })).toBe(true);
+        expect(policy.isNodeVisible(other, `${kind}:1`, { agent_id: "agent-owner" })).toBe(false);
+        expect(policy.getNodeDisposition(other, `${kind}:1`, { agent_id: "agent-owner" })).toBe("private");
+      }
+    });
+  });
+
+  describe("isEdgeVisible — both endpoints must be visible", () => {
+    it("returns true only when both source and target are visible", () => {
+      const owner = makeViewer("agent-owner");
+      expect(policy.isEdgeVisible(
+        owner,
+        "assertion:1",
+        { agent_id: "agent-owner" },
+        "assertion:2",
+        { agent_id: "agent-owner" },
+      )).toBe(true);
+      expect(policy.isEdgeVisible(
+        owner,
+        "assertion:1",
+        { agent_id: "agent-owner" },
+        "assertion:2",
+        { agent_id: "agent-other" },
+      )).toBe(false);
+    });
   });
 });

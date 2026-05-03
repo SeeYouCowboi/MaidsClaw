@@ -424,6 +424,65 @@ describe("PromptBuilder", () => {
 				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
 			expect(op).not.toContain("worldStateOps");
 		});
+
+		it("framework-mode prompt explicitly states assert-only / no-retract MVP rule", async () => {
+			delete process.env[FLAG];
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).toContain("assert-only");
+			expect(op).toMatch(/op:\s*"retract"/);
+			expect(op).toContain("contradictedFactEdgeIds");
+		});
+
+		it("talker-mode prompt explicitly states assert-only via 'no retract' phrasing", async () => {
+			delete process.env[FLAG];
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+				isTalkerMode: true,
+				contextText: '{"writeEligible":false}',
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).toMatch(/[Aa]ssert-only|no retract/);
+			expect(op).toContain("contradictedFactEdgeIds");
+		});
+
+		it("talker allowed-output line precedes the actionCommitments allowed-output line", async () => {
+			delete process.env[FLAG];
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+				isTalkerMode: true,
+				contextText: '{"writeEligible":false}',
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			const wsoLineIndex = op.indexOf("- worldStateOps: OPTIONAL");
+			const acLineIndex = op.indexOf("- actionCommitments:");
+			expect(wsoLineIndex).toBeGreaterThan(-1);
+			expect(acLineIndex).toBeGreaterThan(-1);
+			expect(wsoLineIndex).toBeLessThan(acLineIndex);
+		});
 	});
 });
 
