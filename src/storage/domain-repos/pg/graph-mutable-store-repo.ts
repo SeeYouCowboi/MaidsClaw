@@ -567,82 +567,106 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
   async createWorldStateFactEdge(
     params: Parameters<GraphMutableStoreRepo["createWorldStateFactEdge"]>[0],
   ): Promise<{ id: number; created: boolean }> {
-    const existing = await this.sql`
-      SELECT id
-      FROM fact_edges
-      WHERE source_kind = ${params.sourceKind}
-        AND source_ref = ${params.sourceRef}
-        AND t_invalid = ${PG_MAX_BIGINT}
-      LIMIT 1
-    `;
-
-    if (existing.length > 0) {
-      return { id: Number(existing[0].id), created: false };
-    }
-
-    const now = Date.now();
-
-    if ((params.contradictedFactEdgeIds?.length ?? 0) > 0) {
-      await this.sql`
-        UPDATE fact_edges
-        SET t_invalid = ${now},
-            t_expired = ${now}
-        WHERE id IN ${this.sql(params.contradictedFactEdgeIds ?? [])}
-          AND t_invalid = ${PG_MAX_BIGINT}
-          AND (owner_agent_id IS NULL OR owner_agent_id = ${params.ownerAgentId ?? null})
-      `;
-    }
-
-    try {
-      const rows = await this.sql`
-        INSERT INTO fact_edges (
-          source_entity_id,
-          target_entity_id,
-          predicate,
-          fact_text,
-          owner_agent_id,
-          source_kind,
-          source_ref,
-          t_valid,
-          t_invalid,
-          t_created,
-          t_expired,
-          source_event_id
-        ) VALUES (
-          ${params.sourceEntityId},
-          ${params.targetEntityId},
-          ${params.predicate},
-          ${params.factText},
-          ${params.ownerAgentId},
-          ${params.sourceKind},
-          ${params.sourceRef},
-          ${params.tValid},
-          ${PG_MAX_BIGINT},
-          ${now},
-          ${PG_MAX_BIGINT},
-          ${null}
-        )
-        RETURNING id
-      `;
-
-      return { id: Number(rows[0].id), created: true };
-    } catch (error) {
-      if ((error as { code?: string }).code !== "23505") {
-        throw error;
-      }
-      const retryExisting = await this.sql`
+    // Full-history idempotency: a row with the same (source_kind, source_ref)
+    // makes the call a NO-OP regardless of t_invalid. This prevents the
+    // replay-resurrection bug where settlement A's row was invalidated by
+    // settlement B and then a replay of A would re-INSERT a new active row.
+    // The SELECT must check ALL rows, not just t_invalid = ∞.
+    //
+    // The UPDATE (invalidate contradicted) and INSERT (write new) must execute
+    // in a single transaction so that a partial failure cannot leave history
+    // in a state where the predecessor was invalidated but the successor was
+    // never written (violating §8 invariant 6 of CONSENSUS_MEMORY_EDGES.md).
+    const doWrite = async (tx: postgres.Sql): Promise<{ id: number; created: boolean }> => {
+      const existing = await tx`
         SELECT id
         FROM fact_edges
         WHERE source_kind = ${params.sourceKind}
           AND source_ref = ${params.sourceRef}
-          AND t_invalid = ${PG_MAX_BIGINT}
         LIMIT 1
       `;
-      if (retryExisting.length === 0) {
-        throw error;
+
+      if (existing.length > 0) {
+        return { id: Number(existing[0].id), created: false };
       }
-      return { id: Number(retryExisting[0].id), created: false };
+
+      const now = Date.now();
+
+      if ((params.contradictedFactEdgeIds?.length ?? 0) > 0) {
+        await tx`
+          UPDATE fact_edges
+          SET t_invalid = ${now},
+              t_expired = ${now}
+          WHERE id IN ${tx(params.contradictedFactEdgeIds ?? [])}
+            AND t_invalid = ${PG_MAX_BIGINT}
+            AND (owner_agent_id IS NULL OR owner_agent_id = ${params.ownerAgentId ?? null})
+        `;
+      }
+
+      try {
+        const rows = await tx`
+          INSERT INTO fact_edges (
+            source_entity_id,
+            target_entity_id,
+            predicate,
+            fact_text,
+            owner_agent_id,
+            source_kind,
+            source_ref,
+            t_valid,
+            t_invalid,
+            t_created,
+            t_expired,
+            source_event_id
+          ) VALUES (
+            ${params.sourceEntityId},
+            ${params.targetEntityId},
+            ${params.predicate},
+            ${params.factText},
+            ${params.ownerAgentId},
+            ${params.sourceKind},
+            ${params.sourceRef},
+            ${params.tValid},
+            ${PG_MAX_BIGINT},
+            ${now},
+            ${PG_MAX_BIGINT},
+            ${null}
+          )
+          RETURNING id
+        `;
+
+        return { id: Number(rows[0].id), created: true };
+      } catch (error) {
+        // Concurrent writer raced us between the SELECT and the INSERT.
+        // The unique constraint guarantees the other tx already wrote the
+        // canonical row; re-query to retrieve its id.
+        if ((error as { code?: string }).code !== "23505") {
+          throw error;
+        }
+        const retryExisting = await tx`
+          SELECT id
+          FROM fact_edges
+          WHERE source_kind = ${params.sourceKind}
+            AND source_ref = ${params.sourceRef}
+          LIMIT 1
+        `;
+        if (retryExisting.length === 0) {
+          throw error;
+        }
+        return { id: Number(retryExisting[0].id), created: false };
+      }
+    };
+
+    // Use sql.begin when available so UPDATE+INSERT are atomic. Fall back to
+    // direct execution when this.sql is already a transaction/reserved handle
+    // (e.g. tests or callers running inside an outer transaction). Pattern
+    // mirrors PgRecentCognitionSlotRepo to stay compatible across both modes.
+    if (typeof (this.sql as unknown as Record<string, unknown>).begin === "function") {
+      return this.sql.begin(async (rawTx) =>
+        doWrite(rawTx as unknown as postgres.Sql),
+      ) as unknown as Promise<{ id: number; created: boolean }>;
     }
+    return doWrite(this.sql);
   }
 
   async activeFactEdgesByOwner(

@@ -93,6 +93,88 @@ describe.skipIf(skipPgTests)("world-state replay (PG-integrated)", () => {
     });
   });
 
+  it("createWorldStateFactEdge replay after invalidation is a NO-OP, not a resurrection (P1-T2 regression)", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const graphStoreRepo = new PgGraphMutableStoreRepo(sql);
+
+      const aliceId = await graphStoreRepo.upsertEntity({
+        pointerKey: "p:alice",
+        displayName: "Alice",
+        entityType: "person",
+        memoryScope: "shared_public",
+      });
+      const bobId = await graphStoreRepo.upsertEntity({
+        pointerKey: "p:bob",
+        displayName: "Bob",
+        entityType: "person",
+        memoryScope: "shared_public",
+      });
+
+      // Settlement A writes the canonical row.
+      const writeA = await graphStoreRepo.createWorldStateFactEdge({
+        sourceEntityId: aliceId,
+        targetEntityId: bobId,
+        predicate: "trusts",
+        factText: "Alice trusts Bob",
+        ownerAgentId: null,
+        sourceKind: "settlement",
+        sourceRef: "stl-A:0",
+        tValid: 1_000,
+      });
+      expect(writeA.created).toBe(true);
+
+      // Settlement B writes a contradictory current fact, invalidating A's row.
+      const writeB = await graphStoreRepo.createWorldStateFactEdge({
+        sourceEntityId: aliceId,
+        targetEntityId: bobId,
+        predicate: "distrusts",
+        factText: "Alice distrusts Bob",
+        ownerAgentId: null,
+        sourceKind: "settlement",
+        sourceRef: "stl-B:0",
+        tValid: 2_000,
+        contradictedFactEdgeIds: [writeA.id],
+      });
+      expect(writeB.created).toBe(true);
+
+      // Settlement A is replayed (e.g., from settlement_processing_ledger
+      // recovery). Pre-fix this would have inserted a new active row and
+      // resurrected the stale fact. Post-fix it is a strict NO-OP returning
+      // the original (now invalidated) row id.
+      const replayA = await graphStoreRepo.createWorldStateFactEdge({
+        sourceEntityId: aliceId,
+        targetEntityId: bobId,
+        predicate: "trusts",
+        factText: "Alice trusts Bob",
+        ownerAgentId: null,
+        sourceKind: "settlement",
+        sourceRef: "stl-A:0",
+        tValid: 1_000,
+      });
+      expect(replayA.created).toBe(false);
+      expect(replayA.id).toBe(writeA.id);
+
+      // Exactly two physical rows exist (A invalidated, B active). No third.
+      const allRows = await sql`
+        SELECT source_ref, t_invalid
+        FROM fact_edges
+        WHERE source_kind = 'settlement'
+        ORDER BY source_ref
+      `;
+      expect(allRows.length).toBe(2);
+
+      // A is invalidated, B is the only active row.
+      const PG_MAX_BIGINT = "9223372036854775807";
+      const activeRows = await sql`
+        SELECT source_ref FROM fact_edges
+        WHERE source_kind = 'settlement' AND t_invalid = ${PG_MAX_BIGINT}
+      `;
+      expect(activeRows.length).toBe(1);
+      expect(activeRows[0].source_ref).toBe("stl-B:0");
+    });
+  });
+
   it("flips an unresolvable op to dead_letter once retryCount crosses the threshold", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);

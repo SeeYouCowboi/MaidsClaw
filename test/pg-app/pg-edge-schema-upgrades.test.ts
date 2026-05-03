@@ -189,7 +189,7 @@ describe.skipIf(skipPgTests)("pg-edge-schema-upgrades", () => {
     });
   });
 
-  it("fact_edges idempotency guard prevents duplicate active settlement-sourced rows", async () => {
+  it("fact_edges idempotency guard is full-history (active or invalidated) for settlement source_ref", async () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);
       const now = Date.now();
@@ -200,7 +200,8 @@ describe.skipIf(skipPgTests)("pg-edge-schema-upgrades", () => {
         VALUES (1, 2, 'located_at', ${now}, ${now}, 'settlement', 'stl-1:0')
       `);
 
-      let caught: Error | null = null;
+      // Active duplicate must fail — basic idempotency.
+      let caughtActive: Error | null = null;
       try {
         await sql.unsafe(`
           INSERT INTO fact_edges
@@ -208,30 +209,118 @@ describe.skipIf(skipPgTests)("pg-edge-schema-upgrades", () => {
           VALUES (3, 4, 'has_color', ${now}, ${now}, 'settlement', 'stl-1:0')
         `);
       } catch (e: any) {
-        caught = e;
+        caughtActive = e;
       }
-      expect(caught).not.toBeNull();
-      expect(caught!.message.toLowerCase()).toContain("unique");
+      expect(caughtActive).not.toBeNull();
+      expect(caughtActive!.message.toLowerCase()).toContain("unique");
 
+      // Now invalidate the original row. With the OLD active-only index this
+      // freed the (source_kind, source_ref) slot and let a replayed settlement
+      // re-insert a new active row, resurrecting stale facts. With the NEW
+      // full-history index, the slot stays occupied — replay must fail.
       await sql.unsafe(`
         UPDATE fact_edges SET t_invalid = ${now + 1000}
         WHERE source_kind = 'settlement' AND source_ref = 'stl-1:0'
       `);
 
-      await sql.unsafe(`
-        INSERT INTO fact_edges
-          (source_entity_id, target_entity_id, predicate, t_valid, t_created, source_kind, source_ref)
-        VALUES (3, 4, 'has_color', ${now + 1000}, ${now + 1000}, 'settlement', 'stl-1:0')
-      `);
+      let caughtReplay: Error | null = null;
+      try {
+        await sql.unsafe(`
+          INSERT INTO fact_edges
+            (source_entity_id, target_entity_id, predicate, t_valid, t_created, source_kind, source_ref)
+          VALUES (3, 4, 'has_color', ${now + 1000}, ${now + 1000}, 'settlement', 'stl-1:0')
+        `);
+      } catch (e: any) {
+        caughtReplay = e;
+      }
+      expect(caughtReplay).not.toBeNull();
+      expect(caughtReplay!.message.toLowerCase()).toContain("unique");
 
-      const activeRows = await sql.unsafe(`
+      // Exactly one row exists for that source_ref, regardless of state.
+      const total = await sql.unsafe(`
+        SELECT count(*)::int AS cnt
+        FROM fact_edges
+        WHERE source_kind = 'settlement' AND source_ref = 'stl-1:0'
+      `);
+      expect(total[0].cnt).toBe(1);
+
+      // And no active rows, since we invalidated the only one.
+      const active = await sql.unsafe(`
         SELECT count(*)::int AS cnt
         FROM fact_edges
         WHERE source_kind = 'settlement'
           AND source_ref = 'stl-1:0'
           AND t_invalid = ${PG_MAX_BIGINT}
       `);
-      expect(activeRows[0].cnt).toBe(1);
+      expect(active[0].cnt).toBe(0);
+    });
+  });
+
+  it("migrateFactEdgesIdempotencyToFullHistory dedupes legacy duplicates and switches to full-history index", async () => {
+    const { migrateFactEdgesIdempotencyToFullHistory } = await import(
+      "../../src/storage/pg-app-schema-truth.js"
+    );
+
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+
+      // Simulate an old deployment: drop new index, recreate the active-only
+      // legacy index, and seed duplicates that the legacy guard allowed.
+      await sql.unsafe(`DROP INDEX IF EXISTS ux_fact_edges_settlement_source_ref`);
+      await sql.unsafe(`
+        CREATE UNIQUE INDEX ux_fact_edges_settlement_active
+          ON fact_edges(source_kind, source_ref)
+          WHERE source_kind = 'settlement' AND t_invalid = ${PG_MAX_BIGINT}
+      `);
+
+      const now = Date.now();
+      await sql.unsafe(`
+        INSERT INTO fact_edges
+          (source_entity_id, target_entity_id, predicate, t_valid, t_invalid, t_created, source_kind, source_ref)
+        VALUES
+          (1, 2, 'located_at', ${now},        ${now + 100}, ${now},       'settlement', 'stl-1:0'),
+          (1, 2, 'located_at', ${now + 200},  ${PG_MAX_BIGINT}, ${now + 200}, 'settlement', 'stl-1:0')
+      `);
+
+      const before = await sql.unsafe(`
+        SELECT count(*)::int AS cnt
+        FROM fact_edges
+        WHERE source_kind = 'settlement' AND source_ref = 'stl-1:0'
+      `);
+      expect(before[0].cnt).toBe(2);
+
+      await migrateFactEdgesIdempotencyToFullHistory(sql);
+
+      // After migration, the canonical row keeps its source_ref; the duplicate
+      // is suffixed; both rows still exist but resolve to distinct source_refs.
+      const refs = await sql.unsafe(`
+        SELECT source_ref FROM fact_edges
+        WHERE source_kind = 'settlement'
+        ORDER BY id
+      `);
+      expect(refs.length).toBe(2);
+      expect(refs[0].source_ref).toBe("stl-1:0");
+      expect(String(refs[1].source_ref)).toContain(":legacy-");
+
+      // Old index is gone; new full-history index is present.
+      const idx = await sql.unsafe(`
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND indexname IN (
+            'ux_fact_edges_settlement_active',
+            'ux_fact_edges_settlement_source_ref'
+          )
+      `);
+      const indexNames = idx.map((row: any) => row.indexname).sort();
+      expect(indexNames).toEqual(["ux_fact_edges_settlement_source_ref"]);
+
+      // Re-running migration is a no-op (no further dedupe needed).
+      await migrateFactEdgesIdempotencyToFullHistory(sql);
+      const after = await sql.unsafe(`
+        SELECT count(*)::int AS cnt FROM fact_edges
+        WHERE source_kind = 'settlement'
+      `);
+      expect(after[0].cnt).toBe(2);
     });
   });
 

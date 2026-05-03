@@ -190,13 +190,19 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS source_kind TEXT`);
   await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS source_ref TEXT`);
 
-  // Idempotency guard for settlement-sourced active world-state facts.
-  // sourceRef = '${settlementId}:${opIndex}' is the canonical key — at most one
-  // active (t_invalid = sentinel) row may exist per (source_kind='settlement', source_ref).
+  // Idempotency guard (full-history): at most one row per
+  // (source_kind='settlement', source_ref) regardless of t_invalid state.
+  // Active-only uniqueness was insufficient: when settlement A is invalidated by
+  // settlement B and then A is replayed (e.g., from settlement_processing_ledger
+  // recovery), an active-only filter let A re-insert a new active row, resurrecting
+  // a stale fact. Full-history uniqueness makes settlement replay a strict NO-OP.
+  // Operators upgrading from active-only deployments must first run
+  // migrateFactEdgesIdempotencyToFullHistory(sql) to dedupe existing duplicates.
+  await sql.unsafe(`DROP INDEX IF EXISTS ux_fact_edges_settlement_active`);
   await sql.unsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_edges_settlement_active
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_edges_settlement_source_ref
       ON fact_edges(source_kind, source_ref)
-      WHERE source_kind = 'settlement' AND t_invalid = ${PG_MAX_BIGINT}
+      WHERE source_kind = 'settlement'
   `);
 
   // ══════════════════════════════════════════════════════════════════
@@ -943,4 +949,56 @@ async function backfillTableInBatches(
       return;
     }
   }
+}
+
+/**
+ * Migrate fact_edges idempotency from active-only to full-history.
+ *
+ * Old design: ux_fact_edges_settlement_active ensured at most one ACTIVE row
+ * per (source_kind='settlement', source_ref). This allowed replay of an
+ * already-invalidated settlement to re-insert a new active row, resurrecting
+ * stale facts.
+ *
+ * New design: ux_fact_edges_settlement_source_ref ensures at most one row
+ * total (active or not) per (source_kind='settlement', source_ref). Settlement
+ * replay becomes a strict NO-OP because the original row is found regardless
+ * of state.
+ *
+ * Migration steps (re-entrant, never called from bootstrap):
+ *   1. Suffix duplicate (source_kind='settlement', source_ref) rows by id so
+ *      the new unique index can be created. The earliest-created row keeps
+ *      the canonical source_ref; duplicates get ':legacy-${id}' appended.
+ *   2. Drop the old active-only index.
+ *   3. Create the new full-history unique index.
+ *
+ * After migration, future bootstrap calls are idempotent: the DROP IF EXISTS
+ * and CREATE IF NOT EXISTS in bootstrapTruthSchema converge on the new index.
+ */
+export async function migrateFactEdgesIdempotencyToFullHistory(
+  sql: postgres.Sql,
+): Promise<void> {
+  // Step 1: dedupe duplicates by suffixing source_ref. ROW_NUMBER preserves
+  // the earliest row (smallest id) as canonical.
+  await sql.unsafe(`
+    UPDATE fact_edges fe
+    SET source_ref = fe.source_ref || ':legacy-' || fe.id
+    FROM (
+      SELECT id, ROW_NUMBER() OVER (
+        PARTITION BY source_kind, source_ref ORDER BY id
+      ) AS rn
+      FROM fact_edges
+      WHERE source_kind = 'settlement'
+    ) ranked
+    WHERE fe.id = ranked.id AND ranked.rn > 1
+  `);
+
+  // Step 2: drop legacy active-only index. Safe if it does not exist.
+  await sql.unsafe(`DROP INDEX IF EXISTS ux_fact_edges_settlement_active`);
+
+  // Step 3: create the new full-history unique index. Safe to re-run.
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_edges_settlement_source_ref
+      ON fact_edges(source_kind, source_ref)
+      WHERE source_kind = 'settlement'
+  `);
 }
