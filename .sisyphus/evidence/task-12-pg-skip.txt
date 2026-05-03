@@ -1,0 +1,21 @@
+Task 12 PG-integration tests — environment notes
+==================================================
+
+PG env detection (test/helpers/pg-test-utils.ts:36-42):
+  skipPgTests = true  if NONE of {PG_TEST_URL, JOBS_PG_URL, PG_APP_URL, PG_APP_TEST_URL} is set.
+
+Local run (this evidence): a PG env was discovered via .env / shell, so describe.skipIf
+returned false and all 4 target files executed against a real Postgres instance.
+See task-12-pg-integration-tests.txt for the pass run (24 pass / 0 fail / exit 0).
+
+To verify the skip path manually on a clean shell:
+  PowerShell:
+    Remove-Item Env:PG_TEST_URL, Env:JOBS_PG_URL, Env:PG_APP_URL, Env:PG_APP_TEST_URL -ErrorAction SilentlyContinue
+    bun test "test/pg-app/pg-truth-schema.test.ts" "test/pg-app/pg-graph-store-repo.test.ts" `
+             "test/pg-app/unified-edge-read-repo.test.ts" "test/pg-app/world-state-replay.test.ts"
+  Expected: every describe block reports (skip), 0 fail, exit 0.
+
+The skip pattern is structurally identical to the other passing pg-app suites
+(pg-edge-schema-upgrades.test.ts, pg-unresolved-world-state-queue.test.ts,
+pg-unified-edge-read-repo.test.ts) which already use describe.skipIf(skipPgTests)
+and are known to skip cleanly without PG env.

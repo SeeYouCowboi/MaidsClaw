@@ -1,0 +1,114 @@
+Task 4 — Wire optional worldStateOps through payload, tool schema,
+runtime normalization, and prompt instructions.
+
+Date: 2026-05-03
+Plan:  .sisyphus/plans/consensus-memory-edges.md  (lines 327-382)
+Branch: <feature branch>
+
+================================================================
+Files modified
+================================================================
+src/runtime/rp-turn-contract.ts
+  - Added canonical WorldStateOp type (with MVP-semantics docstring).
+  - Added worldStateOps?: WorldStateOp[] to RpTurnOutcomeSubmissionV5.
+  - Added worldStateOps: WorldStateOp[] to CanonicalRpTurnOutcome.
+  - Added normalizeWorldStateOps():
+      * defaults to []
+      * validates subject/object endpoint shape
+      * validates predicate / factText non-empty strings
+      * validates contradictedFactEdgeIds as finite numbers
+      * accepts visibility "shared_public" | "private_overlay"
+      * DROPS entries with op:"retract" + console.warn (assert-only MVP)
+      * REJECTS any other unknown `op` value with a clear error
+  - Wired worldStateOps into normalizeV5Submission output.
+
+src/interaction/contracts.ts
+  - Imports WorldStateOp from runtime/rp-turn-contract.js (re-exports it).
+  - Added worldStateOps?: WorldStateOp[] to TurnSettlementPayload.
+
+src/interaction/settlement-adapter.ts
+  - Added worldStateOps: WorldStateOp[] to NormalizedSettlementPayload.
+  - Normalizes missing field to [].
+
+src/runtime/submit-rp-turn-tool.ts
+  - SUBMIT_RP_TURN_ARTIFACT_CONTRACTS.worldStateOps:
+      authority_level:  "agent"
+      artifact_scope:   "private"
+      ledger_policy:    "current_state"
+  - Full JSON schema property with description distinguishing it from
+    actionCommitments, free-form predicate guidance,
+    contradictedFactEdgeIds-from-context-only rule, visibility default.
+
+src/interaction/redaction.ts
+  - Added worldStateOps redaction:
+      replaces the array with { redacted: true, count: N } when present;
+      omits the field entirely when empty / absent.
+  - factText, predicate, subject.value, object.value, contradictedFactEdgeIds
+    no longer leak through redacted records (asserted in tests).
+
+src/core/prompt-builder.ts
+  - Added env-flag gate: process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0"
+    (default = enabled; only "0" disables).
+  - When enabled, appends WORLD_STATE_OPS_INSTRUCTIONS to the
+    RP_AGENT_FRAMEWORK_INSTRUCTIONS body.
+  - When enabled, splices a "- worldStateOps: OPTIONAL …" line into
+    the Talker allowed-output sentence and appends a Talker-mode
+    "World State Ops" section.
+  - When disabled, NEITHER block is injected.
+  - actionCommitments instructions remain untouched.
+
+================================================================
+Tests added / updated
+================================================================
+test/runtime/rp-turn-contract.test.ts
+  - Updated 2 existing toEqual snapshots to include "worldStateOps: []".
+  - Added 3 new cases:
+      * defaults worldStateOps to [] when omitted
+      * normalizes valid worldStateOps pass-through
+      * drops worldStateOps entries carrying op:'retract' with a warn
+        (asserts console.warn called once + remaining op count)
+
+test/interaction/interaction-redaction.test.ts
+  - New case: redacts worldStateOps to count-only summary, asserts that
+    factText / endpoint values / predicate words ("wears", "holds",
+    "Alice wears", "red_dress", "lantern") are NOT present in the
+    serialized redacted payload.
+  - Extended absent-fields case: payload.worldStateOps is undefined.
+
+test/core/prompt-builder.test.ts
+  - New describe "worldStateOps prompt instructions (env-flag gated)" with 4 cases:
+      * RP framework: section injected when flag is unset (default ENABLED)
+      * RP framework: section omitted when flag = "0"
+      * Talker mode: section + allowed-output line injected when enabled
+      * Talker mode: nothing injected when flag = "0"
+
+================================================================
+Verification
+================================================================
+$ bun run build
+  -> tsc -p tsconfig.build.json --noEmit
+  (exit 0, no diagnostics)
+
+$ bun test test/runtime/rp-turn-contract.test.ts \
+            test/interaction/interaction-redaction.test.ts \
+            test/core/prompt-builder.test.ts
+  95 pass
+  0 fail
+  248 expect() calls
+
+================================================================
+Constraints honoured
+================================================================
+[x] No `op` field on WorldStateOp (MVP assert-only).
+[x] Old-current invalidation expressed only via contradictedFactEdgeIds.
+[x] op:"retract" → drop + warn, with explicit test.
+[x] visibility default = "private_overlay".
+[x] Predicate is free-form; no closed vocabulary instructed.
+[x] No storage / DB writes added.
+[x] No synchronous LLM call introduced.
+[x] actionCommitments fields and instructions untouched.
+[x] worldStateOps is OPTIONAL throughout.
+[x] Env flag MAIDSCLAW_WORLDSTATE_OPS_ENABLED defaults enabled; only
+    the literal value "0" disables prompt injection.
+[x] Plan file (.sisyphus/plans/consensus-memory-edges.md) NOT modified.
+[x] ExplicitSettlementProcessor NOT modified (Task 7 scope).

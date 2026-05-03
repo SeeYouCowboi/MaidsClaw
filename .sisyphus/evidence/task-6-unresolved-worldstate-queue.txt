@@ -1,0 +1,48 @@
+Task 6 — Unresolved worldStateOps Queue Helpers
+================================================
+
+Build: PASS (`bun run build` exits 0, tsc --noEmit clean)
+
+Targeted PG tests (test/pg-app/pg-unresolved-world-state-queue.test.ts):
+  bun test v1.3.10 (30e609e0)
+   6 pass
+   0 fail
+   32 expect() calls
+  Ran 6 tests across 1 file. [3.76s]
+
+Test cases covered:
+  1. enqueueOp is idempotent on (settlementId, opIndex)
+     - Second insert returns same id, `created: false`
+     - COUNT(*) confirms exactly 1 row
+  2. listPending returns only pending rows below dead-letter threshold
+     - Resolved rows excluded; agent filter works
+  3. incrementRetry advances retryCount and dead-letters at threshold
+     - retryCount=4 (< threshold 5) still pending
+     - retryCount=5 transitions to status='dead_letter'
+     - dead_letter rows excluded from listPending
+  4. markResolved removes op from pending listing
+  5. markDeadLetter forces dead_letter status with reason
+  6. payload round-trips full op + resolution metadata
+     (subjectPointerKey, objectPointerKey, contradictedFactEdgeIds, validTime)
+
+Files added:
+  - src/storage/domain-repos/contracts/unresolved-world-state-ops-repo.ts
+  - src/storage/domain-repos/pg/unresolved-world-state-ops-repo.ts
+  - test/pg-app/pg-unresolved-world-state-queue.test.ts
+
+Files modified:
+  - src/storage/domain-repos/contracts/index.ts (re-export new types + DEAD_LETTER_THRESHOLD)
+
+Schema reconciliation note:
+  The actual `unresolved_world_state_ops` table created in Task 3 stores
+  op data as JSONB (`op_payload`) rather than as separate columns. The
+  repo serializes `{ agentId, op, subjectPointerKey, objectPointerKey,
+  turnTimestamp, retryCount }` into op_payload. Retry threshold logic uses
+  `(op_payload->>'retryCount')::int` and `jsonb_set` to mutate in place.
+  The schema constraint `MUST NOT modify pg-app-schema-truth.ts` was
+  honoured.
+
+Skip semantics:
+  Test file uses `describe.skipIf(skipPgTests)` — when no PG_TEST_URL /
+  PG_APP_URL / PG_APP_TEST_URL is set, the suite reports `(skip)` and
+  exits 0 cleanly. Verified locally with PG_APP_URL set.

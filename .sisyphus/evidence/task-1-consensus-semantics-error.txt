@@ -1,0 +1,5 @@
+command: Add-Content .sisyphus/notepads/consensus-memory-edges/learnings.md (initial attempt with inline quoted array)
+exit_code: 1
+
+output:
+ParserError: Unexpected token while parsing inline quoted Add-Content value.

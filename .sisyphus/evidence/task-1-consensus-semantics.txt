@@ -1,0 +1,5 @@
+command: bun test test/memory/relation-contract.test.ts
+exit_code: 0
+
+output:
+System.Object[]

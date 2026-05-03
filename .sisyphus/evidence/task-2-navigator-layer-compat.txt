@@ -1,0 +1,203 @@
+bun test v1.3.10 (30e609e0)
+
+test\memory\memtask-pg-integration.test.ts:
+61 | async function withRollbackTx(
+62 |   sql: postgres.Sql,
+63 |   fn: (tx: postgres.Sql) => Promise<void>,
+64 | ): Promise<void> {
+65 |   try {
+66 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:66:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:192:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:189:11)
+(fail) T13 memtask PG full-chain integration > flush chain: entities + cognition written to PG [1031.00ms]
+61 | async function withRollbackTx(
+62 |   sql: postgres.Sql,
+63 |   fn: (tx: postgres.Sql) => Promise<void>,
+64 | ): Promise<void> {
+65 |   try {
+66 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:66:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:306:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:303:11)
+(fail) T13 memtask PG full-chain integration > settlement chain: explicit cognition ops via ExplicitSettlementProcessor [969.00ms]
+61 | async function withRollbackTx(
+62 |   sql: postgres.Sql,
+63 |   fn: (tx: postgres.Sql) => Promise<void>,
+64 | ): Promise<void> {
+65 |   try {
+66 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:66:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:460:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:457:11)
+(fail) T13 memtask PG full-chain integration > vector retrieval: localizeSeedsHybrid fires semantic branch when queryEmbedding provided [1047.00ms]
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-1 session session-1
+
+test\memory\pending-settlement-sweeper-thinker.test.ts:
+37 | 			return queues.settlements?.[settlementIndex++] ?? [];
+38 | 		}
+39 | 		if (query.includes("FROM jobs_current")) {
+40 | 			return queues.existingJobs?.[existingIndex++] ?? [];
+41 | 		}
+42 | 		throw new Error(`Unexpected SQL query: ${query}`);
+                 ^
+error: Unexpected SQL query: SELECT settlement_id, claimed_at, claimed_by FROM settlement_processing_ledger WHERE status = 'thinker_projecting' AND claimed_at < LIMIT 50
+      at sql (D:\ACodingWorkSpace\MaidsClaw\test\memory\pending-settlement-sweeper-thinker.test.ts:42:13)
+      at logStaleThinkerProjecting (D:\ACodingWorkSpace\MaidsClaw\src\memory\pending-settlement-sweeper.ts:272:22)
+      at runSweep (D:\ACodingWorkSpace\MaidsClaw\src\memory\pending-settlement-sweeper.ts:112:17)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pending-settlement-sweeper-thinker.test.ts:337:9)
+(fail) PendingSettlementSweeper thinker recovery > thinker recovery runs only on configured interval
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-corrected-5 session session-1
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-auto-2 session session-2
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-canonical-3 session session-3
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-10 session session-4
+
+test\memory\pg-memory-chain-integration.test.ts:
+301 | 				);
+302 | 
+303 | 				expect(surface.trim().length).toBeGreaterThan(0);
+304 | 				expect(
+305 | 					surface.includes("[cognition]") || surface.includes("[narrative]"),
+306 | 				).toBe(true);
+            ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:306:7)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:281:10)
+(fail) PG memory chain integration > TYPED_RETRIEVAL surface > produces non-empty content when memory data exists [1281.00ms]
+386 | 				);
+387 | 				const result = await tool.handler({ query: "silver token" }, viewer);
+388 | 
+389 | 				expect(Array.isArray(result)).toBe(true);
+390 | 				const hits = result as Array<{ content: string }>;
+391 | 				expect(hits.length).toBeGreaterThan(0);
+                              ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:391:25)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:371:10)
+(fail) PG memory chain integration > tool: cognition_search > returns cognition hits for matching query [969.00ms]
+651 | 				const surface = await harness.memoryAdapter.getTypedRetrievalSurface(
+652 | 					"silver token",
+653 | 					viewer,
+654 | 				);
+655 | 
+656 | 				expect(surface).toContain("silver token fresh cognition");
+                          ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "silver token fresh cognition"
+Received: "[episode]\n鈥?[event] silver token fresh narrative\n\nCognition entries may be prefixed with [basis=X provenance=Y verification=Z].\nTreat the entry as low-confidence, fragmentary memory when verification is unverified, or when basis is belief or unknown, or when basis is inference and verification is not strong_verified.\nDo not use provenance alone as a low-confidence trigger once basis and verification have already been normalized.\nUse uncertain language when relying on low-confidence entries, do not repeat the bracketed metadata verbatim, and do not present them as quoted evidence.\nStrong verification can rescue user-stated or other weak-at-write-time entries once post-verification normalization has upgraded their trust state; do not keep them permanently low-confidence solely because their write-time provenance was weak.\nEntries without the prefix, or entries whose final basis/verification state no longer satisfies the low-confidence rule, may be treated as grounded memory."
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:656:21)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:595:10)
+(fail) PG memory chain integration > conversation-aware dedup > filters overlapping content already present in recent cognition and conversation [1078.00ms]
+
+test\memory\pipeline-e2e.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+
+test\memory\private-alias-scan.test.ts:
+{"level":"debug","message":"private_alias_scan_failed","context":{"event":"private_alias_scan_failed","error":"Error: list boom\n    at listPrivateAliasStrings (D:\\ACodingWorkSpace\\MaidsClaw\\test\\memory\\private-alias-scan.test.ts:47:40)\n    at route (D:\\ACodingWorkSpace\\MaidsClaw\\src\\memory\\query-router.ts:250:49)\n    at async <anonymous> (D:\\ACodingWorkSpace\\MaidsClaw\\test\\memory\\private-alias-scan.test.ts:185:34)\n    at processTicksAndRejections (native:7:39)"},"timestamp":1777777892947}
+
+test\memory\relation-builder-pg.test.ts:
+[relation_builder_conflict_factor_dropped] source=assertion:10 dropped=1 source_ref=settlement-xyz
+
+test\memory\relation-intent-resolver-pg.test.ts:
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_kind ref=something settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_ref kind=evidence settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_kind ref=no-kind settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=2 resolved=2
+
+test\memory\task-agent-pg.test.ts:
+[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback {
+  operation: "runMigrateInternal",
+  jobType: "graph_organizer",
+  batchId: "flush-1",
+  agentId: "agent-1",
+}
+[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback {
+  operation: "runMigrateInternal",
+  jobType: "graph_organizer",
+  batchId: "flush-1",
+  agentId: "agent-1",
+}
+
+ 717 pass
+ 7 fail
+ 13253 expect() calls
+Ran 724 tests across 46 files. [18.91s]

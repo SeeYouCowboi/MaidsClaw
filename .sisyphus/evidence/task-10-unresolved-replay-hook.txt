@@ -1,0 +1,38 @@
+Task 10 — unresolved world-state replay hook
+Date: 2026-05-03
+
+Implemented:
+- Added `src/memory/world-state-ops-replayer.ts` with `replayUnresolvedWorldStateOps(agentId, opts)`.
+- Reused world-state entity resolution from `world-state-ops-applier.ts` by exporting shared helpers (`resolveWorldStateEntityRef`, `ensureSyntheticAgentEntity`, and related types).
+- Hooked replay after successful `entityJudgeSweeper.runSweep()` in `src/runtime/thinker-worker.ts`.
+- Replay hook gating:
+  - runs only when `MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0"`
+  - runs only when sweep report has `created > 0 || matched > 0`
+  - replay failures are logged as warnings and remain non-fatal
+- Added tests:
+  - `test/memory/world-state-ops-replayer.test.ts`
+  - new replay-hook runtime assertions in `test/runtime/thinker-batch-collapse.test.ts`
+
+Behavior verified:
+- Resolved pending ops are written via `createWorldStateFactEdge` and marked resolved.
+- Still-unresolved ops increment retry.
+- Rows at/above dead-letter threshold are dead-lettered.
+- Replay is skipped when world-state ops env flag is disabled.
+- Replay failure does not crash thinker worker flow.
+
+Verification commands:
+1) Targeted tests
+   `bun test "test/memory/world-state-ops-replayer.test.ts" "test/runtime/thinker-batch-collapse.test.ts" --test-name-pattern "replayUnresolvedWorldStateOps|unresolved world-state replay"`
+   Result: pass (6 pass, 0 fail)
+
+2) Build
+   `bun run build`
+   Result: pass (tsc --noEmit exit 0)
+
+3) LSP diagnostics on changed files
+   - src/memory/world-state-ops-applier.ts
+   - src/memory/world-state-ops-replayer.ts
+   - src/runtime/thinker-worker.ts
+   - test/memory/world-state-ops-replayer.test.ts
+   - test/runtime/thinker-batch-collapse.test.ts
+   Result: no diagnostics

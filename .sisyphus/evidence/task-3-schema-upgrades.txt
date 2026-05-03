@@ -1,0 +1,72 @@
+Task 3: Idempotent Schema Upgrades, Backfills, and Constraints
+================================================================
+Date: 2026-05-03
+Branch: feature/studyRoom
+
+CHANGES
+-------
+1. src/storage/pg-app-schema-truth.ts
+   - Added nullable provenance columns (idempotent ALTER):
+     * logic_edges.source_kind TEXT, logic_edges.source_ref TEXT
+     * fact_edges.fact_text TEXT, fact_edges.owner_agent_id TEXT,
+       fact_edges.source_kind TEXT, fact_edges.source_ref TEXT
+   - Added partial unique index for idempotency guard:
+     * ux_fact_edges_settlement_active ON fact_edges(source_kind, source_ref)
+       WHERE source_kind = 'settlement' AND t_invalid = PG_MAX_BIGINT
+   - Expanded memory_relations.source_kind CHECK to accept both legacy
+     ('job', 'system') and new consensus values ('turn', 'agent_op',
+     'settlement', 'sweep', 'migration', 'seed', 'derived').
+   - Added unresolved_world_state_ops table per plan spec (id SERIAL PK,
+     session_id, settlement_id, op_index, op_payload JSONB, status with
+     CHECK ('pending','resolved','dead_letter'), last_error, created_at,
+     updated_at) + unique index on (settlement_id, op_index).
+   - Implemented and exported backfillEdgeProvenance(sql, opts?) at end of file:
+     * Re-entrant, batched (default 5000).
+     * Strategy A for memory_relations: drop ux_memory_relations_pair_type,
+       rewrite job->sweep / system->migration, suffix collisions with
+       :legacy-${id}, recreate index.
+     * logic_edges, fact_edges backfilled with source_kind='migration'.
+     * semantic_edges guarded by information_schema existence check
+       (semantic_edges lives in derived schema, not always present).
+
+2. src/storage/pg-app-schema-derived.ts
+   - Added nullable semantic_edges.source_kind TEXT, source_ref TEXT.
+
+3. test/pg-app/pg-edge-schema-upgrades.test.ts (NEW)
+   - 8 tests covering:
+     * Fresh bootstrap creates new columns and unresolved_world_state_ops.
+     * Re-running bootstrap is idempotent.
+     * memory_relations CHECK accepts all 9 source_kind variants.
+     * memory_relations backfill rewrites legacy 'job'/'system' values.
+     * Collision case: 2 legacy 'job' rows with same ref get :legacy-
+       suffix after backfill.
+     * Backfill is re-entrant (logic_edges).
+     * fact_edges idempotency guard rejects duplicate active settlement
+       row but allows re-insertion after t_invalid is set.
+     * unresolved_world_state_ops enforces unique (settlement_id, op_index).
+
+VERIFICATION
+------------
+$ bun test test/pg-app/pg-edge-schema-upgrades.test.ts
+  8 pass / 0 fail / 27 expect() calls / 6.29s
+
+$ bun test test/pg-app/
+  322 pass / 0 fail / 1072 expect() calls / 135.31s
+  (no regressions in any other pg-app test)
+
+$ bun run build
+  Pre-existing errors in src/interaction/contracts.ts (Task 1/2 scope):
+    - TS2440 Import declaration conflicts with local declaration of 'WorldStateOp'
+    - TS2484 Export declaration conflicts with exported declaration of 'WorldStateOp'
+  Task 3 files (pg-app-schema-truth.ts, pg-app-schema-derived.ts,
+  pg-edge-schema-upgrades.test.ts) have ZERO LSP diagnostics.
+
+NOTES
+-----
+- bootstrap remains DDL-only (no UPDATE/INSERT/DELETE).
+- backfillEdgeProvenance is operator/test-only; never invoked from bootstrap.
+- All ALTERs use IF NOT EXISTS; safe to re-run.
+- New columns left nullable per task spec; tightening to NOT NULL deferred.
+- PG_MAX_BIGINT used as SQL string sentinel throughout (never JS number).
+- memory_relations CHECK expansion (not tightening) preserves backwards
+  compatibility for unbackfilled rows.
