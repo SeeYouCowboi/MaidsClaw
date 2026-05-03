@@ -701,6 +701,14 @@ export class TurnService {
 					canonicalOutcome.actionCommitments.length > 0
 						? canonicalOutcome.actionCommitments
 						: undefined,
+				// Persist worldStateOps so settlement replay / task-agent / redaction paths
+				// can recover them from the InteractionRecord — the immediate-projection
+				// path uses canonicalOutcome directly, but persisted records must round-trip.
+				worldStateOps:
+					canonicalOutcome.worldStateOps &&
+					canonicalOutcome.worldStateOps.length > 0
+						? canonicalOutcome.worldStateOps
+						: undefined,
 				cognitiveSketch: effectiveSketch,
 				...(cognitiveSketchSource ? { cognitiveSketchSource } : {}),
 				...(correctionSuspected ? { correctionSuspected } : {}),
@@ -1172,6 +1180,11 @@ export class TurnService {
 					canonicalOutcome.actionCommitments &&
 					canonicalOutcome.actionCommitments.length > 0
 						? canonicalOutcome.actionCommitments
+						: undefined,
+				worldStateOps:
+					canonicalOutcome.worldStateOps &&
+					canonicalOutcome.worldStateOps.length > 0
+						? canonicalOutcome.worldStateOps
 						: undefined,
 				cognitiveSketch: canonicalOutcome.latentScratchpad,
 			};

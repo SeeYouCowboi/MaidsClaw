@@ -40,20 +40,25 @@ const PROFILE: AgentProfile = {
 
 class MockModelProvider implements ChatModelProvider {
 	readonly requests: ChatCompletionRequest[] = [];
+	toolPayloadOverride?: Record<string, unknown>;
 
 	async *chatCompletion(
 		request: ChatCompletionRequest,
 	): AsyncIterable<import("../../src/core/chunk.js").Chunk> {
 		this.requests.push(request);
+		const basePayload: Record<string, unknown> = {
+			schemaVersion: "rp_turn_outcome_v5",
+			publicReply: "Roger.",
+			latentScratchpad: "internal",
+		};
+		const payload = this.toolPayloadOverride
+			? { ...basePayload, ...this.toolPayloadOverride }
+			: basePayload;
 		yield { type: "tool_use_start", id: "tool:1", name: "submit_rp_turn" };
 		yield {
 			type: "tool_use_delta",
 			id: "tool:1",
-			partialJson: JSON.stringify({
-				schemaVersion: "rp_turn_outcome_v5",
-				publicReply: "Roger.",
-				latentScratchpad: "internal",
-			}),
+			partialJson: JSON.stringify(payload),
 		};
 		yield { type: "tool_use_end", id: "tool:1" };
 		yield { type: "message_end", stopReason: "end_turn" };
@@ -444,6 +449,48 @@ describe("TurnService speaker normalization integration", () => {
 			| undefined;
 
 		expect(payload?.normalizedTurnInput).toEqual(normalizeTurnInput(USER_TEXT));
+	});
+
+	it("settlement payload persists worldStateOps for downstream replay/audit (HIGH-1 regression)", async () => {
+		const { turnService, records, modelProvider } = makeTurnService({
+			speakerNormalizationGate: false,
+		});
+
+		modelProvider.toolPayloadOverride = {
+			worldStateOps: [
+				{
+					subject: { kind: "pointer_key", value: "item:silver_pocket_watch" },
+					predicate: "放在",
+					object: { kind: "pointer_key", value: "loc:tea_room" },
+					factText: "银怀表放在茶室",
+					visibility: "private_overlay",
+				},
+			],
+		};
+
+		await drain(
+			turnService.run({
+				sessionId: SESSION_ID,
+				requestId: `${REQUEST_ID}-worldstateops`,
+				messages: [{ role: "user", content: "把怀表放在茶室。" }],
+			}),
+		);
+
+		const record = records.find(
+			(item) =>
+				item.recordType === "turn_settlement" &&
+				item.correlatedTurnId === `${REQUEST_ID}-worldstateops`,
+		);
+		const payload = record?.payload as
+			| { worldStateOps?: unknown[] }
+			| undefined;
+
+		expect(Array.isArray(payload?.worldStateOps)).toBe(true);
+		expect(payload?.worldStateOps).toHaveLength(1);
+		expect(payload?.worldStateOps?.[0]).toMatchObject({
+			predicate: "放在",
+			factText: "银怀表放在茶室",
+		});
 	});
 
 	it("settlement backfills entityMentions from explicit user names when talker omits them", async () => {
