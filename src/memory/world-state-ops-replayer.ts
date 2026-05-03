@@ -145,7 +145,7 @@ export async function replayUnresolvedWorldStateOps(
           targetEntityId: object.entityId,
           predicate: op.predicate,
           factText: op.factText,
-          ownerAgentId: rowAgentId,
+          ownerAgentId: op.visibility === "shared_public" ? null : rowAgentId,
           sourceKind: "settlement",
           sourceRef: `${row.settlementId}:${row.opIndex}`,
           tValid,
