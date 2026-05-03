@@ -192,13 +192,15 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
 
     for (let depth = 0; depth < maxDepth && frontier.length > 0 && edgeById.size < maxEdges; depth += 1) {
       const remaining = maxEdges - edgeById.size;
+      // Over-fetch by 2× to give the cascade/dedup pass headroom; the final
+      // sortAndClamp(maxEdges) trims back to the caller's budget.
       const rows = await this.sql<LogicRow[]>`
         SELECT id, source_event_id, target_event_id, relation_type, weight, source_kind, source_ref, created_at
         FROM logic_edges
         WHERE (source_event_id IN ${this.sql(frontier)} OR target_event_id IN ${this.sql(frontier)})
           ${asOfFilter}
         ORDER BY created_at DESC, id DESC
-        LIMIT ${Math.max(remaining * 2, remaining)}
+        LIMIT ${remaining * 2}
       `;
 
       const nextFrontier = new Set<number>();
@@ -601,8 +603,11 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       return Number.isFinite(parsed) ? parsed : null;
     }
 
-    // In PG test pools int8 may already be parsed as Number. Sentinel BIGINT
-    // exceeds JS safe-integer range and is rounded to ~9.223372036854776e18.
+    // PG_MAX_BIGINT (9223372036854775807) > Number.MAX_SAFE_INTEGER, so any
+    // sentinel forced through Number() lands in the unsafe range and trips the
+    // first guard. The 9_000_000_000_000_000 lower bound is belt-and-suspenders
+    // for drivers that round the sentinel to a finite-but-still-unsafe value
+    // (~9.223372036854776e18 in some pools); both flag it as ∞ → null.
     if (!Number.isSafeInteger(raw) || raw >= 9_000_000_000_000_000) {
       return null;
     }

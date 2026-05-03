@@ -844,7 +844,7 @@ export async function backfillEdgeProvenance(
     throw new Error(`Invalid batchSize: ${batchSize}`);
   }
 
-  await backfillTableInBatches(sql, batchSize, async (limit) => {
+  await backfillTableInBatches(batchSize, async (limit) => {
     const result = await sql.unsafe(`
       WITH candidate AS (
         SELECT id FROM logic_edges
@@ -862,7 +862,7 @@ export async function backfillEdgeProvenance(
 
   await sql.unsafe(`DROP INDEX IF EXISTS ux_memory_relations_pair_type`);
 
-  await backfillTableInBatches(sql, batchSize, async (limit) => {
+  await backfillTableInBatches(batchSize, async (limit) => {
     const result = await sql.unsafe(`
       WITH candidate AS (
         SELECT id FROM memory_relations
@@ -906,7 +906,7 @@ export async function backfillEdgeProvenance(
     WHERE table_schema = current_schema() AND table_name = 'semantic_edges'
   `;
   if (semanticExists.length > 0) {
-    await backfillTableInBatches(sql, batchSize, async (limit) => {
+    await backfillTableInBatches(batchSize, async (limit) => {
       const result = await sql.unsafe(`
         WITH candidate AS (
           SELECT id FROM semantic_edges
@@ -921,7 +921,9 @@ export async function backfillEdgeProvenance(
       `);
       return result.count ?? 0;
     });
-  }  await backfillTableInBatches(sql, batchSize, async (limit) => {
+  }
+
+  await backfillTableInBatches(batchSize, async (limit) => {
     const result = await sql.unsafe(`
       WITH candidate AS (
         SELECT id FROM fact_edges
@@ -938,8 +940,9 @@ export async function backfillEdgeProvenance(
   });
 }
 
+const BACKFILL_INTER_BATCH_SLEEP_MS = 50;
+
 async function backfillTableInBatches(
-  _sql: postgres.Sql,
   batchSize: number,
   runOnce: (limit: number) => Promise<number>,
 ): Promise<void> {
@@ -948,6 +951,11 @@ async function backfillTableInBatches(
     if (updated < batchSize) {
       return;
     }
+    // Yield between batches so backfill on large tables doesn't starve other
+    // queries on the same connection / pool. 50ms is empirically small enough
+    // not to extend total wall-clock time meaningfully while still letting the
+    // event loop process other work.
+    await new Promise((resolve) => setTimeout(resolve, BACKFILL_INTER_BATCH_SLEEP_MS));
   }
 }
 
