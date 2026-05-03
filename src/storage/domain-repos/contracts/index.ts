@@ -65,3 +65,15 @@ export type { SemanticEdgeRepo } from "./semantic-edge-repo.js";
 export type { SessionRepo } from "./session-repo.js";
 export type { SettlementLedgerRecord, SettlementLedgerRepo } from "./settlement-ledger-repo.js";
 export type { SharedBlockRepo, SharedBlockAttachment } from "./shared-block-repo.js";
+export {
+  DEAD_LETTER_THRESHOLD,
+} from "./unresolved-world-state-ops-repo.js";
+export type {
+  EnqueueOpParams,
+  EnqueueOpResult,
+  EnqueuedOpPayload,
+  ListPendingOptions,
+  UnresolvedWorldStateOp,
+  UnresolvedWorldStateOpStatus,
+  UnresolvedWorldStateOpsRepo,
+} from "./unresolved-world-state-ops-repo.js";
