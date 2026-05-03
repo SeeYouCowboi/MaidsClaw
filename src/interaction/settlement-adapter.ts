@@ -7,7 +7,7 @@ import type {
 	PublicationDeclaration,
 	RelationIntent,
 } from "../runtime/rp-turn-contract.js";
-import type { TurnSettlementPayload } from "./contracts.js";
+import type { TurnSettlementPayload, WorldStateOp } from "./contracts.js";
 
 export type NormalizedSettlementPayload = {
 	settlementId: string;
@@ -26,6 +26,7 @@ export type NormalizedSettlementPayload = {
 	relationIntents: RelationIntent[];
 	conflictFactors: ConflictFactor[];
 	actionCommitments: ActionCommitment[];
+	worldStateOps: WorldStateOp[];
 	cognitiveSketchSource?: TurnSettlementPayload["cognitiveSketchSource"];
 	correctionSuspected?: boolean;
 	normalizedTurnInput?: TurnSettlementPayload["normalizedTurnInput"];
@@ -72,6 +73,9 @@ export function normalizeSettlementPayload(
 			: [],
 		actionCommitments: Array.isArray(payload.actionCommitments)
 			? payload.actionCommitments
+			: [],
+		worldStateOps: Array.isArray(payload.worldStateOps)
+			? payload.worldStateOps
 			: [],
 		...(payload.cognitiveSketchSource !== undefined ? { cognitiveSketchSource: payload.cognitiveSketchSource } : {}),
 		...(payload.correctionSuspected !== undefined ? { correctionSuspected: payload.correctionSuspected } : {}),

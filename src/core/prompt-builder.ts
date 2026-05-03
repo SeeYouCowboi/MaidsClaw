@@ -209,6 +209,60 @@ Examples:
 - "我走进书房"     → [{ effect: "move", summary: "主人走进书房", commits: [{ scope: "area", exposureScope: "area_visible", factKey: "location:user", value: "study" }] }]`;
 
 // ---------------------------------------------------------------------------
+// worldStateOps — entity→entity world-state fact edges (env-flag gated)
+// ---------------------------------------------------------------------------
+const WORLD_STATE_OPS_INSTRUCTIONS = `
+
+---
+
+### worldStateOps  (OPTIONAL — assert entity→entity world-state facts)
+
+worldStateOps is distinct from actionCommitments:
+- actionCommitments = physical scene fact commits (location, holder, status of items in the area).
+- worldStateOps = entity→entity world-state fact edges (e.g. who-holds-what, who-knows-what, who-is-allied-with-whom) at the world-graph level.
+
+Emit worldStateOps ONLY when the turn establishes or changes a relationship-like fact between two entities. Otherwise OMIT this field entirely.
+
+Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds?, visibility? }
+- subject / object: { kind: "pointer_key" | "special", value: <id> }. Use pointer_key values that already appear in <known_entities>; use "special" for self/user/current_location.
+- predicate: short free-form natural-language phrase in the conversation language (e.g. "wears", "trusts", "knows_about", "is_allied_with"). Do NOT pick from a closed vocabulary.
+- factText: one human-readable sentence in the conversation language stating the fact as currently true.
+- contradictedFactEdgeIds: numeric ids of prior fact-edges this assertion invalidates. Source these ONLY from ids already present in the prompt context — never invent ids. If you have no such ids, OMIT this field; do NOT guess.
+- visibility: "private_overlay" (default, agent-private RP fact) or "shared_public" (consensus-visible). Default to "private_overlay" unless this is an explicitly public, witnessed event.
+
+MVP semantics — assert-only:
+- Every entry asserts a NEW current fact. There is NO retract/delete operation.
+- To express "this old fact is no longer true", assert the new fact AND list the old fact-edge id in contradictedFactEdgeIds.
+- Do NOT include an "op" field. Entries with op:"retract" will be silently dropped.`;
+
+const WORLD_STATE_OPS_TALKER_LINE = `\n- worldStateOps: OPTIONAL — when this turn establishes or changes an entity→entity world-state fact (see "World State Ops" section). Otherwise OMIT.`;
+
+const WORLD_STATE_OPS_TALKER_SECTION = `
+
+---
+
+## World State Ops (entity→entity world-state fact edges)
+
+worldStateOps is distinct from actionCommitments:
+- actionCommitments = physical scene fact commits (location/holder/status of items in the area).
+- worldStateOps = entity→entity world-state fact edges (e.g. who-holds-what, who-trusts-whom) at the world-graph level.
+
+Emit worldStateOps ONLY when the turn establishes or changes a relationship-like fact between two entities.
+
+Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds?, visibility? }
+- subject / object: { kind: "pointer_key" | "special", value: <id> } — pointer_key from <known_entities>, or "special" for self/user/current_location.
+- predicate: short free-form natural-language phrase (e.g. "wears", "trusts"). Not a closed vocabulary.
+- factText: one sentence in the conversation language.
+- contradictedFactEdgeIds: numeric ids of prior facts this invalidates. Use ONLY ids already present in the prompt context; never invent ids. Omit if none.
+- visibility: "private_overlay" (default) or "shared_public".
+
+Assert-only: there is no retract. Express invalidation via contradictedFactEdgeIds.`;
+
+function isWorldStateOpsEnabled(): boolean {
+	return process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0";
+}
+
+// ---------------------------------------------------------------------------
 // Talker mode — lightweight instructions replacing the full cognition framework
 // ---------------------------------------------------------------------------
 const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
@@ -415,8 +469,15 @@ export class PromptBuilder {
 			slotContent.set(
 				PromptSectionSlot.OPERATIONAL_STATE,
 				input.isTalkerMode
-					? TALKER_INSTRUCTIONS
-					: RP_AGENT_FRAMEWORK_INSTRUCTIONS,
+					? (isWorldStateOpsEnabled()
+						? TALKER_INSTRUCTIONS.replace(
+								"\n- actionCommitments:",
+								`${WORLD_STATE_OPS_TALKER_LINE}\n- actionCommitments:`,
+							) + WORLD_STATE_OPS_TALKER_SECTION
+						: TALKER_INSTRUCTIONS)
+					: (isWorldStateOpsEnabled()
+						? RP_AGENT_FRAMEWORK_INSTRUCTIONS + WORLD_STATE_OPS_INSTRUCTIONS
+						: RP_AGENT_FRAMEWORK_INSTRUCTIONS),
 			);
 		} else {
 			slotContent.set(

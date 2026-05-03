@@ -10,6 +10,7 @@ import type {
   PrivateEpisodeArtifact,
   PublicationDeclaration,
   RelationIntent,
+  WorldStateOp,
 } from "../runtime/rp-turn-contract.js";
 import type { NormalizedTurnInput } from "../runtime/speaker-normalization.js";
 
@@ -49,6 +50,8 @@ export type InteractionRecord = {
   correlatedTurnId?: string;   // Links back to the user-turn request ID
   committedAt: number;         // Unix ms timestamp
 };
+
+export type { WorldStateOp };
 
 // Payload schemas by record type (normative, not runtime-validated in V1)
 
@@ -115,6 +118,7 @@ export type TurnSettlementPayload = {
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
   actionCommitments?: ActionCommitment[];
+  worldStateOps?: WorldStateOp[];
   areaStateArtifacts?: Array<{ // LEGACY_COMPAT: historical replay only
     key: string;
     value: unknown;

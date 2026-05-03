@@ -114,7 +114,7 @@ describe("artifact-contract-policy", () => {
   it("all submit_rp_turn contracts pass enforcement for append writes", () => {
     const contracts = getContracts();
 
-    expect(Object.keys(contracts)).toHaveLength(8);
+    expect(Object.keys(contracts)).toHaveLength(9);
     expect(() =>
       enforceArtifactContracts(contracts, {
         writingAgentId: "rp:alice",

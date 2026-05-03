@@ -43,6 +43,11 @@ export const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract>
     artifact_scope: "session",
     ledger_policy: "current_state",
   },
+  worldStateOps: {
+    authority_level: "agent",
+    artifact_scope: "private",
+    ledger_policy: "current_state",
+  },
 };
 
 export function makeSubmitRpTurnTool(): ToolDefinition {
@@ -253,6 +258,58 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               },
             },
             required: ["effect", "summary", "commits"],
+          },
+        },
+        worldStateOps: {
+          type: "array",
+          description:
+            "OPTIONAL entity→entity world-state fact edges. DISTINCT from actionCommitments (which commit physical scene facts like holder/location/status). " +
+            "Use worldStateOps for relational facts between two entities (people/places/items/concepts) — e.g. 'silver pocket watch is in the tea room', 'Alice trusts Bob', 'the locket belongs to mother'. " +
+            "Each op is an ASSERTION of a new current fact (no `op` field; assert-only in MVP). To invalidate prior contradicting facts, list their edge ids in `contradictedFactEdgeIds`. " +
+            "predicate and factText are FREE-FORM natural language in the conversation language — do NOT use a closed vocabulary. " +
+            "visibility defaults to 'private_overlay' (agent-private RP fact); use 'shared_public' only when the fact should be observable by other agents/world.",
+          items: {
+            type: "object",
+            properties: {
+              localRef: { type: "string" },
+              subject: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["pointer_key", "special"] },
+                  value: { type: "string" },
+                },
+                required: ["kind", "value"],
+              },
+              predicate: {
+                type: "string",
+                description: "Free-form natural-language predicate in the conversation language (e.g. '放在', 'trusts', '属于').",
+              },
+              object: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["pointer_key", "special"] },
+                  value: { type: "string" },
+                },
+                required: ["kind", "value"],
+              },
+              factText: {
+                type: "string",
+                description: "Human-readable form of the fact in the conversation language.",
+              },
+              contradictedFactEdgeIds: {
+                type: "array",
+                description:
+                  "Edge ids of prior active fact edges this op invalidates. Source these ids from the [world_state] retrieval block when surfaced; never call an LLM to detect contradictions.",
+                items: { type: "number" },
+              },
+              validTime: { type: "number" },
+              visibility: {
+                type: "string",
+                enum: ["shared_public", "private_overlay"],
+                description: "Default 'private_overlay'.",
+              },
+            },
+            required: ["subject", "predicate", "object", "factText"],
           },
         },
         cognitiveSketchSource: {

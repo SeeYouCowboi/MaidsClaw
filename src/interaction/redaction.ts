@@ -70,6 +70,9 @@ export function redactInteractionRecord(
 		...(normalizedPayload.privateEpisodes.length > 0
 			? { privateEpisodes: { redacted: true as const, count: normalizedPayload.privateEpisodes.length } }
 			: {}),
+		...(normalizedPayload.worldStateOps.length > 0
+			? { worldStateOps: { redacted: true as const, count: normalizedPayload.worldStateOps.length } }
+			: {}),
 		...(normalizedPayload.pinnedSummaryProposal
 			? { pinnedSummaryProposal: { redacted: true as const } }
 			: {}),

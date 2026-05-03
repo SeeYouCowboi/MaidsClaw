@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, afterEach } from "bun:test";
 
 import type { AgentProfile } from "../../src/agents/profile.js";
 import { AreaStateResolver } from "../../src/core/area-state-resolver.js";
@@ -341,6 +341,87 @@ describe("PromptBuilder", () => {
 		}
 
 		expect(threw).toBe(true);
+	});
+
+	describe("worldStateOps prompt instructions (env-flag gated)", () => {
+		const FLAG = "MAIDSCLAW_WORLDSTATE_OPS_ENABLED";
+
+		afterEach(() => {
+			delete process.env[FLAG];
+		});
+
+		it("injects worldStateOps section into RP framework instructions when flag default (enabled)", async () => {
+			delete process.env[FLAG];
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).toContain("worldStateOps");
+			expect(op).toContain("entity→entity");
+			expect(op).toContain("contradictedFactEdgeIds");
+		});
+
+		it("omits worldStateOps section when flag is '0'", async () => {
+			process.env[FLAG] = "0";
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).not.toContain("worldStateOps");
+			expect(op).not.toContain("entity→entity");
+		});
+
+		it("injects worldStateOps Talker section + allowed-output line when enabled in talker mode", async () => {
+			delete process.env[FLAG];
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+				isTalkerMode: true,
+				contextText: '{"writeEligible":false}',
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).toContain("worldStateOps");
+			expect(op).toContain("World State Ops");
+			expect(op).toMatch(/- worldStateOps: OPTIONAL/);
+		});
+
+		it("omits worldStateOps from Talker instructions when flag is '0'", async () => {
+			process.env[FLAG] = "0";
+			const dataSources = makeDataSources();
+			const builder = new PromptBuilder(dataSources);
+			const output = await builder.build({
+				profile: makeProfile({ role: "rp_agent", personaId: "hero-card" }),
+				viewerContext: BASE_VIEWER_CONTEXT,
+				userMessage: "hello",
+				conversationMessages: CONVERSATION,
+				budget: BASE_BUDGET,
+				isTalkerMode: true,
+				contextText: '{"writeEligible":false}',
+			});
+			const op =
+				getSectionContent(output.sections, PromptSectionSlot.OPERATIONAL_STATE) ?? "";
+			expect(op).not.toContain("worldStateOps");
+		});
 	});
 });
 

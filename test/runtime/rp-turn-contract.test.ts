@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type postgres from "postgres";
 import { MaidsClawError } from "../../src/core/errors.js";
 import type {
@@ -517,7 +517,86 @@ describe("normalizeRpTurnOutcome", () => {
       publications: [],
       relationIntents: [],
       conflictFactors: [],
+      worldStateOps: [],
     });
+  });
+
+  it("defaults worldStateOps to [] when omitted", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "no ops",
+      privateEpisodes: [],
+      publications: [],
+      relationIntents: [],
+      conflictFactors: [],
+    });
+    expect(result.worldStateOps).toEqual([]);
+  });
+
+  it("normalizes valid worldStateOps pass-through", () => {
+    const result = normalizeRpTurnOutcome({
+      schemaVersion: "rp_turn_outcome_v5",
+      publicReply: "asserted",
+      privateEpisodes: [],
+      publications: [],
+      relationIntents: [],
+      conflictFactors: [],
+      worldStateOps: [
+        {
+          subject: { kind: "pointer_key", value: "char:alice" },
+          predicate: "wears",
+          object: { kind: "pointer_key", value: "item:red_dress" },
+          factText: "Alice is wearing the red dress.",
+          contradictedFactEdgeIds: [42, 43],
+          visibility: "private_overlay",
+        },
+      ],
+    });
+    expect(result.worldStateOps).toEqual([
+      {
+        subject: { kind: "pointer_key", value: "char:alice" },
+        predicate: "wears",
+        object: { kind: "pointer_key", value: "item:red_dress" },
+        factText: "Alice is wearing the red dress.",
+        contradictedFactEdgeIds: [42, 43],
+        visibility: "private_overlay",
+      },
+    ]);
+  });
+
+  it("drops worldStateOps entries carrying op:'retract' with a warn", () => {
+    const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "with retract",
+        privateEpisodes: [],
+        publications: [],
+        relationIntents: [],
+        conflictFactors: [],
+        worldStateOps: [
+          {
+            op: "retract",
+            subject: { kind: "pointer_key", value: "char:alice" },
+            predicate: "wears",
+            object: { kind: "pointer_key", value: "item:red_dress" },
+            factText: "drop me",
+          },
+          {
+            subject: { kind: "pointer_key", value: "char:alice" },
+            predicate: "holds",
+            object: { kind: "pointer_key", value: "item:lantern" },
+            factText: "Alice holds a lantern.",
+          },
+        ],
+      });
+      expect(result.worldStateOps).toHaveLength(1);
+      expect(result.worldStateOps[0]?.predicate).toBe("holds");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain("retract");
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
@@ -921,6 +1000,7 @@ describe("makeSubmitRpTurnTool", () => {
       publications: [],
       relationIntents: [],
       conflictFactors: [],
+      worldStateOps: [],
     });
   });
 

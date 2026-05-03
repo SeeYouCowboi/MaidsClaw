@@ -470,6 +470,7 @@ describe("AgentLoop.runBuffered", () => {
         publications: [],
         relationIntents: [],
         conflictFactors: [],
+        worldStateOps: [],
       },
     });
     if ("outcome" in result) {

@@ -183,6 +183,29 @@ export type ActionCommitment = {
   commits: SceneCommit[];
 };
 
+/**
+ * WorldStateOp — entity→entity world-state fact edge asserted by an RP turn.
+ *
+ * MVP semantics (assert-only):
+ * - Every op asserts a NEW current fact (no `op` discriminator field).
+ * - Old-current invalidation is expressed via `contradictedFactEdgeIds` only;
+ *   processors must never call an LLM to detect contradictions synchronously.
+ * - `visibility` defaults to `"private_overlay"` for agent-private RP facts.
+ *
+ * Predicate is free-form natural language; do not enforce a closed vocabulary.
+ * factText is the human-readable form of the fact (conversation language).
+ */
+export type WorldStateOp = {
+  localRef?: string;
+  subject: { kind: "pointer_key" | "special"; value: string };
+  predicate: string;
+  object: { kind: "pointer_key" | "special"; value: string };
+  factText: string;
+  contradictedFactEdgeIds?: number[];
+  validTime?: number;
+  visibility?: "shared_public" | "private_overlay";
+};
+
 export interface SceneFactCommit {
   scope: "area" | "world";
   areaId?: number;
@@ -235,6 +258,7 @@ export type RpTurnOutcomeSubmissionV5 = {
   relationIntents?: RelationIntent[];
   conflictFactors?: ConflictFactor[];
   actionCommitments?: ActionCommitment[];
+  worldStateOps?: WorldStateOp[];
 };
 
 export type CanonicalRpTurnOutcome = {
@@ -249,6 +273,7 @@ export type CanonicalRpTurnOutcome = {
   relationIntents: RelationIntent[];
   conflictFactors: ConflictFactor[];
   actionCommitments?: ActionCommitment[];
+  worldStateOps: WorldStateOp[];
 };
 
 const V4_ASSERTION_STANCES: ReadonlySet<AssertionStance> = new Set([
@@ -452,6 +477,7 @@ function normalizeV5Submission(
   const relationIntents = normalizeRelationIntents(obj.relationIntents);
   const conflictFactors = normalizeConflictFactors(obj.conflictFactors);
   const actionCommitments = normalizeActionCommitments(obj.actionCommitments);
+  const worldStateOps = normalizeWorldStateOps(obj.worldStateOps);
   const entityMentions = normalizeEntityMentions(obj.entityMentions, {
     fieldName: "entityMentions",
   });
@@ -460,7 +486,8 @@ function normalizeV5Submission(
     || (privateCognition && privateCognition.ops.length > 0)
     || publications.length > 0
     || privateEpisodes.length > 0
-    || actionCommitments.length > 0;
+    || actionCommitments.length > 0
+    || worldStateOps.length > 0;
 
   if (!hasContent) {
     throw new Error(
@@ -480,6 +507,7 @@ function normalizeV5Submission(
     relationIntents,
     conflictFactors,
     ...(actionCommitments.length > 0 ? { actionCommitments } : {}),
+    worldStateOps,
   };
 }
 
@@ -1144,4 +1172,113 @@ function isEntityPropositionObject(
 
   const candidate = value as Record<string, unknown>;
   return candidate.kind === "entity" && isCognitionEntityRef(candidate.ref);
+}
+
+function isWorldStateEndpoint(
+  value: unknown,
+): value is { kind: "pointer_key" | "special"; value: string } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.kind === "pointer_key" || candidate.kind === "special")
+    && typeof candidate.value === "string"
+    && candidate.value.length > 0
+  );
+}
+
+function normalizeWorldStateOps(raw: unknown): WorldStateOp[] {
+  if (raw === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(raw)) {
+    throw new Error("worldStateOps must be an array");
+  }
+
+  const ops: WorldStateOp[] = [];
+
+  for (let index = 0; index < raw.length; index++) {
+    const entry = raw[index];
+
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`worldStateOps[${index}] must be an object`);
+    }
+
+    const candidate = entry as Record<string, unknown>;
+
+    // MVP is assert-only. Drop ops carrying op:"retract" with a console.warn
+    // so the model gets feedback but the turn is not rejected. This matches
+    // the plan acceptance: drop unsupported field behavior must be tested.
+    if (candidate.op === "retract") {
+      console.warn(
+        `worldStateOps[${index}]: op:"retract" is not supported in MVP — dropping. Use contradictedFactEdgeIds to invalidate prior facts.`,
+      );
+      continue;
+    }
+
+    if (candidate.op !== undefined && candidate.op !== "upsert") {
+      throw new Error(
+        `worldStateOps[${index}].op is not supported (MVP is assert-only); only contradictedFactEdgeIds is allowed for invalidation`,
+      );
+    }
+
+    if (!isWorldStateEndpoint(candidate.subject)) {
+      throw new Error(
+        `worldStateOps[${index}].subject must be { kind: "pointer_key"|"special", value: string }`,
+      );
+    }
+    if (!isWorldStateEndpoint(candidate.object)) {
+      throw new Error(
+        `worldStateOps[${index}].object must be { kind: "pointer_key"|"special", value: string }`,
+      );
+    }
+    if (typeof candidate.predicate !== "string" || candidate.predicate.trim() === "") {
+      throw new Error(
+        `worldStateOps[${index}].predicate must be a non-empty string`,
+      );
+    }
+    if (typeof candidate.factText !== "string" || candidate.factText.trim() === "") {
+      throw new Error(
+        `worldStateOps[${index}].factText must be a non-empty string`,
+      );
+    }
+
+    const op: WorldStateOp = {
+      subject: { kind: candidate.subject.kind, value: candidate.subject.value },
+      predicate: candidate.predicate,
+      object: { kind: candidate.object.kind, value: candidate.object.value },
+      factText: candidate.factText,
+    };
+
+    if (typeof candidate.localRef === "string" && candidate.localRef.length > 0) {
+      op.localRef = candidate.localRef;
+    }
+    if (Array.isArray(candidate.contradictedFactEdgeIds)) {
+      const ids: number[] = [];
+      for (let j = 0; j < candidate.contradictedFactEdgeIds.length; j++) {
+        const id = candidate.contradictedFactEdgeIds[j];
+        if (typeof id !== "number" || !Number.isFinite(id)) {
+          throw new Error(
+            `worldStateOps[${index}].contradictedFactEdgeIds[${j}] must be a finite number`,
+          );
+        }
+        ids.push(id);
+      }
+      if (ids.length > 0) {
+        op.contradictedFactEdgeIds = ids;
+      }
+    }
+    if (typeof candidate.validTime === "number" && Number.isFinite(candidate.validTime)) {
+      op.validTime = candidate.validTime;
+    }
+    if (candidate.visibility === "shared_public" || candidate.visibility === "private_overlay") {
+      op.visibility = candidate.visibility;
+    }
+
+    ops.push(op);
+  }
+
+  return ops;
 }

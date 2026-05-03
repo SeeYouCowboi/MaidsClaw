@@ -649,6 +649,53 @@ describe("redactInteractionRecord — V5 artifact fields", () => {
     expect(payload.privateEpisodes).toEqual({ redacted: true, count: 2 });
   });
 
+  it("redacts worldStateOps to count-only summary (no factText/predicate/endpoints leak)", () => {
+    const record: InteractionRecord = {
+      sessionId: "sess-v5",
+      recordId: "stl-v5-wso",
+      recordIndex: 0,
+      actorType: "rp_agent",
+      recordType: "turn_settlement",
+      payload: {
+        settlementId: "stl-v5-wso",
+        requestId: "req-v5-wso",
+        sessionId: "sess-v5",
+        ownerAgentId: "rp:alice",
+        publicReply: "test",
+        hasPublicReply: true,
+        viewerSnapshot: { selfPointerKey: "__self__", userPointerKey: "__user__" },
+        schemaVersion: "turn_settlement_v5",
+        worldStateOps: [
+          {
+            subject: { kind: "pointer_key", value: "char:alice" },
+            predicate: "wears",
+            object: { kind: "pointer_key", value: "item:red_dress" },
+            factText: "Alice wears the red dress.",
+            contradictedFactEdgeIds: [42],
+          },
+          {
+            subject: { kind: "pointer_key", value: "char:alice" },
+            predicate: "holds",
+            object: { kind: "pointer_key", value: "item:lantern" },
+            factText: "Alice holds a lantern.",
+          },
+        ],
+      } satisfies TurnSettlementPayload,
+      committedAt: 1000,
+    };
+
+    const redacted = redactInteractionRecord(record);
+    const payload = redacted.payload as Record<string, unknown>;
+
+    expect(payload.worldStateOps).toEqual({ redacted: true, count: 2 });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("Alice wears");
+    expect(serialized).not.toContain("red_dress");
+    expect(serialized).not.toContain("lantern");
+    expect(serialized).not.toContain("wears");
+    expect(serialized).not.toContain("holds");
+  });
+
   it("redacts pinnedSummaryProposal to redacted marker", () => {
     const record: InteractionRecord = {
       sessionId: "sess-v5",
@@ -701,6 +748,7 @@ describe("redactInteractionRecord — V5 artifact fields", () => {
 
     expect(payload.privateEpisodes).toBeUndefined();
     expect(payload.pinnedSummaryProposal).toBeUndefined();
+    expect(payload.worldStateOps).toBeUndefined();
   });
 });
 
