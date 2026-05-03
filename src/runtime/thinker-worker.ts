@@ -12,7 +12,12 @@ import type {
 	DurableJobStore,
 } from "../jobs/durable-store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
+import {
+	TERMINAL_STANCES,
+	validateSceneFactBindingForRevision,
+} from "../memory/cognition/belief-revision.js";
 import { applyContestConflictFactors } from "../memory/cognition/contest-conflict-applicator.js";
+import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
 import { RelationBuilder } from "../memory/cognition/relation-builder.js";
 import {
 	materializeRelationIntents,
@@ -20,44 +25,48 @@ import {
 	resolveLocalRefs,
 	type SettledArtifacts,
 } from "../memory/cognition/relation-intent-resolver.js";
-import {
-	TERMINAL_STANCES,
-	validateSceneFactBindingForRevision,
-} from "../memory/cognition/belief-revision.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
+import type { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import type {
 	ProjectionManager,
 	SettlementProjectionParams,
 } from "../memory/projection/projection-manager.js";
 import type { SettlementLedger } from "../memory/settlement-ledger.js";
+import type { MemoryTaskModelProvider } from "../memory/task-agent.js";
 import { CALL_TWO_TOOLS, type CreatedState } from "../memory/task-agent.js";
 import type { NodeRef } from "../memory/types.js";
-import type { MemoryTaskModelProvider } from "../memory/task-agent.js";
+import { isWorldStateOpsProcessingEnabled } from "../memory/world-state-ops-applier.js";
+import {
+	type ReplayUnresolvedWorldStateOpsOptions,
+	type ReplayUnresolvedWorldStateOpsResult,
+	replayUnresolvedWorldStateOps,
+} from "../memory/world-state-ops-replayer.js";
+import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
 import type { EmbeddingRepo } from "../storage/domain-repos/contracts/embedding-repo.js";
 import type { InteractionRepo } from "../storage/domain-repos/contracts/interaction-repo.js";
 import type { RecentCognitionSlotRepo } from "../storage/domain-repos/contracts/recent-cognition-slot-repo.js";
 import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
-import type { AliasRepo } from "../storage/domain-repos/contracts/alias-repo.js";
 import { PgAreaWorldProjectionRepo } from "../storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
+import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
 import { PgRecentCognitionSlotRepo } from "../storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
 import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
-import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
 import { PgUnresolvedWorldStateOpsRepo } from "../storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
-
 import {
-	type ActionCommitment,
+	canonicalizePointerKeysInCognitionOps,
+	canonicalizePointerKeysInEpisodes,
+} from "./canonicalize-pointer-keys.js";
+import {
 	type AssertionBasis,
 	type AssertionProvenance,
 	type AssertionRecordV4,
-	type CanonicalRpTurnOutcome,
 	type CognitionEntityRef,
 	type CognitionKind,
 	type CognitionOp,
@@ -69,15 +78,8 @@ import {
 	normalizeRpTurnOutcome,
 	type PrivateEpisodeArtifact,
 	type RelationIntent,
-	type SceneFactCommit,
 } from "./rp-turn-contract.js";
 import type { NormalizedTurnInput } from "./speaker-normalization.js";
-import type { CognitionCurrentRow } from "../memory/cognition/private-cognition-current.js";
-import type { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
-import {
-	canonicalizePointerKeysInCognitionOps,
-	canonicalizePointerKeysInEpisodes,
-} from "./canonicalize-pointer-keys.js";
 
 export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured Output Rules for submit_rp_turn
 
@@ -285,7 +287,11 @@ function applyNormalizedSemanticGate(
 		const hasValidBinding = hasValidSceneFactBindingForRevision(binding);
 
 		if (hasBinding && !hasValidBinding) {
-			warnBindingInvalidFallback("semantic_gate", assertion, binding!);
+			warnBindingInvalidFallback(
+				"semantic_gate",
+				assertion,
+				binding as NonNullable<AssertionRecordV4["sceneFactBinding"]>,
+			);
 			delete assertion.sceneFactBinding;
 		}
 
@@ -367,7 +373,9 @@ function normalizeThinkerAssertionOpsBeforeProjection(
 			warnBindingInvalidFallback(
 				"projection_normalize",
 				assertion,
-				assertion.sceneFactBinding!,
+				assertion.sceneFactBinding as NonNullable<
+					AssertionRecordV4["sceneFactBinding"]
+				>,
 			);
 			delete assertion.sceneFactBinding;
 		}
@@ -996,28 +1004,11 @@ export type ThinkerWorkerDeps = {
 	entityJudgeEnabled?: boolean;
 	entityJudgeModelId?: string;
 	entityJudgeBatchIntervalMs?: number;
+	replayUnresolvedWorldStateOpsFn?: (
+		agentId: string,
+		opts: ReplayUnresolvedWorldStateOpsOptions,
+	) => Promise<ReplayUnresolvedWorldStateOpsResult>;
 };
-
-function mapActionCommitmentsToSceneFactCommits(
-	actionCommitments: ActionCommitment[],
-): SceneFactCommit[] {
-	const commits: SceneFactCommit[] = [];
-	for (const ac of actionCommitments) {
-		const sceneCommits = Array.isArray(ac.commits) ? ac.commits : [];
-		for (const sc of sceneCommits) {
-			if (!isValidSceneFactKey(sc.factKey)) continue;
-			commits.push({
-				scope: sc.scope,
-				// AreaCommit has no areaId; projection-manager falls back to viewerSnapshot.currentLocationEntityId
-				factKey: sc.factKey,
-				value: sc.value,
-				sourceKind: "action_commitment",
-				exposureScope: sc.exposureScope,
-			});
-		}
-	}
-	return commits;
-}
 
 function toConversationMessages(records: InteractionRecord[]): ChatMessage[] {
 	const messages: ChatMessage[] = [];
@@ -2009,12 +2000,45 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 				const lastRunAt = entityJudgeLastRunBySession.get(judgeKey) ?? 0;
 				if (now - lastRunAt >= intervalMs) {
 					entityJudgeLastRunBySession.set(judgeKey, now);
+					const replayFn =
+						deps.replayUnresolvedWorldStateOpsFn ?? replayUnresolvedWorldStateOps;
 					void deps.entityJudgeSweeper
 						.runSweep({
 							agentId: payload.agentId,
 							sessionId: payload.sessionId,
 							modelId: deps.entityJudgeModelId,
 							dryRun: false,
+						})
+						.then(async (report) => {
+							if (!isWorldStateOpsProcessingEnabled()) {
+								return;
+							}
+
+							if (report.created <= 0 && report.matched <= 0) {
+								return;
+							}
+
+							try {
+								const replayResult = await replayFn(payload.agentId, {
+									graphStoreRepo: new PgGraphMutableStoreRepo(deps.sql),
+									unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(deps.sql),
+									viewerSnapshot,
+								});
+								if (
+									replayResult.replayed > 0 ||
+									replayResult.stillPending > 0 ||
+									replayResult.deadLettered > 0
+								) {
+									console.log(
+										`[thinker_worker] replayed unresolved world-state ops after entity sweep: replayed=${replayResult.replayed} stillPending=${replayResult.stillPending} deadLettered=${replayResult.deadLettered} agentId=${payload.agentId}`,
+									);
+								}
+							} catch (error) {
+								console.warn(
+									"[thinker_worker] world-state unresolved replay failed (non-fatal):",
+									error,
+								);
+							}
 						})
 						.catch((error) => {
 							console.warn(

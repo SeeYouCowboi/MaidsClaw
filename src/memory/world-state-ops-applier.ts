@@ -4,8 +4,9 @@ import type { GraphMutableStoreRepo } from "../storage/domain-repos/contracts/gr
 import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 
 type ViewerSnapshot = TurnSettlementPayload["viewerSnapshot"];
+export type WorldStateOpsViewerSnapshot = ViewerSnapshot;
 
-type GraphStoreRepoForWorldStateOps = Pick<
+export type GraphStoreRepoForWorldStateOps = Pick<
   GraphMutableStoreRepo,
   | "resolveEntityByPointerKey"
   | "createWorldStateFactEdge"
@@ -17,7 +18,7 @@ type UnresolvedOpsRepoForWorldStateOps = Pick<
   "enqueueOp"
 >;
 
-type ResolveResult =
+export type WorldStateEntityResolveResult =
   | {
       ok: true;
       entityId: number;
@@ -54,7 +55,7 @@ export function isWorldStateOpsProcessingEnabled(): boolean {
   return process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0";
 }
 
-async function ensureSyntheticAgentEntity(
+export async function ensureSyntheticAgentEntity(
   graphStoreRepo: GraphStoreRepoForWorldStateOps,
   agentId: string,
 ): Promise<number> {
@@ -74,7 +75,7 @@ async function ensureSyntheticAgentEntity(
   });
 }
 
-async function resolveEntityRef(params: {
+export async function resolveWorldStateEntityRef(params: {
   ref: WorldStateOp["subject"] | WorldStateOp["object"];
   viewerSnapshot: ViewerSnapshot | undefined;
   agentId: string;
@@ -82,7 +83,7 @@ async function resolveEntityRef(params: {
   settlementId: string;
   opIndex: number;
   endpoint: "subject" | "object";
-}): Promise<ResolveResult> {
+}): Promise<WorldStateEntityResolveResult> {
   const {
     ref,
     viewerSnapshot,
@@ -202,7 +203,7 @@ export async function applyWorldStateOpsForSettlement(
     const op = normalizedOps[opIndex];
     try {
       const [subject, object] = await Promise.all([
-        resolveEntityRef({
+        resolveWorldStateEntityRef({
           ref: op.subject,
           viewerSnapshot: params.viewerSnapshot,
           agentId: params.agentId,
@@ -211,7 +212,7 @@ export async function applyWorldStateOpsForSettlement(
           opIndex,
           endpoint: "subject",
         }),
-        resolveEntityRef({
+        resolveWorldStateEntityRef({
           ref: op.object,
           viewerSnapshot: params.viewerSnapshot,
           agentId: params.agentId,

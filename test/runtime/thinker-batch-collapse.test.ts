@@ -432,6 +432,7 @@ function createMockAssertionCanonicalizationBundle(params: {
 }
 
 function createFixture(params: {
+	sessionId?: string;
 	claimedVersion: number;
 	settlementBehavior: SettlementBehavior;
 	pendingPayloads?: CognitionThinkerJobPayload[];
@@ -442,7 +443,12 @@ function createFixture(params: {
 	assertionCanonicalization?: ThinkerWorkerDeps["assertionCanonicalization"];
 	cognitionProjectionRows?: CognitionCurrentRow[];
 	canonicalizationSimilarityThreshold?: number;
+	entityJudgeSweeper?: ThinkerWorkerDeps["entityJudgeSweeper"];
+	entityJudgeEnabled?: ThinkerWorkerDeps["entityJudgeEnabled"];
+	entityJudgeBatchIntervalMs?: ThinkerWorkerDeps["entityJudgeBatchIntervalMs"];
+	replayUnresolvedWorldStateOpsFn?: ThinkerWorkerDeps["replayUnresolvedWorldStateOpsFn"];
 }) {
+	const sessionId = params.sessionId ?? SESSION_ID;
 	const settlementCalls: string[] = [];
 	let capturedRequest: AgentRunRequest | undefined;
 	const settlementLedger = createSettlementLedger();
@@ -455,7 +461,7 @@ function createFixture(params: {
 		return { error: FAIL_AFTER_PROMPT };
 	});
 	const payload: CognitionThinkerJobPayload = {
-		sessionId: SESSION_ID,
+		sessionId: sessionId,
 		agentId: AGENT_ID,
 		settlementId: settlementIdFor(params.claimedVersion),
 		talkerTurnVersion: params.claimedVersion,
@@ -501,7 +507,7 @@ function createFixture(params: {
 				} as unknown as DurableJobStore);
 
 	const interactionRepo = createInteractionRepo({
-		sessionId: SESSION_ID,
+		sessionId,
 		settlementBehavior: params.settlementBehavior,
 		settlementCalls,
 	});
@@ -527,6 +533,10 @@ function createFixture(params: {
 			: undefined,
 		canonicalizationSimilarityThreshold:
 			params.canonicalizationSimilarityThreshold,
+		entityJudgeSweeper: params.entityJudgeSweeper,
+		entityJudgeEnabled: params.entityJudgeEnabled,
+		entityJudgeBatchIntervalMs: params.entityJudgeBatchIntervalMs,
+		replayUnresolvedWorldStateOpsFn: params.replayUnresolvedWorldStateOpsFn,
 	};
 
 	const readBySettlementSpy = jest
@@ -553,6 +563,25 @@ function createFixture(params: {
 		slotUpsertSpy,
 		settlementCalls,
 		getCapturedPrompt: () => extractUserPrompt(capturedRequest),
+	};
+}
+
+function makeEntityJudgeReport(overrides?: { created?: number; matched?: number }) {
+	return {
+		scanned_at: Date.now(),
+		duration_ms: 1,
+		model_id: "test-model",
+		agent_id: AGENT_ID,
+		dry_run: false,
+		scope: "private_overlay" as const,
+		max_candidates_per_key: 10,
+		candidate_keys: 1,
+		judged: 1,
+		matched: overrides?.matched ?? 0,
+		created: overrides?.created ?? 0,
+		rejected: 0,
+		skipped_due_lock: false,
+		decisions: [],
 	};
 }
 
@@ -2238,5 +2267,158 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 		expect(prompt).toContain("Cognitive sketches from Talker (batch)");
 		expect(prompt).not.toContain("correctionSuspected");
 		expect(prompt).not.toContain("correction");
+	});
+
+	it("runs unresolved world-state replay after successful entity sweep when report created/matched > 0", async () => {
+		const runSweep = jest
+			.fn()
+			.mockResolvedValue(makeEntityJudgeReport({ created: 1, matched: 0 }));
+		const replayUnresolvedWorldStateOpsFn = jest
+			.fn()
+			.mockResolvedValue({ replayed: 1, stillPending: 0, deadLettered: 0 });
+
+		const fixture = createFixture({
+			sessionId: "session:replay-hook:created",
+			claimedVersion: 7,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(7)]: { sketch: "single-sketch-v7" },
+			},
+			agentOutcome: makeSuccessOutcome(),
+			entityJudgeSweeper: {
+				runSweep,
+			} as unknown as ThinkerWorkerDeps["entityJudgeSweeper"],
+			entityJudgeBatchIntervalMs: 1,
+			replayUnresolvedWorldStateOpsFn,
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(runSweep).toHaveBeenCalledTimes(1);
+		expect(replayUnresolvedWorldStateOpsFn).toHaveBeenCalledTimes(1);
+		expect(replayUnresolvedWorldStateOpsFn).toHaveBeenCalledWith(
+			AGENT_ID,
+			expect.objectContaining({
+				viewerSnapshot: expect.objectContaining({
+					selfPointerKey: "entity:self",
+					userPointerKey: "entity:user",
+				}),
+			}),
+		);
+	});
+
+	it("skips unresolved world-state replay when sweep reports no created/matched entities", async () => {
+		const runSweep = jest
+			.fn()
+			.mockResolvedValue(makeEntityJudgeReport({ created: 0, matched: 0 }));
+		const replayUnresolvedWorldStateOpsFn = jest
+			.fn()
+			.mockResolvedValue({ replayed: 1, stillPending: 0, deadLettered: 0 });
+
+		const fixture = createFixture({
+			sessionId: "session:replay-hook:none",
+			claimedVersion: 8,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(8)]: { sketch: "single-sketch-v8" },
+			},
+			agentOutcome: makeSuccessOutcome(),
+			entityJudgeSweeper: {
+				runSweep,
+			} as unknown as ThinkerWorkerDeps["entityJudgeSweeper"],
+			entityJudgeBatchIntervalMs: 1,
+			replayUnresolvedWorldStateOpsFn,
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(runSweep).toHaveBeenCalledTimes(1);
+		expect(replayUnresolvedWorldStateOpsFn).not.toHaveBeenCalled();
+	});
+
+	it("skips unresolved world-state replay entirely when MAIDSCLAW_WORLDSTATE_OPS_ENABLED is 0", async () => {
+		const previousFlag = process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED;
+		process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED = "0";
+		try {
+			const runSweep = jest
+				.fn()
+				.mockResolvedValue(makeEntityJudgeReport({ created: 1, matched: 0 }));
+			const replayUnresolvedWorldStateOpsFn = jest
+				.fn()
+				.mockResolvedValue({ replayed: 1, stillPending: 0, deadLettered: 0 });
+
+			const fixture = createFixture({
+				sessionId: "session:replay-hook:disabled",
+				claimedVersion: 9,
+				withDurableJobStore: false,
+				settlementBehavior: {
+					[settlementIdFor(9)]: { sketch: "single-sketch-v9" },
+				},
+				agentOutcome: makeSuccessOutcome(),
+				entityJudgeSweeper: {
+					runSweep,
+				} as unknown as ThinkerWorkerDeps["entityJudgeSweeper"],
+				entityJudgeBatchIntervalMs: 1,
+				replayUnresolvedWorldStateOpsFn,
+			});
+
+			await fixture.worker({ payload: fixture.payload });
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(runSweep).toHaveBeenCalledTimes(1);
+			expect(replayUnresolvedWorldStateOpsFn).not.toHaveBeenCalled();
+		} finally {
+			if (previousFlag === undefined) {
+				delete process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED;
+			} else {
+				process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED = previousFlag;
+			}
+		}
+	});
+
+	it("treats replay failure as non-fatal after successful entity sweep", async () => {
+		const warnSpy = jest
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
+		const runSweep = jest
+			.fn()
+			.mockResolvedValue(makeEntityJudgeReport({ created: 0, matched: 1 }));
+		const replayUnresolvedWorldStateOpsFn = jest
+			.fn()
+			.mockRejectedValue(new Error("replay boom"));
+
+		const fixture = createFixture({
+			sessionId: "session:replay-hook:nonfatal",
+			claimedVersion: 12,
+			withDurableJobStore: false,
+			settlementBehavior: {
+				[settlementIdFor(12)]: { sketch: "single-sketch-v12" },
+			},
+			agentOutcome: makeSuccessOutcome(),
+			entityJudgeSweeper: {
+				runSweep,
+			} as unknown as ThinkerWorkerDeps["entityJudgeSweeper"],
+			entityJudgeBatchIntervalMs: 1,
+			replayUnresolvedWorldStateOpsFn,
+		});
+
+		await fixture.worker({ payload: fixture.payload });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fixture.settlementLedger.markApplied).toHaveBeenCalledWith(
+			settlementIdFor(12),
+		);
+		expect(replayUnresolvedWorldStateOpsFn).toHaveBeenCalledTimes(1);
+		expect(
+			warnSpy.mock.calls.some((call) =>
+				call.some(
+					(part) =>
+						typeof part === "string" &&
+						part.includes("world-state unresolved replay failed"),
+				),
+			),
+		).toBe(true);
 	});
 });
