@@ -136,4 +136,27 @@ describe.skipIf(skipPgTests)("unified-edge-read-repo (consensus data plane)", ()
       );
     });
   });
+
+  it("worldStateOf includes published_as edges from memory_relations", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+      const repo = new PgUnifiedEdgeReadRepo(sql);
+
+      await sql.unsafe(`
+        INSERT INTO memory_relations
+          (source_node_ref, target_node_ref, relation_type, strength, source_kind, source_ref, created_at, updated_at)
+        VALUES ('event:100', 'entity:42', 'published_as', 1.0, 'turn', 'turn:5:0', 500, 500)
+      `);
+
+      const result = await repo.worldStateOf("entity:42");
+
+      expect(result.length).toBe(1);
+      const edge = result[0];
+      expect(edge?.table).toBe("memory_relations");
+      expect(edge?.edgeKind).toBe("published_as");
+      expect(edge?.sourceRef).toBe("event:100");
+      expect(edge?.targetRef).toBe("entity:42");
+    });
+  });
 });

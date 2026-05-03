@@ -123,6 +123,7 @@ export type WorldStateEdgeRecord = {
   targetRef: string;
   targetPointer: string;
   factText: string;
+  tValid?: number | null;
 };
 
 export type TypedRetrievalResult = {

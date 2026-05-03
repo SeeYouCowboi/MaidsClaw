@@ -108,32 +108,49 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
     const limit = this.resolveLimit(opts.limit, DEFAULT_ANCHOR_LIMIT);
     const ownerVisibility = this.factOwnerVisibility(opts.viewerAgentId);
     const temporalFilter = this.factTemporalFilter(opts);
+    const asOfFilter = this.createdAtAsOfFilter(opts.asOf);
 
-    const rows = await this.sql<FactRow[]>`
-      SELECT
-        id,
-        source_entity_id,
-        target_entity_id,
-        predicate,
-        fact_text,
-        source_kind,
-        source_ref,
-        owner_agent_id,
-        t_valid,
-        t_invalid,
-        t_created
-      FROM fact_edges
-      WHERE (source_entity_id = ${entityId} OR target_entity_id = ${entityId})
-        AND fact_text IS NOT NULL
-        AND predicate NOT IN ('explicit_assertion', 'explicit_evaluation', 'explicit_commitment')
-        AND (source_kind IS NULL OR source_kind != 'migration')
-        ${ownerVisibility}
-        ${temporalFilter}
-      ORDER BY t_valid DESC, t_created DESC, id DESC
-      LIMIT ${limit}
-    `;
+    const [factRows, publishedAsRows] = await Promise.all([
+      this.sql<FactRow[]>`
+        SELECT
+          id,
+          source_entity_id,
+          target_entity_id,
+          predicate,
+          fact_text,
+          source_kind,
+          source_ref,
+          owner_agent_id,
+          t_valid,
+          t_invalid,
+          t_created
+        FROM fact_edges
+        WHERE (source_entity_id = ${entityId} OR target_entity_id = ${entityId})
+          AND fact_text IS NOT NULL
+          AND predicate NOT IN ('explicit_assertion', 'explicit_evaluation', 'explicit_commitment')
+          AND (source_kind IS NULL OR source_kind != 'migration')
+          ${ownerVisibility}
+          ${temporalFilter}
+        ORDER BY t_valid DESC, t_created DESC, id DESC
+        LIMIT ${limit}
+      `,
+      this.sql<MemoryRow[]>`
+        SELECT id, source_node_ref, target_node_ref, relation_type, strength, source_kind, source_ref, created_at
+        FROM memory_relations
+        WHERE relation_type = 'published_as'
+          AND target_node_ref = ${entityRef}
+          ${asOfFilter}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limit}
+      `,
+    ]);
 
-    return rows.map((row) => this.normalizeFactRow(row));
+    const combined = [
+      ...factRows.map((row) => this.normalizeFactRow(row)),
+      ...publishedAsRows.map((row) => this.normalizeMemoryRow(row)),
+    ];
+
+    return this.sortAndClamp(combined, limit);
   }
 
   async cognitiveContextOf(nodeRef: string, opts: UnifiedEdgeReadOptions = {}): Promise<UnifiedEdgeRecord[]> {

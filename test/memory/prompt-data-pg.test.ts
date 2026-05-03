@@ -723,6 +723,7 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
         lifecycle: "supersedable",
         factText: "银怀表放在茶室",
         sourceKind: "settlement",
+        tValid: 1000,
       },
     ]);
 
@@ -737,7 +738,7 @@ describe("getTypedRetrievalSurfaceAsync (PG-native, unit)", () => {
     const idxWorldState = output.indexOf("[world_state]");
     expect(idxSceneWorld).toBeGreaterThanOrEqual(0);
     expect(idxWorldState).toBeGreaterThan(idxSceneWorld);
-    expect(output).toContain("- id=42 | item:silver_pocket_watch 放在 loc:tea_room | 银怀表放在茶室");
+    expect(output).toContain("- id=42 tValid=1000 | item:silver_pocket_watch 放在 loc:tea_room | 银怀表放在茶室");
   });
 
   it("excludes legacy/internal world_state rows (migration/null fact/predicate denylist)", async () => {

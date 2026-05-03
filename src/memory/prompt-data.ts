@@ -494,6 +494,7 @@ async function getWorldStateForCurrentTurnEntities(
       targetRef: row.targetRef,
       targetPointer,
       factText: trimText(row.factText) ?? "",
+      tValid: row.tValid ?? null,
     });
   }
   return records;
@@ -521,8 +522,9 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
     if (parts.length > 0) parts.push("");
     parts.push("[world_state]");
     for (const edge of result.world_state ?? []) {
+      const tValidPart = edge.tValid != null ? ` tValid=${String(edge.tValid)}` : "";
       parts.push(
-        `- id=${String(edge.id)} | ${edge.sourcePointer} ${edge.predicate} ${edge.targetPointer} | ${edge.factText}`,
+        `- id=${String(edge.id)}${tValidPart} | ${edge.sourcePointer} ${edge.predicate} ${edge.targetPointer} | ${edge.factText}`,
       );
     }
   }
