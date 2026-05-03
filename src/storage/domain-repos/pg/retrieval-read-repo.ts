@@ -79,7 +79,13 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
 
     return {
       entity,
-      facts: factRows.map(normalizeFactRow),
+      facts: factRows
+        .filter((row) =>
+          this.visibilityPolicy.isFactVisible(viewerContext, {
+            owner_agent_id: (row.owner_agent_id as string | null) ?? null,
+          })
+        )
+        .map(normalizeFactRow),
       events: eventRows.map(normalizeEventRow),
       episodes: episodeRows.map(normalizeEpisodeRow),
     };
@@ -160,7 +166,13 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
         AND (owner_agent_id IS NULL OR owner_agent_id = ${viewerContext.viewer_agent_id})
     `;
 
-    return rows.map(normalizeFactRow);
+    return rows
+      .filter((row) =>
+        this.visibilityPolicy.isFactVisible(viewerContext, {
+          owner_agent_id: (row.owner_agent_id as string | null) ?? null,
+        })
+      )
+      .map(normalizeFactRow);
   }
 
   async resolveRedirect(name: string, ownerAgentId?: string): Promise<string> {
@@ -321,15 +333,22 @@ function normalizeEventRow(row: postgres.Row): EventNode {
 }
 
 function normalizeFactRow(row: postgres.Row): FactEdge {
+  const normalizeTemporalBound = (raw: unknown): number => {
+    if (raw == null) {
+      return MAX_INTEGER;
+    }
+    return String(raw) === PG_MAX_BIGINT ? MAX_INTEGER : Number(raw);
+  };
+
   return {
     id: Number(row.id),
     source_entity_id: Number(row.source_entity_id),
     target_entity_id: Number(row.target_entity_id),
     predicate: row.predicate as string,
     t_valid: Number(row.t_valid),
-    t_invalid: Number(row.t_invalid ?? MAX_INTEGER),
+    t_invalid: normalizeTemporalBound(row.t_invalid),
     t_created: Number(row.t_created),
-    t_expired: Number(row.t_expired),
+    t_expired: normalizeTemporalBound(row.t_expired),
     source_event_id:
       row.source_event_id != null ? Number(row.source_event_id) : null,
   };

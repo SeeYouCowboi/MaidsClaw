@@ -229,7 +229,7 @@ export async function applyWorldStateOpsForSettlement(
           targetEntityId: object.entityId,
           predicate: op.predicate,
           factText: op.factText,
-          ownerAgentId: params.agentId,
+          ownerAgentId: op.visibility === "shared_public" ? null : params.agentId,
           sourceKind: "settlement",
           sourceRef: `${params.settlementId}:${opIndex}`,
           tValid: params.settledAt ?? Date.now(),

@@ -18,7 +18,7 @@ export type WorldStateFactEdgeParams = {
 	targetEntityId: number;
 	predicate: string;
 	factText: string;
-	ownerAgentId: string;
+	ownerAgentId: string | null;
 	sourceKind: "settlement";
 	sourceRef: string;
 	tValid: number;

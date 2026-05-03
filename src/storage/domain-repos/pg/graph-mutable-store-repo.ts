@@ -589,10 +589,7 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
             t_expired = ${now}
         WHERE id IN ${this.sql(params.contradictedFactEdgeIds ?? [])}
           AND t_invalid = ${PG_MAX_BIGINT}
-          AND (
-            owner_agent_id = ${params.ownerAgentId}
-            OR owner_agent_id IS NULL
-          )
+          AND (owner_agent_id IS NULL OR owner_agent_id = ${params.ownerAgentId ?? null})
       `;
     }
 
