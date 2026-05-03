@@ -36,6 +36,7 @@ import { PgRelationWriteRepo } from "../../src/storage/domain-repos/pg/relation-
 import { PgRetrievalReadRepo } from "../../src/storage/domain-repos/pg/retrieval-read-repo.js";
 import { PgSearchProjectionRepo } from "../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { PgSemanticEdgeRepo } from "../../src/storage/domain-repos/pg/semantic-edge-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../../src/storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { bootstrapOpsSchema } from "../../src/storage/pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
@@ -158,6 +159,8 @@ function createMemoryTaskAgent(
         relationWriteRepo: new PgRelationWriteRepo(sql),
         cognitionProjectionRepo,
         episodeRepo: new PgEpisodeRepo(sql),
+        graphStoreRepo: new PgGraphMutableStoreRepo(sql),
+        unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(sql),
       },
     },
     graphStorage,
@@ -341,6 +344,8 @@ describe.skipIf(skipPgTests)("T13 memtask PG full-chain integration", () => {
             relationWriteRepo: new PgRelationWriteRepo(txSql),
             cognitionProjectionRepo,
             episodeRepo: new PgEpisodeRepo(txSql),
+            graphStoreRepo,
+            unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(txSql),
           },
           {
             getEntityById: () => null,

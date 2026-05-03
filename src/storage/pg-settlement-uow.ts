@@ -11,6 +11,7 @@ import { PgRecentCognitionSlotRepo } from "./domain-repos/pg/recent-cognition-sl
 import { PgSearchProjectionRepo } from "./domain-repos/pg/search-projection-repo.js";
 import { PgSessionRepo } from "./domain-repos/pg/session-repo.js";
 import { PgSettlementLedgerRepo } from "./domain-repos/pg/settlement-ledger-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "./domain-repos/pg/unresolved-world-state-ops-repo.js";
 import type { SettlementRepos, SettlementUnitOfWork } from "./unit-of-work.js";
 
 export class PgSettlementUnitOfWork implements SettlementUnitOfWork {
@@ -29,6 +30,7 @@ export class PgSettlementUnitOfWork implements SettlementUnitOfWork {
 			searchProjectionRepo: new PgSearchProjectionRepo(txSql),
 			coreMemoryBlockRepo: new PgCoreMemoryBlockRepo(txSql),
 			graphStoreRepo: new PgGraphMutableStoreRepo(txSql),
+			unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(txSql),
 			pendingFlushRecoveryRepo: new PgPendingFlushRecoveryRepo(txSql),
 		});
 

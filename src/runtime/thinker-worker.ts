@@ -49,6 +49,8 @@ import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-rep
 import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgSettlementLedgerRepo } from "../storage/domain-repos/pg/settlement-ledger-repo.js";
+import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 
 import {
 	type ActionCommitment,
@@ -1668,9 +1670,11 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 
 			const viewerSnapshot = settlementPayload.viewerSnapshot
 				? {
+						selfPointerKey: settlementPayload.viewerSnapshot.selfPointerKey,
+						userPointerKey: settlementPayload.viewerSnapshot.userPointerKey,
 						currentLocationEntityId:
 							settlementPayload.viewerSnapshot.currentLocationEntityId,
-					}
+				  }
 				: undefined;
 
 			let changedNodeRefs: NodeRef[] = [];
@@ -1698,6 +1702,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					relationWriteRepo: txRelationWriteRepo,
 					searchProjectionRepo: new PgSearchProjectionRepo(txSql),
 					areaWorldProjectionRepo: new PgAreaWorldProjectionRepo(txSql),
+					graphStoreRepo: new PgGraphMutableStoreRepo(txSql),
+					unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(txSql),
 					recentCognitionSlotRepo: createThinkerSlotRepo(
 						new PgRecentCognitionSlotRepo(txSql),
 						batchMode ? effectiveHighestVersion : undefined,
@@ -1759,6 +1765,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					// avoid duplicate rows in the append-only scene_area_fact_events table.
 					sceneFactCommits: [],
 					sceneFactWritePath: deps.sceneFactWritePath ?? false,
+					worldStateOps: canonicalOutcome.worldStateOps,
 					recentCognitionSlotJson,
 					committedAt,
 					viewerSnapshot,
@@ -1783,6 +1790,7 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						privateEpisodes: memberEpisodes,
 						publications: [],
 						areaStateArtifacts: [],
+						worldStateOps: [],
 						recentCognitionSlotJson: "[]",
 						committedAt,
 						viewerSnapshot,

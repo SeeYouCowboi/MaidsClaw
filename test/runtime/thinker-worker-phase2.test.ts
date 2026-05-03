@@ -16,6 +16,8 @@ import { PgCognitionProjectionRepo } from "../../src/storage/domain-repos/pg/cog
 import { PgAreaWorldProjectionRepo } from "../../src/storage/domain-repos/pg/area-world-projection-repo.js";
 import { PgSearchProjectionRepo } from "../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { PgRelationWriteRepo } from "../../src/storage/domain-repos/pg/relation-write-repo.js";
+import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../../src/storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { PgSettlementUnitOfWork } from "../../src/storage/pg-settlement-uow.js";
 import {
 	createThinkerWorker,
@@ -2542,6 +2544,8 @@ describe.skipIf(skipPgTests)(
 					},
 					cognitionProjectionRepo: new PgCognitionProjectionRepo(pool),
 					episodeRepo: new PgEpisodeRepo(pool),
+					graphStoreRepo: new PgGraphMutableStoreRepo(pool),
+					unresolvedOpsRepo: new PgUnresolvedWorldStateOpsRepo(pool),
 				},
 				{
 					getEntityById: () => null,

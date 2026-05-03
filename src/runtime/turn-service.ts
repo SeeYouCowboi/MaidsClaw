@@ -1573,6 +1573,7 @@ export class TurnService {
 					]),
 					sceneFactWritePath:
 						this.talkerThinkerConfig.sceneFactWritePath ?? false,
+					worldStateOps: canonicalOutcome.worldStateOps,
 					viewerSnapshot: resolvedViewerSnapshot,
 					recentCognitionSlotJson: JSON.stringify(slotEntries),
 					agentRole: "rp_agent",
@@ -1591,6 +1592,8 @@ export class TurnService {
 					searchProjectionRepo: repos.searchProjectionRepo,
 					areaWorldProjectionRepo: repos.areaWorldProjectionRepo,
 					recentCognitionSlotRepo: repos.recentCognitionSlotRepo,
+					graphStoreRepo: repos.graphStoreRepo,
+					unresolvedOpsRepo: repos.unresolvedOpsRepo,
 				},
 			);
 		}

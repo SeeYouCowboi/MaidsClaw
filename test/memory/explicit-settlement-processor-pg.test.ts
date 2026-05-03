@@ -190,6 +190,14 @@ describe("ExplicitSettlementProcessor (PG repos, async)", () => {
           readBySettlement: async () => [],
           readPublicationsBySettlement: async () => [],
         },
+        graphStoreRepo: {
+          resolveEntityByPointerKey: async () => null,
+          createWorldStateFactEdge: async () => ({ id: 0, created: true }),
+          upsertEntity: async () => 0,
+        },
+        unresolvedOpsRepo: {
+          enqueueOp: async () => ({ id: 0, created: true }),
+        },
       },
       {
         getEntityById: () => null,
@@ -383,6 +391,14 @@ describe("ExplicitSettlementProcessor (PG repos, async)", () => {
               source_pub_index: 0,
             },
           ],
+        },
+        graphStoreRepo: {
+          resolveEntityByPointerKey: async () => null,
+          createWorldStateFactEdge: async () => ({ id: 0, created: true }),
+          upsertEntity: async () => 0,
+        },
+        unresolvedOpsRepo: {
+          enqueueOp: async () => ({ id: 0, created: true }),
         },
       },
       {

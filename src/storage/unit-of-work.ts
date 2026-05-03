@@ -11,6 +11,7 @@ import type {
 	SearchProjectionRepo,
 	SessionRepo,
 	SettlementLedgerRepo,
+	UnresolvedWorldStateOpsRepo,
 } from "./domain-repos/contracts/index.js";
 
 export interface SettlementUnitOfWork {
@@ -29,5 +30,6 @@ export interface SettlementRepos {
 	searchProjectionRepo: SearchProjectionRepo;
 	coreMemoryBlockRepo: CoreMemoryBlockRepo;
 	graphStoreRepo: GraphMutableStoreRepo;
+	unresolvedOpsRepo: UnresolvedWorldStateOpsRepo;
 	pendingFlushRecoveryRepo: PendingFlushRecoveryRepo;
 }

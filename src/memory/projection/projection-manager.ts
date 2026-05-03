@@ -12,17 +12,21 @@ import type {
   EpisodeEntityRef,
   PrivateEpisodeArtifact,
   PublicationDeclaration,
+  WorldStateOp,
 } from "../../runtime/rp-turn-contract.js";
 
 import type { SettlementRepos } from "../../storage/unit-of-work.js";
 import type { CognitionEventRepo } from "../../storage/domain-repos/contracts/cognition-event-repo.js";
 import type { InteractionRepo } from "../../storage/domain-repos/contracts/interaction-repo.js";
 import type { SearchProjectionRepo } from "../../storage/domain-repos/contracts/search-projection-repo.js";
+import type { GraphMutableStoreRepo } from "../../storage/domain-repos/contracts/graph-mutable-store-repo.js";
+import type { UnresolvedWorldStateOpsRepo } from "../../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 import type { PrivateCognitionProjectionRepo } from "../cognition/private-cognition-current.js";
 import { normalizePointerKeys } from "../contracts/pointer-key.js";
 import type { WriteTemplate } from "../contracts/write-template.js";
 import type { EpisodeRepository } from "../episode/episode-repo.js";
 import { materializePublications } from "../materialization.js";
+import { applyWorldStateOpsForSettlement } from "../world-state-ops-applier.js";
 import type { GraphStorageService } from "../storage.js";
 import type { NodeRef, NodeRefKind } from "../types.js";
 import { makeNodeRef } from "../schema.js";
@@ -107,6 +111,8 @@ type ProjectionCommitRepos = Pick<
 > & {
   interactionRepo?: InteractionRepo;
   searchProjectionRepo?: SearchProjectionRepo | ProjectionSearchProjectionRepo;
+  graphStoreRepo?: SettlementRepos["graphStoreRepo"];
+  unresolvedOpsRepo?: SettlementRepos["unresolvedOpsRepo"];
 };
 
 export type CommitSettlementResult = {
@@ -417,6 +423,8 @@ export type SettlementProjectionParams = {
   privateEpisodes: PrivateEpisodeArtifact[];
   publications: PublicationDeclaration[];
   viewerSnapshot?: {
+    selfPointerKey?: string;
+    userPointerKey?: string;
     currentLocationEntityId?: number;
   };
   upsertRecentCognitionSlot?: (
@@ -437,6 +445,8 @@ export type SettlementProjectionParams = {
   sceneFactCommits?: SceneFactCommit[];
   /** Rollout flag: only write scene facts when this is true */
   sceneFactWritePath?: boolean;
+  /** Optional world-state ops (entity->entity fact edges) emitted by the turn. */
+  worldStateOps?: WorldStateOp[];
 };
 
 /**
@@ -548,6 +558,51 @@ export class ProjectionManager {
           areaWorldProjectionRepo,
           repoOverrides,
         );
+      },
+      () => {
+        if (!params.worldStateOps || params.worldStateOps.length === 0) {
+          return;
+        }
+
+        if (!repoOverrides?.graphStoreRepo || !repoOverrides?.unresolvedOpsRepo) {
+          throw new Error(
+            "ProjectionManager.commitSettlement requires graphStoreRepo and unresolvedOpsRepo when worldStateOps are provided",
+          );
+        }
+
+        const viewerSnapshot =
+          params.viewerSnapshot?.selfPointerKey &&
+            params.viewerSnapshot?.userPointerKey
+            ? {
+              selfPointerKey: params.viewerSnapshot.selfPointerKey,
+              userPointerKey: params.viewerSnapshot.userPointerKey,
+              currentLocationEntityId:
+                params.viewerSnapshot.currentLocationEntityId,
+            }
+            : undefined;
+
+        const applyResult = applyWorldStateOpsForSettlement({
+          settlementId: params.settlementId,
+          sessionId: params.sessionId,
+          agentId: params.agentId,
+          worldStateOps: params.worldStateOps,
+          viewerSnapshot,
+          graphStoreRepo:
+            repoOverrides.graphStoreRepo as Pick<
+              GraphMutableStoreRepo,
+              "resolveEntityByPointerKey" | "createWorldStateFactEdge" | "upsertEntity"
+            >,
+          unresolvedOpsRepo:
+            repoOverrides.unresolvedOpsRepo as Pick<
+              UnresolvedWorldStateOpsRepo,
+              "enqueueOp"
+            >,
+          settledAt: now,
+        });
+
+        if (isPromiseLike(applyResult)) {
+          return Promise.resolve(applyResult).then(() => undefined);
+        }
       },
       () => {
         const verificationResult = this.runSynchronousGroundingVerification({

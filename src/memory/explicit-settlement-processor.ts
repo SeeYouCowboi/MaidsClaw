@@ -13,6 +13,7 @@ import type {
   CognitionSelector,
   CommitmentRecord,
   EvaluationRecord,
+  WorldStateOp,
 } from "../runtime/rp-turn-contract.js";
 import type { CognitionRepository } from "./cognition/cognition-repo.js";
 import { applyContestConflictFactors } from "./cognition/contest-conflict-applicator.js";
@@ -27,11 +28,14 @@ import {
 import type { RelationWriteRepo } from "../storage/domain-repos/contracts/relation-write-repo.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
 import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
+import type { GraphMutableStoreRepo } from "../storage/domain-repos/contracts/graph-mutable-store-repo.js";
+import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import { makeNodeRef } from "./schema.js";
 import type { SettlementLedger } from "./settlement-ledger.js";
 import type { GraphStorageService } from "./storage.js";
 import type { NodeRef } from "./types.js";
+import { applyWorldStateOpsForSettlement } from "./world-state-ops-applier.js";
 import type {
   ChatToolDefinition,
   CreatedState,
@@ -83,6 +87,11 @@ export type ExplicitSettlementProcessorDeps = {
     EpisodeRepo,
     "readBySettlement" | "readPublicationsBySettlement"
   >;
+  graphStoreRepo: Pick<
+    GraphMutableStoreRepo,
+    "resolveEntityByPointerKey" | "createWorldStateFactEdge" | "upsertEntity"
+  >;
+  unresolvedOpsRepo: Pick<UnresolvedWorldStateOpsRepo, "enqueueOp">;
 };
 
 export class ExplicitSettlementProcessor {
@@ -90,6 +99,8 @@ export class ExplicitSettlementProcessor {
   private readonly relationBuilder: ExplicitSettlementProcessorDeps["relationBuilder"];
   private readonly relationWriteRepo: ExplicitSettlementProcessorDeps["relationWriteRepo"];
   private readonly cognitionProjectionRepo: ExplicitSettlementProcessorDeps["cognitionProjectionRepo"];
+  private readonly graphStoreRepo: ExplicitSettlementProcessorDeps["graphStoreRepo"];
+  private readonly unresolvedOpsRepo: ExplicitSettlementProcessorDeps["unresolvedOpsRepo"];
   private readonly episodeRepo: Pick<
     EpisodeRepo,
     "readBySettlement" | "readPublicationsBySettlement"
@@ -107,6 +118,8 @@ export class ExplicitSettlementProcessor {
     this.relationBuilder = deps.relationBuilder;
     this.relationWriteRepo = deps.relationWriteRepo;
     this.cognitionProjectionRepo = deps.cognitionProjectionRepo;
+    this.graphStoreRepo = deps.graphStoreRepo;
+    this.unresolvedOpsRepo = deps.unresolvedOpsRepo;
     this.episodeRepo = deps.episodeRepo ?? {
       readBySettlement: async () => {
         throw new Error(
@@ -132,6 +145,7 @@ export class ExplicitSettlementProcessor {
       agentId?: string;
       artifactContracts?: Record<string, ArtifactContract>;
       skipEnforcement?: boolean;
+      worldStateOpsBySettlement?: ReadonlyMap<string, WorldStateOp[]>;
     },
   ): Promise<void> {
     if (!options.skipEnforcement) {
@@ -214,6 +228,19 @@ export class ExplicitSettlementProcessor {
         created.changedNodeRefs.push(...commitResult.refs);
 
         if (settlementPayload) {
+          await applyWorldStateOpsForSettlement({
+            settlementId: explicitMeta.settlementId,
+            sessionId: flushRequest.sessionId,
+            agentId: explicitMeta.ownerAgentId,
+            worldStateOps:
+              explicitMeta.worldStateOps ??
+              options.worldStateOpsBySettlement?.get(explicitMeta.settlementId) ??
+              [],
+            viewerSnapshot: settlementPayload.viewerSnapshot,
+            graphStoreRepo: this.graphStoreRepo,
+            unresolvedOpsRepo: this.unresolvedOpsRepo,
+          });
+
           const settledArtifacts = await this.buildSettledArtifacts(
             settlementPayload,
             explicitMeta.ownerAgentId,

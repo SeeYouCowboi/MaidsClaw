@@ -3,7 +3,7 @@ import { MaidsClawError } from "../core/errors.js";
 import type { MemoryFlushRequest as CoreMemoryFlushRequest } from "../core/types.js";
 import type { InteractionRecord, TurnSettlementPayload } from "../interaction/contracts.js";
 import { SUBMIT_RP_TURN_ARTIFACT_CONTRACTS } from "../runtime/submit-rp-turn-tool.js";
-import type { PrivateCognitionCommitV4 } from "../runtime/rp-turn-contract.js";
+import type { PrivateCognitionCommitV4, WorldStateOp } from "../runtime/rp-turn-contract.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
 import { CognitionRepository } from "./cognition/cognition-repo.js";
 import { CoreMemoryIndexUpdater } from "./core-memory-index-updater.js";
@@ -27,11 +27,13 @@ import type { GraphReadQueryRepo } from "../storage/domain-repos/contracts/graph
 import type { EpisodeRepo } from "../storage/domain-repos/contracts/episode-repo.js";
 import type { PromotionQueryRepo } from "../storage/domain-repos/contracts/promotion-query-repo.js";
 import type { AreaWorldProjectionRepo } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
+import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 import type { CognitionProjectionRepo } from "../storage/domain-repos/contracts/cognition-projection-repo.js";
 import { PgCognitionProjectionRepo } from "../storage/domain-repos/pg/cognition-projection-repo.js";
 import { PgCognitionEventRepo } from "../storage/domain-repos/pg/cognition-event-repo.js";
 import { PgSearchProjectionRepo } from "../storage/domain-repos/pg/search-projection-repo.js";
 import { PgGraphMutableStoreRepo } from "../storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { PgRelationWriteRepo } from "../storage/domain-repos/pg/relation-write-repo.js";
 import { PgRelationReadRepo } from "../storage/domain-repos/pg/relation-read-repo.js";
 import { PgEpisodeRepo } from "../storage/domain-repos/pg/episode-repo.js";
@@ -80,6 +82,7 @@ export type ExplicitSettlementMeta = {
   requestId: string;
   ownerAgentId: string;
   privateCognition: PrivateCognitionCommitV4;
+  worldStateOps?: WorldStateOp[];
 };
 
 export type IngestionAttachment = {
@@ -354,6 +357,7 @@ export class MemoryIngestionPolicy {
         requestId: p.requestId,
         ownerAgentId: p.ownerAgentId,
         privateCognition: p.privateCognition,
+        worldStateOps: p.worldStateOps,
       };
       attachment.explicitMeta = meta;
       explicitSettlements.push(meta);
@@ -374,6 +378,7 @@ export type MemoryTaskAgentDeps = {
   explicitSettlement?: ExplicitSettlementProcessorDeps;
   sqlFactory: () => postgres.Sql;
   graphMutableStoreRepo?: GraphMutableStoreRepo;
+  unresolvedOpsRepo?: UnresolvedWorldStateOpsRepo;
   graphReadQueryRepo?: GraphReadQueryRepo;
   episodeRepo?: EpisodeRepo;
   promotionQueryRepo?: PromotionQueryRepo;
@@ -383,6 +388,7 @@ export type MemoryTaskAgentDeps = {
 export class MemoryTaskAgent {
   private readonly sqlFactory: () => postgres.Sql;
   private readonly graphMutableStoreRepo?: GraphMutableStoreRepo;
+  private readonly unresolvedOpsRepo?: UnresolvedWorldStateOpsRepo;
   private readonly graphReadQueryRepo?: GraphReadQueryRepo;
   private readonly episodeRepo?: EpisodeRepo;
   private readonly promotionQueryRepo?: PromotionQueryRepo;
@@ -414,6 +420,7 @@ export class MemoryTaskAgent {
     }
     this.sqlFactory = deps.sqlFactory;
     this.graphMutableStoreRepo = deps.graphMutableStoreRepo;
+    this.unresolvedOpsRepo = deps.unresolvedOpsRepo;
     this.graphReadQueryRepo = deps.graphReadQueryRepo;
     this.episodeRepo = deps.episodeRepo;
     this.promotionQueryRepo = deps.promotionQueryRepo;
@@ -453,6 +460,14 @@ export class MemoryTaskAgent {
       cognitionProjectionRepo: {
         getCurrent: async (): Promise<null> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
         updateConflictFactors: async (): Promise<void> => { throw new Error("cognitionProjectionRepo not configured for PG"); },
+      },
+      graphStoreRepo: this.graphMutableStoreRepo ?? {
+        resolveEntityByPointerKey: async (): Promise<null> => { throw new Error("graphStoreRepo not configured for PG"); },
+        createWorldStateFactEdge: async (): Promise<{ id: number; created: boolean }> => { throw new Error("graphStoreRepo not configured for PG"); },
+        upsertEntity: async (): Promise<number> => { throw new Error("graphStoreRepo not configured for PG"); },
+      },
+      unresolvedOpsRepo: this.unresolvedOpsRepo ?? {
+        enqueueOp: async (): Promise<{ id: number; created: boolean }> => { throw new Error("unresolvedOpsRepo not configured for PG"); },
       },
     };
     this.cognitionOpsRepo = explicitSettlementDeps.cognitionRepo;
@@ -544,12 +559,27 @@ export class MemoryTaskAgent {
       createSameEpisodeEdges: (privateEvents: Array<{ event_id: number | null }>) => Promise<void>,
     ): Promise<void> => {
       const existingContext = await loadContext();
+      const worldStateOpsBySettlement = new Map<string, WorldStateOp[]>();
+      for (const attachment of ingest.attachments) {
+        if (attachment.recordType !== "turn_settlement") {
+          continue;
+        }
+        const payload = attachment.payload as TurnSettlementPayload | undefined;
+        if (!payload?.settlementId) {
+          continue;
+        }
+        worldStateOpsBySettlement.set(
+          payload.settlementId,
+          Array.isArray(payload.worldStateOps) ? payload.worldStateOps : [],
+        );
+      }
 
       await settlementProcessor.process(flushRequest, ingest, created, EXPLICIT_SUPPORT_TOOLS, {
         agentRole: flushRequest.agentRole ?? "rp_agent",
         writeTemplateOverride: flushRequest.writeTemplateOverride,
         agentId: flushRequest.agentId,
         artifactContracts: SUBMIT_RP_TURN_ARTIFACT_CONTRACTS,
+        worldStateOpsBySettlement,
       });
 
       const explicitRequestIds = new Set(ingest.explicitSettlements.map((meta) => meta.requestId));
@@ -610,6 +640,7 @@ export class MemoryTaskAgent {
             txCognitionProjectionRepo.resolveEntityByPointerKey(pointerKey, agentId),
         });
         const txGraphMutableStoreRepo = new PgGraphMutableStoreRepo(txSql);
+        const txUnresolvedOpsRepo = new PgUnresolvedWorldStateOpsRepo(txSql);
         const txGraphReadQueryRepo = new PgGraphReadQueryRepo(txSql);
         const txRelationWriteRepo = new PgRelationWriteRepo(txSql);
         const txRelationReadRepo = new PgRelationReadRepo(txSql);
@@ -634,6 +665,8 @@ export class MemoryTaskAgent {
             relationWriteRepo: txRelationWriteRepo,
             cognitionProjectionRepo: txCognitionProjectionRepo,
             episodeRepo: txEpisodeRepo,
+            graphStoreRepo: txGraphMutableStoreRepo,
+            unresolvedOpsRepo: txUnresolvedOpsRepo,
           },
           this.storage,
           this.modelProvider,
