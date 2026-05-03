@@ -1,0 +1,35 @@
+================================================================
+Task 13 PG Closeout — consensus-memory-edges
+Date: 2026-05-03
+================================================================
+
+Command:
+  bun test --timeout 20000 \
+    "test/pg-app/pg-truth-schema.test.ts" \
+    "test/pg-app/pg-graph-store-repo.test.ts" \
+    "test/pg-app/unified-edge-read-repo.test.ts" \
+    "test/pg-app/world-state-replay.test.ts"
+
+Exit code: 0
+
+Result:
+  bun test v1.3.10 (30e609e0)
+  24 pass
+  0 fail
+  177 expect() calls
+  Ran 24 tests across 4 files. [18.47s]
+
+PG environment status: AVAILABLE (tests RAN — they were not skipped).
+The PG_APP_TEST_URL / PG_TEST_URL / PG_APP_URL / JOBS_PG_URL env vars
+were sufficient to spin up live Postgres-backed cases.
+
+Coverage:
+  - test/pg-app/pg-truth-schema.test.ts            — truth schema DDL + backfill
+  - test/pg-app/pg-graph-store-repo.test.ts        — fact edge writes + activeFactEdgesByOwner
+  - test/pg-app/unified-edge-read-repo.test.ts     — UnifiedEdgeReadRepo for talker retrieval
+  - test/pg-app/world-state-replay.test.ts         — replayUnresolvedWorldStateOps hook
+
+All four test files are part of the consensus-memory-edges deliverable
+(Tasks 3, 5, 6, 8, 10). All assertions pass.
+
+Raw output: .sisyphus/evidence/_pg-test-raw.txt

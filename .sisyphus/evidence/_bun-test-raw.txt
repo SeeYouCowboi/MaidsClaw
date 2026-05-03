@@ -1,0 +1,2888 @@
+bun test v1.3.10 (30e609e0)
+
+test\app\app-host.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] local consumer: created
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] local consumer: created
+[app-host] starting job consumer (role=local)
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] local consumer: created
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] local consumer: created
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] server consumer: shouldConsume=true, durableOrch=false, talkerThinker=true
+[app-host] starting job consumer (role=server)
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] server consumer: shouldConsume=true, durableOrch=false, talkerThinker=true
+[app-host] starting job consumer (role=server)
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] server consumer: shouldConsume=true, durableOrch=false, talkerThinker=true
+[app-host] starting job consumer (role=server)
+[job-consumer] maintenance.full not implemented 鈥?job maintenance.full:1777789341994 completed as no-op
+
+test\app\facade-contract.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] starting (model=bailian/text-embedding-v4)
+[bootstrap][seed] seedWorldEntities returned: seeded=9 embedded=9
+[bootstrap][seed] health check OK 鈥?shared_public=9
+[app-host] local consumer: created
+
+test\app\session-close-flush.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] SKIPPED: memoryTaskModelProvider is undefined
+[create-app-host] world entity seed SKIPPED (memoryTaskModelProvider is undefined) 鈥?entity canonicalization will be degraded
+[app-host] local consumer: created
+{"ok":false,"command":"agent list","error":{"code":"INVALID_FLAG_VALUE","message":"--source must be \"file\" or \"runtime\", got \"invalid\"","exitCode":2}}
+Available slash commands:
+  /summary, /inspect    - View summary for last request
+  /transcript           - View session transcript
+  /prompt               - View prompt for last request
+  /chunks               - View public chunks for last request
+  /logs                 - View logs for session/request
+  /memory               - View memory state for session
+  /diagnose             - Run diagnostic for last request
+  /trace                - Export trace for last request
+  /raw on|off           - Toggle raw observation mode
+  /recover              - Recover current session
+  /close                - Close session and exit
+  /mode local|gateway   - Switch operating mode
+  /exit, /quit          - Exit shell
+  /help                 - Show this help
+
+Inspect commands accept --request <id> to override the implicit last request.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /summary. Send a message first, or use /summary --request <id>.
+No request context available for /prompt. Send a message first, or use /prompt --request <id>.
+No request context available for /chunks. Send a message first, or use /chunks --request <id>.
+No request context available for /diagnose. Send a message first, or use /diagnose --request <id>.
+No request context available for /trace. Send a message first, or use /trace --request <id>.
+Raw observation mode: ON
+Raw observation mode: OFF
+Mode: local
+Mode: gateway
+Unknown slash command: /nonexistent. Type /help for available commands.
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat command does not support --json mode","exitCode":2}}
+Error [MISSING_ARGUMENT]: chat requires --agent <agent_id>
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "chat": --bogus
+
+test\cli\config-doctor.test.ts:
+[memoryPipelineStatus] chat model unavailable: 127 |   private hasUnsupportedEmbeddingPrefix(modelId: string): boolean {
+128 |     return this.unsupportedEmbeddingPrefixes.some((prefix) => modelId.startsWith(prefix));
+129 |   }
+130 | 
+131 |   private modelNotConfigured(capability: "chat" | "embedding", modelId: string): MaidsClawError {
+132 |     return new MaidsClawError({
+                 ^
+MaidsClawError: No chat provider configured for model 'openai/gpt-4o'
+ retriable: false,
+   details: {
+  capability: "chat",
+  modelId: "openai/gpt-4o",
+},
+      code: "MODEL_NOT_CONFIGURED"
+
+      at modelNotConfigured (D:\ACodingWorkSpace\MaidsClaw\src\core\models\registry.ts:132:12)
+      at resolveChat (D:\ACodingWorkSpace\MaidsClaw\src\core\models\registry.ts:81:16)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:1094:18)
+      at bootstrapRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:1122:10)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:305:3)
+      at handleConfigDoctor (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\commands\config.ts:327:18)
+      at dispatch (D:\ACodingWorkSpace\MaidsClaw\src\terminal-cli\parser.ts:225:17)
+      at runDoctor (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:68:11)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:148:26)
+
+167 |     });
+168 | 
+169 |     const result = await runDoctor(tmpRoot);
+170 | 
+171 |     expect(result.ok).toBe(true);
+172 |     expect(result.data.status).toBe("ready");
+                                     ^
+error: expect(received).toBe(expected)
+
+Expected: "ready"
+Received: "blocked"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:172:32)
+(fail) config doctor > returns ready for minimal valid runtime-ready config
+185 |     });
+186 | 
+187 |     const result = await runDoctor(tmpRoot);
+188 | 
+189 |     expect(result.ok).toBe(true);
+190 |     expect(result.data.status).toBe("degraded");
+                                     ^
+error: expect(received).toBe(expected)
+
+Expected: "degraded"
+Received: "blocked"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\cli\config-doctor.test.ts:190:32)
+(fail) config doctor > returns explicit memory_pipeline_status for missing embedding model [16.00ms]
+
+test\cli\debug-commands.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[bootstrap][seed] SKIPPED: memoryTaskModelProvider is undefined
+[create-app-host] world entity seed SKIPPED (memoryTaskModelProvider is undefined) 鈥?entity canonicalization will be degraded
+[app-host] local consumer: skipped (talkerThinker not enabled)
+
+test\cli\gateway-mode.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+{"ok":false,"command":"debug trace","error":{"code":"UNSAFE_RAW_LOCAL_ONLY","message":"--unsafe-raw is only allowed in local mode","exitCode":2}}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+Error [UNKNOWN_COMMAND]: Unknown command: "unknown". Available: known
+Error [UNKNOWN_SUBCOMMAND]: Unknown subcommand "bad" for "config". Available: show
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_SUBCOMMAND]: "config" requires a subcommand. Available: show
+Error [MISSING_CWD_VALUE]: --cwd requires a path argument
+{"ok":false,"command":"chat","error":{"code":"INVALID_FLAG","message":"chat does not support --json","exitCode":2}}
+Usage: maidsclaw <command> [subcommand] [flags]
+
+Commands:
+  test  
+
+Global flags:
+  --json          Output in JSON format
+  --quiet         Suppress non-essential output
+  --cwd <path>    Override working directory
+
+Run 'bun cli help <command>' for details on a specific command.
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "server start": --bogus
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--port requires a numeric value","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: 99999. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"INVALID_FLAG_VALUE","message":"Invalid port: abc. Must be 0-65535.","exitCode":2}}
+{"ok":false,"command":"server start","error":{"code":"MISSING_FLAG_VALUE","message":"--host requires a value","exitCode":2}}
+Error [UNKNOWN_FLAGS]: Unknown flag(s) for "health": --bogus
+{"ok":false,"command":"health","error":{"code":"MISSING_FLAG_VALUE","message":"--base-url requires a URL value","exitCode":2}}
+{"ok":false,"command":"health","error":{"code":"CONNECTION_FAILED","message":"Failed to connect to server at http://127.0.0.1:19999: Unable to connect. Is the computer able to access the url?","exitCode":4}}
+
+test\config\atomic-writer.test.ts:
+ENOENT: no such file or directory, open 'C:\Users\TeaCat\AppData\Local\Temp\maidsclaw-atomic-writer-pMJRtf\.backup\runtime.json.bak'
+    path: "C:\\Users\\TeaCat\\AppData\\Local\\Temp\\maidsclaw-atomic-writer-pMJRtf\\.backup\\runtime.json.bak",
+ syscall: "open",
+   errno: -2,
+    code: "ENOENT"
+
+(fail) atomic writer > writes deterministic JSON with trailing newline and creates backup [15.00ms]
+ENOENT: no such file or directory, open 'C:\Users\TeaCat\AppData\Local\Temp\maidsclaw-atomic-writer-c1WoIs\.backup\personas.json.bak'
+    path: "C:\\Users\\TeaCat\\AppData\\Local\\Temp\\maidsclaw-atomic-writer-c1WoIs\\.backup\\personas.json.bak",
+ syscall: "open",
+   errno: -2,
+    code: "ENOENT"
+
+(fail) atomic writer > updates target and backup on subsequent writes [32.00ms]
+
+test\gateway\gateway.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+1184 |         }),
+1185 |       });
+1186 | 
+1187 |       expect(res.status).toBe(200);
+1188 |       const events = parseSseEvents(await res.text());
+1189 |       expect(events.map((event) => event.type)).toEqual(["status", "delta", "done"]);
+                                                       ^
+error: expect(received).toEqual(expected)
+
+@@ -2,4 +2,3 @@
+    "status",
+-   "delta",
+-   "done",
++   "error",
+  ]
+
+- Expected  - 2
++ Received  + 1
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\gateway.test.ts:1189:49)
+(fail) Real TurnService-backed gateway path > real-path RP session emits status, full delta, then done [562.00ms]
+
+test\gateway\personas-guards.test.ts:
+225 | 			});
+226 | 			expect(deleteRes.status).toBe(409);
+227 | 			const body = (await deleteRes.json()) as {
+228 | 				error: { code: string; details?: { persona_id?: string; agent_ids?: string[] } };
+229 | 			};
+230 | 			expect(body.error.code).toBe("PERSONA_IN_USE");
+                                 ^
+error: expect(received).toBe(expected)
+
+Expected: "PERSONA_IN_USE"
+Received: "CONFLICT"
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\personas-guards.test.ts:230:28)
+(fail) persona route guards > blocks delete with PERSONA_IN_USE when referenced by configured agent [16.00ms]
+
+test\gateway\request-validation.test.ts:
+158 | 			method: "POST",
+159 | 			headers: { "Content-Type": "application/json" },
+160 | 			body: "{broken",
+161 | 		});
+162 | 		expect(res.status).toBe(400);
+163 | 		const body = (await res.json()) as {
+                                ^
+SyntaxError: Failed to parse JSON
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\gateway\request-validation.test.ts:163:27)
+(fail) POST /v1/sessions/{id}/turns:stream 鈥?request validation > invalid JSON body on turn 鈫?400 BAD_REQUEST (not SSE)
+
+test\jobs\pg-batch-detection.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_e24442e09e30\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-claim-lease.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_5009d5a97704\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_7b6dd8d0b315\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-connection.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_073ae21c205f\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+
+test\jobs\pg-fencing.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_42e24591824a\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-inspect.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_8a3b103bdfd1\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-organize-enqueue.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_5fb2543c75d2\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_66fa3b56e0e9\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+
+test\jobs\pg-race-recovery.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-retention.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_ad0e080b63f8\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-runner.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_1ccbc9623af4\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\jobs\pg-schema.test.ts:
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_ea2986e5cb0e\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"jobs_current\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "parse_utilcmd.c",
+  line: "211",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"job_attempts\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "parse_utilcmd.c",
+  line: "211",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"ux_job_attempts_job_key_claim_version\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_status_next_attempt\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_family_active\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_concurrency_running\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_pending_thinker_session\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_lease_expiry\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_terminal\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_job_attempts_job_key\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"jobs_current\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "parse_utilcmd.c",
+  line: "211",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"job_attempts\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "parse_utilcmd.c",
+  line: "211",
+  routine: "transformCreateStmt",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"ux_job_attempts_job_key_claim_version\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_status_next_attempt\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_family_active\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_concurrency_running\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_pending_thinker_session\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_lease_expiry\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_jobs_current_terminal\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "42P07",
+  message: "鍏崇郴 \"idx_job_attempts_job_key\" 宸茬粡瀛樺湪, 璺宠繃",
+  file: "index.c",
+  line: "894",
+  routine: "index_create",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+{
+test\jobs\pg-search-rebuild-coalescing.test.ts:
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "妯″紡 \"test_18bc0b87030f\" 涓嶅瓨鍦?,
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+{
+  severity_local: "娉ㄦ剰",
+  severity: "NOTICE",
+  code: "00000",
+  message: "涓茶仈鍒犻櫎2涓叾瀹冨璞?,
+  detail: "閫掑綊鍒犻櫎 琛?jobs_current\n閫掑綊鍒犻櫎 琛?job_attempts",
+  file: "dependency.c",
+  line: "1171",
+  routine: "reportDependentObjects",
+}
+
+test\memory\memtask-pg-integration.test.ts:
+62 | async function withRollbackTx(
+63 |   sql: postgres.Sql,
+64 |   fn: (tx: postgres.Sql) => Promise<void>,
+65 | ): Promise<void> {
+66 |   try {
+67 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:67:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:195:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:192:11)
+(fail) T13 memtask PG full-chain integration > flush chain: entities + cognition written to PG [1078.00ms]
+62 | async function withRollbackTx(
+63 |   sql: postgres.Sql,
+64 |   fn: (tx: postgres.Sql) => Promise<void>,
+65 | ): Promise<void> {
+66 |   try {
+67 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:67:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:309:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:306:11)
+(fail) T13 memtask PG full-chain integration > settlement chain: explicit cognition ops via ExplicitSettlementProcessor [969.00ms]
+62 | async function withRollbackTx(
+63 |   sql: postgres.Sql,
+64 |   fn: (tx: postgres.Sql) => Promise<void>,
+65 | ): Promise<void> {
+66 |   try {
+67 |     await sql.begin(async (tx) => {
+                   ^
+TypeError: sql.begin is not a function. (In 'sql.begin(async (tx) => {
+      await fn(tx);
+      throw TX_ROLLBACK;
+    })', 'sql.begin' is undefined)
+      at withRollbackTx (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:67:15)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:465:13)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\memtask-pg-integration.test.ts:462:11)
+(fail) T13 memtask PG full-chain integration > vector retrieval: localizeSeedsHybrid fires semantic branch when queryEmbedding provided [953.00ms]
+
+test\memory\pending-settlement-sweeper-thinker.test.ts:
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-1 session session-1
+37 | 			return queues.settlements?.[settlementIndex++] ?? [];
+38 | 		}
+39 | 		if (query.includes("FROM jobs_current")) {
+40 | 			return queues.existingJobs?.[existingIndex++] ?? [];
+41 | 		}
+42 | 		throw new Error(`Unexpected SQL query: ${query}`);
+                 ^
+error: Unexpected SQL query: SELECT settlement_id, claimed_at, claimed_by FROM settlement_processing_ledger WHERE status = 'thinker_projecting' AND claimed_at < LIMIT 50
+      at sql (D:\ACodingWorkSpace\MaidsClaw\test\memory\pending-settlement-sweeper-thinker.test.ts:42:13)
+      at logStaleThinkerProjecting (D:\ACodingWorkSpace\MaidsClaw\src\memory\pending-settlement-sweeper.ts:272:22)
+      at runSweep (D:\ACodingWorkSpace\MaidsClaw\src\memory\pending-settlement-sweeper.ts:112:17)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pending-settlement-sweeper-thinker.test.ts:337:9)
+(fail) PendingSettlementSweeper thinker recovery > thinker recovery runs only on configured interval
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-corrected-5 session session-1
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-auto-2 session session-2
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-canonical-3 session session-3
+[thinker_recovery] re-enqueued thinker job for settlement stl:req-10 session session-4
+
+test\memory\pg-memory-chain-integration.test.ts:
+301 | 				);
+302 | 
+303 | 				expect(surface.trim().length).toBeGreaterThan(0);
+304 | 				expect(
+305 | 					surface.includes("[cognition]") || surface.includes("[narrative]"),
+306 | 				).toBe(true);
+            ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:306:7)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:281:10)
+(fail) PG memory chain integration > TYPED_RETRIEVAL surface > produces non-empty content when memory data exists [1141.00ms]
+386 | 				);
+387 | 				const result = await tool.handler({ query: "silver token" }, viewer);
+388 | 
+389 | 				expect(Array.isArray(result)).toBe(true);
+390 | 				const hits = result as Array<{ content: string }>;
+391 | 				expect(hits.length).toBeGreaterThan(0);
+                              ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:391:25)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:371:10)
+(fail) PG memory chain integration > tool: cognition_search > returns cognition hits for matching query [1000.00ms]
+651 | 				const surface = await harness.memoryAdapter.getTypedRetrievalSurface(
+652 | 					"silver token",
+653 | 					viewer,
+654 | 				);
+655 | 
+656 | 				expect(surface).toContain("silver token fresh cognition");
+                          ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "silver token fresh cognition"
+Received: "[episode]\n鈥?[event] silver token fresh narrative\n\nCognition entries may be prefixed with [basis=X provenance=Y verification=Z].\nTreat the entry as low-confidence, fragmentary memory when verification is unverified, or when basis is belief or unknown, or when basis is inference and verification is not strong_verified.\nDo not use provenance alone as a low-confidence trigger once basis and verification have already been normalized.\nUse uncertain language when relying on low-confidence entries, do not repeat the bracketed metadata verbatim, and do not present them as quoted evidence.\nStrong verification can rescue user-stated or other weak-at-write-time entries once post-verification normalization has upgraded their trust state; do not keep them permanently low-confidence solely because their write-time provenance was weak.\nEntries without the prefix, or entries whose final basis/verification state no longer satisfies the low-confidence rule, may be treated as grounded memory."
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:656:21)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\pg-memory-chain-integration.test.ts:595:10)
+(fail) PG memory chain integration > conversation-aware dedup > filters overlapping content already present in recent cognition and conversation [1094.00ms]
+
+test\memory\pipeline-e2e.test.ts:
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "table \"search_docs_private\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_area_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_world_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_cognition_content_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+[pg notice] {
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "index \"idx_search_docs_episode_trgm\" does not exist, skipping",
+  file: "tablecmds.c",
+  line: "1427",
+  routine: "DropErrorMsgNonExistent",
+}
+
+test\memory\private-alias-scan.test.ts:
+{"level":"debug","message":"private_alias_scan_failed","context":{"event":"private_alias_scan_failed","error":"Error: list boom\n    at listPrivateAliasStrings (D:\\ACodingWorkSpace\\MaidsClaw\\test\\memory\\private-alias-scan.test.ts:47:40)\n    at route (D:\\ACodingWorkSpace\\MaidsClaw\\src\\memory\\query-router.ts:250:49)\n    at async <anonymous> (D:\\ACodingWorkSpace\\MaidsClaw\\test\\memory\\private-alias-scan.test.ts:185:34)\n    at processTicksAndRejections (native:7:39)"},"timestamp":1777789376320}
+
+test\memory\relation-builder-pg.test.ts:
+[relation_builder_conflict_factor_dropped] source=assertion:10 dropped=1 source_ref=settlement-xyz
+
+test\memory\relation-intent-resolver-pg.test.ts:
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_kind ref=something settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_ref kind=evidence settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=1 resolved=0
+[settlement_conflict_factor_rejected] reason=missing_kind ref=no-kind settlement=settlement-1
+[settlement_conflict_factors_dropped] settlement=settlement-1 dropped=2 resolved=2
+
+test\memory\task-agent-pg.test.ts:
+[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback {
+  operation: "runMigrateInternal",
+  jobType: "graph_organizer",
+  batchId: "flush-1",
+  agentId: "agent-1",
+}
+[MemoryTaskAgent] no jobPersistence configured, using deprecated background fallback {
+  operation: "runMigrateInternal",
+  jobType: "graph_organizer",
+  batchId: "flush-1",
+  agentId: "agent-1",
+}
+
+test\runtime\thinker-batch-collapse.test.ts:
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch split: enqueued sub-batch (v9..11) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v12..14) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v15..17) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v18..20) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v21..23) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v24..25) as parallel job
+[thinker_worker] batch split: processing v6..8 (3), split off 17 into 6 parallel job(s)
+[thinker_worker] batch sketch chain loaded: chain=3 members=8 highest=8
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: boom-v4
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:753:31)
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch: sketch load failed for v3 (stl:req-3), truncating chain warn: claimed-sketch-fail
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:782:31)
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] resolved 1 conflict factors (0 unresolved) for settlement stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:1159:23)
+(fail) Thinker Worker batch collapse (R-P3-02) > worker host wiring passes durableJobStore into createThinkerWorker
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: v4 payload missing
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:1241:31)
+
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-3
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=11
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-11
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-10
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-11
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] replayed unresolved world-state ops after entity sweep: replayed=1 stillPending=0 deadLettered=0 agentId=rp:alice
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-8
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-9
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-12
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+test\runtime\thinker-worker-phase2.test.ts:
+[thinker_worker] materialized 1 relation intents for settlement stl:e2e-worker:001
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement stl:e2e-worker:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-single-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-no-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-multi-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-exclusions:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-weak-excluded:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-overlay:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-sketch-weak:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-self-certified-fake:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-auto-fallback:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-auto-provenance-crosscheck:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-confirmed-downgrade:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-cognition-only-refs:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:sync-verify-first-hand:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:sync-verify-sketch-cap:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:verify-version-high:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:verify-version-low:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:question-bound:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:narrated-action-bound:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:narrated-action-invalid-binding:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+
+test\runtime\turn-service-normalization.test.ts:
+[turn-timing] req=req-turn-normalization phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization phase=after_talker_retry_loop phase_ms=2 total_ms=2
+[turn-timing] req=req-turn-normalization phase=before_settlement_uow phase_ms=2 total_ms=4
+[turn-timing] req=req-turn-normalization phase=after_settlement_uow phase_ms=1 total_ms=5
+[turn-timing] req=req-turn-normalization phase=after_mark_talker_committed phase_ms=0 total_ms=5
+[turn-timing] req=req-turn-normalization phase=after_thinker_enqueue phase_ms=0 total_ms=5
+[turn-timing] req=req-turn-normalization phase=rp_talker_turn_end phase_ms=2 total_ms=7
+[turn-timing] req=req-turn-normalization-correction-hidden phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=rp_talker_turn_end phase_ms=1 total_ms=2
+[turn-timing] req=req-turn-normalization-rollback phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-rollback phase=after_soft_block phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_talker_retry_loop phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=rp_talker_turn_end phase_ms=1 total_ms=2
+[turn-timing] req=req-turn-normalization-settlement phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-settlement phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-settlement phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=rp_talker_turn_end phase_ms=1 total_ms=2
+[turn-timing] req=req-turn-normalization-entity-fallback phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=rp_talker_turn_end phase_ms=2 total_ms=3
+
+test\scenario-engine\smoke.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_mini-sample_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 12 cognition search docs with display names
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_detective_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789534947}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789534947}
+86 |     const cognitionProbes = probeResults.filter(
+87 |       (r) => r.probe.retrievalMethod === "cognition_search",
+88 |     );
+89 |     expect(cognitionProbes.length).toBeGreaterThan(0);
+90 |     for (const p of cognitionProbes) {
+91 |       expect(p.hits.length).toBeGreaterThan(0);
+                                 ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\smoke.test.ts:91:29)
+(fail) Smoke Test - settlement writePath > cognition_search returns hits for assertion content
+15 |       .map(
+16 |         (r) =>
+17 |           `\n  Probe: "${r.probe.query}"\n  Method: ${r.probe.retrievalMethod}\n  Score: ${r.score.toFixed(2)}\n  Expected: [${r.probe.expectedFragments.join(", ")}]\n  Matched: [${r.matched.join(", ")}]\n  Missed: [${r.missed.join(", ")}]\n  Unexpected: [${r.unexpectedPresent.join(", ")}]`,
+18 |       )
+19 |       .join("\n")}\n`,
+20 |   );
+       ^
+error: 
+Probe assertion failed: 3 of 5 probes failed
+
+Failed probes:
+
+  Probe: "butler_oswin"
+  Method: narrative_search
+  Score: 0.50
+  Expected: [butler_oswin, study]
+  Matched: [butler_oswin]
+  Missed: [study]
+  Unexpected: []
+
+  Probe: "stole"
+  Method: cognition_search
+  Score: 0.00
+  Expected: [butler_oswin]
+  Matched: []
+  Missed: [butler_oswin]
+  Unexpected: []
+
+  Probe: "hidden plan"
+  Method: cognition_search
+  Score: 0.00
+  Expected: [plan]
+  Matched: []
+  Missed: [plan]
+  Unexpected: []
+
+      at assertAllProbesPass (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\probes\probe-assertions.ts:20:3)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\smoke.test.ts:102:7)
+(fail) Smoke Test - settlement writePath > text-based probes pass (narrative, cognition, memory_read)
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_mini-sample_scripted\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[create_entity] failed to embed locked_drawer_study (id=14): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed master_lordship (id=15): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed library (id=16): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed miss_pemberton (id=17): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed thomas_footman (id=18): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed thomas_hidden_trunk (id=19): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed correspondence_study (id=20): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+[create_entity] failed to embed miss_marsh (id=21): ScriptedProvider.embed() must not be called 鈥?use real embedding service
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_detective_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789537292}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789537293}
+136 |       });
+137 |       probeResults = await executeProbes(miniSample, handle);
+138 |     }, 3 * 60 * 1000);
+139 | 
+140 |     it("scripted baseline completes without errors", () => {
+141 |       expect(handle.runResult.errors).toHaveLength(0);
+                                            ^
+error: expect(received).toHaveLength(expected)
+
+Expected length: 0
+Received length: 1
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\smoke.test.ts:141:39)
+(fail) Smoke Test - scripted writePath (requires cached live run) > scripted baseline completes without errors
+15 |       .map(
+16 |         (r) =>
+17 |           `\n  Probe: "${r.probe.query}"\n  Method: ${r.probe.retrievalMethod}\n  Score: ${r.score.toFixed(2)}\n  Expected: [${r.probe.expectedFragments.join(", ")}]\n  Matched: [${r.matched.join(", ")}]\n  Missed: [${r.missed.join(", ")}]\n  Unexpected: [${r.unexpectedPresent.join(", ")}]`,
+18 |       )
+19 |       .join("\n")}\n`,
+20 |   );
+       ^
+error: 
+Probe assertion failed: 5 of 6 probes failed
+
+Failed probes:
+
+  Probe: "butler_oswin"
+  Method: narrative_search
+  Score: 0.00
+  Expected: [butler_oswin, study]
+  Matched: []
+  Missed: [butler_oswin, study]
+  Unexpected: []
+
+  Probe: "stole"
+  Method: cognition_search
+  Score: 0.00
+  Expected: [butler_oswin]
+  Matched: []
+  Missed: [butler_oswin]
+  Unexpected: []
+
+  Probe: "study"
+  Method: memory_read
+  Score: 0.00
+  Expected: [butler_oswin]
+  Matched: []
+  Missed: [butler_oswin]
+  Unexpected: []
+
+  Probe: "hidden plan"
+  Method: cognition_search
+  Score: 0.00
+  Expected: [plan]
+  Matched: []
+  Missed: [plan]
+  Unexpected: []
+
+  Probe: "cook_henrik"
+  Method: narrative_search
+  Score: 0.00
+  Expected: [cook_henrik, cellar]
+  Matched: []
+  Missed: [cook_henrik, cellar]
+  Unexpected: []
+
+      at assertAllProbesPass (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\probes\probe-assertions.ts:20:3)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\smoke.test.ts:160:7)
+(fail) Smoke Test - scripted writePath (requires cached live run) > all probes pass
+
+test\app\host\admin-orchestration.test.ts:
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:88:23)
+(fail) admin orchestration introspection > server role (durable) reports orchestration.enabled === true
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:106:23)
+(fail) admin orchestration introspection > server role (non-durable) reports orchestration.enabled === false
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:124:23)
+(fail) admin orchestration introspection > worker role reports orchestration.enabled === true [16.00ms]
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:141:23)
+(fail) admin orchestration introspection > local role reports orchestration.enabled === false
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:158:25)
+(fail) admin orchestration introspection > leaseReclaimActive is true when orchestrated
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:199:29)
+(fail) admin orchestration introspection > getCapabilities() returns orchestration capability flags
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\admin-orchestration.test.ts:251:23)
+(fail) admin orchestration introspection > maintenance role has maintenanceFacade capability
+
+test\app\host\role-boundaries.test.ts:
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:148:23)
+(fail) createAppHost role boundaries > server role (non-durable) exposes user facade and gateway only
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:173:23)
+(fail) createAppHost role boundaries > server role (durable) starts gateway and consumer
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:198:23)
+(fail) createAppHost role boundaries > worker role starts consumer only and does not expose user facade
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:222:23)
+(fail) createAppHost role boundaries > local role exposes user facade and starts no consumer or gateway
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+(fail) createAppHost role boundaries > local role waits for segmenterReady before createAppHost resolves
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:267:23)
+(fail) createAppHost role boundaries > maintenance role exposes maintenance facade and does not start gateway
+[create-app-host] world entity seed failed; aborting startup
+319 | 		await initializePgBackendForRuntime(runtime);
+320 | 		// Seed the world entity catalog now that the pg pool is initialized.
+321 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+322 | 		// as a startup error rather than silently leaving shared_public empty.
+323 | 		try {
+324 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:324:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\role-boundaries.test.ts:309:24)
+(fail) createAppHost role boundaries > shutdown is idempotent for all roles
+
+test\app\host\server-durable.test.ts:
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\server-durable.test.ts:98:23)
+(fail) createAppHost server durable mode > starts job consumer in addition to gateway when durable mode is enabled
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\server-durable.test.ts:142:23)
+(fail) createAppHost server durable mode > does not start job consumer for default server mode
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\server-durable.test.ts:187:23)
+(fail) createAppHost server durable mode > stops both gateway and consumer on shutdown when durable mode is enabled
+
+test\app\host\worker-role.test.ts:
+3161 | 		pg: { url: process.env.PG_APP_URL ?? "" },
+3162 | 	});
+3163 | 
+3164 | 	result.searchRebuilder = new PgSearchRebuilder(pgFactory.getPool());
+3165 | 
+3166 | 	if (result.turnService && pgFactory.isInitialized()) {
+                                            ^
+TypeError: pgFactory.isInitialized is not a function. (In 'pgFactory.isInitialized()', 'pgFactory.isInitialized' is undefined)
+      at initializePgBackendForRuntime (D:\ACodingWorkSpace\MaidsClaw\src\bootstrap\runtime.ts:3166:38)
+      at async createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:319:9)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\app\host\worker-role.test.ts:104:23)
+(fail) createAppHost worker role > starts durable consumer on start and stops it on shutdown
+
+test\core\models\bootstrap.test.ts:
+[llm-call] transport=openai model=gpt-4o messages=1 tools=0 thinking=default payloadBytes=118 maxTokens=n/a
+
+test\core\models\model-services.test.ts:
+[llm-call] transport=anthropic model=claude-3-5-sonnet messages=1 tools=0 thinking=default payloadBytes=130 maxTokens=1024
+[llm-call] transport=openai model=gpt-4o messages=1 tools=0 thinking=default payloadBytes=76 maxTokens=n/a
+[llm-call] transport=openai model=gpt-4o messages=1 tools=0 thinking=default payloadBytes=119 maxTokens=n/a
+[llm-call] transport=openai model=gpt-4o messages=1 tools=0 thinking=default payloadBytes=79 maxTokens=n/a
+[llm-call] transport=openai model=gpt-4o messages=1 tools=0 thinking=default payloadBytes=119 maxTokens=n/a
+[llm-call] transport=openai model=kimi-for-coding messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+
+test\core\models\moonshot-minimax.test.ts:
+[llm-call] transport=openai model=kimi-k2.5 messages=1 tools=0 thinking=default payloadBytes=81 maxTokens=n/a
+[llm-call] transport=openai model=kimi-k2.5 messages=1 tools=0 thinking=default payloadBytes=81 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=disabled payloadBytes=160 maxTokens=n/a
+[llm-call] transport=openai model=kimi-k2.5 messages=1 tools=0 thinking=default payloadBytes=82 maxTokens=n/a
+[llm-call] transport=anthropic model=MiniMax-M2.7-highspeed messages=1 tools=0 thinking=default payloadBytes=137 maxTokens=1024
+[llm-call] transport=anthropic model=MiniMax-M2.7-highspeed messages=1 tools=0 thinking=disabled payloadBytes=168 maxTokens=1024
+[llm-call] transport=anthropic model=claude-3-5-sonnet-20241022 messages=1 tools=0 thinking=default payloadBytes=141 maxTokens=1024
+[llm-call] transport=openai model=kimi-for-coding messages=1 tools=0 thinking=default payloadBytes=88 maxTokens=n/a
+
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+test\core\models\openai-hidden-reasoning.test.ts:
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=3 tools=0 thinking=default payloadBytes=389 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=122 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=2 tools=0 thinking=default payloadBytes=141 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=92 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=2 tools=0 thinking=default payloadBytes=123 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=disabled payloadBytes=224 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=default payloadBytes=193 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=disabled payloadBytes=224 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=default payloadBytes=87 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=disabled payloadBytes=249 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=disabled payloadBytes=245 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=default payloadBytes=214 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=1 thinking=default payloadBytes=193 maxTokens=n/a
+[llm-call] transport=openai model=deepseek-v4-flash messages=1 tools=0 thinking=disabled payloadBytes=118 maxTokens=n/a
+
+test\scenario-engine\runner\debugger.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_debugger-test-story_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_debugger-test-story_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 54 other objects",
+  detail: "drop cascades to table \"scenario_mini-sample_settlement\".settlement_processing_ledger\ndrop cascades to table \"scenario_mini-sample_settlement\".event_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".logic_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".topics\ndrop cascades to table \"scenario_mini-sample_settlement\".fact_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".entity_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".entity_aliases\ndrop cascades to table \"scenario_mini-sample_settlement\".pointer_redirects\ndrop cascades to table \"scenario_mini-sample_settlement\".core_memory_blocks\ndrop cascades to table \"scenario_mini-sample_settlement\".memory_relations\ndrop cascades to table \"scenario_mini-sample_settlement\".private_episode_events\ndrop cascades to table \"scenario_mini-sample_settlement\".private_cognition_events\ndrop cascades to table \"scenario_mini-sample_settlement\".area_state_events\ndrop cascades to table \"scenario_mini-sample_settlement\".world_state_events\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_area_fact_events\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_world_fact_events\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_blocks\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_sections\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_admins\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_attachments\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_patch_log\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_snapshots\ndrop cascades to table \"scenario_mini-sample_settlement\".unresolved_world_state_ops\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_private_episode_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_private_episode_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_private_cognition_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_private_cognition_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_area_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_area_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_world_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_world_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_scene_area_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_scene_area_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_scene_world_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_scene_world_fact_events()\ndrop cascades to table \"scenario_mini-sample_settlement\".sessions\ndrop cascades to table \"scenario_mini-sample_settlement\".interaction_records\ndrop cascades to table \"scenario_mini-sample_settlement\".recent_cognition_slots\ndrop cascades to table \"scenario_mini-sample_settlement\".pending_settlement_recovery\ndrop cascades to table \"scenario_mini-sample_settlement\".private_cognition_current\ndrop cascades to table \"scenario_mini-sample_settlement\".area_state_current\ndrop cascades to table \"scenario_mini-sample_settlement\".area_narrative_current\ndrop cascades to table \"scenario_mini-sample_settlement\".world_state_current\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_area_fact_current\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_world_fact_current\ndrop cascades to table \"scenario_mini-sample_settlement\".world_narrative_current\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_area\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_world\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_cognition\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_episode\ndrop cascades to table \"scenario_mini-sample_settlement\".node_embeddings\ndrop cascades to table \"scenario_mini-sample_settlement\".semantic_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".graph_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".node_scores",
+  file: "dependency.c",
+  line: "1165",
+  routine: "reportDependentObjects",
+}
+[settlement] enriched 12 cognition search docs with display names
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_detective_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789550732}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789550733}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_mini-sample_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 12 cognition search docs with display names
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_detective_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789553954}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789553954}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_mini-sample_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 12 cognition search docs with display names
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "drop cascades to 54 other objects",
+  detail: "drop cascades to table \"scenario_mini-sample_settlement\".settlement_processing_ledger\ndrop cascades to table \"scenario_mini-sample_settlement\".event_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".logic_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".topics\ndrop cascades to table \"scenario_mini-sample_settlement\".fact_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".entity_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".entity_aliases\ndrop cascades to table \"scenario_mini-sample_settlement\".pointer_redirects\ndrop cascades to table \"scenario_mini-sample_settlement\".core_memory_blocks\ndrop cascades to table \"scenario_mini-sample_settlement\".memory_relations\ndrop cascades to table \"scenario_mini-sample_settlement\".private_episode_events\ndrop cascades to table \"scenario_mini-sample_settlement\".private_cognition_events\ndrop cascades to table \"scenario_mini-sample_settlement\".area_state_events\ndrop cascades to table \"scenario_mini-sample_settlement\".world_state_events\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_area_fact_events\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_world_fact_events\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_blocks\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_sections\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_admins\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_attachments\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_patch_log\ndrop cascades to table \"scenario_mini-sample_settlement\".shared_block_snapshots\ndrop cascades to table \"scenario_mini-sample_settlement\".unresolved_world_state_ops\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_private_episode_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_private_episode_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_private_cognition_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_private_cognition_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_area_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_area_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_world_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_world_state_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_scene_area_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_scene_area_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_update_scene_world_fact_events()\ndrop cascades to function \"scenario_mini-sample_settlement\".fn_deny_delete_scene_world_fact_events()\ndrop cascades to table \"scenario_mini-sample_settlement\".sessions\ndrop cascades to table \"scenario_mini-sample_settlement\".interaction_records\ndrop cascades to table \"scenario_mini-sample_settlement\".recent_cognition_slots\ndrop cascades to table \"scenario_mini-sample_settlement\".pending_settlement_recovery\ndrop cascades to table \"scenario_mini-sample_settlement\".private_cognition_current\ndrop cascades to table \"scenario_mini-sample_settlement\".area_state_current\ndrop cascades to table \"scenario_mini-sample_settlement\".area_narrative_current\ndrop cascades to table \"scenario_mini-sample_settlement\".world_state_current\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_area_fact_current\ndrop cascades to table \"scenario_mini-sample_settlement\".scene_world_fact_current\ndrop cascades to table \"scenario_mini-sample_settlement\".world_narrative_current\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_area\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_world\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_cognition\ndrop cascades to table \"scenario_mini-sample_settlement\".search_docs_episode\ndrop cascades to table \"scenario_mini-sample_settlement\".node_embeddings\ndrop cascades to table \"scenario_mini-sample_settlement\".semantic_edges\ndrop cascades to table \"scenario_mini-sample_settlement\".graph_nodes\ndrop cascades to table \"scenario_mini-sample_settlement\".node_scores",
+  file: "dependency.c",
+  line: "1165",
+  routine: "reportDependentObjects",
+}
+[settlement] enriched 12 cognition search docs with display names
+[debug-perf] settlement mini-sample elapsed debugOff=2820.8ms debugOn=2955.8ms delta=135.0ms
+
+test\scenario-engine\runner\infra.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_infra_test_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+
+test\scenario-engine\scenarios\adversarial.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_adversarial-contested-refuted_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 8 cognition search docs with display names
+223 | 
+224 |   it("cognition_search 杩斿洖琚帹缈?claim 鐨勫懡涓?, async () => {
+225 |     const probeResults = await executeProbes(adversarialContestedRefuted, handle);
+226 |     const refuted = probeResults.find((r) => r.probe.id === "refuted-cellar-claim");
+227 |     expect(refuted).toBeDefined();
+228 |     expect(refuted!.hits.length).toBeGreaterThan(0);
+                                       ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\adversarial.test.ts:228:34)
+(fail) Adversarial 路 鏂█缈绘閾?(contested 鈫?rejected) > cognition_search 杩斿洖琚帹缈?claim 鐨勫懡涓?[234.00ms]
+230 | 
+231 |   it("cognition_search 杩斿洖琚噸鏂伴噰淇?claim 鐨勫懡涓?, async () => {
+232 |     const probeResults = await executeProbes(adversarialContestedRefuted, handle);
+233 |     const reinstated = probeResults.find((r) => r.probe.id === "upstairs-footsteps-reinstated");
+234 |     expect(reinstated).toBeDefined();
+235 |     expect(reinstated!.hits.length).toBeGreaterThan(0);
+                                          ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\adversarial.test.ts:235:37)
+(fail) Adversarial 路 鏂█缈绘閾?(contested 鈫?rejected) > cognition_search 杩斿洖琚噸鏂伴噰淇?claim 鐨勫懡涓?[31.00ms]
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_adversarial-polluted-retrieval_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 8 cognition search docs with display names
+313 |     const hits = await handle.infra.services.cognitionSearch.searchCognition({
+314 |       agentId: SCENARIO_DEFAULT_AGENT_ID,
+315 |       query: "浼€犳敞鍏?鍏ヤ镜鑰?,
+316 |       limit: 10,
+317 |     });
+318 |     expect(hits.some((h) => h.source_ref === FOREIGN_SOURCE_REF)).toBe(true);
+                                                                        ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\adversarial.test.ts:318:67)
+(fail) Adversarial 路 姹℃煋妫€绱?(audit + source_ref filter) > cognition_search 涓嶄紶 filter 鏃朵細鍛戒腑姹℃煋鏁版嵁锛堣褰曡剢寮辨€э級 [203.00ms]
+333 |       agentId: SCENARIO_DEFAULT_AGENT_ID,
+334 |       query: "鐜懓鑼?,
+335 |       limit: 10,
+336 |       allowedSourceRefPrefixes: LEGIT_SOURCE_REF_PREFIXES,
+337 |     });
+338 |     expect(hits.length).toBeGreaterThan(0);
+                              ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\adversarial.test.ts:338:25)
+(fail) Adversarial 路 姹℃煋妫€绱?(audit + source_ref filter) > cognition_search 浼犲叆 filter 鍚庝粛鑳藉懡涓悎娉曠帿鐟拌尪 claim [16.00ms]
+346 |       agentId: SCENARIO_DEFAULT_AGENT_ID,
+347 |       query: "鑺卞壀 鍙嶆斁",
+348 |       limit: 10,
+349 |       allowedSourceRefPrefixes: LEGIT_SOURCE_REF_PREFIXES,
+350 |     });
+351 |     expect(hits.length).toBeGreaterThan(0);
+                              ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\adversarial.test.ts:351:25)
+(fail) Adversarial 路 姹℃煋妫€绱?(audit + source_ref filter) > cognition_search 浼犲叆 filter 鍚庝粛鑳藉懡涓悎娉曡姳鍓?claim [15.00ms]
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_adversarial-timeout-recovery_scripted\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_adversarial-retraction-cascade_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 2 cognition search docs with display names
+
+test\scenario-engine\scenarios\cognition-guardrails.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_cognition-guardrails_thinker\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-01-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-01-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-01-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-01-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-02-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-02-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-02-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-02-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-03-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-03-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-03-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-03-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-04-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-04-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-04-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-04-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-05-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-05-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-05-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-05-b4
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=23
+[thinker_worker] parseEpisodesBySettlement: 0/3 episodes attributed by settlementId, 3 fell back to scenario_cognition-guardrails_beat_cg-06-b3
+[thinker_worker] enqueued memory.organize jobs (6 refs) for settlement scenario_cognition-guardrails_beat_cg-06-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-06-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-07-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-07-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-07-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-07-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-07-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-08-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-08-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-08-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-08-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-09-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-09-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-09-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-09-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-10-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-10-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-10-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-10-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-11-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-11-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-11-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-11-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-12-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-12-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-12-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-12-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-13-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-13-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-13-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-13-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-14-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-14-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-14-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-14-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-15-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-15-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-15-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-15-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-16-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-16-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-16-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-16-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-17-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-17-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-17-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-17-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-18-b1
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-18-b2
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-18-b3
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_cognition-guardrails_beat_cg-18-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-19-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-19-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-19-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-19-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-19-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-20-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-20-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-20-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-20-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-20-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-21-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-21-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-21-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-21-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-21-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-22-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-22-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-22-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-22-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-22-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-23-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-23-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-23-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-23-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-23-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-24-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-24-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-24-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-24-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-24-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-25-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-25-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-25-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-25-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-25-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-26-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-26-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-26-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-26-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-26-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-27-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-27-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-27-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-27-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-27-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-28-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-28-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-28-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-28-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-28-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-29-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-29-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-29-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-29-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-29-b4
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-30-b1
+[thinker_worker] resolved 0 conflict factors (0 unresolved) for settlement scenario_cognition-guardrails_beat_cg-30-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-30-b2
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-30-b3
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails_beat_cg-30-b4
+[thinker] enriched 32 cognition search docs with display names
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_cognition-guardrails-semantic-gate_thinker\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails-semantic-gate_beat_sg-t80-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails-semantic-gate_beat_sg-correction-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails-semantic-gate_beat_sg-t80-correction-confusion-b1
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement scenario_cognition-guardrails-semantic-gate_beat_sg-hypothesis-user-stated-b1
+[thinker] enriched 4 cognition search docs with display names
+354 | 		const hits = await handle.infra.services.cognitionSearch.searchCognition({
+355 | 			agentId: SCENARIO_DEFAULT_AGENT_ID,
+356 | 			query: "涓村畨搴?,
+357 | 			limit: 10,
+358 | 		});
+359 | 		expect(hits.length).toBeGreaterThan(0);
+                            ^
+error: expect(received).toBeGreaterThan(expected)
+
+Expected: > 0
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\cognition-guardrails.test.ts:359:23)
+(fail) Cognition Guardrails 鈥?Long Run Thinker > F) source docs remain queryable through cognition search [250.00ms]
+
+test\scenario-engine\scenarios\invisible-man.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_invisible-man_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 54 cognition search docs with display names
+[Embeddings] generated=84 errors=0 elapsed=5274ms
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":[],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789595882}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.3,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.3,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789595882}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":[],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789596628}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.3,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.3,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789596629}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_memory_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789597420}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789597421}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":["episode_detective_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789598187}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.51,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789598187}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"why","legacy_query_type":"why","agreed_with_legacy":true,"intents":[{"type":"why","confidence":0.5,"evidence_count":1},{"type":"entity","confidence":0.6,"evidence_count":1}],"intent_count":2,"matched_rules":["entities_resolved:1","episode_detective_keywords","why_keywords"],"resolved_entity_count":1,"time_signals":[],"signals":{"needsEpisode":0.3,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0.6,"needsEntityFocus":0.6000000000000001},"rationale":"primary=why | multi-intent[2] | entities=1"},"timestamp":1777789598975}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"why","secondary_intents":["entity"],"surface_weights":{"narrative":0.8,"cognition":0.76,"episode":0.51,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":"evaluation","cognition_stance":null,"seed_bias":{"entity":0.8,"event":0.5,"episode":0.51,"assertion":0.64,"evaluation":0.56,"commitment":0.3},"edge_bias":{"causal":1.3,"supports":1.2},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent","multi_intent"],"rationale":"role=rp_agent | primary=why | secondary=[entity]"},"timestamp":1777789598975}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"conflict","legacy_query_type":"conflict","agreed_with_legacy":true,"intents":[{"type":"conflict","confidence":0.7,"evidence_count":2}],"intent_count":1,"matched_rules":["conflict_keywords"],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0,"needsConflict":0.7,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=conflict"},"timestamp":1777789599804}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"conflict","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.3,"conflict_notes":0.7},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":"contested","seed_bias":{"entity":0.5,"event":0.5,"episode":0.3,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{"conflicts_with":1.5,"downgraded_by":1.3},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=conflict"},"timestamp":1777789599804}
+15 |       .map(
+16 |         (r) =>
+17 |           `\n  Probe: "${r.probe.query}"\n  Method: ${r.probe.retrievalMethod}\n  Score: ${r.score.toFixed(2)}\n  Expected: [${r.probe.expectedFragments.join(", ")}]\n  Matched: [${r.matched.join(", ")}]\n  Missed: [${r.missed.join(", ")}]\n  Unexpected: [${r.unexpectedPresent.join(", ")}]`,
+18 |       )
+19 |       .join("\n")}\n`,
+20 |   );
+       ^
+error: 
+Probe assertion failed: 1 of 20 probes failed
+
+Failed probes:
+
+  Probe: "骞虫椂 鏉ユ潵鍘诲幓 鏅€?涓嶆敞鎰?鍒舵湇 杩囨护"
+  Method: narrative_search
+  Score: 0.00
+  Expected: [骞虫椂鏉ユ潵鍘诲幓,杩囦簬鏅€?鐞嗘墍褰撶劧,鑳屾櫙鍏冪礌,涓嶇鍚圿
+  Matched: []
+  Missed: [骞虫椂鏉ユ潵鍘诲幓|杩囦簬鏅€殀鐞嗘墍褰撶劧|鑳屾櫙鍏冪礌|涓嶇鍚圿
+  Unexpected: []
+
+      at assertAllProbesPass (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\probes\probe-assertions.ts:20:3)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\invisible-man.test.ts:139:7)
+(fail) Invisible Man 鈥?Settlement Path > text-based probes pass (narrative, cognition, memory_read)
+
+test\scenario-engine\scenarios\island-suspicion.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_island-suspicion_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 68 cognition search docs with display names
+[Embeddings] generated=92 errors=0 elapsed=5974ms
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":[],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789613353}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.3,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.3,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789613353}
+{"level":"debug","message":"query_route_shadow","context":{"event":"query_route_shadow","classifier":"rule-v1","primary_intent":"event","legacy_query_type":"event","agreed_with_legacy":true,"intents":[],"intent_count":0,"matched_rules":[],"resolved_entity_count":0,"time_signals":[],"signals":{"needsEpisode":0,"needsConflict":0,"needsTimeline":0,"needsRelationship":0,"needsCognition":0,"needsEntityFocus":0},"rationale":"primary=event"},"timestamp":1777789615719}
+{"level":"debug","message":"query_plan_shadow","context":{"event":"query_plan_shadow","builder":"deterministic-v1","primary_intent":"event","secondary_intents":[],"surface_weights":{"narrative":0.5,"cognition":0.4,"episode":0.3,"conflict_notes":0},"surface_enabled":{"narrative":true,"cognition":true,"episode":true,"conflict_notes":true},"cognition_kind":null,"cognition_stance":null,"seed_bias":{"entity":0.5,"event":0.5,"episode":0.3,"assertion":0.4,"evaluation":0,"commitment":0.3},"edge_bias":{},"time_slice":null,"matched_rules":["builder=deterministic-v1","role=rp_agent"],"rationale":"role=rp_agent | primary=event"},"timestamp":1777789615719}
+15 |       .map(
+16 |         (r) =>
+17 |           `\n  Probe: "${r.probe.query}"\n  Method: ${r.probe.retrievalMethod}\n  Score: ${r.score.toFixed(2)}\n  Expected: [${r.probe.expectedFragments.join(", ")}]\n  Matched: [${r.matched.join(", ")}]\n  Missed: [${r.missed.join(", ")}]\n  Unexpected: [${r.unexpectedPresent.join(", ")}]`,
+18 |       )
+19 |       .join("\n")}\n`,
+20 |   );
+       ^
+error: 
+Probe assertion failed: 1 of 9 probes failed
+
+Failed probes:
+
+  Probe: "杞处璁板綍 寰愮劧 浠樻"
+  Method: cognition_search
+  Score: 1.00
+  Expected: [xu_ran_paid_by_yuanchao]
+  Matched: [xu_ran_paid_by_yuanchao]
+  Missed: []
+  Unexpected: []
+
+      at assertAllProbesPass (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\probes\probe-assertions.ts:20:3)
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\scenarios\island-suspicion.test.ts:130:7)
+(fail) Island Suspicion 鈥?Settlement Path > text-based probes pass (narrative, cognition, memory_read)
+
+test\scenario-engine\scenarios\manor-intrigue.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_manor-intrigue_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 49 cognition search docs with display names
+
+test\scenario-engine\scenarios\query-router.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_query-router_settlement\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[settlement] enriched 8 cognition search docs with display names
+
+test\scenario-engine\scenarios\scene-fact-t80-regression.test.ts:
+{
+  severity_local: "NOTICE",
+  severity: "NOTICE",
+  code: "00000",
+  message: "schema \"scenario_scene-fact-t80-regression_thinker\" does not exist, skipping",
+  file: "dropcmds.c",
+  line: "521",
+  routine: "does_not_exist_skipping",
+}
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement scenario_scene-fact-t80-regression_beat_t80-b1
+[thinker] enriched 1 cognition search docs with display names
+
+test\scenario-engine\stories\mini-sample-coverage.test.ts:
+119 |     expect(contestedCount).toBeGreaterThanOrEqual(1);
+120 |   });
+121 | 
+122 |   it("passes validateStory with zero errors", () => {
+123 |     const result = validateStory(miniSample);
+124 |     expect(result.valid).toBe(true);
+                               ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\scenario-engine\stories\mini-sample-coverage.test.ts:124:26)
+(fail) mini-sample coverage > passes validateStory with zero errors
+[llm-call] transport=anthropic model=claude-3-5-sonnet-20241022 messages=1 tools=0 thinking=default payloadBytes=139 maxTokens=1024
+
+test\core\models\experimental\anthropic-claude-pro-max-oauth.test.ts:
+
+test\core\models\experimental\codex-adapter.test.ts:
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+[llm-call] transport=openai model=codex-mini-latest messages=1 tools=0 thinking=default payloadBytes=89 maxTokens=n/a
+[llm-call] transport=openai model=codex-mini-latest messages=1 tools=0 thinking=default payloadBytes=89 maxTokens=n/a
+WARNING: OpenAI ChatGPT Codex OAuth provider is experimental and may violate OpenAI terms of service. Use at your own risk.
+
+ 2870 pass
+ 30 skip
+ 46 fail
+ 20093 expect() calls
+Ran 2946 tests across 264 files. [291.26s]
