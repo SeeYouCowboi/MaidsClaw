@@ -133,6 +133,15 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       ON logic_edges(target_event_id)
   `);
 
+  // Consensus-memory-edges: provenance columns (idempotent, nullable for now).
+  // Backfill performed by backfillEdgeProvenance(); NOT NULL tightening deferred.
+  await sql.unsafe(
+    `ALTER TABLE logic_edges ADD COLUMN IF NOT EXISTS source_kind TEXT`,
+  );
+  await sql.unsafe(
+    `ALTER TABLE logic_edges ADD COLUMN IF NOT EXISTS source_ref TEXT`,
+  );
+
   // ══════════════════════════════════════════════════════════════════
   // Graph nodes: topics
   // ══════════════════════════════════════════════════════════════════
@@ -173,6 +182,21 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_fact_edges_current
       ON fact_edges(source_entity_id, predicate, target_entity_id)
       WHERE t_invalid = ${PG_MAX_BIGINT}
+  `);
+
+  // Consensus-memory-edges: world_state edge metadata + provenance (nullable, idempotent).
+  await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS fact_text TEXT`);
+  await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS owner_agent_id TEXT`);
+  await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS source_kind TEXT`);
+  await sql.unsafe(`ALTER TABLE fact_edges ADD COLUMN IF NOT EXISTS source_ref TEXT`);
+
+  // Idempotency guard for settlement-sourced active world-state facts.
+  // sourceRef = '${settlementId}:${opIndex}' is the canonical key — at most one
+  // active (t_invalid = sentinel) row may exist per (source_kind='settlement', source_ref).
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_edges_settlement_active
+      ON fact_edges(source_kind, source_ref)
+      WHERE source_kind = 'settlement' AND t_invalid = ${PG_MAX_BIGINT}
   `);
 
   // ══════════════════════════════════════════════════════════════════
@@ -336,6 +360,35 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`
     CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type
       ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
+  `);
+
+  // Consensus-memory-edges: expand source_kind CHECK to accept both legacy
+  // ('job', 'system') and new consensus values. Legacy values stay accepted
+  // until backfillEdgeProvenance() rewrites old rows; tightening is a future task.
+  await sql.unsafe(`
+    DO $$
+    DECLARE
+      conname_var TEXT;
+    BEGIN
+      SELECT con.conname INTO conname_var
+      FROM pg_constraint con
+      JOIN pg_class cls ON con.conrelid = cls.oid
+      JOIN pg_namespace nsp ON cls.relnamespace = nsp.oid
+      WHERE cls.relname = 'memory_relations'
+        AND nsp.nspname = current_schema()
+        AND con.contype = 'c'
+        AND pg_get_constraintdef(con.oid) LIKE '%source_kind%'
+        AND pg_get_constraintdef(con.oid) NOT LIKE '%settlement%';
+      IF conname_var IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE memory_relations DROP CONSTRAINT %I', conname_var);
+        ALTER TABLE memory_relations
+          ADD CONSTRAINT memory_relations_source_kind_check
+          CHECK (source_kind IN (
+            'turn', 'job', 'agent_op', 'system',
+            'settlement', 'sweep', 'migration', 'seed', 'derived'
+          ));
+      END IF;
+    END $$
   `);
 
   // ══════════════════════════════════════════════════════════════════
@@ -677,6 +730,30 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   `);
 
   // ══════════════════════════════════════════════════════════════════
+  // Consensus-memory-edges: unresolved_world_state_ops queue
+  // ══════════════════════════════════════════════════════════════════
+
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS unresolved_world_state_ops (
+      id              SERIAL PRIMARY KEY,
+      session_id      TEXT NOT NULL,
+      settlement_id   TEXT NOT NULL,
+      op_index        INTEGER NOT NULL,
+      op_payload      JSONB NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'resolved', 'dead_letter')),
+      last_error      TEXT,
+      created_at      BIGINT NOT NULL,
+      updated_at      BIGINT NOT NULL
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_unresolved_world_state_ops_settlement_op
+      ON unresolved_world_state_ops(settlement_id, op_index)
+  `);
+
+  // ══════════════════════════════════════════════════════════════════
   // Append-only triggers
   // ══════════════════════════════════════════════════════════════════
 
@@ -741,5 +818,129 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
         END IF;
       END $$
     `);
+  }
+}
+
+/**
+ * Backfill provenance columns on legacy edge rows. Re-entrant; never called
+ * from bootstrapTruthSchema. Must be invoked manually by tests/operators.
+ *
+ * Strategy A for memory_relations: drop the unique pair index, rewrite legacy
+ * source_kind values, suffix colliding source_ref with `:legacy-${id}`, and
+ * recreate the unique index.
+ */
+export async function backfillEdgeProvenance(
+  sql: postgres.Sql,
+  opts: { batchSize?: number } = {},
+): Promise<void> {
+  const batchSize = opts.batchSize ?? 5000;
+  if (!Number.isInteger(batchSize) || batchSize <= 0) {
+    throw new Error(`Invalid batchSize: ${batchSize}`);
+  }
+
+  await backfillTableInBatches(sql, batchSize, async (limit) => {
+    const result = await sql.unsafe(`
+      WITH candidate AS (
+        SELECT id FROM logic_edges
+        WHERE source_kind IS NULL
+        LIMIT ${limit}
+      )
+      UPDATE logic_edges le
+      SET source_kind = 'migration',
+          source_ref  = 'legacy:logic_edges'
+      FROM candidate
+      WHERE le.id = candidate.id
+    `);
+    return result.count ?? 0;
+  });
+
+  await sql.unsafe(`DROP INDEX IF EXISTS ux_memory_relations_pair_type`);
+
+  await backfillTableInBatches(sql, batchSize, async (limit) => {
+    const result = await sql.unsafe(`
+      WITH candidate AS (
+        SELECT id FROM memory_relations
+        WHERE source_kind IN ('job', 'system')
+        LIMIT ${limit}
+      )
+      UPDATE memory_relations mr
+      SET source_kind = CASE mr.source_kind
+            WHEN 'job'    THEN 'sweep'
+            WHEN 'system' THEN 'migration'
+            ELSE mr.source_kind
+          END
+      FROM candidate
+      WHERE mr.id = candidate.id
+    `);
+    return result.count ?? 0;
+  });
+
+  await sql.unsafe(`
+    UPDATE memory_relations dup
+    SET source_ref = dup.source_ref || ':legacy-' || dup.id
+    FROM (
+      SELECT id, source_node_ref, target_node_ref, relation_type, source_kind, source_ref,
+             ROW_NUMBER() OVER (
+               PARTITION BY source_node_ref, target_node_ref, relation_type, source_kind, source_ref
+               ORDER BY id
+             ) AS rn
+      FROM memory_relations
+    ) ranked
+    WHERE dup.id = ranked.id
+      AND ranked.rn > 1
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_memory_relations_pair_type
+      ON memory_relations(source_node_ref, target_node_ref, relation_type, source_kind, source_ref)
+  `);
+
+  const semanticExists = await sql`
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'semantic_edges'
+  `;
+  if (semanticExists.length > 0) {
+    await backfillTableInBatches(sql, batchSize, async (limit) => {
+      const result = await sql.unsafe(`
+        WITH candidate AS (
+          SELECT id FROM semantic_edges
+          WHERE source_kind IS NULL
+          LIMIT ${limit}
+        )
+        UPDATE semantic_edges se
+        SET source_kind = 'migration',
+            source_ref  = 'legacy:semantic_edges'
+        FROM candidate
+        WHERE se.id = candidate.id
+      `);
+      return result.count ?? 0;
+    });
+  }  await backfillTableInBatches(sql, batchSize, async (limit) => {
+    const result = await sql.unsafe(`
+      WITH candidate AS (
+        SELECT id FROM fact_edges
+        WHERE source_kind IS NULL
+        LIMIT ${limit}
+      )
+      UPDATE fact_edges fe
+      SET source_kind = 'migration',
+          source_ref  = 'migration:' || COALESCE(fe.source_event_id::text, fe.id::text)
+      FROM candidate
+      WHERE fe.id = candidate.id
+    `);
+    return result.count ?? 0;
+  });
+}
+
+async function backfillTableInBatches(
+  _sql: postgres.Sql,
+  batchSize: number,
+  runOnce: (limit: number) => Promise<number>,
+): Promise<void> {
+  while (true) {
+    const updated = await runOnce(batchSize);
+    if (updated < batchSize) {
+      return;
+    }
   }
 }

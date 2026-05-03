@@ -340,6 +340,9 @@ export async function bootstrapDerivedSchema(
     )
   `);
 
+  await sql.unsafe(`ALTER TABLE semantic_edges ADD COLUMN IF NOT EXISTS source_kind TEXT`);
+  await sql.unsafe(`ALTER TABLE semantic_edges ADD COLUMN IF NOT EXISTS source_ref TEXT`);
+
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS graph_nodes (
       id         BIGSERIAL PRIMARY KEY,

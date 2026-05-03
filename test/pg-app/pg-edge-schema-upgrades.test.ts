@@ -1,0 +1,262 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import type postgres from "postgres";
+import {
+  backfillEdgeProvenance,
+  bootstrapTruthSchema,
+} from "../../src/storage/pg-app-schema-truth.js";
+import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
+import {
+  createTestPgAppPool,
+  ensureTestPgAppDb,
+  teardownAppPool,
+  withTestAppSchema,
+} from "../helpers/pg-app-test-utils.js";
+import { skipPgTests } from "../helpers/pg-test-utils.js";
+
+const PG_MAX_BIGINT = "9223372036854775807";
+
+async function columnExists(
+  sql: postgres.Sql,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ${table}
+      AND column_name = ${column}
+  `;
+  return rows.length > 0;
+}
+
+async function tableExists(sql: postgres.Sql, table: string): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_name = ${table}
+  `;
+  return rows.length > 0;
+}
+
+describe.skipIf(skipPgTests)("pg-edge-schema-upgrades", () => {
+  let pool: postgres.Sql;
+
+  beforeAll(async () => {
+    await ensureTestPgAppDb();
+    pool = createTestPgAppPool();
+  });
+
+  afterAll(async () => {
+    await teardownAppPool(pool);
+  });
+
+  it("fresh bootstrap creates new provenance columns and unresolved ops table", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+
+      expect(await columnExists(sql, "logic_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "logic_edges", "source_ref")).toBe(true);
+
+      expect(await columnExists(sql, "fact_edges", "fact_text")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "owner_agent_id")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "source_ref")).toBe(true);
+
+      expect(await columnExists(sql, "semantic_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "semantic_edges", "source_ref")).toBe(true);
+
+      expect(await tableExists(sql, "unresolved_world_state_ops")).toBe(true);
+    });
+  });
+
+  it("re-running bootstrap is a no-op (idempotent)", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+    });
+  });
+
+  it("memory_relations CHECK accepts both legacy and new source_kind values", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const now = Date.now();
+
+      const variants = ["turn", "job", "agent_op", "system", "settlement", "sweep", "migration", "seed", "derived"];
+      for (let i = 0; i < variants.length; i++) {
+        const kind = variants[i];
+        await sql.unsafe(`
+          INSERT INTO memory_relations
+            (source_node_ref, target_node_ref, relation_type, source_kind, source_ref, created_at, updated_at)
+          VALUES ('event:${i}a', 'event:${i}b', 'supports', '${kind}', 'ref-${i}', ${now}, ${now})
+        `);
+      }
+    });
+  });
+
+  it("backfillEdgeProvenance rewrites memory_relations legacy source_kind values", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const now = Date.now();
+
+      await sql.unsafe(`
+        INSERT INTO memory_relations
+          (source_node_ref, target_node_ref, relation_type, source_kind, source_ref, created_at, updated_at)
+        VALUES
+          ('event:1', 'event:2', 'supports', 'job',    'ref-a', ${now}, ${now}),
+          ('event:1', 'event:2', 'supports', 'system', 'ref-b', ${now}, ${now})
+      `);
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+
+      const rows = await sql`
+        SELECT source_kind, source_ref
+        FROM memory_relations
+        WHERE source_node_ref = 'event:1' AND target_node_ref = 'event:2'
+        ORDER BY id
+      `;
+
+      expect(rows.length).toBe(2);
+      expect(rows[0].source_kind).toBe("sweep");
+      expect(rows[1].source_kind).toBe("migration");
+      expect(rows[0].source_ref).toBe("ref-a");
+      expect(rows[1].source_ref).toBe("ref-b");
+    });
+  });
+
+  it("backfillEdgeProvenance applies :legacy- suffix when post-rewrite tuples collide", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const now = Date.now();
+
+      await sql.unsafe(`DROP INDEX IF EXISTS ux_memory_relations_pair_type`);
+      await sql.unsafe(`
+        INSERT INTO memory_relations
+          (source_node_ref, target_node_ref, relation_type, source_kind, source_ref, created_at, updated_at)
+        VALUES
+          ('event:1', 'event:2', 'supports', 'job', 'ref-x', ${now}, ${now}),
+          ('event:1', 'event:2', 'supports', 'job', 'ref-x', ${now}, ${now})
+      `);
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+
+      const rows = await sql`
+        SELECT source_kind, source_ref
+        FROM memory_relations
+        WHERE source_node_ref = 'event:1' AND target_node_ref = 'event:2'
+        ORDER BY id
+      `;
+
+      expect(rows.length).toBe(2);
+      for (const r of rows) {
+        expect(r.source_kind).toBe("sweep");
+      }
+      const refs = rows.map((r) => String(r.source_ref));
+      expect(new Set(refs).size).toBe(2);
+      expect(refs.some((r) => r.includes(":legacy-"))).toBe(true);
+    });
+  });
+
+  it("backfillEdgeProvenance is re-entrant (calling twice does nothing on already-backfilled rows)", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+      const now = Date.now();
+
+      await sql.unsafe(`
+        INSERT INTO logic_edges
+          (source_event_id, target_event_id, relation_type, created_at)
+        VALUES (1, 2, 'causal', ${now})
+      `);
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+      const [first] = await sql`
+        SELECT source_kind, source_ref FROM logic_edges WHERE source_event_id = 1
+      `;
+      expect(first.source_kind).toBe("migration");
+      expect(first.source_ref).toBe("legacy:logic_edges");
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+      const [second] = await sql`
+        SELECT source_kind, source_ref FROM logic_edges WHERE source_event_id = 1
+      `;
+      expect(second.source_kind).toBe("migration");
+      expect(second.source_ref).toBe("legacy:logic_edges");
+    });
+  });
+
+  it("fact_edges idempotency guard prevents duplicate active settlement-sourced rows", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const now = Date.now();
+
+      await sql.unsafe(`
+        INSERT INTO fact_edges
+          (source_entity_id, target_entity_id, predicate, t_valid, t_created, source_kind, source_ref)
+        VALUES (1, 2, 'located_at', ${now}, ${now}, 'settlement', 'stl-1:0')
+      `);
+
+      let caught: Error | null = null;
+      try {
+        await sql.unsafe(`
+          INSERT INTO fact_edges
+            (source_entity_id, target_entity_id, predicate, t_valid, t_created, source_kind, source_ref)
+          VALUES (3, 4, 'has_color', ${now}, ${now}, 'settlement', 'stl-1:0')
+        `);
+      } catch (e: any) {
+        caught = e;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught!.message.toLowerCase()).toContain("unique");
+
+      await sql.unsafe(`
+        UPDATE fact_edges SET t_invalid = ${now + 1000}
+        WHERE source_kind = 'settlement' AND source_ref = 'stl-1:0'
+      `);
+
+      await sql.unsafe(`
+        INSERT INTO fact_edges
+          (source_entity_id, target_entity_id, predicate, t_valid, t_created, source_kind, source_ref)
+        VALUES (3, 4, 'has_color', ${now + 1000}, ${now + 1000}, 'settlement', 'stl-1:0')
+      `);
+
+      const activeRows = await sql.unsafe(`
+        SELECT count(*)::int AS cnt
+        FROM fact_edges
+        WHERE source_kind = 'settlement'
+          AND source_ref = 'stl-1:0'
+          AND t_invalid = ${PG_MAX_BIGINT}
+      `);
+      expect(activeRows[0].cnt).toBe(1);
+    });
+  });
+
+  it("unresolved_world_state_ops enforces unique (settlement_id, op_index)", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      const now = Date.now();
+
+      await sql.unsafe(`
+        INSERT INTO unresolved_world_state_ops
+          (session_id, settlement_id, op_index, op_payload, created_at, updated_at)
+        VALUES ('sess-1', 'stl-1', 0, '{}'::jsonb, ${now}, ${now})
+      `);
+
+      let caught: Error | null = null;
+      try {
+        await sql.unsafe(`
+          INSERT INTO unresolved_world_state_ops
+            (session_id, settlement_id, op_index, op_payload, created_at, updated_at)
+          VALUES ('sess-1', 'stl-1', 0, '{}'::jsonb, ${now}, ${now})
+        `);
+      } catch (e: any) {
+        caught = e;
+      }
+      expect(caught).not.toBeNull();
+    });
+  });
+});
