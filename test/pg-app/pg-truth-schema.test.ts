@@ -7,8 +7,37 @@ import {
   teardownAppPool,
   expectTriggerReject,
 } from "../helpers/pg-app-test-utils.js";
-import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
+import {
+  backfillEdgeProvenance,
+  bootstrapTruthSchema,
+} from "../../src/storage/pg-app-schema-truth.js";
+import { bootstrapDerivedSchema } from "../../src/storage/pg-app-schema-derived.js";
 import { skipPgTests } from "../helpers/pg-test-utils.js";
+
+async function columnExists(
+  sql: postgres.Sql,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ${table}
+      AND column_name = ${column}
+  `;
+  return rows.length > 0;
+}
+
+async function tableExists(sql: postgres.Sql, table: string): Promise<boolean> {
+  const rows = await sql`
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_name = ${table}
+  `;
+  return rows.length > 0;
+}
 
 describe.skipIf(skipPgTests)("pg-truth-schema", () => {
   let pool: postgres.Sql;
@@ -26,6 +55,69 @@ describe.skipIf(skipPgTests)("pg-truth-schema", () => {
     await withTestAppSchema(pool, async (sql) => {
       await bootstrapTruthSchema(sql);
       await bootstrapTruthSchema(sql);
+    });
+  });
+
+  it("provenance columns + unresolved_world_state_ops table exist after bootstrap", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+
+      expect(await columnExists(sql, "logic_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "logic_edges", "source_ref")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "source_ref")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "fact_text")).toBe(true);
+      expect(await columnExists(sql, "fact_edges", "owner_agent_id")).toBe(true);
+      expect(await columnExists(sql, "semantic_edges", "source_kind")).toBe(true);
+      expect(await columnExists(sql, "semantic_edges", "source_ref")).toBe(true);
+
+      expect(await tableExists(sql, "unresolved_world_state_ops")).toBe(true);
+      const requiredCols = [
+        "id",
+        "settlement_id",
+        "op_index",
+        "op_payload",
+        "status",
+        "created_at",
+      ];
+      for (const col of requiredCols) {
+        expect(await columnExists(sql, "unresolved_world_state_ops", col)).toBe(true);
+      }
+    });
+  });
+
+  it("backfillEdgeProvenance runs cleanly on empty tables and is re-entrant", async () => {
+    await withTestAppSchema(pool, async (sql) => {
+      await bootstrapTruthSchema(sql);
+      await bootstrapDerivedSchema(sql);
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+
+      const now = Date.now();
+      await sql.unsafe(`DROP INDEX IF EXISTS ux_memory_relations_pair_type`);
+      await sql.unsafe(`
+        INSERT INTO memory_relations
+          (source_node_ref, target_node_ref, relation_type, source_kind, source_ref, created_at, updated_at)
+        VALUES
+          ('event:1', 'event:2', 'supports', 'job', 'ref-x', ${now}, ${now}),
+          ('event:1', 'event:2', 'supports', 'job', 'ref-x', ${now}, ${now})
+      `);
+
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+      await backfillEdgeProvenance(sql, { batchSize: 100 });
+
+      const rows = await sql`
+        SELECT source_kind, source_ref
+        FROM memory_relations
+        WHERE source_node_ref = 'event:1' AND target_node_ref = 'event:2'
+      `;
+      expect(rows.length).toBe(2);
+      for (const r of rows) {
+        expect(r.source_kind).toBe("sweep");
+      }
+      const refs = rows.map((r) => String(r.source_ref));
+      expect(new Set(refs).size).toBe(2);
     });
   });
 

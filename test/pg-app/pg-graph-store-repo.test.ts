@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type postgres from "postgres";
 import { PgGraphMutableStoreRepo } from "../../src/storage/domain-repos/pg/graph-mutable-store-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../../src/storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
+import { DEAD_LETTER_THRESHOLD } from "../../src/storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
+import type { WorldStateOp } from "../../src/runtime/rp-turn-contract.js";
 import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
   createTestPgAppPool,
@@ -514,6 +517,83 @@ describe.skipIf(skipPgTests)(
           expect(String(row.source_ref)).toMatch(/^graph-mutable-store:upsertExplicit/);
           expect(row.fact_text).toBeNull();
         }
+      });
+    });
+
+    it("PgUnresolvedWorldStateOpsRepo enqueueOp is idempotent and supports queue lifecycle", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapTruthSchema(sql);
+        const queue = new PgUnresolvedWorldStateOpsRepo(sql);
+
+        const op: WorldStateOp = {
+          subject: { kind: "pointer_key", value: "p:alice" },
+          predicate: "knows",
+          object: { kind: "pointer_key", value: "p:bob" },
+          factText: "Alice knows Bob",
+        };
+
+        const first = await queue.enqueueOp({
+          sessionId: "sess-q",
+          settlementId: "stl-q",
+          opIndex: 0,
+          agentId: "agent-q",
+          op,
+        });
+        expect(first.created).toBe(true);
+
+        const second = await queue.enqueueOp({
+          sessionId: "sess-q",
+          settlementId: "stl-q",
+          opIndex: 0,
+          agentId: "agent-q",
+          op,
+        });
+        expect(second.created).toBe(false);
+        expect(second.id).toBe(first.id);
+
+        const count = await sql`SELECT COUNT(*)::int AS c FROM unresolved_world_state_ops`;
+        expect(Number(count[0].c)).toBe(1);
+      });
+    });
+
+    it("PgUnresolvedWorldStateOpsRepo transitions: markResolved / incrementRetry / dead-letter at threshold", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapTruthSchema(sql);
+        const queue = new PgUnresolvedWorldStateOpsRepo(sql);
+
+        const baseOp: WorldStateOp = {
+          subject: { kind: "pointer_key", value: "p:s" },
+          predicate: "knows",
+          object: { kind: "pointer_key", value: "p:o" },
+          factText: "fact",
+        };
+
+        const resolved = await queue.enqueueOp({
+          sessionId: "s", settlementId: "stl-resolved", opIndex: 0,
+          agentId: "agent-x", op: baseOp,
+        });
+        await queue.markResolved(resolved.id);
+        const resolvedRow = await queue.getById(resolved.id);
+        expect(resolvedRow!.status).toBe("resolved");
+
+        const retry = await queue.enqueueOp({
+          sessionId: "s", settlementId: "stl-retry", opIndex: 0,
+          agentId: "agent-x", op: baseOp,
+        });
+        for (let i = 0; i < DEAD_LETTER_THRESHOLD - 1; i++) {
+          await queue.incrementRetry(retry.id, `attempt-${i}`);
+        }
+        let row = await queue.getById(retry.id);
+        expect(row!.status).toBe("pending");
+        expect(row!.payload.retryCount).toBe(DEAD_LETTER_THRESHOLD - 1);
+
+        await queue.incrementRetry(retry.id, "final");
+        row = await queue.getById(retry.id);
+        expect(row!.status).toBe("dead_letter");
+
+        const pending = await queue.listPending({ agentId: "agent-x" });
+        expect(pending.find((p) => p.id === retry.id)).toBeUndefined();
+        expect(pending.find((p) => p.id === resolved.id)).toBeUndefined();
       });
     });
   },
