@@ -16,6 +16,223 @@ export type RelationContract = {
   heuristic_only: boolean;
 };
 
+export type EdgeSemanticsTable =
+  | "logic_edges"
+  | "memory_relations"
+  | "semantic_edges"
+  | "fact_edges";
+
+export type ConsensusLayer = "narrative" | "cognitive" | "latent" | "world_state";
+export type EdgeLifecycle = "immutable" | "supersedable" | "regenerable";
+export type EdgeSemanticsEndpointFamily = NodeRefKind | "any";
+
+export type EdgeSemantics = {
+  table: EdgeSemanticsTable;
+  layer: ConsensusLayer;
+  endpointFamilies: readonly [EdgeSemanticsEndpointFamily, EdgeSemanticsEndpointFamily];
+  truthBearing: boolean;
+  heuristicOnly: boolean;
+  temporal: boolean;
+  lifecycle: EdgeLifecycle;
+  cardinality_per_source?: number;
+};
+
+export const FACT_EDGE_PREDICATE_WILDCARD = "__fact_edge_wildcard__" as const;
+
+export const EDGE_SEMANTICS_BY_TABLE = {
+  logic_edges: {
+    causal: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    contradict: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    reinforce: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    temporal_prev: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+      cardinality_per_source: 1,
+    },
+    temporal_next: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+      cardinality_per_source: 1,
+    },
+    same_episode: {
+      table: "logic_edges",
+      layer: "narrative",
+      endpointFamilies: ["event", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+  },
+  memory_relations: {
+    supports: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["event", "assertion"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    triggered: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["event", "evaluation"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    conflicts_with: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["assertion", "assertion"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    derived_from: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["fact", "assertion"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    supersedes: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["assertion", "assertion"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    surfaced_as: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["assertion", "event"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    published_as: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["event", "entity"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: false,
+      lifecycle: "immutable",
+    },
+    resolved_by: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["assertion", "fact"],
+      truthBearing: false,
+      heuristicOnly: true,
+      temporal: false,
+      lifecycle: "regenerable",
+    },
+    downgraded_by: {
+      table: "memory_relations",
+      layer: "cognitive",
+      endpointFamilies: ["assertion", "evaluation"],
+      truthBearing: false,
+      heuristicOnly: true,
+      temporal: false,
+      lifecycle: "regenerable",
+    },
+  },
+  semantic_edges: {
+    semantic_similar: {
+      table: "semantic_edges",
+      layer: "latent",
+      endpointFamilies: ["any", "any"],
+      truthBearing: false,
+      heuristicOnly: true,
+      temporal: false,
+      lifecycle: "regenerable",
+      cardinality_per_source: 4,
+    },
+    conflict_or_update: {
+      table: "semantic_edges",
+      layer: "latent",
+      endpointFamilies: ["any", "any"],
+      truthBearing: false,
+      heuristicOnly: true,
+      temporal: false,
+      lifecycle: "regenerable",
+      cardinality_per_source: 2,
+    },
+    entity_bridge: {
+      table: "semantic_edges",
+      layer: "latent",
+      endpointFamilies: ["any", "entity"],
+      truthBearing: false,
+      heuristicOnly: true,
+      temporal: false,
+      lifecycle: "regenerable",
+      cardinality_per_source: 2,
+    },
+  },
+  fact_edges: {
+    [FACT_EDGE_PREDICATE_WILDCARD]: {
+      table: "fact_edges",
+      layer: "world_state",
+      endpointFamilies: ["entity", "entity"],
+      truthBearing: true,
+      heuristicOnly: false,
+      temporal: true,
+      lifecycle: "supersedable",
+    },
+  },
+} as const satisfies Record<EdgeSemanticsTable, Record<string, EdgeSemantics>>;
+
+export const CONSENSUS_EDGE_SEMANTICS_MATRIX = {
+  ...EDGE_SEMANTICS_BY_TABLE.logic_edges,
+  ...EDGE_SEMANTICS_BY_TABLE.memory_relations,
+  ...EDGE_SEMANTICS_BY_TABLE.semantic_edges,
+  ...EDGE_SEMANTICS_BY_TABLE.fact_edges,
+} as const satisfies Record<string, EdgeSemantics>;
+
 export const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
   causal:            { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
   // Narrative-layer matched pair: contradict/reinforce are explicit, author-
