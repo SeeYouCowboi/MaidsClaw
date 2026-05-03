@@ -76,7 +76,8 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       this.readSemanticEdgesFrom(nodeRef, opts, limit),
       this.readFactEdgesFrom(nodeRef, opts, limit),
     ]);
-    return this.sortAndClamp(edgeRows.flat(), limit);
+    const cascadeFiltered = await this.applyEndpointCascade(edgeRows.flat(), opts);
+    return this.sortAndClamp(cascadeFiltered, limit);
   }
 
   async edgesTo(nodeRef: string, opts: UnifiedEdgeReadOptions = {}): Promise<UnifiedEdgeRecord[]> {
@@ -87,7 +88,8 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       this.readSemanticEdgesTo(nodeRef, opts, limit),
       this.readFactEdgesTo(nodeRef, opts, limit),
     ]);
-    return this.sortAndClamp(edgeRows.flat(), limit);
+    const cascadeFiltered = await this.applyEndpointCascade(edgeRows.flat(), opts);
+    return this.sortAndClamp(cascadeFiltered, limit);
   }
 
   async edgesAround(nodeRef: string, opts: UnifiedEdgeReadOptions = {}): Promise<UnifiedEdgeRecord[]> {
@@ -150,7 +152,8 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       ...publishedAsRows.map((row) => this.normalizeMemoryRow(row)),
     ];
 
-    return this.sortAndClamp(combined, limit);
+    const cascadeFiltered = await this.applyEndpointCascade(combined, opts);
+    return this.sortAndClamp(cascadeFiltered, limit);
   }
 
   async cognitiveContextOf(nodeRef: string, opts: UnifiedEdgeReadOptions = {}): Promise<UnifiedEdgeRecord[]> {
@@ -166,7 +169,8 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       LIMIT ${limit}
     `;
 
-    return rows.map((row) => this.normalizeMemoryRow(row));
+    const records = rows.map((row) => this.normalizeMemoryRow(row));
+    return this.applyEndpointCascade(records, opts);
   }
 
   async narrativeChainOf(
@@ -223,7 +227,11 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       frontier = Array.from(nextFrontier);
     }
 
-    return this.sortAndClamp(Array.from(edgeById.values()), maxEdges);
+    const cascadeFiltered = await this.applyEndpointCascade(
+      Array.from(edgeById.values()),
+      opts,
+    );
+    return this.sortAndClamp(cascadeFiltered, maxEdges);
   }
 
   async semanticNeighborsOf(
@@ -243,7 +251,8 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       LIMIT ${Math.min(topK, finalLimit)}
     `;
 
-    return rows.map((row) => this.normalizeSemanticRow(row));
+    const records = rows.map((row) => this.normalizeSemanticRow(row));
+    return this.applyEndpointCascade(records, opts);
   }
 
   async evidencePathTo(
@@ -678,4 +687,226 @@ export class PgUnifiedEdgeReadRepo implements UnifiedEdgeReadRepo {
       return null;
     }
   }
+
+  /**
+   * Endpoint visibility cascade: an edge is only returned if both endpoints
+   * are visible to the viewer. When opts.viewerAgentId is unset, the caller
+   * is treated as system-level and no cascade is applied (current default).
+   *
+   * Visibility rules per endpoint kind:
+   * - entity: shared_public OR owner_agent_id = viewer
+   * - event:  world_public OR (area_visible AND location_entity_id = viewerCurrentAreaId)
+   * - fact:   owner_agent_id IS NULL OR owner_agent_id = viewer
+   *           (also delegated to PgRetrievalReadRepo / VisibilityPolicy elsewhere)
+   * - assertion / evaluation / commitment / episode: agent_id = viewer
+   *
+   * Endpoints whose target rows cannot be located (orphaned, deleted) are
+   * treated as not-visible — strict-mode safety to avoid accidental leaks.
+   */
+  private async applyEndpointCascade(
+    records: UnifiedEdgeRecord[],
+    opts: UnifiedEdgeReadOptions,
+  ): Promise<UnifiedEdgeRecord[]> {
+    if (!opts.viewerAgentId || records.length === 0) {
+      return records;
+    }
+
+    const refs = new Set<string>();
+    for (const rec of records) {
+      refs.add(rec.sourceRef);
+      refs.add(rec.targetRef);
+    }
+    const visibility = await this.fetchEndpointVisibility(Array.from(refs));
+
+    return records.filter((rec) =>
+      this.isEndpointVisibleTo(visibility, rec.sourceRef, opts) &&
+      this.isEndpointVisibleTo(visibility, rec.targetRef, opts),
+    );
+  }
+
+  private async fetchEndpointVisibility(
+    nodeRefs: readonly string[],
+  ): Promise<Map<string, EndpointVisibilityMeta>> {
+    const map = new Map<string, EndpointVisibilityMeta>();
+    if (nodeRefs.length === 0) {
+      return map;
+    }
+
+    const idsByKind = new Map<string, number[]>();
+    for (const ref of nodeRefs) {
+      const colonIdx = ref.indexOf(":");
+      if (colonIdx <= 0) continue;
+      const kind = ref.slice(0, colonIdx);
+      const idStr = ref.slice(colonIdx + 1);
+      const id = Number(idStr);
+      if (!Number.isFinite(id)) continue;
+      const list = idsByKind.get(kind) ?? [];
+      list.push(id);
+      idsByKind.set(kind, list);
+    }
+
+    const eventIds = idsByKind.get("event") ?? [];
+    if (eventIds.length > 0) {
+      const rows = await this.sql<{
+        id: number | string;
+        visibility_scope: string;
+        location_entity_id: number | string;
+      }[]>`
+        SELECT id, visibility_scope, location_entity_id
+        FROM event_nodes
+        WHERE id IN ${this.sql(eventIds)}
+      `;
+      for (const row of rows) {
+        map.set(`event:${Number(row.id)}`, {
+          kind: "event",
+          visibilityScope: String(row.visibility_scope),
+          locationEntityId: Number(row.location_entity_id),
+        });
+      }
+    }
+
+    const entityIds = idsByKind.get("entity") ?? [];
+    if (entityIds.length > 0) {
+      const rows = await this.sql<{
+        id: number | string;
+        memory_scope: string;
+        owner_agent_id: string | null;
+      }[]>`
+        SELECT id, memory_scope, owner_agent_id
+        FROM entity_nodes
+        WHERE id IN ${this.sql(entityIds)}
+      `;
+      for (const row of rows) {
+        map.set(`entity:${Number(row.id)}`, {
+          kind: "entity",
+          memoryScope: String(row.memory_scope),
+          ownerAgentId: row.owner_agent_id,
+        });
+      }
+    }
+
+    const factIds = idsByKind.get("fact") ?? [];
+    if (factIds.length > 0) {
+      const rows = await this.sql<{
+        id: number | string;
+        owner_agent_id: string | null;
+      }[]>`
+        SELECT id, owner_agent_id
+        FROM fact_edges
+        WHERE id IN ${this.sql(factIds)}
+      `;
+      for (const row of rows) {
+        map.set(`fact:${Number(row.id)}`, {
+          kind: "fact",
+          ownerAgentId: row.owner_agent_id,
+        });
+      }
+    }
+
+    for (const kind of ["assertion", "evaluation", "commitment"] as const) {
+      const ids = idsByKind.get(kind) ?? [];
+      if (ids.length === 0) continue;
+      const rows = await this.sql<{
+        id: number | string;
+        agent_id: string | null;
+      }[]>`
+        SELECT id, agent_id
+        FROM private_cognition_events
+        WHERE id IN ${this.sql(ids)}
+      `;
+      for (const row of rows) {
+        map.set(`${kind}:${Number(row.id)}`, {
+          kind,
+          agentId: row.agent_id,
+        });
+      }
+    }
+
+    const episodeIds = idsByKind.get("episode") ?? [];
+    if (episodeIds.length > 0) {
+      const rows = await this.sql<{
+        id: number | string;
+        agent_id: string | null;
+      }[]>`
+        SELECT id, agent_id
+        FROM private_episode_events
+        WHERE id IN ${this.sql(episodeIds)}
+      `;
+      for (const row of rows) {
+        map.set(`episode:${Number(row.id)}`, {
+          kind: "episode",
+          agentId: row.agent_id,
+        });
+      }
+    }
+
+    return map;
+  }
+
+  private isEndpointVisibleTo(
+    visibility: Map<string, EndpointVisibilityMeta>,
+    nodeRef: string,
+    opts: UnifiedEdgeReadOptions,
+  ): boolean {
+    const meta = visibility.get(nodeRef);
+    if (!meta) {
+      // Unknown / orphaned endpoint — strict-mode default: hide.
+      return false;
+    }
+
+    if (meta.kind === "event") {
+      if (meta.visibilityScope === "world_public") return true;
+      if (meta.visibilityScope === "area_visible") {
+        return (
+          opts.viewerCurrentAreaId != null &&
+          meta.locationEntityId === opts.viewerCurrentAreaId
+        );
+      }
+      return false;
+    }
+
+    if (meta.kind === "entity") {
+      if (meta.memoryScope === "shared_public") return true;
+      if (meta.memoryScope === "private_overlay") {
+        return meta.ownerAgentId === opts.viewerAgentId;
+      }
+      return false;
+    }
+
+    if (meta.kind === "fact") {
+      if (!meta.ownerAgentId) return true;
+      return meta.ownerAgentId === opts.viewerAgentId;
+    }
+
+    if (
+      meta.kind === "assertion" ||
+      meta.kind === "evaluation" ||
+      meta.kind === "commitment" ||
+      meta.kind === "episode"
+    ) {
+      return meta.agentId === opts.viewerAgentId;
+    }
+
+    return false;
+  }
 }
+
+type EndpointVisibilityMeta =
+  | {
+      kind: "event";
+      visibilityScope: string;
+      locationEntityId: number;
+    }
+  | {
+      kind: "entity";
+      memoryScope: string;
+      ownerAgentId: string | null;
+    }
+  | {
+      kind: "fact";
+      ownerAgentId: string | null;
+    }
+  | {
+      kind: "assertion" | "evaluation" | "commitment" | "episode";
+      agentId: string | null;
+    };

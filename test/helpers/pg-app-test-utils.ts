@@ -228,6 +228,83 @@ export async function resetAppSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`CREATE SCHEMA "${schemaName}"`);
 }
 
+/**
+ * Seeds endpoint rows (entity_nodes / event_nodes / private_cognition_events /
+ * private_episode_events) so that PgUnifiedEdgeReadRepo's endpoint cascade
+ * doesn't strict-hide edges with dangling endpoints.
+ *
+ * Refs are seeded as visible to `viewerAgentId`:
+ *   - entity:N   → shared_public (visible to all)
+ *   - event:N    → world_public  (visible to all)
+ *   - assertion:N / evaluation:N / commitment:N → private_cognition_events
+ *                                                  with agent_id = viewerAgentId
+ *   - episode:N  → private_episode_events with agent_id = viewerAgentId
+ *
+ * Idempotent: ON CONFLICT DO NOTHING for natural keys; rows with explicit
+ * primary keys use sequence-respecting inserts.
+ */
+export async function seedVisibleEndpoints(
+  sql: postgres.Sql,
+  refs: readonly string[],
+  viewerAgentId: string = "agent-a",
+): Promise<void> {
+  const idsByKind = new Map<string, number[]>();
+  for (const ref of refs) {
+    const colonIdx = ref.indexOf(":");
+    if (colonIdx <= 0) continue;
+    const kind = ref.slice(0, colonIdx);
+    const id = Number(ref.slice(colonIdx + 1));
+    if (!Number.isFinite(id)) continue;
+    const list = idsByKind.get(kind) ?? [];
+    list.push(id);
+    idsByKind.set(kind, list);
+  }
+
+  const now = Date.now();
+  const entityIds = idsByKind.get("entity") ?? [];
+  for (const id of entityIds) {
+    await sql`
+      INSERT INTO entity_nodes
+        (id, pointer_key, display_name, entity_type, memory_scope, owner_agent_id, created_at, updated_at)
+      VALUES (${id}, ${"e:" + String(id)}, ${"E" + String(id)}, 'thing', 'shared_public', NULL, ${now}, ${now})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+
+  const eventIds = idsByKind.get("event") ?? [];
+  for (const id of eventIds) {
+    await sql`
+      INSERT INTO event_nodes
+        (id, session_id, timestamp, created_at, visibility_scope, location_entity_id,
+         event_category, event_origin)
+      VALUES (${id}, 'sess', ${now}, ${now}, 'world_public', 0, 'speech', 'runtime_projection')
+      ON CONFLICT DO NOTHING
+    `;
+  }
+
+  for (const kind of ["assertion", "evaluation", "commitment"] as const) {
+    const ids = idsByKind.get(kind) ?? [];
+    for (const id of ids) {
+      await sql`
+        INSERT INTO private_cognition_events
+          (id, agent_id, kind, op, cognition_key, settlement_id, committed_time, created_at)
+        VALUES (${id}, ${viewerAgentId}, ${kind}, 'upsert', 'k', 'stl', ${now}, ${now})
+        ON CONFLICT DO NOTHING
+      `;
+    }
+  }
+
+  const episodeIds = idsByKind.get("episode") ?? [];
+  for (const id of episodeIds) {
+    await sql`
+      INSERT INTO private_episode_events
+        (id, agent_id, session_id, settlement_id, category, summary, committed_time, created_at)
+      VALUES (${id}, ${viewerAgentId}, 'sess', 'stl', 'speech', '', ${now}, ${now})
+      ON CONFLICT DO NOTHING
+    `;
+  }
+}
+
 export async function teardownAppPool(sql: postgres.Sql): Promise<void> {
   const schemaName = schemaRegistry.get(sql);
   if (schemaName) {

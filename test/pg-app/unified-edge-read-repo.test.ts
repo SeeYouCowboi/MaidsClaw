@@ -6,6 +6,7 @@ import { bootstrapTruthSchema } from "../../src/storage/pg-app-schema-truth.js";
 import {
   createTestPgAppPool,
   ensureTestPgAppDb,
+  seedVisibleEndpoints,
   teardownAppPool,
   withTestAppSchema,
 } from "../helpers/pg-app-test-utils.js";
@@ -56,6 +57,10 @@ describe.skipIf(skipPgTests)("unified-edge-read-repo (consensus data plane)", ()
           (2, 3, 'located_at', 'Entity 2 is at Entity 3', NULL, 'settlement', 'stl-1:0', 1300, ${PG_MAX_BIGINT}, 1300, ${PG_MAX_BIGINT}, NULL)
       `);
 
+      await seedVisibleEndpoints(sql, [
+        "event:10", "event:11", "entity:2", "entity:3", "assertion:20",
+      ]);
+
       const aroundEvent = await repo.edgesAround("event:10", { viewerAgentId: "agent-a" });
       const aroundEntity = await repo.edgesAround("entity:2", { viewerAgentId: "agent-a" });
       const tables = new Set([...aroundEvent, ...aroundEntity].map((edge) => edge.table));
@@ -89,6 +94,10 @@ describe.skipIf(skipPgTests)("unified-edge-read-repo (consensus data plane)", ()
           (5, 11, 'null_fact_text', NULL, NULL, 'settlement', 'stl-2:4', 1005, ${PG_MAX_BIGINT}, 1005, ${PG_MAX_BIGINT}, NULL)
       `);
 
+      await seedVisibleEndpoints(sql, [
+        "entity:5", "entity:6", "entity:7", "entity:8", "entity:9", "entity:10", "entity:11",
+      ]);
+
       const ownerView = await repo.worldStateOf("entity:5", { viewerAgentId: "agent-a" });
       const nonOwnerView = await repo.worldStateOf("entity:5", { viewerAgentId: "agent-z" });
 
@@ -120,6 +129,10 @@ describe.skipIf(skipPgTests)("unified-edge-read-repo (consensus data plane)", ()
           (77, 78, 'causal', 0.9, 100, 'derived', 'logic:old'),
           (77, 79, 'causal', 0.8, 300, 'derived', 'logic:new')
       `);
+
+      await seedVisibleEndpoints(sql, [
+        "entity:12", "entity:13", "entity:14", "event:77", "event:78", "event:79",
+      ]);
 
       const asOf150 = await repo.worldStateOf("entity:12", { asOf: 150, viewerAgentId: "agent-a" });
       const asOf300 = await repo.worldStateOf("entity:12", { asOf: 300, viewerAgentId: "agent-a" });

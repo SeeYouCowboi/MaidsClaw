@@ -27,7 +27,18 @@ export type UnifiedEdgeRecord = {
 export type UnifiedEdgeReadOptions = {
   asOf?: number;
   active?: boolean;
+  /**
+   * Viewer identity. When set, endpoint-visibility cascade is applied: an
+   * edge is only returned if both its source and target nodes are visible
+   * to this viewer. When unset, no cascade is applied (system-level caller).
+   */
   viewerAgentId?: string;
+  /**
+   * Viewer's current area for area_visible event filtering. Required to
+   * resolve area_visible events; without it, area_visible endpoints are
+   * treated as not-visible during cascade.
+   */
+  viewerCurrentAreaId?: number;
   limit?: number;
 };
 
