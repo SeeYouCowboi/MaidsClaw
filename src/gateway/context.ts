@@ -85,6 +85,72 @@ export interface SettlementRepoService {
   listByAgent(agentId: string, options?: { limit?: number }): Promise<unknown>;
 }
 
+// Consensus memory edges: world-state inspection (Cockpit/Study Room debug).
+export type WorldStateInspectionEdgeRow = {
+  id: number | string;
+  source_ref: string;
+  target_ref: string;
+  edge_kind: string;
+  layer: string;
+  truth_bearing: boolean;
+  heuristic_only: boolean;
+  lifecycle: string;
+  fact_text?: string | null;
+  t_valid?: number;
+  t_invalid?: number | null;
+  source_kind?: string | null;
+  source_ref_origin?: string | null;
+  owner_agent_id?: string | null;
+  created_at?: number;
+};
+
+export type WorldStateInspectionUnresolvedRow = {
+  id: number;
+  session_id: string;
+  settlement_id: string;
+  op_index: number;
+  status: "pending" | "resolved" | "dead_letter";
+  agent_id?: string;
+  predicate?: string;
+  fact_text?: string;
+  subject_pointer_key?: string;
+  object_pointer_key?: string;
+  visibility?: string;
+  contradicted_fact_edge_ids?: number[];
+  retry_count: number;
+  last_error?: string | null;
+  turn_timestamp?: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export interface WorldStateInspectionService {
+  /**
+   * Active and historical world-state edges anchored on `entityRef`. Used to
+   * debug the worldStateOps → fact_edges → talker [world_state] retrieval
+   * pipeline. Honors the unified read repo's owner-visibility cascade for the
+   * supplied agent.
+   */
+  worldStateOf(params: {
+    agentId: string;
+    entityRef: string;
+    /** "active" (default) returns only currently-valid rows; "all" includes the supersedable history. */
+    mode?: "active" | "all";
+    limit?: number;
+  }): Promise<WorldStateInspectionEdgeRow[]>;
+
+  /**
+   * Unresolved-queue rows for a given agent. Defaults to `pending` so the
+   * Study Room can show "stuck" ops; pass `status: "dead_letter"` to triage
+   * rows past the retry threshold.
+   */
+  listUnresolvedOps(params: {
+    agentId: string;
+    status?: "pending" | "resolved" | "dead_letter";
+    limit?: number;
+  }): Promise<WorldStateInspectionUnresolvedRow[]>;
+}
+
 export interface AreaWorldProjectionService {
   listByAgent(agentId: string): Promise<unknown>;
 }
@@ -245,6 +311,7 @@ export interface GatewayContext {
   cognitionRepo?: CognitionRepoService;
   cognitionEventRepo?: CognitionEventRepoService;
   graphReadRepo?: GraphReadRepoService;
+  worldStateInspection?: WorldStateInspectionService;
   entityReconciliation?: import("../memory/entity-judge-sweeper.js").EntityJudgeSweeper;
   searchRebuilder?: import("../memory/search-rebuild-pg.js").PgSearchRebuilder;
   lightweightLlm?: LightweightLlmService;

@@ -15,6 +15,8 @@ import type { LoreService } from "../lore/service.js";
 import type { CoreMemoryService } from "../memory/core-memory.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
+import type { UnifiedEdgeReadRepo } from "../storage/domain-repos/contracts/unified-edge-read-repo.js";
+import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 import type { PersonaService } from "../persona/service.js";
 import type { TurnService } from "../runtime/turn-service.js";
 import type { SessionService } from "../session/service.js";
@@ -184,6 +186,17 @@ export type RuntimeBootstrapResult = {
 	loreService: LoreService;
 	reloadPromptData: () => Promise<void>;
   aliasRepo: AliasRepo;
+  /**
+   * Read-only access to consensus memory edges (logic / memory_relations /
+   * semantic / fact). Exposed on the bootstrap result so the gateway can build
+   * the world-state inspection service for the Cockpit/Study Room.
+   */
+  unifiedEdgeReadRepo: UnifiedEdgeReadRepo;
+  /**
+   * Queue of worldStateOps awaiting entity resolution. Exposed for the
+   * inspection service so the Study Room can show pending/dead-letter rows.
+   */
+  unresolvedWorldStateOpsRepo: UnresolvedWorldStateOpsRepo;
 };
 
 export type PublicRuntimeBootstrapResult = Omit<

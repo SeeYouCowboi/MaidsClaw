@@ -6,11 +6,15 @@ import {
 	NarrativeListSchema,
 	PinnedSummaryListSchema,
 	SettlementListSchema,
+	UnresolvedWorldStateOpsListSchema,
+	WorldStateEdgesListSchema,
 } from "../../contracts/cockpit/browser.js";
 import {
 	handleAgentMemoryEpisodes,
 	handleAgentMemoryNarratives,
 	handleAgentMemorySettlements,
+	handleAgentMemoryUnresolvedWorldStateOps,
+	handleAgentMemoryWorldStateEdges,
 	handleGetCoreMemoryBlock,
 	handleListCoreMemoryBlocks,
 	handleListPinnedSummaries,
@@ -89,5 +93,33 @@ export const MEMORY_ROUTES: RouteEntry[] = [
 		errorTransport: "json",
 		requestSchema: GatewayNoBodyRequestSchema,
 		responseSchema: PinnedSummaryListSchema,
+	},
+	// World-state debug surface for the frontend Study Room. The two routes
+	// expose the same data Talker sees in [world_state] retrieval (active
+	// fact_edges anchored on an entity) plus the unresolved replay queue so a
+	// developer can trace why a worldStateOp didn't materialize.
+	{
+		method: "GET",
+		pattern: "/v1/agents/{agent_id}/memory/world-state",
+		handler: handleAgentMemoryWorldStateEdges,
+		scope: "read",
+		audit: false,
+		cors: true,
+		pgRequired: true,
+		errorTransport: "json",
+		requestSchema: GatewayNoBodyRequestSchema,
+		responseSchema: WorldStateEdgesListSchema,
+	},
+	{
+		method: "GET",
+		pattern: "/v1/agents/{agent_id}/memory/world-state/unresolved-ops",
+		handler: handleAgentMemoryUnresolvedWorldStateOps,
+		scope: "read",
+		audit: false,
+		cors: true,
+		pgRequired: true,
+		errorTransport: "json",
+		requestSchema: GatewayNoBodyRequestSchema,
+		responseSchema: UnresolvedWorldStateOpsListSchema,
 	},
 ];

@@ -2027,6 +2027,8 @@ export function bootstrapRuntime(
 		loreService,
 		reloadPromptData,
 		aliasRepo: pgAliasRepo,
+		unifiedEdgeReadRepo,
+		unresolvedWorldStateOpsRepo: unresolvedOpsRepo,
 	};
 }
 
@@ -2100,6 +2102,167 @@ function buildSettlementRepoService(
 				created_at: Number(row.created_at),
 				updated_at: Number(row.updated_at),
 			}));
+		},
+	};
+}
+
+function buildWorldStateInspectionService(
+	runtime: RuntimeBootstrapResult,
+): GatewayContext["worldStateInspection"] {
+	if (!runtime.pgFactory) {
+		return undefined;
+	}
+
+	const PG_MAX_BIGINT_NUM = Number.MAX_SAFE_INTEGER;
+	const edgeReadRepo = runtime.unifiedEdgeReadRepo;
+	const queueRepo = runtime.unresolvedWorldStateOpsRepo;
+
+	return {
+		async worldStateOf(params) {
+			const mode = params.mode ?? "active";
+			const limit = params.limit ?? 100;
+			const records = await edgeReadRepo.worldStateOf(params.entityRef, {
+				viewerAgentId: params.agentId,
+				...(mode === "all" ? { active: false } : {}),
+				limit,
+			});
+			return records.map((rec) => ({
+				id: rec.id,
+				source_ref: rec.sourceRef,
+				target_ref: rec.targetRef,
+				edge_kind: rec.edgeKind,
+				layer: rec.layer,
+				truth_bearing: rec.truthBearing,
+				heuristic_only: rec.heuristicOnly,
+				lifecycle: rec.lifecycle,
+				...(rec.factText !== undefined ? { fact_text: rec.factText } : {}),
+				...(rec.tValid !== undefined ? { t_valid: rec.tValid } : {}),
+				...(rec.tInvalid !== undefined && rec.tInvalid !== PG_MAX_BIGINT_NUM
+					? { t_invalid: rec.tInvalid }
+					: {}),
+				...(rec.sourceKind !== undefined ? { source_kind: rec.sourceKind } : {}),
+				...(rec.sourceRefOrigin !== undefined
+					? { source_ref_origin: rec.sourceRefOrigin }
+					: {}),
+				...(rec.ownerAgentId !== undefined
+					? { owner_agent_id: rec.ownerAgentId }
+					: {}),
+				...(rec.createdAt !== undefined ? { created_at: rec.createdAt } : {}),
+			}));
+		},
+
+		async listUnresolvedOps(params) {
+			const limit = params.limit ?? 100;
+			const status = params.status ?? "pending";
+			// listPending only returns status='pending' rows; for other statuses we
+			// fall back to a direct PG query through the same connection so the
+			// Study Room can see resolved/dead-letter rows for triage.
+			if (status === "pending") {
+				const rows = await queueRepo.listPending({
+					agentId: params.agentId,
+					limit,
+				});
+				return rows.map((row) => ({
+					id: row.id,
+					session_id: row.sessionId,
+					settlement_id: row.settlementId,
+					op_index: row.opIndex,
+					status: row.status,
+					...(row.payload.agentId ? { agent_id: row.payload.agentId } : {}),
+					...(row.payload.op?.predicate
+						? { predicate: row.payload.op.predicate }
+						: {}),
+					...(row.payload.op?.factText
+						? { fact_text: row.payload.op.factText }
+						: {}),
+					...(row.payload.subjectPointerKey
+						? { subject_pointer_key: row.payload.subjectPointerKey }
+						: {}),
+					...(row.payload.objectPointerKey
+						? { object_pointer_key: row.payload.objectPointerKey }
+						: {}),
+					...(row.payload.op?.visibility
+						? { visibility: row.payload.op.visibility }
+						: {}),
+					...(Array.isArray(row.payload.op?.contradictedFactEdgeIds) &&
+					row.payload.op.contradictedFactEdgeIds.length > 0
+						? { contradicted_fact_edge_ids: row.payload.op.contradictedFactEdgeIds }
+						: {}),
+					retry_count: row.payload.retryCount ?? 0,
+					last_error: row.lastError ?? null,
+					...(typeof row.payload.turnTimestamp === "number"
+						? { turn_timestamp: row.payload.turnTimestamp }
+						: {}),
+					created_at: row.createdAt,
+					updated_at: row.updatedAt,
+				}));
+			}
+
+			const sql = runtime.pgFactory?.getPool();
+			if (!sql) {
+				return [];
+			}
+			const rows = params.agentId
+				? await sql<Array<Record<string, unknown>>>`
+					SELECT id, session_id, settlement_id, op_index, op_payload, status,
+						last_error, created_at, updated_at
+					FROM unresolved_world_state_ops
+					WHERE status = ${status}
+						AND op_payload->>'agentId' = ${params.agentId}
+					ORDER BY id DESC
+					LIMIT ${limit}
+				`
+				: await sql<Array<Record<string, unknown>>>`
+					SELECT id, session_id, settlement_id, op_index, op_payload, status,
+						last_error, created_at, updated_at
+					FROM unresolved_world_state_ops
+					WHERE status = ${status}
+					ORDER BY id DESC
+					LIMIT ${limit}
+				`;
+			return rows.map((raw) => {
+				const payload = (raw.op_payload ?? {}) as {
+					agentId?: string;
+					op?: {
+						predicate?: string;
+						factText?: string;
+						visibility?: string;
+						contradictedFactEdgeIds?: number[];
+					};
+					subjectPointerKey?: string;
+					objectPointerKey?: string;
+					turnTimestamp?: number;
+					retryCount?: number;
+				};
+				return {
+					id: Number(raw.id),
+					session_id: String(raw.session_id),
+					settlement_id: String(raw.settlement_id),
+					op_index: Number(raw.op_index),
+					status: status,
+					...(payload.agentId ? { agent_id: payload.agentId } : {}),
+					...(payload.op?.predicate ? { predicate: payload.op.predicate } : {}),
+					...(payload.op?.factText ? { fact_text: payload.op.factText } : {}),
+					...(payload.subjectPointerKey
+						? { subject_pointer_key: payload.subjectPointerKey }
+						: {}),
+					...(payload.objectPointerKey
+						? { object_pointer_key: payload.objectPointerKey }
+						: {}),
+					...(payload.op?.visibility ? { visibility: payload.op.visibility } : {}),
+					...(Array.isArray(payload.op?.contradictedFactEdgeIds) &&
+					payload.op.contradictedFactEdgeIds.length > 0
+						? { contradicted_fact_edge_ids: payload.op.contradictedFactEdgeIds }
+						: {}),
+					retry_count: payload.retryCount ?? 0,
+					last_error: (raw.last_error as string | null) ?? null,
+					...(typeof payload.turnTimestamp === "number"
+						? { turn_timestamp: payload.turnTimestamp }
+						: {}),
+					created_at: Number(raw.created_at),
+					updated_at: Number(raw.updated_at),
+				};
+			});
 		},
 	};
 }
@@ -3043,6 +3206,7 @@ export function buildGatewayRuntimeContextExtensions(
 	| "cognitionRepo"
 	| "cognitionEventRepo"
 	| "graphReadRepo"
+	| "worldStateInspection"
 	| "entityReconciliation"
 	| "searchRebuilder"
 	| "lightweightLlm"
@@ -3140,6 +3304,7 @@ export function buildGatewayRuntimeContextExtensions(
 		cognitionRepo: buildCognitionRepoService(runtime),
 		cognitionEventRepo: buildCognitionEventRepoService(runtime),
 		graphReadRepo: buildGraphReadRepoService(runtime),
+		worldStateInspection: buildWorldStateInspectionService(runtime),
 		entityReconciliation: runtime.entityReconciliation,
 		searchRebuilder: runtime.searchRebuilder,
 		lightweightLlm: new LightweightLlmServiceImpl(

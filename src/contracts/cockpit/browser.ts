@@ -190,6 +190,10 @@ export {
   RetrievalTraceResponseSchema as RetrievalTraceSchema,
   SettlementItemSchema,
   SettlementListResponseSchema as SettlementListSchema,
+  UnresolvedWorldStateOpItemSchema,
+  UnresolvedWorldStateOpsResponseSchema as UnresolvedWorldStateOpsListSchema,
+  WorldStateEdgeItemSchema,
+  WorldStateEdgesResponseSchema as WorldStateEdgesListSchema,
 } from "./memory.js";
 export * from "./personas.js";
 export * from "./providers.js";

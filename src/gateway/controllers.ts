@@ -3563,6 +3563,142 @@ const LightweightCompleteBodySchema = z
   })
   .strict();
 
+// ─── Consensus memory edges: world-state debug surface for Cockpit/Study Room ──
+//
+// Two read-only routes that wrap the unified-edge read repo + unresolved-ops
+// queue so the frontend Study Room can show the same data the talker sees in
+// its [world_state] retrieval block, plus the queue of ops waiting on entity
+// resolution. Both routes are scoped to a single agent so private-overlay
+// rows are visible to the agent inspecting their own graph.
+
+export async function handleAgentMemoryWorldStateEdges(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.worldStateInspection, "worldStateInspection");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/memory/world-state",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const entityRef = url.searchParams.get("entity_ref");
+    if (!entityRef || entityRef.trim().length === 0) {
+      return badRequest("Missing required query param 'entity_ref' (e.g., entity:42)");
+    }
+
+    const modeParam = url.searchParams.get("mode") ?? "active";
+    if (modeParam !== "active" && modeParam !== "all") {
+      return badRequest("Query param 'mode' must be 'active' or 'all'");
+    }
+
+    const limit = parseBoundedLimit(url, "limit", {
+      defaultValue: 100,
+      min: 1,
+      max: 500,
+    });
+    if (limit instanceof Response) {
+      return limit;
+    }
+
+    const items = await service.worldStateOf({
+      agentId,
+      entityRef,
+      mode: modeParam,
+      limit,
+    });
+
+    return jsonResponse({
+      agent_id: agentId,
+      entity_ref: entityRef,
+      mode: modeParam,
+      items,
+    });
+  } catch (error) {
+    if (isMaidsClawError(error)) {
+      const status = error.code === "UNSUPPORTED_RUNTIME_MODE" ? 501 : 500;
+      return errorResponse(error, status);
+    }
+    return errorResponse(
+      new MaidsClawError({
+        code: "INTERNAL_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      }),
+      500,
+    );
+  }
+}
+
+export async function handleAgentMemoryUnresolvedWorldStateOps(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.worldStateInspection, "worldStateInspection");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/memory/world-state/unresolved-ops",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const statusParam = url.searchParams.get("status") ?? undefined;
+    if (
+      statusParam !== undefined &&
+      statusParam !== "pending" &&
+      statusParam !== "resolved" &&
+      statusParam !== "dead_letter"
+    ) {
+      return badRequest(
+        "Query param 'status' must be one of: pending, resolved, dead_letter",
+      );
+    }
+
+    const limit = parseBoundedLimit(url, "limit", {
+      defaultValue: 100,
+      min: 1,
+      max: 500,
+    });
+    if (limit instanceof Response) {
+      return limit;
+    }
+
+    const items = await service.listUnresolvedOps({
+      agentId,
+      ...(statusParam ? { status: statusParam } : {}),
+      limit,
+    });
+
+    return jsonResponse({
+      agent_id: agentId,
+      ...(statusParam ? { status_filter: statusParam } : {}),
+      items,
+    });
+  } catch (error) {
+    if (isMaidsClawError(error)) {
+      const status = error.code === "UNSUPPORTED_RUNTIME_MODE" ? 501 : 500;
+      return errorResponse(error, status);
+    }
+    return errorResponse(
+      new MaidsClawError({
+        code: "INTERNAL_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      }),
+      500,
+    );
+  }
+}
+
 /** POST /v1/util/complete — stateless, fire-and-forget LLM completion */
 export async function handleLightweightComplete(
   req: Request,

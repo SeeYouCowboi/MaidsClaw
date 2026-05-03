@@ -221,3 +221,94 @@ export type RecentRequestListResponse = z.infer<
   typeof RecentRequestListResponseSchema
 >;
 export type RecentRequestListResponseDto = RecentRequestListResponse;
+
+// ─── Consensus memory edges: world-state inspection (debug surface) ──────────
+//
+// Shape is intentionally close to PgUnifiedEdgeReadRepo's normalized record so
+// the Cockpit/Study Room can render it 1:1 for debugging the worldStateOps →
+// fact_edges → talker [world_state] retrieval pipeline. Unresolved-queue rows
+// expose the same payload the entity-judge replayer reads, so a developer can
+// see why a queued op is stuck or dead-lettered.
+
+export const WorldStateEdgeItemSchema = z
+  .object({
+    id: z.union([z.number(), z.string()]),
+    source_ref: z.string(),
+    target_ref: z.string(),
+    edge_kind: z.string(),
+    layer: z.string(),
+    truth_bearing: z.boolean(),
+    heuristic_only: z.boolean(),
+    lifecycle: z.string(),
+    fact_text: z.string().nullable().optional(),
+    t_valid: z.number().optional(),
+    t_invalid: z.number().nullable().optional(),
+    source_kind: z.string().nullable().optional(),
+    source_ref_origin: z.string().nullable().optional(),
+    owner_agent_id: z.string().nullable().optional(),
+    created_at: z.number().optional(),
+  })
+  .strict();
+export type WorldStateEdgeItem = z.infer<typeof WorldStateEdgeItemSchema>;
+export type WorldStateEdgeItemDto = WorldStateEdgeItem;
+
+export const WorldStateEdgesResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    entity_ref: z.string(),
+    /** "active" omits invalidated rows; "all" includes the supersedable history. */
+    mode: z.enum(["active", "all"]),
+    items: z.array(WorldStateEdgeItemSchema),
+  })
+  .strict();
+export type WorldStateEdgesResponse = z.infer<
+  typeof WorldStateEdgesResponseSchema
+>;
+export type WorldStateEdgesResponseDto = WorldStateEdgesResponse;
+
+export const UnresolvedWorldStateOpStatusSchema = z.enum([
+  "pending",
+  "resolved",
+  "dead_letter",
+]);
+export type UnresolvedWorldStateOpStatus = z.infer<
+  typeof UnresolvedWorldStateOpStatusSchema
+>;
+
+export const UnresolvedWorldStateOpItemSchema = z
+  .object({
+    id: z.number(),
+    session_id: z.string(),
+    settlement_id: z.string(),
+    op_index: z.number(),
+    status: UnresolvedWorldStateOpStatusSchema,
+    agent_id: z.string().optional(),
+    predicate: z.string().optional(),
+    fact_text: z.string().optional(),
+    subject_pointer_key: z.string().optional(),
+    object_pointer_key: z.string().optional(),
+    visibility: z.string().optional(),
+    contradicted_fact_edge_ids: z.array(z.number()).optional(),
+    retry_count: z.number(),
+    last_error: z.string().nullable().optional(),
+    turn_timestamp: z.number().optional(),
+    created_at: z.number(),
+    updated_at: z.number(),
+  })
+  .strict();
+export type UnresolvedWorldStateOpItem = z.infer<
+  typeof UnresolvedWorldStateOpItemSchema
+>;
+export type UnresolvedWorldStateOpItemDto = UnresolvedWorldStateOpItem;
+
+export const UnresolvedWorldStateOpsResponseSchema = z
+  .object({
+    agent_id: z.string(),
+    status_filter: UnresolvedWorldStateOpStatusSchema.optional(),
+    items: z.array(UnresolvedWorldStateOpItemSchema),
+  })
+  .strict();
+export type UnresolvedWorldStateOpsResponse = z.infer<
+  typeof UnresolvedWorldStateOpsResponseSchema
+>;
+export type UnresolvedWorldStateOpsResponseDto = UnresolvedWorldStateOpsResponse;
