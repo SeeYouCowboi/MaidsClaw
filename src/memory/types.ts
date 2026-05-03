@@ -74,8 +74,14 @@ export const QUERY_TYPES = [
 ] as const;
 export type QueryType = (typeof QUERY_TYPES)[number];
 
-export const EDGE_LAYERS = ["state", "symbolic", "heuristic"] as const;
-export type EdgeLayer = (typeof EDGE_LAYERS)[number];
+export const NAVIGATOR_EDGE_LAYERS = ["state", "symbolic", "heuristic"] as const;
+export type NavigatorEdgeLayer = (typeof NAVIGATOR_EDGE_LAYERS)[number];
+
+export const CONSENSUS_EDGE_LAYERS = ["narrative", "cognitive", "latent", "world_state"] as const;
+export type EdgeLayer = (typeof CONSENSUS_EDGE_LAYERS)[number];
+
+export const EDGE_LIFECYCLES = ["immutable", "supersedable", "regenerable"] as const;
+export type EdgeLifecycle = (typeof EDGE_LIFECYCLES)[number];
 
 export const EXPLORE_MODES = [
   "why",
@@ -273,13 +279,19 @@ export const RELATION_DIRECTNESS_VALUES = [
 ] as const;
 export type RelationDirectness = (typeof RELATION_DIRECTNESS_VALUES)[number];
 
-export const RELATION_SOURCE_KINDS = [
+export const EDGE_PROVENANCE_SOURCE_KINDS = [
   "turn",
-  "job",
+  "settlement",
+  "sweep",
   "agent_op",
-  "system",
+  "migration",
+  "seed",
+  "derived",
 ] as const;
-export type RelationSourceKind = (typeof RELATION_SOURCE_KINDS)[number];
+export type EdgeProvenanceSourceKind = (typeof EDGE_PROVENANCE_SOURCE_KINDS)[number];
+
+export const RELATION_SOURCE_KINDS = EDGE_PROVENANCE_SOURCE_KINDS;
+export type RelationSourceKind = EdgeProvenanceSourceKind;
 
 export type MemoryRelationRecord = {
   id: number;
@@ -383,7 +395,7 @@ export type BeamEdge = {
   from: NodeRef;
   to: NodeRef;
   kind: NavigatorEdgeKind | MemoryRelationType;
-  layer: EdgeLayer;
+  layer: NavigatorEdgeLayer;
   weight: number;
   timestamp: number | null;
   summary: string | null;
@@ -423,7 +435,7 @@ export type AuditProvenance = {
   /** Node refs involved in conflict/update edges within this path, if any. */
   conflict_refs: NodeRef[];
   /** Edge layers traversed (e.g. ["state", "symbolic", "heuristic"]). */
-  edge_layers: EdgeLayer[];
+  edge_layers: NavigatorEdgeLayer[];
 };
 
 export type EvidencePath = {

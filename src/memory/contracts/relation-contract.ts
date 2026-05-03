@@ -5,7 +5,12 @@
  * @see docs/MEMORY_RELATION_CONTRACT.md
  */
 
-import type { MemoryRelationType, NodeRefKind } from "../types.js";
+import type {
+  EdgeLayer,
+  EdgeLifecycle,
+  MemoryRelationType,
+  NodeRefKind,
+} from "../types.js";
 
 export type EndpointFamily = NodeRefKind | "unknown";
 
@@ -14,6 +19,10 @@ export type RelationContract = {
   target_family: EndpointFamily;
   truth_bearing: boolean;
   heuristic_only: boolean;
+  layer: EdgeLayer;
+  temporal: boolean;
+  lifecycle: EdgeLifecycle;
+  cardinality_per_source?: number;
 };
 
 export type EdgeSemanticsTable =
@@ -22,13 +31,11 @@ export type EdgeSemanticsTable =
   | "semantic_edges"
   | "fact_edges";
 
-export type ConsensusLayer = "narrative" | "cognitive" | "latent" | "world_state";
-export type EdgeLifecycle = "immutable" | "supersedable" | "regenerable";
 export type EdgeSemanticsEndpointFamily = NodeRefKind | "any";
 
 export type EdgeSemantics = {
   table: EdgeSemanticsTable;
-  layer: ConsensusLayer;
+  layer: EdgeLayer;
   endpointFamilies: readonly [EdgeSemanticsEndpointFamily, EdgeSemanticsEndpointFamily];
   truthBearing: boolean;
   heuristicOnly: boolean;
@@ -233,33 +240,52 @@ export const CONSENSUS_EDGE_SEMANTICS_MATRIX = {
   ...EDGE_SEMANTICS_BY_TABLE.fact_edges,
 } as const satisfies Record<string, EdgeSemantics>;
 
+function toEndpointFamily(family: EdgeSemanticsEndpointFamily): EndpointFamily {
+  return family === "any" ? "unknown" : family;
+}
+
+function toRelationContract(semantics: EdgeSemantics): RelationContract {
+  return {
+    source_family: toEndpointFamily(semantics.endpointFamilies[0]),
+    target_family: toEndpointFamily(semantics.endpointFamilies[1]),
+    truth_bearing: semantics.truthBearing,
+    heuristic_only: semantics.heuristicOnly,
+    layer: semantics.layer,
+    temporal: semantics.temporal,
+    lifecycle: semantics.lifecycle,
+    ...(semantics.cardinality_per_source !== undefined
+      ? { cardinality_per_source: semantics.cardinality_per_source }
+      : {}),
+  };
+}
+
 export const LOGIC_EDGE_CONTRACTS: Record<string, RelationContract> = {
-  causal:            { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
+  causal: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.causal),
   // Narrative-layer matched pair: contradict/reinforce are explicit, author-
   // or DSL-declared relationships. They sit next to `causal` because both
   // endpoints are event nodes and the claim is truth-bearing (as opposed to
   // `semantic_similar` / `conflict_or_update` which are heuristic and
   // embedding-derived — see SEMANTIC_EDGE_TYPES).
-  contradict:        { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
-  reinforce:         { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
-  temporal_prev:     { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
-  temporal_next:     { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
-  same_episode:      { source_family: "event", target_family: "event", truth_bearing: true,  heuristic_only: false },
-  semantic_similar:  { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
-  conflict_or_update:{ source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
-  entity_bridge:     { source_family: "unknown", target_family: "unknown", truth_bearing: false, heuristic_only: true },
+  contradict: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.contradict),
+  reinforce: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.reinforce),
+  temporal_prev: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.temporal_prev),
+  temporal_next: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.temporal_next),
+  same_episode: toRelationContract(EDGE_SEMANTICS_BY_TABLE.logic_edges.same_episode),
+  semantic_similar: toRelationContract(EDGE_SEMANTICS_BY_TABLE.semantic_edges.semantic_similar),
+  conflict_or_update: toRelationContract(EDGE_SEMANTICS_BY_TABLE.semantic_edges.conflict_or_update),
+  entity_bridge: toRelationContract(EDGE_SEMANTICS_BY_TABLE.semantic_edges.entity_bridge),
 };
 
 export const MEMORY_RELATION_CONTRACTS: Record<MemoryRelationType, RelationContract> = {
-  supports:       { source_family: "event",     target_family: "assertion",  truth_bearing: true,  heuristic_only: false },
-  triggered:      { source_family: "event",     target_family: "evaluation", truth_bearing: true,  heuristic_only: false },
-  conflicts_with: { source_family: "assertion", target_family: "assertion",  truth_bearing: true,  heuristic_only: false },
-  derived_from:   { source_family: "fact",      target_family: "assertion",  truth_bearing: true,  heuristic_only: false },
-  supersedes:     { source_family: "assertion", target_family: "assertion",  truth_bearing: true,  heuristic_only: false },
-  surfaced_as:    { source_family: "assertion", target_family: "event",      truth_bearing: true,  heuristic_only: false },
-  published_as:   { source_family: "event",     target_family: "entity",     truth_bearing: true,  heuristic_only: false },
-  resolved_by:    { source_family: "assertion", target_family: "fact",       truth_bearing: false, heuristic_only: true },
-  downgraded_by:  { source_family: "assertion", target_family: "evaluation", truth_bearing: false, heuristic_only: true },
+  supports: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.supports),
+  triggered: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.triggered),
+  conflicts_with: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.conflicts_with),
+  derived_from: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.derived_from),
+  supersedes: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.supersedes),
+  surfaced_as: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.surfaced_as),
+  published_as: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.published_as),
+  resolved_by: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.resolved_by),
+  downgraded_by: toRelationContract(EDGE_SEMANTICS_BY_TABLE.memory_relations.downgraded_by),
 };
 
 export const RELATION_CONTRACTS: Record<string, RelationContract> = {

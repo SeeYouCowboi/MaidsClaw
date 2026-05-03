@@ -1,15 +1,15 @@
 import type postgres from "postgres";
 import { parseGraphNodeRef } from "../../../memory/contracts/graph-node-ref.js";
 import {
-  RELATION_CONTRACTS as CANONICAL_RELATION_CONTRACTS,
   KNOWN_NODE_KINDS,
+  RELATION_CONTRACTS as CANONICAL_RELATION_CONTRACTS,
   type RelationContract as CanonicalRelationContract,
 } from "../../../memory/contracts/relation-contract.js";
 import { isEdgeInTimeSlice, type TimeSliceQuery } from "../../../memory/time-slice-query.js";
 import {
   MEMORY_RELATION_TYPES,
-  type EdgeLayer,
   type MemoryRelationType,
+  type NavigatorEdgeLayer,
   type NodeRef,
   type NodeRefKind,
   type ViewerContext,
@@ -389,7 +389,7 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
           visibility_scope = 'world_public'
           OR (
             visibility_scope = 'area_visible'
-            AND ${viewerContext.current_area_id == null ? false : true}
+            AND ${viewerContext.current_area_id != null}
             AND location_entity_id = ${viewerContext.current_area_id ?? -1}
           )
         )
@@ -527,7 +527,7 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
         visibility_scope = 'world_public'
         OR (
           visibility_scope = 'area_visible'
-          AND ${viewerContext.current_area_id == null ? false : true}
+          AND ${viewerContext.current_area_id != null}
           AND location_entity_id = ${viewerContext.current_area_id ?? -1}
         )
       )
@@ -965,7 +965,7 @@ export class PgGraphReadQueryRepo implements GraphReadQueryRepo {
 
   private toGraphEdge(
     family: GraphReadEdgeFamily,
-    layer: EdgeLayer,
+    layer: NavigatorEdgeLayer,
     relationType: string,
     sourceRef: NodeRef,
     targetRef: NodeRef,

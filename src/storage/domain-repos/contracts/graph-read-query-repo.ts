@@ -1,11 +1,17 @@
 import type { TimeSliceQuery } from "../../../memory/time-slice-query.js";
-import type { EdgeLayer, MemoryRelationType, NodeRef, NodeRefKind, ViewerContext } from "../../../memory/types.js";
+import type {
+  MemoryRelationType,
+  NavigatorEdgeLayer,
+  NodeRef,
+  NodeRefKind,
+  ViewerContext,
+} from "../../../memory/types.js";
 
 export type GraphReadEdgeFamily = "logic_edges" | "memory_relations" | "semantic_edges";
 
 export type GraphReadEdgeRecord = {
   family: GraphReadEdgeFamily;
-  layer: EdgeLayer;
+  layer: NavigatorEdgeLayer;
   relationType: string;
   sourceRef: NodeRef;
   targetRef: NodeRef;

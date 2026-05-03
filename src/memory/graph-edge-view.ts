@@ -3,15 +3,24 @@ import type {
   GraphReadQueryRepo,
 } from "../storage/domain-repos/contracts/graph-read-query-repo.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
-import { RELATION_CONTRACTS, KNOWN_NODE_KINDS, type EndpointFamily } from "./contracts/relation-contract.js";
-import type { EdgeLayer, NodeRef, NodeRefKind, ViewerContext } from "./types.js";
+import {
+  KNOWN_NODE_KINDS,
+  RELATION_CONTRACTS,
+  type EndpointFamily,
+} from "./contracts/relation-contract.js";
+import type {
+  NavigatorEdgeLayer,
+  NodeRef,
+  NodeRefKind,
+  ViewerContext,
+} from "./types.js";
 import type { TimeSliceQuery } from "./time-slice-query.js";
 
 type GraphEdgeFamily = "logic_edges" | "memory_relations" | "semantic_edges";
 
 export type GraphEdgeReadResult = {
   family: GraphEdgeFamily;
-  layer: EdgeLayer;
+  layer: NavigatorEdgeLayer;
   relation_type: string;
   source_ref: NodeRef;
   target_ref: NodeRef;
@@ -60,7 +69,7 @@ export class GraphEdgeView {
 
   private toGraphEdge(
     family: GraphEdgeFamily,
-    layer: EdgeLayer,
+    layer: NavigatorEdgeLayer,
     relationType: string,
     sourceRef: NodeRef,
     targetRef: NodeRef,
@@ -100,16 +109,6 @@ export class GraphEdgeView {
         declared,
       },
     };
-  }
-
-  private reverseTemporalRelation(relationType: string): string {
-    if (relationType === "temporal_prev") {
-      return "temporal_next";
-    }
-    if (relationType === "temporal_next") {
-      return "temporal_prev";
-    }
-    return relationType;
   }
 
   private fromRepoRecord(record: GraphReadEdgeRecord): GraphEdgeReadResult {

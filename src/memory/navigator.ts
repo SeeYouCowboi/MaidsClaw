@@ -38,12 +38,12 @@ import {
   type AuditProvenance,
   type BeamEdge,
   type BeamPath,
-  type EdgeLayer,
   type EvidencePath,
   type ExplainDetailLevel,
   type ExploreMode,
   type MemoryExploreInput,
   type MemoryRelationType,
+  type NavigatorEdgeLayer,
   type NavigatorEdgeKind,
   type NavigatorResult,
   type NodeRef,
@@ -2363,7 +2363,7 @@ export class GraphNavigator {
       new Set(
         evidencePath.path.edges
           .map((e) => e.layer)
-          .filter((l): l is EdgeLayer => l !== undefined),
+          .filter((l): l is NavigatorEdgeLayer => l !== undefined),
       ),
     );
 
