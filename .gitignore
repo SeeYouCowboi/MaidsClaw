@@ -53,3 +53,4 @@ test/scenario-engine/reports/
 .claude/settings.local.json
 tmp
 .claude/worktrees
+logs
