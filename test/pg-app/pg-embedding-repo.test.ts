@@ -102,6 +102,59 @@ describe.skipIf(skipPgTests)(
         await repo.upsert(source, target, "semantic_similar", 0.42);
         await repo.upsert(source, target, "semantic_similar", 0.88);
 
+        const provenanceRows = await pool`
+          SELECT source_kind, source_ref
+          FROM semantic_edges
+          WHERE source = ${source}
+            AND target = ${target}
+            AND relation_type = 'semantic_similar'
+        `;
+        expect(provenanceRows).toHaveLength(1);
+        expect(provenanceRows[0].source_kind).toBe("derived");
+        expect(provenanceRows[0].source_ref).toBe("semantic-edge-repo:upsert");
+
+        await pool`
+          UPDATE semantic_edges
+          SET source_kind = 'turn', source_ref = 'turn:custom'
+          WHERE source = ${source}
+            AND target = ${target}
+            AND relation_type = 'semantic_similar'
+        `;
+        await repo.upsert(source, target, "semantic_similar", 0.66);
+
+        const preservedRows = await pool`
+          SELECT source_kind, source_ref, weight
+          FROM semantic_edges
+          WHERE source = ${source}
+            AND target = ${target}
+            AND relation_type = 'semantic_similar'
+        `;
+        expect(preservedRows).toHaveLength(1);
+        expect(preservedRows[0].source_kind).toBe("turn");
+        expect(preservedRows[0].source_ref).toBe("turn:custom");
+        expect(Number(preservedRows[0].weight)).toBeCloseTo(0.66, 6);
+
+        await pool`
+          UPDATE semantic_edges
+          SET source_kind = NULL, source_ref = NULL
+          WHERE source = ${source}
+            AND target = ${target}
+            AND relation_type = 'semantic_similar'
+        `;
+        await repo.upsert(source, target, "semantic_similar", 0.77);
+
+        const backfilledRows = await pool`
+          SELECT source_kind, source_ref, weight
+          FROM semantic_edges
+          WHERE source = ${source}
+            AND target = ${target}
+            AND relation_type = 'semantic_similar'
+        `;
+        expect(backfilledRows).toHaveLength(1);
+        expect(backfilledRows[0].source_kind).toBe("derived");
+        expect(backfilledRows[0].source_ref).toBe("semantic-edge-repo:upsert");
+        expect(Number(backfilledRows[0].weight)).toBeCloseTo(0.77, 6);
+
         const bySource = await repo.queryBySource(source);
         expect(bySource.length).toBe(1);
         const sourceRow = bySource[0];
@@ -109,7 +162,7 @@ describe.skipIf(skipPgTests)(
         if (!sourceRow) {
           throw new Error("expected source semantic edge result");
         }
-        expect(sourceRow.weight).toBeCloseTo(0.88, 6);
+        expect(sourceRow.weight).toBeCloseTo(0.77, 6);
 
         const byTarget = await repo.queryByTarget(target, "semantic_similar");
         expect(byTarget.length).toBe(1);

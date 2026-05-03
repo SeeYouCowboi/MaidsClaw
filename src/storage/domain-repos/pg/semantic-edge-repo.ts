@@ -18,13 +18,15 @@ export class PgSemanticEdgeRepo implements SemanticEdgeRepo {
     const now = Date.now();
     await this.sql`
       INSERT INTO semantic_edges
-        (source, target, relation_type, weight, created_at, updated_at)
+        (source, target, relation_type, weight, created_at, updated_at, source_kind, source_ref)
       VALUES
-        (${sourceRef}, ${targetRef}, ${relationType}, ${weight}, ${now}, ${now})
+        (${sourceRef}, ${targetRef}, ${relationType}, ${weight}, ${now}, ${now}, 'derived', 'semantic-edge-repo:upsert')
       ON CONFLICT (source, target, relation_type)
       DO UPDATE SET
         weight = EXCLUDED.weight,
-        updated_at = EXCLUDED.updated_at
+        updated_at = EXCLUDED.updated_at,
+        source_kind = COALESCE(semantic_edges.source_kind, EXCLUDED.source_kind),
+        source_ref = COALESCE(semantic_edges.source_ref, EXCLUDED.source_ref)
     `;
   }
 

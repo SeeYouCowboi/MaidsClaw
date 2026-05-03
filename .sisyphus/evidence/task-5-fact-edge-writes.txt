@@ -1,0 +1,51 @@
+Task 5 Evidence — Fact-Edge Write Methods + Provenance Defaults
+Date: 2026-05-03
+
+Implemented scope:
+- Added `createWorldStateFactEdge(params)` + `activeFactEdgesByOwner(...)` to GraphMutableStoreRepo contract and PgGraphMutableStoreRepo implementation.
+- Implemented settlement idempotency (`source_kind='settlement'`, canonical `source_ref='${settlementId}:${opIndex}'`) with:
+  - pre-insert active-row lookup
+  - unique-violation (`23505`) retry readback fallback
+- Added owner-scope-safe contradiction invalidation (`owner_agent_id = ownerAgentId OR owner_agent_id IS NULL` only).
+- Added deterministic provenance defaults to existing writers:
+  - `createLogicEdge`: derived / graph-mutable-store:createLogicEdge (override-able)
+  - same-episode batch: derived / same_episode:auto
+  - `createFact`: derived / graph-mutable-store:createFact
+  - cognition fact writers: owner_agent_id + derived source_kind/source_ref + fact_text NULL
+- Updated semantic edge upsert provenance policy:
+  - INSERT writes derived / semantic-edge-repo:upsert
+  - ON CONFLICT updates provenance only when NULL (`COALESCE(existing, excluded)`), preserves existing non-null provenance
+
+Tests added/updated:
+- `test/pg-app/pg-graph-store-repo.test.ts`
+  - createLogicEdge default + override provenance
+  - same-episode provenance defaults
+  - explicit assertion provenance fields
+  - world-state contradiction invalidation owner-scope isolation
+  - settlement retry idempotency
+  - createFact + cognition writer provenance compatibility defaults
+- `test/pg-app/pg-embedding-repo.test.ts`
+  - semantic edge insert default provenance
+  - preserve existing non-null provenance on upsert conflict
+  - backfill to defaults when provenance is NULL
+- `test/memory/embeddings-async.test.ts`
+  - semantic relation cap test wired to `CONSENSUS_EDGE_SEMANTICS_MATRIX.*.cardinality_per_source`
+- `test/runtime/turn-service-normalization.test.ts`
+  - graphStoreRepo stub expanded for new GraphMutableStoreRepo methods
+
+Verification:
+1) LSP diagnostics on changed TS files
+   - result: clean (no diagnostics)
+
+2) Targeted tests
+   - command:
+     bun test "test/memory/embeddings-async.test.ts" "test/pg-app/pg-graph-store-repo.test.ts" "test/pg-app/pg-embedding-repo.test.ts" "test/runtime/turn-service-normalization.test.ts"
+   - result:
+     33 pass
+     0 fail
+     147 expect() calls
+
+3) Build
+   - command: bun run build
+   - result: exit 0
+     ($ tsc -p tsconfig.build.json --noEmit)

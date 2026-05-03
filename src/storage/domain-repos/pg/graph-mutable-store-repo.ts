@@ -112,10 +112,28 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     targetEventId: number,
     relationType: Parameters<GraphMutableStoreRepo["createLogicEdge"]>[2],
     weight?: number | null,
+    sourceKind = "derived",
+    sourceRef = "graph-mutable-store:createLogicEdge",
   ): Promise<number> {
     const rows = await this.sql`
-      INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at)
-      VALUES (${sourceEventId}, ${targetEventId}, ${relationType}, ${weight ?? null}, ${Date.now()})
+      INSERT INTO logic_edges (
+        source_event_id,
+        target_event_id,
+        relation_type,
+        weight,
+        created_at,
+        source_kind,
+        source_ref
+      )
+      VALUES (
+        ${sourceEventId},
+        ${targetEventId},
+        ${relationType},
+        ${weight ?? null},
+        ${Date.now()},
+        ${sourceKind},
+        ${sourceRef}
+      )
       RETURNING id
     `;
     return Number(rows[0].id);
@@ -322,6 +340,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       "explicit_assertion",
       eventId,
       now,
+      params.agentId,
+      "derived",
+      "graph-mutable-store:upsertExplicitAssertion",
     );
     return { id, ref: makeNodeRef("assertion", id) };
   }
@@ -366,6 +387,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       "explicit_evaluation",
       eventId,
       now,
+      params.agentId,
+      "derived",
+      "graph-mutable-store:upsertExplicitEvaluation",
     );
     return { id, ref: makeNodeRef("evaluation", id) };
   }
@@ -412,6 +436,9 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       "explicit_commitment",
       eventId,
       now,
+      params.agentId,
+      "derived",
+      "graph-mutable-store:upsertExplicitCommitment",
     );
     return { id, ref: makeNodeRef("commitment", id) };
   }
@@ -509,6 +536,10 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
         source_entity_id,
         target_entity_id,
         predicate,
+        fact_text,
+        owner_agent_id,
+        source_kind,
+        source_ref,
         t_valid,
         t_invalid,
         t_created,
@@ -518,6 +549,10 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
         ${sourceEntityId},
         ${targetEntityId},
         ${predicate},
+        ${null},
+        ${null},
+        ${"derived"},
+        ${"graph-mutable-store:createFact"},
         ${now},
         ${PG_MAX_BIGINT},
         ${now},
@@ -527,6 +562,112 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       RETURNING id
     `;
     return Number(rows[0].id);
+  }
+
+  async createWorldStateFactEdge(
+    params: Parameters<GraphMutableStoreRepo["createWorldStateFactEdge"]>[0],
+  ): Promise<{ id: number; created: boolean }> {
+    const existing = await this.sql`
+      SELECT id
+      FROM fact_edges
+      WHERE source_kind = ${params.sourceKind}
+        AND source_ref = ${params.sourceRef}
+        AND t_invalid = ${PG_MAX_BIGINT}
+      LIMIT 1
+    `;
+
+    if (existing.length > 0) {
+      return { id: Number(existing[0].id), created: false };
+    }
+
+    const now = Date.now();
+
+    if ((params.contradictedFactEdgeIds?.length ?? 0) > 0) {
+      await this.sql`
+        UPDATE fact_edges
+        SET t_invalid = ${now},
+            t_expired = ${now}
+        WHERE id IN ${this.sql(params.contradictedFactEdgeIds ?? [])}
+          AND t_invalid = ${PG_MAX_BIGINT}
+          AND (
+            owner_agent_id = ${params.ownerAgentId}
+            OR owner_agent_id IS NULL
+          )
+      `;
+    }
+
+    try {
+      const rows = await this.sql`
+        INSERT INTO fact_edges (
+          source_entity_id,
+          target_entity_id,
+          predicate,
+          fact_text,
+          owner_agent_id,
+          source_kind,
+          source_ref,
+          t_valid,
+          t_invalid,
+          t_created,
+          t_expired,
+          source_event_id
+        ) VALUES (
+          ${params.sourceEntityId},
+          ${params.targetEntityId},
+          ${params.predicate},
+          ${params.factText},
+          ${params.ownerAgentId},
+          ${params.sourceKind},
+          ${params.sourceRef},
+          ${params.tValid},
+          ${PG_MAX_BIGINT},
+          ${now},
+          ${PG_MAX_BIGINT},
+          ${null}
+        )
+        RETURNING id
+      `;
+
+      return { id: Number(rows[0].id), created: true };
+    } catch (error) {
+      if ((error as { code?: string }).code !== "23505") {
+        throw error;
+      }
+      const retryExisting = await this.sql`
+        SELECT id
+        FROM fact_edges
+        WHERE source_kind = ${params.sourceKind}
+          AND source_ref = ${params.sourceRef}
+          AND t_invalid = ${PG_MAX_BIGINT}
+        LIMIT 1
+      `;
+      if (retryExisting.length === 0) {
+        throw error;
+      }
+      return { id: Number(retryExisting[0].id), created: false };
+    }
+  }
+
+  async activeFactEdgesByOwner(
+    sourceEntityId: number,
+    predicate: string,
+    targetEntityId: number,
+    ownerAgentId: string,
+  ): Promise<Array<{ id: number }>> {
+    const rows = await this.sql`
+      SELECT id
+      FROM fact_edges
+      WHERE source_entity_id = ${sourceEntityId}
+        AND predicate = ${predicate}
+        AND target_entity_id = ${targetEntityId}
+        AND t_invalid = ${PG_MAX_BIGINT}
+        AND (
+          owner_agent_id = ${ownerAgentId}
+          OR owner_agent_id IS NULL
+        )
+      ORDER BY id ASC
+    `;
+    return rows.map((row) => ({ id: Number(row.id) }));
   }
 
   async invalidateFact(factId: number): Promise<void> {
@@ -660,6 +801,8 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
       target_event_id: number;
       relation_type: "same_episode";
       created_at: number;
+      source_kind: string;
+      source_ref: string;
     }> = [];
 
     for (let index = 0; index < sorted.length - 1; index += 1) {
@@ -681,12 +824,16 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
         target_event_id: next.id,
         relation_type: "same_episode",
         created_at: createdAt,
+        source_kind: "derived",
+        source_ref: "same_episode:auto",
       });
       rowsToInsert.push({
         source_event_id: next.id,
         target_event_id: current.id,
         relation_type: "same_episode",
         created_at: createdAt,
+        source_kind: "derived",
+        source_ref: "same_episode:auto",
       });
     }
 
@@ -695,7 +842,15 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     }
 
     await this.sql`
-      INSERT INTO logic_edges ${this.sql(rowsToInsert, "source_event_id", "target_event_id", "relation_type", "created_at")}
+      INSERT INTO logic_edges ${this.sql(
+        rowsToInsert,
+        "source_event_id",
+        "target_event_id",
+        "relation_type",
+        "created_at",
+        "source_kind",
+        "source_ref",
+      )}
     `;
   }
 
@@ -847,12 +1002,19 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
     predicate: CognitionPredicate,
     sourceEventId: number,
     now: number,
+    ownerAgentId: string,
+    sourceKind: string,
+    sourceRef: string,
   ): Promise<number> {
     const rows = await this.sql`
       INSERT INTO fact_edges (
         source_entity_id,
         target_entity_id,
         predicate,
+        fact_text,
+        owner_agent_id,
+        source_kind,
+        source_ref,
         t_valid,
         t_invalid,
         t_created,
@@ -862,6 +1024,10 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
         ${sourceEntityId},
         ${targetEntityId},
         ${predicate},
+        ${null},
+        ${ownerAgentId},
+        ${sourceKind},
+        ${sourceRef},
         ${now},
         ${PG_MAX_BIGINT},
         ${now},

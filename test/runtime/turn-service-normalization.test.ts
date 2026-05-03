@@ -2,21 +2,21 @@ import { describe, expect, it } from "bun:test";
 import type { AgentProfile } from "../../src/agents/profile.js";
 import { TraceStore } from "../../src/app/diagnostics/trace-store.js";
 import { AgentLoop } from "../../src/core/agent-loop.js";
-import { PromptBuilder } from "../../src/core/prompt-builder.js";
-import { PromptRenderer } from "../../src/core/prompt-renderer.js";
 import type {
 	ChatCompletionRequest,
 	ChatModelProvider,
 } from "../../src/core/models/chat-provider.js";
+import { PromptBuilder } from "../../src/core/prompt-builder.js";
+import { PromptRenderer } from "../../src/core/prompt-renderer.js";
 import { ToolExecutor } from "../../src/core/tools/tool-executor.js";
 import type { InteractionRecord } from "../../src/interaction/contracts.js";
+import type { CandidateAction } from "../../src/runtime/speaker-normalization.js";
+import { normalizeTurnInput } from "../../src/runtime/speaker-normalization.js";
+import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 import {
 	mapCandidateActionsToSceneFactCommits,
 	TurnService,
 } from "../../src/runtime/turn-service.js";
-import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
-import type { CandidateAction } from "../../src/runtime/speaker-normalization.js";
-import { normalizeTurnInput } from "../../src/runtime/speaker-normalization.js";
 
 const SESSION_ID = "session:turn-normalization";
 const REQUEST_ID = "req-turn-normalization";
@@ -72,11 +72,17 @@ function makeTurnService(params: {
 	const records: InteractionRecord[] = [];
 
 	const commitService = {
-		commit(input: Omit<InteractionRecord, "recordId" | "recordIndex" | "committedAt">): InteractionRecord {
+		commit(
+			input: Omit<
+				InteractionRecord,
+				"recordId" | "recordIndex" | "committedAt"
+			>,
+		): InteractionRecord {
 			const existingIndices = records
 				.filter((record) => record.sessionId === input.sessionId)
 				.map((record) => record.recordIndex);
-			const maxIndex = existingIndices.length > 0 ? Math.max(...existingIndices) : -1;
+			const maxIndex =
+				existingIndices.length > 0 ? Math.max(...existingIndices) : -1;
 			const record: InteractionRecord = {
 				...input,
 				recordId: crypto.randomUUID(),
@@ -193,7 +199,66 @@ function makeTurnService(params: {
 		},
 		searchProjectionRepo: {},
 		coreMemoryBlockRepo: {},
-		graphStoreRepo: {},
+		graphStoreRepo: {
+			async createProjectedEvent() {
+				return 0;
+			},
+			async createPromotedEvent() {
+				return 0;
+			},
+			async createLogicEdge() {
+				return 0;
+			},
+			async createTopic() {
+				return 0;
+			},
+			async upsertEntity() {
+				return 0;
+			},
+			async resolveEntityByPointerKey() {
+				return null;
+			},
+			async getEntityById() {
+				return null;
+			},
+			async upsertExplicitAssertion() {
+				return { id: 0, ref: "assertion:0" as const };
+			},
+			async upsertExplicitEvaluation() {
+				return { id: 0, ref: "evaluation:0" as const };
+			},
+			async upsertExplicitCommitment() {
+				return { id: 0, ref: "commitment:0" as const };
+			},
+			async retractExplicitCognition() {},
+			async createEntityAlias() {
+				return 0;
+			},
+			async createRedirect() {
+				return 0;
+			},
+			async createFact() {
+				return 0;
+			},
+			async createWorldStateFactEdge() {
+				return { id: 0, created: true };
+			},
+			async activeFactEdgesByOwner() {
+				return [];
+			},
+			async invalidateFact() {},
+			async createPrivateEvent() {
+				return 0;
+			},
+			async createPrivateBelief() {
+				return 0;
+			},
+			async updatePrivateEventLink() {},
+			async createSameEpisodeEdges() {},
+			async runBatch(fn: () => void) {
+				fn();
+			},
+		},
 		pendingFlushRecoveryRepo: {},
 	};
 
@@ -290,7 +355,10 @@ async function drain(stream: AsyncIterable<unknown>): Promise<void> {
 	}
 }
 
-function getCapturedSystemPrompt(traceStore: TraceStore, requestId: string): string {
+function getCapturedSystemPrompt(
+	traceStore: TraceStore,
+	requestId: string,
+): string {
 	const trace = traceStore.getTrace(requestId);
 	return trace?.prompt?.rendered_system ?? "";
 }
@@ -311,7 +379,7 @@ describe("TurnService speaker normalization integration", () => {
 
 		const prompt = getCapturedSystemPrompt(traceStore, REQUEST_ID);
 		expect(prompt).toContain("<normalized_turn_input>");
-		expect(prompt).toContain("\"speechActs\"");
+		expect(prompt).toContain('"speechActs"');
 		expect(prompt).toContain("</normalized_turn_input>");
 	});
 
@@ -368,7 +436,9 @@ describe("TurnService speaker normalization integration", () => {
 			}),
 		);
 
-		const record = records.find((item) => item.recordType === "turn_settlement");
+		const record = records.find(
+			(item) => item.recordType === "turn_settlement",
+		);
 		const payload = record?.payload as
 			| { normalizedTurnInput?: unknown }
 			| undefined;
