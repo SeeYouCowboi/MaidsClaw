@@ -358,6 +358,10 @@ export async function executeSettlementPath(
 						: { currentLocationEntityId: viewerLocationEntityId },
 				recentCognitionSlotJson: JSON.stringify(settlement.recentSlotEntries),
 				committedAt: Date.now(),
+				worldStateOps:
+					settlement.worldStateOps.length > 0
+						? settlement.worldStateOps
+						: undefined,
 			};
 
 			await infra.repos.settlementLedger.markApplying(
@@ -380,6 +384,8 @@ export async function executeSettlementPath(
 				searchProjectionRepo: infra.repos.searchProjection,
 				areaWorldProjectionRepo,
 				recentCognitionSlotRepo: infra.repos.recentCognitionSlot,
+				graphStoreRepo: infra.repos.graphStore,
+				unresolvedOpsRepo: infra.repos.unresolvedOps,
 			});
 
 			const beatEpisodeIds = await appendEpisodesForSettlement(
@@ -606,7 +612,9 @@ export async function executeLivePath(
 			completedBeatIds.add(beat.id);
 		} catch (error) {
 			beatErrors += 1;
-			errors.push({ beatId: beat.id, error: toError(error) });
+			const beatErr = toError(error);
+			console.error(`[live] beat "${beat.id}" error:`, beatErr.message, beatErr.stack?.split('\n')[1] ?? '');
+			errors.push({ beatId: beat.id, error: beatErr });
 		} finally {
 			if (beatCaptureStarted) {
 				try {
@@ -1350,13 +1358,15 @@ function createMemoryTaskAgent(
 }
 
 function resolveChatModelId(): string {
+	if (process.env.SCENARIO_CHAT_MODEL?.trim())
+		return process.env.SCENARIO_CHAT_MODEL.trim();
 	if (process.env.ANTHROPIC_API_KEY?.trim())
 		return "anthropic/claude-sonnet-4-20250514";
-	if (process.env.MINIMAX_API_KEY?.trim())
-		return "minimax/MiniMax-M2.7-highspeed";
 	if (process.env.MOONSHOT_API_KEY?.trim()) return "moonshot/kimi-k2.5";
 	if (process.env.KIMI_CODING_API_KEY?.trim())
 		return "kimi-coding/kimi-for-coding";
+	if (process.env.MINIMAX_API_KEY?.trim())
+		return "minimax/MiniMax-M2.7-highspeed";
 	if (process.env.OPENAI_API_KEY?.trim()) return "openai/gpt-4o-mini";
 	throw new Error(
 		"executeLivePath requires at least one LLM API key (ANTHROPIC_API_KEY, MINIMAX_API_KEY, MOONSHOT_API_KEY, KIMI_CODING_API_KEY, or OPENAI_API_KEY)",

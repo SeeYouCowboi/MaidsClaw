@@ -66,6 +66,15 @@ export type StoryBeat = {
 	expectedToolPattern?: ToolCallPattern;
 };
 
+// World-state fact assertion spec — maps to WorldStateOp for fact_edges writing
+export type WorldStateOpSpec = {
+	subject: string; // pointer_key
+	predicate: string;
+	object: string; // pointer_key
+	factText: string;
+	visibility?: "shared_public" | "private_overlay";
+};
+
 // What a beat produces in memory
 export type MemoryEffect = {
 	newEntities?: EntitySpec[]; // new entities discovered this beat
@@ -76,6 +85,7 @@ export type MemoryEffect = {
 	commitments?: CommitmentSpec[];
 	logicEdges?: LogicEdgeSpec[];
 	retractions?: RetractionSpec[];
+	worldStateOps?: WorldStateOpSpec[]; // world-state facts written to fact_edges
 };
 
 // Individual memory specs — map to repository API parameters

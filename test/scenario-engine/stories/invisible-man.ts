@@ -788,6 +788,20 @@ export const invisibleMan: Story = {
             weight: 0.8,
           },
         ],
+        worldStateOps: [
+          {
+            subject: "smythe",
+            predicate: "located_at",
+            object: "himalaya_mansions",
+            factText: "斯迈思居住在喜玛拉雅公寓大厦顶层",
+          },
+          {
+            subject: "five_prior_letters",
+            predicate: "stored_at",
+            object: "smythe_apartment",
+            factText: "五封韦尔金的恐吓信存放在斯迈思公寓",
+          },
+        ],
       },
     },
 
@@ -966,6 +980,20 @@ export const invisibleMan: Story = {
             toEpisodeId: "c1_ep",
             edgeType: "causal",
             weight: 0.9,
+          },
+        ],
+        worldStateOps: [
+          {
+            subject: "angus",
+            predicate: "located_at",
+            object: "himalaya_mansions",
+            factText: "安格斯在喜玛拉雅公寓大厦入口布置守卫",
+          },
+          {
+            subject: "doorman",
+            predicate: "guards",
+            object: "himalaya_mansions",
+            factText: "门警守在公寓大厦前厅监视所有进出人员",
           },
         ],
       },
@@ -1167,6 +1195,20 @@ export const invisibleMan: Story = {
             toEpisodeId: "d1_ep",
             edgeType: "causal",
             weight: 0.95,
+          },
+        ],
+        worldStateOps: [
+          {
+            subject: "flambeau",
+            predicate: "located_at",
+            object: "himalaya_mansions",
+            factText: "弗朗博在喜玛拉雅公寓大厦与安格斯等人会合",
+          },
+          {
+            subject: "father_brown",
+            predicate: "located_at",
+            object: "himalaya_mansions",
+            factText: "布朗神父抵达喜玛拉雅公寓大厦参与调查",
           },
         ],
       },

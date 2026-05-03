@@ -101,6 +101,30 @@ describe.skipIf(skipPgTests || !hasLlmKey || !scenarioLiveTestsEnabled)("Invisib
     expect(rows[0].c).toBeGreaterThan(0);
   });
 
+  it("edge tables — logic_edges created by story DSL", async () => {
+    const rows = await handle.infra.sql`SELECT count(*)::int AS c FROM logic_edges`;
+    const count = rows[0].c as number;
+    console.log(`[edge-obs] logic_edges=${count}`);
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it("edge tables — memory_relations observed (may be 0 if no conflicts)", async () => {
+    const rows = await handle.infra.sql`SELECT count(*)::int AS c FROM memory_relations`;
+    const count = rows[0].c as number;
+    console.log(`[edge-obs] memory_relations=${count}`);
+    // Non-fatal: memory_relations are only created when RelationBuilder detects conflicts
+    expect(count).toBeGreaterThanOrEqual(0);
+  });
+
+  it("edge tables — fact_edges from worldStateOps DSL (0 in live path; >0 after settlement path uses worldStateOps)", async () => {
+    const rows = await handle.infra.sql`SELECT count(*)::int AS c FROM fact_edges`;
+    const count = rows[0].c as number;
+    console.log(`[edge-obs] fact_edges=${count} unresolved_world_state_ops=${(await handle.infra.sql`SELECT count(*)::int AS c FROM unresolved_world_state_ops`)[0].c}`);
+    // Live path (MemoryTaskAgent/Thinker) does not emit worldStateOps — fact_edges are
+    // only populated via the settlement path when story beats include worldStateOps specs.
+    expect(count).toBeGreaterThanOrEqual(0);
+  });
+
   it("per-beat stats recorded for all beats", () => {
     expect(handle.runResult.perBeatStats).toHaveLength(invisibleMan.beats.length);
     for (const stat of handle.runResult.perBeatStats) {

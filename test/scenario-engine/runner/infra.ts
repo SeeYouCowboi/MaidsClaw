@@ -16,6 +16,7 @@ import { PgCognitionProjectionRepo } from "../../../src/storage/domain-repos/pg/
 import { PgSearchProjectionRepo } from "../../../src/storage/domain-repos/pg/search-projection-repo.js";
 import { PgRecentCognitionSlotRepo } from "../../../src/storage/domain-repos/pg/recent-cognition-slot-repo.js";
 import { PgSettlementLedgerRepo } from "../../../src/storage/domain-repos/pg/settlement-ledger-repo.js";
+import { PgUnresolvedWorldStateOpsRepo } from "../../../src/storage/domain-repos/pg/unresolved-world-state-ops-repo.js";
 import { PgNarrativeSearchRepo } from "../../../src/storage/domain-repos/pg/narrative-search-repo.js";
 import { PgCognitionSearchRepo } from "../../../src/storage/domain-repos/pg/cognition-search-repo.js";
 import { PgGraphReadQueryRepo } from "../../../src/storage/domain-repos/pg/graph-read-query-repo.js";
@@ -60,6 +61,7 @@ export type ScenarioInfra = {
     searchProjection: PgSearchProjectionRepo;
     recentCognitionSlot: PgRecentCognitionSlotRepo;
     settlementLedger: PgSettlementLedgerRepo;
+    unresolvedOps: PgUnresolvedWorldStateOpsRepo;
   };
   services: {
     narrativeSearch: NarrativeSearchService;
@@ -129,6 +131,7 @@ function buildRepos(sql: postgres.Sql) {
     searchProjection: new PgSearchProjectionRepo(sql),
     recentCognitionSlot: new PgRecentCognitionSlotRepo(sql),
     settlementLedger: new PgSettlementLedgerRepo(sql),
+    unresolvedOps: new PgUnresolvedWorldStateOpsRepo(sql),
   };
 }
 

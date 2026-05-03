@@ -2,12 +2,14 @@ import {
   SCENARIO_DEFAULT_AGENT_ID,
   SCENARIO_DEFAULT_SESSION_ID,
 } from "../constants.js";
+import type { WorldStateOp } from "../../../src/runtime/rp-turn-contract.js";
 import type {
   AssertionSpec,
   CommitmentSpec,
   EvaluationSpec,
   RetractionSpec,
   Story,
+  WorldStateOpSpec,
 } from "../dsl/story-types.js";
 
 export type GeneratedSettlement = {
@@ -24,6 +26,7 @@ export type GeneratedSettlement = {
   logicEdges: LogicEdgeCreation[];
   retractions: RetractionCreation[];
   recentSlotEntries: RecentSlotEntry[];
+  worldStateOps: WorldStateOp[];
 };
 
 export type EntityCreation = {
@@ -263,6 +266,10 @@ export function generateSettlements(story: Story): GeneratedSettlement[] {
       kind: retraction.kind,
     }));
 
+    const worldStateOps: WorldStateOp[] = (beat.memoryEffects.worldStateOps ?? []).map((spec) =>
+      dslSpecToWorldStateOp(spec),
+    );
+
     const recentSlotEntries = buildRecentSlotEntries(settlementId, beat.timestamp, cognitionOps);
 
 		return {
@@ -279,6 +286,7 @@ export function generateSettlements(story: Story): GeneratedSettlement[] {
       logicEdges,
       retractions,
       recentSlotEntries,
+      worldStateOps,
     };
   });
 }
@@ -462,6 +470,16 @@ function buildRecentSlotEntries(
       status: "active",
     };
   });
+}
+
+function dslSpecToWorldStateOp(spec: WorldStateOpSpec): WorldStateOp {
+  return {
+    subject: { kind: "pointer_key", value: spec.subject },
+    predicate: spec.predicate,
+    object: { kind: "pointer_key", value: spec.object },
+    factText: spec.factText,
+    visibility: spec.visibility ?? "private_overlay",
+  };
 }
 
 function summarizeUpsert(op: CognitionOpSpec): string {
