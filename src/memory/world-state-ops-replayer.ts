@@ -101,10 +101,13 @@ export async function replayUnresolvedWorldStateOps(
     }
 
     if (isLegacyRetractOp(op)) {
-      console.warn(
-        `[world-state-ops] queued retract op is unsupported in MVP; skipping: settlement=${row.settlementId} opIndex=${row.opIndex}`,
-      );
-      await opts.unresolvedOpsRepo.markResolved(row.id);
+      // MVP does not support retract semantics. Earlier we marked these
+      // 'resolved', which lied about the outcome and erased the audit trail.
+      // Dead-letter them instead so operators can find and triage these rows.
+      const reason = `[world-state-ops] retract op unsupported in MVP; dead-lettered: settlement=${row.settlementId} opIndex=${row.opIndex}`;
+      console.warn(reason);
+      await opts.unresolvedOpsRepo.markDeadLetter(row.id, reason);
+      deadLettered += 1;
       continue;
     }
 

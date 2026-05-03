@@ -3,8 +3,20 @@ import type { WorldStateOp } from "../runtime/rp-turn-contract.js";
 import type { GraphMutableStoreRepo } from "../storage/domain-repos/contracts/graph-mutable-store-repo.js";
 import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 
-type ViewerSnapshot = TurnSettlementPayload["viewerSnapshot"];
-export type WorldStateOpsViewerSnapshot = ViewerSnapshot;
+// Internal viewer snapshot shape used during world-state op resolution.
+// Each field is optional individually so callers can supply only what they
+// have without losing the rest. The strict Talker-emitted TurnSettlementPayload
+// shape is a structural subtype of this.
+export type WorldStateOpsViewerSnapshot = {
+  selfPointerKey?: string;
+  userPointerKey?: string;
+  currentLocationEntityId?: number;
+};
+
+type ViewerSnapshot = WorldStateOpsViewerSnapshot;
+// Re-export the original Talker payload type for callers that already have
+// the strict shape; the applier accepts both.
+export type TurnSettlementViewerSnapshot = TurnSettlementPayload["viewerSnapshot"];
 
 export type GraphStoreRepoForWorldStateOps = Pick<
   GraphMutableStoreRepo,
@@ -239,11 +251,21 @@ export async function applyWorldStateOpsForSettlement(
         continue;
       }
 
-      const hasSpecialUnresolved =
-        (!subject.ok && subject.kind === "special_unresolved") ||
-        (!object.ok && object.kind === "special_unresolved");
+      // Skip-without-enqueue applies only when *every* unresolved endpoint is
+      // special_unresolved — a deterministic dead-end the entity-judge sweeper
+      // can never fix (special pseudo-entities are never created). When at
+      // least one endpoint is pointer_unresolved, enqueue the op so the
+      // sweeper has a chance to resolve the resolvable side; if the special
+      // endpoint stays dead, the queue's incrementRetry → dead_letter path
+      // surfaces it instead of swallowing it silently.
+      const subjectPointerUnresolved =
+        !subject.ok && subject.kind === "pointer_unresolved";
+      const objectPointerUnresolved =
+        !object.ok && object.kind === "pointer_unresolved";
+      const hasPointerUnresolved =
+        subjectPointerUnresolved || objectPointerUnresolved;
 
-      if (hasSpecialUnresolved) {
+      if (!hasPointerUnresolved) {
         if (!subject.ok) {
           console.warn(subject.warning);
         }

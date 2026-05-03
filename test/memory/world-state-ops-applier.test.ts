@@ -235,6 +235,41 @@ describe("applyWorldStateOpsForSettlement (area 11/12 shared applier)", () => {
       expect(unresolved.enqueueOp).toHaveBeenCalledTimes(0);
       expect(warnSpy).toHaveBeenCalled();
     });
+
+    it("ENQUEUES (does not skip) when one endpoint is pointer_unresolved AND the other is special_unresolved (P2-T3 regression)", async () => {
+      delete process.env[FLAG];
+      const graph = makeGraphRepo();
+      // Subject pointer_key cannot resolve → pointer_unresolved.
+      // Object special:user has no viewerSnapshot → special_unresolved.
+      graph.resolveEntityByPointerKey.mockImplementation(async () => null);
+      const unresolved = makeUnresolvedRepo();
+      const op = makeOp({
+        subject: { kind: "pointer_key", value: "char:unknown" },
+        object: { kind: "special", value: "user" } as WorldStateOp["object"],
+      });
+
+      const result = await applyWorldStateOpsForSettlement({
+        settlementId: "stl:mixed",
+        sessionId: "sess",
+        agentId: "agent-1",
+        worldStateOps: [op],
+        viewerSnapshot: undefined,
+        graphStoreRepo: graph,
+        unresolvedOpsRepo: unresolved,
+      });
+
+      // Pre-fix: skippedOps=1, enqueuedOps=0 (pointer endpoint silently lost).
+      // Post-fix: enqueuedOps=1, skippedOps=0 — replay/dead-letter audits the
+      // unresolvable special endpoint instead of swallowing the pointer side.
+      expect(result.skippedOps).toBe(0);
+      expect(result.enqueuedOps).toBe(1);
+      expect(unresolved.enqueueOp).toHaveBeenCalledTimes(1);
+      const enqArgs = (unresolved.enqueueOp.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      expect(enqArgs.subjectPointerKey).toBe("char:unknown");
+      // Object special endpoints are not pointer_keys, so the pointer field
+      // is undefined for them — replay logic still tries the special branch.
+      expect(enqArgs.objectPointerKey).toBeUndefined();
+    });
   });
 
   describe("failure path: createWorldStateFactEdge throws", () => {

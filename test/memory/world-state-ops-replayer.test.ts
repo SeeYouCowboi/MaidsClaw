@@ -128,6 +128,45 @@ describe("replayUnresolvedWorldStateOps", () => {
 		expect(graphStoreRepo.createWorldStateFactEdge).not.toHaveBeenCalled();
 	});
 
+	it("dead-letters legacy retract ops instead of marking them resolved (P2-T4 regression)", async () => {
+		const retractOp = {
+			...makeOp(),
+			op: "retract",
+		} as unknown as WorldStateOp;
+		const graphStoreRepo: MockGraphRepo = {
+			resolveEntityByPointerKey: jest.fn().mockResolvedValue(101),
+			createWorldStateFactEdge: jest
+				.fn()
+				.mockResolvedValue({ id: 99, created: true }),
+			upsertEntity: jest.fn().mockResolvedValue(500),
+		};
+		const unresolvedOpsRepo: MockUnresolvedRepo = {
+			listPending: jest
+				.fn()
+				.mockResolvedValue([makePendingRow({ id: 7, op: retractOp })]),
+			markResolved: jest.fn().mockResolvedValue(undefined),
+			incrementRetry: jest.fn().mockResolvedValue(undefined),
+			markDeadLetter: jest.fn().mockResolvedValue(undefined),
+		};
+
+		const result = await replayUnresolvedWorldStateOps(AGENT_ID, {
+			graphStoreRepo,
+			unresolvedOpsRepo,
+		});
+
+		// Pre-fix: replayed=0, stillPending=0, deadLettered=0 with markResolved
+		// called (lying about outcome). Post-fix: deadLettered=1, markDeadLetter
+		// called with retract reason — keeps audit trail intact for triage.
+		expect(result).toEqual({ replayed: 0, stillPending: 0, deadLettered: 1 });
+		expect(unresolvedOpsRepo.markDeadLetter).toHaveBeenCalledWith(
+			7,
+			expect.stringContaining("retract"),
+		);
+		expect(unresolvedOpsRepo.markResolved).not.toHaveBeenCalled();
+		expect(unresolvedOpsRepo.incrementRetry).not.toHaveBeenCalled();
+		expect(graphStoreRepo.createWorldStateFactEdge).not.toHaveBeenCalled();
+	});
+
 	it("dead-letters rows already at retry threshold", async () => {
 		const graphStoreRepo: MockGraphRepo = {
 			resolveEntityByPointerKey: jest.fn().mockResolvedValue(101),

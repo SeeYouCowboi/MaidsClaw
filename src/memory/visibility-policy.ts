@@ -1,12 +1,6 @@
 import type { ViewerContext } from "./types.js";
 import { AuthorizationPolicy, type VisibilityDisposition } from "./redaction-policy.js";
 
-const INTERNAL_COGNITION_FACT_PREDICATES = new Set([
-  "explicit_assertion",
-  "explicit_evaluation",
-  "explicit_commitment",
-]);
-
 type FactVisibilityMeta = {
   owner_agent_id?: string | null;
   source_kind?: string | null;
@@ -74,21 +68,9 @@ export class VisibilityPolicy {
       return true;
     }
 
-    // Owner-scoped rows are private to owner.
-    if (ownerAgentId !== viewerContext.viewer_agent_id) {
-      return false;
-    }
-
-    // Internal cognition predicates remain owner-private when owner exists.
-    // Reaching this line implies viewer is owner, so these stay visible here.
-    const predicate = typeof factMeta.predicate === "string"
-      ? factMeta.predicate
-      : null;
-    if (predicate && INTERNAL_COGNITION_FACT_PREDICATES.has(predicate)) {
-      return true;
-    }
-
-    return true;
+    // Owner-scoped rows are private to owner; both authored world-state and
+    // internal cognition predicates fall under the same rule once owner is set.
+    return ownerAgentId === viewerContext.viewer_agent_id;
   }
 
   isPrivateNodeVisible(

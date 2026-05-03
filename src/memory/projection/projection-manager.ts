@@ -570,16 +570,25 @@ export class ProjectionManager {
           );
         }
 
-        const viewerSnapshot =
-          params.viewerSnapshot?.selfPointerKey &&
-            params.viewerSnapshot?.userPointerKey
-            ? {
-              selfPointerKey: params.viewerSnapshot.selfPointerKey,
-              userPointerKey: params.viewerSnapshot.userPointerKey,
-              currentLocationEntityId:
-                params.viewerSnapshot.currentLocationEntityId,
+        // Pass through the snapshot field-by-field rather than gating on both
+        // selfPointerKey and userPointerKey: the applier handles each special
+        // ref's resolution independently (special:self has its own synthetic-
+        // entity fallback, special:user/current_location skip when their
+        // specific field is missing). Conjunction-gating dropped useful self
+        // pointers whenever the user pointer was absent.
+        const viewerSnapshot = params.viewerSnapshot
+          ? {
+              ...(params.viewerSnapshot.selfPointerKey != null
+                ? { selfPointerKey: params.viewerSnapshot.selfPointerKey }
+                : {}),
+              ...(params.viewerSnapshot.userPointerKey != null
+                ? { userPointerKey: params.viewerSnapshot.userPointerKey }
+                : {}),
+              ...(params.viewerSnapshot.currentLocationEntityId != null
+                ? { currentLocationEntityId: params.viewerSnapshot.currentLocationEntityId }
+                : {}),
             }
-            : undefined;
+          : undefined;
 
         const applyResult = applyWorldStateOpsForSettlement({
           settlementId: params.settlementId,
