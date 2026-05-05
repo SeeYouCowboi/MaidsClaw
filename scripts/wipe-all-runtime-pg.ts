@@ -11,9 +11,25 @@
  *
  * Safety: refuses to run unless the URL host is an explicit local loopback
  * (127.0.0.1 or localhost). Pass --force to override.
+ *
+ * Session carryover risks addressed by this script:
+ *   - entity_nodes: entity descriptions written by entity-judge-sweeper during
+ *     a session (e.g. fabricated character states like "Alice 上月已回城") persist
+ *     in entity_nodes.description until wiped. Cleared here ✓
+ *   - private_episode_events: hallucinated episodes written during a session
+ *     (e.g. fabricated items like "银袖扣") persist and pollute retrieval. Cleared here ✓
+ *   - unresolved_world_state_ops: pending world-state ops that were not applied
+ *     before shutdown accumulate across restarts. Cleared here ✓
+ *   - data/debug/traces: file-based trace store grows unboundedly between runs.
+ *     Use --clean-traces to delete trace files (does NOT affect DB).
+ *
+ * After wiping, always restart MaidsClaw (`bun run start`) so the bootstrap
+ * seed re-populates shared_public entity_nodes from world config. Skipping
+ * the restart leaves entity_nodes empty and breaks all memory retrieval.
  */
 import { parseArgs } from "node:util";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import postgres from "postgres";
 
 function loadEnvFile(path: string): Record<string, string> {
@@ -42,6 +58,8 @@ const { values } = parseArgs({
     force: { type: "boolean", default: false },
     "dry-run": { type: "boolean", default: false },
     extra: { type: "string", multiple: true, default: [] },
+    "clean-traces": { type: "boolean", default: false },
+    "data-dir": { type: "string" },
   },
   strict: true,
 });
@@ -92,6 +110,7 @@ const TABLES = [
   "world_state_current",
   "world_state_events",
   "world_narrative_current",
+  "unresolved_world_state_ops",
   // Graph layer
   "graph_nodes",
   "event_nodes",
@@ -135,8 +154,7 @@ try {
       const rows = await sql.unsafe(`SELECT COUNT(*)::int AS c FROM ${t}`);
       counts[t] = Number(rows[0]?.c ?? 0);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/does not exist/.test(msg)) {
+      if ((err as any)?.code === "42P01") {
         counts[t] = -1; // table missing — skip
         continue;
       }
@@ -171,4 +189,20 @@ try {
   console.log(`[wipe] entity_nodes after: ${after[0]?.c ?? "?"}`);
 } finally {
   await sql.end();
+}
+
+if (values["clean-traces"]) {
+  const dataDir = resolve(values["data-dir"] ?? "data");
+  const tracesDir = join(dataDir, "debug", "traces");
+  if (existsSync(tracesDir)) {
+    const files = readdirSync(tracesDir).filter((f) => f.endsWith(".json"));
+    if (values["dry-run"]) {
+      console.log(`[wipe] dry run; would delete ${files.length} trace files from ${tracesDir}`);
+    } else {
+      for (const f of files) rmSync(join(tracesDir, f));
+      console.log(`[wipe] deleted ${files.length} trace files from ${tracesDir}`);
+    }
+  } else {
+    console.log(`[wipe] traces dir not found, skipping: ${tracesDir}`);
+  }
 }
