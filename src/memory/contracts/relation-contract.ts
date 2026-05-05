@@ -300,6 +300,7 @@ export const KNOWN_NODE_KINDS = new Set<NodeRefKind>([
   "assertion",
   "evaluation",
   "commitment",
+  "episode",
 ]);
 
 export const RESOLUTION_CHAIN_TYPES = ["conflicts_with", "resolved_by", "downgraded_by"] as const;

@@ -3212,6 +3212,70 @@ export async function handleCognitionKeyHistory(
 
 // ── Graph Controllers ────────────────────────────────────────────────────────
 
+/** GET /v1/agents/{agent_id}/graph/edges */
+export async function handleListGraphAllEdges(
+  req: Request,
+  ctx: ControllerContext,
+): Promise<Response> {
+  try {
+    const service = requireService(ctx.graphReadRepo, "graphReadRepo");
+    const url = new URL(req.url);
+    const agentId = extractParam(
+      url,
+      "/v1/agents/{agent_id}/graph/edges",
+      "agent_id",
+    );
+    if (!agentId) {
+      return badRequest("Missing agent_id in path");
+    }
+
+    const limit = parseBoundedLimit(url, "limit", {
+      defaultValue: 50,
+      min: 1,
+      max: 200,
+    });
+    if (limit instanceof Response) return limit;
+
+    const rawOffset = url.searchParams.get("offset");
+    let offset = 0;
+    if (rawOffset) {
+      const n = Number(rawOffset);
+      if (!Number.isInteger(n) || n < 0) {
+        return badRequestResponse("Invalid offset: must be a non-negative integer");
+      }
+      offset = n;
+    }
+
+    const rawLayer = extractOptionalQueryParam(url, "layer");
+    let layer: GraphEdgeFamilyFilter | undefined;
+    if (rawLayer) {
+      if (!(GRAPH_EDGE_TYPE_VALUES as readonly string[]).includes(rawLayer)) {
+        return badRequestResponse(
+          "Invalid layer: must be one of logic,semantic,memory",
+        );
+      }
+      layer = rawLayer as GraphEdgeFamilyFilter;
+    }
+
+    const relation_type = extractOptionalQueryParam(url, "relation_type");
+
+    const result = await service.listAllEdges({
+      agentId,
+      layer,
+      relation_type,
+      limit,
+      offset,
+    });
+
+    return jsonResponse(result);
+  } catch (error) {
+    if (isMaidsClawError(error) && error.code === "UNSUPPORTED_RUNTIME_MODE") {
+      return errorResponse(error, 501);
+    }
+    throw error;
+  }
+}
+
 /** GET /v1/agents/{agent_id}/graph/nodes */
 export async function handleListGraphNodes(
   req: Request,

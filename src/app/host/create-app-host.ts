@@ -93,6 +93,7 @@ function createPgJobConsumer(runtime: RuntimeBootstrapResult): JobConsumer {
 			sceneRetrieval: runtime.talkerThinkerConfig?.sceneRetrieval,
 			legacyAreaStateCompat:
 				runtime.talkerThinkerConfig?.legacyAreaStateCompat,
+			graphStorage: runtime.graphStorageService,
 		};
 
 		const thinkerWorker = createThinkerWorker(thinkerWorkerDeps);

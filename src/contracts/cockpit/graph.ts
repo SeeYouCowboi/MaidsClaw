@@ -70,3 +70,23 @@ export const GraphEdgesResponseSchema = z
   .strict();
 export type GraphEdgesResponse = z.infer<typeof GraphEdgesResponseSchema>;
 export type GraphEdgesResponseDto = GraphEdgesResponse;
+
+export const GraphEdgeStatsSchema = z
+  .object({
+    logic: z.number(),
+    semantic: z.number(),
+    memory: z.number(),
+    by_relation: z.record(z.string(), z.number()),
+  })
+  .strict();
+export type GraphEdgeStats = z.infer<typeof GraphEdgeStatsSchema>;
+export type GraphEdgeStatsDto = GraphEdgeStats;
+
+export const GraphAllEdgesResponseSchema = z
+  .object({
+    items: z.array(GraphEdgeItemSchema),
+    stats: GraphEdgeStatsSchema,
+  })
+  .strict();
+export type GraphAllEdgesResponse = z.infer<typeof GraphAllEdgesResponseSchema>;
+export type GraphAllEdgesResponseDto = GraphAllEdgesResponse;

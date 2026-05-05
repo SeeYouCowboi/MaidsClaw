@@ -318,7 +318,7 @@ const V4_ASSERTION_PROVENANCE: ReadonlySet<AssertionProvenance> = new Set([
   "legacy_unknown",
 ]);
 
-const SCENE_FACT_KEY_RE = /^(location|holder|status):[a-z0-9_-]+$/;
+const SCENE_FACT_KEY_RE = /^(location|holder|status):[a-z0-9一-鿿_-]+$/u;
 const SCENE_FACT_POINTER_VALUE_RE = /^[a-z0-9_-]+$/;
 const SCENE_FACT_STATUS_VALUES: ReadonlySet<string> = new Set([
   "open",

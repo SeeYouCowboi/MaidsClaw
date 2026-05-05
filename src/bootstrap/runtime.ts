@@ -1906,7 +1906,7 @@ export function bootstrapRuntime(
 		sessionService,
 		viewerContextResolver,
 		options.projectionSink,
-		undefined,
+		graphStorageService,
 		traceStore,
 		projectionManager,
 		settlementUnitOfWork,
@@ -1995,6 +1995,7 @@ export function bootstrapRuntime(
 		pgFactory,
 		settlementUnitOfWork,
 		projectionManager,
+		graphStorageService,
 		interactionRepo,
 		coreMemoryBlockRepo,
 		recentCognitionSlotRepo,
@@ -2533,15 +2534,22 @@ function graphVisibilityScope(record: GraphNodeVisibilityRecord): string {
 
 function isVisibleInDegradedGraphMode(
 	record: GraphNodeVisibilityRecord,
+	viewerAgentId: string,
 ): boolean {
 	if (record.kind === "event") {
-		return record.visibilityScope === "world_public";
+		return record.visibilityScope === "world_public" || record.visibilityScope === "area_visible";
 	}
 	if (record.kind === "entity") {
-		return record.memoryScope === "shared_public";
+		return record.memoryScope === "shared_public" || record.ownerAgentId === viewerAgentId;
 	}
 	if (record.kind === "fact") {
 		return record.active;
+	}
+	if (record.kind === "episode") {
+		return record.ownerAgentId === viewerAgentId;
+	}
+	if (record.kind === "assertion" || record.kind === "evaluation" || record.kind === "commitment") {
+		return record.agentId === viewerAgentId;
 	}
 	return false;
 }
@@ -2554,7 +2562,7 @@ function isGraphNodeVisible(params: {
 	nodeRef: string;
 }): boolean {
 	if (params.viewerContextDegraded) {
-		return isVisibleInDegradedGraphMode(params.record);
+		return isVisibleInDegradedGraphMode(params.record, params.viewerContext.viewer_agent_id);
 	}
 
 	const nodeData = graphVisibilityNodeData(params.record);
@@ -2878,6 +2886,53 @@ function buildGraphReadRepoService(
 				summary = row.summary ?? summary;
 				timestamp = Number(row.committed_time);
 				rawText = row.private_notes ?? undefined;
+			} else if (parsed.kind === "entity") {
+				const rows = await sql<
+					{
+						display_name: string | null;
+						pointer_key: string | null;
+						entity_type: string | null;
+						summary: string | null;
+					}[]
+				>`
+          SELECT display_name, pointer_key, entity_type, summary
+          FROM entity_nodes
+          WHERE id = ${parsed.id}
+          LIMIT 1
+        `;
+				if (rows.length === 0) {
+					return null;
+				}
+				const row = rows[0];
+				category = row.entity_type ?? "entity";
+				summary = row.summary ?? row.display_name ?? summary;
+				rawText = row.display_name != null && row.pointer_key != null
+					? `${row.display_name} (${row.pointer_key})`
+					: row.display_name ?? row.pointer_key ?? undefined;
+			} else if (
+				parsed.kind === "assertion" ||
+				parsed.kind === "commitment" ||
+				parsed.kind === "evaluation"
+			) {
+				const rows = await sql<
+					{
+						summary_text: string | null;
+						record_json: unknown;
+						updated_at: number | string;
+					}[]
+				>`
+          SELECT summary_text, record_json, updated_at
+          FROM private_cognition_current
+          WHERE kind = ${parsed.kind} AND id = ${parsed.id}
+          LIMIT 1
+        `;
+				if (rows.length === 0) {
+					return null;
+				}
+				const row = rows[0];
+				category = parsed.kind;
+				summary = row.summary_text ?? summary;
+				timestamp = Number(row.updated_at);
 			}
 
 			return {
@@ -3179,6 +3234,193 @@ function buildGraphReadRepoService(
 				};
 			}
 			return out;
+		},
+
+		async listAllEdges(params) {
+			const sql = runtime.pgFactory?.getPool();
+			if (!sql) {
+				return {
+					items: [],
+					stats: { logic: 0, semantic: 0, memory: 0, by_relation: {} },
+				};
+			}
+
+			const shouldIncludeLogic =
+				!params.layer || params.layer === "logic";
+			const shouldIncludeSemantic =
+				!params.layer || params.layer === "semantic";
+			const shouldIncludeMemory =
+				!params.layer || params.layer === "memory";
+
+			const [logicStats, semanticStats, memoryStats] = await Promise.all([
+				sql<{ relation_type: string; cnt: string }[]>`
+          SELECT le.relation_type, COUNT(*) AS cnt
+          FROM logic_edges le
+          JOIN event_nodes en ON en.id = le.source_event_id
+          JOIN sessions s ON s.session_id = en.session_id
+          WHERE s.agent_id = ${params.agentId}
+          GROUP BY le.relation_type
+        `,
+				sql<{ relation_type: string; cnt: string }[]>`
+          SELECT relation_type, COUNT(*) AS cnt
+          FROM semantic_edges
+          GROUP BY relation_type
+        `,
+				sql<{ relation_type: string; cnt: string }[]>`
+          SELECT mr.relation_type, COUNT(*) AS cnt
+          FROM memory_relations mr
+          JOIN settlement_processing_ledger spl ON spl.settlement_id = mr.source_ref
+          WHERE spl.agent_id = ${params.agentId}
+          GROUP BY mr.relation_type
+        `,
+			]);
+
+			let logicCount = 0;
+			let semanticCount = 0;
+			let memoryCount = 0;
+			const byRelation: Record<string, number> = {};
+			for (const row of logicStats) {
+				const n = Number(row.cnt);
+				logicCount += n;
+				byRelation[row.relation_type] =
+					(byRelation[row.relation_type] ?? 0) + n;
+			}
+			for (const row of semanticStats) {
+				const n = Number(row.cnt);
+				semanticCount += n;
+				byRelation[row.relation_type] =
+					(byRelation[row.relation_type] ?? 0) + n;
+			}
+			for (const row of memoryStats) {
+				const n = Number(row.cnt);
+				memoryCount += n;
+				byRelation[row.relation_type] =
+					(byRelation[row.relation_type] ?? 0) + n;
+			}
+
+			const stats = {
+				logic: logicCount,
+				semantic: semanticCount,
+				memory: memoryCount,
+				by_relation: byRelation,
+			};
+
+			const all: Array<{
+				from_ref: string;
+				to_ref: string;
+				relation_type: string;
+				layer: "logic" | "semantic" | "memory";
+				weight?: number;
+				context?: { request_id?: string; settlement_id?: string };
+			}> = [];
+
+			await Promise.all([
+				shouldIncludeLogic
+					? sql<
+							{
+								source_event_id: number | string;
+								target_event_id: number | string;
+								relation_type: string;
+								weight: number | string | null;
+							}[]
+					  >`
+              SELECT le.source_event_id, le.target_event_id, le.relation_type, le.weight
+              FROM logic_edges le
+              JOIN event_nodes en ON en.id = le.source_event_id
+              JOIN sessions s ON s.session_id = en.session_id
+              WHERE s.agent_id = ${params.agentId}
+              ORDER BY le.weight DESC NULLS LAST
+            `.then((rows) => {
+							for (const row of rows) {
+								if (
+									!params.relation_type ||
+									row.relation_type === params.relation_type
+								) {
+									all.push({
+										from_ref: `event:${Number(row.source_event_id)}`,
+										to_ref: `event:${Number(row.target_event_id)}`,
+										relation_type: row.relation_type,
+										layer: "logic",
+										...(row.weight !== null
+											? { weight: Number(row.weight) }
+											: {}),
+									});
+								}
+							}
+					  })
+					: Promise.resolve(),
+
+				shouldIncludeSemantic
+					? sql<
+							{
+								source: string;
+								target: string;
+								relation_type: string;
+								weight: number | string;
+							}[]
+					  >`
+              SELECT se.source, se.target, se.relation_type, se.weight
+              FROM semantic_edges se
+              ORDER BY se.weight DESC
+            `.then((rows) => {
+							for (const row of rows) {
+								if (
+									!params.relation_type ||
+									row.relation_type === params.relation_type
+								) {
+									all.push({
+										from_ref: row.source,
+										to_ref: row.target,
+										relation_type: row.relation_type,
+										layer: "semantic",
+										weight: Number(row.weight),
+									});
+								}
+							}
+					  })
+					: Promise.resolve(),
+
+				shouldIncludeMemory
+					? sql<
+							{
+								source_node_ref: string;
+								target_node_ref: string;
+								relation_type: string;
+								strength: number | string;
+								source_kind: string;
+								source_ref: string;
+							}[]
+					  >`
+              SELECT mr.source_node_ref, mr.target_node_ref, mr.relation_type, mr.strength, mr.source_kind, mr.source_ref
+              FROM memory_relations mr
+              JOIN settlement_processing_ledger spl ON spl.settlement_id = mr.source_ref
+              WHERE spl.agent_id = ${params.agentId}
+              ORDER BY mr.strength DESC
+            `.then((rows) => {
+							for (const row of rows) {
+								if (
+									!params.relation_type ||
+									row.relation_type === params.relation_type
+								) {
+									all.push({
+										from_ref: row.source_node_ref,
+										to_ref: row.target_node_ref,
+										relation_type: row.relation_type,
+										layer: "memory",
+										weight: Number(row.strength),
+										...(row.source_kind === "turn"
+											? { context: { settlement_id: row.source_ref } }
+											: {}),
+									});
+								}
+							}
+					  })
+					: Promise.resolve(),
+			]);
+
+			all.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+			const items = all.slice(params.offset, params.offset + params.limit);
+			return { items, stats };
 		},
 	};
 }

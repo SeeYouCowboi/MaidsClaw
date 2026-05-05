@@ -25,6 +25,8 @@ import {
 	resolveLocalRefs,
 	type SettledArtifacts,
 } from "../memory/cognition/relation-intent-resolver.js";
+import { materializeActionEpisodes } from "../memory/materialization.js";
+import type { GraphStorageService } from "../memory/storage.js";
 import type { CoreMemoryIndexUpdater } from "../memory/core-memory-index-updater.js";
 import type { EntityJudgeSweeper } from "../memory/entity-judge-sweeper.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
@@ -1004,6 +1006,7 @@ export type ThinkerWorkerDeps = {
 	entityJudgeEnabled?: boolean;
 	entityJudgeModelId?: string;
 	entityJudgeBatchIntervalMs?: number;
+	graphStorage?: GraphStorageService;
 	replayUnresolvedWorldStateOpsFn?: (
 		agentId: string,
 		opts: ReplayUnresolvedWorldStateOpsOptions,
@@ -1670,6 +1673,8 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 
 			let changedNodeRefs: NodeRef[] = [];
 			let leaderClaimFailed = false;
+			let episodeEventNodeCount = 0;
+			const preSettlementTime = Date.now();
 			try {
 				await deps.sql.begin(async (tx) => {
 				const txSql = tx as unknown as postgres.Sql;
@@ -1769,6 +1774,25 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 					repoOverrides,
 				);
 				changedNodeRefs = result.changedNodeRefs;
+
+				// Promote action/state_change episodes to event_nodes for logic_edge input
+				if (deps.graphStorage && effectiveEpisodes.length > 0) {
+					try {
+						const matResult = materializeActionEpisodes(
+							deps.graphStorage,
+							effectiveEpisodes,
+							effectiveSettlementId,
+							{
+								sessionId: payload.sessionId,
+								locationEntityId: viewerSnapshot?.currentLocationEntityId,
+								timestamp: committedAt,
+							},
+						);
+						episodeEventNodeCount = matResult.materialized;
+					} catch (epErr) {
+						console.error("[thinker_worker] materializeActionEpisodes failed (non-fatal):", epErr);
+					}
+				}
 
 				// Per-member episode commits (batch mode only)
 				for (const [memberId, memberEpisodes] of perMemberEpisodes) {
@@ -1986,6 +2010,53 @@ export function createThinkerWorker(deps: ThinkerWorkerDeps) {
 						`settlementId=${effectiveSettlementId}, nodeCount=${changedNodeRefs.length}`,
 						enqueueErr,
 					);
+				}
+			}
+
+			// [T14] Build temporal logic_edges for event_nodes created this settlement cycle
+			// Uses deps.sql directly — deps.graphStorage.createLogicEdge uses resolveNow(Bun.peek)
+			// which throws for unresolved async PG promises.
+			if (deps.graphStorage) {
+				try {
+					const newRows = await deps.sql<Array<{
+						id: number;
+						session_id: string;
+						topic_id: number | null;
+						timestamp: number;
+					}>>`
+						SELECT id, session_id, topic_id, timestamp
+						FROM event_nodes
+						WHERE session_id = ${payload.sessionId}
+							AND created_at >= ${preSettlementTime}
+						ORDER BY created_at ASC, id ASC
+					`;
+					if (newRows.length >= 1) {
+						const nowMs = Date.now();
+						const edgeKind = "derived";
+						const edgeRef = "thinker-worker:T14";
+						if (newRows.length >= 2) {
+							for (let i = 0; i < newRows.length - 1; i++) {
+								await deps.sql`INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at, source_kind, source_ref) VALUES (${newRows[i].id}, ${newRows[i + 1].id}, 'temporal_next', ${0.9}, ${nowMs}, ${edgeKind}, ${edgeRef})`;
+								await deps.sql`INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at, source_kind, source_ref) VALUES (${newRows[i + 1].id}, ${newRows[i].id}, 'temporal_prev', ${0.9}, ${nowMs}, ${edgeKind}, ${edgeRef})`;
+							}
+						}
+						const prevRows = await deps.sql<Array<{ id: number }>>`
+							SELECT id FROM event_nodes
+							WHERE session_id = ${payload.sessionId}
+								AND created_at < ${preSettlementTime}
+							ORDER BY created_at DESC, id DESC
+							LIMIT 1
+						`;
+						if (prevRows.length > 0) {
+							await deps.sql`INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at, source_kind, source_ref) VALUES (${prevRows[0].id}, ${newRows[0].id}, 'temporal_next', ${0.9}, ${nowMs}, ${edgeKind}, ${edgeRef})`;
+							await deps.sql`INSERT INTO logic_edges (source_event_id, target_event_id, relation_type, weight, created_at, source_kind, source_ref) VALUES (${newRows[0].id}, ${prevRows[0].id}, 'temporal_prev', ${0.9}, ${nowMs}, ${edgeKind}, ${edgeRef})`;
+						}
+						console.log(
+							`[thinker_worker] logic_edges: ${newRows.length} new event_nodes linked, prev=${prevRows[0]?.id ?? "none"}`,
+						);
+					}
+				} catch (logicEdgeErr) {
+					console.warn("[thinker_worker] logic_edge build failed (non-fatal):", logicEdgeErr);
 				}
 			}
 

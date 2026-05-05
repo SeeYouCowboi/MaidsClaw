@@ -14,6 +14,7 @@ import type { JobPersistence } from "../jobs/persistence.js";
 import type { LoreService } from "../lore/service.js";
 import type { CoreMemoryService } from "../memory/core-memory.js";
 import type { ProjectionManager } from "../memory/projection/projection-manager.js";
+import type { GraphStorageService } from "../memory/storage.js";
 import type { MemoryTaskAgent } from "../memory/task-agent.js";
 import type { UnifiedEdgeReadRepo } from "../storage/domain-repos/contracts/unified-edge-read-repo.js";
 import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
@@ -110,6 +111,7 @@ export type RuntimeBootstrapResult = {
 	pgFactory: PgBackendFactory | null;
 	settlementUnitOfWork: SettlementUnitOfWork | null;
 	projectionManager: ProjectionManager;
+	graphStorageService: GraphStorageService;
 	interactionRepo: InteractionRepo;
 	coreMemoryBlockRepo: CoreMemoryBlockRepo;
 	recentCognitionSlotRepo: RecentCognitionSlotRepo;

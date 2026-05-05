@@ -1,7 +1,7 @@
 import type { AgentRole } from "../agents/profile.js";
 import type { ArtifactContract } from "../core/tools/tool-definition.js";
 import { enforceArtifactContracts, type ArtifactEnforcementContext } from "../core/tools/artifact-contract-policy.js";
-import type { PublicationDeclaration } from "../runtime/rp-turn-contract.js";
+import type { PrivateEpisodeArtifact, PublicationDeclaration } from "../runtime/rp-turn-contract.js";
 import { parseGraphNodeRef } from "./contracts/graph-node-ref.js";
 import { enforceWriteTemplate } from "./contracts/write-template.js";
 import type { WriteTemplate } from "./contracts/write-template.js";
@@ -76,7 +76,7 @@ export class MaterializationService {
       }
 
       const summary = privateEvent.projectable_summary?.trim();
-      if (!summary || !privateEvent.location_entity_id) {
+      if (!summary) {
         result.skipped += 1;
         continue;
       }
@@ -90,11 +90,13 @@ export class MaterializationService {
         continue;
       }
 
-      const resolvedLocationId = this.resolveEntityForPublic(privateEvent.location_entity_id, privateEvent.created_at, true);
-      if (!resolvedLocationId) {
-        result.skipped += 1;
-        continue;
-      }
+      // SESSION_ROOT_AREA_ID=0 mirrors the sentinel used in writeSceneFactCommitsFromTalker:
+      // episodes with no tracked location are bucketed at 0 rather than dropped.
+      const SESSION_ROOT_AREA_ID = 0;
+      const resolvedLocationId: number =
+        privateEvent.location_entity_id
+          ? (this.resolveEntityForPublic(privateEvent.location_entity_id, privateEvent.created_at, true) ?? SESSION_ROOT_AREA_ID)
+          : SESSION_ROOT_AREA_ID;
 
       const resolvedPrimaryActorId = privateEvent.primary_actor_entity_id
         ? this.resolveEntityForPublic(privateEvent.primary_actor_entity_id, privateEvent.created_at, false)
@@ -253,7 +255,9 @@ export class MaterializationService {
 
   private buildParticipantsJson(primaryActorEntityId: number | null, locationEntityId: number): string {
     const refs = new Set<string>();
-    refs.add(makeNodeRef("entity", locationEntityId));
+    if (locationEntityId > 0) {
+      refs.add(makeNodeRef("entity", locationEntityId));
+    }
     if (primaryActorEntityId) {
       refs.add(makeNodeRef("entity", primaryActorEntityId));
     }
@@ -611,4 +615,79 @@ function isTransientStorageError(error: unknown): boolean {
     msg.includes("database is locked") ||
     msg.includes("database is busy")
   );
+}
+
+// Episodes with these categories describe observable world events — promoted
+// automatically so kimi can build logic_edges without requiring the agent to
+// also submit a publication.
+const PROMOTABLE_EPISODE_CATEGORIES = new Set<string>(["action", "state_change"]);
+
+// Pub-index offset so episode rows never collide with publication rows in the
+// same settlement's (source_settlement_id, source_pub_index) unique space.
+const EPISODE_PUB_INDEX_OFFSET = 1000;
+
+export function materializeActionEpisodes(
+  storage: GraphStorageService | null,
+  episodes: PrivateEpisodeArtifact[],
+  settlementId: string,
+  ctx: {
+    sessionId: string;
+    locationEntityId?: number;
+    timestamp: number;
+  },
+): MaterializationResult {
+  const result: MaterializationResult = { materialized: 0, reconciled: 0, skipped: 0 };
+  const SESSION_ROOT_AREA_ID = 0;
+  const locationEntityId = ctx.locationEntityId ?? SESSION_ROOT_AREA_ID;
+  const participants = locationEntityId > 0
+    ? JSON.stringify([makeNodeRef("entity", locationEntityId)])
+    : JSON.stringify([]);
+
+  for (let i = 0; i < episodes.length; i++) {
+    const episode = episodes[i];
+    if (!episode || !PROMOTABLE_EPISODE_CATEGORIES.has(episode.category)) {
+      result.skipped += 1;
+      continue;
+    }
+    const summary = episode.summary?.trim();
+    if (!summary) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const pubIndex = EPISODE_PUB_INDEX_OFFSET + i;
+    const writeResult = createPublicationEventWithRetry(
+      storage,
+      {
+        sessionId: ctx.sessionId,
+        summary,
+        timestamp: ctx.timestamp,
+        participants,
+        locationEntityId,
+        eventCategory: episode.category as PublicEventCategory,
+        origin: "runtime_projection",
+        visibilityScope: "area_visible",
+        sourceSettlementId: settlementId,
+        sourcePubIndex: pubIndex,
+      },
+      {
+        settlementId,
+        pubIndex,
+        maxRetries: 3,
+        targetScope: "current_area",
+        sourceAgentId: null,
+        kind: episode.category,
+      },
+    );
+
+    if (writeResult === "skipped") {
+      result.skipped += 1;
+    } else if (writeResult === "reconciled") {
+      result.reconciled += 1;
+    } else {
+      result.materialized += 1;
+    }
+  }
+
+  return result;
 }

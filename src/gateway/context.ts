@@ -277,6 +277,22 @@ export interface GraphReadRepoService {
     agentId: string;
     pointerKeys: readonly string[];
   }): Promise<Record<string, ResolvedEntityNodeRow>>;
+
+  listAllEdges(params: {
+    agentId: string;
+    layer?: GraphEdgeFamilyFilter;
+    relation_type?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{
+    items: GraphEdgeItem[];
+    stats: {
+      logic: number;
+      semantic: number;
+      memory: number;
+      by_relation: Record<string, number>;
+    };
+  }>;
 }
 
 /**

@@ -31,7 +31,7 @@ import type { InteractionStore } from "../interaction/store.js";
 import type { JobPersistence } from "../jobs/persistence.js";
 import { prevalidateRelationIntents } from "../memory/cognition/relation-intent-resolver.js";
 import type { CoreMemoryService } from "../memory/core-memory.js";
-import { materializePublications } from "../memory/materialization.js";
+import { materializeActionEpisodes, materializePublications } from "../memory/materialization.js";
 import { enqueueOrganizerJobs } from "../memory/organize-enqueue.js";
 import { normalizeEntityMentions } from "../memory/entity-mentions.js";
 import { segmentCjk } from "../memory/cjk-segmenter.js";
@@ -1326,6 +1326,27 @@ export class TurnService {
 					requestId,
 					"error",
 					`Publication materialization failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
+
+		if (hasPrivateEpisodes && this.graphStorage) {
+			try {
+				materializeActionEpisodes(
+					this.graphStorage,
+					canonicalOutcome.privateEpisodes,
+					settlementId,
+					{
+						sessionId: effectiveRequest.sessionId,
+						locationEntityId: viewerSnapshot?.currentLocationEntityId,
+						timestamp: committedAt,
+					},
+				);
+			} catch (err) {
+				this.traceLog(
+					requestId,
+					"error",
+					`Episode materialization failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
 		}

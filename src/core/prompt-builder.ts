@@ -607,25 +607,22 @@ export class PromptBuilder {
 		const parts: string[] = [];
 
 		if (memDs.getPinnedBlocks) {
-			const getPinnedBlocks = memDs.getPinnedBlocks;
 			const pinned = await this.readDataSource("memory.getPinnedBlocks", () =>
-				getPinnedBlocks(agentId),
+				memDs.getPinnedBlocks!(agentId),
 			);
 			if (pinned) parts.push(pinned);
 		}
 
 		if (memDs.getSharedBlocks) {
-			const getSharedBlocks = memDs.getSharedBlocks;
 			const shared = await this.readDataSource("memory.getSharedBlocks", () =>
-				getSharedBlocks(agentId),
+				memDs.getSharedBlocks!(agentId),
 			);
 			if (shared) parts.push(shared);
 		}
 
 		if (memDs.getAttachedSharedBlocks) {
-			const getAttachedSharedBlocks = memDs.getAttachedSharedBlocks;
 			const attached = await this.readDataSource("memory.getAttachedSharedBlocks", () =>
-				getAttachedSharedBlocks(agentId),
+				memDs.getAttachedSharedBlocks!(agentId),
 			);
 			if (attached) parts.push(attached);
 		}
@@ -639,15 +636,14 @@ export class PromptBuilder {
 		onRetrievalTraceCapture?: (capture: RetrievalTraceCapture) => void,
 	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
-		const getTypedRetrievalSurface = memDs.getTypedRetrievalSurface;
-		if (!getTypedRetrievalSurface) {
+		if (!memDs.getTypedRetrievalSurface) {
 			return "";
 		}
 
 		const result = this.readDataSource(
 			"memory.getTypedRetrievalSurface",
 			() =>
-				getTypedRetrievalSurface(userMessage, viewerContext, {
+				memDs.getTypedRetrievalSurface!(userMessage, viewerContext, {
 					onRetrievalTraceCapture,
 				}),
 		);
@@ -688,14 +684,13 @@ export class PromptBuilder {
 		viewerContext: ViewerContext,
 	): Promise<string> {
 		const memDs = this.getMemoryDataSource();
-		const getKnownEntitiesForWriting = memDs.getKnownEntitiesForWriting;
-		if (!getKnownEntitiesForWriting) {
+		if (!memDs.getKnownEntitiesForWriting) {
 			return "";
 		}
 		const content = await this.readDataSource(
 			"memory.getKnownEntitiesForWriting",
 			() =>
-				getKnownEntitiesForWriting(viewerContext, {
+				memDs.getKnownEntitiesForWriting!(viewerContext, {
 					maxItems: 40,
 					maxChars: 800,
 				}),

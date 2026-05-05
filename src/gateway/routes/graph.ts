@@ -1,17 +1,31 @@
 import {
   GatewayNoBodyRequestSchema,
+  GraphAllEdgesResponseSchema,
   GraphEdgesResponseSchema,
   GraphNodeDetailResponseSchema,
   GraphNodeListResponseSchema,
 } from "../../contracts/cockpit/browser.js";
 import {
   handleGetGraphNodeDetail,
+  handleListGraphAllEdges,
   handleListGraphNodeEdges,
   handleListGraphNodes,
 } from "../controllers.js";
 import type { RouteEntry } from "../route-definition.js";
 
 export const GRAPH_ROUTES: RouteEntry[] = [
+  {
+    method: "GET",
+    pattern: "/v1/agents/{agent_id}/graph/edges",
+    handler: handleListGraphAllEdges,
+    scope: "read",
+    audit: false,
+    cors: true,
+    pgRequired: true,
+    errorTransport: "json",
+    requestSchema: GatewayNoBodyRequestSchema,
+    responseSchema: GraphAllEdgesResponseSchema,
+  },
   {
     method: "GET",
     pattern: "/v1/agents/{agent_id}/graph/nodes",
