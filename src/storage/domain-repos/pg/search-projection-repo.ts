@@ -468,9 +468,10 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     const entityPointerKeys = params.entityPointerKeys ?? [];
     const aliasSource = params.aliasText ?? entityPointerKeys.join(" ");
     const texts = buildSearchTexts(params.content, aliasSource);
+    const actor = params.actor === "user" ? "user" : "agent";
 
-    const existing = await this.sql<{ id: string | number; content: string; category: string }[]>`
-      SELECT id, content, category
+    const existing = await this.sql<{ id: string | number; content: string; category: string; actor: string }[]>`
+      SELECT id, content, category, actor
       FROM search_docs_episode
       WHERE source_ref = ${params.sourceRef}
         AND agent_id = ${params.agentId}
@@ -480,11 +481,11 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     if (existing.length === 0) {
       const inserted = await this.sql<{ id: string | number }[]>`
         INSERT INTO search_docs_episode
-          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys,
+          (doc_type, source_ref, agent_id, category, content, committed_at, created_at, entity_pointer_keys, actor,
             content_search_text, content_ngram_text, alias_text)
         VALUES
           ('episode', ${params.sourceRef}, ${params.agentId}, ${params.category},
-            ${params.content}, ${params.committedAt}, ${now}, ${entityPointerKeys},
+            ${params.content}, ${params.committedAt}, ${now}, ${entityPointerKeys}, ${actor},
             ${texts.searchText}, ${texts.ngramText}, ${texts.aliasText})
         RETURNING id
       `;
@@ -492,13 +493,14 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     }
 
     const row = existing[0];
-    if (row.content !== params.content || row.category !== params.category) {
+    if (row.content !== params.content || row.category !== params.category || row.actor !== actor) {
       await this.sql`
         UPDATE search_docs_episode
         SET content = ${params.content},
             category = ${params.category},
             committed_at = ${params.committedAt},
             entity_pointer_keys = ${entityPointerKeys},
+            actor = ${actor},
             content_search_text = ${texts.searchText},
             content_ngram_text = ${texts.ngramText},
             alias_text = ${texts.aliasText}
@@ -529,6 +531,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
     content: string;
     committedAt: number;
     createdAt: number;
+    actor: "user" | "agent";
     score: number;
   }>> {
     const trimmed = query.trim();
@@ -549,6 +552,7 @@ export class PgSearchProjectionRepo implements SearchProjectionRepo {
       content: row.content,
       committedAt: toNumber(row.committed_at),
       createdAt: toNumber(row.created_at),
+      actor: row.actor === "user" ? "user" : "agent",
       score: toNumber(row.score),
     }));
   }

@@ -1498,6 +1498,7 @@ export function bootstrapRuntime(
 				content: row.content,
 				category: row.category,
 				score: row.score,
+				actor: row.actor === "user" ? "user" : "agent",
 			}));
 		},
 		episodeEmbeddingFn:
@@ -1534,6 +1535,7 @@ export function bootstrapRuntime(
 								content: string;
 								category: string;
 								score: number;
+								actor?: "user" | "agent";
 							}> = [];
 							for (const neighbor of neighbors) {
 								const parts = neighbor.nodeRef.split(":");
@@ -1546,6 +1548,7 @@ export function bootstrapRuntime(
 									content: row.summary,
 									category: row.category,
 									score: neighbor.similarity,
+									actor: row.actor,
 								});
 							}
 							return hits;

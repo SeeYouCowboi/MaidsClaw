@@ -146,6 +146,7 @@ export type EpisodeSearchPgRow = {
 	content: string;
 	committed_at: string | number;
 	created_at: string | number;
+	actor: string | null;
 	score: number;
 };
 
@@ -486,6 +487,7 @@ export function buildEpisodeWordSql(
                   content,
                   committed_at,
                   created_at,
+                  actor,
                   pdb.score(id) AS score
            FROM search_docs_episode
            WHERE ${conditions.join(" AND ")}
@@ -534,6 +536,7 @@ export function buildEpisodeNgramSql(
                   content,
                   committed_at,
                   created_at,
+                  actor,
                   pdb.score(id) AS score
            FROM search_docs_episode
            WHERE ${conditions.join(" AND ")}

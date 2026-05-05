@@ -125,6 +125,12 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               privateNotes: { type: "string" },
               locationText: { type: "string" },
               validTime: { type: "number" },
+              actor: {
+                type: "string",
+                enum: ["user", "agent"],
+                description:
+                  "Who the episode is primarily about. 'user' = paraphrases user message (ground truth). 'agent' = paraphrases YOUR publicReply (down-weighted in future retrieval because it may carry Talker improvisation without external grounding). Default 'agent' if you genuinely cannot tell.",
+              },
               entityRefs: {
                 type: "array",
                 description:

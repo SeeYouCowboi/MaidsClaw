@@ -11,6 +11,8 @@ export type UpsertEpisodeDocParams = {
   createdAt?: number;
   entityPointerKeys?: string[];
   aliasText?: string;
+  /** Defaults to 'agent' to match the column default in search_docs_episode. */
+  actor?: "user" | "agent";
 };
 
 export type UpsertCognitionDocParams = {

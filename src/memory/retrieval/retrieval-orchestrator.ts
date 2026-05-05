@@ -25,7 +25,21 @@ type EpisodeSearchHit = {
   content: string;
   category: string;
   score: number;
+  actor?: "user" | "agent";
 };
+
+/**
+ * Score multiplier applied to episodes whose actor is 'agent'. These episodes
+ * record the agent's own publicReply via the Thinker — they can carry Talker
+ * fabrications that have no user grounding. Halving their score lets
+ * user-grounded episodes (actor='user') win ties on the same query without
+ * removing agent episodes entirely (they are still useful for self-coherence).
+ */
+const AGENT_EPISODE_SCORE_MULTIPLIER = 0.5;
+
+function applyActorWeight(score: number, actor: "user" | "agent" | undefined): number {
+  return actor === "agent" ? score * AGENT_EPISODE_SCORE_MULTIPLIER : score;
+}
 
 type EpisodeSearchFn = (query: string, agentId: string, limit: number) => Promise<EpisodeSearchHit[]>;
 
@@ -86,6 +100,12 @@ type TypedRetrievalSegment = {
 type TypedNarrativeSegment = TypedRetrievalSegment & {
   doc_type: string;
   scope: MemoryHint["scope"];
+  /**
+   * Episode-only: 'user' = paraphrases user message, 'agent' = paraphrases
+   * Talker publicReply. Used by prompt-data formatting to mark agent-stated
+   * episodes so the next turn knows they are not user-grounded.
+   */
+  actor?: "user" | "agent";
 };
 
 type TypedCognitionSegment = TypedRetrievalSegment & {
@@ -803,7 +823,10 @@ export class RetrievalOrchestrator {
     const rankedRows = rawRows
       .map((row) => ({
         row,
-        score: this.scoreEpisodeRow(row, query, viewerContext),
+        score: applyActorWeight(
+          this.scoreEpisodeRow(row, query, viewerContext),
+          row.actor,
+        ),
       }))
       .sort((a, b) => {
         if (b.score !== a.score) {
@@ -821,6 +844,7 @@ export class RetrievalOrchestrator {
       score,
       doc_type: `episode_${row.category}`,
       scope: "private",
+      actor: row.actor,
     }));
   }
 
@@ -914,7 +938,7 @@ export class RetrievalOrchestrator {
     const candidates: SignalCandidate[] = [];
     const episodeMeta = new Map<
       string,
-      { content?: string; category?: string }
+      { content?: string; category?: string; actor?: "user" | "agent" }
     >();
 
     for (const [rank, hit] of ftsHits.entries()) {
@@ -927,6 +951,7 @@ export class RetrievalOrchestrator {
       episodeMeta.set(hit.sourceRef, {
         content: hit.content,
         category: hit.category,
+        actor: hit.actor,
       });
     }
     for (const [rank, hit] of embeddingHits.entries()) {
@@ -940,6 +965,7 @@ export class RetrievalOrchestrator {
         episodeMeta.set(hit.sourceRef, {
           content: hit.content,
           category: hit.category,
+          actor: hit.actor,
         });
       }
     }
@@ -981,6 +1007,7 @@ export class RetrievalOrchestrator {
           episodeMeta.set(`episode:${row.id}`, {
             content: row.summary,
             category: row.category,
+            actor: row.actor,
           });
         }
       }
@@ -996,11 +1023,16 @@ export class RetrievalOrchestrator {
       segments.push({
         source_ref: candidate.sourceRef,
         content,
-        score: candidate.score,
+        score: applyActorWeight(candidate.score, meta?.actor),
         doc_type: `episode_${meta?.category ?? "event"}`,
         scope: "private",
+        actor: meta?.actor,
       });
     }
+
+    // Re-sort after actor weighting so user-grounded episodes outrank
+    // down-weighted agent-fabricated ones at the same RRF rank.
+    segments.sort((a, b) => b.score - a.score);
 
     return segments.slice(0, effectiveEpisodeBudget);
   }

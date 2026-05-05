@@ -71,7 +71,7 @@ export class PgRetrievalReadRepo implements RetrievalReadRepo {
     const episodeRows = await this.sql<postgres.Row[]>`
       SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes,
              location_entity_id, location_text, valid_time, committed_time, source_local_ref,
-             created_at, entity_pointer_keys
+             created_at, entity_pointer_keys, actor
       FROM private_episode_events
       WHERE agent_id = ${viewerContext.viewer_agent_id}
         AND location_entity_id = ${entity.id}
@@ -359,6 +359,7 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
   const entityPointerKeys: string[] = Array.isArray(rawKeys)
     ? (rawKeys as unknown[]).filter((v): v is string => typeof v === "string")
     : [];
+  const actor = row.actor === "user" ? "user" : "agent";
   return {
     id: Number(row.id),
     agent_id: row.agent_id as string,
@@ -376,5 +377,6 @@ function normalizeEpisodeRow(row: postgres.Row): EpisodeRow {
     request_id: (row.request_id as string) ?? null,
     created_at: Number(row.created_at),
     entity_pointer_keys: entityPointerKeys,
+    actor,
   };
 }

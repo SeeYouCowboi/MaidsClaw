@@ -559,7 +559,12 @@ function renderTypedRetrieval(result: TypedRetrievalResult): string {
     if (parts.length > 0) parts.push("");
     parts.push("[episode]");
     for (const hit of result.episode) {
-      parts.push(`• [${hit.doc_type}] ${hit.content}`);
+      // Tag agent-actor episodes so the next turn knows the content was
+      // self-narrated by the Talker (and may be a Talker fabrication) rather
+      // than user-stated ground truth. user-actor and untyped (legacy public
+      // event) hits render without a prefix.
+      const actorTag = hit.actor === "agent" ? "[agent] " : "";
+      parts.push(`• [${hit.doc_type}] ${actorTag}${hit.content}`);
     }
   }
 

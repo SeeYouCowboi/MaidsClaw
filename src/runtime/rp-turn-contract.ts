@@ -220,6 +220,8 @@ export type PinnedSummaryProposal = {
   rationale?: string;
 };
 
+export type EpisodeActor = "user" | "agent";
+
 export type PrivateEpisodeArtifact = {
   localRef?: LocalRef;
   /** In batch mode, the settlementId of the turn this episode belongs to. */
@@ -229,6 +231,14 @@ export type PrivateEpisodeArtifact = {
   privateNotes?: string;
   locationText?: string;
   validTime?: number;
+  /**
+   * Who the episode is primarily about — the user or the agent itself.
+   * Used by retrieval to down-weight `agent`-actor episodes (which can
+   * carry Talker fabrications) so they cannot drown out user-grounded
+   * facts in later turns. Default `agent` is the conservative choice:
+   * untagged legacy rows are treated with skepticism.
+   */
+  actor?: EpisodeActor;
   /**
    * People, places, and items involved in this episode. Used as the
    * retrieval-index surface for "do you remember <entity>" recall — episodes
@@ -652,6 +662,7 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
       throw new Error("privateEpisode summary must be a string");
     }
     const entityRefs = normalizeEpisodeEntityRefs(ep.entityRefs);
+    const actor = ep.actor === "user" ? "user" : ep.actor === "agent" ? "agent" : undefined;
     episodes.push({
       ...(typeof ep.localRef === "string" ? { localRef: ep.localRef } : {}),
       ...(typeof ep.settlementId === "string" ? { settlementId: ep.settlementId } : {}),
@@ -660,6 +671,7 @@ function normalizePrivateEpisodes(raw: unknown): PrivateEpisodeArtifact[] {
       ...(typeof ep.privateNotes === "string" ? { privateNotes: ep.privateNotes } : {}),
       ...(typeof ep.locationText === "string" ? { locationText: ep.locationText } : {}),
       ...(typeof ep.validTime === "number" ? { validTime: ep.validTime } : {}),
+      ...(actor !== undefined ? { actor } : {}),
       ...(entityRefs.length > 0 ? { entityRefs } : {}),
     });
   }

@@ -267,7 +267,8 @@ export async function bootstrapDerivedSchema(
       content              TEXT NOT NULL,
       committed_at         BIGINT NOT NULL,
       created_at           BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
-      entity_pointer_keys  TEXT[] NOT NULL DEFAULT '{}'
+      entity_pointer_keys  TEXT[] NOT NULL DEFAULT '{}',
+      actor                TEXT NOT NULL DEFAULT 'agent'
     )
   `);
 
@@ -275,6 +276,12 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`
     ALTER TABLE search_docs_episode
       ADD COLUMN IF NOT EXISTS entity_pointer_keys TEXT[] NOT NULL DEFAULT '{}'
+  `);
+
+  // Idempotent upgrade for databases created before the actor column existed.
+  await sql.unsafe(`
+    ALTER TABLE search_docs_episode
+      ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT 'agent'
   `);
 
   await sql.unsafe(`

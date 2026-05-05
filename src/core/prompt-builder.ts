@@ -139,6 +139,11 @@ Scene-level events that happened this turn. Each entry:
   - speech = something said aloud, action = a physical/deliberate act, observation = something noticed, state_change = a shift in mood/relationship/situation
 - summary: one-sentence description of the event
 - privateNotes (optional): your private annotation about the significance
+- actor: REQUIRED. Either "user" or "agent" — who the episode is primarily about.
+  - "user" = paraphrases what the user said/did/observed this turn (grounded in the user message).
+  - "agent" = paraphrases what YOU (the agent) said/did/observed in publicReply. These episodes are downweighted in future retrieval because they may carry in-character improvisation that has no external grounding.
+  - When the episode mixes both (e.g. "we both noticed X"), choose by primary actor: if the user initiated it, "user"; if you initiated it, "agent".
+  - Default to "agent" only if you genuinely cannot tell — but try hard to pick one.
 - entityRefs (REQUIRED whenever a specific person/place/object matters): list every named participant, location, and notable item the episode is about. This is the retrieval anchor — when the user later asks "do you remember the silver pocket watch", episodes tagged with that item are the ones surfaced. Without entityRefs, recall falls back to fuzzy text matching and you will forget.
   - Each entry is { kind: "pointer_key", value: "<canonical_id_or_label>" } for normal entities, or { kind: "special", value: "self" | "user" | "current_location" } for the agent itself, the user, or the current room.
 - Use ONE canonical pointer_key per entity. Do not duplicate the same entity with translated or paraphrased variants in the same episode.
@@ -146,9 +151,9 @@ Scene-level events that happened this turn. Each entry:
   - Always tag any person who spoke or was referenced in this episode.
 
 Examples:
-{ category: "observation", summary: "主人追问管家来访的目的，语气带有怀疑", entityRefs: [{ kind: "special", value: "user" }, { kind: "pointer_key", value: "person:butler" }, { kind: "special", value: "current_location" }] }
-{ category: "action", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项", entityRefs: [{ kind: "special", value: "self" }, { kind: "special", value: "user" }, { kind: "pointer_key", value: "topic:butler_accounting" }] }
-{ category: "state_change", summary: "主人在茶室递来一枚银怀表作为生日礼物", entityRefs: [{ kind: "special", value: "user" }, { kind: "special", value: "self" }, { kind: "pointer_key", value: "location:tea_room" }, { kind: "pointer_key", value: "item:silver_pocket_watch" }] }
+{ category: "observation", actor: "user", summary: "主人追问管家来访的目的，语气带有怀疑", entityRefs: [{ kind: "special", value: "user" }, { kind: "pointer_key", value: "person:butler" }, { kind: "special", value: "current_location" }] }
+{ category: "action", actor: "agent", summary: "将管家来访原因弱化为'日常账目核对'", privateNotes: "实际上管家来访涉及异常款项", entityRefs: [{ kind: "special", value: "self" }, { kind: "special", value: "user" }, { kind: "pointer_key", value: "topic:butler_accounting" }] }
+{ category: "state_change", actor: "user", summary: "主人在茶室递来一枚银怀表作为生日礼物", entityRefs: [{ kind: "special", value: "user" }, { kind: "special", value: "self" }, { kind: "pointer_key", value: "location:tea_room" }, { kind: "pointer_key", value: "item:silver_pocket_watch" }] }
 
 ---
 
@@ -269,7 +274,7 @@ const TALKER_INSTRUCTIONS = `## Response Instructions (Talker Mode)
 Respond in character via the submit_rp_turn tool. You MUST populate the following fields as separate tool parameters:
 - latentScratchpad: 1-3 sentences of internal reasoning, stance, intent (NOT visible to user)
 - publicReply: your in-character spoken/acted response (visible to user). This is the part the user actually sees.
-- entityMentions: when this turn explicitly names people, places, or notable items worth remembering, include their surface names as a short string array. Omit pronouns and self/user/current room placeholders.
+- entityMentions: when this turn explicitly names people, places, or notable items worth remembering, use typed pointer key format — "char:Name" for characters, "loc:Place" for locations, "item:Object" for notable items (e.g. ["char:Alice", "loc:花房", "item:银怀表"]). Include only concrete named entities. Omit pronouns, function words, and self/user/current room placeholders.
 - actionCommitments: REQUIRED whenever <normalized_turn_input> contains a narrated action (see "Action Commitments" section below). Otherwise OMIT this field entirely.
 
 CRITICAL — voice & length:

@@ -33,6 +33,12 @@ export type EpisodeAppendParams = {
   requestId?: string;
   /** Canonical pointer-key strings of entities involved in this episode. */
   entityPointerKeys?: string[];
+  /**
+   * Whether the episode is primarily about the user or the agent.
+   * Defaults to 'agent' at the storage layer when omitted, matching the
+   * column default in private_episode_events.
+   */
+  actor?: "user" | "agent";
 };
 
 export type EpisodeRow = {
@@ -51,6 +57,7 @@ export type EpisodeRow = {
   request_id: string | null;
   created_at: number;
   entity_pointer_keys: string[];
+  actor: "user" | "agent";
 };
 
 export class EpisodeRepository {
@@ -77,8 +84,9 @@ export class EpisodeRepository {
     // SQLite has no native array type, so we serialize entity_pointer_keys as
     // JSON. The PG repo (which is the live path) uses TEXT[] directly.
     const entityKeysJson = JSON.stringify(params.entityPointerKeys ?? []);
+    const actor = params.actor === "user" ? "user" : "agent";
     const result = this.db.run(
-      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO private_episode_events (agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.agentId,
         params.sessionId,
@@ -94,6 +102,7 @@ export class EpisodeRepository {
         params.requestId ?? null,
         now,
         entityKeysJson,
+        actor,
       ],
     );
 
@@ -102,7 +111,7 @@ export class EpisodeRepository {
 
   readBySettlement(settlementId: string, agentId: string): EpisodeRow[] {
     const rows = this.db.query<Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null }>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys, actor FROM private_episode_events WHERE settlement_id = ? AND agent_id = ? ORDER BY id ASC`,
       [settlementId, agentId],
     );
     return rows.map(deserializeEntityPointerKeys);
@@ -123,7 +132,7 @@ export class EpisodeRepository {
   readByAgent(agentId: string, limit?: number): EpisodeRow[] {
     const effectiveLimit = limit ?? 100;
     const rows = this.db.query<Omit<EpisodeRow, "entity_pointer_keys"> & { entity_pointer_keys: string | null }>(
-      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      `SELECT id, agent_id, session_id, settlement_id, category, summary, private_notes, location_entity_id, location_text, valid_time, committed_time, source_local_ref, request_id, created_at, entity_pointer_keys, actor FROM private_episode_events WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
       [agentId, effectiveLimit],
     );
     return rows.map(deserializeEntityPointerKeys);
@@ -145,5 +154,6 @@ function deserializeEntityPointerKeys(
       keys = [];
     }
   }
-  return { ...row, entity_pointer_keys: keys };
+  const actor = row.actor === "user" ? "user" : "agent";
+  return { ...row, entity_pointer_keys: keys, actor };
 }

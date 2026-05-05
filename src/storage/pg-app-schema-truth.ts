@@ -418,7 +418,9 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       source_local_ref     TEXT,
       request_id           VARCHAR,
       created_at           BIGINT NOT NULL,
-      entity_pointer_keys  TEXT[] NOT NULL DEFAULT '{}'
+      entity_pointer_keys  TEXT[] NOT NULL DEFAULT '{}',
+      actor                TEXT NOT NULL DEFAULT 'agent'
+                           CHECK (actor IN ('user', 'agent'))
     )
   `);
 
@@ -426,6 +428,27 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`
     ALTER TABLE private_episode_events
       ADD COLUMN IF NOT EXISTS entity_pointer_keys TEXT[] NOT NULL DEFAULT '{}'
+  `);
+
+  // Idempotent upgrade for databases created before the actor column existed.
+  // Backfills 'agent' for legacy rows so contaminated episodes from before the
+  // distinction was tracked are treated conservatively (down-weighted).
+  await sql.unsafe(`
+    ALTER TABLE private_episode_events
+      ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT 'agent'
+  `);
+  await sql.unsafe(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'private_episode_events'::regclass
+          AND conname = 'private_episode_events_actor_check'
+      ) THEN
+        ALTER TABLE private_episode_events
+          ADD CONSTRAINT private_episode_events_actor_check
+          CHECK (actor IN ('user', 'agent'));
+      END IF;
+    END $$
   `);
 
   await sql.unsafe(`

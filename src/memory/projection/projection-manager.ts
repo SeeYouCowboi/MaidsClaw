@@ -85,6 +85,7 @@ type ProjectionSearchProjectionRepo = {
     committedAt: number;
     now: number;
     entityPointerKeys: string[];
+    actor: "user" | "agent";
   }) => MaybePromise<number | undefined>;
 };
 
@@ -175,6 +176,7 @@ function resolveSearchProjectionRepo(
         committedAt: params.committedAt,
         createdAt: params.now,
         entityPointerKeys: params.entityPointerKeys,
+        actor: params.actor,
       });
 
       if (isPromiseLike(result)) {
@@ -727,6 +729,7 @@ export class ProjectionManager {
         params.agentId,
         params.viewerSnapshot?.currentLocationEntityId,
       );
+      const actor = episode.actor === "user" ? "user" : "agent";
       const appendResult = episodeRepo.append({
         agentId: params.agentId,
         sessionId: params.sessionId,
@@ -741,6 +744,7 @@ export class ProjectionManager {
         committedTime: now,
         sourceLocalRef: episode.localRef ?? `${params.settlementId}:_auto:${index}`,
         entityPointerKeys,
+        actor,
       });
 
       const afterAppend = (episodeId: number): void | Promise<void> => {
@@ -757,6 +761,7 @@ export class ProjectionManager {
           committedAt: now,
           now,
           entityPointerKeys,
+          actor,
         });
 
         if (isPromiseLike(searchResult)) {
