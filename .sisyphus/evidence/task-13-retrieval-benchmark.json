@@ -1,0 +1,60 @@
+{
+  "task": "Task 13: Extend Retrieval Benchmark and Golden Fixtures for Graph Multi-hop",
+  "status": "implemented",
+  "verification": {
+    "unit_tests": {
+      "command": "bun test test/scripts/retrieval-benchmark.test.ts",
+      "result": "6 pass / 0 fail / 13 expect calls",
+      "pg_required": false
+    },
+    "typecheck": {
+      "command": "bun run build (tsc -p tsconfig.build.json --noEmit)",
+      "result": "clean (no errors emitted)"
+    },
+    "lsp_diagnostics": {
+      "scripts/retrieval-benchmark.ts": "no errors",
+      "test/scripts/retrieval-benchmark.test.ts": "no errors"
+    },
+    "live_pg_run": {
+      "skipped": "no_pg",
+      "reason": "PG_TEST_URL/PARADEDB_TEST_URL not configured in this environment"
+    }
+  },
+  "exports_added": [
+    "computeGraphPprContribution(traces, signal): number",
+    "computePprOnOffDelta(pprOnRecall, pprOffRecall): number",
+    "GRAPH_PPR_EPISODE_SIGNAL",
+    "GRAPH_PPR_COGNITION_SIGNAL"
+  ],
+  "cli_flag": "--with-ppr",
+  "graph_fixture_seeded": {
+    "entity_nodes": 4,
+    "entity_aliases": 6,
+    "graph_retrieval_edges": 5,
+    "pointers": ["char:alice", "loc:花房", "item:银怀表", "item:金怀表"],
+    "run_id": "fixture_benchmark_graph_run"
+  },
+  "report_section_when_with_ppr": {
+    "graph_ppr.ppr_enabled": true,
+    "graph_ppr.mode_supported": "true if [graph-retrieval-trace] traces collected, else false",
+    "graph_ppr.graph_fixture_seeded": "{ nodes, aliases, edges }",
+    "graph_ppr.graph_ppr_episode_contribution": "sum of rrfContribution[signal=graph_ppr_episode]",
+    "graph_ppr.graph_ppr_cognition_contribution": "sum of rrfContribution[signal=graph_ppr_cognition]",
+    "graph_ppr.traces_collected": "number of intercepted [graph-retrieval-trace] log lines"
+  },
+  "constraints_honored": {
+    "existing_fts_path_unchanged": true,
+    "existing_fixture_cases_preserved": true,
+    "no_live_llm_calls": true,
+    "no_neo4j_or_python_deps": true,
+    "ppr_damping_unchanged": "0.5 (HippoRAG-style, not modified)",
+    "graphPprAffectsSurfaceSignals_unchanged": false,
+    "esm_js_imports": true,
+    "scenario_live_tests_disabled": true
+  },
+  "files_modified": [
+    "scripts/retrieval-benchmark.ts",
+    "test/scripts/retrieval-benchmark.test.ts"
+  ],
+  "next_integration_step": "Wire RetrievalOrchestrator into evaluateCase() to actually populate collectedTraces; current implementation reports mode_supported=false until orchestrator integration lands (out-of-scope for Task 13 which focuses on benchmark scaffolding + metrics)."
+}

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
 	computeCrossAgentLeakageCount,
+	computeGraphPprContribution,
 	computeMrr,
+	computePprOnOffDelta,
 	computeRecallAtK,
+	GRAPH_PPR_COGNITION_SIGNAL,
+	GRAPH_PPR_EPISODE_SIGNAL,
 	percentile,
 } from "../../scripts/retrieval-benchmark";
 
@@ -61,5 +65,39 @@ describe("retrieval-benchmark metrics", () => {
 			{ leakageCount: 1 },
 		];
 		expect(computeCrossAgentLeakageCount(leakageRows)).toBe(3);
+	});
+
+	it("sums graph PPR per-signal contribution counts across traces", () => {
+		const traces = [
+			{
+				rrfContribution: [
+					{ signal: GRAPH_PPR_EPISODE_SIGNAL, count: 3 },
+					{ signal: GRAPH_PPR_COGNITION_SIGNAL, count: 1 },
+					{ signal: "lexical_episode", count: 5 },
+				],
+			},
+			{
+				rrfContribution: [
+					{ signal: GRAPH_PPR_EPISODE_SIGNAL, count: 2 },
+					{ signal: "embedding_episode", count: 4 },
+				],
+			},
+			{ rrfContribution: [] },
+		];
+
+		expect(
+			computeGraphPprContribution(traces, GRAPH_PPR_EPISODE_SIGNAL),
+		).toBe(5);
+		expect(
+			computeGraphPprContribution(traces, GRAPH_PPR_COGNITION_SIGNAL),
+		).toBe(1);
+		expect(computeGraphPprContribution(traces, "unknown_signal")).toBe(0);
+		expect(computeGraphPprContribution([], GRAPH_PPR_EPISODE_SIGNAL)).toBe(0);
+	});
+
+	it("computes PPR on/off recall delta", () => {
+		expect(computePprOnOffDelta(0.85, 0.6)).toBeCloseTo(0.25, 6);
+		expect(computePprOnOffDelta(0.5, 0.5)).toBe(0);
+		expect(computePprOnOffDelta(0.4, 0.7)).toBeCloseTo(-0.3, 6);
 	});
 });

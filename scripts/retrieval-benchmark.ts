@@ -12,10 +12,21 @@ import {
 import { bootstrapDerivedSchema } from "../src/storage/pg-app-schema-derived.js";
 import { bootstrapOpsSchema } from "../src/storage/pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "../src/storage/pg-app-schema-truth.js";
+import type { GraphRetrievalTrace } from "../src/memory/retrieval/graph-retrieval-trace.js";
 
 const DEFAULT_DB_URL =
 	"postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app";
 const BENCHMARK_CATEGORY = "fixture_benchmark";
+const BENCHMARK_GRAPH_RUN_ID = "fixture_benchmark_graph_run";
+
+/**
+ * Signal names emitted by the graph-PPR retrieval path inside the
+ * RetrievalOrchestrator. Kept as constants so the benchmark CLI and the
+ * unit tests reference the exact same strings as
+ * src/memory/retrieval/search-backend-contract.ts.
+ */
+export const GRAPH_PPR_EPISODE_SIGNAL = "graph_ppr_episode" as const;
+export const GRAPH_PPR_COGNITION_SIGNAL = "graph_ppr_cognition" as const;
 
 type RawGoldenCase = {
 	id: string;
@@ -138,32 +149,59 @@ export function computeCrossAgentLeakageCount(
 	return results.reduce((sum, row) => sum + row.leakageCount, 0);
 }
 
+export function computeGraphPprContribution(
+	traces: Array<Pick<GraphRetrievalTrace, "rrfContribution">>,
+	signal: string,
+): number {
+	let total = 0;
+	for (const trace of traces) {
+		for (const entry of trace.rrfContribution) {
+			if (entry.signal === signal) total += entry.count;
+		}
+	}
+	return total;
+}
+
+export function computePprOnOffDelta(
+	pprOnRecall: number,
+	pprOffRecall: number,
+): number {
+	return pprOnRecall - pprOffRecall;
+}
+
 function round6(value: number): number {
 	return Number(value.toFixed(6));
 }
 
-function parseArgs(argv: string[]): { fixture: string; output: string } {
+function parseArgs(argv: string[]): {
+	fixture: string;
+	output: string;
+	withPpr: boolean;
+} {
 	let fixture = "";
 	let output = "";
+	let withPpr = false;
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		if (arg === "--fixture" && i + 1 < argv.length) {
 			fixture = argv[i + 1] ?? "";
 			i += 1;
-		}
-		if (arg === "--output" && i + 1 < argv.length) {
+		} else if (arg === "--output" && i + 1 < argv.length) {
 			output = argv[i + 1] ?? "";
 			i += 1;
+		} else if (arg === "--with-ppr") {
+			withPpr = true;
 		}
 	}
 	if (!fixture || !output) {
 		throw new Error(
-			"Usage: bun run scripts/retrieval-benchmark.ts --fixture <path> --output <path>",
+			"Usage: bun run scripts/retrieval-benchmark.ts --fixture <path> --output <path> [--with-ppr]",
 		);
 	}
 	return {
 		fixture: resolve(process.cwd(), fixture),
 		output: resolve(process.cwd(), output),
+		withPpr,
 	};
 }
 
@@ -507,8 +545,145 @@ function computeOutput(results: CaseEvaluation[]): BenchmarkOutput {
 	};
 }
 
+type GraphFixtureNode = {
+	pointerKey: string;
+	displayName: string;
+	entityType: string;
+};
+
+type GraphFixtureAlias = {
+	canonicalPointer: string;
+	alias: string;
+};
+
+type GraphFixtureEdge = {
+	sourceRef: string;
+	sourceKind: "entity" | "episode" | "cognition";
+	targetRef: string;
+	targetKind: "entity" | "episode" | "cognition";
+	edgeKind:
+		| "mention_episode_entity"
+		| "mention_cognition_entity"
+		| "cooccurrence_associative"
+		| "cooccurrence_contrastive"
+		| "fact_relation"
+		| "semantic_projection";
+	weight: number;
+};
+
+const GRAPH_FIXTURE_NODES: GraphFixtureNode[] = [
+	{ pointerKey: "char:alice", displayName: "Alice", entityType: "person" },
+	{ pointerKey: "loc:花房", displayName: "花房", entityType: "location" },
+	{ pointerKey: "item:银怀表", displayName: "银怀表", entityType: "object" },
+	{ pointerKey: "item:金怀表", displayName: "金怀表", entityType: "object" },
+];
+
+const GRAPH_FIXTURE_ALIASES: GraphFixtureAlias[] = [
+	{ canonicalPointer: "char:alice", alias: "alice" },
+	{ canonicalPointer: "char:alice", alias: "Alice" },
+	{ canonicalPointer: "loc:花房", alias: "花房" },
+	{ canonicalPointer: "loc:花房", alias: "flower_garden" },
+	{ canonicalPointer: "item:银怀表", alias: "银怀表" },
+	{ canonicalPointer: "item:金怀表", alias: "金怀表" },
+];
+
+const GRAPH_FIXTURE_EDGES: GraphFixtureEdge[] = [
+	{
+		sourceRef: "char:alice",
+		sourceKind: "entity",
+		targetRef: "loc:花房",
+		targetKind: "entity",
+		edgeKind: "cooccurrence_associative",
+		weight: 2.0,
+	},
+	{
+		sourceRef: "episode:fixture:alice-flower-garden-encounter",
+		sourceKind: "episode",
+		targetRef: "char:alice",
+		targetKind: "entity",
+		edgeKind: "mention_episode_entity",
+		weight: 1.0,
+	},
+	{
+		sourceRef: "episode:fixture:alice-flower-garden-encounter",
+		sourceKind: "episode",
+		targetRef: "loc:花房",
+		targetKind: "entity",
+		edgeKind: "mention_episode_entity",
+		weight: 1.0,
+	},
+	{
+		sourceRef: "cognition:fixture:alice-flower-commitment",
+		sourceKind: "cognition",
+		targetRef: "char:alice",
+		targetKind: "entity",
+		edgeKind: "mention_cognition_entity",
+		weight: 1.0,
+	},
+	{
+		sourceRef: "cognition:fixture:alice-flower-commitment",
+		sourceKind: "cognition",
+		targetRef: "loc:花房",
+		targetKind: "entity",
+		edgeKind: "mention_cognition_entity",
+		weight: 1.0,
+	},
+];
+
+async function seedGraphFixture(sql: postgres.Sql): Promise<{
+	nodes: number;
+	aliases: number;
+	edges: number;
+}> {
+	const now = Date.now();
+	for (const node of GRAPH_FIXTURE_NODES) {
+		await sql`
+			INSERT INTO entity_nodes
+				(pointer_key, display_name, entity_type, memory_scope, owner_agent_id, created_at, updated_at)
+			VALUES
+				(${node.pointerKey}, ${node.displayName}, ${node.entityType}, 'shared_public', NULL, ${now}, ${now})
+			ON CONFLICT DO NOTHING
+		`;
+	}
+	for (const alias of GRAPH_FIXTURE_ALIASES) {
+		await sql`
+			INSERT INTO entity_aliases
+				(canonical_id, alias, alias_type, owner_agent_id, status, source_kind, source_ref, created_at, updated_at)
+			SELECT id, ${alias.alias}, 'fixture', NULL, 'active', 'fixture_benchmark', ${alias.canonicalPointer}, ${now}, ${now}
+			FROM entity_nodes WHERE pointer_key = ${alias.canonicalPointer} AND memory_scope = 'shared_public'
+			ON CONFLICT DO NOTHING
+		`;
+	}
+	for (const edge of GRAPH_FIXTURE_EDGES) {
+		const sourceHash = `${BENCHMARK_GRAPH_RUN_ID}:${edge.sourceRef}:${edge.targetRef}:${edge.edgeKind}`;
+		await sql`
+			INSERT INTO graph_retrieval_edges
+				(run_id, algorithm_version, edge_kind, source_ref, source_kind,
+				 target_ref, target_kind, weight, visibility_scope, owner_agent_id,
+				 first_seen_at, last_seen_at, source_hash, created_at, active)
+			VALUES
+				(${BENCHMARK_GRAPH_RUN_ID}, 'v1', ${edge.edgeKind}, ${edge.sourceRef}, ${edge.sourceKind},
+				 ${edge.targetRef}, ${edge.targetKind}, ${edge.weight}, 'shared_public', NULL,
+				 ${now}, ${now}, ${sourceHash}, ${now}, true)
+			ON CONFLICT (run_id, source_hash) WHERE source_hash IS NOT NULL DO NOTHING
+		`;
+	}
+	return {
+		nodes: GRAPH_FIXTURE_NODES.length,
+		aliases: GRAPH_FIXTURE_ALIASES.length,
+		edges: GRAPH_FIXTURE_EDGES.length,
+	};
+}
+
+async function cleanupGraphFixture(sql: postgres.Sql): Promise<void> {
+	await sql`DELETE FROM graph_retrieval_edges WHERE run_id = ${BENCHMARK_GRAPH_RUN_ID}`;
+	await sql`DELETE FROM entity_aliases WHERE source_kind = 'fixture_benchmark'`;
+	const pointers = GRAPH_FIXTURE_NODES.map((n) => n.pointerKey);
+	await sql`DELETE FROM entity_nodes WHERE pointer_key = ANY(${pointers}) AND memory_scope = 'shared_public'`;
+}
+
 async function run(): Promise<void> {
-	const { fixture, output } = parseArgs(process.argv.slice(2));
+	const { fixture, output, withPpr } = parseArgs(process.argv.slice(2));
 	const cases = parseGoldenSet(fixture);
 
 	const sql = postgres(process.env.PARADEDB_TEST_URL ?? DEFAULT_DB_URL, {
@@ -532,11 +707,35 @@ async function run(): Promise<void> {
 		mrr_delta: -1,
 	};
 
+	let graphPprSection: Record<string, unknown> | undefined;
+	const collectedTraces: GraphRetrievalTrace[] = [];
+	let originalDebug: typeof console.debug | undefined;
+	if (withPpr) {
+		originalDebug = console.debug.bind(console);
+		console.debug = (...args: unknown[]) => {
+			if (args[0] === "[graph-retrieval-trace]" && typeof args[1] === "string") {
+				try {
+					collectedTraces.push(JSON.parse(args[1]) as GraphRetrievalTrace);
+				} catch (_err) {
+					void _err;
+				}
+			}
+			originalDebug?.(...args);
+		};
+	}
+
 	try {
 		await bootstrapTruthSchema(sql);
 		await bootstrapOpsSchema(sql);
 		await bootstrapDerivedSchema(sql);
 		await cleanupBenchmarkCategory(sql);
+
+		let seededGraph: { nodes: number; aliases: number; edges: number } | null =
+			null;
+		if (withPpr) {
+			await cleanupGraphFixture(sql);
+			seededGraph = await seedGraphFixture(sql);
+		}
 
 		const backend = new PgSearchLexicalBackend(sql);
 
@@ -590,10 +789,40 @@ async function run(): Promise<void> {
 
 		partial = computeOutput(results);
 
+		if (withPpr) {
+			const episodeContribution = computeGraphPprContribution(
+				collectedTraces,
+				GRAPH_PPR_EPISODE_SIGNAL,
+			);
+			const cognitionContribution = computeGraphPprContribution(
+				collectedTraces,
+				GRAPH_PPR_COGNITION_SIGNAL,
+			);
+			graphPprSection = {
+				ppr_enabled: true,
+				mode_supported: collectedTraces.length > 0,
+				graph_fixture_seeded: seededGraph,
+				graph_ppr_episode_signal: GRAPH_PPR_EPISODE_SIGNAL,
+				graph_ppr_cognition_signal: GRAPH_PPR_COGNITION_SIGNAL,
+				graph_ppr_episode_contribution: episodeContribution,
+				graph_ppr_cognition_contribution: cognitionContribution,
+				traces_collected: collectedTraces.length,
+			};
+		}
+
 		mkdirSync(dirname(output), { recursive: true });
 		writeFileSync(
 			output,
-			`${JSON.stringify({ ...partial, generated_at: new Date().toISOString(), cases_evaluated: cases.length }, null, 2)}\n`,
+			`${JSON.stringify(
+				{
+					...partial,
+					...(graphPprSection ? { graph_ppr: graphPprSection } : {}),
+					generated_at: new Date().toISOString(),
+					cases_evaluated: cases.length,
+				},
+				null,
+				2,
+			)}\n`,
 			"utf8",
 		);
 		console.log(`Wrote benchmark report to ${output}`);
@@ -609,8 +838,14 @@ async function run(): Promise<void> {
 	} finally {
 		try {
 			await cleanupBenchmarkCategory(sql);
+			if (withPpr) {
+				await cleanupGraphFixture(sql);
+			}
 		} catch (cleanupErr) {
 			console.warn("cleanup warning:", cleanupErr);
+		}
+		if (originalDebug) {
+			console.debug = originalDebug;
 		}
 		await sql.end({ timeout: 5 });
 	}
