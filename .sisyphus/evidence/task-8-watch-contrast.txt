@@ -1,0 +1,13 @@
+Task 8 watch contrast evidence
+
+Expected verification:
+- `bun test test/memory/graph-edge-builder.test.ts --timeout 20000`
+- `bun test test/pg-app/pg-graph-edge-builder.test.ts --timeout 30000`
+- Unit coverage asserts `contrasts_with` turns gold/silver watch
+  co-occurrence into `cooccurrence_contrastive` weighted by
+  `log1p(count) * contrastiveMultiplier`.
+- PG coverage seeds `item:金怀表` and `item:银怀表` as separate entity rows,
+  includes both `contrasts_with` and `same_as` facts, then verifies the builder
+  emits fact/co-occurrence edges without creating aliases or canonical merges.
+
+Final command output is recorded in the task completion summary.

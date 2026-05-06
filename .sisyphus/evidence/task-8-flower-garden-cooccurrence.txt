@@ -1,0 +1,10 @@
+Task 8 flower-garden co-occurrence evidence
+
+Expected verification:
+- `bun test test/pg-app/pg-graph-edge-builder.test.ts --timeout 30000`
+- The PG test seeds an episode with `char:alice` and `loc:花房`, runs
+  `buildGraphRetrievalEdges()`, and asserts an active private
+  `cooccurrence_associative` edge `loc:花房 -> char:alice` with
+  `source_passage_refs = ['ep:1']`.
+
+Final command output is recorded in the task completion summary.
