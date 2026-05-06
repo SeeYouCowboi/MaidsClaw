@@ -350,10 +350,11 @@ export class RetrievalOrchestrator {
       ? (queryPlan.surfacePlans.episode.rewrittenQuery ?? query)
       : query;
 
-    const episodeHints = await this.resolveEpisodeHints(
+    const { hints: episodeHints, cognitionPprEntries } = await this.resolveEpisodeHints(
       episodeQuery,
       viewerContext,
       effectiveEpisodeBudget,
+      effectiveConflictNotesBudget + template.cognitionBudget,
       queryPlan,
     );
 
@@ -422,7 +423,10 @@ export class RetrievalOrchestrator {
       }
     }
 
-    const cognitionHits = this.filterCognitionHits(rawCognitionHits, recentCognitionKeys, seenText);
+    const cognitionHitsForSurface = cognitionPprEntries.length > 0
+      ? this.sortCognitionHitsByPpr(rawCognitionHits, cognitionPprEntries)
+      : rawCognitionHits;
+    const cognitionHits = this.filterCognitionHits(cognitionHitsForSurface, recentCognitionKeys, seenText);
     const typed = this.buildTypedSurface(
       template,
       sceneAreaFacts,
@@ -751,16 +755,18 @@ export class RetrievalOrchestrator {
     query: string,
     viewerContext: ViewerContext,
     effectiveEpisodeBudget: number,
+    effectiveCognitionBudget: number,
     queryPlan?: QueryPlan,
-  ): Promise<TypedNarrativeSegment[]> {
-    if (effectiveEpisodeBudget <= 0) {
-      return [];
+  ): Promise<{ hints: TypedNarrativeSegment[]; cognitionPprEntries: Array<{ sourceRef: string; score: number }> }> {
+    if (effectiveEpisodeBudget <= 0 && effectiveCognitionBudget <= 0) {
+      return { hints: [], cognitionPprEntries: [] };
     }
 
     const trimmedQuery = query.trim();
+    const signalFetchBudget = Math.max(effectiveEpisodeBudget, effectiveCognitionBudget, 1);
     const fetchLimit = Math.max(
-      effectiveEpisodeBudget * 3,
-      effectiveEpisodeBudget + 4,
+      signalFetchBudget * 3,
+      signalFetchBudget + 4,
     );
 
     // Run exact recall first, then lexical FTS + embedding recall in parallel.
@@ -772,6 +778,7 @@ export class RetrievalOrchestrator {
     let ftsHits: EpisodeSearchHit[] = [];
     let embeddingHits: EpisodeSearchHit[] = [];
     let pprEpisodeEntries: Array<{ sourceRef: string; score: number }> = [];
+    let pprCognitionEntries: Array<{ sourceRef: string; score: number }> = [];
     if (trimmedQuery.length > 0) {
       if (this.exactRecallProvider) {
         try {
@@ -811,17 +818,24 @@ export class RetrievalOrchestrator {
       if (ftsResult.status === "fulfilled") ftsHits = ftsResult.value;
       if (embResult.status === "fulfilled") embeddingHits = embResult.value;
 
-      pprEpisodeEntries = await this.resolvePprEpisodeEntries(
+      const pprEntries = await this.resolvePprSignalEntries(
         trimmedQuery,
         viewerContext,
         fetchLimit,
         effectiveEpisodeBudget,
+        effectiveCognitionBudget,
         queryPlan,
       );
+      pprEpisodeEntries = pprEntries.episodeEntries;
+      pprCognitionEntries = pprEntries.cognitionEntries;
+    }
+
+    if (effectiveEpisodeBudget <= 0) {
+      return { hints: [], cognitionPprEntries: pprCognitionEntries };
     }
 
     if (exactHits.length > 0 || ftsHits.length > 0 || embeddingHits.length > 0 || pprEpisodeEntries.length > 0) {
-      return this.rrfMergeEpisodeHits(
+      const hints = await this.rrfMergeEpisodeHits(
         ftsHits,
         embeddingHits,
         effectiveEpisodeBudget,
@@ -829,11 +843,12 @@ export class RetrievalOrchestrator {
         viewerContext.viewer_agent_id,
         pprEpisodeEntries,
       );
+      return { hints, cognitionPprEntries: pprCognitionEntries };
     }
 
     // Fallback: direct scan via episodeRepository (no lexical or embedding match)
     if (!this.episodeRepository) {
-      return [];
+      return { hints: [], cognitionPprEntries: pprCognitionEntries };
     }
 
     const rawRows = await this.episodeRepository.readByAgent(
@@ -842,7 +857,7 @@ export class RetrievalOrchestrator {
     );
 
     if (rawRows.length === 0) {
-      return [];
+      return { hints: [], cognitionPprEntries: pprCognitionEntries };
     }
 
     const rankedRows = rawRows
@@ -863,14 +878,17 @@ export class RetrievalOrchestrator {
         return b.row.id - a.row.id;
       });
 
-    return rankedRows.map(({ row, score }) => ({
-      source_ref: `episode:${row.id}`,
-      content: row.summary,
-      score,
-      doc_type: `episode_${row.category}`,
-      scope: "private",
-      actor: row.actor,
-    }));
+    return {
+      hints: rankedRows.map(({ row, score }) => ({
+        source_ref: `episode:${row.id}`,
+        content: row.summary,
+        score,
+        doc_type: `episode_${row.category}`,
+        scope: "private",
+        actor: row.actor,
+      })),
+      cognitionPprEntries: pprCognitionEntries,
+    };
   }
 
   private seedSeenText(context?: RetrievalDedupContext): Set<string> {
@@ -915,6 +933,20 @@ export class RetrievalOrchestrator {
       });
     }
     return filtered;
+  }
+
+  private sortCognitionHitsByPpr(
+    hits: CognitionHit[],
+    pprEntries: Array<{ sourceRef: string; score: number }>,
+  ): CognitionHit[] {
+    if (pprEntries.length === 0) return hits;
+    const scoreMap = new Map(pprEntries.map((entry) => [entry.sourceRef, entry.score]));
+    return [...hits].sort((a, b) => {
+      const scoreA = scoreMap.get(String(a.source_ref)) ?? 0;
+      const scoreB = scoreMap.get(String(b.source_ref)) ?? 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return b.updated_at - a.updated_at;
+    });
   }
 
   private resolveEpisodeBudget(template: Required<RetrievalTemplate>): number {
@@ -1071,36 +1103,52 @@ export class RetrievalOrchestrator {
     return segments.slice(0, effectiveEpisodeBudget);
   }
 
-  private async resolvePprEpisodeEntries(
+  private async resolvePprSignalEntries(
     query: string,
     viewerContext: ViewerContext,
     fetchLimit: number,
     effectiveEpisodeBudget: number,
+    effectiveCognitionBudget: number,
     queryPlan?: QueryPlan,
-  ): Promise<Array<{ sourceRef: string; score: number }>> {
+  ): Promise<{
+    episodeEntries: Array<{ sourceRef: string; score: number }>;
+    cognitionEntries: Array<{ sourceRef: string; score: number }>;
+  }> {
     const config = this.graphRetrievalConfig;
     if (!config) {
-      return [];
+      return { episodeEntries: [], cognitionEntries: [] };
     }
     if (!config.enabled) {
       this.emitGraphRetrievalTrace(
-        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "disabled_by_config"),
+        this.buildEmptyGraphRetrievalTrace(
+          config,
+          viewerContext,
+          effectiveEpisodeBudget,
+          effectiveCognitionBudget,
+          "disabled_by_config",
+        ),
       );
-      return [];
+      return { episodeEntries: [], cognitionEntries: [] };
     }
     if (!this.sql) {
       this.emitGraphRetrievalTrace(
-        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "error"),
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, effectiveCognitionBudget, "error"),
       );
-      return [];
+      return { episodeEntries: [], cognitionEntries: [] };
     }
 
     const seedHints = this.buildGraphSeedHints(query, queryPlan);
     if (seedHints.length === 0) {
       this.emitGraphRetrievalTrace(
-        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "no_visible_seeds"),
+        this.buildEmptyGraphRetrievalTrace(
+          config,
+          viewerContext,
+          effectiveEpisodeBudget,
+          effectiveCognitionBudget,
+          "no_visible_seeds",
+        ),
       );
-      return [];
+      return { episodeEntries: [], cognitionEntries: [] };
     }
 
     try {
@@ -1119,13 +1167,14 @@ export class RetrievalOrchestrator {
             config,
             viewerContext,
             effectiveEpisodeBudget,
+            effectiveCognitionBudget,
             this.toGraphRetrievalFallbackReason(loaderResult.fallbackReason ?? "no_visible_seeds"),
           ),
           seedRefs: loaderResult.seedRefs,
           visibleNodeCount: loaderResult.visibleNodeCount,
           visibleEdgeCount: loaderResult.visibleEdgeCount,
         });
-        return [];
+        return { episodeEntries: [], cognitionEntries: [] };
       }
 
       const pprResult = runPersonalizedPageRank({
@@ -1137,6 +1186,10 @@ export class RetrievalOrchestrator {
       });
 
       const pprEpisodeEntries = [...pprResult.episodeScores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, fetchLimit)
+        .map(([sourceRef, score]) => ({ sourceRef, score }));
+      const pprCognitionEntries = [...pprResult.cognitionScores.entries()]
         .sort((a, b) => b[1] - a[1])
         .slice(0, fetchLimit)
         .map(([sourceRef, score]) => ({ sourceRef, score }));
@@ -1162,22 +1215,28 @@ export class RetrievalOrchestrator {
           ref: entry.sourceRef,
           score: entry.score,
         })),
-        topPprCognitions: [],
-        rrfContribution: [{ signal: "graph_ppr_episode", count: pprEpisodeEntries.length }],
-        budgetBefore: { episode: effectiveEpisodeBudget, cognition: 0 },
-        budgetAfter: { episode: effectiveEpisodeBudget, cognition: 0 },
+        topPprCognitions: pprCognitionEntries.slice(0, 10).map((entry) => ({
+          ref: entry.sourceRef,
+          score: entry.score,
+        })),
+        rrfContribution: [
+          { signal: "graph_ppr_episode", count: pprEpisodeEntries.length },
+          { signal: "graph_ppr_cognition", count: pprCognitionEntries.length },
+        ],
+        budgetBefore: { episode: effectiveEpisodeBudget, cognition: effectiveCognitionBudget },
+        budgetAfter: { episode: effectiveEpisodeBudget, cognition: effectiveCognitionBudget },
         factEdgesCountAtQueryTime: 0,
         sessionId: viewerContext.session_id,
         viewerAgentId: viewerContext.viewer_agent_id,
       });
 
-      return pprEpisodeEntries;
+      return { episodeEntries: pprEpisodeEntries, cognitionEntries: pprCognitionEntries };
     } catch (err) {
-      console.warn("[retrieval] graph PPR episode signal failed (non-fatal):", err);
+      console.warn("[retrieval] graph PPR signal failed (non-fatal):", err);
       this.emitGraphRetrievalTrace(
-        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "error"),
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, effectiveCognitionBudget, "error"),
       );
-      return [];
+      return { episodeEntries: [], cognitionEntries: [] };
     }
   }
 
@@ -1207,6 +1266,7 @@ export class RetrievalOrchestrator {
     config: GraphRetrievalConfig,
     viewerContext: ViewerContext,
     effectiveEpisodeBudget: number,
+    effectiveCognitionBudget: number,
     fallbackReason: GraphRetrievalFallbackReason,
   ): GraphRetrievalTrace {
     return {
@@ -1223,9 +1283,12 @@ export class RetrievalOrchestrator {
       topPprNodes: [],
       topPprEpisodes: [],
       topPprCognitions: [],
-      rrfContribution: [{ signal: "graph_ppr_episode", count: 0 }],
-      budgetBefore: { episode: effectiveEpisodeBudget, cognition: 0 },
-      budgetAfter: { episode: effectiveEpisodeBudget, cognition: 0 },
+      rrfContribution: [
+        { signal: "graph_ppr_episode", count: 0 },
+        { signal: "graph_ppr_cognition", count: 0 },
+      ],
+      budgetBefore: { episode: effectiveEpisodeBudget, cognition: effectiveCognitionBudget },
+      budgetAfter: { episode: effectiveEpisodeBudget, cognition: effectiveCognitionBudget },
       factEdgesCountAtQueryTime: 0,
       sessionId: viewerContext.session_id,
       viewerAgentId: viewerContext.viewer_agent_id,

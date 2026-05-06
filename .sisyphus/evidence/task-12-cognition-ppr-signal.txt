@@ -1,0 +1,23 @@
+bun test v1.3.10 (30e609e0)
+[graph-retrieval-trace] {"enabled":false,"fallbackReason":"disabled_by_config","seedRefs":[],"visibleNodeCount":0,"visibleEdgeCount":0,"pprParams":{"damping":0.5,"maxIterations":20,"epsilon":0.0001},"topPprNodes":[],"topPprEpisodes":[],"topPprCognitions":[],"rrfContribution":[{"signal":"graph_ppr_episode","count":0},{"signal":"graph_ppr_cognition","count":0}],"budgetBefore":{"episode":0,"cognition":4},"budgetAfter":{"episode":0,"cognition":4},"factEdgesCountAtQueryTime":0,"sessionId":"sess_test","viewerAgentId":"agent_test"}
+
+test\memory\graph-ppr-cognition-signal.test.ts:
+[graph-retrieval-trace] {"enabled":true,"seedRefs":["char:alice"],"visibleNodeCount":3,"visibleEdgeCount":2,"pprParams":{"damping":0.5,"maxIterations":20,"epsilon":0.0001},"topPprNodes":[{"ref":"char:alice","score":0.6180257510729613},{"ref":"item:silver_watch","score":0.286480686695279},{"ref":"loc:garden","score":0.09549356223175966}],"topPprEpisodes":[],"topPprCognitions":[{"ref":"cognition_key:newer","score":1},{"ref":"cognition_key:older","score":0.3333333333333333}],"rrfContribution":[{"signal":"graph_ppr_episode","count":0},{"signal":"graph_ppr_cognition","count":2}],"budgetBefore":{"episode":0,"cognition":4},"budgetAfter":{"episode":0,"cognition":4},"factEdgesCountAtQueryTime":0,"sessionId":"sess_test","viewerAgentId":"agent_test"}
+[retrieval] graph PPR signal failed (non-fatal): warn: stub graph failure
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\graph-ppr-cognition-signal.test.ts:106:17)
+      at resolveAlias (D:\ACodingWorkSpace\MaidsClaw\src\storage\domain-repos\pg\alias-repo.ts:60:37)
+      at resolveAliasToPointerKey (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\graph-seed-resolver.ts:109:39)
+      at resolveGraphSeeds (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\graph-seed-resolver.ts:46:28)
+      at loadVisibilityFilteredGraph (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\graph-loader.ts:60:32)
+      at resolvePprSignalEntries (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\retrieval-orchestrator.ts:1155:34)
+      at resolveEpisodeHints (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\retrieval-orchestrator.ts:821:37)
+      at async search (D:\ACodingWorkSpace\MaidsClaw\src\memory\retrieval\retrieval-orchestrator.ts:353:69)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\graph-ppr-cognition-signal.test.ts:239:39)
+
+[graph-retrieval-trace] {"enabled":false,"fallbackReason":"error","seedRefs":[],"visibleNodeCount":0,"visibleEdgeCount":0,"pprParams":{"damping":0.5,"maxIterations":20,"epsilon":0.0001},"topPprNodes":[],"topPprEpisodes":[],"topPprCognitions":[],"rrfContribution":[{"signal":"graph_ppr_episode","count":0},{"signal":"graph_ppr_cognition","count":0}],"budgetBefore":{"episode":0,"cognition":4},"budgetAfter":{"episode":0,"cognition":4},"factEdgesCountAtQueryTime":0,"sessionId":"sess_test","viewerAgentId":"agent_test"}
+[graph-retrieval-trace] {"enabled":true,"seedRefs":["char:alice"],"visibleNodeCount":3,"visibleEdgeCount":2,"pprParams":{"damping":0.5,"maxIterations":20,"epsilon":0.0001},"topPprNodes":[{"ref":"char:alice","score":0.6180257510729614},{"ref":"item:silver_watch","score":0.19098712446351934},{"ref":"loc:garden","score":0.19098712446351934}],"topPprEpisodes":[],"topPprCognitions":[{"ref":"cognition_key:newer","score":1},{"ref":"cognition_key:older","score":1}],"rrfContribution":[{"signal":"graph_ppr_episode","count":0},{"signal":"graph_ppr_cognition","count":2}],"budgetBefore":{"episode":0,"cognition":4},"budgetAfter":{"episode":0,"cognition":4},"factEdgesCountAtQueryTime":0,"sessionId":"sess_test","viewerAgentId":"agent_test"}
+
+ 4 pass
+ 0 fail
+ 4 expect() calls
+Ran 4 tests across 1 file. [95.00ms]
