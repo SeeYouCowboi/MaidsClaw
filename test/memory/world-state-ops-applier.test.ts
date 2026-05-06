@@ -176,6 +176,86 @@ describe("applyWorldStateOpsForSettlement (area 11/12 shared applier)", () => {
       expect(callArgs.tValid).toBe(1234567890);
       expect(callArgs.contradictedFactEdgeIds).toEqual([101, 102]);
     });
+
+    it("rejects invalid predicates before resolving refs or writing fact_edges", async () => {
+      delete process.env[FLAG];
+      const graph = makeGraphRepo();
+      graph.resolveEntityByPointerKey.mockImplementation(async () => 7);
+      const unresolved = makeUnresolvedRepo();
+
+      const result = await applyWorldStateOpsForSettlement({
+        settlementId: "stl:invalid-predicate",
+        sessionId: "sess",
+        agentId: "agent-1",
+        worldStateOps: [makeOp({ predicate: "likes_unknown_free_text" })],
+        graphStoreRepo: graph,
+        unresolvedOpsRepo: unresolved,
+      });
+
+      expect(result.writtenOps).toBe(0);
+      expect(result.skippedOps + result.failedOps).toBe(1);
+      expect(result.enqueuedOps).toBe(0);
+      expect(graph.resolveEntityByPointerKey).toHaveBeenCalledTimes(0);
+      expect(graph.createWorldStateFactEdge).toHaveBeenCalledTimes(0);
+      expect(unresolved.enqueueOp).toHaveBeenCalledTimes(0);
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("inserts same_as as fact data without alias mutation side effects", async () => {
+      delete process.env[FLAG];
+      const createEntityAlias = mock(async () => 1234);
+      const graph = {
+        ...makeGraphRepo(),
+        createEntityAlias,
+      } as ReturnType<typeof makeGraphRepo> & {
+        createEntityAlias: ReturnType<typeof mock>;
+      };
+      graph.resolveEntityByPointerKey.mockImplementation(async (key: string) => {
+        if (key === "char:alice") return 11;
+        if (key === "char:bob") return 22;
+        return null;
+      });
+      const unresolved = makeUnresolvedRepo();
+
+      const result = await applyWorldStateOpsForSettlement({
+        settlementId: "stl:same-as",
+        sessionId: "sess",
+        agentId: "agent-1",
+        worldStateOps: [makeOp({ predicate: "same_as" })],
+        graphStoreRepo: graph,
+        unresolvedOpsRepo: unresolved,
+      });
+
+      expect(result.writtenOps).toBe(1);
+      expect(graph.createWorldStateFactEdge).toHaveBeenCalledTimes(1);
+      const callArgs = (graph.createWorldStateFactEdge.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      expect(callArgs.predicate).toBe("same_as");
+      expect(createEntityAlias).toHaveBeenCalledTimes(0);
+    });
+
+    it("inserts contrasts_with as downweight-only fact data", async () => {
+      delete process.env[FLAG];
+      const graph = makeGraphRepo();
+      graph.resolveEntityByPointerKey.mockImplementation(async (key: string) => {
+        if (key === "char:alice") return 11;
+        if (key === "char:bob") return 22;
+        return null;
+      });
+      const unresolved = makeUnresolvedRepo();
+
+      const result = await applyWorldStateOpsForSettlement({
+        settlementId: "stl:contrast",
+        sessionId: "sess",
+        agentId: "agent-1",
+        worldStateOps: [makeOp({ predicate: "contrasts_with" })],
+        graphStoreRepo: graph,
+        unresolvedOpsRepo: unresolved,
+      });
+
+      expect(result.writtenOps).toBe(1);
+      const callArgs = (graph.createWorldStateFactEdge.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      expect(callArgs.predicate).toBe("contrasts_with");
+    });
   });
 
   describe("enqueue path: pointer_key unresolved", () => {

@@ -1,0 +1,232 @@
+bun test v1.3.10 (30e609e0)
+
+test\memory\graph-retrieval-regression.test.ts:
+190 |       "Alice瀵规垜鏈変粈涔堟壙璇?,
+191 |       makeViewer(),
+192 |       "rp_agent",
+193 |       { queryPlan: currentPreImplementationPlan },
+194 |     );
+195 |     expect(current.typed.cognition.map((hit) => hit.source_ref)).toContain(
+                                                                       ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "commitment:9001"
+Received: []
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\graph-retrieval-regression.test.ts:195:66)
+(fail) graph retrieval regression baselines > surfaces Alice-related commitment cognition via flower_garden multi-hop entity expansion [16.00ms]
+[world-state-ops] invalid fact_edge predicate skipped: settlement=settlement-invalid-predicate opIndex=0 predicate=likes_unknown_free_text
+249 |             SELECT table_name
+250 |             FROM information_schema.tables
+251 |             WHERE table_schema = current_schema()
+252 |               AND table_name = 'graph_retrieval_edges'
+253 |           `;
+254 |           expect(beforeTableRows.length).toBe(1);
+                                               ^
+error: expect(received).toBe(expected)
+
+Expected: 1
+Received: 0
+
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\graph-retrieval-regression.test.ts:254:42)
+      at async withTestAppSchema (D:\ACodingWorkSpace\MaidsClaw\test\helpers\pg-app-test-utils.ts:208:18)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\memory\graph-retrieval-regression.test.ts:245:15)
+(fail) graph retrieval rebuild idempotency (PG) > rebuilding derived retrieval graph twice does not duplicate active edges [422.00ms]
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+
+test\runtime\thinker-batch-collapse.test.ts:
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch split: enqueued sub-batch (v9..11) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v12..14) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v15..17) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v18..20) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v21..23) as parallel job
+[thinker_worker] batch split: enqueued sub-batch (v24..25) as parallel job
+[thinker_worker] batch split: processing v6..8 (3), split off 17 into 6 parallel job(s)
+[thinker_worker] batch sketch chain loaded: chain=3 members=8 highest=8
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: boom-v4
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:753:31)
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch: sketch load failed for v3 (stl:req-3), truncating chain warn: claimed-sketch-fail
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:782:31)
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] resolved 1 conflict factors (0 unresolved) for settlement stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[create-app-host] world entity seed failed; aborting startup
+320 | 		await initializePgBackendForRuntime(runtime);
+321 | 		// Seed the world entity catalog now that the pg pool is initialized.
+322 | 		// The seed is awaited (not fire-and-forget) so a failure here surfaces
+323 | 		// as a startup error rather than silently leaving shared_public empty.
+324 | 		try {
+325 | 			const seedResult = await runtime.runWorldEntitySeed();
+                                          ^
+TypeError: runtime.runWorldEntitySeed is not a function. (In 'runtime.runWorldEntitySeed()', 'runtime.runWorldEntitySeed' is undefined)
+      at createAppHost (D:\ACodingWorkSpace\MaidsClaw\src\app\host\create-app-host.ts:325:37)
+      at async <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:1159:23)
+(fail) Thinker Worker batch collapse (R-P3-02) > worker host wiring passes durableJobStore into createThinkerWorker
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch: sketch load failed for v4 (stl:req-4), truncating chain warn: v4 payload missing
+      at <anonymous> (D:\ACodingWorkSpace\MaidsClaw\test\runtime\thinker-batch-collapse.test.ts:1241:31)
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-3
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] parseEpisodesBySettlement: 0/1 episodes attributed by settlementId, 1 fell back to stl:req-5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] batch sketch chain loaded: chain=2 members=2 highest=11
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-11
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-10
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-11
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] batch sketch chain loaded: chain=3 members=3 highest=5
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-7
+[thinker_worker] replayed unresolved world-state ops after entity sweep: replayed=1 stillPending=0 deadLettered=0 agentId=rp:alice
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-8
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-9
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:req-12
+
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+test\runtime\thinker-worker-phase2.test.ts:
+[thinker_worker] materialized 1 relation intents for settlement stl:e2e-worker:001
+[thinker_worker] enqueued memory.organize jobs (2 refs) for settlement stl:e2e-worker:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-single-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-no-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-multi-match:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-exclusions:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-weak-excluded:001
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:canonicalize-overlay:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-sketch-weak:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-self-certified-fake:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-auto-fallback:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-auto-provenance-crosscheck:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-confirmed-downgrade:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:guardrail-cognition-only-refs:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:sync-verify-first-hand:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:sync-verify-sketch-cap:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:verify-version-high:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:verify-version-low:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:question-bound:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:narrated-action-bound:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+[thinker_worker] enqueued memory.organize jobs (1 refs) for settlement stl:normalized-gate:narrated-action-invalid-binding:001
+[thinker_worker] assertionCanonicalization bundle absent 鈥?canonicalization will be skipped
+
+[turn-timing] req=req-turn-normalization phase=rp_talker_turn_start phase_ms=0 total_ms=0
+test\runtime\turn-service-normalization.test.ts:
+[turn-timing] req=req-turn-normalization phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization phase=after_talker_retry_loop phase_ms=6 total_ms=6
+[turn-timing] req=req-turn-normalization phase=before_settlement_uow phase_ms=1 total_ms=7
+[turn-timing] req=req-turn-normalization phase=after_settlement_uow phase_ms=1 total_ms=8
+[turn-timing] req=req-turn-normalization phase=after_mark_talker_committed phase_ms=0 total_ms=8
+[turn-timing] req=req-turn-normalization phase=after_thinker_enqueue phase_ms=0 total_ms=8
+[turn-timing] req=req-turn-normalization phase=rp_talker_turn_end phase_ms=2 total_ms=10
+[turn-timing] req=req-turn-normalization-correction-hidden phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-correction-hidden phase=before_settlement_uow phase_ms=1 total_ms=2
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_settlement_uow phase_ms=0 total_ms=2
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_mark_talker_committed phase_ms=0 total_ms=2
+[turn-timing] req=req-turn-normalization-correction-hidden phase=after_thinker_enqueue phase_ms=0 total_ms=2
+[turn-timing] req=req-turn-normalization-correction-hidden phase=rp_talker_turn_end phase_ms=1 total_ms=3
+[turn-timing] req=req-turn-normalization-rollback phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-rollback phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-rollback phase=after_talker_retry_loop phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-rollback phase=before_settlement_uow phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-rollback phase=rp_talker_turn_end phase_ms=2 total_ms=3
+[turn-timing] req=req-turn-normalization-settlement phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-settlement phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-settlement phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-settlement phase=rp_talker_turn_end phase_ms=2 total_ms=3
+[turn-timing] req=req-turn-normalization-worldstateops phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-worldstateops phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-worldstateops phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-worldstateops phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-worldstateops phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-worldstateops phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-worldstateops phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-worldstateops phase=rp_talker_turn_end phase_ms=2 total_ms=3
+[turn-timing] req=req-turn-normalization-entity-fallback phase=rp_talker_turn_start phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_soft_block phase_ms=0 total_ms=0
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_talker_retry_loop phase_ms=1 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=before_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_settlement_uow phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_mark_talker_committed phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=after_thinker_enqueue phase_ms=0 total_ms=1
+[turn-timing] req=req-turn-normalization-entity-fallback phase=rp_talker_turn_end phase_ms=2 total_ms=3
+
+ 182 pass
+ 3 fail
+ 668 expect() calls
+Ran 185 tests across 10 files. [4.09s]

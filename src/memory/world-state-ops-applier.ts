@@ -1,5 +1,8 @@
 import type { TurnSettlementPayload } from "../interaction/contracts.js";
-import type { WorldStateOp } from "../runtime/rp-turn-contract.js";
+import {
+  isValidFactEdgePredicate,
+  type WorldStateOp,
+} from "../runtime/rp-turn-contract.js";
 import type { GraphMutableStoreRepo } from "../storage/domain-repos/contracts/graph-mutable-store-repo.js";
 import type { UnresolvedWorldStateOpsRepo } from "../storage/domain-repos/contracts/unresolved-world-state-ops-repo.js";
 
@@ -214,6 +217,14 @@ export async function applyWorldStateOpsForSettlement(
   for (let opIndex = 0; opIndex < normalizedOps.length; opIndex += 1) {
     const op = normalizedOps[opIndex];
     try {
+      if (!isValidFactEdgePredicate(op.predicate)) {
+        console.warn(
+          `[world-state-ops] invalid fact_edge predicate skipped: settlement=${params.settlementId} opIndex=${opIndex} predicate=${op.predicate}`,
+        );
+        skippedOps += 1;
+        continue;
+      }
+
       const [subject, object] = await Promise.all([
         resolveWorldStateEntityRef({
           ref: op.subject,
@@ -236,6 +247,15 @@ export async function applyWorldStateOpsForSettlement(
       ]);
 
       if (subject.ok && object.ok) {
+        if (op.predicate === "same_as") {
+          // same_as is semantic fact data only; it must not auto-mutate
+          // entity_aliases or trigger alias merges.
+        }
+        if (op.predicate === "contrasts_with") {
+          // contrasts_with is retrieval downweight-only signal data, never a
+          // hard exclusion rule.
+        }
+
         await params.graphStoreRepo.createWorldStateFactEdge({
           sourceEntityId: subject.entityId,
           targetEntityId: object.entityId,
