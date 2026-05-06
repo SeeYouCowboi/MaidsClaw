@@ -51,9 +51,25 @@ export function runPersonalizedPageRank(params: PprParams): PprResult {
   const maxIterations = Math.max(0, Math.floor(params.config.ppr.maxIterations));
   const epsilon = params.config.ppr.epsilon;
 
+  // Pre-compute the dangling-node bitmap once: nodes with no outgoing
+  // adjacency lose their score mass each iteration. Standard PageRank
+  // handles this by redistributing dangling mass across the
+  // personalization vector (i.e. back to seeds for PPR), preserving the
+  // probability mass and the seed-proximity bias. Without it,
+  // normalizeScores() at the end of each iteration would silently
+  // redistribute lost mass proportionally to current scores — eroding
+  // the seed bias whenever the visible subgraph contains many sparse
+  // mention-only entities.
+  const isDangling = nodeRefs.map((ref) => !params.adjacency.has(ref));
+
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     const nextScores = new Array<number>(nodeRefs.length).fill(0);
+    let danglingMass = 0;
     for (let sourceIndex = 0; sourceIndex < nodeRefs.length; sourceIndex += 1) {
+      if (isDangling[sourceIndex]) {
+        danglingMass += scores[sourceIndex];
+        continue;
+      }
       const sourceRef = nodeRefs[sourceIndex];
       const outgoing = params.adjacency.get(sourceRef);
       if (!outgoing) {
@@ -68,8 +84,11 @@ export function runPersonalizedPageRank(params: PprParams): PprResult {
       }
     }
 
+    // Redistribute dangling mass + restart probability through the
+    // personalization vector so seeds keep their bias and total mass is
+    // conserved before normalization.
     for (let index = 0; index < nodeRefs.length; index += 1) {
-      nextScores[index] += restartWeight * personalization[index];
+      nextScores[index] += (restartWeight + damping * danglingMass) * personalization[index];
     }
 
     const normalizedNextScores = normalizeScores(nextScores);
