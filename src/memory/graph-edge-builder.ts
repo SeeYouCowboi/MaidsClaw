@@ -264,6 +264,13 @@ async function loadFactEdges(
   sql: postgres.Sql,
   agentId: string,
 ): Promise<GraphEdgeBuilderFactInput[]> {
+  // Visibility filter: include the agent's private facts AND any
+  // shared/public facts (owner_agent_id IS NULL). The previous filter
+  // `fe.owner_agent_id = ${agentId}` excluded all world-level facts —
+  // e.g. `location_of(管家, 庄园)` — so PPR could never traverse them.
+  // Plan Task 12 acceptance requires "Active controlled fact edges
+  // affect PPR traversal" for the agent's visible scope, which the
+  // VisibilityPolicy treats as the union of private-owned and shared.
   const rows = await sql<FactEdgeRow[]>`
     SELECT
       fe.id,
@@ -275,7 +282,7 @@ async function loadFactEdges(
     FROM fact_edges fe
     JOIN entity_nodes source_entity ON source_entity.id = fe.source_entity_id
     JOIN entity_nodes target_entity ON target_entity.id = fe.target_entity_id
-    WHERE fe.owner_agent_id = ${agentId}
+    WHERE (fe.owner_agent_id = ${agentId} OR fe.owner_agent_id IS NULL)
       AND fe.t_invalid = ${PG_MAX_BIGINT}
       AND fe.t_expired = ${PG_MAX_BIGINT}
     ORDER BY fe.t_created ASC, fe.id ASC
@@ -290,8 +297,10 @@ async function loadFactEdges(
       predicate: row.predicate,
       firstSeenAt: seenAt,
       lastSeenAt: seenAt,
-      visibilityScope: "private_overlay",
-      ownerAgentId: row.owner_agent_id,
+      // Mirror loadSemanticEdges: shared facts (owner null) get
+      // shared_public; agent-owned facts stay private_overlay.
+      visibilityScope: row.owner_agent_id ? "private_overlay" : "shared_public",
+      ownerAgentId: row.owner_agent_id ?? null,
     };
   });
 }
