@@ -211,6 +211,71 @@ describe("graph retrieval regression baselines", () => {
     );
   });
 
+  it("does not introduce an entityIds filter when the plan provides none (B8)", async () => {
+    // Mock cognition that distinguishes match-all (no entityIds) from
+    // filtered-by-id calls. If expansion incorrectly imposes a filter
+    // when baseEntityIds is undefined, the test detects it because
+    // matchAllHit would be missing.
+    let matchAllSearchCount = 0;
+    let filteredSearchCount = 0;
+    const searchCognition = mock(async (params: { entityIds?: number[] }) => {
+      if (params.entityIds === undefined || params.entityIds.length === 0) {
+        matchAllSearchCount += 1;
+        return [
+          {
+            kind: "commitment",
+            basis: null,
+            stance: "accepted",
+            cognitionKey: "any/match-all",
+            source_ref: "commitment:any",
+            content: "match-all hit",
+            updated_at: 1_700_000_000_000,
+            provenance: "fixture",
+            groundingVerificationLevel: "context_verified",
+          },
+        ];
+      }
+      filteredSearchCount += 1;
+      return [];
+    });
+    const cognitionService = {
+      searchCognition,
+      createCurrentProjectionReader() {
+        return null;
+      },
+    } as unknown as CognitionSearchService;
+
+    // Expansion fn always wants to add 999, but should be short-circuited
+    // because baseEntityIds is undefined (match-all).
+    const graphEntityExpansionFn: GraphEntityExpansionFn = async () => [999];
+
+    const orchestrator = new RetrievalOrchestrator({
+      narrativeService: makeNarrativeService(),
+      cognitionService,
+      currentProjectionReader: null,
+      episodeRepository: null,
+      episodeSearchFn: null,
+      graphEntityExpansionFn,
+    });
+
+    // Build a plan with EMPTY surfacePlans.cognition.entityFilters so
+    // cognitionFacets.entityIds resolves to undefined via nonEmptyOrUndefined.
+    const matchAllPlan = makePlan([]);
+
+    const result = await orchestrator.search(
+      "Alice对我有什么承诺",
+      makeViewer(),
+      "rp_agent",
+      { queryPlan: matchAllPlan },
+    );
+
+    expect(matchAllSearchCount).toBeGreaterThanOrEqual(1);
+    expect(filteredSearchCount).toBe(0);
+    expect(result.typed.cognition.map((hit) => hit.source_ref)).toContain(
+      "commitment:any",
+    );
+  });
+
   it("rejects invalid fact predicates before fact_edges insert", async () => {
     const op: WorldStateOp = {
       subject: { kind: "pointer_key", value: "char:alice" },

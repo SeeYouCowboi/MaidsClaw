@@ -1348,10 +1348,18 @@ export class RetrievalOrchestrator {
 
   /**
    * Augments the cognition surface's `entityIds` filter with entities reached
-   * via graph multi-hop expansion from the query's seed entities. Returns the
-   * (possibly expanded) entity ID list. If the expansion function is not
-   * wired, the cognition surface is disabled, or expansion fails, the base
-   * IDs are returned unchanged.
+   * via graph multi-hop expansion from the query's seed entities.
+   *
+   * Contract (B8): expansion ONLY augments an existing filter — it never
+   * introduces a filter where none existed. If the plan provides no
+   * `entityFilters` (`baseEntityIds` undefined/empty), the cognition surface
+   * is in "match-all" mode and expansion would silently narrow it to just
+   * the expanded entities, which is a much stricter semantic than callers
+   * intend. In that case we short-circuit and return undefined so the
+   * downstream `entityIds: undefined` path (no filter) is preserved.
+   *
+   * If the expansion function is not wired, the cognition surface is
+   * disabled, or expansion fails, the base IDs are returned unchanged.
    */
   private async expandCognitionEntityIds(
     cognitionQuery: string,
@@ -1363,17 +1371,21 @@ export class RetrievalOrchestrator {
     if (!this.graphEntityExpansionFn || !cognitionEnabled) {
       return baseEntityIds;
     }
+    if (!baseEntityIds || baseEntityIds.length === 0) {
+      // No base filter ⇒ match-all. Do not let expansion impose one.
+      return baseEntityIds;
+    }
     try {
       const additional = await this.graphEntityExpansionFn({
         query: cognitionQuery,
         queryPlan,
         viewerContext,
-        baseEntityIds: baseEntityIds ?? [],
+        baseEntityIds,
       });
       if (additional.length === 0) {
         return baseEntityIds;
       }
-      const merged = baseEntityIds ? [...baseEntityIds] : [];
+      const merged = [...baseEntityIds];
       const seen = new Set<number>(merged);
       for (const id of additional) {
         if (!seen.has(id)) {
@@ -1381,7 +1393,7 @@ export class RetrievalOrchestrator {
           merged.push(id);
         }
       }
-      return merged.length > 0 ? merged : undefined;
+      return merged;
     } catch (err) {
       console.warn("[retrieval] graph entity expansion failed (non-fatal):", err);
       return baseEntityIds;
