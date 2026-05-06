@@ -13,6 +13,11 @@ import { bootstrapDerivedSchema } from "../src/storage/pg-app-schema-derived.js"
 import { bootstrapOpsSchema } from "../src/storage/pg-app-schema-ops.js";
 import { bootstrapTruthSchema } from "../src/storage/pg-app-schema-truth.js";
 import type { GraphRetrievalTrace } from "../src/memory/retrieval/graph-retrieval-trace.js";
+import { RetrievalOrchestrator } from "../src/memory/retrieval/retrieval-orchestrator.js";
+import { DEFAULT_GRAPH_RETRIEVAL_CONFIG } from "../src/memory/retrieval/graph-retrieval-config.js";
+import type { CognitionSearchService } from "../src/memory/cognition/cognition-search.js";
+import type { NarrativeSearchService } from "../src/memory/narrative/narrative-search.js";
+import type { ViewerContext } from "../src/core/contracts/viewer-context.js";
 
 const DEFAULT_DB_URL =
 	"postgres://maidsclaw:maidsclaw@127.0.0.1:55433/maidsclaw_app";
@@ -419,22 +424,94 @@ async function runPrimaryWordSearch(
 	}
 }
 
+function buildBenchmarkOrchestrator(
+	sql: postgres.Sql,
+	backend: PgSearchLexicalBackend,
+): RetrievalOrchestrator {
+	// Stub services: the benchmark exercises only the episode + PPR surfaces.
+	// Cognition/narrative are wired empty so the orchestrator's RRF merge
+	// reduces to (FTS via episodeSearchFn) ⊕ (graph PPR via sql + config).
+	const stubNarrative: Pick<NarrativeSearchService, "generateMemoryHints" | "searchNarrative"> = {
+		async generateMemoryHints() {
+			return [];
+		},
+		async searchNarrative() {
+			return [];
+		},
+	};
+	const stubCognition: Pick<CognitionSearchService, "searchCognition" | "createCurrentProjectionReader"> = {
+		async searchCognition() {
+			return [];
+		},
+		createCurrentProjectionReader() {
+			return null;
+		},
+	};
+	return new RetrievalOrchestrator({
+		narrativeService: stubNarrative as NarrativeSearchService,
+		cognitionService: stubCognition as CognitionSearchService,
+		currentProjectionReader: null,
+		episodeRepository: null,
+		episodeSearchFn: async (query, agentId, limit) => {
+			const hits = await backend.searchEpisode({
+				query,
+				agentId,
+				limit,
+				category: BENCHMARK_CATEGORY,
+			});
+			return hits.map((hit) => ({
+				sourceRef: hit.source_ref,
+				content: hit.content ?? "",
+				category: hit.category ?? BENCHMARK_CATEGORY,
+				score: hit.score ?? 0,
+				actor: hit.actor === "user" || hit.actor === "agent" ? hit.actor : undefined,
+			}));
+		},
+		sql,
+		graphRetrievalConfig: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG, enabled: true },
+	});
+}
+
+function buildBenchmarkViewer(agentId: string): ViewerContext {
+	return {
+		viewer_agent_id: agentId,
+		viewer_role: "rp_agent",
+		can_read_admin_only: false,
+		current_area_id: null,
+		session_id: "benchmark",
+	};
+}
+
 async function evaluateCase(
 	backend: PgSearchLexicalBackend,
 	sql: postgres.Sql,
 	row: BenchmarkCase,
+	orchestrator?: RetrievalOrchestrator,
 ): Promise<CaseEvaluation> {
 	const limit = Math.max(10, row.recallK);
 	const started = performance.now();
-	const hits = await backend.searchEpisode({
-		query: row.query,
-		agentId: row.agentId,
-		limit,
-		category: BENCHMARK_CATEGORY,
-	});
+	let hitRefs: string[];
+	if (orchestrator) {
+		// Orchestrator path: PPR signal joins FTS via RRF; trace lines emit
+		// to console.debug and are intercepted by the trace collector in run().
+		const result = await orchestrator.search(
+			row.query,
+			buildBenchmarkViewer(row.agentId),
+			"rp_agent",
+		);
+		hitRefs = result.typed.episode.map((hit) => hit.source_ref).slice(0, limit);
+	} else {
+		const hits = await backend.searchEpisode({
+			query: row.query,
+			agentId: row.agentId,
+			limit,
+			category: BENCHMARK_CATEGORY,
+		});
+		hitRefs = hits.slice(0, limit).map((hit) => hit.source_ref);
+	}
 	const latencyMs = performance.now() - started;
 
-	const topRefs = hits.slice(0, limit).map((hit) => hit.source_ref);
+	const topRefs = hitRefs;
 	const top5 = topRefs.slice(0, 5);
 	const top10 = topRefs.slice(0, 10);
 
@@ -738,6 +815,10 @@ async function run(): Promise<void> {
 		}
 
 		const backend = new PgSearchLexicalBackend(sql);
+		// Wire RetrievalOrchestrator only in withPpr mode so PPR traces emit
+		// during evaluateCase. Plain (FTS-only) runs continue to call the
+		// backend directly to keep that baseline path unchanged.
+		const orchestrator = withPpr ? buildBenchmarkOrchestrator(sql, backend) : undefined;
 
 		const results: CaseEvaluation[] = [];
 		for (const row of cases) {
@@ -749,7 +830,7 @@ async function run(): Promise<void> {
 				limit: Math.max(10, row.recallK),
 				category: BENCHMARK_CATEGORY,
 			});
-			results.push(await evaluateCase(backend, sql, row));
+			results.push(await evaluateCase(backend, sql, row, orchestrator));
 			await cleanupRows(sql, caseSeeds);
 		}
 
