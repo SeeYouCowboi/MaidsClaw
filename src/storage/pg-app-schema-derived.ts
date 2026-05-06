@@ -351,6 +351,104 @@ export async function bootstrapDerivedSchema(
   await sql.unsafe(`ALTER TABLE semantic_edges ADD COLUMN IF NOT EXISTS source_ref TEXT`);
 
   await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS graph_retrieval_edges (
+      id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      run_id                    TEXT NOT NULL,
+      algorithm_version         TEXT NOT NULL DEFAULT 'v1',
+      edge_kind                 TEXT NOT NULL
+                                CHECK (edge_kind IN (
+                                  'mention_episode_entity',
+                                  'mention_cognition_entity',
+                                  'cooccurrence_associative',
+                                  'cooccurrence_contrastive',
+                                  'fact_relation',
+                                  'semantic_projection'
+                                )),
+      source_ref                TEXT NOT NULL,
+      source_entity_id          BIGINT,
+      source_kind               TEXT NOT NULL
+                                CHECK (source_kind IN ('entity', 'episode', 'cognition')),
+      target_ref                TEXT NOT NULL,
+      target_entity_id          BIGINT,
+      target_kind               TEXT NOT NULL
+                                CHECK (target_kind IN ('entity', 'episode', 'cognition')),
+      weight                    REAL NOT NULL DEFAULT 1.0,
+      visibility_scope          TEXT NOT NULL
+                                CHECK (visibility_scope IN (
+                                  'shared_public',
+                                  'private_overlay',
+                                  'area_visible',
+                                  'world_public'
+                                )),
+      owner_agent_id            TEXT,
+      first_seen_at             BIGINT NOT NULL,
+      last_seen_at              BIGINT NOT NULL,
+      source_passage_refs       TEXT[] NOT NULL DEFAULT '{}',
+      source_fact_edge_ids      BIGINT[] NOT NULL DEFAULT '{}',
+      source_semantic_edge_refs TEXT[] NOT NULL DEFAULT '{}',
+      source_hash               TEXT,
+      created_at                BIGINT NOT NULL,
+      active                    BOOLEAN NOT NULL DEFAULT false,
+      CHECK (
+        (visibility_scope IN ('shared_public', 'area_visible', 'world_public') AND owner_agent_id IS NULL)
+        OR
+        (visibility_scope = 'private_overlay' AND owner_agent_id IS NOT NULL)
+      )
+    )
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_graph_retrieval_edges_run_source_hash
+      ON graph_retrieval_edges(run_id, source_hash)
+      WHERE source_hash IS NOT NULL
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_gre_active_source
+      ON graph_retrieval_edges (source_ref, edge_kind)
+      WHERE active = true
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_gre_active_target
+      ON graph_retrieval_edges (target_ref, edge_kind)
+      WHERE active = true
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_gre_owner_active
+      ON graph_retrieval_edges (owner_agent_id, visibility_scope)
+      WHERE active = true
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_gre_run
+      ON graph_retrieval_edges (run_id, active)
+  `);
+
+  await sql.unsafe(`
+    CREATE INDEX IF NOT EXISTS idx_gre_last_seen
+      ON graph_retrieval_edges (last_seen_at DESC)
+      WHERE active = true
+  `);
+
+  await sql.unsafe(`
+    CREATE OR REPLACE FUNCTION rebuild_graph_retrieval_edges()
+    RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      -- Task 8 owns edge building. Task 7 provides an idempotent no-op rebuild
+      -- hook so callers can safely invoke the materialization lifecycle before
+      -- a concrete builder is installed.
+      UPDATE graph_retrieval_edges
+      SET active = FALSE
+      WHERE active = TRUE;
+    END;
+    $$
+  `);
+
+  await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS graph_nodes (
       id         BIGSERIAL PRIMARY KEY,
       node_kind  TEXT NOT NULL,
