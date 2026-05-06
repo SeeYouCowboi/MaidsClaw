@@ -527,6 +527,21 @@ function buildSemanticEdges(
   return edges;
 }
 
+/**
+ * Cap each entity's co-occurrence degree symmetrically.
+ *
+ * Co-occurrence edges are emitted in BOTH directions (A→B and B→A) so
+ * applying the cap only on outgoing edges leaves a high-degree hub like
+ * `loc:茶室` with full *incoming* edges from every partner — meaning the
+ * hub still receives mass from N partners during PPR diffusion, even if
+ * it can only emit to its top-`degreeCap` neighbors.
+ *
+ * To make the cap genuinely two-sided, we drop a directed edge `A→B`
+ * unless BOTH endpoints rank the other within their respective top
+ * `degreeCap` outgoing neighbors. This preserves PPR symmetry on
+ * undirected co-occurrence relationships and makes the config name
+ * (`cooccurrence.degreeCap`) match observed behavior.
+ */
 function applyDegreeCap(
   edges: GraphRetrievalEdgeInsert[],
   rawDegreeCap: number,
@@ -539,17 +554,32 @@ function applyDegreeCap(
     grouped.set(edge.sourceRef, bucket);
   }
 
-  const capped: GraphRetrievalEdgeInsert[] = [];
+  // Phase 1: per-source top-K outgoing — record which targets each
+  // source keeps. Phase 2: drop A→B unless A→B passes A's outgoing cap
+  // AND B→A passes B's outgoing cap (symmetric survival).
+  const allowedOutgoing = new Map<string, Set<string>>();
+  let totalSkipped = 0;
   for (const [sourceRef, bucket] of grouped.entries()) {
     bucket.sort(compareCooccurrenceBySurvivalPriority);
     const survivors = bucket.slice(0, degreeCap);
-    const skipped = bucket.length - survivors.length;
-    if (skipped > 0) {
-      console.warn(
-        `[graph-edge-builder] cooccurrence degree cap skipped ${skipped} outgoing edges for ${sourceRef}`,
-      );
+    if (bucket.length - survivors.length > 0) {
+      totalSkipped += bucket.length - survivors.length;
     }
-    capped.push(...survivors);
+    allowedOutgoing.set(sourceRef, new Set(survivors.map((e) => e.targetRef)));
+  }
+  if (totalSkipped > 0) {
+    console.warn(
+      `[graph-edge-builder] cooccurrence degree cap skipped ${totalSkipped} directed edges across ${grouped.size} sources`,
+    );
+  }
+
+  const capped: GraphRetrievalEdgeInsert[] = [];
+  for (const edge of edges) {
+    const forwardOk = allowedOutgoing.get(edge.sourceRef)?.has(edge.targetRef) === true;
+    const reverseOk = allowedOutgoing.get(edge.targetRef)?.has(edge.sourceRef) === true;
+    if (forwardOk && reverseOk) {
+      capped.push(edge);
+    }
   }
   return stableSortEdges(capped);
 }
