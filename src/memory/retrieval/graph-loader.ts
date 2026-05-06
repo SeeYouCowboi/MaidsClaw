@@ -25,12 +25,20 @@ type WeightedEdge = {
   weight: number;
 };
 
+export type MentionEdge = {
+  passageRef: string;
+  passageKind: "episode" | "cognition";
+  entityRef: string;
+  weight: number;
+};
+
 export type GraphLoaderResult = {
   nodes: Set<string>;
   adjacency: Map<string, Map<string, number>>;
   seedRefs: string[];
   visibleNodeCount: number;
   visibleEdgeCount: number;
+  mentionEdges: MentionEdge[];
   fallbackReason?: FallbackReason;
 };
 
@@ -76,13 +84,23 @@ export async function loadVisibilityFilteredGraph(params: GraphLoaderParams): Pr
     edge.targetKind === "entity" &&
     isEdgeVisibleToViewer(edge, params.viewerAgentId)
   );
-  const endpointRefs = collectEndpointRefs(entityEdges, seedRefs);
+  const mentionTargetRefs = collectMentionTargetRefs(activeEdges, params.viewerAgentId);
+  const endpointRefs = collectEndpointRefs(entityEdges, [...seedRefs, ...mentionTargetRefs]);
   const visibleEntities = await loadVisibleEntityRefs(params.sql, endpointRefs, params.viewerAgentId);
   const visibleSeedRefs = seedRefs.filter((ref) => visibleEntities.has(ref));
 
   if (visibleSeedRefs.length === 0) {
     return emptyGraph(visibleSeedRefs, "no_visible_seeds");
   }
+
+  const mentionEdges = collectVisibleMentionEdges(
+    activeEdges,
+    visibleEntities,
+    params.viewerAgentId,
+    params.queryTime,
+    params.config,
+    params.sessionId,
+  );
 
   const weightedEdges: WeightedEdge[] = [];
   const visibleNodes = new Set<string>(visibleSeedRefs);
@@ -110,6 +128,7 @@ export async function loadVisibilityFilteredGraph(params: GraphLoaderParams): Pr
       seedRefs: visibleSeedRefs,
       visibleNodeCount: visibleNodes.size,
       visibleEdgeCount: weightedEdges.length,
+      mentionEdges: [],
       fallbackReason: "node_limit_exceeded",
     };
   }
@@ -139,6 +158,7 @@ export async function loadVisibilityFilteredGraph(params: GraphLoaderParams): Pr
     seedRefs: visibleSeedRefs,
     visibleNodeCount: adjacencyNodes.size,
     visibleEdgeCount: edgesForAdjacency.length,
+    mentionEdges,
     ...(fallbackReason ? { fallbackReason } : {}),
   };
 }
@@ -150,6 +170,7 @@ function emptyGraph(seedRefs: string[], fallbackReason: FallbackReason): GraphLo
     seedRefs,
     visibleNodeCount: seedRefs.length,
     visibleEdgeCount: 0,
+    mentionEdges: [],
     fallbackReason,
   };
 }
@@ -171,6 +192,67 @@ function collectEndpointRefs(edges: GraphRetrievalEdgeRow[], seedRefs: string[])
     refs.add(edge.targetRef);
   }
   return [...refs];
+}
+
+function collectMentionTargetRefs(edges: GraphRetrievalEdgeRow[], viewerAgentId: string): string[] {
+  const refs = new Set<string>();
+  for (const edge of edges) {
+    if (
+      edge.active &&
+      (edge.sourceKind === "episode" || edge.sourceKind === "cognition") &&
+      edge.targetKind === "entity" &&
+      isEdgeVisibleToViewer(edge, viewerAgentId)
+    ) {
+      refs.add(edge.targetRef);
+    }
+  }
+  return [...refs];
+}
+
+function collectVisibleMentionEdges(
+  edges: GraphRetrievalEdgeRow[],
+  visibleEntities: Set<string>,
+  viewerAgentId: string,
+  queryTime: number,
+  config: GraphRetrievalConfig,
+  sessionId: string | undefined,
+): MentionEdge[] {
+  const mentionEdges: MentionEdge[] = [];
+  for (const edge of edges) {
+    const passageKind = resolveMentionPassageKind(edge);
+    if (
+      !edge.active ||
+      !passageKind ||
+      edge.targetKind !== "entity" ||
+      !visibleEntities.has(edge.targetRef) ||
+      !isEdgeVisibleToViewer(edge, viewerAgentId)
+    ) {
+      continue;
+    }
+
+    const weight = applyRecencyDecay(edge, queryTime, config, sessionId);
+    if (weight < MIN_EFFECTIVE_EDGE_WEIGHT) {
+      continue;
+    }
+
+    mentionEdges.push({
+      passageRef: edge.sourceRef,
+      passageKind,
+      entityRef: edge.targetRef,
+      weight,
+    });
+  }
+  return mentionEdges.sort(compareMentionEdgesByStableOrder);
+}
+
+function resolveMentionPassageKind(edge: GraphRetrievalEdgeRow): MentionEdge["passageKind"] | undefined {
+  if (edge.sourceKind === "episode") {
+    return "episode";
+  }
+  if (edge.sourceKind === "cognition") {
+    return "cognition";
+  }
+  return undefined;
 }
 
 async function loadVisibleEntityRefs(
@@ -278,6 +360,13 @@ function compareWeightedEdgesBySurvivalPriority(a: WeightedEdge, b: WeightedEdge
   return b.weight - a.weight ||
     a.sourceRef.localeCompare(b.sourceRef) ||
     a.targetRef.localeCompare(b.targetRef);
+}
+
+function compareMentionEdgesByStableOrder(a: MentionEdge, b: MentionEdge): number {
+  return a.passageKind.localeCompare(b.passageKind) ||
+    a.passageRef.localeCompare(b.passageRef) ||
+    a.entityRef.localeCompare(b.entityRef) ||
+    b.weight - a.weight;
 }
 
 function resolvePositiveLimit(value: number, fallback: number): number {
