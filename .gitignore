@@ -54,3 +54,6 @@ test/scenario-engine/reports/
 tmp
 .claude/worktrees
 logs
+
+*.log
+scripts/_*.ts
