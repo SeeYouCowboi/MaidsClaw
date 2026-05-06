@@ -1,0 +1,12 @@
+Task 9 hidden bridge loader evidence
+
+- Implemented loadVisibilityFilteredGraph in src/memory/retrieval/graph-loader.ts.
+- Uses PgGraphRetrievalEdgeRepo.loadActiveEdges() and filters graph_retrieval_edges by viewer-visible scope before endpoint loading.
+- Loads entity_nodes for all entity-edge endpoints and drops edges when either endpoint is not visible to the viewer before adjacency construction.
+- Applies recency decay before graph limits and row-normalizes outgoing weights after duplicate source-target aggregation.
+- Focused tests added in test/memory/graph-loader.test.ts:
+  - hidden private bridge node excluded before traversal
+  - recency decay formula affects normalized edge mass
+  - row-normalization sums outgoing weights to 1.0
+  - node limit seed-only fallback
+  - edge limit highest-weight truncation

@@ -1,0 +1,11 @@
+Task 9 seed resolver evidence
+
+- Implemented resolveGraphSeeds in src/memory/retrieval/graph-seed-resolver.ts.
+- Alias path uses PgAliasRepo.resolveAlias() with NFKC normalization, then canonical id -> visible entity pointer_key lookup.
+- Direct pointer lookup accepts visible shared/private-owner entities only.
+- Dense path checks node_embeddings existence/non-emptiness and becomes a no-op when the table is missing or empty, preserving alias/exact seeds.
+- Seeds are deduplicated and capped by config.seed.linkingTopK.
+- Focused tests added in test/memory/graph-loader.test.ts:
+  - flower-garden resolves to loc:花房
+  - missing aliases are reported in missingRefs without throwing
+  - empty node_embeddings skips dense linking while alias seeds still resolve
