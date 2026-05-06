@@ -24,6 +24,12 @@ export type {
   NodeSalienceRecord,
 } from "./graph-read-query-repo.js";
 export type {
+  DerivedEdgeKind,
+  GraphRetrievalEdgeInsert,
+  GraphRetrievalEdgeRepo,
+  GraphRetrievalEdgeRow,
+} from "./graph-retrieval-edge-repo.js";
+export type {
   InteractionRepo,
   InteractionTransactionContext,
 } from "./interaction-repo.js";
