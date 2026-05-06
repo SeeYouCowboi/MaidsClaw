@@ -1,0 +1,24 @@
+Task 14 scenario-engine evidence: flower-garden multi-hop retrieval
+
+Test file: test/scenario-engine/scenarios/graph-retrieval-multihop.test.ts
+Story: graph-retrieval-multihop
+Write path: settlement only
+Live LLM: disabled / not used; no SCENARIO_LIVE_TESTS flag; deterministic Story DSL memoryEffects seed all data.
+
+Probe IDs and expected behavior:
+- p1-flower-garden-alice
+  - retrievalMethod: narrative_search
+  - query: "flower garden"
+  - viewerPerspective: butler_guan
+  - expectedFragments: ["alice"]
+  - topK: 5
+  - Evidence beat: b1-flower-garden-alice records butler_guan observing alice in flower_garden/花房 and worldStateOps for location_of, met_at, knows.
+- p5-cognition-surface-constraint
+  - retrievalMethod: cognition_search
+  - query: "flower_garden silver_watch constraint"
+  - viewerPerspective: butler_guan
+  - expectedFragments: ["butler_flower_garden_constraint", "silver_watch"]
+  - topK: 5
+  - Evidence beat: b5-public-cognition-constraint writes a public constraint commitment linked to b1 and b2 via causal logicEdges.
+
+This validates the T88-style case: “花房那个人有没有见过我” should retrieve Alice evidence through the flower-garden location rather than treating loc:flower_garden as an Alice alias.

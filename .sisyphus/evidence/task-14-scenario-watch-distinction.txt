@@ -1,0 +1,34 @@
+Task 14 scenario-engine evidence: silver/gold watch distinction
+
+Test file: test/scenario-engine/scenarios/graph-retrieval-multihop.test.ts
+Story: graph-retrieval-multihop
+Write path: settlement only
+Live LLM: disabled / not used; no SCENARIO_LIVE_TESTS flag; deterministic Story DSL memoryEffects seed all data.
+
+Probe IDs and expected behavior:
+- p2-silver-watch-distinct
+  - retrievalMethod: cognition_search
+  - query: "silver watch"
+  - viewerPerspective: butler_guan
+  - expectedFragments: ["silver_watch"]
+  - expectedMissing: ["gold_watch_holder_alice"]
+  - topK: 5
+  - Evidence beat: b2-silver-watch writes silver_watch_holder_butler and holder_of(butler_guan, silver_watch).
+- p3-gold-watch-distinct
+  - retrievalMethod: cognition_search
+  - query: "gold watch"
+  - viewerPerspective: alice
+  - expectedFragments: ["gold_watch"]
+  - expectedMissing: ["silver_watch_holder_butler"]
+  - topK: 5
+  - Evidence beat: b3-gold-watch writes gold_watch_holder_alice and holder_of(alice, gold_watch).
+- p4-private-leakage
+  - retrievalMethod: cognition_search
+  - query: "vault_orchid_private_code"
+  - viewerPerspective: butler_guan
+  - expectedFragments: []
+  - expectedMissing: ["vault_orchid_private_code"]
+  - topK: 5
+  - Evidence beat: b4-private-commitment writes a private hidden_agent-only commitment used to assert no cross-agent private leakage.
+
+The story uses contrasts_with fact edges between silver_watch/银怀表 and gold_watch/金怀表 to keep the entities distinct and never merged.
