@@ -149,7 +149,7 @@ describe("regression: graph multi-hop retrieval baselines", () => {
     expect(requiredGraphRanking[0]?.sourceRef).toBe(
       "episode:fixture:alice-flower-garden-encounter",
     );
-    expect(currentPreImplementationRanking.slice(0, 2).map((e) => e.sourceRef)).toContain(
+    expect(currentPreImplementationRanking.slice(0, 2).map((e) => e.sourceRef)).not.toContain(
       "episode:fixture:alice-flower-garden-encounter",
     );
   });

@@ -1,0 +1,16 @@
+F5 Live RP Delta Check — SKIPPED
+
+Reason: No live LLM environment available (no ANTHROPIC_API_KEY / OPENAI_API_KEY / SCENARIO_LIVE_TESTS=1 set in CI).
+
+Required environment to run F5:
+  - PG_TEST_URL   — PostgreSQL test database with PPR-wired graph_retrieval_edges populated
+  - PG_APP_URL    — Application database
+  - ANTHROPIC_API_KEY or OPENAI_API_KEY — At least one live LLM provider key
+  - SCENARIO_LIVE_TESTS=1 — Explicit opt-in flag for live scenario paths
+
+F5 must be re-run manually before any production deployment of the graph multi-hop retrieval feature.
+The golden fixture baselines in test/fixtures/retrieval-golden-set.json capture the expected
+improvement signatures; compare live RP output against those baselines when re-running.
+
+Skipped at: 2026-05-06
+Plan: hipporag-multihop-retrieval
