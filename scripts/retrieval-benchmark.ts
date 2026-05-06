@@ -769,6 +769,28 @@ async function cleanupGraphFixture(sql: postgres.Sql): Promise<void> {
 	await sql`DELETE FROM entity_nodes WHERE pointer_key = ANY(${pointers}) AND memory_scope = 'shared_public'`;
 }
 
+async function evaluateAllCases(params: {
+	cases: BenchmarkCase[];
+	backend: PgSearchLexicalBackend;
+	sql: postgres.Sql;
+	orchestrator?: RetrievalOrchestrator;
+}): Promise<CaseEvaluation[]> {
+	const out: CaseEvaluation[] = [];
+	for (const row of params.cases) {
+		const caseSeeds = buildCaseSeedRows(row);
+		await seedRows(params.sql, caseSeeds);
+		await params.backend.searchEpisode({
+			query: row.query,
+			agentId: row.agentId,
+			limit: Math.max(10, row.recallK),
+			category: BENCHMARK_CATEGORY,
+		});
+		out.push(await evaluateCase(params.backend, params.sql, row, params.orchestrator));
+		await cleanupRows(params.sql, caseSeeds);
+	}
+	return out;
+}
+
 async function run(): Promise<void> {
 	const { fixture, output, withPpr } = parseArgs(process.argv.slice(2));
 	const cases = parseGoldenSet(fixture);
@@ -825,23 +847,26 @@ async function run(): Promise<void> {
 		}
 
 		const backend = new PgSearchLexicalBackend(sql);
-		// Wire RetrievalOrchestrator only in withPpr mode so PPR traces emit
-		// during evaluateCase. Plain (FTS-only) runs continue to call the
-		// backend directly to keep that baseline path unchanged.
+		// PPR-on/off comparison: when --with-ppr is set, run the same case set
+		// twice — first with the orchestrator (PPR signal active) and then
+		// with the FTS-only path (orchestrator=undefined). Plan Task 13
+		// requires a single invocation to emit comparable JSON for both
+		// modes so the recall@5 +0.3 gate can be measured without manual
+		// diffing of two runs.
 		const orchestrator = withPpr ? buildBenchmarkOrchestrator(sql, backend) : undefined;
 
-		const results: CaseEvaluation[] = [];
-		for (const row of cases) {
-			const caseSeeds = buildCaseSeedRows(row);
-			await seedRows(sql, caseSeeds);
-			await backend.searchEpisode({
-				query: row.query,
-				agentId: row.agentId,
-				limit: Math.max(10, row.recallK),
-				category: BENCHMARK_CATEGORY,
+		// Primary results: PPR-on if --with-ppr, else baseline FTS.
+		const results = await evaluateAllCases({ cases, backend, sql, orchestrator });
+		// PPR-off comparison results captured only in withPpr mode.
+		let pprOffResults: CaseEvaluation[] | null = null;
+		const pprOnTraceCount = collectedTraces.length;
+		if (withPpr) {
+			pprOffResults = await evaluateAllCases({
+				cases,
+				backend,
+				sql,
+				orchestrator: undefined,
 			});
-			results.push(await evaluateCase(backend, sql, row, orchestrator));
-			await cleanupRows(sql, caseSeeds);
 		}
 
 		// Explicit reverse-direction leakage probe:
@@ -881,23 +906,53 @@ async function run(): Promise<void> {
 		partial = computeOutput(results);
 
 		if (withPpr) {
+			// Slice the trace buffer to only the PPR-on traces (the PPR-off
+			// pass runs without orchestrator and emits none, so technically
+			// post-pprOnTraceCount entries are zero — but slicing keeps the
+			// section faithful to the on-mode segment).
+			const pprOnTraces = collectedTraces.slice(0, pprOnTraceCount);
 			const episodeContribution = computeGraphPprContribution(
-				collectedTraces,
+				pprOnTraces,
 				GRAPH_PPR_EPISODE_SIGNAL,
 			);
 			const cognitionContribution = computeGraphPprContribution(
-				collectedTraces,
+				pprOnTraces,
 				GRAPH_PPR_COGNITION_SIGNAL,
 			);
+			const pprOnMetrics = computeOutput(results);
+			const pprOffMetrics = pprOffResults
+				? computeOutput(pprOffResults)
+				: null;
 			graphPprSection = {
 				ppr_enabled: true,
-				mode_supported: collectedTraces.length > 0,
+				mode_supported: pprOnTraces.length > 0,
 				graph_fixture_seeded: seededGraph,
 				graph_ppr_episode_signal: GRAPH_PPR_EPISODE_SIGNAL,
 				graph_ppr_cognition_signal: GRAPH_PPR_COGNITION_SIGNAL,
 				graph_ppr_episode_contribution: episodeContribution,
 				graph_ppr_cognition_contribution: cognitionContribution,
-				traces_collected: collectedTraces.length,
+				traces_collected: pprOnTraces.length,
+				ppr_on: pprOnMetrics,
+				ppr_off: pprOffMetrics,
+				delta: pprOffMetrics
+					? {
+							recall_at_5: round6(
+								computePprOnOffDelta(
+									pprOnMetrics.recall_at_5,
+									pprOffMetrics.recall_at_5,
+								),
+							),
+							recall_at_10: round6(
+								computePprOnOffDelta(
+									pprOnMetrics.recall_at_10,
+									pprOffMetrics.recall_at_10,
+								),
+							),
+							mrr: round6(
+								computePprOnOffDelta(pprOnMetrics.mrr, pprOffMetrics.mrr),
+							),
+						}
+					: null,
 			};
 		}
 
