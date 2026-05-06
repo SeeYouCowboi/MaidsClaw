@@ -1,3 +1,5 @@
+import type postgres from "postgres";
+
 import type { AgentRole } from "../../agents/profile.js";
 import type { ViewerContext } from "../../core/contracts/viewer-context.js";
 import type { MemoryHint } from "../types.js";
@@ -11,6 +13,11 @@ import type { QueryPlan } from "../query-plan-types.js";
 import { tokenizeQuery } from "../query-tokenizer.js";
 import { allocateBudget } from "./budget-allocator.js";
 import { mergeSignalCandidates } from "./candidate-merge.js";
+import type { GraphSeedHint } from "./graph-loader.js";
+import { loadVisibilityFilteredGraph } from "./graph-loader.js";
+import { runPersonalizedPageRank } from "./graph-ppr.js";
+import type { GraphRetrievalConfig } from "./graph-retrieval-config.js";
+import type { GraphRetrievalFallbackReason, GraphRetrievalTrace } from "./graph-retrieval-trace.js";
 import type { SignalCandidate } from "./search-backend-contract.js";
 import type {
   SceneAreaFact,
@@ -89,6 +96,8 @@ type RetrievalOrchestratorDeps = {
   episodeSearchFn?: EpisodeSearchFn | null;
   episodeEmbeddingFn?: EpisodeEmbeddingSearchFn | null;
   exactRecallProvider?: ExactRecallProviderLike | null;
+  sql?: postgres.Sql | null;
+  graphRetrievalConfig?: GraphRetrievalConfig | null;
 };
 
 type TypedRetrievalSegment = {
@@ -225,6 +234,8 @@ export class RetrievalOrchestrator {
   private readonly episodeSearchFn: EpisodeSearchFn | null;
   private readonly episodeEmbeddingFn: EpisodeEmbeddingSearchFn | null;
   private readonly exactRecallProvider: ExactRecallProviderLike | null;
+  private readonly sql: postgres.Sql | null;
+  private readonly graphRetrievalConfig: GraphRetrievalConfig | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
@@ -235,6 +246,8 @@ export class RetrievalOrchestrator {
     this.episodeSearchFn = deps.episodeSearchFn ?? null;
     this.episodeEmbeddingFn = deps.episodeEmbeddingFn ?? null;
     this.exactRecallProvider = deps.exactRecallProvider ?? null;
+    this.sql = deps.sql ?? null;
+    this.graphRetrievalConfig = deps.graphRetrievalConfig ?? null;
   }
 
   async search(
@@ -341,6 +354,7 @@ export class RetrievalOrchestrator {
       episodeQuery,
       viewerContext,
       effectiveEpisodeBudget,
+      queryPlan,
     );
 
     const narrativeHints: MemoryHint[] =
@@ -737,6 +751,7 @@ export class RetrievalOrchestrator {
     query: string,
     viewerContext: ViewerContext,
     effectiveEpisodeBudget: number,
+    queryPlan?: QueryPlan,
   ): Promise<TypedNarrativeSegment[]> {
     if (effectiveEpisodeBudget <= 0) {
       return [];
@@ -756,6 +771,7 @@ export class RetrievalOrchestrator {
     let exactHits: ExactEpisodeHit[] = [];
     let ftsHits: EpisodeSearchHit[] = [];
     let embeddingHits: EpisodeSearchHit[] = [];
+    let pprEpisodeEntries: Array<{ sourceRef: string; score: number }> = [];
     if (trimmedQuery.length > 0) {
       if (this.exactRecallProvider) {
         try {
@@ -794,15 +810,24 @@ export class RetrievalOrchestrator {
       ]);
       if (ftsResult.status === "fulfilled") ftsHits = ftsResult.value;
       if (embResult.status === "fulfilled") embeddingHits = embResult.value;
+
+      pprEpisodeEntries = await this.resolvePprEpisodeEntries(
+        trimmedQuery,
+        viewerContext,
+        fetchLimit,
+        effectiveEpisodeBudget,
+        queryPlan,
+      );
     }
 
-    if (exactHits.length > 0 || ftsHits.length > 0 || embeddingHits.length > 0) {
+    if (exactHits.length > 0 || ftsHits.length > 0 || embeddingHits.length > 0 || pprEpisodeEntries.length > 0) {
       return this.rrfMergeEpisodeHits(
         ftsHits,
         embeddingHits,
         effectiveEpisodeBudget,
         exactHits,
         viewerContext.viewer_agent_id,
+        pprEpisodeEntries,
       );
     }
 
@@ -934,6 +959,7 @@ export class RetrievalOrchestrator {
     effectiveEpisodeBudget: number,
     exactHits: ExactEpisodeHit[] = [],
     viewerAgentId?: string,
+    pprEpisodeEntries: Array<{ sourceRef: string; score: number }> = [],
   ): Promise<TypedNarrativeSegment[]> {
     const candidates: SignalCandidate[] = [];
     const episodeMeta = new Map<
@@ -968,6 +994,14 @@ export class RetrievalOrchestrator {
           actor: hit.actor,
         });
       }
+    }
+    for (const [rank, entry] of pprEpisodeEntries.entries()) {
+      candidates.push({
+        sourceRef: entry.sourceRef,
+        signal: "graph_ppr_episode",
+        rank,
+        content: undefined,
+      });
     }
     for (const hit of exactHits) {
       candidates.push({
@@ -1035,6 +1069,181 @@ export class RetrievalOrchestrator {
     segments.sort((a, b) => b.score - a.score);
 
     return segments.slice(0, effectiveEpisodeBudget);
+  }
+
+  private async resolvePprEpisodeEntries(
+    query: string,
+    viewerContext: ViewerContext,
+    fetchLimit: number,
+    effectiveEpisodeBudget: number,
+    queryPlan?: QueryPlan,
+  ): Promise<Array<{ sourceRef: string; score: number }>> {
+    const config = this.graphRetrievalConfig;
+    if (!config) {
+      return [];
+    }
+    if (!config.enabled) {
+      this.emitGraphRetrievalTrace(
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "disabled_by_config"),
+      );
+      return [];
+    }
+    if (!this.sql) {
+      this.emitGraphRetrievalTrace(
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "error"),
+      );
+      return [];
+    }
+
+    const seedHints = this.buildGraphSeedHints(query, queryPlan);
+    if (seedHints.length === 0) {
+      this.emitGraphRetrievalTrace(
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "no_visible_seeds"),
+      );
+      return [];
+    }
+
+    try {
+      const loaderResult = await loadVisibilityFilteredGraph({
+        sql: this.sql,
+        viewerAgentId: viewerContext.viewer_agent_id,
+        queryTime: Date.now(),
+        config,
+        seedHints,
+        sessionId: viewerContext.session_id,
+      });
+
+      if (loaderResult.fallbackReason || loaderResult.seedRefs.length === 0) {
+        this.emitGraphRetrievalTrace({
+          ...this.buildEmptyGraphRetrievalTrace(
+            config,
+            viewerContext,
+            effectiveEpisodeBudget,
+            this.toGraphRetrievalFallbackReason(loaderResult.fallbackReason ?? "no_visible_seeds"),
+          ),
+          seedRefs: loaderResult.seedRefs,
+          visibleNodeCount: loaderResult.visibleNodeCount,
+          visibleEdgeCount: loaderResult.visibleEdgeCount,
+        });
+        return [];
+      }
+
+      const pprResult = runPersonalizedPageRank({
+        adjacency: loaderResult.adjacency,
+        nodes: loaderResult.nodes,
+        seedRefs: loaderResult.seedRefs,
+        mentionEdges: loaderResult.mentionEdges,
+        config,
+      });
+
+      const pprEpisodeEntries = [...pprResult.episodeScores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, fetchLimit)
+        .map(([sourceRef, score]) => ({ sourceRef, score }));
+
+      this.emitGraphRetrievalTrace({
+        enabled: true,
+        ...(pprResult.fallbackReason
+          ? { fallbackReason: this.toGraphRetrievalFallbackReason(pprResult.fallbackReason) }
+          : {}),
+        seedRefs: loaderResult.seedRefs,
+        visibleNodeCount: loaderResult.visibleNodeCount,
+        visibleEdgeCount: loaderResult.visibleEdgeCount,
+        pprParams: {
+          damping: config.ppr.damping,
+          maxIterations: config.ppr.maxIterations,
+          epsilon: config.ppr.epsilon,
+        },
+        topPprNodes: [...pprResult.entityScores.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([ref, score]) => ({ ref, score })),
+        topPprEpisodes: pprEpisodeEntries.slice(0, 10).map((entry) => ({
+          ref: entry.sourceRef,
+          score: entry.score,
+        })),
+        topPprCognitions: [],
+        rrfContribution: [{ signal: "graph_ppr_episode", count: pprEpisodeEntries.length }],
+        budgetBefore: { episode: effectiveEpisodeBudget, cognition: 0 },
+        budgetAfter: { episode: effectiveEpisodeBudget, cognition: 0 },
+        factEdgesCountAtQueryTime: 0,
+        sessionId: viewerContext.session_id,
+        viewerAgentId: viewerContext.viewer_agent_id,
+      });
+
+      return pprEpisodeEntries;
+    } catch (err) {
+      console.warn("[retrieval] graph PPR episode signal failed (non-fatal):", err);
+      this.emitGraphRetrievalTrace(
+        this.buildEmptyGraphRetrievalTrace(config, viewerContext, effectiveEpisodeBudget, "error"),
+      );
+      return [];
+    }
+  }
+
+  private buildGraphSeedHints(query: string, queryPlan?: QueryPlan): GraphSeedHint[] {
+    const hints: GraphSeedHint[] = [];
+    const seen = new Set<string>();
+    const push = (ref: string | undefined | null, kind?: GraphSeedHint["kind"]): void => {
+      const trimmed = ref?.trim();
+      if (!trimmed) return;
+      const key = `${kind ?? "alias"}:${trimmed.toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      hints.push(kind ? { ref: trimmed, kind } : { ref: trimmed });
+    };
+
+    for (const token of tokenizeQuery(query)) {
+      push(token);
+    }
+    for (const hint of queryPlan?.route.entityHints ?? []) {
+      push(hint, "alias");
+    }
+
+    return hints;
+  }
+
+  private buildEmptyGraphRetrievalTrace(
+    config: GraphRetrievalConfig,
+    viewerContext: ViewerContext,
+    effectiveEpisodeBudget: number,
+    fallbackReason: GraphRetrievalFallbackReason,
+  ): GraphRetrievalTrace {
+    return {
+      enabled: false,
+      fallbackReason,
+      seedRefs: [],
+      visibleNodeCount: 0,
+      visibleEdgeCount: 0,
+      pprParams: {
+        damping: config.ppr.damping,
+        maxIterations: config.ppr.maxIterations,
+        epsilon: config.ppr.epsilon,
+      },
+      topPprNodes: [],
+      topPprEpisodes: [],
+      topPprCognitions: [],
+      rrfContribution: [{ signal: "graph_ppr_episode", count: 0 }],
+      budgetBefore: { episode: effectiveEpisodeBudget, cognition: 0 },
+      budgetAfter: { episode: effectiveEpisodeBudget, cognition: 0 },
+      factEdgesCountAtQueryTime: 0,
+      sessionId: viewerContext.session_id,
+      viewerAgentId: viewerContext.viewer_agent_id,
+    };
+  }
+
+  private toGraphRetrievalFallbackReason(reason: string): GraphRetrievalFallbackReason {
+    if (reason === "disabled_by_config" || reason === "no_visible_seeds") {
+      return reason;
+    }
+    if (reason === "node_limit_exceeded" || reason === "edge_limit_exceeded" || reason === "empty_graph") {
+      return "graph_too_large";
+    }
+    return "error";
+  }
+
+  private emitGraphRetrievalTrace(trace: GraphRetrievalTrace): void {
+    console.debug("[graph-retrieval-trace]", JSON.stringify(trace));
   }
 
   /**

@@ -4,7 +4,8 @@ export type RetrievalSignal =
   | "bm25_jieba"
   | "bm25_en"
   | "bm25_ngram"
-  | "embedding";
+  | "embedding"
+  | "graph_ppr_episode";
 
 export const SIGNAL_WEIGHTS: Record<RetrievalSignal, number> = {
   alias_exact: 3.0,
@@ -13,6 +14,7 @@ export const SIGNAL_WEIGHTS: Record<RetrievalSignal, number> = {
   bm25_en: 1.2,
   bm25_ngram: 0.6,
   embedding: 1.2,
+  graph_ppr_episode: 1.2,
 };
 
 export interface SignalCandidate {
