@@ -438,12 +438,15 @@ export async function bootstrapDerivedSchema(
     LANGUAGE plpgsql
     AS $$
     BEGIN
-      -- Task 8 owns edge building. Task 7 provides an idempotent no-op rebuild
-      -- hook so callers can safely invoke the materialization lifecycle before
-      -- a concrete builder is installed.
-      UPDATE graph_retrieval_edges
-      SET active = FALSE
-      WHERE active = TRUE;
+      -- Real no-op stub. Edge materialization is owned by the TS builder in
+      -- src/memory/graph-edge-builder.ts (Task 8) and the active-run swap is
+      -- driven by PgGraphRetrievalEdgeRepo.atomicSwapRun(). This function is
+      -- preserved purely so existing callers (idempotency tests, ops scripts
+      -- written against the legacy API) do not error. Calling it MUST NOT
+      -- deactivate or otherwise mutate graph_retrieval_edges rows — the
+      -- previous implementation flipped active=TRUE to FALSE and would wipe
+      -- the live retrieval graph if invoked in production.
+      RAISE DEBUG 'rebuild_graph_retrieval_edges: no-op stub; use TS builder + atomicSwapRun';
     END;
     $$
   `);

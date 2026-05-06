@@ -267,8 +267,35 @@ if (skipPgTests) {
           `;
           expect(beforeTableRows.length).toBe(1);
 
+          // Regression for B1: rebuild_graph_retrieval_edges() previously
+          // contained a destructive UPDATE that flipped active=TRUE rows to
+          // FALSE — i.e. calling it would wipe the live retrieval graph.
+          // Seed an active row, run rebuild twice, and confirm the row is
+          // STILL active after both calls. The duplicate-count assertion
+          // below would have masked the bug because zero active rows = zero
+          // duplicates.
+          const now = Date.now();
+          await sql`
+            INSERT INTO graph_retrieval_edges
+              (run_id, algorithm_version, edge_kind, source_ref, source_kind,
+               target_ref, target_kind, weight, visibility_scope, owner_agent_id,
+               first_seen_at, last_seen_at, source_hash, created_at, active)
+            VALUES
+              ('test-rebuild-noop', 'v1', 'cooccurrence_associative',
+               'loc:flower_garden', 'entity', 'char:alice', 'entity',
+               1.0, 'shared_public', NULL,
+               ${now}, ${now}, 'test-rebuild-noop:loc:flower_garden:char:alice', ${now}, TRUE)
+          `;
+
           await sql`SELECT rebuild_graph_retrieval_edges()`;
           await sql`SELECT rebuild_graph_retrieval_edges()`;
+
+          const stillActiveRows = await sql<Array<{ cnt: number | string }>>`
+            SELECT COUNT(*)::bigint AS cnt
+            FROM graph_retrieval_edges
+            WHERE active = TRUE AND run_id = 'test-rebuild-noop'
+          `;
+          expect(Number(stillActiveRows[0]?.cnt ?? 0)).toBe(1);
 
           const duplicateRows = await sql`
             SELECT source_ref, target_ref, edge_kind, owner_agent_id, COUNT(*) AS cnt
