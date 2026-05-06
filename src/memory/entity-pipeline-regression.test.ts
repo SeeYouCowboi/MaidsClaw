@@ -5,12 +5,10 @@
  * Each test pins a specific bad-case turn from that transcript and asserts
  * the post-A+C ingestion + ranking pipeline produces the expected behavior.
  *
- * Out of scope here (these are Layer B canonical-merge problems, not
- * solvable by ingestion filtering or rank floor):
- *   - T70/T80 银怀表 ↔ silver_pocket_watch ↔ item:silver_pocket_watch split
- *   - T88   "花房那边的人" → Alice resolution
- * If we add Layer B (deterministic alias seeding + judge follow-up), add
- * regression cases for those here.
+ * T70/T80 (银怀表 ↔ silver_pocket_watch item disambiguation) and T88
+ * ("花房那边的人" → Alice resolution) are now covered by the graph multi-hop
+ * retrieval layer (Tasks 8, 13, 14). See docs/GRAPH_MULTI_HOP_RETRIEVAL.md
+ * and the graph retrieval scenario tests for those regression cases.
  */
 import { describe, expect, it } from "bun:test";
 

@@ -506,6 +506,52 @@ These are deferred from this consensus and tracked for future iterations:
 
 ---
 
+## 11. Graph Retrieval Edges (Derived)
+
+> **See also:** [`docs/GRAPH_MULTI_HOP_RETRIEVAL.md`](./GRAPH_MULTI_HOP_RETRIEVAL.md) for the full architecture reference.
+
+The four source tables described above feed a fifth **derived** table, `graph_retrieval_edges`, which is the materialized projection used by the graph multi-hop retrieval layer (PPR-based re-ranking).
+
+### Relationship to the four source layers
+
+`graph_retrieval_edges` is **not** a fifth authoritative layer. It is a read-optimized projection rebuilt from the four source tables. Source-of-truth tables are never modified by the builder.
+
+| Source table | Contributes edge kinds |
+|---|---|
+| `private_episode_events` | `mention_episode_entity` |
+| `private_cognition_current` | `mention_cognition_entity` |
+| `fact_edges` (world_state layer) | `fact_relation`, `cooccurrence_associative`, `cooccurrence_contrastive` |
+| `semantic_edges` (latent layer) | `semantic_projection` |
+
+### Controlled predicate constraint
+
+The `world_state` layer's free-text predicate field is **constrained to 10 v1 predicates** when contributing to `graph_retrieval_edges`. Unknown predicates are quarantined and do not reach the derived table. This is a retrieval-layer constraint only; `fact_edges` itself remains open-vocabulary.
+
+The 10 v1 predicates: `location_of`, `holder_of`, `knows`, `met_at`, `communicates_with`, `trusts`, `affiliated_with`, `conflicts_with`, `same_as`, `contrasts_with`.
+
+### Lifecycle and atomicity
+
+`graph_retrieval_edges` is rebuilt entirely on each rebuild run and swapped atomically via `atomicSwapRun()`. The swap sets `active = true` on the new run's rows and `active = false` on the previous run's rows in a single transaction. If the transaction fails, the previous active run remains intact.
+
+### Visibility invariant
+
+Visibility filtering happens **before** the graph is constructed for PPR traversal. Private nodes (`owner_agent_id`-scoped) never influence scores visible to other agents. This is enforced in `loadVisibilityFilteredGraph()` before any PPR iteration begins.
+
+### Edge semantics delta from source tables
+
+| Edge kind | Weight formula | Notes |
+|---|---|---|
+| `mention_episode_entity` | 1.0 (fixed) | Episode → entity mention link |
+| `mention_cognition_entity` | 1.0 (fixed) | Cognition → entity mention link |
+| `cooccurrence_associative` | `min(4.0, log1p(count))` | Entity co-occurrence in same episode |
+| `cooccurrence_contrastive` | `min(4.0, log1p(count)) * 0.35` | Co-occurrence for `contrasts_with` / `conflicts_with` pairs |
+| `fact_relation` | 1.0 (or 0.35 for `contrasts_with`) | Derived from `fact_edges` controlled predicates |
+| `semantic_projection` | original semantic edge weight | Projected from `semantic_edges` |
+
+All weights are further decayed by `weight * exp(-ageMs / halfLifeMs)` before PPR traversal.
+
+---
+
 ## 10. Glossary
 
 - **NodeRef**: `"${kind}:${id}"` typed reference to any graph node

@@ -100,7 +100,7 @@ The maid identity comes from system layers, not just style prompts:
 
 - `Persona`: defines identity, voice, behavior, and opening style.
 - `Lore`: injects world rules, etiquette, and service boundaries into context.
-- `Memory`: keeps long-term facts and prior interactions available to persistent characters.
+- `Memory`: keeps long-term facts and prior interactions available to persistent characters. A graph multi-hop retrieval layer (entity-centric PPR) re-ranks episode and cognition candidates for richer context assembly — see [`docs/GRAPH_MULTI_HOP_RETRIEVAL.md`](docs/GRAPH_MULTI_HOP_RETRIEVAL.md).
 - `Blackboard`: acts like a shared notice board for coordination between agents.
 - `Interaction Log`: records what happened so context can be reconstructed consistently.
 - `Tool System`: lets agents actually perform work through local or MCP-backed tools.

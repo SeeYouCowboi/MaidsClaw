@@ -1,0 +1,75 @@
+task-16-docs-controls evidence
+generated: 2026-05-06
+
+## Files written / modified
+
+1. docs/GRAPH_MULTI_HOP_RETRIEVAL.md  [NEW]
+   - 12 sections covering architecture, PPR parameters, alias lifecycle,
+     controlled predicates, edge materialization, visibility invariants,
+     budget allocator constraints, config toggles, rebuild/debug CLI,
+     emission stats, known limitations, and data flow appendix.
+   - Damping=0.5 explicitly documented as intentional (NOT 0.85).
+   - graphPprAffectsSurfaceSignals=false v1 safety constraint documented.
+   - same_as predicate: fact_relation edge only, no alias mutation.
+   - contrasts_with: downweight only (0.35), never exclusion.
+   - Unknown predicates: quarantined, not silently mapped.
+   - Live tests: documented as requiring SCENARIO_LIVE_TESTS=1 opt-in.
+   - NOT oversold as full HippoRAG — explicitly "MaidsClaw-adapted".
+
+2. docs/CONSENSUS_MEMORY_EDGES.md  [APPENDED]
+   - Added section 11: "Graph Retrieval Edges (Derived)"
+   - Cross-link to GRAPH_MULTI_HOP_RETRIEVAL.md
+   - Explains derived table relationship to four source layers
+   - Documents controlled predicate constraint (10 v1 predicates)
+   - Documents atomic swap lifecycle and visibility invariant
+   - Documents edge semantics delta (weight formulas per edge kind)
+   - Existing content untouched.
+
+3. README.md  [UPDATED]
+   - Memory bullet in "Why It Feels Like a Maid System" extended with
+     cross-link to docs/GRAPH_MULTI_HOP_RETRIEVAL.md
+   - No restructuring; single bullet extended only.
+
+4. src/memory/entity-pipeline-regression.test.ts  [COMMENT UPDATED]
+   - Removed stale "Out of scope here (these are Layer B canonical-merge
+     problems...)" language for T70/T80/T88.
+   - Replaced with accurate cross-reference: T70/T80/T88 are now covered
+     by graph multi-hop retrieval layer (Tasks 8, 13, 14).
+   - No TypeScript source logic modified.
+
+## Constraints verified
+
+- NEVER modified plan file (.sisyphus/plans/*.md): confirmed
+- Did NOT oversell as full HippoRAG: confirmed
+- Did NOT document live tests as default CI: confirmed (SCENARIO_LIVE_TESTS=1 required)
+- Did NOT restructure README.md: confirmed (single bullet extended)
+- Did NOT modify any source TypeScript files other than the comment: confirmed
+- Did NOT add alias review UI docs: confirmed (explicitly out of scope)
+- Did NOT remove existing content from CONSENSUS_MEMORY_EDGES.md: confirmed (append only)
+
+## Key values cross-checked against source
+
+- ppr.damping = 0.5 (graph-ppr.ts: intentional, documented)
+- ppr.maxIterations = 20
+- ppr.epsilon = 0.0001
+- ppr.maxVisibleNodes = 2000
+- ppr.maxVisibleEdges = 8000
+- seed.linkingTopK = 5
+- seed.similarityThreshold = 0.75
+- rrf.episodeSignalWeight = 1.2
+- rrf.cognitionSignalWeight = 1.2
+- cooccurrence.maxWeight = 4.0
+- cooccurrence.contrastiveMultiplier = 0.35
+- cooccurrence.degreeCap = 25
+- recency.sessionHalfLifeMs = 1800000 (30 min)
+- recency.globalHalfLifeMs = 86400000 (24 h)
+- 6 edge kinds: mention_episode_entity, mention_cognition_entity,
+  cooccurrence_associative, cooccurrence_contrastive, fact_relation,
+  semantic_projection
+- 10 v1 predicates: location_of, holder_of, knows, met_at,
+  communicates_with, trusts, affiliated_with, conflicts_with,
+  same_as, contrasts_with
+- CONTRASTIVE_FACT_PREDICATES = {contrasts_with, conflicts_with}
+- atomicSwapRun: idempotent, previous run intact on failure
+- graphPprAffectsSurfaceSignals = false (v1 safety)
+- maxPprOnOffBudgetDrift = 1
