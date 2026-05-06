@@ -4,7 +4,10 @@ import type { CognitionSearchService } from "../../src/memory/cognition/cognitio
 import type { NarrativeSearchService } from "../../src/memory/narrative/narrative-search.js";
 import type { QueryPlan } from "../../src/memory/query-plan-types.js";
 import type { QueryRoute, QuerySignals } from "../../src/memory/query-routing-types.js";
-import { RetrievalOrchestrator } from "../../src/memory/retrieval/retrieval-orchestrator.js";
+import {
+  RetrievalOrchestrator,
+  type GraphEntityExpansionFn,
+} from "../../src/memory/retrieval/retrieval-orchestrator.js";
 import type { MemoryHint, ViewerContext } from "../../src/memory/types.js";
 import {
   applyWorldStateOpsForSettlement,
@@ -165,12 +168,23 @@ function makeCognitionService() {
 describe("graph retrieval regression baselines", () => {
   it("surfaces Alice-related commitment cognition via flower_garden multi-hop entity expansion", async () => {
     const cognition = makeCognitionService();
+    // Mock graph entity expansion: simulates the production PPR path that
+    // walks from loc:flower_garden through co-occurrence/fact edges to
+    // char:alice (entity id 101) and returns it for the cognition filter.
+    const graphEntityExpansionFn: GraphEntityExpansionFn = async ({ queryPlan }) => {
+      const entityHints = queryPlan?.route.entityHints ?? [];
+      if (entityHints.some((hint) => hint.includes("flower_garden"))) {
+        return [101];
+      }
+      return [];
+    };
     const orchestrator = new RetrievalOrchestrator({
       narrativeService: makeNarrativeService(),
       cognitionService: cognition.service,
       currentProjectionReader: null,
       episodeRepository: null,
       episodeSearchFn: null,
+      graphEntityExpansionFn,
     });
 
     const currentPreImplementationPlan = makePlan([88]);

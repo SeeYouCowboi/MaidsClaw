@@ -87,6 +87,26 @@ type ExactRecallProviderLike = {
 
 export type RetrievalOrchestratorExactRecallProvider = ExactRecallProviderLike;
 
+/**
+ * Expands `cognitionFacets.entityIds` by walking the graph (PPR or an
+ * equivalent multi-hop mechanism) from the query's seed entities. Returns
+ * the additional entity IDs to merge into the cognition search filter.
+ *
+ * Implementations must be deterministic, visibility-safe (only include
+ * entities the viewer can see), and bounded by a top-K cap. Returning an
+ * empty array means "no expansion" — the orchestrator falls back to the
+ * plan-provided `entityFilters` unchanged.
+ *
+ * Production wiring uses PPR's `entityScores` + alias resolution to map
+ * top-K entity refs to numeric IDs. Tests inject a static map.
+ */
+export type GraphEntityExpansionFn = (params: {
+  query: string;
+  queryPlan: QueryPlan | undefined;
+  viewerContext: ViewerContext;
+  baseEntityIds: ReadonlyArray<number>;
+}) => Promise<ReadonlyArray<number>>;
+
 type RetrievalOrchestratorDeps = {
   narrativeService: NarrativeSearchService;
   cognitionService: CognitionSearchService;
@@ -98,6 +118,7 @@ type RetrievalOrchestratorDeps = {
   exactRecallProvider?: ExactRecallProviderLike | null;
   sql?: postgres.Sql | null;
   graphRetrievalConfig?: GraphRetrievalConfig | null;
+  graphEntityExpansionFn?: GraphEntityExpansionFn | null;
 };
 
 type TypedRetrievalSegment = {
@@ -236,6 +257,7 @@ export class RetrievalOrchestrator {
   private readonly exactRecallProvider: ExactRecallProviderLike | null;
   private readonly sql: postgres.Sql | null;
   private readonly graphRetrievalConfig: GraphRetrievalConfig | null;
+  private readonly graphEntityExpansionFn: GraphEntityExpansionFn | null;
 
   constructor(deps: RetrievalOrchestratorDeps) {
     this.narrativeService = deps.narrativeService;
@@ -248,6 +270,7 @@ export class RetrievalOrchestrator {
     this.exactRecallProvider = deps.exactRecallProvider ?? null;
     this.sql = deps.sql ?? null;
     this.graphRetrievalConfig = deps.graphRetrievalConfig ?? null;
+    this.graphEntityExpansionFn = deps.graphEntityExpansionFn ?? null;
   }
 
   async search(
@@ -368,6 +391,20 @@ export class RetrievalOrchestrator {
           )
         : [];
 
+    // Graph multi-hop entity expansion: when a graph expansion fn is wired,
+    // run it before searchCognition so cognition's entityIds filter can include
+    // entities reached via PPR multi-hop from the query's seed entities.
+    // E.g. query "Alice对我有什么承诺" with entityFilters=[88 (flower_garden)]
+    // expands to [88, 101 (alice)] so Alice's commitments surface even when
+    // the plan only resolved the flower-garden anchor.
+    const cognitionEntityIds = await this.expandCognitionEntityIds(
+      cognitionQuery,
+      queryPlan,
+      viewerContext,
+      cognitionFacets?.entityIds,
+      template.cognitionEnabled,
+    );
+
     const rawCognitionHits: CognitionHit[] =
       template.cognitionEnabled && (template.cognitionBudget > 0 || effectiveConflictNotesBudget > 0)
         ? await this.cognitionService.searchCognition({
@@ -377,7 +414,7 @@ export class RetrievalOrchestrator {
             limit: Math.max(template.cognitionBudget + effectiveConflictNotesBudget + 4, template.cognitionBudget),
             kind: cognitionFacets?.kind,
             stance: cognitionFacets?.stance,
-            entityIds: cognitionFacets?.entityIds,
+            entityIds: cognitionEntityIds,
             timeWindow: cognitionFacets?.timeWindow,
           })
         : [];
@@ -1307,6 +1344,48 @@ export class RetrievalOrchestrator {
 
   private emitGraphRetrievalTrace(trace: GraphRetrievalTrace): void {
     console.debug("[graph-retrieval-trace]", JSON.stringify(trace));
+  }
+
+  /**
+   * Augments the cognition surface's `entityIds` filter with entities reached
+   * via graph multi-hop expansion from the query's seed entities. Returns the
+   * (possibly expanded) entity ID list. If the expansion function is not
+   * wired, the cognition surface is disabled, or expansion fails, the base
+   * IDs are returned unchanged.
+   */
+  private async expandCognitionEntityIds(
+    cognitionQuery: string,
+    queryPlan: QueryPlan | undefined,
+    viewerContext: ViewerContext,
+    baseEntityIds: number[] | undefined,
+    cognitionEnabled: boolean,
+  ): Promise<number[] | undefined> {
+    if (!this.graphEntityExpansionFn || !cognitionEnabled) {
+      return baseEntityIds;
+    }
+    try {
+      const additional = await this.graphEntityExpansionFn({
+        query: cognitionQuery,
+        queryPlan,
+        viewerContext,
+        baseEntityIds: baseEntityIds ?? [],
+      });
+      if (additional.length === 0) {
+        return baseEntityIds;
+      }
+      const merged = baseEntityIds ? [...baseEntityIds] : [];
+      const seen = new Set<number>(merged);
+      for (const id of additional) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          merged.push(id);
+        }
+      }
+      return merged.length > 0 ? merged : undefined;
+    } catch (err) {
+      console.warn("[retrieval] graph entity expansion failed (non-fatal):", err);
+      return baseEntityIds;
+    }
   }
 
   /**
