@@ -34,6 +34,7 @@ export type MemoryConfig = {
   migrationChatModelId?: string;
   embeddingModelId?: string;
   organizerEmbeddingModelId?: string;
+  graphRetrieval?: import("../memory/retrieval/graph-retrieval-config.js").GraphRetrievalConfig;
 };
 
 // Lightweight LLM config — used by the gateway's /v1/util/complete endpoint

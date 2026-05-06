@@ -4,7 +4,41 @@
     "_comment": "Models used by the memory pipeline. Use provider-qualified IDs (e.g. 'moonshot/kimi-k2.5', 'bailian/text-embedding-v4') or bare model IDs if the provider is globally defaulted.",
     "migrationChatModelId": "moonshot/kimi-k2.5",
     "embeddingModelId": "bailian/text-embedding-v4",
-    "organizerEmbeddingModelId": "bailian/text-embedding-v4"
+    "organizerEmbeddingModelId": "bailian/text-embedding-v4",
+    "graphRetrieval": {
+      "_comment": "Graph-based retrieval (PPR / HippoRAG-style multi-hop). All fields optional — omitted keys fall back to built-in defaults.",
+      "enabled": true,
+      "shadowLog": true,
+      "ppr": {
+        "damping": 0.5,
+        "maxIterations": 20,
+        "epsilon": 0.0001,
+        "maxVisibleNodes": 2000,
+        "maxVisibleEdges": 8000
+      },
+      "seed": {
+        "linkingTopK": 5,
+        "similarityThreshold": 0.75
+      },
+      "rrf": {
+        "episodeSignalWeight": 1.2,
+        "cognitionSignalWeight": 1.2
+      },
+      "budgetAllocator": {
+        "graphPprAffectsSurfaceSignals": false,
+        "maxPprOnOffBudgetDrift": 1
+      },
+      "cooccurrence": {
+        "maxWeight": 4.0,
+        "contrastiveMultiplier": 0.35,
+        "degreeCap": 25
+      },
+      "recency": {
+        "scope": "session",
+        "sessionHalfLifeMs": 1800000,
+        "globalHalfLifeMs": 86400000
+      }
+    }
   },
   "lightweightLlm": {
     "_comment": "Fast/cheap model used for lightweight tasks such as session title generation. Must be explicitly set — no automatic fallback.",
