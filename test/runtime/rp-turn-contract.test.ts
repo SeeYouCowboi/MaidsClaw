@@ -6,6 +6,9 @@ import type {
   RpTurnOutcomeSubmissionV5,
 } from "../../src/runtime/rp-turn-contract.js";
 import {
+  FACT_EDGE_PREDICATES,
+  inventoryUnknownFactEdgePredicates,
+  isValidFactEdgePredicate,
   normalizeRpTurnOutcome,
   normalizeToCanonicalOutcome,
   validateRpTurnOutcome,
@@ -13,6 +16,44 @@ import {
 } from "../../src/runtime/rp-turn-contract.js";
 import { makeSubmitRpTurnTool } from "../../src/runtime/submit-rp-turn-tool.js";
 import { PgAreaWorldProjectionRepo } from "../../src/storage/domain-repos/pg/area-world-projection-repo.js";
+
+describe("fact_edges predicate contract", () => {
+  it("accepts exactly the 10 v1 controlled predicates", () => {
+    expect(FACT_EDGE_PREDICATES).toEqual([
+      "location_of",
+      "holder_of",
+      "knows",
+      "met_at",
+      "communicates_with",
+      "trusts",
+      "affiliated_with",
+      "conflicts_with",
+      "same_as",
+      "contrasts_with",
+    ]);
+
+    for (const predicate of FACT_EDGE_PREDICATES) {
+      expect(isValidFactEdgePredicate(predicate)).toBe(true);
+    }
+    expect(isValidFactEdgePredicate("likes_unknown_free_text")).toBe(false);
+    expect(isValidFactEdgePredicate("related_to")).toBe(false);
+  });
+
+  it("inventories unknown legacy predicates without remapping them", () => {
+    expect(
+      inventoryUnknownFactEdgePredicates([
+        "knows",
+        "likes_unknown_free_text",
+        "holds",
+        "likes_unknown_free_text",
+        "same_as",
+      ]),
+    ).toEqual([
+      { predicate: "holds", count: 1 },
+      { predicate: "likes_unknown_free_text", count: 2 },
+    ]);
+  });
+});
 
 describe("normalizeRpTurnOutcome", () => {
   it("accepts canonical v5 payload and normalizes optional arrays", () => {
@@ -544,7 +585,7 @@ describe("normalizeRpTurnOutcome", () => {
       worldStateOps: [
         {
           subject: { kind: "pointer_key", value: "char:alice" },
-          predicate: "wears",
+          predicate: "holder_of",
           object: { kind: "pointer_key", value: "item:red_dress" },
           factText: "Alice is wearing the red dress.",
           contradictedFactEdgeIds: [42, 43],
@@ -555,7 +596,7 @@ describe("normalizeRpTurnOutcome", () => {
     expect(result.worldStateOps).toEqual([
       {
         subject: { kind: "pointer_key", value: "char:alice" },
-        predicate: "wears",
+        predicate: "holder_of",
         object: { kind: "pointer_key", value: "item:red_dress" },
         factText: "Alice is wearing the red dress.",
         contradictedFactEdgeIds: [42, 43],
@@ -578,20 +619,20 @@ describe("normalizeRpTurnOutcome", () => {
           {
             op: "retract",
             subject: { kind: "pointer_key", value: "char:alice" },
-            predicate: "wears",
+            predicate: "holder_of",
             object: { kind: "pointer_key", value: "item:red_dress" },
             factText: "drop me",
           },
           {
             subject: { kind: "pointer_key", value: "char:alice" },
-            predicate: "holds",
+            predicate: "holder_of",
             object: { kind: "pointer_key", value: "item:lantern" },
             factText: "Alice holds a lantern.",
           },
         ],
       });
       expect(result.worldStateOps).toHaveLength(1);
-      expect(result.worldStateOps[0]?.predicate).toBe("holds");
+      expect(result.worldStateOps[0]?.predicate).toBe("holder_of");
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0]?.[0]).toContain("retract");
     } finally {
@@ -1486,6 +1527,16 @@ describe("makeSubmitRpTurnTool — schema declares worldStateOps assert-only con
     expect(wso.items.properties.contradictedFactEdgeIds).toBeDefined();
     expect(wso.items.properties.contradictedFactEdgeIds.type).toBe("array");
     expect(wso.items.properties.contradictedFactEdgeIds.items?.type).toBe("number");
+  });
+
+  it("declares predicate as the controlled v1 enum", () => {
+    const tool = makeSubmitRpTurnTool();
+    const params = tool.parameters as { properties: Record<string, unknown> };
+    const wso = params.properties.worldStateOps as {
+      items: { properties: Record<string, { enum?: unknown[]; description?: string }> };
+    };
+    expect(wso.items.properties.predicate.enum).toEqual([...FACT_EDGE_PREDICATES]);
+    expect(wso.items.properties.predicate.description).toContain("Controlled fact_edges predicate");
   });
 
   it("attaches SUBMIT_RP_TURN_ARTIFACT_CONTRACTS to the tool's artifactContracts field", async () => {

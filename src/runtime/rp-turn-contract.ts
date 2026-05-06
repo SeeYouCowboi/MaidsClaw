@@ -1,9 +1,9 @@
+import { normalizeEntityMentions } from "../memory/entity-mentions.js";
 import type {
   AreaFactExposureScope,
   SceneFactSourceKind,
   WorldFactExposureScope,
 } from "../storage/domain-repos/contracts/area-world-projection-repo.js";
-import { normalizeEntityMentions } from "../memory/entity-mentions.js";
 
 export type CognitionEntityRef =
   | { kind: "pointer_key"; value: string }
@@ -184,6 +184,87 @@ export type ActionCommitment = {
 };
 
 /**
+ * Controlled v1 predicates for `fact_edges` written by worldStateOps.
+ *
+ * Direction/type contract:
+ * - `location_of`: directed; source char/item/event is located at target loc.
+ * - `holder_of`: directed; source char/agent/container holds target item.
+ * - `knows`: directed; source char knows target char; emit reciprocal edges only
+ *   when both directions are asserted.
+ * - `met_at`: directed; source char was encountered at target loc.
+ * - `communicates_with`: symmetric relationship between chars; store as directed
+ *   edge(s), emitting two edges when mutual evidence is needed.
+ * - `trusts`: directed; source char trusts target char/group.
+ * - `affiliated_with`: directed; source entity is affiliated with target
+ *   group/loc/household.
+ * - `conflicts_with`: symmetric relationship for char↔char or char↔group;
+ *   store as directed edge(s), emitting two edges when both directions matter.
+ * - `same_as`: symmetric semantic equivalence fact. It is fact data only and
+ *   MUST NOT mutate `entity_aliases` or trigger automatic alias merges.
+ * - `contrasts_with`: symmetric semantic contrast. Retrieval may downweight;
+ *   it must never use this predicate for hard exclusion.
+ *
+ * Contradiction behavior: worldStateOps remain assert-only; only explicit
+ * `contradictedFactEdgeIds` may invalidate prior current facts. No predicate is
+ * transitive in v1 unless a future retriever derives that separately; writers
+ * must persist only the asserted directed edge(s).
+ */
+export type FactEdgePredicate =
+  | "location_of"
+  | "holder_of"
+  | "knows"
+  | "met_at"
+  | "communicates_with"
+  | "trusts"
+  | "affiliated_with"
+  | "conflicts_with"
+  | "same_as"
+  | "contrasts_with";
+
+export const FACT_EDGE_PREDICATES = [
+  "location_of",
+  "holder_of",
+  "knows",
+  "met_at",
+  "communicates_with",
+  "trusts",
+  "affiliated_with",
+  "conflicts_with",
+  "same_as",
+  "contrasts_with",
+] as const satisfies readonly FactEdgePredicate[];
+
+const FACT_EDGE_PREDICATE_SET: ReadonlySet<string> = new Set(
+  FACT_EDGE_PREDICATES,
+);
+
+export function isValidFactEdgePredicate(
+  predicate: string,
+): predicate is FactEdgePredicate {
+  return FACT_EDGE_PREDICATE_SET.has(predicate);
+}
+
+export type UnknownFactEdgePredicateInventoryRow = {
+  predicate: string;
+  count: number;
+};
+
+export function inventoryUnknownFactEdgePredicates(
+  predicates: Iterable<string>,
+): UnknownFactEdgePredicateInventoryRow[] {
+  const counts = new Map<string, number>();
+  for (const predicate of predicates) {
+    if (!isValidFactEdgePredicate(predicate)) {
+      counts.set(predicate, (counts.get(predicate) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(counts, ([predicate, count]) => ({ predicate, count })).sort(
+    (left, right) => left.predicate.localeCompare(right.predicate),
+  );
+}
+
+/**
  * WorldStateOp — entity→entity world-state fact edge asserted by an RP turn.
  *
  * MVP semantics (assert-only):
@@ -192,13 +273,15 @@ export type ActionCommitment = {
  *   processors must never call an LLM to detect contradictions synchronously.
  * - `visibility` defaults to `"private_overlay"` for agent-private RP facts.
  *
- * Predicate is free-form natural language; do not enforce a closed vocabulary.
+ * Predicate is runtime-validated against {@link FACT_EDGE_PREDICATES}. The
+ * public TypeScript shape still allows `string` for legacy/caller compatibility;
+ * invalid values are rejected before any `fact_edges` write.
  * factText is the human-readable form of the fact (conversation language).
  */
 export type WorldStateOp = {
   localRef?: string;
   subject: { kind: "pointer_key" | "special"; value: string };
-  predicate: string;
+  predicate: FactEdgePredicate | string;
   object: { kind: "pointer_key" | "special"; value: string };
   factText: string;
   contradictedFactEdgeIds?: number[];

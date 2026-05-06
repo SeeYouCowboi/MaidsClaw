@@ -1,6 +1,9 @@
 import { MaidsClawError } from "../core/errors.js";
 import type { ArtifactContract, ToolDefinition } from "../core/tools/tool-definition.js";
-import { normalizeRpTurnOutcome } from "./rp-turn-contract.js";
+import {
+  FACT_EDGE_PREDICATES,
+  normalizeRpTurnOutcome,
+} from "./rp-turn-contract.js";
 
 export const SUBMIT_RP_TURN_ARTIFACT_CONTRACTS: Record<string, ArtifactContract> = {
   publicReply: {
@@ -272,7 +275,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
             "OPTIONAL entity→entity world-state fact edges. DISTINCT from actionCommitments (which commit physical scene facts like holder/location/status). " +
             "Use worldStateOps for relational facts between two entities (people/places/items/concepts) — e.g. 'silver pocket watch is in the tea room', 'Alice trusts Bob', 'the locket belongs to mother'. " +
             "Each op is an ASSERTION of a new current fact (no `op` field; assert-only in MVP). To invalidate prior contradicting facts, list their edge ids in `contradictedFactEdgeIds`. " +
-            "predicate and factText are FREE-FORM natural language in the conversation language — do NOT use a closed vocabulary. " +
+            "predicate MUST be one of the controlled v1 fact_edges predicates: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with. factText remains free-form conversation-language text. " +
+            "same_as is a semantic fact only and must not imply alias mutation; contrasts_with is downweight-only and never exclusion. " +
             "visibility defaults to 'private_overlay' (agent-private RP fact); use 'shared_public' only when the fact should be observable by other agents/world.",
           items: {
             type: "object",
@@ -288,7 +292,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
               },
               predicate: {
                 type: "string",
-                description: "Free-form natural-language predicate in the conversation language (e.g. '放在', 'trusts', '属于').",
+                enum: [...FACT_EDGE_PREDICATES],
+                description: "Controlled fact_edges predicate. Use exactly one of: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with.",
               },
               object: {
                 type: "object",
