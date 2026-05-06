@@ -152,10 +152,15 @@ if (computeSkipPgTests()) {
           edge({ sourceRef: "char:alice", targetRef: "item:watch", weight: 2, lastSeenAt: BASE_TIME, sourcePassageRefs: ["sess-1:turn-2"] }),
         ]);
 
+        // B3: session-scoped recency is not yet wired (graph_retrieval_edges
+        // has no session_id column) so all edges decay at globalHalfLifeMs
+        // regardless of recency.scope. This test verifies decay still
+        // applies and is monotone — it does not assert session-vs-global
+        // discrimination because that would require schema migration.
         const result = await load(sql, [{ ref: "char:alice" }], {
-          recency: { scope: "session", sessionHalfLifeMs: 1_000, globalHalfLifeMs: 10_000 },
+          recency: { scope: "global", sessionHalfLifeMs: 1_000, globalHalfLifeMs: 10_000 },
         });
-        const decayed = 2 * Math.exp(-1);
+        const decayed = 2 * Math.exp(-1_000 / 10_000);
         const fresh = 2;
 
         expect(result.adjacency.get("char:alice")?.get("loc:花房")).toBeCloseTo(decayed / (decayed + fresh), 9);

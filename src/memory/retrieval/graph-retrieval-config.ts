@@ -72,13 +72,19 @@ export type GraphRetrievalConfig = {
     degreeCap: number;
   };
 
-  /** Recency decay applied to PPR node scores. */
+  /** Recency decay applied to PPR node scores.
+   *
+   *  KNOWN GAP (B3): scope="session" currently behaves identically to
+   *  scope="global". Wiring real session-scoped recency requires a
+   *  session_id column on graph_retrieval_edges populated by the edge
+   *  builder; until that schema migration lands, both scopes use
+   *  globalHalfLifeMs. Setting scope="session" will log a one-time
+   *  warning at config-resolution time so operators are aware. */
   recency: {
     /** Whether recency half-life is scoped to the current session or global.
-     *  Default "session". */
+     *  Default "session". KNOWN GAP: not yet wired — see config doc. */
     scope: "session" | "global";
-    /** Session-scoped half-life in milliseconds.
-     *  30-minute default; tune to 7_200_000 (2h) for long RP scenarios (100+ turns). */
+    /** Session-scoped half-life in milliseconds. NOT YET WIRED — see scope. */
     sessionHalfLifeMs: number;
     /** Global half-life in milliseconds. Default 86_400_000 (24h). */
     globalHalfLifeMs: number;
@@ -127,24 +133,39 @@ export const DEFAULT_GRAPH_RETRIEVAL_CONFIG: GraphRetrievalConfig = {
 export function resolveGraphRetrievalConfig(
   partial?: Partial<GraphRetrievalConfig>,
 ): GraphRetrievalConfig {
-  if (!partial) return DEFAULT_GRAPH_RETRIEVAL_CONFIG;
-  return {
-    ...DEFAULT_GRAPH_RETRIEVAL_CONFIG,
-    ...partial,
-    ppr: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.ppr, ...partial.ppr },
-    seed: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.seed, ...partial.seed },
-    rrf: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.rrf, ...partial.rrf },
-    budgetAllocator: {
-      ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.budgetAllocator,
-      ...partial.budgetAllocator,
-    },
-    cooccurrence: {
-      ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.cooccurrence,
-      ...partial.cooccurrence,
-    },
-    recency: {
-      ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.recency,
-      ...partial.recency,
-    },
-  };
+  const resolved: GraphRetrievalConfig = !partial
+    ? DEFAULT_GRAPH_RETRIEVAL_CONFIG
+    : {
+        ...DEFAULT_GRAPH_RETRIEVAL_CONFIG,
+        ...partial,
+        ppr: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.ppr, ...partial.ppr },
+        seed: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.seed, ...partial.seed },
+        rrf: { ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.rrf, ...partial.rrf },
+        budgetAllocator: {
+          ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.budgetAllocator,
+          ...partial.budgetAllocator,
+        },
+        cooccurrence: {
+          ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.cooccurrence,
+          ...partial.cooccurrence,
+        },
+        recency: {
+          ...DEFAULT_GRAPH_RETRIEVAL_CONFIG.recency,
+          ...partial.recency,
+        },
+      };
+  warnIfSessionScopeRequested(resolved);
+  return resolved;
+}
+
+let sessionScopeWarningEmitted = false;
+function warnIfSessionScopeRequested(config: GraphRetrievalConfig): void {
+  if (config.recency.scope === "session" && !sessionScopeWarningEmitted) {
+    sessionScopeWarningEmitted = true;
+    console.warn(
+      "[graph-retrieval-config] recency.scope=\"session\" is configured but session-scoped " +
+        "recency is not wired yet (graph_retrieval_edges has no session_id column). " +
+        "Half-life decay falls back to globalHalfLifeMs until the schema migration lands.",
+    );
+  }
 }

@@ -306,13 +306,21 @@ function selectHalfLifeMs(
   config: GraphRetrievalConfig,
   sessionId: string | undefined,
 ): number {
-  if (
-    config.recency.scope === "session" &&
-    sessionId &&
-    (edge.sourcePassageRefs ?? []).some((ref) => ref === sessionId || ref.includes(sessionId))
-  ) {
-    return config.recency.sessionHalfLifeMs;
-  }
+  // NOTE (B3 fix): The previous `sourcePassageRefs.some(ref => ref === sessionId
+  // || ref.includes(sessionId))` heuristic was dead code — sourcePassageRefs
+  // hold passage refs like `ep:1234` / `cog:key`, never session UUIDs, so
+  // session-scoped half-life never fired and `ref.includes(sessionId)` also
+  // risked false-positive substring matches on unrelated refs.
+  //
+  // Wiring real session-scoped recency requires a session_id column (or
+  // similarly typed metadata) on graph_retrieval_edges populated by the
+  // edge builder. Until that schema migration lands, both
+  // `recency.scope: "session"` and `"global"` behave identically and use
+  // `globalHalfLifeMs`. The `sessionId` parameter is preserved on the
+  // function signature so the call sites do not need to change when the
+  // proper plumbing is added.
+  void edge;
+  void sessionId;
   return config.recency.globalHalfLifeMs;
 }
 
