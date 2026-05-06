@@ -57,7 +57,7 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
   return {
     name: "submit_rp_turn",
     description:
-      "Terminal tool for RP buffered turns. Captures the final outcome of an RP turn including the public reply, optional latent scratchpad, and optional private cognition commit. Must be the last tool call in an RP turn.",
+      "Terminal tool for RP buffered turns. Captures the final outcome of an RP turn including the public reply, optional latent scratchpad, private cognition, actionCommitments, and controlled-predicate worldStateOps. Must be the last tool call in an RP turn.",
     effectClass: "read_only",
     traceVisibility: "private_runtime",
     executionContract: {
@@ -272,8 +272,8 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         worldStateOps: {
           type: "array",
           description:
-            "OPTIONAL entity→entity world-state fact edges. DISTINCT from actionCommitments (which commit physical scene facts like holder/location/status). " +
-            "Use worldStateOps for relational facts between two entities (people/places/items/concepts) — e.g. 'silver pocket watch is in the tea room', 'Alice trusts Bob', 'the locket belongs to mother'. " +
+            "REQUIRED for durable entity→entity relation facts that should persist in fact_edges. DISTINCT from actionCommitments: actionCommitments commit immediate physical scene state (factKey namespaces location/holder/status), while worldStateOps commit durable relational memory between resolved entities. " +
+            "Use worldStateOps for relational facts between two entities (people/places/items/concepts) — e.g. 'silver pocket watch is in the tea room' => location_of, 'Alice trusts Bob' => trusts, 'the locket belongs to mother' => holder_of. " +
             "Each op is an ASSERTION of a new current fact (no `op` field; assert-only in MVP). To invalidate prior contradicting facts, list their edge ids in `contradictedFactEdgeIds`. " +
             "predicate MUST be one of the controlled v1 fact_edges predicates: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with. factText remains free-form conversation-language text. " +
             "same_as is a semantic fact only and must not imply alias mutation; contrasts_with is downweight-only and never exclusion. " +

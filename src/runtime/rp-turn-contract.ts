@@ -1334,6 +1334,11 @@ function normalizeWorldStateOps(raw: unknown): WorldStateOp[] {
         `worldStateOps[${index}].predicate must be a non-empty string`,
       );
     }
+    if (!isValidFactEdgePredicate(candidate.predicate.trim())) {
+      throw new Error(
+        `worldStateOps[${index}].predicate must be one of ${FACT_EDGE_PREDICATES.join(", ")}`,
+      );
+    }
     if (typeof candidate.factText !== "string" || candidate.factText.trim() === "") {
       throw new Error(
         `worldStateOps[${index}].factText must be a non-empty string`,
@@ -1342,7 +1347,7 @@ function normalizeWorldStateOps(raw: unknown): WorldStateOp[] {
 
     const op: WorldStateOp = {
       subject: { kind: candidate.subject.kind, value: candidate.subject.value },
-      predicate: candidate.predicate,
+      predicate: candidate.predicate.trim(),
       object: { kind: candidate.object.kind, value: candidate.object.value },
       factText: candidate.factText,
     };

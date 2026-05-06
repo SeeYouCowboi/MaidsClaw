@@ -1,0 +1,5 @@
+Task 6 worldStateOps persistence evidence
+timestamp=2026-05-06T17:49:33.9639764+08:00
+command=bun test test/pg-app/world-state-ops-persistence.test.ts test/pg-app/pg-graph-store-repo.test.ts --timeout 30000
+result=PASS (16 pass, 0 fail)
+coverage=valid scripted submit_rp_turn-style worldStateOps wrote fact_edges row with source_kind=settlement, source_ref=stl:worldstate-scripted:0, source_entity_id=loc:tea-room, target_entity_id=item:silver-watch, predicate=location_of, owner_agent_id=NULL for shared_public visibility.

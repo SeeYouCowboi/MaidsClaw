@@ -592,18 +592,43 @@ export class PgGraphMutableStoreRepo implements GraphMutableStoreRepo {
 
       const now = Date.now();
 
-      if ((params.contradictedFactEdgeIds?.length ?? 0) > 0) {
-        await tx`
-          UPDATE fact_edges
+		if ((params.contradictedFactEdgeIds?.length ?? 0) > 0) {
+			await tx`
+				UPDATE fact_edges
           SET t_invalid = ${now},
               t_expired = ${now}
           WHERE id IN ${tx(params.contradictedFactEdgeIds ?? [])}
             AND t_invalid = ${PG_MAX_BIGINT}
             AND (owner_agent_id IS NULL OR owner_agent_id = ${params.ownerAgentId ?? null})
-        `;
-      }
+			`;
+		}
 
-      try {
+		const activeDuplicate = await tx`
+			SELECT id
+			FROM fact_edges
+			WHERE source_entity_id = ${params.sourceEntityId}
+				AND predicate = ${params.predicate}
+				AND target_entity_id = ${params.targetEntityId}
+				AND t_invalid = ${PG_MAX_BIGINT}
+				AND (
+					(owner_agent_id IS NULL AND ${params.ownerAgentId}::text IS NULL)
+					OR owner_agent_id = ${params.ownerAgentId}
+				)
+			LIMIT 1
+		`;
+
+		if (activeDuplicate.length > 0) {
+			await tx`
+				UPDATE fact_edges
+				SET t_created = ${now},
+						t_valid = GREATEST(t_valid, ${params.tValid}),
+						fact_text = ${params.factText}
+				WHERE id = ${Number(activeDuplicate[0].id)}
+			`;
+			return { id: Number(activeDuplicate[0].id), created: false };
+		}
+
+		try {
         const rows = await tx`
           INSERT INTO fact_edges (
             source_entity_id,

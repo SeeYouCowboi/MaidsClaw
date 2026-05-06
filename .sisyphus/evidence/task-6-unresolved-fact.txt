@@ -1,0 +1,5 @@
+Task 6 unresolved worldStateOps evidence
+timestamp=2026-05-06T17:49:33.9639764+08:00
+command=bun test test/pg-app/world-state-ops-persistence.test.ts --timeout 30000
+result=PASS as part of focused PG world-state suite
+coverage=unresolved pointer object char:missing enqueued one unresolved_world_state_ops row with status=pending and inserted zero fact_edges rows; no orphan relation was written.

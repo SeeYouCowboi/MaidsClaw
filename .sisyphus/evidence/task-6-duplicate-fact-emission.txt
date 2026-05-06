@@ -1,0 +1,5 @@
+Task 6 duplicate fact emission evidence
+timestamp=2026-05-06T17:49:33.9639764+08:00
+command=bun test test/pg-app/world-state-ops-persistence.test.ts test/pg-app/pg-graph-store-repo.test.ts --timeout 30000
+result=PASS (16 pass, 0 fail)
+coverage=repeated active tuple (source_entity_id, predicate, target_entity_id, owner_agent_id) returned created=false on second settlement, refreshed t_valid/t_created/fact_text recency metadata, and left exactly one active fact_edges row.

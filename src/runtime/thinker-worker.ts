@@ -66,6 +66,7 @@ import {
 	canonicalizePointerKeysInEpisodes,
 } from "./canonicalize-pointer-keys.js";
 import {
+	FACT_EDGE_PREDICATES,
 	type AssertionBasis,
 	type AssertionProvenance,
 	type AssertionRecordV4,
@@ -104,6 +105,12 @@ export const THINKER_RELATION_AND_CONFLICT_INSTRUCTIONS = `## Thinker Structured
 4. EVALUATION STABILITY: For trust/X evaluations, the key MUST be exactly "trust/{entity}" (e.g. "trust/player"). NEVER create variant keys like "trust/player_revised". Upsert the same key.
 
 ### B. Grounding refs vs relation edges (STRICT SEPARATION)
+
+Durable entity→entity facts MUST be emitted as worldStateOps using exactly one controlled predicate: ${FACT_EDGE_PREDICATES.join(", ")}.
+- Use worldStateOps for persistent relation facts between entities (person/place/item/group/concept), e.g. Alice trusts Bob => trusts, watch is in tea room => location_of, locket belongs to mother => holder_of.
+- Keep worldStateOps distinct from actionCommitments: actionCommitments are immediate physical scene commits keyed by location:/holder:/status:, while worldStateOps are graph fact_edges between resolved entity refs.
+- Do not invent predicates. same_as is semantic fact data only (no alias merge). contrasts_with is retrieval downweight-only (never exclusion).
+- To replace a surfaced prior fact, include its fact_edges id in contradictedFactEdgeIds; otherwise repeated same subject/predicate/object refreshes recency instead of creating a second active edge.
 
 claimedGroundingRefs belongs to assertion records and is ONLY evidence/source trace for the claim itself.
 - Use request:<id>, settlement:<id>, episode:<localRef>, cognition:<key> prefixes exactly.

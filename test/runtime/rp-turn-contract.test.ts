@@ -605,6 +605,23 @@ describe("normalizeRpTurnOutcome", () => {
     ]);
   });
 
+  it("rejects worldStateOps predicates outside the controlled enum", () => {
+    expect(() =>
+      normalizeRpTurnOutcome({
+        schemaVersion: "rp_turn_outcome_v5",
+        publicReply: "asserted",
+        worldStateOps: [
+          {
+            subject: { kind: "pointer_key", value: "char:alice" },
+            predicate: "related_to",
+            object: { kind: "pointer_key", value: "char:bob" },
+            factText: "Alice is related to Bob.",
+          },
+        ],
+      })
+    ).toThrow("worldStateOps[0].predicate must be one of");
+  });
+
   it("drops worldStateOps entries carrying op:'retract' with a warn", () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -1537,6 +1554,18 @@ describe("makeSubmitRpTurnTool — schema declares worldStateOps assert-only con
     };
     expect(wso.items.properties.predicate.enum).toEqual([...FACT_EDGE_PREDICATES]);
     expect(wso.items.properties.predicate.description).toContain("Controlled fact_edges predicate");
+  });
+
+  it("instructs Thinker to use worldStateOps for durable relations instead of actionCommitments", () => {
+    const tool = makeSubmitRpTurnTool();
+    const params = tool.parameters as { properties: Record<string, unknown> };
+    const wso = params.properties.worldStateOps as { description?: string };
+    expect(tool.description).toContain("controlled-predicate worldStateOps");
+    expect(wso.description).toContain("REQUIRED for durable entity→entity relation facts");
+    expect(wso.description).toContain("DISTINCT from actionCommitments");
+    expect(wso.description).toContain("location_of");
+    expect(wso.description).toContain("holder_of");
+    expect(wso.description).toContain("trusts");
   });
 
   it("attaches SUBMIT_RP_TURN_ARTIFACT_CONTRACTS to the tool's artifactContracts field", async () => {

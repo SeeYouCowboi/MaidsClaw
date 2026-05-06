@@ -429,6 +429,68 @@ describe.skipIf(skipPgTests)(
       });
     });
 
+    it("repeated active world-state relation refreshes recency instead of inserting a duplicate", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapTruthSchema(sql);
+        const repo = new PgGraphMutableStoreRepo(sql);
+
+        const sourceId = await repo.upsertEntity({
+          pointerKey: "char:repeat-alice",
+          displayName: "Repeat Alice",
+          entityType: "person",
+          memoryScope: "shared_public",
+        });
+        const targetId = await repo.upsertEntity({
+          pointerKey: "char:repeat-bob",
+          displayName: "Repeat Bob",
+          entityType: "person",
+          memoryScope: "shared_public",
+        });
+
+        const first = await repo.createWorldStateFactEdge({
+          sourceEntityId: sourceId,
+          targetEntityId: targetId,
+          predicate: "trusts",
+          factText: "Alice trusts Bob.",
+          ownerAgentId: "agent-repeat",
+          sourceKind: "settlement",
+          sourceRef: "stl-repeat-1:0",
+          tValid: 1_000,
+        });
+        const second = await repo.createWorldStateFactEdge({
+          sourceEntityId: sourceId,
+          targetEntityId: targetId,
+          predicate: "trusts",
+          factText: "Alice still trusts Bob.",
+          ownerAgentId: "agent-repeat",
+          sourceKind: "settlement",
+          sourceRef: "stl-repeat-2:0",
+          tValid: 2_000,
+        });
+
+        expect(first.created).toBe(true);
+        expect(second.created).toBe(false);
+        expect(second.id).toBe(first.id);
+
+        const rows = await sql`
+          SELECT id, fact_text, t_valid, t_created, t_invalid::text AS t_invalid
+          FROM fact_edges
+          WHERE source_entity_id = ${sourceId}
+            AND predicate = 'trusts'
+            AND target_entity_id = ${targetId}
+            AND owner_agent_id = 'agent-repeat'
+          ORDER BY id ASC
+        `;
+
+        expect(rows).toHaveLength(1);
+        expect(Number(rows[0].id)).toBe(first.id);
+        expect(rows[0].fact_text).toBe("Alice still trusts Bob.");
+        expect(Number(rows[0].t_valid)).toBe(2_000);
+        expect(Number(rows[0].t_created)).toBeGreaterThanOrEqual(2_000);
+        expect(String(rows[0].t_invalid)).toBe(PG_MAX_BIGINT);
+      });
+    });
+
     it("createFact and explicit cognition writers keep deterministic provenance defaults", async () => {
       await withTestAppSchema(pool, async (sql) => {
         await bootstrapTruthSchema(sql);
@@ -574,7 +636,7 @@ describe.skipIf(skipPgTests)(
         });
         await queue.markResolved(resolved.id);
         const resolvedRow = await queue.getById(resolved.id);
-        expect(resolvedRow!.status).toBe("resolved");
+        expect(resolvedRow?.status).toBe("resolved");
 
         const retry = await queue.enqueueOp({
           sessionId: "s", settlementId: "stl-retry", opIndex: 0,
@@ -584,12 +646,12 @@ describe.skipIf(skipPgTests)(
           await queue.incrementRetry(retry.id, `attempt-${i}`);
         }
         let row = await queue.getById(retry.id);
-        expect(row!.status).toBe("pending");
-        expect(row!.payload.retryCount).toBe(DEAD_LETTER_THRESHOLD - 1);
+        expect(row?.status).toBe("pending");
+        expect(row?.payload.retryCount).toBe(DEAD_LETTER_THRESHOLD - 1);
 
         await queue.incrementRetry(retry.id, "final");
         row = await queue.getById(retry.id);
-        expect(row!.status).toBe("dead_letter");
+        expect(row?.status).toBe("dead_letter");
 
         const pending = await queue.listPending({ agentId: "agent-x" });
         expect(pending.find((p) => p.id === retry.id)).toBeUndefined();

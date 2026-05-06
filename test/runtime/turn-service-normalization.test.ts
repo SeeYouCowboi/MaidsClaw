@@ -460,7 +460,7 @@ describe("TurnService speaker normalization integration", () => {
 			worldStateOps: [
 				{
 					subject: { kind: "pointer_key", value: "item:silver_pocket_watch" },
-					predicate: "放在",
+					predicate: "location_of",
 					object: { kind: "pointer_key", value: "loc:tea_room" },
 					factText: "银怀表放在茶室",
 					visibility: "private_overlay",
@@ -488,7 +488,7 @@ describe("TurnService speaker normalization integration", () => {
 		expect(Array.isArray(payload?.worldStateOps)).toBe(true);
 		expect(payload?.worldStateOps).toHaveLength(1);
 		expect(payload?.worldStateOps?.[0]).toMatchObject({
-			predicate: "放在",
+			predicate: "location_of",
 			factText: "银怀表放在茶室",
 		});
 	});

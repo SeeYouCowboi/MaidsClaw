@@ -1143,6 +1143,12 @@ describe("Thinker Worker batch collapse (R-P3-02)", () => {
 			recentCognitionSlotRepo: createSlotRepo(),
 			createAgentLoop: () => null,
 			jobPersistence: createMockJobPersistence(),
+			runWorldEntitySeed: async () => ({
+				seeded: 0,
+				embedded: 0,
+				skipped: true,
+				reason: "unit-test",
+			}),
 			pgFactory: {
 				type: "pg",
 				initialize: async () => undefined,
