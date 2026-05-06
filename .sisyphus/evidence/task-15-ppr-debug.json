@@ -1,0 +1,16 @@
+{
+  "mode": "ppr_debug",
+  "note": "example output - no live DB required",
+  "seeds": [],
+  "visible_graph_node_count": 0,
+  "visible_graph_edge_count": 0,
+  "top_ppr_nodes": [],
+  "top_ppr_episodes": [],
+  "top_ppr_cognitions": [],
+  "fallback_reason": "no_seeds",
+  "fact_edges_count_at_query_time": 0,
+  "rrf_contribution": {
+    "graph_ppr_episode": 0,
+    "graph_ppr_cognition": 0
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mode": "emission_stats",
+  "note": "example output - no live DB required",
+  "total_fact_edges": 0,
+  "predicate_distribution": {},
+  "unresolved_ratio": 0,
+  "warning": "zero emissions detected — graph will be empty"
+}

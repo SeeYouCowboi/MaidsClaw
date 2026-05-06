@@ -1,0 +1,15 @@
+{
+  "mode": "dry_run",
+  "note": "example output - no live DB required",
+  "edge_counts_by_kind": {
+    "mention": 0,
+    "cooccurrence": 0,
+    "fact": 0,
+    "semantic": 0,
+    "logic": 0
+  },
+  "edge_counts_by_scope": {},
+  "unknown_predicate_rows": [],
+  "active_run_id": null,
+  "total_edges": 0
+}
