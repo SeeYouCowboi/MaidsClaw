@@ -1,0 +1,16 @@
+Command: bun test test/pg-app/ --timeout 30000
+Result: PASS
+
+Relevant coverage:
+- test/pg-app/pg-graph-retrieval-edge-repo.test.ts inserts duplicate identical rebuild inputs within each run and swaps from rebuild-1 to rebuild-2.
+- insertBatch deduplicates duplicate source_hash rows per run and ON CONFLICT updates existing run rows.
+- Active edge set after rebuild-2 matches rebuild-1 semantically, with no active duplicates by (source_ref, target_ref, edge_kind, owner_agent_id).
+
+Suite result observed:
+- 365 pass
+- 0 fail
+- 1344 expect() calls
+- Ran 365 tests across 44 files.
+
+Command: bun run build
+Result: PASS

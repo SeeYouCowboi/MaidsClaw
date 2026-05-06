@@ -1,0 +1,17 @@
+Command: bun test test/pg-app/ --timeout 30000
+Result: PASS
+
+Relevant coverage:
+- test/pg-app/pg-graph-retrieval-edge-repo.test.ts verifies inactive partial runs are invisible to loadActiveEdges().
+- test/pg-app/pg-graph-retrieval-edge-repo.test.ts verifies activateRun() makes inserted rows visible.
+- test/pg-app/pg-graph-retrieval-edge-repo.test.ts verifies atomicSwapRun() deactivates old-run and activates new-run in one transaction using sql.begin().
+- test/pg-app/pg-graph-retrieval-privacy.test.ts now boots graph_retrieval_edges and confirms no hidden active bridge row leaks into visible retrieval.
+
+Suite result observed:
+- 365 pass
+- 0 fail
+- 1344 expect() calls
+- Ran 365 tests across 44 files.
+
+Command: bun run build
+Result: PASS
