@@ -1,5 +1,40 @@
 import type { EntityAlias } from "../../../memory/types.js";
 
+export type AliasLifecycleStatusValue = "active" | "pending_review" | "conflicted" | "deprecated";
+
+export type AliasLifecycleCreate = {
+  canonicalId: number;
+  alias: string;
+  aliasType?: string;
+  ownerAgentId?: string;
+  status?: AliasLifecycleStatusValue;
+  conflictGroupKey?: string | null;
+  reviewReason?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: number | null;
+  sourceKind?: string | null;
+  sourceRef?: string | null;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+export type AliasLifecycleStatus = {
+  id: number;
+  canonicalId: number;
+  alias: string;
+  aliasType: string | null;
+  ownerAgentId: string | null;
+  status: AliasLifecycleStatusValue;
+  conflictGroupKey: string | null;
+  reviewReason: string | null;
+  reviewedBy: string | null;
+  reviewedAt: number | null;
+  sourceKind: string | null;
+  sourceRef: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export interface AliasRepo {
   resolveAlias(alias: string, ownerAgentId?: string): Promise<number | null>;
 
@@ -11,6 +46,10 @@ export interface AliasRepo {
     aliasType?: string,
     ownerAgentId?: string,
   ): Promise<number>;
+
+  createAliasWithLifecycle(params: AliasLifecycleCreate): Promise<number>;
+
+  getAliasLifecycleStatus(alias: string, ownerAgentId?: string): Promise<AliasLifecycleStatus | null>;
 
   getAliasesForEntity(canonicalId: number, ownerAgentId?: string): Promise<EntityAlias[]>;
 

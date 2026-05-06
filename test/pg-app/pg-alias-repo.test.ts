@@ -16,8 +16,23 @@ async function bootstrapAliasSchema(sql: postgres.Sql): Promise<void> {
       canonical_id     BIGINT NOT NULL,
       alias            TEXT NOT NULL,
       alias_type       TEXT,
-      owner_agent_id   TEXT
+      owner_agent_id   TEXT,
+      status           TEXT NOT NULL DEFAULT 'active',
+      conflict_group_key TEXT,
+      review_reason    TEXT,
+      reviewed_by      TEXT,
+      reviewed_at      BIGINT,
+      source_kind      TEXT,
+      source_ref       TEXT,
+      created_at       BIGINT NOT NULL DEFAULT 0,
+      updated_at       BIGINT NOT NULL DEFAULT 0
     )
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_aliases_active_unique
+      ON entity_aliases (LOWER(alias), COALESCE(owner_agent_id, '__shared__'))
+      WHERE status = 'active'
   `);
 
   await sql.unsafe(`
@@ -215,6 +230,30 @@ describe.skipIf(skipPgTests)("PgAliasRepo", () => {
         expect(result).toBeNull();
       });
     });
+
+    it("excludes pending_review, conflicted, and deprecated aliases from resolution", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        await sql`
+          INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id, status)
+          VALUES (100, 'pending-alias', 'nickname', NULL, 'pending_review'),
+                 (200, 'conflicted-alias', 'nickname', NULL, 'conflicted'),
+                 (300, 'deprecated-alias', 'nickname', NULL, 'deprecated')
+        `;
+
+        const result = await repo.resolveAliases([
+          "pending-alias",
+          "conflicted-alias",
+          "deprecated-alias",
+        ]);
+
+        expect(result.get("pending-alias")).toBeNull();
+        expect(result.get("conflicted-alias")).toBeNull();
+        expect(result.get("deprecated-alias")).toBeNull();
+      });
+    });
   });
 
   describe("resolveAliases", () => {
@@ -291,15 +330,21 @@ describe.skipIf(skipPgTests)("PgAliasRepo", () => {
       });
     });
 
-    it("allows same alias for different canonical entities", async () => {
+    it("rejects same active alias for different canonical entities in same owner scope", async () => {
       await withTestAppSchema(pool, async (sql) => {
         await bootstrapAliasSchema(sql);
         const repo = new PgAliasRepo(sql);
 
         const aliasId1 = await repo.createAlias(100, "shared-name", "nickname", "agent-a");
-        const aliasId2 = await repo.createAlias(200, "shared-name", "nickname", "agent-a");
+        let caught: Error | null = null;
+        try {
+          await repo.createAlias(200, "shared-name", "nickname", "agent-a");
+        } catch (e: unknown) {
+          caught = e instanceof Error ? e : new Error(String(e));
+        }
 
-        expect(aliasId1).not.toBe(aliasId2);
+        expect(aliasId1).toBeGreaterThan(0);
+        expect(caught).not.toBeNull();
       });
     });
 
@@ -332,6 +377,153 @@ describe.skipIf(skipPgTests)("PgAliasRepo", () => {
         }
         expect(row.alias_type).toBeNull();
         expect(row.owner_agent_id).toBeNull();
+      });
+    });
+
+    it("creates active aliases with lifecycle timestamps by default", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        const before = Date.now();
+        const aliasId = await repo.createAlias(100, "timestamped-alias");
+        const after = Date.now();
+
+        const rows = await sql`SELECT status, created_at, updated_at FROM entity_aliases WHERE id = ${aliasId}`;
+        expect(rows[0].status).toBe("active");
+        expect(Number(rows[0].created_at)).toBeGreaterThanOrEqual(before);
+        expect(Number(rows[0].created_at)).toBeLessThanOrEqual(after);
+        expect(Number(rows[0].updated_at)).toBe(Number(rows[0].created_at));
+      });
+    });
+  });
+
+  describe("alias lifecycle", () => {
+    it("appends conflicting alias row without changing active resolution", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        const activeId = await repo.createAliasWithLifecycle({
+          canonicalId: 100,
+          alias: "same-name",
+          aliasType: "nickname",
+          ownerAgentId: "agent-a",
+          sourceKind: "manual",
+          sourceRef: "seed:100",
+          createdAt: 10,
+          updatedAt: 10,
+        });
+        const conflictedId = await repo.createAliasWithLifecycle({
+          canonicalId: 200,
+          alias: "SAME-NAME",
+          aliasType: "nickname",
+          ownerAgentId: "agent-a",
+          sourceKind: "settlement",
+          sourceRef: "settlement:200",
+          reviewedBy: "alias-reviewer",
+          reviewedAt: 20,
+          createdAt: 20,
+          updatedAt: 20,
+        });
+
+        expect(conflictedId).not.toBe(activeId);
+        expect(await repo.resolveAlias("same-name", "agent-a")).toBe(100);
+
+        const rows = await sql`
+          SELECT id, canonical_id, status, conflict_group_key, review_reason, reviewed_by, reviewed_at
+          FROM entity_aliases
+          WHERE LOWER(alias) = LOWER('same-name') AND owner_agent_id = 'agent-a'
+          ORDER BY id ASC
+        `;
+        expect(rows.length).toBe(2);
+        expect(rows[0].status).toBe("active");
+        expect(rows[0].canonical_id).toBe(100);
+        expect(rows[1].status).toBe("conflicted");
+        expect(rows[1].canonical_id).toBe(200);
+        expect(rows[1].conflict_group_key).toBe("same-name:agent-a");
+        expect(rows[1].review_reason).toContain("100");
+        expect(rows[1].reviewed_by).toBe("alias-reviewer");
+        expect(rows[1].reviewed_at).toBe(20);
+      });
+    });
+
+    it("creates and reads pending_review lifecycle status", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+        const repo = new PgAliasRepo(sql);
+
+        const aliasId = await repo.createAliasWithLifecycle({
+          canonicalId: 300,
+          alias: "review-me",
+          aliasType: "backfill_candidate",
+          status: "pending_review",
+          reviewReason: "low-confidence backfill",
+          sourceKind: "backfill",
+          sourceRef: "batch:17",
+          createdAt: 111,
+          updatedAt: 222,
+        });
+
+        const status = await repo.getAliasLifecycleStatus("REVIEW-ME");
+        expect(status).not.toBeNull();
+        if (!status) {
+          throw new Error("expected lifecycle status");
+        }
+        expect(status.id).toBe(aliasId);
+        expect(status.canonicalId).toBe(300);
+        expect(status.alias).toBe("review-me");
+        expect(status.aliasType).toBe("backfill_candidate");
+        expect(status.ownerAgentId).toBeNull();
+        expect(status.status).toBe("pending_review");
+        expect(status.reviewReason).toBe("low-confidence backfill");
+        expect(status.sourceKind).toBe("backfill");
+        expect(status.sourceRef).toBe("batch:17");
+        expect(status.createdAt).toBe(111);
+        expect(status.updatedAt).toBe(222);
+      });
+    });
+
+    it("partial unique active index allows multiple non-active rows", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+
+        await sql`
+          INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id, status)
+          VALUES (100, 'duplicate-review', 'nickname', NULL, 'pending_review'),
+                 (200, 'DUPLICATE-REVIEW', 'nickname', NULL, 'conflicted'),
+                 (300, 'duplicate-review', 'nickname', NULL, 'deprecated')
+        `;
+
+        const rows = await sql`
+          SELECT COUNT(*) AS count
+          FROM entity_aliases
+          WHERE LOWER(alias) = LOWER('duplicate-review')
+        `;
+        expect(Number(rows[0].count)).toBe(3);
+      });
+    });
+
+    it("partial unique active index prevents two active rows for same normalized alias and owner", async () => {
+      await withTestAppSchema(pool, async (sql) => {
+        await bootstrapAliasSchema(sql);
+
+        await sql`
+          INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id, status)
+          VALUES (100, 'Unique-Name', 'nickname', 'agent-a', 'active')
+        `;
+
+        let caught: Error | null = null;
+        try {
+          await sql`
+            INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id, status)
+            VALUES (200, 'unique-name', 'nickname', 'agent-a', 'active')
+          `;
+        } catch (e: unknown) {
+          caught = e instanceof Error ? e : new Error(String(e));
+        }
+
+        expect(caught).not.toBeNull();
       });
     });
   });

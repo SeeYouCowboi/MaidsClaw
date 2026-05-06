@@ -1,9 +1,50 @@
 import type postgres from "postgres";
 import type { EntityAlias } from "../../../memory/types.js";
-import type { AliasRepo } from "../contracts/alias-repo.js";
+import type {
+  AliasLifecycleCreate,
+  AliasLifecycleStatus,
+  AliasLifecycleStatusValue,
+  AliasRepo,
+} from "../contracts/alias-repo.js";
 
 function normalizeLookupText(raw: string): string {
   return raw.normalize("NFKC").trim();
+}
+
+type AliasLifecycleRow = {
+  id: number;
+  canonical_id: number;
+  alias: string;
+  alias_type: string | null;
+  owner_agent_id: string | null;
+  status: AliasLifecycleStatusValue;
+  conflict_group_key: string | null;
+  review_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: number | null;
+  source_kind: string | null;
+  source_ref: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+function toAliasLifecycleStatus(row: AliasLifecycleRow): AliasLifecycleStatus {
+  return {
+    id: Number(row.id),
+    canonicalId: Number(row.canonical_id),
+    alias: row.alias,
+    aliasType: row.alias_type,
+    ownerAgentId: row.owner_agent_id,
+    status: row.status,
+    conflictGroupKey: row.conflict_group_key,
+    reviewReason: row.review_reason,
+    reviewedBy: row.reviewed_by,
+    reviewedAt: row.reviewed_at === null ? null : Number(row.reviewed_at),
+    sourceKind: row.source_kind,
+    sourceRef: row.source_ref,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 export class PgAliasRepo implements AliasRepo {
@@ -21,6 +62,7 @@ export class PgAliasRepo implements AliasRepo {
         FROM entity_aliases
         WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
           AND owner_agent_id = ${ownerAgentId}
+          AND status = 'active'
         ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END
         LIMIT 1
       `;
@@ -34,6 +76,7 @@ export class PgAliasRepo implements AliasRepo {
       FROM entity_aliases
       WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
         AND owner_agent_id IS NULL
+        AND status = 'active'
       ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END
       LIMIT 1
     `;
@@ -95,6 +138,7 @@ export class PgAliasRepo implements AliasRepo {
           AND alias = ${alias}
           AND alias_type IS NULL
           AND owner_agent_id IS NULL
+          AND status = 'active'
         LIMIT 1
       `;
     } else if (aliasType === undefined) {
@@ -108,6 +152,7 @@ export class PgAliasRepo implements AliasRepo {
           AND alias = ${alias}
           AND alias_type IS NULL
           AND owner_agent_id = ${owner}
+          AND status = 'active'
         LIMIT 1
       `;
     } else if (ownerAgentId === undefined) {
@@ -118,6 +163,7 @@ export class PgAliasRepo implements AliasRepo {
           AND alias = ${alias}
           AND alias_type = ${aliasType}
           AND owner_agent_id IS NULL
+          AND status = 'active'
         LIMIT 1
       `;
     } else {
@@ -128,6 +174,7 @@ export class PgAliasRepo implements AliasRepo {
           AND alias = ${alias}
           AND alias_type = ${aliasType}
           AND owner_agent_id = ${ownerAgentId}
+          AND status = 'active'
         LIMIT 1
       `;
     }
@@ -136,12 +183,148 @@ export class PgAliasRepo implements AliasRepo {
       return Number(existing[0].id);
     }
 
+    const now = Date.now();
     const inserted = await this.sql<{ id: number }[]>`
-      INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id)
-      VALUES (${canonicalId}, ${alias}, ${aliasType ?? null}, ${ownerAgentId ?? null})
+      INSERT INTO entity_aliases (canonical_id, alias, alias_type, owner_agent_id, status, created_at, updated_at)
+      VALUES (${canonicalId}, ${alias}, ${aliasType ?? null}, ${ownerAgentId ?? null}, 'active', ${now}, ${now})
       RETURNING id
     `;
     return Number(inserted[0].id);
+  }
+
+  async createAliasWithLifecycle(params: AliasLifecycleCreate): Promise<number> {
+    const requestedStatus = params.status ?? "active";
+    const now = Date.now();
+    const createdAt = params.createdAt ?? now;
+    const updatedAt = params.updatedAt ?? createdAt;
+    const conflictGroupKey = params.conflictGroupKey ?? this.conflictGroupKey(params.alias, params.ownerAgentId);
+    const existingActive = await this.findActiveAlias(params.alias, params.ownerAgentId);
+
+    if (existingActive && Number(existingActive.canonical_id) === params.canonicalId && requestedStatus === "active") {
+      return Number(existingActive.id);
+    }
+
+    const hasCanonicalConflict = existingActive && Number(existingActive.canonical_id) !== params.canonicalId;
+    const status: AliasLifecycleStatusValue = hasCanonicalConflict ? "conflicted" : requestedStatus;
+    const reviewReason = hasCanonicalConflict
+      ? params.reviewReason ?? `Alias conflicts with active canonical_id ${existingActive.canonical_id}`
+      : params.reviewReason ?? null;
+
+    const inserted = await this.sql<{ id: number }[]>`
+      INSERT INTO entity_aliases (
+        canonical_id,
+        alias,
+        alias_type,
+        owner_agent_id,
+        status,
+        conflict_group_key,
+        review_reason,
+        reviewed_by,
+        reviewed_at,
+        source_kind,
+        source_ref,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${params.canonicalId},
+        ${params.alias},
+        ${params.aliasType ?? null},
+        ${params.ownerAgentId ?? null},
+        ${status},
+        ${hasCanonicalConflict ? conflictGroupKey : params.conflictGroupKey ?? null},
+        ${reviewReason},
+        ${params.reviewedBy ?? null},
+        ${params.reviewedAt ?? null},
+        ${params.sourceKind ?? null},
+        ${params.sourceRef ?? null},
+        ${createdAt},
+        ${updatedAt}
+      )
+      RETURNING id
+    `;
+    return Number(inserted[0].id);
+  }
+
+  async getAliasLifecycleStatus(alias: string, ownerAgentId?: string): Promise<AliasLifecycleStatus | null> {
+    const lookup = normalizeLookupText(alias);
+    if (lookup.length === 0) {
+      return null;
+    }
+
+    const rows = ownerAgentId === undefined
+      ? await this.sql<AliasLifecycleRow[]>`
+          SELECT *
+          FROM entity_aliases
+          WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+            AND owner_agent_id IS NULL
+          ORDER BY
+            CASE status
+              WHEN 'active' THEN 0
+              WHEN 'conflicted' THEN 1
+              WHEN 'pending_review' THEN 2
+              WHEN 'deprecated' THEN 3
+              ELSE 4
+            END,
+            updated_at DESC,
+            id DESC
+          LIMIT 1
+        `
+      : await this.sql<AliasLifecycleRow[]>`
+          SELECT *
+          FROM entity_aliases
+          WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+            AND owner_agent_id = ${ownerAgentId}
+          ORDER BY
+            CASE status
+              WHEN 'active' THEN 0
+              WHEN 'conflicted' THEN 1
+              WHEN 'pending_review' THEN 2
+              WHEN 'deprecated' THEN 3
+              ELSE 4
+            END,
+            updated_at DESC,
+            id DESC
+          LIMIT 1
+        `;
+
+    if (rows.length === 0) {
+      return null;
+    }
+    return toAliasLifecycleStatus(rows[0]);
+  }
+
+  private conflictGroupKey(alias: string, ownerAgentId?: string): string {
+    return `${normalizeLookupText(alias).toLowerCase()}:${ownerAgentId ?? "__shared__"}`;
+  }
+
+  private async findActiveAlias(alias: string, ownerAgentId?: string): Promise<{ id: number; canonical_id: number } | null> {
+    const lookup = normalizeLookupText(alias);
+    if (lookup.length === 0) {
+      return null;
+    }
+
+    const rows = ownerAgentId === undefined
+      ? await this.sql<{ id: number; canonical_id: number }[]>`
+          SELECT id, canonical_id
+          FROM entity_aliases
+          WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+            AND owner_agent_id IS NULL
+            AND status = 'active'
+          ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END, id ASC
+          LIMIT 1
+        `
+      : await this.sql<{ id: number; canonical_id: number }[]>`
+          SELECT id, canonical_id
+          FROM entity_aliases
+          WHERE (alias = ${lookup} OR LOWER(alias) = LOWER(${lookup}))
+            AND owner_agent_id = ${ownerAgentId}
+            AND status = 'active'
+          ORDER BY CASE WHEN alias = ${lookup} THEN 0 ELSE 1 END, id ASC
+          LIMIT 1
+        `;
+
+    return rows[0] ?? null;
   }
 
   async getAliasesForEntity(canonicalId: number, ownerAgentId?: string): Promise<EntityAlias[]> {
@@ -246,6 +429,7 @@ export class PgAliasRepo implements AliasRepo {
       SELECT DISTINCT alias
       FROM entity_aliases
       WHERE owner_agent_id IS NULL
+        AND status = 'active'
       LIMIT ${LIMIT}
     `;
     return rows.map((r) => r.alias);
@@ -261,6 +445,7 @@ export class PgAliasRepo implements AliasRepo {
       SELECT DISTINCT alias
       FROM entity_aliases
       WHERE owner_agent_id = ${agentId}
+        AND status = 'active'
       LIMIT ${LIMIT}
     `;
     return rows.map((r) => r.alias);

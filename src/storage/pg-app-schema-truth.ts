@@ -252,9 +252,28 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
       canonical_id    INTEGER NOT NULL,
       alias           TEXT NOT NULL,
       alias_type      TEXT,
-      owner_agent_id  TEXT
+      owner_agent_id  TEXT,
+      status          TEXT NOT NULL DEFAULT 'active',
+      conflict_group_key TEXT,
+      review_reason   TEXT,
+      reviewed_by     TEXT,
+      reviewed_at     BIGINT,
+      source_kind     TEXT,
+      source_ref      TEXT,
+      created_at      BIGINT NOT NULL DEFAULT 0,
+      updated_at      BIGINT NOT NULL DEFAULT 0
     )
   `);
+
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS conflict_group_key TEXT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS review_reason TEXT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS reviewed_by TEXT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS reviewed_at BIGINT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS source_kind TEXT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS source_ref TEXT`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS created_at BIGINT NOT NULL DEFAULT 0`);
+  await sql.unsafe(`ALTER TABLE IF EXISTS entity_aliases ADD COLUMN IF NOT EXISTS updated_at BIGINT NOT NULL DEFAULT 0`);
 
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS idx_entity_aliases_alias_owner
@@ -264,6 +283,12 @@ export async function bootstrapTruthSchema(sql: postgres.Sql): Promise<void> {
   await sql.unsafe(`
     CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup_owner
       ON entity_aliases (LOWER(alias), owner_agent_id)
+  `);
+
+  await sql.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_aliases_active_unique
+      ON entity_aliases (LOWER(alias), COALESCE(owner_agent_id, '__shared__'))
+      WHERE status = 'active'
   `);
 
   await sql.unsafe(`
