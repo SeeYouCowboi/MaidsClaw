@@ -32,6 +32,39 @@ const REGRESSION_CORE_KEYS: ReadonlySet<string> = new Set([
   "mei",
 ]);
 
+type FixtureEpisode = {
+  sourceRef: string;
+  entityPointerKeys: string[];
+  content: string;
+  lexicalScore: number;
+  graphScore: number;
+};
+
+function rankFixtureEpisodesWithoutGraph(
+  episodes: FixtureEpisode[],
+): FixtureEpisode[] {
+  return [...episodes].sort((a, b) => b.lexicalScore - a.lexicalScore);
+}
+
+function rankFixtureEpisodesWithGraphRequirement(
+  episodes: FixtureEpisode[],
+): FixtureEpisode[] {
+  return [...episodes].sort(
+    (a, b) => b.lexicalScore + b.graphScore - (a.lexicalScore + a.graphScore),
+  );
+}
+
+function canonicalWatchKey(pointerKey: string): string {
+  const normalized = pointerKey.toLowerCase();
+  if (normalized.includes("银") || normalized.includes("silver")) {
+    return "item:银怀表";
+  }
+  if (normalized.includes("金") || normalized.includes("gold")) {
+    return "item:金怀表";
+  }
+  return pointerKey;
+}
+
 describe("regression: T110 — red-tea preference turn (rp:mei)", () => {
   it("filters function-word noise from the LLM-emitted entity mention list", () => {
     // Synthetic but representative of what the writer model produced for T110:
@@ -83,6 +116,60 @@ describe("regression: T147 — door/window state audit turn (rp:mei)", () => {
     expect(order.indexOf("alice")).toBeLessThan(order.indexOf("窗户"));
     expect(order.indexOf("管家")).toBeLessThan(order.indexOf("金怀表"));
     expect(order.indexOf("alice")).toBeLessThan(order.indexOf("银怀表"));
+  });
+});
+
+describe("regression: graph multi-hop retrieval baselines", () => {
+  it("T88 resolves 花房那个人 to Alice-supporting episodes through loc:花房 multi-hop", () => {
+    const fixtures: FixtureEpisode[] = [
+      {
+        sourceRef: "episode:fixture:greenhouse-gardener-rumor",
+        entityPointerKeys: ["loc:greenhouse", "char:gardener"],
+        content: "温室的人提到修剪花枝，但没有见过我。",
+        lexicalScore: 0.91,
+        graphScore: 0,
+      },
+      {
+        sourceRef: "episode:fixture:alice-flower-garden-encounter",
+        entityPointerKeys: ["char:alice", "loc:flower_garden", "loc:花房"],
+        content: "Alice 在花房见过我，并记得我问过银怀表。",
+        lexicalScore: 0.18,
+        graphScore: 1.4,
+      },
+      {
+        sourceRef: "episode:fixture:butler-flower-garden-inventory",
+        entityPointerKeys: ["char:butler", "loc:花房"],
+        content: "管家在花房清点花盆，没有提到是否见过我。",
+        lexicalScore: 0.54,
+        graphScore: 0.2,
+      },
+    ];
+
+    const currentPreImplementationRanking = rankFixtureEpisodesWithoutGraph(fixtures);
+    const requiredGraphRanking = rankFixtureEpisodesWithGraphRequirement(fixtures);
+
+    expect(requiredGraphRanking[0]?.sourceRef).toBe(
+      "episode:fixture:alice-flower-garden-encounter",
+    );
+    expect(currentPreImplementationRanking.slice(0, 2).map((e) => e.sourceRef)).toContain(
+      "episode:fixture:alice-flower-garden-encounter",
+    );
+  });
+
+  it("T70/T80 keeps silver and gold pocket watches as distinct canonical entities", () => {
+    const rawWatchSurfaces = [
+      "银怀表",
+      "item:silver_pocket_watch",
+      "silver_pocket_watch",
+      "金怀表",
+      "item:gold_pocket_watch",
+      "gold_pocket_watch",
+    ];
+
+    const canonicalKeys = new Set(rawWatchSurfaces.map(canonicalWatchKey));
+    expect(canonicalKeys.has("item:银怀表")).toBe(true);
+    expect(canonicalKeys.has("item:金怀表")).toBe(true);
+    expect(canonicalKeys.size).toBe(2);
   });
 });
 

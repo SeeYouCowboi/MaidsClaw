@@ -84,6 +84,37 @@
       "recall_k": 10,
       "tags": ["cross_agent", "leakage", "security", "cjk"],
       "notes": "Pass condition: zero results from agent-a scope. Agent-b may have its own episodes about 怀表, but must not see agent-a's episodes."
+    },
+    {
+      "id": "t88-alice-flower-garden",
+      "description": "Graph multi-hop: '花房那个人有没有见过我' should retrieve Alice-supporting episodes via loc:花房 co-occurrence edge",
+      "query": "花房那个人有没有见过我",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:alice-flower-garden-encounter",
+      "recall_k": 5,
+      "tags": ["zh", "multi-hop", "graph-ppr", "t88"],
+      "notes": "Requires graph PPR (Task 11). Will fail before implementation."
+    },
+    {
+      "id": "silver-watch-distinction",
+      "description": "Silver watch query must not confuse with gold watch; silver watch episodes stay separate",
+      "query": "银怀表在哪里",
+      "scope": "episode",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "episode:fixture:silver-watch-location",
+      "recall_k": 5,
+      "tags": ["zh", "watch-distinction", "t70", "t80"]
+    },
+    {
+      "id": "cognition-multihop",
+      "description": "Cognition multi-hop: commitment related to Alice accessible via flower_garden entity path",
+      "query": "Alice对我有什么承诺",
+      "scope": "cognition",
+      "agent_scope": "agent-a",
+      "expected_top_ref": "cognition:fixture:alice-flower-commitment",
+      "recall_k": 5,
+      "tags": ["zh", "multi-hop", "cognition", "graph-ppr"]
     }
   ]
 }
