@@ -494,10 +494,20 @@ async function evaluateCase(
 	if (orchestrator) {
 		// Orchestrator path: PPR signal joins FTS via RRF; trace lines emit
 		// to console.debug and are intercepted by the trace collector in run().
+		// rp_agent's default episodeBudget=6 would clamp recall@10 measurements
+		// to 6 hits — bypass via override so the benchmark can actually exercise
+		// the recall@5 / recall@10 metrics across the full top-N.
+		const episodeBudget = Math.max(limit, 10);
 		const result = await orchestrator.search(
 			row.query,
 			buildBenchmarkViewer(row.agentId),
 			"rp_agent",
+			{
+				override: {
+					episodeBudget,
+					maxNarrativeHits: limit,
+				},
+			},
 		);
 		hitRefs = result.typed.episode.map((hit) => hit.source_ref).slice(0, limit);
 	} else {
