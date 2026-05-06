@@ -1,0 +1,11 @@
+Task 10 Evidence: Deterministic PPR Convergence
+Test command: bun test test/memory/graph-ppr.test.ts --timeout 20000
+Result:
+bun test v1.3.10 (30e609e0)
+
+ 10 pass
+ 0 fail
+ 31 expect() calls
+Ran 10 tests across 1 file. [80.00ms]
+Two-node graph PPR verified: A (seed) score > B score, sum ≈ 1.0
+Determinism verified: 3 identical runs produce bitwise-equal results

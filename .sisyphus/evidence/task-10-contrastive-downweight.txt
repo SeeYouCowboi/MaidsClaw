@@ -1,0 +1,3 @@
+Task 10 Evidence: Contrastive Edge Downweights Score
+Contrastive path (weight=0.35) produces lower PPR score than associative (weight=1.0)
+Candidate with contrastive edge remains eligible (score > 0)
