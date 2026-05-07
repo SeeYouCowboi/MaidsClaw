@@ -328,7 +328,15 @@ export class OpenAIProvider implements ChatModelProvider, EmbeddingProvider {
       });
     }
 
+    // Explicit `disableThinking: false` from the agent (e.g. thinker mode) takes
+    // precedence over the provider's auto-disable. The original code OR'd them,
+    // which silently force-disabled thinking even on async thinker calls where
+    // we want to keep thinking on for structured-output quality (worldStateOps,
+    // etc.). We still honour explicit `true` and the auto path when the agent
+    // hasn't expressed an opinion.
+    const agentSaysEnableThinking = request.disableThinking === false;
     const thinkingDisabled =
+      !agentSaysEnableThinking &&
       (request.disableThinking || autoDisableThinking) &&
       (this.options.disableToolChoiceRequired || this.options.supportsThinkingControl);
 
