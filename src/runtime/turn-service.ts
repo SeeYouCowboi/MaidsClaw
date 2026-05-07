@@ -135,6 +135,167 @@ export class TurnService {
 		private readonly agentRegistry?: AgentRegistry,
 	) {}
 
+	// Per-session counter of consecutive thinker enqueues skipped via the low-info
+	// gate (see isLowInformationTurn). Capped at stalenessThreshold so the talker-
+	// thinker version gap never exceeds soft-block tolerance and degrades latency.
+	private readonly thinkerSkipCountBySession = new Map<string, number>();
+
+	// Per-session ring buffer of the last few intent signatures (sorted, joined
+	// keyword matches). Used by the intent-repetition skip rule: when the
+	// current turn carries the same signature as a very recent settled turn,
+	// re-running the thinker would just re-affirm beliefs the agent already
+	// holds. Capped at INTENT_HISTORY_LEN to bound memory.
+	private readonly recentIntentSigsBySession = new Map<string, string[]>();
+	private static readonly INTENT_HISTORY_LEN = 3;
+
+	/**
+	 * Detect "pure recall query" — short user message that's clearly a
+	 * question seeking remembered information, with no intent/commitment
+	 * language on either side. The agent's reply may be long (recall answers
+	 * tend to be detailed) but contains no NEW state worth thinking about.
+	 */
+	private static isPureRecallQuery(
+		trimmedUser: string,
+		trimmedReply: string,
+	): boolean {
+		if (trimmedUser.length === 0) return false;
+		if (trimmedUser.length > TurnService.PURE_RECALL_USER_LEN_MAX) return false;
+		if (TurnService.THINKER_INTENT_KEYWORDS.test(trimmedUser)) return false;
+		if (TurnService.THINKER_INTENT_KEYWORDS.test(trimmedReply)) return false;
+		const hasQuestionMark = /[?？]\s*$/.test(trimmedUser);
+		const hasQuestionWord = TurnService.THINKER_QUESTION_KEYWORDS.test(trimmedUser);
+		return hasQuestionMark || hasQuestionWord;
+	}
+
+	/**
+	 * Detect "acknowledgment-only" user message — pure social/back-channel
+	 * with no propositional content. These turns add no facts the thinker
+	 * could project even when the reply is medium-length descriptive text.
+	 */
+	private static isAcknowledgmentOnly(trimmedUser: string): boolean {
+		if (trimmedUser.length === 0) return false;
+		if (trimmedUser.length > TurnService.ACK_USER_LEN_MAX) return false;
+		return TurnService.THINKER_ACK_PATTERN.test(trimmedUser);
+	}
+
+	private getIntentSignature(userText: string, replyText: string): string {
+		const matches: string[] = [];
+		const userMatch = userText.match(TurnService.THINKER_INTENT_KEYWORDS_GLOBAL);
+		if (userMatch) matches.push(...userMatch);
+		const replyMatch = replyText.match(TurnService.THINKER_INTENT_KEYWORDS_GLOBAL);
+		if (replyMatch) matches.push(...replyMatch);
+		return [...new Set(matches)].sort().join("|");
+	}
+
+	private isRepeatedIntent(sessionId: string, signature: string): boolean {
+		if (signature.length === 0) return false;
+		const history = this.recentIntentSigsBySession.get(sessionId);
+		if (!history || history.length === 0) return false;
+		return history.includes(signature);
+	}
+
+	private rememberIntentSignature(sessionId: string, signature: string): void {
+		if (signature.length === 0) return;
+		const history = this.recentIntentSigsBySession.get(sessionId) ?? [];
+		history.push(signature);
+		while (history.length > TurnService.INTENT_HISTORY_LEN) {
+			history.shift();
+		}
+		this.recentIntentSigsBySession.set(sessionId, history);
+	}
+
+	/**
+	 * Returns true when the committed turn carries no signal worth thinker LLM
+	 * processing — talker has already extracted nothing (no entity mentions,
+	 * world-state ops, commitments, conflicts), the cognitive sketch is empty,
+	 * and neither side's text contains intent/belief language. The thinker would
+	 * early-return on such turns anyway; gating at the enqueue site removes job
+	 * queue churn and lets the safety counter (stalenessThreshold) bound the
+	 * worst-case staleness.
+	 *
+	 * Three additional skip signals layered on top of the original payload+text
+	 * gate:
+	 *   - **pure-recall query**: short user question with no intent keywords
+	 *     → reply may be long but has no new state
+	 *   - **acknowledgment-only**: user msg matches ack-pattern (嗯/好/谢谢/...)
+	 *   - **repeated intent**: same intent-keyword signature as a recent turn
+	 *     → re-running thinker would just re-affirm existing beliefs
+	 *
+	 * Each new signal is gated by `correctionSuspected` and the structured
+	 * payload checks above, so a turn carrying real changes still proceeds
+	 * to the thinker even if the user text looks like a question.
+	 */
+	private isLowInformationTurn(
+		payload: TurnSettlementPayload | undefined,
+		userText: string,
+		replyText: string,
+		sessionId: string,
+	): boolean {
+		if (payload) {
+			if ((payload.worldStateOps?.length ?? 0) > 0) return false;
+			if ((payload.entityMentions?.length ?? 0) > 0) return false;
+			if ((payload.actionCommitments?.length ?? 0) > 0) return false;
+			if ((payload.relationIntents?.length ?? 0) > 0) return false;
+			if ((payload.conflictFactors?.length ?? 0) > 0) return false;
+			if ((payload.privateEpisodes?.length ?? 0) > 0) return false;
+			if (payload.correctionSuspected) return false;
+			if (payload.cognitiveSketch && payload.cognitiveSketch.trim().length > 0) {
+				return false;
+			}
+		}
+
+		const trimmedUser = userText.trim();
+		const trimmedReply = replyText.trim();
+
+		// Signal 1: pure recall query — short question, no intent on either
+		// side. Skip regardless of reply length.
+		if (TurnService.isPureRecallQuery(trimmedUser, trimmedReply)) return true;
+
+		// Signal 2: acknowledgment-only — pure back-channel with no content.
+		if (TurnService.isAcknowledgmentOnly(trimmedUser)) return true;
+
+		// Signal 3: repeated intent — same matched-keyword set as recent turn.
+		// Only consult when the original gate would have rejected (intent
+		// keywords present), so we never mask a fresh first-occurrence intent.
+		const userIntentHit = TurnService.THINKER_INTENT_KEYWORDS.test(trimmedUser);
+		const replyIntentHit = TurnService.THINKER_INTENT_KEYWORDS.test(trimmedReply);
+		if (userIntentHit || replyIntentHit) {
+			const signature = this.getIntentSignature(trimmedUser, trimmedReply);
+			if (this.isRepeatedIntent(sessionId, signature)) {
+				return true;
+			}
+			return false;
+		}
+
+		if (trimmedUser.length >= TurnService.THINKER_LOW_INFO_USER_LEN_MAX) return false;
+		if (trimmedReply.length >= TurnService.THINKER_LOW_INFO_REPLY_LEN_MAX) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private static readonly THINKER_LOW_INFO_USER_LEN_MAX = 25;
+	private static readonly THINKER_LOW_INFO_REPLY_LEN_MAX = 60;
+	private static readonly PURE_RECALL_USER_LEN_MAX = 35;
+	private static readonly ACK_USER_LEN_MAX = 12;
+	private static readonly THINKER_INTENT_KEYWORDS =
+		/(承诺|保证|答应|记住|约定|不要|必须|一定|永远|绝不|永不|发誓|答应|喜欢|讨厌|相信|怀疑|拒绝|同意|说好)/;
+	// Global flag variant for collecting all matches (used by intent signature).
+	private static readonly THINKER_INTENT_KEYWORDS_GLOBAL =
+		/(承诺|保证|答应|记住|约定|不要|必须|一定|永远|绝不|永不|发誓|答应|喜欢|讨厌|相信|怀疑|拒绝|同意|说好)/g;
+	// Question particles + interrogatives common in CN dialogue. Matches whole
+	// utterances rather than fragments — paired with the "?" detector and the
+	// intent-keyword negation in isPureRecallQuery for confidence.
+	private static readonly THINKER_QUESTION_KEYWORDS =
+		/(吗|呢|什么|为什么|怎么|怎样|哪里|哪儿|哪个|谁|几时|多少|几点|是不是|有没有|对不对)/;
+	// Acknowledgment-only patterns: short closed responses that carry no
+	// proposition. Anchored ^...$ with optional trailing punctuation so we
+	// only match utterances that ARE the ack rather than utterances that
+	// contain one.
+	private static readonly THINKER_ACK_PATTERN =
+		/^(嗯+|哦+|啊+|呀+|好+(的|呀|啊|吧)?|是的|对|可以|行|谢谢|了解|明白|知道了|收到|没事|没问题|ok|okay)[。！？\.\!\?\s]*$/i;
+
 	setSettlementUnitOfWork(uow: SettlementUnitOfWork): void {
 		this.settlementUnitOfWork = uow;
 	}
@@ -817,30 +978,69 @@ export class TurnService {
 		phaseLog("after_mark_talker_committed");
 
 		if (this.jobPersistence && talkerTurnVersion !== undefined) {
-			const thinkerJobEntry = {
-				id: `thinker:${effectiveRequest.sessionId}:${settlementId}`,
-				jobType: "cognition.thinker" as const,
-				payload: {
-					sessionId: effectiveRequest.sessionId,
-					agentId: ownerAgentId,
-					settlementId,
-					talkerTurnVersion,
-					requestId,
-				} satisfies import("../jobs/durable-store.js").CognitionThinkerJobPayload,
-				status: "pending" as const,
-				maxAttempts: 3,
-			};
+			// Plan C: skip thinker enqueue when settlement carries no extractable
+			// signal AND we haven't already skipped enough turns to risk exceeding
+			// stalenessThreshold (which would force soft-block waits on the next
+			// turn). The cap matches stalenessThreshold so the gap stays bounded.
+			const forceInterval = Math.max(
+				1,
+				this.talkerThinkerConfig.stalenessThreshold,
+			);
+			const sessionKey = effectiveRequest.sessionId;
+			const skipCount = this.thinkerSkipCountBySession.get(sessionKey) ?? 0;
+			const userText = getLatestUserMessage(effectiveRequest.messages);
+			const replyText = effectivePublicReply ?? "";
+			const lowInfo = this.isLowInformationTurn(
+				settlementPayloadAfterCommit,
+				userText,
+				replyText,
+				sessionKey,
+			);
+			// Record this turn's intent signature regardless of the skip
+			// decision so the next call's repeated-intent check sees it.
+			this.rememberIntentSignature(
+				sessionKey,
+				this.getIntentSignature(userText, replyText),
+			);
 
-			try {
-				await this.jobPersistence.enqueue(thinkerJobEntry);
-			} catch (error: unknown) {
+			if (lowInfo && skipCount < forceInterval) {
+				const nextSkipCount = skipCount + 1;
+				this.thinkerSkipCountBySession.set(sessionKey, nextSkipCount);
 				this.traceLog(
 					requestId,
-					"warn",
-					`Thinker enqueue failed, retrying once: ${error instanceof Error ? error.message : String(error)}`,
+					"info",
+					`Thinker enqueue skipped (low-info turn, skipCount=${nextSkipCount}/${forceInterval})`,
 				);
-				await new Promise<void>((resolve) => setTimeout(resolve, 1000));
-				await this.jobPersistence.enqueue(thinkerJobEntry); // no catch — propagate
+			} else {
+				if (skipCount > 0) {
+					this.thinkerSkipCountBySession.set(sessionKey, 0);
+				}
+
+				const thinkerJobEntry = {
+					id: `thinker:${effectiveRequest.sessionId}:${settlementId}`,
+					jobType: "cognition.thinker" as const,
+					payload: {
+						sessionId: effectiveRequest.sessionId,
+						agentId: ownerAgentId,
+						settlementId,
+						talkerTurnVersion,
+						requestId,
+					} satisfies import("../jobs/durable-store.js").CognitionThinkerJobPayload,
+					status: "pending" as const,
+					maxAttempts: 3,
+				};
+
+				try {
+					await this.jobPersistence.enqueue(thinkerJobEntry);
+				} catch (error: unknown) {
+					this.traceLog(
+						requestId,
+						"warn",
+						`Thinker enqueue failed, retrying once: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+					await this.jobPersistence.enqueue(thinkerJobEntry); // no catch — propagate
+				}
 			}
 		}
 
