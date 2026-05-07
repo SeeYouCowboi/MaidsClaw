@@ -259,7 +259,7 @@ export function loadRuntimeConfig(options?: { runtimeFilePath?: string; cwd?: st
       judgeModelId:
         typeof ec.judgeModelId === "string" && ec.judgeModelId.trim().length > 0
           ? ec.judgeModelId.trim()
-          : "minimax/MiniMax-M2.7",
+          : "minimax/MiniMax-M2.7-highspeed",
       judgeEnabled:
         typeof ec.judgeEnabled === "boolean" ? ec.judgeEnabled : true,
       judgeBatchIntervalMs:

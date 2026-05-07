@@ -3581,7 +3581,7 @@ export async function handleRunEntityReconciliation(
   const sessionId =
     body.session_id ?? url.searchParams.get("session_id") ?? undefined;
 
-  const modelId = body.model_id ?? "minimax/MiniMax-M2.7";
+  const modelId = body.model_id ?? "minimax/MiniMax-M2.7-highspeed";
   try {
     const report = await sweeper.runSweep({
       modelId: modelId,

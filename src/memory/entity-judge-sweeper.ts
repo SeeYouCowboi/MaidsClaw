@@ -117,7 +117,7 @@ const JUDGE_TOOL: ChatToolDefinition = {
 };
 
 const DEFAULT_MAX_CANDIDATES_PER_KEY = 10;
-const DEFAULT_JUDGE_MODEL_ID = "minimax/MiniMax-M2.7";
+const DEFAULT_JUDGE_MODEL_ID = "minimax/MiniMax-M2.7-highspeed";
 // Upper bound on how many CJK pointer keys per sweep get a semantic
 // candidate lookup. Each call costs one slot in the embedding model's
 // per-second/per-minute quota. Sweeps run frequently and share the
