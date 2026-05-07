@@ -21,13 +21,21 @@ interface WorldEntitySeed {
  * Hardcoded location / object seeds that cannot be derived from persona cards.
  * These correspond to the world described in the persona `world` fields.
  */
+// Pointer keys use the typed prefix convention (`loc:` / `char:` / `item:`) so
+// they line up with what entity-judge-sweeper produces from talker
+// entityMentions (e.g. `char:alice`, `item:银怀表`). When the talker/thinker
+// emits a worldStateOp referencing one of these, the resolver finds the
+// pointer_key verbatim in `entity_nodes` and creates a fact_edge instead of
+// dropping the op into `unresolved_world_state_ops`.
 export const STATIC_WORLD_ENTITIES: WorldEntitySeed[] = [
-  { pointerKey: "茶室", displayName: "茶室", entityType: "location", summary: "庄园内靠窗的茶室，光线柔和，主人常在此饮茶" },
-  { pointerKey: "温室", displayName: "温室", entityType: "location", summary: "庄园温室，湿气较重，花木茂盛" },
-  { pointerKey: "花房", displayName: "花房", entityType: "location", summary: "庄园花房，湿润温暖，园丁偶尔打理" },
-  { pointerKey: "书房", displayName: "书房", entityType: "location", summary: "庄园书房，午后安静，台灯偏暗" },
-  { pointerKey: "管家", displayName: "管家", entityType: "character", summary: "庄园管家，负责库房清单和账目管理，爱打听消息" },
-  { pointerKey: "梅姨", displayName: "梅姨", entityType: "character", summary: "庄园厨娘，手艺好，嘴碎，与管家走得近" },
+  { pointerKey: "loc:茶室", displayName: "茶室", entityType: "location", summary: "庄园内靠窗的茶室，光线柔和，主人常在此饮茶" },
+  { pointerKey: "loc:温室", displayName: "温室", entityType: "location", summary: "庄园温室，湿气较重，花木茂盛" },
+  { pointerKey: "loc:花房", displayName: "花房", entityType: "location", summary: "庄园花房，湿润温暖，园丁偶尔打理" },
+  { pointerKey: "loc:书房", displayName: "书房", entityType: "location", summary: "庄园书房，午后安静，台灯偏暗" },
+  { pointerKey: "char:管家", displayName: "管家", entityType: "character", summary: "庄园管家，负责库房清单和账目管理，爱打听消息" },
+  { pointerKey: "char:梅姨", displayName: "梅姨", entityType: "character", summary: "庄园厨娘，手艺好，嘴碎，与管家走得近" },
+  { pointerKey: "item:银怀表", displayName: "银怀表", entityType: "object", summary: "主人随身携带的银壳怀表，常被遗落在茶室；对管家保密" },
+  { pointerKey: "item:金怀表", displayName: "金怀表", entityType: "object", summary: "主人祖父遗留的金壳怀表，约束是不借外人" },
 ];
 
 export async function seedWorldEntities(
@@ -48,11 +56,13 @@ export async function seedWorldEntities(
     // explicit settlement support phase (create_entity tool). Used for testing the
     // system's ability to introduce new entities through conversation.
     if (card.worldPresence === "introduced-via-conversation") continue;
-    // Skip if already covered by static seeds
-    if (seeds.some((s) => s.pointerKey === name)) continue;
+    const pointerKey = name.startsWith("char:") ? name : `char:${name}`;
+    // Skip if already covered by static seeds (compare against final pointerKey
+    // to avoid duplicate seeds when persona name overlaps a static one).
+    if (seeds.some((s) => s.pointerKey === pointerKey)) continue;
 
     seeds.push({
-      pointerKey: name,
+      pointerKey,
       displayName: name,
       entityType: "character",
       summary: card.description?.substring(0, 200) ?? name,
@@ -134,7 +144,8 @@ export function buildCoreEntityPointerKeys(
     const name = card.name?.trim();
     if (!name) continue;
     if (card.worldPresence === "introduced-via-conversation") continue;
-    keys.add(name.toLowerCase());
+    const pointerKey = name.startsWith("char:") ? name : `char:${name}`;
+    keys.add(pointerKey.toLowerCase());
   }
   return keys;
 }
