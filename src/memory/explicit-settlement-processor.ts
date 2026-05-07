@@ -113,6 +113,12 @@ export class ExplicitSettlementProcessor {
     private readonly loadExistingContext: ExistingContextLoader,
     private readonly applyCallOneToolCalls: CallOneApplier,
     private readonly settlementLedger?: SettlementLedger,
+    /** Optional alias-based pointer_key fallback used by the worldStateOps applier. */
+    private readonly worldStateAliasResolver?: import("./world-state-ops-applier.js").WorldStateAliasResolver,
+    /** Optional LLM-based pointer_key canonicalizer used after the alias fallback misses. */
+    private readonly worldStatePointerKeyFormatFixer?: import("./world-state-ops-applier.js").WorldStatePointerKeyFormatFixer,
+    /** Optional schema-parser-driven processor (validate → triage → regenerate). */
+    private readonly worldStateOpProcessor?: import("./world-state-op-triage.js").WorldStateOpProcessor,
   ) {
     this.cognitionRepo = deps.cognitionRepo;
     this.relationBuilder = deps.relationBuilder;
@@ -239,6 +245,9 @@ export class ExplicitSettlementProcessor {
             viewerSnapshot: settlementPayload.viewerSnapshot,
             graphStoreRepo: this.graphStoreRepo,
             unresolvedOpsRepo: this.unresolvedOpsRepo,
+            aliasResolver: this.worldStateAliasResolver,
+            pointerKeyFormatFixer: this.worldStatePointerKeyFormatFixer,
+            worldStateOpProcessor: this.worldStateOpProcessor,
           });
 
           const settledArtifacts = await this.buildSettledArtifacts(

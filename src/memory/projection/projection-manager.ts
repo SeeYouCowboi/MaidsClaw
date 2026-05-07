@@ -478,6 +478,12 @@ export class ProjectionManager {
     private readonly graphStorage: GraphStorageService | null,
     private readonly areaWorldProjectionRepo: ProjectionAreaWorldProjectionRepo | null = null,
     private readonly rawDb?: unknown,
+    /** Optional alias-based pointer_key fallback used by the worldStateOps applier. */
+    private readonly worldStateAliasResolver?: import("../world-state-ops-applier.js").WorldStateAliasResolver,
+    /** Optional LLM-based pointer_key canonicalizer used after the alias fallback misses. */
+    private readonly worldStatePointerKeyFormatFixer?: import("../world-state-ops-applier.js").WorldStatePointerKeyFormatFixer,
+    /** Optional schema-parser-driven processor (validate → triage → regenerate). Takes priority over the alias resolver / format fixer when both are configured. */
+    private readonly worldStateOpProcessor?: import("../world-state-op-triage.js").WorldStateOpProcessor,
   ) {}
 
   /**
@@ -609,6 +615,9 @@ export class ProjectionManager {
               "enqueueOp"
             >,
           settledAt: now,
+          aliasResolver: this.worldStateAliasResolver,
+          pointerKeyFormatFixer: this.worldStatePointerKeyFormatFixer,
+          worldStateOpProcessor: this.worldStateOpProcessor,
         });
 
         if (isPromiseLike(applyResult)) {

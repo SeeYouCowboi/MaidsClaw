@@ -85,6 +85,15 @@ import { GraphNavigator } from "../memory/navigator.js";
 import { PendingSettlementSweeper } from "../memory/pending-settlement-sweeper.js";
 import { PgTransactionBatcher } from "../memory/pg-transaction-batcher.js";
 import { ProjectionManager } from "../memory/projection/projection-manager.js";
+import { createWorldStateFormatFixer } from "../memory/world-state-format-fixer.js";
+import {
+	createWorldStateOpProcessor,
+	type WorldStateOpProcessor,
+} from "../memory/world-state-op-triage.js";
+import type {
+	WorldStateAliasResolver,
+	WorldStatePointerKeyFormatFixer,
+} from "../memory/world-state-ops-applier.js";
 import type { PromptDataRepos } from "../memory/prompt-data.js";
 import { PublicationRecoverySweeper } from "../memory/publication-recovery-sweeper.js";
 import { DeterministicQueryPlanBuilder } from "../memory/query-plan-builder.js";
@@ -983,7 +992,7 @@ export function bootstrapRuntime(
 			judgeModelId: entityCanonicalizationFromConfig?.judgeModelId?.trim()
 				.length
 				? entityCanonicalizationFromConfig.judgeModelId.trim()
-				: "minimax/MiniMax-M2.7",
+				: "minimax/MiniMax-M2.7-highspeed",
 			judgeEnabled: entityCanonicalizationFromConfig?.judgeEnabled ?? true,
 			judgeBatchIntervalMs:
 				entityCanonicalizationFromConfig?.judgeBatchIntervalMs ?? 30000,
@@ -1381,6 +1390,44 @@ export function bootstrapRuntime(
 		areaWorldProjectionRepo,
 		resolveAreaPointerKey: resolveAreaPointerKeyForSessionSeed,
 	});
+
+	// World-state pointer_key fallback resolvers, threaded through both
+	// ProjectionManager and MemoryTaskAgent → ExplicitSettlementProcessor so
+	// every applyWorldStateOpsForSettlement callsite shares the same fallback
+	// chain (alias → optional LLM canonicalizer). Construction order: the
+	// alias resolver is eager (pgAliasRepo is already defined above); the
+	// LLM fixer is late-bound via a holder closure because
+	// memoryTaskModelProvider is constructed further down to satisfy the
+	// retrieval-orchestrator dependency chain.
+	const worldStateAliasResolver: WorldStateAliasResolver = async (
+		value,
+		agentId,
+	) => pgAliasRepo.resolveAlias(value, agentId);
+	let lateBoundWorldStatePointerKeyFormatFixer:
+		| WorldStatePointerKeyFormatFixer
+		| undefined;
+	const worldStatePointerKeyFormatFixer: WorldStatePointerKeyFormatFixer =
+		async (params) => {
+			const impl = lateBoundWorldStatePointerKeyFormatFixer;
+			if (!impl) return null;
+			return impl(params);
+		};
+	let lateBoundWorldStateOpProcessor: WorldStateOpProcessor | undefined;
+	const worldStateOpProcessor: WorldStateOpProcessor = async (rawOp, ctx) => {
+		const impl = lateBoundWorldStateOpProcessor;
+		if (!impl) {
+			// Without the processor configured, surface a "second_validation_failed"
+			// shape so the applier falls through to the legacy resolver path.
+			return {
+				ok: false,
+				reason: "processor_not_configured",
+				lastAttempt: rawOp,
+				lastErrors: [],
+			};
+		}
+		return impl(rawOp, ctx);
+	};
+
 	const projectionManager = new ProjectionManager(
 		episodeRepo,
 		cognitionEventRepo,
@@ -1388,6 +1435,9 @@ export function bootstrapRuntime(
 		null,
 		areaWorldProjectionRepo,
 		undefined,
+		worldStateAliasResolver,
+		worldStatePointerKeyFormatFixer,
+		worldStateOpProcessor,
 	);
 	const graphStorageService = GraphStorageService.withDomainRepos(
 		{
@@ -1480,6 +1530,45 @@ export function bootstrapRuntime(
 					}
 				})()
 			: undefined;
+	// Bind the late-bound LLM pointer_key fixer now that the model provider
+	// exists. Stays undefined when memoryTaskModelProvider is unavailable —
+	// the holder closure declared above already returns null in that case.
+	lateBoundWorldStatePointerKeyFormatFixer = createWorldStateFormatFixer(
+		pgFactory,
+		memoryTaskModelProvider,
+	);
+	// Bind the schema-parser-driven validate → triage → regenerate processor.
+	// Reads recent dialogue via interactionRepo for the regenerate stage's
+	// context window. When memoryTaskModelProvider is unavailable the holder
+	// closure returns a synthetic "processor_not_configured" failure result
+	// and the applier enqueues the op for the entity-judge sweeper.
+	lateBoundWorldStateOpProcessor =
+		createWorldStateOpProcessor({
+			pgFactory,
+			modelProvider: memoryTaskModelProvider,
+			loadRecentMessages: async (sessionId, limit) => {
+				try {
+					const records = await interactionRepo.getMessageRecords(sessionId, {
+						maxMessages: limit,
+					});
+					const out: Array<{ role: "user" | "assistant"; content: string }> = [];
+					for (const r of records) {
+						const payload = r.payload as { role?: unknown; content?: unknown };
+						if (payload.role !== "user" && payload.role !== "assistant") continue;
+						out.push({
+							role: payload.role,
+							content:
+								typeof payload.content === "string"
+									? payload.content
+									: String(payload.content ?? ""),
+						});
+					}
+					return out;
+				} catch {
+					return [];
+				}
+			},
+		}) ?? undefined;
 	const retrievalOrchestrator = new RetrievalOrchestrator({
 		narrativeService: narrativeSearchService,
 		cognitionService: cognitionSearchService,
@@ -1845,6 +1934,9 @@ export function bootstrapRuntime(
 					episodeRepo,
 					promotionQueryRepo,
 					areaWorldProjectionRepo,
+					worldStateAliasResolver,
+					worldStatePointerKeyFormatFixer,
+					worldStateOpProcessor,
 					explicitSettlement: {
 						cognitionRepo,
 						relationBuilder,

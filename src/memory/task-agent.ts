@@ -383,6 +383,12 @@ export type MemoryTaskAgentDeps = {
   episodeRepo?: EpisodeRepo;
   promotionQueryRepo?: PromotionQueryRepo;
   areaWorldProjectionRepo?: AreaWorldProjectionRepo;
+  /** Optional alias-based pointer_key fallback used by the worldStateOps applier. */
+  worldStateAliasResolver?: import("./world-state-ops-applier.js").WorldStateAliasResolver;
+  /** Optional LLM-based pointer_key canonicalizer used after the alias fallback misses. */
+  worldStatePointerKeyFormatFixer?: import("./world-state-ops-applier.js").WorldStatePointerKeyFormatFixer;
+  /** Optional schema-parser-driven processor (validate → triage → regenerate). */
+  worldStateOpProcessor?: import("./world-state-op-triage.js").WorldStateOpProcessor;
 };
 
 export class MemoryTaskAgent {
@@ -394,6 +400,9 @@ export class MemoryTaskAgent {
   private readonly promotionQueryRepo?: PromotionQueryRepo;
   private readonly areaWorldProjectionRepo?: AreaWorldProjectionRepo;
   private readonly settlementLedger?: SettlementLedger;
+  private readonly worldStateAliasResolver?: import("./world-state-ops-applier.js").WorldStateAliasResolver;
+  private readonly worldStatePointerKeyFormatFixer?: import("./world-state-ops-applier.js").WorldStatePointerKeyFormatFixer;
+  private readonly worldStateOpProcessor?: import("./world-state-op-triage.js").WorldStateOpProcessor;
   private readonly cognitionOpsRepo: Pick<CognitionRepository, "getAssertions" | "getCommitments" | "upsertAssertion">;
   private readonly modelProvider: MemoryTaskModelProvider;
   private readonly ingestionPolicy: MemoryIngestionPolicy;
@@ -426,6 +435,9 @@ export class MemoryTaskAgent {
     this.promotionQueryRepo = deps.promotionQueryRepo;
     this.areaWorldProjectionRepo = deps.areaWorldProjectionRepo;
     this.settlementLedger = settlementLedger;
+    this.worldStateAliasResolver = deps.worldStateAliasResolver;
+    this.worldStatePointerKeyFormatFixer = deps.worldStatePointerKeyFormatFixer;
+    this.worldStateOpProcessor = deps.worldStateOpProcessor;
     this.modelProvider =
       modelProvider ??
       ({
@@ -480,6 +492,9 @@ export class MemoryTaskAgent {
         await this.applyCallOneToolCalls(request, toolCalls, created);
       },
       settlementLedger,
+      this.worldStateAliasResolver,
+      this.worldStatePointerKeyFormatFixer,
+      this.worldStateOpProcessor,
     );
     this.coreMemoryIndexUpdater = new CoreMemoryIndexUpdater(this.coreMemory, this.modelProvider);
     this.graphOrganizer = new GraphOrganizer(
@@ -683,6 +698,9 @@ export class MemoryTaskAgent {
             );
           },
           this.settlementLedger,
+          this.worldStateAliasResolver,
+          this.worldStatePointerKeyFormatFixer,
+          this.worldStateOpProcessor,
         );
 
         await runFlushBody(
