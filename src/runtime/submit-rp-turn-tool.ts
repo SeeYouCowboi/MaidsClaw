@@ -215,12 +215,15 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         actionCommitments: {
           type: "array",
           description:
-            "REQUIRED whenever the user's turn (see <normalized_turn_input> in the prompt) has speechActs containing \"narrated_action\" AND writeEligible is true. OMIT this field otherwise (questions/hypotheses/confusions/quoted_speech/pure dialogue do NOT produce commitments). " +
-            "Each entry logs one physical scene change. factKey MUST match /^(location|holder|status):[a-z0-9_-]+$/ with a lowercase English snake_case id. " +
+            "ALWAYS output this field — use an empty array [] when no scene action occurred this turn. NEVER omit the field. " +
+            "Include one entry per physical scene action when the user's narration contains 拿起/放下/打开/关上/锁上/解开/走进/离开/坐下/站起 (or English equivalents take/put/open/close/lock/unlock/move). " +
+            "SKIP commitment entries (output []) for: questions, hypotheses (假如/如果), confusions, quoted speech, pure dialogue with no physical action. Use <normalized_turn_input> speechActs as a hint when present, but always output the field. " +
+            "factKey MUST match /^(location|holder|status):[a-z0-9_-]+$/ with a lowercase English snake_case id. " +
             "Examples — '我拿起金怀表' → [{effect:'possession', summary:'主人拿起金怀表', commits:[{scope:'area', exposureScope:'area_visible', factKey:'holder:gold_pocket_watch', value:'user'}]}]. " +
             "'我放下金怀表' → [{effect:'possession', summary:'主人放下金怀表', commits:[{scope:'area', exposureScope:'area_visible', factKey:'holder:gold_pocket_watch', value:null}]}]. " +
             "'我打开窗户' → [{effect:'status_change', summary:'主人打开窗户', commits:[{scope:'area', exposureScope:'area_visible', factKey:'status:window', value:'open'}]}]. " +
-            "'我走进书房' → [{effect:'move', summary:'主人走进书房', commits:[{scope:'area', exposureScope:'area_visible', factKey:'location:user', value:'study'}]}].",
+            "'我走进书房' → [{effect:'move', summary:'主人走进书房', commits:[{scope:'area', exposureScope:'area_visible', factKey:'location:user', value:'study'}]}]. " +
+            "Pure dialogue '你说得真好' → [].",
           items: {
             type: "object",
             properties: {
@@ -272,12 +275,19 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
         worldStateOps: {
           type: "array",
           description:
-            "REQUIRED for durable entity→entity relation facts that should persist in fact_edges. DISTINCT from actionCommitments: actionCommitments commit immediate physical scene state (factKey namespaces location/holder/status), while worldStateOps commit durable relational memory between resolved entities. " +
-            "Use worldStateOps for relational facts between two entities (people/places/items/concepts) — e.g. 'silver pocket watch is in the tea room' => location_of, 'Alice trusts Bob' => trusts, 'the locket belongs to mother' => holder_of. " +
-            "Each op is an ASSERTION of a new current fact (no `op` field; assert-only in MVP). To invalidate prior contradicting facts, list their edge ids in `contradictedFactEdgeIds`. " +
-            "predicate MUST be one of the controlled v1 fact_edges predicates: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with. factText remains free-form conversation-language text. " +
+            "ALWAYS output this field — use an empty array [] when this turn establishes no durable entity-to-entity relation. NEVER omit the field. " +
+            "Output one entry per durable relation between two entities (people/places/items) that should persist in long-term memory. DISTINCT from actionCommitments: actionCommitments capture immediate scene state (location/holder/status), worldStateOps capture relational memory that survives across scenes. " +
+            "Output a worldStateOp when the turn (talker or user) ESTABLISHES, REFERENCES, or REVEALS a relation: " +
+            "'银怀表在茶室' → location_of (silver_pocket_watch, tea_room). " +
+            "'Alice 常去花房' → location_of with frequency hint in factText. " +
+            "'管家负责库房' → affiliated_with (butler, storage_room) or holder_of. " +
+            "'Alice 和管家会互相通气' → communicates_with (alice, butler). " +
+            "'梅姨是厨娘' → affiliated_with (mei, kitchen) or knows (user, mei). " +
+            "predicate MUST be one of: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with. factText is free-form conversation language. " +
+            "Each op asserts a new current fact (assert-only in MVP). To invalidate prior contradicting facts, list their edge ids in `contradictedFactEdgeIds` (source from [world_state] retrieval block; never call an LLM to detect contradictions). " +
             "same_as is a semantic fact only and must not imply alias mutation; contrasts_with is downweight-only and never exclusion. " +
-            "visibility defaults to 'private_overlay' (agent-private RP fact); use 'shared_public' only when the fact should be observable by other agents/world.",
+            "visibility defaults to 'private_overlay' (agent-private RP fact); use 'shared_public' only when other agents/world should observe. " +
+            "Pure greeting/dialogue with no relation revealed → [].",
           items: {
             type: "object",
             properties: {
@@ -335,7 +345,14 @@ export function makeSubmitRpTurnTool(): ToolDefinition {
             "Optional settlement metadata: telemetry-only user correction suspicion flag.",
         },
       },
-      required: ["schemaVersion", "publicReply"],
+      required: [
+        "schemaVersion",
+        "publicReply",
+        "latentScratchpad",
+        "entityMentions",
+        "actionCommitments",
+        "worldStateOps",
+      ],
     },
     async execute(params: unknown): Promise<unknown> {
       try {

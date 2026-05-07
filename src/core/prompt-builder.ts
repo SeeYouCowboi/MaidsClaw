@@ -220,17 +220,30 @@ const WORLD_STATE_OPS_INSTRUCTIONS = `
 
 ---
 
-### worldStateOps  (OPTIONAL — assert entity→entity world-state facts)
+### worldStateOps  (decide explicitly each turn)
 
 worldStateOps is distinct from actionCommitments:
 - actionCommitments = physical scene fact commits (location, holder, status of items in the area).
 - worldStateOps = entity→entity world-state fact edges (e.g. who-holds-what, who-knows-what, who-is-allied-with-whom) at the world-graph level.
 
-Emit worldStateOps ONLY when the turn establishes or changes a relationship-like fact between two entities. Otherwise OMIT this field entirely.
+Before producing worldStateOps, walk through this decision tree (record your reasoning in latentScratchpad first):
+
+1. Does the conversation this turn (talker reply + user input) name TWO or more concrete entities (people / places / items / groups)? If NO → output worldStateOps: [] and stop here.
+2. Is there an explicit or strongly-implied DURABLE relation between two of those entities? Examples that qualify: "银怀表落在茶室" (location_of), "Alice 总往花房跑" (affiliated_with), "管家和梅姨会通气" (communicates_with), "金怀表是祖父留下的" (holder_of), "我相信 Alice" (trusts). Examples that do NOT qualify: pure dialogue, greetings, hypotheses, questions, the user merely *naming* an entity without a relation. If NO → output worldStateOps: [] and stop here.
+3. Map the relation to exactly one controlled predicate from: location_of, holder_of, knows, met_at, communicates_with, trusts, affiliated_with, conflicts_with, same_as, contrasts_with. If none fits → output worldStateOps: [] and stop here.
+4. Resolve the subject and object pointer_keys. Look at the <known_entities> block in the prompt. For each entity you want to reference:
+   a. Find its row in <known_entities>. Copy the pointer_key VERBATIM — same characters, same case, same prefix-or-no-prefix as shown there. Some entities use bare CJK names ("茶室", "管家"), others use typed prefixes ("char:alice", "item:银怀表") — DO NOT add or strip prefixes; copy what's there.
+   b. If the entity is NOT in <known_entities>:
+      - If it refers to self / user / current_location, use { kind: "special", value: "self" | "user" | "current_location" } instead.
+      - Otherwise SKIP this op entirely (do not invent a pointer_key, do not guess a prefix). Move to the next relation if any, else output [].
+5. Check [world_state] retrieval block for any prior fact_edge id that this new fact contradicts; include those ids in contradictedFactEdgeIds. NEVER invent ids.
+6. Emit a single worldStateOps entry. If the same turn establishes multiple distinct relations, emit one entry per relation (typically 0-3 entries; rarely more).
+
+Output worldStateOps: [] when the decision tree exits at step 1, 2, 3, or when 4b causes every candidate op to be skipped.
 
 Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds?, visibility? }
-- subject / object: { kind: "pointer_key" | "special", value: <id> }. Use pointer_key values that already appear in <known_entities>; use "special" for self/user/current_location.
-- predicate: short free-form natural-language phrase in the conversation language (e.g. "wears", "trusts", "knows_about", "is_allied_with"). Do NOT pick from a closed vocabulary.
+- subject / object: { kind: "pointer_key" | "special", value: <id> }. Use pointer_key values that ALREADY appear in <known_entities> verbatim; use "special" only for self/user/current_location.
+- predicate: MUST be exactly one of these controlled values: "location_of", "holder_of", "knows", "met_at", "communicates_with", "trusts", "affiliated_with", "conflicts_with", "same_as", "contrasts_with". No free-form values.
 - factText: one human-readable sentence in the conversation language stating the fact as currently true.
 - contradictedFactEdgeIds: numeric ids of prior fact-edges this assertion invalidates. Source these ONLY from visible ids in the [world_state] retrieval block (id=...). Never invent ids. If you have no such ids, OMIT this field; do NOT guess.
 - visibility: "private_overlay" (default, agent-private RP fact) or "shared_public" (consensus-visible). Default to "private_overlay" unless this is an explicitly public, witnessed event.
@@ -256,12 +269,17 @@ Emit worldStateOps ONLY when the turn establishes or changes a relationship-like
 
 Format: array of { subject, predicate, object, factText, contradictedFactEdgeIds?, visibility? }
 - subject / object: { kind: "pointer_key" | "special", value: <id> } — pointer_key from <known_entities>, or "special" for self/user/current_location.
-- predicate: short free-form natural-language phrase (e.g. "wears", "trusts"). Not a closed vocabulary.
+- predicate: MUST be exactly one of these controlled values: "location_of", "holder_of", "knows", "met_at", "communicates_with", "trusts", "affiliated_with", "conflicts_with", "same_as", "contrasts_with". No free-form values.
 - factText: one sentence in the conversation language.
 - contradictedFactEdgeIds: numeric ids of prior facts this invalidates. Use ONLY visible ids from [world_state] (id=...); never invent ids. Omit if none.
 - visibility: "private_overlay" (default) or "shared_public".
 
-Assert-only: there is no retract. Express invalidation via contradictedFactEdgeIds.`;
+Assert-only: there is no retract. Express invalidation via contradictedFactEdgeIds.
+
+Examples — when to emit a worldStateOp entry:
+- "银怀表落在茶室" → { subject:{kind:"pointer_key",value:"item:silver_pocket_watch"}, predicate:"location_of", object:{kind:"pointer_key",value:"loc:tea_room"}, factText:"银怀表落在茶室" }
+- "Alice 常去花房" → { subject:{kind:"pointer_key",value:"char:alice"}, predicate:"affiliated_with", object:{kind:"pointer_key",value:"loc:greenhouse"}, factText:"Alice 常出现在花房" }
+- "管家和梅姨会通气" → { subject:{kind:"pointer_key",value:"char:butler"}, predicate:"communicates_with", object:{kind:"pointer_key",value:"char:mei"}, factText:"管家和梅姨会互相通消息" }`;
 
 function isWorldStateOpsEnabled(): boolean {
 	return process.env.MAIDSCLAW_WORLDSTATE_OPS_ENABLED !== "0";
